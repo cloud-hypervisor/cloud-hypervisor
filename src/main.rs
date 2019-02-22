@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+extern crate vmm;
+
 #[macro_use(crate_version, crate_authors)]
 extern crate clap;
 
@@ -29,4 +31,6 @@ fn main() {
         .expect("Missing argument: kernel");
 
     println!("Booting {:?}...", kernel_path.as_path());
+
+    vmm::test_vm()
 }
