@@ -1,0 +1,13 @@
+[package]
+name = "vmm"
+version = "0.1.0"
+authors = ["The Cloud Hypervisor Authors"]
+edition = "2018"
+
+[dependencies]
+kvm-bindings = "0.1"
+kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls" }
+
+[dependencies.vm-memory]
+git = "https://github.com/rust-vmm/vm-memory"
+features = ["backend-mmap"]
