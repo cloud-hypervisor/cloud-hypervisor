@@ -32,5 +32,5 @@ fn main() {
 
     println!("Booting {:?}...", kernel_path.as_path());
 
-    vmm::test_vm()
+    vmm::boot_kernel(kernel_path.as_path()).unwrap();
 }
