@@ -5,22 +5,28 @@
 
 extern crate arch;
 extern crate kvm_ioctls;
+extern crate libc;
 extern crate linux_loader;
 extern crate vm_memory;
+extern crate vmm_sys_util;
 
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::*;
+use libc::{c_void, siginfo_t};
 use linux_loader::cmdline;
 use linux_loader::loader::KernelLoader;
 use std::ffi::CString;
 use std::fs::File;
 use std::path::Path;
+use std::sync::{Arc, Barrier};
 use std::{io, result, str, thread};
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion, GuestUsize,
     MmapError,
 };
+use vmm_sys_util::signal::register_signal_handler;
 
+const VCPU_RTSIG_OFFSET: i32 = 0;
 const DEFAULT_CMDLINE: &str =
     "console=ttyS0,115200n8 init=/init tsc=reliable no_timer_check cryptomgr.notests";
 const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
@@ -48,8 +54,91 @@ pub enum Error {
 
     /// Cannot load the command line in memory
     CmdLine,
+
+    /// Cannot open the VCPU file descriptor.
+    VcpuFd(io::Error),
+
+    /// Cannot run the VCPUs.
+    VcpuRun(io::Error),
+
+    /// Cannot spawn a new vCPU thread.
+    VcpuSpawn(io::Error),
+
+    #[cfg(target_arch = "x86_64")]
+    /// Cannot set the local interruption due to bad configuration.
+    LocalIntConfiguration(arch::x86_64::interrupts::Error),
+
+    #[cfg(target_arch = "x86_64")]
+    /// Error configuring the MSR registers
+    MSRSConfiguration(arch::x86_64::regs::Error),
+
+    #[cfg(target_arch = "x86_64")]
+    /// Error configuring the general purpose registers
+    REGSConfiguration(arch::x86_64::regs::Error),
+
+    #[cfg(target_arch = "x86_64")]
+    /// Error configuring the special registers
+    SREGSConfiguration(arch::x86_64::regs::Error),
+
+    #[cfg(target_arch = "x86_64")]
+    /// Error configuring the floating point related registers
+    FPUConfiguration(arch::x86_64::regs::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
+
+/// A wrapper around creating and using a kvm-based VCPU.
+pub struct Vcpu {
+    //    #[cfg(target_arch = "x86_64")]
+    //    cpuid: CpuId,
+    fd: VcpuFd,
+    id: u8,
+}
+
+impl Vcpu {
+    /// Constructs a new VCPU for `vm`.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Represents the CPU number between [0, max vcpus).
+    /// * `vm` - The virtual machine this vcpu will get attached to.
+    pub fn new(id: u8, vm: &Vm) -> Result<Self> {
+        let kvm_vcpu = vm.fd.create_vcpu(id).map_err(Error::VcpuFd)?;
+        // Initially the cpuid per vCPU is the one supported by this VM.
+        Ok(Vcpu { fd: kvm_vcpu, id })
+    }
+
+    /// Configures a x86_64 specific vcpu and should be called once per vcpu from the vcpu's thread.
+    ///
+    /// # Arguments
+    ///
+    /// * `machine_config` - Specifies necessary info used for the CPUID configuration.
+    /// * `kernel_start_addr` - Offset from `guest_mem` at which the kernel starts.
+    /// * `vm` - The virtual machine this vcpu will get attached to.
+    pub fn configure(&mut self, kernel_start_addr: GuestAddress, vm: &Vm) -> Result<()> {
+        arch::x86_64::regs::setup_msrs(&self.fd).map_err(Error::MSRSConfiguration)?;
+        // Safe to unwrap because this method is called after the VM is configured
+        let vm_memory = vm.get_memory();
+        arch::x86_64::regs::setup_regs(
+            &self.fd,
+            kernel_start_addr.raw_value(),
+            arch::x86_64::layout::BOOT_STACK_POINTER.raw_value(),
+            arch::x86_64::layout::ZERO_PAGE_START.raw_value(),
+        )
+        .map_err(Error::REGSConfiguration)?;
+        arch::x86_64::regs::setup_fpu(&self.fd).map_err(Error::FPUConfiguration)?;
+        arch::x86_64::regs::setup_sregs(vm_memory, &self.fd).map_err(Error::SREGSConfiguration)?;
+        arch::x86_64::interrupts::set_lint(&self.fd).map_err(Error::LocalIntConfiguration)?;
+        Ok(())
+    }
+
+    /// Runs the VCPU until it exits, returning the reason.
+    ///
+    /// Note that the state of the VCPU and associated VM must be setup first for this to do
+    /// anything useful.
+    pub fn run(&self) -> Result<VcpuExit> {
+        self.fd.run().map_err(Error::VcpuRun)
+    }
+}
 
 struct VmConfig<'a> {
     kernel_path: &'a Path,
@@ -122,6 +211,9 @@ impl<'a> Vm<'a> {
         fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize)
             .map_err(Error::VmSetup)?;
 
+        // Create IRQ chip
+        fd.create_irq_chip().map_err(Error::VmSetup)?;
+
         Ok(Vm {
             fd,
             kernel,
@@ -133,9 +225,7 @@ impl<'a> Vm<'a> {
 
     pub fn load_kernel(&mut self) -> Result<GuestAddress> {
         let cmdline = self.config.cmdline.clone().ok_or(Error::CmdLine)?;
-
         let cmdline_cstring = CString::new(cmdline).map_err(|_| Error::CmdLine)?;
-
         let entry_addr = linux_loader::loader::Elf::load(
             &self.memory,
             None,
@@ -164,8 +254,113 @@ impl<'a> Vm<'a> {
         Ok(entry_addr.kernel_load)
     }
 
-    pub fn start(&mut self) -> Result<()> {
+    pub fn start(&mut self, entry_addr: GuestAddress) -> Result<()> {
+        let vcpu_count = self.config.vcpu_count;
+
+        let mut vcpus = Vec::with_capacity(vcpu_count as usize);
+        let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
+
+        for cpu_id in 0..vcpu_count {
+            println!("Starting VCPU {:?}", cpu_id);
+            let mut vcpu = Vcpu::new(cpu_id, &self)?;
+            let vcpu_thread_barrier = vcpu_thread_barrier.clone();
+
+            vcpu.configure(entry_addr, &self)?;
+
+            vcpus.push(
+                thread::Builder::new()
+                    .name(format!("cloud-hypervisor_vcpu{}", vcpu.id))
+                    .spawn(move || {
+                        unsafe {
+                            extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {
+                            }
+                            // This uses an async signal safe handler to kill the vcpu handles.
+                            register_signal_handler(
+                                VCPU_RTSIG_OFFSET,
+                                vmm_sys_util::signal::SignalHandler::Siginfo(handle_signal),
+                                true,
+                                0,
+                            )
+                            .expect("Failed to register vcpu signal handler");
+                        }
+
+                        vcpu_thread_barrier.wait();
+
+                        loop {
+                            match vcpu.run() {
+                                Ok(run) => match run {
+                                    VcpuExit::IoIn(addr, data) => {
+                                        println!(
+                                            "IO in -- addr: {:#x} data [{:?}]",
+                                            addr,
+                                            str::from_utf8(&data).unwrap()
+                                        );
+                                    }
+                                    VcpuExit::IoOut(addr, data) => {
+                                        println!(
+                                            "IO out -- addr: {:#x} data [{:?}]",
+                                            addr,
+                                            str::from_utf8(&data).unwrap()
+                                        );
+                                    }
+                                    VcpuExit::MmioRead(_addr, _data) => {}
+                                    VcpuExit::MmioWrite(_addr, _data) => {}
+                                    VcpuExit::Unknown => {}
+                                    VcpuExit::Exception => {}
+                                    VcpuExit::Hypercall => {}
+                                    VcpuExit::Debug => {}
+                                    VcpuExit::Hlt => {
+                                        println!("HLT");
+                                    }
+                                    VcpuExit::IrqWindowOpen => {}
+                                    VcpuExit::Shutdown => {}
+                                    VcpuExit::FailEntry => {}
+                                    VcpuExit::Intr => {}
+                                    VcpuExit::SetTpr => {}
+                                    VcpuExit::TprAccess => {}
+                                    VcpuExit::S390Sieic => {}
+                                    VcpuExit::S390Reset => {}
+                                    VcpuExit::Dcr => {}
+                                    VcpuExit::Nmi => {}
+                                    VcpuExit::InternalError => {}
+                                    VcpuExit::Osi => {}
+                                    VcpuExit::PaprHcall => {}
+                                    VcpuExit::S390Ucontrol => {}
+                                    VcpuExit::Watchdog => {}
+                                    VcpuExit::S390Tsch => {}
+                                    VcpuExit::Epr => {}
+                                    VcpuExit::SystemEvent => {}
+                                    VcpuExit::S390Stsi => {}
+                                    VcpuExit::IoapicEoi => {}
+                                    VcpuExit::Hyperv => {}
+                                },
+                                Err(e) => {
+                                    println! {"VCPU {:?} error {:?}", cpu_id, e}
+                                    break;
+                                }
+                            }
+                        }
+                    })
+                    .map_err(Error::VcpuSpawn)?,
+            );
+        }
+
+        vcpu_thread_barrier.wait();
         Ok(())
+    }
+
+    /// Gets a reference to the guest memory owned by this VM.
+    ///
+    /// Note that `GuestMemory` does not include any device memory that may have been added after
+    /// this VM was constructed.
+    pub fn get_memory(&self) -> &GuestMemoryMmap {
+        &self.memory
+    }
+
+    /// Gets a reference to the kvm file descriptor owned by this VM.
+    ///
+    pub fn get_fd(&self) -> &VmFd {
+        &self.fd
     }
 }
 

@@ -26,8 +26,8 @@ pub fn boot_kernel(kernel: &Path) -> Result<()> {
     let vmm = Vmm::new()?;
     let mut vm = Vm::new(&vmm.kvm, kernel)?;
 
-    vm.load_kernel()?;
-    vm.start()?;
+    let entry = vm.load_kernel()?;
+    vm.start(entry)?;
 
     Ok(())
 }
