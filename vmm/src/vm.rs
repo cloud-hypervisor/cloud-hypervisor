@@ -83,13 +83,14 @@ pub enum Error {
     #[cfg(target_arch = "x86_64")]
     /// Error configuring the floating point related registers
     FPUConfiguration(arch::x86_64::regs::Error),
+
+    /// The call to KVM_SET_CPUID2 failed.
+    SetSupportedCpusFailed(io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
 /// A wrapper around creating and using a kvm-based VCPU.
 pub struct Vcpu {
-    //    #[cfg(target_arch = "x86_64")]
-    //    cpuid: CpuId,
     fd: VcpuFd,
     id: u8,
 }
@@ -115,6 +116,10 @@ impl Vcpu {
     /// * `kernel_start_addr` - Offset from `guest_mem` at which the kernel starts.
     /// * `vm` - The virtual machine this vcpu will get attached to.
     pub fn configure(&mut self, kernel_start_addr: GuestAddress, vm: &Vm) -> Result<()> {
+        self.fd
+            .set_cpuid2(&vm.cpuid)
+            .map_err(Error::SetSupportedCpusFailed)?;
+
         arch::x86_64::regs::setup_msrs(&self.fd).map_err(Error::MSRSConfiguration)?;
         // Safe to unwrap because this method is called after the VM is configured
         let vm_memory = vm.get_memory();
@@ -170,6 +175,7 @@ pub struct Vm<'a> {
     kernel: File,
     memory: GuestMemoryMmap,
     vcpus: Option<Vec<thread::JoinHandle<()>>>,
+    cpuid: CpuId,
     config: VmConfig<'a>,
 }
 
@@ -214,11 +220,17 @@ impl<'a> Vm<'a> {
         // Create IRQ chip
         fd.create_irq_chip().map_err(Error::VmSetup)?;
 
+        // Supported CPUID
+        let cpuid = kvm
+            .get_supported_cpuid(MAX_KVM_CPUID_ENTRIES)
+            .map_err(Error::VmSetup)?;
+
         Ok(Vm {
             fd,
             kernel,
             memory: guest_memory,
             vcpus: None,
+            cpuid,
             config: vm_config,
         })
     }
