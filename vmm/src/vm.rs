@@ -10,7 +10,7 @@ extern crate linux_loader;
 extern crate vm_memory;
 extern crate vmm_sys_util;
 
-use kvm_bindings::kvm_userspace_memory_region;
+use kvm_bindings::{kvm_pit_config, kvm_userspace_memory_region, KVM_PIT_SPEAKER_DUMMY};
 use kvm_ioctls::*;
 use libc::{c_void, siginfo_t};
 use linux_loader::cmdline;
@@ -27,8 +27,8 @@ use vm_memory::{
 use vmm_sys_util::signal::register_signal_handler;
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
-const DEFAULT_CMDLINE: &str =
-    "console=ttyS0,115200n8 init=/init tsc=reliable no_timer_check cryptomgr.notests";
+const DEFAULT_CMDLINE: &str = "console=ttyS0 reboot=k panic=1 pci=off nomodules \
+                               i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd";
 const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
 
 /// Errors associated with the wrappers over KVM ioctls.
@@ -157,8 +157,8 @@ struct VmConfig<'a> {
 impl<'a> Default for VmConfig<'a> {
     fn default() -> Self {
         let line = String::from(DEFAULT_CMDLINE);
-        let mut cmdline = cmdline::Cmdline::new(line.capacity());
-        cmdline.insert_str(line);
+        let mut cmdline = cmdline::Cmdline::new(arch::CMDLINE_MAX_SIZE);
+        cmdline.insert_str(line).unwrap();
 
         VmConfig {
             kernel_path: Path::new(""),
@@ -220,6 +220,13 @@ impl<'a> Vm<'a> {
         // Create IRQ chip
         fd.create_irq_chip().map_err(Error::VmSetup)?;
 
+        // Creates an in-kernel device model for the PIT.
+        let mut pit_config = kvm_pit_config::default();
+        // We need to enable the emulation of a dummy speaker port stub so that writing to port 0x61
+        // (i.e. KVM_SPEAKER_BASE_ADDRESS) does not trigger an exit to user space.
+        pit_config.flags = KVM_PIT_SPEAKER_DUMMY;
+        fd.create_pit2(pit_config).map_err(Error::VmSetup)?;
+
         // Supported CPUID
         let cpuid = kvm
             .get_supported_cpuid(MAX_KVM_CPUID_ENTRIES)
@@ -269,15 +276,15 @@ impl<'a> Vm<'a> {
     pub fn start(&mut self, entry_addr: GuestAddress) -> Result<()> {
         let vcpu_count = self.config.vcpu_count;
 
-        let mut vcpus = Vec::with_capacity(vcpu_count as usize);
+        let mut vcpus: Vec<thread::JoinHandle<()>> = Vec::with_capacity(vcpu_count as usize);
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
 
         for cpu_id in 0..vcpu_count {
             println!("Starting VCPU {:?}", cpu_id);
             let mut vcpu = Vcpu::new(cpu_id, &self)?;
-            let vcpu_thread_barrier = vcpu_thread_barrier.clone();
-
             vcpu.configure(entry_addr, &self)?;
+
+            let vcpu_thread_barrier = vcpu_thread_barrier.clone();
 
             vcpus.push(
                 thread::Builder::new()
@@ -296,29 +303,30 @@ impl<'a> Vm<'a> {
                             .expect("Failed to register vcpu signal handler");
                         }
 
+                        // Block until all CPUs are ready.
                         vcpu_thread_barrier.wait();
 
                         loop {
                             match vcpu.run() {
                                 Ok(run) => match run {
-                                    VcpuExit::IoIn(addr, data) => {
-                                        println!(
-                                            "IO in -- addr: {:#x} data [{:?}]",
-                                            addr,
-                                            str::from_utf8(&data).unwrap()
-                                        );
-                                    }
+                                    VcpuExit::IoIn(_addr, _data) => {}
                                     VcpuExit::IoOut(addr, data) => {
-                                        println!(
-                                            "IO out -- addr: {:#x} data [{:?}]",
-                                            addr,
-                                            str::from_utf8(&data).unwrap()
-                                        );
+                                        if addr == 0x3f8 {
+                                            print!("{}", str::from_utf8(&data).unwrap());
+                                        }
                                     }
-                                    VcpuExit::MmioRead(_addr, _data) => {}
-                                    VcpuExit::MmioWrite(_addr, _data) => {}
-                                    VcpuExit::Unknown => {}
-                                    VcpuExit::Exception => {}
+                                    VcpuExit::MmioRead(addr, _data) => {
+                                        println!("MMIO R -- addr: {:#x}", addr);
+                                    }
+                                    VcpuExit::MmioWrite(addr, _data) => {
+                                        println!("MMIO W -- addr: {:#x}", addr);
+                                    }
+                                    VcpuExit::Unknown => {
+                                        println!("Unknown");
+                                    }
+                                    VcpuExit::Exception => {
+                                        println!("Exception");
+                                    }
                                     VcpuExit::Hypercall => {}
                                     VcpuExit::Debug => {}
                                     VcpuExit::Hlt => {
@@ -347,7 +355,7 @@ impl<'a> Vm<'a> {
                                     VcpuExit::Hyperv => {}
                                 },
                                 Err(e) => {
-                                    println! {"VCPU {:?} error {:?}", cpu_id, e}
+                                    println! {"VCPU {:?} error {:?}", cpu_id, e};
                                     break;
                                 }
                             }
@@ -357,7 +365,13 @@ impl<'a> Vm<'a> {
             );
         }
 
+        // Unblock all CPU threads.
         vcpu_thread_barrier.wait();
+
+        for vcpu_barrier in vcpus {
+            vcpu_barrier.join().unwrap();
+        }
+
         Ok(())
     }
 
