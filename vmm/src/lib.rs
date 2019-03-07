@@ -6,10 +6,10 @@
 extern crate kvm_ioctls;
 
 use kvm_ioctls::*;
-use std::path::Path;
+
 pub mod vm;
 
-use self::vm::{Result, Vm};
+use self::vm::{Result, Vm, VmConfig};
 
 struct Vmm {
     kvm: Kvm,
@@ -22,9 +22,9 @@ impl Vmm {
     }
 }
 
-pub fn boot_kernel(kernel: &Path) -> Result<()> {
+pub fn boot_kernel(config: VmConfig) -> Result<()> {
     let vmm = Vmm::new()?;
-    let mut vm = Vm::new(&vmm.kvm, kernel)?;
+    let mut vm = Vm::new(&vmm.kvm, config)?;
 
     let entry = vm.load_kernel()?;
     vm.start(entry)?;

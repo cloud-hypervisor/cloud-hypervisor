@@ -4,6 +4,7 @@
 //
 
 extern crate arch;
+extern crate devices;
 extern crate kvm_ioctls;
 extern crate libc;
 extern crate linux_loader;
@@ -12,21 +13,24 @@ extern crate vmm_sys_util;
 
 use kvm_bindings::{kvm_pit_config, kvm_userspace_memory_region, KVM_PIT_SPEAKER_DUMMY};
 use kvm_ioctls::*;
-use libc::{c_void, siginfo_t};
+use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::cmdline;
 use linux_loader::loader::KernelLoader;
 use std::ffi::CString;
 use std::fs::File;
+use std::io::{self, stdout};
 use std::path::Path;
-use std::sync::{Arc, Barrier};
-use std::{io, result, str, thread};
+use std::sync::{Arc, Barrier, Mutex};
+use std::{result, str, thread};
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion, GuestUsize,
     MmapError,
 };
 use vmm_sys_util::signal::register_signal_handler;
+use vmm_sys_util::EventFd;
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
+pub const DEFAULT_VCPUS: u8 = 1;
 const DEFAULT_CMDLINE: &str = "console=ttyS0 reboot=k panic=1 pci=off nomodules \
                                i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd";
 const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
@@ -86,6 +90,15 @@ pub enum Error {
 
     /// The call to KVM_SET_CPUID2 failed.
     SetSupportedCpusFailed(io::Error),
+
+    /// Cannot create EventFd.
+    EventFd(io::Error),
+
+    /// Cannot create a device manager.
+    DeviceManager,
+
+    /// Cannot add legacy device to Bus.
+    BusError(devices::BusError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -145,13 +158,22 @@ impl Vcpu {
     }
 }
 
-struct VmConfig<'a> {
+pub struct VmConfig<'a> {
     kernel_path: &'a Path,
     cmdline: Option<cmdline::Cmdline>,
     cmdline_addr: GuestAddress,
 
     memory_size: GuestUsize,
     vcpu_count: u8,
+}
+
+impl<'a> VmConfig<'a> {
+    pub fn new(kernel_path: &'a Path) -> Result<Self> {
+        Ok(VmConfig {
+            kernel_path,
+            ..Default::default()
+        })
+    }
 }
 
 impl<'a> Default for VmConfig<'a> {
@@ -170,27 +192,56 @@ impl<'a> Default for VmConfig<'a> {
     }
 }
 
+struct DeviceManager {
+    io_bus: devices::Bus,
+
+    // Serial port on 0x3f8
+    serial: Arc<Mutex<devices::legacy::Serial>>,
+    serial_evt: EventFd,
+}
+
+impl DeviceManager {
+    fn new() -> Result<Self> {
+        let io_bus = devices::Bus::new();
+        let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+        let serial = Arc::new(Mutex::new(devices::legacy::Serial::new_out(
+            serial_evt.try_clone().map_err(Error::EventFd)?,
+            Box::new(stdout()),
+        )));
+
+        Ok(DeviceManager {
+            io_bus,
+            serial,
+            serial_evt,
+        })
+    }
+
+    /// Register legacy devices.
+    pub fn register_devices(&mut self) -> Result<()> {
+        self.io_bus
+            .insert(self.serial.clone(), 0x3f8, 0x8)
+            .map_err(Error::BusError)?;
+        Ok(())
+    }
+}
+
 pub struct Vm<'a> {
     fd: VmFd,
     kernel: File,
     memory: GuestMemoryMmap,
     vcpus: Option<Vec<thread::JoinHandle<()>>>,
+    devices: DeviceManager,
     cpuid: CpuId,
     config: VmConfig<'a>,
 }
 
 impl<'a> Vm<'a> {
-    pub fn new(kvm: &Kvm, kernel_path: &'a Path) -> Result<Self> {
-        let vm_config = VmConfig {
-            kernel_path,
-            ..Default::default()
-        };
-
-        let kernel = File::open(kernel_path).map_err(Error::KernelFile)?;
+    pub fn new(kvm: &Kvm, config: VmConfig<'a>) -> Result<Self> {
+        let kernel = File::open(&config.kernel_path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
 
         // Init guest memory
-        let arch_mem_regions = arch::arch_memory_regions(vm_config.memory_size << 20);
+        let arch_mem_regions = arch::arch_memory_regions(config.memory_size << 20);
         let guest_memory = GuestMemoryMmap::new(&arch_mem_regions).map_err(Error::GuestMemory)?;
 
         guest_memory
@@ -232,13 +283,16 @@ impl<'a> Vm<'a> {
             .get_supported_cpuid(MAX_KVM_CPUID_ENTRIES)
             .map_err(Error::VmSetup)?;
 
+        let device_manager = DeviceManager::new().map_err(|_| Error::DeviceManager)?;
+
         Ok(Vm {
             fd,
             kernel,
             memory: guest_memory,
             vcpus: None,
+            devices: device_manager,
             cpuid,
-            config: vm_config,
+            config,
         })
     }
 
@@ -274,6 +328,8 @@ impl<'a> Vm<'a> {
     }
 
     pub fn start(&mut self, entry_addr: GuestAddress) -> Result<()> {
+        self.devices.register_devices()?;
+
         let vcpu_count = self.config.vcpu_count;
 
         let mut vcpus: Vec<thread::JoinHandle<()>> = Vec::with_capacity(vcpu_count as usize);
@@ -281,6 +337,7 @@ impl<'a> Vm<'a> {
 
         for cpu_id in 0..vcpu_count {
             println!("Starting VCPU {:?}", cpu_id);
+            let io_bus = self.devices.io_bus.clone();
             let mut vcpu = Vcpu::new(cpu_id, &self)?;
             vcpu.configure(entry_addr, &self)?;
 
@@ -309,11 +366,11 @@ impl<'a> Vm<'a> {
                         loop {
                             match vcpu.run() {
                                 Ok(run) => match run {
-                                    VcpuExit::IoIn(_addr, _data) => {}
+                                    VcpuExit::IoIn(addr, data) => {
+                                        io_bus.read(u64::from(addr), data);
+                                    }
                                     VcpuExit::IoOut(addr, data) => {
-                                        if addr == 0x3f8 {
-                                            print!("{}", str::from_utf8(&data).unwrap());
-                                        }
+                                        io_bus.write(u64::from(addr), data);
                                     }
                                     VcpuExit::MmioRead(addr, _data) => {
                                         println!("MMIO R -- addr: {:#x}", addr);

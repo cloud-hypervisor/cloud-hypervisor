@@ -12,6 +12,8 @@ use clap::{App, Arg};
 
 use std::path::PathBuf;
 
+use vmm::vm::*;
+
 fn main() {
     let cmd_arguments = App::new("cloud-hypervisor")
         .version(crate_version!())
@@ -25,12 +27,16 @@ fn main() {
         )
         .get_matches();
 
-    let kernel_path = cmd_arguments
+    let kernel_arg = cmd_arguments
         .value_of("kernel")
         .map(PathBuf::from)
         .expect("Missing argument: kernel");
 
-    println!("Booting {:?}...", kernel_path.as_path());
+    let kernel_path = kernel_arg.as_path();
 
-    vmm::boot_kernel(kernel_path.as_path()).unwrap();
+    println!("Booting {:?}...", kernel_path);
+
+    let vm_config = VmConfig::new(kernel_path).unwrap();
+
+    vmm::boot_kernel(vm_config).unwrap();
 }

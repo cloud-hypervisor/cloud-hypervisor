@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 arch = { path = "../arch" }
+devices = { path = "../devices" }
 kvm-bindings = "0.1"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls" }
 libc = ">=0.2.39"
