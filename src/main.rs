@@ -31,6 +31,12 @@ fn main() {
                 .help("Number of virtual CPUs")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("memory")
+                .long("memory")
+                .help("Amount of RAM (in MB)")
+                .takes_value(true),
+        )
         .get_matches();
 
     let kernel_arg = cmd_arguments
@@ -45,10 +51,15 @@ fn main() {
         vcpus = cpus.parse::<u8>().unwrap();
     }
 
-    println!("VM [{} vCPUS]", vcpus);
+    let mut memory = DEFAULT_MEMORY;
+    if let Some(mem) = cmd_arguments.value_of("memory") {
+        memory = mem.parse::<u64>().unwrap();
+    }
+
+    println!("VM [{} vCPUS {} MB of memory]", vcpus, memory);
     println!("Booting {:?}...", kernel_path);
 
-    let vm_config = VmConfig::new(kernel_path, vcpus).unwrap();
+    let vm_config = VmConfig::new(kernel_path, vcpus, memory).unwrap();
 
     vmm::boot_kernel(vm_config).unwrap();
 }

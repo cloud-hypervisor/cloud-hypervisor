@@ -31,6 +31,7 @@ use vmm_sys_util::EventFd;
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
 pub const DEFAULT_VCPUS: u8 = 1;
+pub const DEFAULT_MEMORY: GuestUsize = 512;
 const DEFAULT_CMDLINE: &str = "console=ttyS0 reboot=k panic=1 pci=off nomodules \
                                i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd";
 const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
@@ -168,9 +169,10 @@ pub struct VmConfig<'a> {
 }
 
 impl<'a> VmConfig<'a> {
-    pub fn new(kernel_path: &'a Path, vcpus: u8) -> Result<Self> {
+    pub fn new(kernel_path: &'a Path, vcpus: u8, memory_size: GuestUsize) -> Result<Self> {
         Ok(VmConfig {
             kernel_path,
+            memory_size,
             vcpu_count: vcpus,
             ..Default::default()
         })
@@ -187,8 +189,8 @@ impl<'a> Default for VmConfig<'a> {
             kernel_path: Path::new(""),
             cmdline: Some(cmdline),
             cmdline_addr: CMDLINE_OFFSET,
-            memory_size: 512,
-            vcpu_count: 1,
+            memory_size: DEFAULT_MEMORY,
+            vcpu_count: DEFAULT_VCPUS,
         }
     }
 }
