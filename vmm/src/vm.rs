@@ -168,9 +168,10 @@ pub struct VmConfig<'a> {
 }
 
 impl<'a> VmConfig<'a> {
-    pub fn new(kernel_path: &'a Path) -> Result<Self> {
+    pub fn new(kernel_path: &'a Path, vcpus: u8) -> Result<Self> {
         Ok(VmConfig {
             kernel_path,
+            vcpu_count: vcpus,
             ..Default::default()
         })
     }

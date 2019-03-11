@@ -25,6 +25,12 @@ fn main() {
                 .help("Path to kernel image (vmlinux)")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("cpus")
+                .long("cpus")
+                .help("Number of virtual CPUs")
+                .takes_value(true),
+        )
         .get_matches();
 
     let kernel_arg = cmd_arguments
@@ -34,9 +40,15 @@ fn main() {
 
     let kernel_path = kernel_arg.as_path();
 
+    let mut vcpus = DEFAULT_VCPUS;
+    if let Some(cpus) = cmd_arguments.value_of("cpus") {
+        vcpus = cpus.parse::<u8>().unwrap();
+    }
+
+    println!("VM [{} vCPUS]", vcpus);
     println!("Booting {:?}...", kernel_path);
 
-    let vm_config = VmConfig::new(kernel_path).unwrap();
+    let vm_config = VmConfig::new(kernel_path, vcpus).unwrap();
 
     vmm::boot_kernel(vm_config).unwrap();
 }
