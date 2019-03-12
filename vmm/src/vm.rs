@@ -414,10 +414,17 @@ impl<'a> Vm<'a> {
                                     VcpuExit::IoapicEoi => {}
                                     VcpuExit::Hyperv => {}
                                 },
-                                Err(e) => {
-                                    println! {"VCPU {:?} error {:?}", cpu_id, e};
-                                    break;
+                                Err(Error::VcpuRun(ref e)) => {
+                                    match e.raw_os_error().unwrap() {
+                                        // Why do we check for these if we only return EINVAL?
+                                        libc::EAGAIN | libc::EINTR => {}
+                                        _ => {
+                                            println! {"VCPU {:?} error {:?}", cpu_id, e};
+                                            break;
+                                        }
+                                    }
                                 }
+                                _ => (),
                             }
                         }
                     })
