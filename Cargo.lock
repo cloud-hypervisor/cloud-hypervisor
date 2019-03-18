@@ -173,6 +173,7 @@ version = "0.1.0"
 dependencies = [
  "arch 0.1.0",
  "devices 0.1.0",
+ "epoll 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-bindings 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-ioctls 0.1.0 (git+https://github.com/rust-vmm/kvm-ioctls)",
  "libc 0.2.48 (registry+https://github.com/rust-lang/crates.io-index)",

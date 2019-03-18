@@ -1,10 +1,11 @@
 // Copyright © 2019 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
-//
+//vm
 
 extern crate arch;
 extern crate devices;
+extern crate epoll;
 extern crate kvm_ioctls;
 extern crate libc;
 extern crate linux_loader;
@@ -19,6 +20,7 @@ use linux_loader::loader::KernelLoader;
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{self, stdout};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
@@ -27,6 +29,7 @@ use vm_memory::{
     MmapError,
 };
 use vmm_sys_util::signal::register_signal_handler;
+use vmm_sys_util::terminal::Terminal;
 use vmm_sys_util::EventFd;
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
@@ -100,6 +103,12 @@ pub enum Error {
 
     /// Cannot add legacy device to Bus.
     BusError(devices::BusError),
+
+    /// Cannot create epoll context.
+    EpollError(io::Error),
+
+    /// Write to the serial console failed.
+    Serial(vmm_sys_util::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -228,6 +237,34 @@ impl DeviceManager {
     }
 }
 
+pub struct EpollContext {
+    raw_fd: RawFd,
+}
+
+impl EpollContext {
+    pub fn new() -> result::Result<EpollContext, io::Error> {
+        let raw_fd = epoll::create(true)?;
+        Ok(EpollContext { raw_fd })
+    }
+
+    pub fn add_stdin(&self) -> result::Result<(), io::Error> {
+        epoll::ctl(
+            self.raw_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            libc::STDIN_FILENO,
+            epoll::Event::new(epoll::Events::EPOLLIN, libc::STDIN_FILENO as u64),
+        )?;
+
+        Ok(())
+    }
+}
+
+impl AsRawFd for EpollContext {
+    fn as_raw_fd(&self) -> RawFd {
+        self.raw_fd
+    }
+}
+
 pub struct Vm<'a> {
     fd: VmFd,
     kernel: File,
@@ -236,6 +273,7 @@ pub struct Vm<'a> {
     devices: DeviceManager,
     cpuid: CpuId,
     config: VmConfig<'a>,
+    epoll: EpollContext,
 }
 
 impl<'a> Vm<'a> {
@@ -288,6 +326,10 @@ impl<'a> Vm<'a> {
 
         let device_manager = DeviceManager::new().map_err(|_| Error::DeviceManager)?;
 
+        // Let's add our STDIN fd.
+        let epoll = EpollContext::new().map_err(Error::EpollError)?;
+        epoll.add_stdin().map_err(Error::EpollError)?;
+
         Ok(Vm {
             fd,
             kernel,
@@ -296,6 +338,7 @@ impl<'a> Vm<'a> {
             devices: device_manager,
             cpuid,
             config,
+            epoll,
         })
     }
 
@@ -328,6 +371,36 @@ impl<'a> Vm<'a> {
         .map_err(|_| Error::CmdLine)?;
 
         Ok(entry_addr.kernel_load)
+    }
+
+    pub fn stdin_loop(&mut self) -> Result<()> {
+        // Let's start the STDIN polling thread.
+        const EPOLL_EVENTS_LEN: usize = 10;
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
+        let epoll_fd = self.epoll.as_raw_fd();
+
+        loop {
+            let num_events =
+                epoll::wait(epoll_fd, -1, &mut events[..]).map_err(Error::EpollError)?;
+
+            for event in events.iter().take(num_events) {
+                let event_data = event.data as RawFd;
+
+                if let libc::STDIN_FILENO = event_data {
+                    let stdin = io::stdin();
+                    let mut out = [0u8; 64];
+                    let stdin_lock = stdin.lock();
+                    let count = stdin_lock.read_raw(&mut out).map_err(Error::Serial)?;
+
+                    self.devices
+                        .serial
+                        .lock()
+                        .expect("Failed to process stdin event due to poisoned lock")
+                        .queue_input_bytes(&out[..count])
+                        .map_err(Error::Serial)?;
+                }
+            }
+        }
     }
 
     pub fn start(&mut self, entry_addr: GuestAddress) -> Result<()> {
@@ -434,6 +507,8 @@ impl<'a> Vm<'a> {
 
         // Unblock all CPU threads.
         vcpu_thread_barrier.wait();
+
+        self.stdin_loop()?;
 
         for vcpu_barrier in vcpus {
             vcpu_barrier.join().unwrap();
