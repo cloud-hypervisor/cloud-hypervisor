@@ -109,6 +109,9 @@ pub enum Error {
 
     /// Write to the serial console failed.
     Serial(vmm_sys_util::Error),
+
+    /// Cannot configure the IRQ.
+    Irq(io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -325,6 +328,8 @@ impl<'a> Vm<'a> {
             .map_err(Error::VmSetup)?;
 
         let device_manager = DeviceManager::new().map_err(|_| Error::DeviceManager)?;
+        fd.register_irqfd(device_manager.serial_evt.as_raw_fd(), 4)
+            .map_err(Error::Irq)?;
 
         // Let's add our STDIN fd.
         let epoll = EpollContext::new().map_err(Error::EpollError)?;
