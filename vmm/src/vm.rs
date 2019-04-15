@@ -240,23 +240,41 @@ impl DeviceManager {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EpollDispatch {
+    Stdin,
+}
+
 pub struct EpollContext {
     raw_fd: RawFd,
+    dispatch_table: Vec<Option<EpollDispatch>>,
 }
 
 impl EpollContext {
     pub fn new() -> result::Result<EpollContext, io::Error> {
         let raw_fd = epoll::create(true)?;
-        Ok(EpollContext { raw_fd })
+
+        // Initial capacity needs to be large enough to hold:
+        // * 1 stdin event
+        let mut dispatch_table = Vec::with_capacity(2);
+        dispatch_table.push(None);
+
+        Ok(EpollContext {
+            raw_fd,
+            dispatch_table,
+        })
     }
 
-    pub fn add_stdin(&self) -> result::Result<(), io::Error> {
+    pub fn add_stdin(&mut self) -> result::Result<(), io::Error> {
+        let dispatch_index = self.dispatch_table.len() as u64;
         epoll::ctl(
             self.raw_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
             libc::STDIN_FILENO,
-            epoll::Event::new(epoll::Events::EPOLLIN, libc::STDIN_FILENO as u64),
+            epoll::Event::new(epoll::Events::EPOLLIN, dispatch_index),
         )?;
+
+        self.dispatch_table.push(Some(EpollDispatch::Stdin));
 
         Ok(())
     }
@@ -332,7 +350,7 @@ impl<'a> Vm<'a> {
             .map_err(Error::Irq)?;
 
         // Let's add our STDIN fd.
-        let epoll = EpollContext::new().map_err(Error::EpollError)?;
+        let mut epoll = EpollContext::new().map_err(Error::EpollError)?;
         epoll.add_stdin().map_err(Error::EpollError)?;
 
         Ok(Vm {
@@ -378,9 +396,10 @@ impl<'a> Vm<'a> {
         Ok(entry_addr.kernel_load)
     }
 
-    pub fn stdin_loop(&mut self) -> Result<()> {
+    pub fn control_loop(&mut self) -> Result<()> {
         // Let's start the STDIN polling thread.
-        const EPOLL_EVENTS_LEN: usize = 10;
+        const EPOLL_EVENTS_LEN: usize = 100;
+
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
         let epoll_fd = self.epoll.as_raw_fd();
 
@@ -389,20 +408,24 @@ impl<'a> Vm<'a> {
                 epoll::wait(epoll_fd, -1, &mut events[..]).map_err(Error::EpollError)?;
 
             for event in events.iter().take(num_events) {
-                let event_data = event.data as RawFd;
+                let dispatch_idx = event.data as usize;
 
-                if let libc::STDIN_FILENO = event_data {
-                    let stdin = io::stdin();
-                    let mut out = [0u8; 64];
-                    let stdin_lock = stdin.lock();
-                    let count = stdin_lock.read_raw(&mut out).map_err(Error::Serial)?;
+                if let Some(dispatch_type) = self.epoll.dispatch_table[dispatch_idx] {
+                    match dispatch_type {
+                        EpollDispatch::Stdin => {
+                            let stdin = io::stdin();
+                            let mut out = [0u8; 64];
+                            let stdin_lock = stdin.lock();
+                            let count = stdin_lock.read_raw(&mut out).map_err(Error::Serial)?;
 
-                    self.devices
-                        .serial
-                        .lock()
-                        .expect("Failed to process stdin event due to poisoned lock")
-                        .queue_input_bytes(&out[..count])
-                        .map_err(Error::Serial)?;
+                            self.devices
+                                .serial
+                                .lock()
+                                .expect("Failed to process stdin event due to poisoned lock")
+                                .queue_input_bytes(&out[..count])
+                                .map_err(Error::Serial)?;
+                        }
+                    }
                 }
             }
         }
@@ -513,7 +536,7 @@ impl<'a> Vm<'a> {
         // Unblock all CPU threads.
         vcpu_thread_barrier.wait();
 
-        self.stdin_loop()?;
+        self.control_loop()?;
 
         for vcpu_barrier in vcpus {
             vcpu_barrier.join().unwrap();
