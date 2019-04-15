@@ -213,6 +213,7 @@ struct DeviceManager {
     // Serial port on 0x3f8
     serial: Arc<Mutex<devices::legacy::Serial>>,
     serial_evt: EventFd,
+    exit_evt: EventFd,
 }
 
 impl DeviceManager {
@@ -224,10 +225,13 @@ impl DeviceManager {
             Box::new(stdout()),
         )));
 
+        let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+
         Ok(DeviceManager {
             io_bus,
             serial,
             serial_evt,
+            exit_evt,
         })
     }
 
@@ -242,6 +246,7 @@ impl DeviceManager {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum EpollDispatch {
+    Exit,
     Stdin,
 }
 
@@ -255,8 +260,9 @@ impl EpollContext {
         let raw_fd = epoll::create(true)?;
 
         // Initial capacity needs to be large enough to hold:
+        // * 1 exit event
         // * 1 stdin event
-        let mut dispatch_table = Vec::with_capacity(2);
+        let mut dispatch_table = Vec::with_capacity(3);
         dispatch_table.push(None);
 
         Ok(EpollContext {
@@ -275,6 +281,22 @@ impl EpollContext {
         )?;
 
         self.dispatch_table.push(Some(EpollDispatch::Stdin));
+
+        Ok(())
+    }
+
+    fn add_event<T>(&mut self, fd: &T, token: EpollDispatch) -> result::Result<(), io::Error>
+    where
+        T: AsRawFd,
+    {
+        let dispatch_index = self.dispatch_table.len() as u64;
+        epoll::ctl(
+            self.raw_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            fd.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, dispatch_index),
+        )?;
+        self.dispatch_table.push(Some(token));
 
         Ok(())
     }
@@ -353,6 +375,11 @@ impl<'a> Vm<'a> {
         let mut epoll = EpollContext::new().map_err(Error::EpollError)?;
         epoll.add_stdin().map_err(Error::EpollError)?;
 
+        // Let's add an exit event.
+        epoll
+            .add_event(&device_manager.exit_evt, EpollDispatch::Exit)
+            .map_err(Error::EpollError)?;
+
         Ok(Vm {
             fd,
             kernel,
@@ -412,6 +439,15 @@ impl<'a> Vm<'a> {
 
                 if let Some(dispatch_type) = self.epoll.dispatch_table[dispatch_idx] {
                     match dispatch_type {
+                        EpollDispatch::Exit => {
+                            // Consume the event.
+                            self.devices.exit_evt.read().map_err(Error::EventFd)?;
+
+                            // Safe because we're terminating the process anyway.
+                            unsafe {
+                                libc::_exit(0);
+                            }
+                        }
                         EpollDispatch::Stdin => {
                             let stdin = io::stdin();
                             let mut out = [0u8; 64];
