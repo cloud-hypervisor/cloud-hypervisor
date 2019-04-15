@@ -6,5 +6,7 @@
 // found in the THIRD-PARTY file.
 
 mod serial;
+mod i8042;
 
 pub use self::serial::Serial;
+pub use self::i8042::I8042Device;

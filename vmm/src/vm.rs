@@ -213,6 +213,9 @@ struct DeviceManager {
     // Serial port on 0x3f8
     serial: Arc<Mutex<devices::legacy::Serial>>,
     serial_evt: EventFd,
+
+    // i8042 device for exit
+    i8042: Arc<Mutex<devices::legacy::I8042Device>>,
     exit_evt: EventFd,
 }
 
@@ -226,20 +229,31 @@ impl DeviceManager {
         )));
 
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+        let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
+            exit_evt.try_clone().map_err(Error::EventFd)?,
+        )));
 
         Ok(DeviceManager {
             io_bus,
             serial,
             serial_evt,
+            i8042,
             exit_evt,
         })
     }
 
     /// Register legacy devices.
     pub fn register_devices(&mut self) -> Result<()> {
+        // Insert serial device
         self.io_bus
             .insert(self.serial.clone(), 0x3f8, 0x8)
             .map_err(Error::BusError)?;
+
+        // Insert i8042 device
+        self.io_bus
+            .insert(self.i8042.clone(), 0x61, 0x4)
+            .map_err(Error::BusError)?;
+
         Ok(())
     }
 }
