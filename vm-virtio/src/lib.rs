@@ -20,20 +20,17 @@ use std::io;
 mod device;
 mod queue;
 
+pub mod transport;
+
 pub use self::device::*;
 pub use self::queue::*;
 
 #[allow(dead_code)]
 const DEVICE_INIT: u32 = 0x00;
-#[allow(dead_code)]
 const DEVICE_ACKNOWLEDGE: u32 = 0x01;
-#[allow(dead_code)]
 const DEVICE_DRIVER: u32 = 0x02;
-#[allow(dead_code)]
 const DEVICE_DRIVER_OK: u32 = 0x04;
-#[allow(dead_code)]
 const DEVICE_FEATURES_OK: u32 = 0x08;
-#[allow(dead_code)]
 const DEVICE_FAILED: u32 = 0x80;
 
 #[allow(dead_code)]
