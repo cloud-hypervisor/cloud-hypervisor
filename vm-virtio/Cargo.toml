@@ -1,0 +1,21 @@
+[package]
+name = "vm-virtio"
+version = "0.1.0"
+authors = ["Samuel Ortiz <sameo@linux.intel.com>"]
+edition = "2018"
+
+[dependencies]
+byteorder = "=1.2.1"
+devices = { path = "../devices" }
+epoll = "=4.0.1"
+libc = ">=0.2.39"
+log = "*"
+pci = { path = "../pci" }
+tempfile = ">=3.0.2"
+virtio-bindings = { path = "../virtio-bindings" }
+vm-allocator = { path = "../vm-allocator" }
+vmm-sys-util = { git = "https://github.com/sameo/vmm-sys-util" }
+
+[dependencies.vm-memory]
+git = "https://github.com/rust-vmm/vm-memory"
+features = ["backend-mmap"]
