@@ -17,6 +17,7 @@ use kvm_ioctls::*;
 use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::cmdline;
 use linux_loader::loader::KernelLoader;
+use pci::{PciConfigIo, PciRoot};
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{self, stdout};
@@ -35,7 +36,7 @@ use vmm_sys_util::EventFd;
 const VCPU_RTSIG_OFFSET: i32 = 0;
 pub const DEFAULT_VCPUS: u8 = 1;
 pub const DEFAULT_MEMORY: GuestUsize = 512;
-const DEFAULT_CMDLINE: &str = "console=ttyS0 reboot=k panic=1 pci=off nomodules \
+const DEFAULT_CMDLINE: &str = "console=ttyS0 reboot=k panic=1 nomodules \
                                i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd";
 const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
 
@@ -217,6 +218,9 @@ struct DeviceManager {
     // i8042 device for exit
     i8042: Arc<Mutex<devices::legacy::I8042Device>>,
     exit_evt: EventFd,
+
+    // PCI root
+    pci: Arc<Mutex<PciConfigIo>>,
 }
 
 impl DeviceManager {
@@ -233,16 +237,19 @@ impl DeviceManager {
             exit_evt.try_clone().map_err(Error::EventFd)?,
         )));
 
+        let pci_root = PciRoot::new(None);
+        let pci = Arc::new(Mutex::new(PciConfigIo::new(pci_root)));
+
         Ok(DeviceManager {
             io_bus,
             serial,
             serial_evt,
             i8042,
             exit_evt,
+            pci,
         })
     }
 
-    /// Register legacy devices.
     pub fn register_devices(&mut self) -> Result<()> {
         // Insert serial device
         self.io_bus
@@ -254,6 +261,10 @@ impl DeviceManager {
             .insert(self.i8042.clone(), 0x61, 0x4)
             .map_err(Error::BusError)?;
 
+        // Insert the PCI root configuration space.
+        self.io_bus
+            .insert(self.pci.clone(), 0xcf8, 0x8)
+            .map_err(Error::BusError)?;
         Ok(())
     }
 }
