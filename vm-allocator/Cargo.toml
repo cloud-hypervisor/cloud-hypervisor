@@ -1,0 +1,9 @@
+[package]
+name = "vm-allocator"
+version = "0.1.0"
+authors = ["The Chromium OS Authors"]
+edition = "2018"
+
+[dependencies]
+libc = "*"
+vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
