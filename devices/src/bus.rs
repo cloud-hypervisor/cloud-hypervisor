@@ -24,6 +24,16 @@ pub trait BusDevice: Send {
     fn write(&mut self, offset: u64, data: &[u8]) {}
     /// Triggers the `irq_mask` interrupt on this device
     fn interrupt(&self, irq_mask: u32) {}
+
+    /// Sets a register in the configuration space. Only used by PCI.
+    /// * `reg_idx` - The index of the config register to modify.
+    /// * `offset` - Offset in to the register.
+    fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {}
+    /// Gets a register from the configuration space. Only used by PCI.
+    /// * `reg_idx` - The index of the config register to read.
+    fn read_config_register(&self, reg_idx: usize) -> u32 {
+        0
+    }
 }
 
 #[derive(Debug)]
