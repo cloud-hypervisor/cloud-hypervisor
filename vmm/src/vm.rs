@@ -40,6 +40,9 @@ const DEFAULT_CMDLINE: &str = "console=ttyS0 reboot=k panic=1 nomodules \
                                i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd";
 const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
 
+// CPUID feature bits
+const ECX_HYPERVISOR_SHIFT: u32 = 31; // Hypervisor bit.
+
 /// Errors associated with the wrappers over KVM ioctls.
 #[derive(Debug)]
 pub enum Error {
@@ -388,9 +391,10 @@ impl<'a> Vm<'a> {
         fd.create_pit2(pit_config).map_err(Error::VmSetup)?;
 
         // Supported CPUID
-        let cpuid = kvm
+        let mut cpuid = kvm
             .get_supported_cpuid(MAX_KVM_CPUID_ENTRIES)
             .map_err(Error::VmSetup)?;
+        Vm::patch_cpuid(&mut cpuid);
 
         let device_manager = DeviceManager::new().map_err(|_| Error::DeviceManager)?;
         fd.register_irqfd(device_manager.serial_evt.as_raw_fd(), 4)
@@ -618,6 +622,18 @@ impl<'a> Vm<'a> {
     ///
     pub fn get_fd(&self) -> &VmFd {
         &self.fd
+    }
+
+    fn patch_cpuid(cpuid: &mut CpuId) {
+        let entries = cpuid.mut_entries_slice();
+
+        for entry in entries.iter_mut() {
+            if let 1 = entry.function {
+                if entry.index == 0 {
+                    entry.ecx |= 1 << ECX_HYPERVISOR_SHIFT;
+                }
+            }
+        }
     }
 }
 
