@@ -12,6 +12,7 @@ kvm-bindings = "0.1"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls" }
 libc = ">=0.2.39"
 pci = {path = "../pci"}
+qcow = { path = "../qcow" }
 linux-loader = { git = "https://github.com/sameo/linux-loader" }
 vmm-sys-util = { git = "https://github.com/sameo/vmm-sys-util" }
 

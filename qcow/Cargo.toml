@@ -1,0 +1,16 @@
+[package]
+name = "qcow"
+version = "0.1.0"
+authors = ["The Chromium OS Authors"]
+edition = "2018"
+license = "BSD-3-Clause"
+
+[lib]
+path = "src/qcow.rs"
+
+[dependencies]
+byteorder = "*"
+libc = "*"
+log = "*"
+remain = "*"
+vmm-sys-util = { git = "https://github.com/sameo/vmm-sys-util" }
