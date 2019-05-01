@@ -26,8 +26,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::{fmt, io, result};
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshotable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
@@ -1069,4 +1069,5 @@ impl Pausable for CpuManager {
 }
 
 impl Snapshotable for CpuManager {}
+impl Transportable for CpuManager {}
 impl Migratable for CpuManager {}

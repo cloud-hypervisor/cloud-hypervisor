@@ -37,11 +37,11 @@ use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
     GuestUsize, Le32,
 };
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshotable, Transportable};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 #[allow(clippy::enum_variant_names)]
@@ -917,4 +917,5 @@ impl Pausable for VirtioPciDevice {
 }
 
 impl Snapshotable for VirtioPciDevice {}
+impl Transportable for VirtioPciDevice {}
 impl Migratable for VirtioPciDevice {}

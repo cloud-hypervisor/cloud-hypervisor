@@ -44,8 +44,8 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshotable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -575,6 +575,7 @@ where
 virtio_pausable!(Vsock, T: 'static + VsockBackend + Sync);
 
 impl<B> Snapshotable for Vsock<B> where B: VsockBackend + Sync + 'static {}
+impl<B> Transportable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 impl<B> Migratable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 
 #[cfg(test)]

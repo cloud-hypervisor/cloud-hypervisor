@@ -21,11 +21,12 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use vm_device::{ExternalDmaMapping, Migratable, MigratableError, Pausable, Snapshotable};
+use vm_device::ExternalDmaMapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap,
 };
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshotable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 /// Queues sizes
@@ -1039,4 +1040,5 @@ impl VirtioDevice for Iommu {
 
 virtio_pausable!(Iommu);
 impl Snapshotable for Iommu {}
+impl Transportable for Iommu {}
 impl Migratable for Iommu {}

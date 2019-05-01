@@ -55,6 +55,7 @@ members = [
     "vmm",
     "vm-virtio",
     "vm-device",
+    "vm-migration",
     "vhost_user_block",
     "vhost_user_backend",
     "vhost_user_fs",

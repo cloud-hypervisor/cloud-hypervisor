@@ -15,8 +15,8 @@ use std::result;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use vm_device::interrupt::InterruptSourceGroup;
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshotable, Transportable};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 const VENDOR_ID: u32 = 0;
@@ -355,4 +355,5 @@ impl Pausable for MmioDevice {
 }
 
 impl Snapshotable for MmioDevice {}
+impl Transportable for MmioDevice {}
 impl Migratable for MmioDevice {}

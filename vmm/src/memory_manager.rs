@@ -23,6 +23,7 @@ use vm_memory::{
     GuestMemory, GuestMemoryAtomic, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
     GuestUsize, MmapRegion,
 };
+use vm_migration::{Migratable, Pausable, Snapshotable, Transportable};
 
 const HOTPLUG_COUNT: usize = 8;
 
@@ -884,3 +885,8 @@ impl Aml for MemoryManager {
         bytes
     }
 }
+
+impl Pausable for MemoryManager {}
+impl Snapshotable for MemoryManager {}
+impl Transportable for MemoryManager {}
+impl Migratable for MemoryManager {}

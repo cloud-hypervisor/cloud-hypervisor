@@ -30,11 +30,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
 };
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshotable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 128;
@@ -956,4 +956,5 @@ impl VirtioDevice for Mem {
 
 virtio_pausable!(Mem);
 impl Snapshotable for Mem {}
+impl Transportable for Mem {}
 impl Migratable for Mem {}

@@ -31,11 +31,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use virtio_bindings::bindings::virtio_blk::*;
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{
     ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap,
 };
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshotable, Transportable};
 use vmm_sys_util::{eventfd::EventFd, seek_hole::SeekHole, write_zeroes::PunchHole};
 
 const SECTOR_SHIFT: u8 = 9;
@@ -1052,4 +1052,5 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 
 virtio_pausable!(Block, T: 'static + DiskFile + Send);
 impl<T: 'static + DiskFile + Send> Snapshotable for Block<T> {}
+impl<T: 'static + DiskFile + Send> Transportable for Block<T> {}
 impl<T: 'static + DiskFile + Send> Migratable for Block<T> {}

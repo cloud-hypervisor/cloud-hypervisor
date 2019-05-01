@@ -48,11 +48,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_allocator::{GsiApic, SystemAllocator};
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryMmap,
     GuestMemoryRegion, GuestUsize,
 };
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshotable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
 
@@ -967,6 +967,7 @@ impl Pausable for Vm {
 }
 
 impl Snapshotable for Vm {}
+impl Transportable for Vm {}
 impl Migratable for Vm {}
 
 #[cfg(test)]

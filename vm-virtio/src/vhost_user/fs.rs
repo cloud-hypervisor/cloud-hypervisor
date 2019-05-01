@@ -26,10 +26,10 @@ use vhost_rs::vhost_user::{
     HandlerResult, Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
 };
 use vhost_rs::VhostBackend;
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
 };
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshotable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const NUM_QUEUE_OFFSET: usize = 1;
@@ -556,4 +556,5 @@ impl VirtioDevice for Fs {
 
 virtio_pausable!(Fs);
 impl Snapshotable for Fs {}
+impl Transportable for Fs {}
 impl Migratable for Fs {}

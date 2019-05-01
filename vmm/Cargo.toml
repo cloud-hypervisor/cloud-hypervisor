@@ -36,6 +36,7 @@ vfio = { path = "../vfio", optional = true }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.2.0", features = ["backend-mmap", "backend-atomic"] }
+vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
 signal-hook = "0.1.13"
