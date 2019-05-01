@@ -51,11 +51,11 @@ use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize, MmapRegion,
 };
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 #[cfg(feature = "pci_support")]
 use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::transport::VirtioTransport;
@@ -2373,7 +2373,8 @@ impl Pausable for DeviceManager {
     }
 }
 
-impl Snapshotable for DeviceManager {}
+impl Snapshottable for DeviceManager {}
+impl Transportable for DeviceManager {}
 impl Migratable for DeviceManager {}
 
 #[cfg(feature = "pci_support")]

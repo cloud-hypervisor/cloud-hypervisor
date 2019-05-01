@@ -27,8 +27,8 @@ use vhost_rs::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost_rs::VhostBackend;
 use virtio_bindings::bindings::virtio_net;
 use virtio_bindings::bindings::virtio_ring;
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const DEFAULT_QUEUE_NUMBER: usize = 2;
@@ -365,5 +365,6 @@ impl VirtioDevice for Net {
 }
 
 virtio_ctrl_q_pausable!(Net);
-impl Snapshotable for Net {}
+impl Snapshottable for Net {}
+impl Transportable for Net {}
 impl Migratable for Net {}
