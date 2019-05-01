@@ -30,8 +30,8 @@ use std::sync::Arc;
 use std::thread;
 use std::vec::Vec;
 use virtio_bindings::bindings::virtio_net::*;
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]
@@ -567,5 +567,6 @@ impl VirtioDevice for Net {
 }
 
 virtio_ctrl_q_pausable!(Net);
-impl Snapshotable for Net {}
+impl Snapshottable for Net {}
+impl Transportable for Net {}
 impl Migratable for Net {}

@@ -26,8 +26,8 @@ use vhost_rs::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost_rs::VhostBackend;
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 struct SlaveReqHandler {}
@@ -328,5 +328,6 @@ impl VirtioDevice for Blk {
 }
 
 virtio_pausable!(Blk);
-impl Snapshotable for Blk {}
+impl Snapshottable for Blk {}
+impl Transportable for Blk {}
 impl Migratable for Blk {}

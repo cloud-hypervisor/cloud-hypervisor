@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::{result, thread};
-use vm_device::Pausable;
+use vm_migration::Pausable;
 use vmm_sys_util::eventfd::EventFd;
 
 pub mod api;

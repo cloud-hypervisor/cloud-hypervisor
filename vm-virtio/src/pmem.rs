@@ -24,11 +24,11 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap, GuestUsize,
 };
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -506,5 +506,6 @@ impl VirtioDevice for Pmem {
 }
 
 virtio_pausable!(Pmem);
-impl Snapshotable for Pmem {}
+impl Snapshottable for Pmem {}
+impl Transportable for Pmem {}
 impl Migratable for Pmem {}
