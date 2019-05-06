@@ -40,8 +40,6 @@ use vmm_sys_util::EventFd;
 const VCPU_RTSIG_OFFSET: i32 = 0;
 pub const DEFAULT_VCPUS: u8 = 1;
 pub const DEFAULT_MEMORY: GuestUsize = 512;
-const DEFAULT_CMDLINE: &str = "console=ttyS0 reboot=k panic=1 nomodules \
-                               i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd";
 const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
 const X86_64_IRQ_BASE: u32 = 5;
 
@@ -207,7 +205,7 @@ impl Vcpu {
 pub struct VmConfig<'a> {
     kernel_path: &'a Path,
     disk_path: &'a Path,
-    cmdline: Option<cmdline::Cmdline>,
+    cmdline: cmdline::Cmdline,
     cmdline_addr: GuestAddress,
 
     memory_size: GuestUsize,
@@ -218,33 +216,21 @@ impl<'a> VmConfig<'a> {
     pub fn new(
         kernel_path: &'a Path,
         disk_path: &'a Path,
+        cmdline_str: String,
         vcpus: u8,
         memory_size: GuestUsize,
     ) -> Result<Self> {
+        let mut cmdline = cmdline::Cmdline::new(arch::CMDLINE_MAX_SIZE);
+        cmdline.insert_str(cmdline_str).unwrap();
+
         Ok(VmConfig {
             kernel_path,
             disk_path,
+            cmdline,
+            cmdline_addr: CMDLINE_OFFSET,
             memory_size,
             vcpu_count: vcpus,
-            ..Default::default()
         })
-    }
-}
-
-impl<'a> Default for VmConfig<'a> {
-    fn default() -> Self {
-        let line = String::from(DEFAULT_CMDLINE);
-        let mut cmdline = cmdline::Cmdline::new(arch::CMDLINE_MAX_SIZE);
-        cmdline.insert_str(line).unwrap();
-
-        VmConfig {
-            kernel_path: Path::new(""),
-            disk_path: Path::new(""),
-            cmdline: Some(cmdline),
-            cmdline_addr: CMDLINE_OFFSET,
-            memory_size: DEFAULT_MEMORY,
-            vcpu_count: DEFAULT_VCPUS,
-        }
     }
 }
 
@@ -518,8 +504,8 @@ impl<'a> Vm<'a> {
     }
 
     pub fn load_kernel(&mut self) -> Result<GuestAddress> {
-        let cmdline = self.config.cmdline.clone().ok_or(Error::CmdLine)?;
-        let cmdline_cstring = CString::new(cmdline).map_err(|_| Error::CmdLine)?;
+        let cmdline_cstring =
+            CString::new(self.config.cmdline.clone()).map_err(|_| Error::CmdLine)?;
         let entry_addr = linux_loader::loader::Elf::load(
             &self.memory,
             None,
