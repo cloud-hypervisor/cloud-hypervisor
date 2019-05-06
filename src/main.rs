@@ -26,6 +26,12 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("disk")
+                .long("disk")
+                .help("Path to VM disk image")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("cpus")
                 .long("cpus")
                 .help("Number of virtual CPUs")
@@ -43,8 +49,13 @@ fn main() {
         .value_of("kernel")
         .map(PathBuf::from)
         .expect("Missing argument: kernel");
-
     let kernel_path = kernel_arg.as_path();
+
+    let disk_arg = cmd_arguments
+        .value_of("disk")
+        .map(PathBuf::from)
+        .expect("Missing argument: disk");
+    let disk_path = disk_arg.as_path();
 
     let mut vcpus = DEFAULT_VCPUS;
     if let Some(cpus) = cmd_arguments.value_of("cpus") {
@@ -59,7 +70,7 @@ fn main() {
     println!("VM [{} vCPUS {} MB of memory]", vcpus, memory);
     println!("Booting {:?}...", kernel_path);
 
-    let vm_config = VmConfig::new(kernel_path, vcpus, memory).unwrap();
+    let vm_config = VmConfig::new(kernel_path, disk_path, vcpus, memory).unwrap();
 
     vmm::boot_kernel(vm_config).unwrap();
 }

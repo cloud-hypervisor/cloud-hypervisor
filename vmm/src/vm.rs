@@ -206,6 +206,7 @@ impl Vcpu {
 
 pub struct VmConfig<'a> {
     kernel_path: &'a Path,
+    disk_path: &'a Path,
     cmdline: Option<cmdline::Cmdline>,
     cmdline_addr: GuestAddress,
 
@@ -214,9 +215,15 @@ pub struct VmConfig<'a> {
 }
 
 impl<'a> VmConfig<'a> {
-    pub fn new(kernel_path: &'a Path, vcpus: u8, memory_size: GuestUsize) -> Result<Self> {
+    pub fn new(
+        kernel_path: &'a Path,
+        disk_path: &'a Path,
+        vcpus: u8,
+        memory_size: GuestUsize,
+    ) -> Result<Self> {
         Ok(VmConfig {
             kernel_path,
+            disk_path,
             memory_size,
             vcpu_count: vcpus,
             ..Default::default()
@@ -232,6 +239,7 @@ impl<'a> Default for VmConfig<'a> {
 
         VmConfig {
             kernel_path: Path::new(""),
+            disk_path: Path::new(""),
             cmdline: Some(cmdline),
             cmdline_addr: CMDLINE_OFFSET,
             memory_size: DEFAULT_MEMORY,
@@ -257,7 +265,12 @@ struct DeviceManager {
 }
 
 impl DeviceManager {
-    fn new(memory: GuestMemoryMmap, allocator: &mut SystemAllocator, vm_fd: &VmFd) -> Result<Self> {
+    fn new(
+        memory: GuestMemoryMmap,
+        allocator: &mut SystemAllocator,
+        vm_fd: &VmFd,
+        vm_cfg: &VmConfig,
+    ) -> Result<Self> {
         let io_bus = devices::Bus::new();
         let mut mmio_bus = devices::Bus::new();
         let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
@@ -277,7 +290,7 @@ impl DeviceManager {
         let raw_img: File = OpenOptions::new()
             .read(true)
             .write(true)
-            .open("/foo/bar/rootfs.img")
+            .open(&vm_cfg.disk_path)
             .map_err(Error::Disk)?;
 
         let virtio_block_device =
@@ -478,7 +491,7 @@ impl<'a> Vm<'a> {
         )
         .ok_or(Error::CreateSystemAllocator)?;
 
-        let device_manager = DeviceManager::new(guest_memory.clone(), &mut allocator, &fd)
+        let device_manager = DeviceManager::new(guest_memory.clone(), &mut allocator, &fd, &config)
             .map_err(|_| Error::DeviceManager)?;
         fd.register_irqfd(device_manager.serial_evt.as_raw_fd(), 4)
             .map_err(Error::Irq)?;
