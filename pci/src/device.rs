@@ -5,7 +5,6 @@
 use crate::configuration::{self, PciConfiguration};
 use crate::PciInterruptPin;
 use devices::BusDevice;
-use kvm_ioctls::*;
 use std;
 use std::fmt::{self, Display};
 use vm_allocator::SystemAllocator;
@@ -60,7 +59,7 @@ pub trait PciDevice: BusDevice {
 
     /// Gets a list of ioeventfds that should be registered with the running VM. The list is
     /// returned as a Vec of (eventfd, addr, datamatch) tuples.
-    fn ioeventfds(&self) -> Vec<(&EventFd, u64, NoDatamatch)> {
+    fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
         Vec::new()
     }
     /// Gets the configuration registers of the Pci Device.

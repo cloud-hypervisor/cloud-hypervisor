@@ -218,6 +218,18 @@ impl VirtioPciDevice {
         })
     }
 
+    /// Gets the list of queue events that must be triggered whenever the VM writes to
+    /// `virtio::NOTIFY_REG_OFFSET` past the MMIO base. Each event must be triggered when the
+    /// value being written equals the index of the event in this list.
+    pub fn queue_evts(&self) -> &[EventFd] {
+        self.queue_evts.as_slice()
+    }
+
+    /// Gets the event this device uses to interrupt the VM when the used queue is changed.
+    pub fn interrupt_evt(&self) -> Option<&EventFd> {
+        self.interrupt_evt.as_ref()
+    }
+
     fn is_driver_ready(&self) -> bool {
         let ready_bits =
             (DEVICE_ACKNOWLEDGE | DEVICE_DRIVER | DEVICE_DRIVER_OK | DEVICE_FEATURES_OK) as u8;
@@ -305,6 +317,24 @@ impl PciDevice for VirtioPciDevice {
         &mut self.configuration
     }
 
+    fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
+        let bar0 = self
+            .configuration
+            .get_bar64_addr(self.settings_bar as usize);
+        let notify_base = bar0 + NOTIFICATION_BAR_OFFSET;
+        self.queue_evts()
+            .iter()
+            .enumerate()
+            .map(|(i, event)| {
+                (
+                    event,
+                    notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
+                    i as u64,
+                )
+            })
+            .collect()
+    }
+
     fn allocate_bars(
         &mut self,
         allocator: &mut SystemAllocator,
@@ -326,8 +356,9 @@ impl PciDevice for VirtioPciDevice {
             })? as u8;
 
         println!(
-            "VIRTIO PCI BAR starts at 0x{:x}",
-            virtio_pci_bar_addr.raw_value()
+            "VIRTIO PCI BAR starts at 0x{:x}, size 0x{:x}",
+            virtio_pci_bar_addr.raw_value(),
+            CAPABILITY_BAR_SIZE
         );
         ranges.push((virtio_pci_bar_addr, CAPABILITY_BAR_SIZE));
 
@@ -349,10 +380,7 @@ impl PciDevice for VirtioPciDevice {
         Ok(ranges)
     }
 
-    fn read_bar(&mut self, addr: u64, data: &mut [u8]) {
-        // The driver is only allowed to do aligned, properly sized access.
-        let bar0 = u64::from(self.configuration.get_bar_addr(self.settings_bar as usize));
-        let offset = addr - bar0;
+    fn read_bar(&mut self, offset: u64, data: &mut [u8]) {
         match offset {
             o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => self.common_config.read(
                 o - COMMON_CONFIG_BAR_OFFSET,
@@ -380,9 +408,7 @@ impl PciDevice for VirtioPciDevice {
         }
     }
 
-    fn write_bar(&mut self, addr: u64, data: &[u8]) {
-        let bar0 = u64::from(self.configuration.get_bar_addr(self.settings_bar as usize));
-        let offset = addr - bar0;
+    fn write_bar(&mut self, offset: u64, data: &[u8]) {
         match offset {
             o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => self.common_config.write(
                 o - COMMON_CONFIG_BAR_OFFSET,

@@ -17,11 +17,13 @@ use std::fmt;
 use std::fs::File;
 use std::io;
 
+mod block;
 mod device;
 mod queue;
 
 pub mod transport;
 
+pub use self::block::*;
 pub use self::device::*;
 pub use self::queue::*;
 
@@ -123,4 +125,7 @@ pub enum Error {
         event: DeviceEventT,
     },
     IoError(io::Error),
+    EpollCreateFd(io::Error),
+    EpollCtl(io::Error),
+    EpollWait(io::Error),
 }

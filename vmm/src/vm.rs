@@ -9,7 +9,9 @@ extern crate epoll;
 extern crate kvm_ioctls;
 extern crate libc;
 extern crate linux_loader;
+extern crate vm_allocator;
 extern crate vm_memory;
+extern crate vm_virtio;
 extern crate vmm_sys_util;
 
 use kvm_bindings::{kvm_pit_config, kvm_userspace_memory_region, KVM_PIT_SPEAKER_DUMMY};
@@ -17,18 +19,20 @@ use kvm_ioctls::*;
 use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::cmdline;
 use linux_loader::loader::KernelLoader;
-use pci::{PciConfigIo, PciRoot};
+use pci::{PciConfigIo, PciDevice, PciInterruptPin, PciRoot};
 use std::ffi::CString;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, stdout};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
+use vm_allocator::SystemAllocator;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion, GuestUsize,
     MmapError,
 };
+use vm_virtio::transport::VirtioPciDevice;
 use vmm_sys_util::signal::register_signal_handler;
 use vmm_sys_util::terminal::Terminal;
 use vmm_sys_util::EventFd;
@@ -39,6 +43,7 @@ pub const DEFAULT_MEMORY: GuestUsize = 512;
 const DEFAULT_CMDLINE: &str = "console=ttyS0 reboot=k panic=1 nomodules \
                                i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd";
 const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
+const X86_64_IRQ_BASE: u32 = 5;
 
 // CPUID feature bits
 const ECX_HYPERVISOR_SHIFT: u32 = 31; // Hypervisor bit.
@@ -114,8 +119,32 @@ pub enum Error {
     /// Write to the serial console failed.
     Serial(vmm_sys_util::Error),
 
+    /// Cannot allocate IRQ.
+    AllocateIrq,
+
+    /// Cannot allocate PCI BARs
+    AllocateBars(pci::PciDeviceError),
+
+    /// Cannot register ioevent.
+    RegisterIoevent(io::Error),
+
     /// Cannot configure the IRQ.
     Irq(io::Error),
+
+    /// Cannot create virtio device
+    VirtioDevice,
+
+    /// Cannot add PCI device
+    AddPciDevice(pci::PciRootError),
+
+    /// Cannot open disk path
+    Disk(io::Error),
+
+    /// Cannot create virtio-blk device
+    CreateVirtioBlock(io::Error),
+
+    /// Cannot create the system allocator
+    CreateSystemAllocator,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -213,6 +242,7 @@ impl<'a> Default for VmConfig<'a> {
 
 struct DeviceManager {
     io_bus: devices::Bus,
+    mmio_bus: devices::Bus,
 
     // Serial port on 0x3f8
     serial: Arc<Mutex<devices::legacy::Serial>>,
@@ -227,8 +257,9 @@ struct DeviceManager {
 }
 
 impl DeviceManager {
-    fn new() -> Result<Self> {
+    fn new(memory: GuestMemoryMmap, allocator: &mut SystemAllocator, vm_fd: &VmFd) -> Result<Self> {
         let io_bus = devices::Bus::new();
+        let mut mmio_bus = devices::Bus::new();
         let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
         let serial = Arc::new(Mutex::new(devices::legacy::Serial::new_out(
             serial_evt.try_clone().map_err(Error::EventFd)?,
@@ -240,11 +271,52 @@ impl DeviceManager {
             exit_evt.try_clone().map_err(Error::EventFd)?,
         )));
 
-        let pci_root = PciRoot::new(None);
+        let mut pci_root = PciRoot::new(None);
+
+        // Open block device path
+        let raw_img: File = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/foo/bar/rootfs.img")
+            .map_err(Error::Disk)?;
+
+        let virtio_block_device =
+            vm_virtio::Block::new(raw_img, false).map_err(Error::CreateVirtioBlock)?;
+        let virtio_block_device = Box::new(virtio_block_device);
+        let mut virtio_pci_device =
+            VirtioPciDevice::new(memory, virtio_block_device).map_err(|_| Error::VirtioDevice)?;
+        let bars = virtio_pci_device
+            .allocate_bars(allocator)
+            .map_err(Error::AllocateBars)?;
+
+        for (event, addr, _) in virtio_pci_device.ioeventfds() {
+            let io_addr = IoEventAddress::Mmio(addr);
+            println!("Register ioevent at 0x{:x}", addr);
+            vm_fd
+                .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)
+                .map_err(Error::RegisterIoevent)?;
+        }
+
+        // Assign IRQ to the virtio-blk device
+        let irqfd = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+        let irq_num = allocator.allocate_irq().ok_or(Error::AllocateIrq)?;
+        vm_fd
+            .register_irqfd(irqfd.as_raw_fd(), irq_num)
+            .map_err(Error::Irq)?;
+        // Let's use irq line INTA for now.
+        virtio_pci_device.assign_irq(irqfd, irq_num as u32, PciInterruptPin::IntA);
+
+        let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
+
+        pci_root
+            .add_device(virtio_pci_device.clone(), &mut mmio_bus, bars)
+            .map_err(Error::AddPciDevice)?;
+
         let pci = Arc::new(Mutex::new(PciConfigIo::new(pci_root)));
 
         Ok(DeviceManager {
             io_bus,
+            mmio_bus,
             serial,
             serial_evt,
             i8042,
@@ -396,7 +468,18 @@ impl<'a> Vm<'a> {
             .map_err(Error::VmSetup)?;
         Vm::patch_cpuid(&mut cpuid);
 
-        let device_manager = DeviceManager::new().map_err(|_| Error::DeviceManager)?;
+        // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
+        let mut allocator = SystemAllocator::new(
+            None,
+            None,
+            GuestAddress(0),
+            1 << 36 as GuestUsize,
+            X86_64_IRQ_BASE,
+        )
+        .ok_or(Error::CreateSystemAllocator)?;
+
+        let device_manager = DeviceManager::new(guest_memory.clone(), &mut allocator, &fd)
+            .map_err(|_| Error::DeviceManager)?;
         fd.register_irqfd(device_manager.serial_evt.as_raw_fd(), 4)
             .map_err(Error::Irq)?;
 
@@ -507,6 +590,7 @@ impl<'a> Vm<'a> {
         for cpu_id in 0..vcpu_count {
             println!("Starting VCPU {:?}", cpu_id);
             let io_bus = self.devices.io_bus.clone();
+            let mmio_bus = self.devices.mmio_bus.clone();
             let mut vcpu = Vcpu::new(cpu_id, &self)?;
             vcpu.configure(entry_addr, &self)?;
 
@@ -541,11 +625,11 @@ impl<'a> Vm<'a> {
                                     VcpuExit::IoOut(addr, data) => {
                                         io_bus.write(u64::from(addr), data);
                                     }
-                                    VcpuExit::MmioRead(addr, _data) => {
-                                        println!("MMIO R -- addr: {:#x}", addr);
+                                    VcpuExit::MmioRead(addr, data) => {
+                                        mmio_bus.read(addr as u64, data);
                                     }
-                                    VcpuExit::MmioWrite(addr, _data) => {
-                                        println!("MMIO W -- addr: {:#x}", addr);
+                                    VcpuExit::MmioWrite(addr, data) => {
+                                        mmio_bus.write(addr as u64, data);
                                     }
                                     VcpuExit::Unknown => {
                                         println!("Unknown");

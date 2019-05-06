@@ -402,11 +402,18 @@ impl PciConfiguration {
         Ok(config.reg_idx)
     }
 
-    /// Returns the address of the given BAR region.
-    pub fn get_bar_addr(&self, bar_num: usize) -> u32 {
+    /// Returns the address of the given 32 bits BAR region.
+    pub fn get_bar32_addr(&self, bar_num: usize) -> u32 {
         let bar_idx = BAR0_REG + bar_num;
 
         self.registers[bar_idx] & BAR_MEM_ADDR_MASK
+    }
+
+    /// Returns the address of the given 64 bits BAR region.
+    pub fn get_bar64_addr(&self, bar_num: usize) -> u64 {
+        let bar_idx = BAR0_REG + bar_num;
+
+        u64::from(self.registers[bar_idx] & BAR_MEM_ADDR_MASK) | (u64::from(self.registers[bar_idx+1]) << 32)
     }
 
     /// Configures the IRQ line and pin used by this device.
