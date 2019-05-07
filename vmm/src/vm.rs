@@ -117,6 +117,12 @@ pub enum Error {
     /// Write to the serial console failed.
     Serial(vmm_sys_util::Error),
 
+    /// Cannot setup terminal in raw mode.
+    SetTerminalRaw(vmm_sys_util::Error),
+
+    /// Cannot setup terminal in canonical mode.
+    SetTerminalCanon(vmm_sys_util::Error),
+
     /// Cannot allocate IRQ.
     AllocateIrq,
 
@@ -541,6 +547,10 @@ impl<'a> Vm<'a> {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
         let epoll_fd = self.epoll.as_raw_fd();
 
+        let stdin = io::stdin();
+        let stdin_lock = stdin.lock();
+        stdin_lock.set_raw_mode().map_err(Error::SetTerminalRaw)?;
+
         loop {
             let num_events =
                 epoll::wait(epoll_fd, -1, &mut events[..]).map_err(Error::EpollError)?;
@@ -554,15 +564,19 @@ impl<'a> Vm<'a> {
                             // Consume the event.
                             self.devices.exit_evt.read().map_err(Error::EventFd)?;
 
+                            // Don't forget to set the terminal in canonical mode
+                            // before to exit.
+                            stdin_lock
+                                .set_canon_mode()
+                                .map_err(Error::SetTerminalCanon)?;
+
                             // Safe because we're terminating the process anyway.
                             unsafe {
                                 libc::_exit(0);
                             }
                         }
                         EpollDispatch::Stdin => {
-                            let stdin = io::stdin();
                             let mut out = [0u8; 64];
-                            let stdin_lock = stdin.lock();
                             let count = stdin_lock.read_raw(&mut out).map_err(Error::Serial)?;
 
                             self.devices
