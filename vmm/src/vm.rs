@@ -417,7 +417,7 @@ pub struct Vm<'a> {
     fd: VmFd,
     kernel: File,
     memory: GuestMemoryMmap,
-    vcpus: Option<Vec<thread::JoinHandle<()>>>,
+    vcpus: Vec<thread::JoinHandle<()>>,
     devices: DeviceManager,
     cpuid: CpuId,
     config: VmConfig<'a>,
@@ -497,11 +497,13 @@ impl<'a> Vm<'a> {
             .add_event(&device_manager.exit_evt, EpollDispatch::Exit)
             .map_err(Error::EpollError)?;
 
+        let vcpus = Vec::with_capacity(config.vcpu_count as usize);
+
         Ok(Vm {
             fd,
             kernel,
             memory: guest_memory,
-            vcpus: None,
+            vcpus,
             devices: device_manager,
             cpuid,
             config,
@@ -597,7 +599,7 @@ impl<'a> Vm<'a> {
 
         let vcpu_count = self.config.vcpu_count;
 
-        let mut vcpus: Vec<thread::JoinHandle<()>> = Vec::with_capacity(vcpu_count as usize);
+        //        let vcpus: Vec<thread::JoinHandle<()>> = Vec::with_capacity(vcpu_count as usize);
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
 
         for cpu_id in 0..vcpu_count {
@@ -609,7 +611,7 @@ impl<'a> Vm<'a> {
 
             let vcpu_thread_barrier = vcpu_thread_barrier.clone();
 
-            vcpus.push(
+            self.vcpus.push(
                 thread::Builder::new()
                     .name(format!("cloud-hypervisor_vcpu{}", vcpu.id))
                     .spawn(move || {
@@ -699,10 +701,6 @@ impl<'a> Vm<'a> {
         vcpu_thread_barrier.wait();
 
         self.control_loop()?;
-
-        for vcpu_barrier in vcpus {
-            vcpu_barrier.join().unwrap();
-        }
 
         Ok(())
     }
