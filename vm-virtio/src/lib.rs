@@ -22,12 +22,14 @@ use std::io;
 
 mod block;
 mod device;
+pub mod net;
 mod queue;
 
 pub mod transport;
 
 pub use self::block::*;
 pub use self::device::*;
+pub use self::net::*;
 pub use self::queue::*;
 
 const DEVICE_INIT: u32 = 0x00;
