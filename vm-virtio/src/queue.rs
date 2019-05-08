@@ -256,6 +256,12 @@ impl Queue {
         min(self.size, self.max_size)
     }
 
+    /// Reset the queue to a state that is acceptable for a device reset
+    pub fn reset(&mut self) {
+        self.ready = false;
+        self.size = self.max_size;
+    }
+
     pub fn is_valid(&self, mem: &GuestMemoryMmap) -> bool {
         let queue_size = self.actual_size() as usize;
         let desc_table = self.desc_table;

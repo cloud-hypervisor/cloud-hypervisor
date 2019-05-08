@@ -30,7 +30,6 @@ pub use self::block::*;
 pub use self::device::*;
 pub use self::queue::*;
 
-#[allow(dead_code)]
 const DEVICE_INIT: u32 = 0x00;
 const DEVICE_ACKNOWLEDGE: u32 = 0x01;
 const DEVICE_DRIVER: u32 = 0x02;
