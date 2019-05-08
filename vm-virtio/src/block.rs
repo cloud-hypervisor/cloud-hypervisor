@@ -416,6 +416,8 @@ pub struct Block {
     avail_features: u64,
     acked_features: u64,
     config_space: Vec<u8>,
+    queue_evt: Option<EventFd>,
+    interrupt_evt: Option<EventFd>,
 }
 
 pub fn build_config_space(disk_size: u64) -> Vec<u8> {
@@ -457,6 +459,8 @@ impl Block {
             avail_features,
             acked_features: 0u64,
             config_space: build_config_space(disk_size),
+            queue_evt: None,
+            interrupt_evt: None,
         })
     }
 }
@@ -564,8 +568,35 @@ impl VirtioDevice for Block {
             };
         self.kill_evt = Some(self_kill_evt);
 
-        if let Some(disk_image) = self.disk_image.take() {
+        if self.disk_image.is_some() {
+            let disk_image = self.disk_image.as_ref().unwrap().try_clone().map_err(|e| {
+                error!("failed to clone disk image: {}", e);
+                ActivateError::BadActivate
+            })?;
+
             let disk_image_id = build_disk_image_id(&disk_image);
+
+            // Save the interrupt EventFD as we need to return it on reset
+            // but clone it to pass into the thread.
+            self.interrupt_evt = Some(interrupt_evt);
+            let interrupt_evt = self
+                .interrupt_evt
+                .as_ref()
+                .unwrap()
+                .try_clone()
+                .map_err(|e| {
+                    error!("failed to clone interrupt EventFd: {}", e);
+                    ActivateError::BadActivate
+                })?;
+
+            // Save the queue EventFD as we need to return it on reset
+            // but clone it to pass into the thread.
+            self.queue_evt = Some(queue_evts.remove(0));
+            let queue_evt = self.queue_evt.as_ref().unwrap().try_clone().map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                ActivateError::BadActivate
+            })?;
+
             let mut handler = BlockEpollHandler {
                 queues,
                 mem,
@@ -578,7 +609,7 @@ impl VirtioDevice for Block {
 
             let worker_result = thread::Builder::new()
                 .name("virtio_blk".to_string())
-                .spawn(move || handler.run(queue_evts.remove(0), kill_evt));
+                .spawn(move || handler.run(queue_evt, kill_evt));
 
             if let Err(e) = worker_result {
                 error!("failed to spawn virtio_blk worker: {}", e);
@@ -588,5 +619,18 @@ impl VirtioDevice for Block {
             return Ok(());
         }
         Err(ActivateError::BadActivate)
+    }
+
+    fn reset(&mut self) -> Option<(EventFd, Vec<EventFd>)> {
+        if let Some(kill_evt) = self.kill_evt.take() {
+            // Ignore the result because there is nothing we can do about it.
+            let _ = kill_evt.write(1);
+        }
+
+        // Return the interrupt and queue EventFDs
+        Some((
+            self.interrupt_evt.take().unwrap(),
+            vec![self.queue_evt.take().unwrap()],
+        ))
     }
 }
