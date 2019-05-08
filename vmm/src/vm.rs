@@ -328,34 +328,15 @@ impl DeviceManager {
         // Add virtio-blk
         let virtio_block_device =
             vm_virtio::Block::new(raw_img, false).map_err(Error::CreateVirtioBlock)?;
-        let virtio_block_device = Box::new(virtio_block_device);
-        let mut virtio_pci_device = VirtioPciDevice::new(memory.clone(), virtio_block_device)
-            .map_err(|_| Error::VirtioDevice)?;
-        let bars = virtio_pci_device
-            .allocate_bars(allocator)
-            .map_err(Error::AllocateBars)?;
 
-        for (event, addr, _) in virtio_pci_device.ioeventfds() {
-            let io_addr = IoEventAddress::Mmio(addr);
-            vm_fd
-                .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)
-                .map_err(Error::RegisterIoevent)?;
-        }
-
-        // Assign IRQ to the virtio-blk device
-        let irqfd = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
-        let irq_num = allocator.allocate_irq().ok_or(Error::AllocateIrq)?;
-        vm_fd
-            .register_irqfd(irqfd.as_raw_fd(), irq_num)
-            .map_err(Error::Irq)?;
-        // Let's use irq line INTA for now.
-        virtio_pci_device.assign_irq(irqfd, irq_num as u32, PciInterruptPin::IntA);
-
-        let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
-
-        pci_root
-            .add_device(virtio_pci_device.clone(), &mut mmio_bus, bars)
-            .map_err(Error::AddPciDevice)?;
+        DeviceManager::add_virtio_pci_device(
+            Box::new(virtio_block_device),
+            memory.clone(),
+            allocator,
+            vm_fd,
+            &mut pci_root,
+            &mut mmio_bus,
+        )?;
 
         // Add virtio-net if required
         if let Some(net_params) = &vm_cfg.net_params {
@@ -364,34 +345,15 @@ impl DeviceManager {
                 let tap = Tap::open_named(tap_if_name).unwrap();
                 let virtio_net_device = vm_virtio::Net::new_with_tap(tap, Some(&mac))
                     .map_err(Error::CreateVirtioNet)?;
-                let virtio_net_device = Box::new(virtio_net_device);
-                let mut virtio_pci_device = VirtioPciDevice::new(memory.clone(), virtio_net_device)
-                    .map_err(|_| Error::VirtioDevice)?;
-                let bars = virtio_pci_device
-                    .allocate_bars(allocator)
-                    .map_err(Error::AllocateBars)?;
 
-                for (event, addr, _) in virtio_pci_device.ioeventfds() {
-                    let io_addr = IoEventAddress::Mmio(addr);
-                    vm_fd
-                        .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)
-                        .map_err(Error::RegisterIoevent)?;
-                }
-
-                // Assign IRQ to the virtio-blk device
-                let irqfd = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
-                let irq_num = allocator.allocate_irq().ok_or(Error::AllocateIrq)?;
-                vm_fd
-                    .register_irqfd(irqfd.as_raw_fd(), irq_num)
-                    .map_err(Error::Irq)?;
-                // Let's use irq line INTA for now.
-                virtio_pci_device.assign_irq(irqfd, irq_num as u32, PciInterruptPin::IntA);
-
-                let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
-
-                pci_root
-                    .add_device(virtio_pci_device.clone(), &mut mmio_bus, bars)
-                    .map_err(Error::AddPciDevice)?;
+                DeviceManager::add_virtio_pci_device(
+                    Box::new(virtio_net_device),
+                    memory.clone(),
+                    allocator,
+                    vm_fd,
+                    &mut pci_root,
+                    &mut mmio_bus,
+                )?;
             }
         }
 
@@ -406,6 +368,45 @@ impl DeviceManager {
             exit_evt,
             pci,
         })
+    }
+
+    fn add_virtio_pci_device(
+        virtio_device: Box<vm_virtio::VirtioDevice>,
+        memory: GuestMemoryMmap,
+        allocator: &mut SystemAllocator,
+        vm_fd: &VmFd,
+        pci_root: &mut PciRoot,
+        mmio_bus: &mut devices::Bus,
+    ) -> Result<()> {
+        let mut virtio_pci_device =
+            VirtioPciDevice::new(memory, virtio_device).map_err(|_| Error::VirtioDevice)?;
+        let bars = virtio_pci_device
+            .allocate_bars(allocator)
+            .map_err(Error::AllocateBars)?;
+
+        for (event, addr, _) in virtio_pci_device.ioeventfds() {
+            let io_addr = IoEventAddress::Mmio(addr);
+            vm_fd
+                .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)
+                .map_err(Error::RegisterIoevent)?;
+        }
+
+        // Assign IRQ to the virtio-pci device
+        let irqfd = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+        let irq_num = allocator.allocate_irq().ok_or(Error::AllocateIrq)?;
+        vm_fd
+            .register_irqfd(irqfd.as_raw_fd(), irq_num)
+            .map_err(Error::Irq)?;
+        // Let's use irq line INTA for now.
+        virtio_pci_device.assign_irq(irqfd, irq_num as u32, PciInterruptPin::IntA);
+
+        let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
+
+        pci_root
+            .add_device(virtio_pci_device.clone(), mmio_bus, bars)
+            .map_err(Error::AddPciDevice)?;
+
+        Ok(())
     }
 
     pub fn register_devices(&mut self) -> Result<()> {
