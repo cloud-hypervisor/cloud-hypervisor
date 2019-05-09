@@ -55,6 +55,12 @@ fn main() {
                 .help("Amount of RAM (in MB)")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("rng")
+                .long("rng")
+                .help("Path to entropy source")
+                .default_value("/dev/urandom"),
+        )
         .get_matches();
 
     let kernel_arg = cmd_arguments
@@ -79,6 +85,11 @@ fn main() {
         net_params = Some(net.to_string());
     }
 
+    let rng_path = match cmd_arguments.occurrences_of("rng") {
+        0 => None,
+        _ => Some(cmd_arguments.value_of("rng").unwrap().to_string()),
+    };
+
     let mut vcpus = DEFAULT_VCPUS;
     if let Some(cpus) = cmd_arguments.value_of("cpus") {
         vcpus = cpus.parse::<u8>().unwrap();
@@ -92,8 +103,16 @@ fn main() {
     println!("VM [{} vCPUS {} MB of memory]", vcpus, memory);
     println!("Booting {:?}...", kernel_path);
 
-    let vm_config =
-        VmConfig::new(kernel_path, disk_path, cmdline, net_params, vcpus, memory).unwrap();
+    let vm_config = VmConfig::new(
+        kernel_path,
+        disk_path,
+        rng_path,
+        cmdline,
+        net_params,
+        vcpus,
+        memory,
+    )
+    .unwrap();
 
     vmm::boot_kernel(vm_config).unwrap();
 }

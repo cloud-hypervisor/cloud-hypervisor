@@ -158,6 +158,9 @@ pub enum Error {
     /// Cannot create virtio-net device
     CreateVirtioNet(vm_virtio::net::Error),
 
+    /// Cannot create virtio-rng device
+    CreateVirtioRng(io::Error),
+
     /// Cannot create the system allocator
     CreateSystemAllocator,
 
@@ -225,6 +228,7 @@ impl Vcpu {
 pub struct VmConfig<'a> {
     kernel_path: &'a Path,
     disk_path: &'a Path,
+    rng_path: Option<String>,
     cmdline: cmdline::Cmdline,
     cmdline_addr: GuestAddress,
     net_params: Option<String>,
@@ -236,6 +240,7 @@ impl<'a> VmConfig<'a> {
     pub fn new(
         kernel_path: &'a Path,
         disk_path: &'a Path,
+        rng_path: Option<String>,
         cmdline_str: String,
         net_params: Option<String>,
         vcpus: u8,
@@ -247,6 +252,7 @@ impl<'a> VmConfig<'a> {
         Ok(VmConfig {
             kernel_path,
             disk_path,
+            rng_path,
             cmdline,
             cmdline_addr: CMDLINE_OFFSET,
             net_params,
@@ -355,6 +361,21 @@ impl DeviceManager {
                     &mut mmio_bus,
                 )?;
             }
+        }
+
+        // Add virtio-rng if required
+        if let Some(rng_path) = &vm_cfg.rng_path {
+            let virtio_rng_device =
+                vm_virtio::Rng::new(rng_path).map_err(Error::CreateVirtioRng)?;
+
+            DeviceManager::add_virtio_pci_device(
+                Box::new(virtio_rng_device),
+                memory.clone(),
+                allocator,
+                vm_fd,
+                &mut pci_root,
+                &mut mmio_bus,
+            )?;
         }
 
         let pci = Arc::new(Mutex::new(PciConfigIo::new(pci_root)));

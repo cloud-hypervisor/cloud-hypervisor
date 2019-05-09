@@ -24,6 +24,7 @@ mod block;
 mod device;
 pub mod net;
 mod queue;
+mod rng;
 
 pub mod transport;
 
@@ -31,6 +32,7 @@ pub use self::block::*;
 pub use self::device::*;
 pub use self::net::*;
 pub use self::queue::*;
+pub use self::rng::*;
 
 const DEVICE_INIT: u32 = 0x00;
 const DEVICE_ACKNOWLEDGE: u32 = 0x01;
