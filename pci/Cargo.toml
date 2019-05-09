@@ -13,4 +13,4 @@ kvm-bindings = "0.1"
 libc = ">=0.2.39"
 log = "*"
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
-vmm-sys-util = { git = "https://github.com/sameo/vmm-sys-util" }
+vmm-sys-util = { git = "https://github.com/liujing2/vmm-sys-util" }

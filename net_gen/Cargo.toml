@@ -4,4 +4,4 @@ version = "0.1.0"
 authors = ["The Chromium OS Authors"]
 
 [dependencies]
-vmm-sys-util = { git = "https://github.com/sameo/vmm-sys-util" }
+vmm-sys-util = { git = "https://github.com/liujing2/vmm-sys-util" }

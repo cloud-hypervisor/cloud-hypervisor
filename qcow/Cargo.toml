@@ -13,4 +13,4 @@ byteorder = "*"
 libc = "*"
 log = "*"
 remain = "*"
-vmm-sys-util = { git = "https://github.com/sameo/vmm-sys-util" }
+vmm-sys-util = { git = "https://github.com/liujing2/vmm-sys-util" }
