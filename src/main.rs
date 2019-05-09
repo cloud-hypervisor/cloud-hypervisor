@@ -38,6 +38,12 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("net")
+                .long("net")
+                .help("Network parameters \"tap=<if_name>,mac=<mac_addr>\"")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("cpus")
                 .long("cpus")
                 .help("Number of virtual CPUs")
@@ -68,6 +74,11 @@ fn main() {
         .expect("Missing argument: disk");
     let disk_path = disk_arg.as_path();
 
+    let mut net_params = None;
+    if let Some(net) = cmd_arguments.value_of("net") {
+        net_params = Some(net.to_string());
+    }
+
     let mut vcpus = DEFAULT_VCPUS;
     if let Some(cpus) = cmd_arguments.value_of("cpus") {
         vcpus = cpus.parse::<u8>().unwrap();
@@ -81,7 +92,8 @@ fn main() {
     println!("VM [{} vCPUS {} MB of memory]", vcpus, memory);
     println!("Booting {:?}...", kernel_path);
 
-    let vm_config = VmConfig::new(kernel_path, disk_path, cmdline, vcpus, memory).unwrap();
+    let vm_config =
+        VmConfig::new(kernel_path, disk_path, cmdline, net_params, vcpus, memory).unwrap();
 
     vmm::boot_kernel(vm_config).unwrap();
 }

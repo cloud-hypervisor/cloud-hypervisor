@@ -460,6 +460,7 @@ dependencies = [
  "kvm-ioctls 0.1.0 (git+https://github.com/rust-vmm/kvm-ioctls)",
  "libc 0.2.54 (registry+https://github.com/rust-lang/crates.io-index)",
  "linux-loader 0.1.0 (git+https://github.com/sameo/linux-loader)",
+ "net_util 0.1.0",
  "pci 0.1.0",
  "qcow 0.1.0",
  "vm-allocator 0.1.0",

@@ -15,6 +15,7 @@ extern crate epoll;
 extern crate kvm_ioctls;
 extern crate libc;
 extern crate linux_loader;
+extern crate net_util;
 extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
@@ -25,6 +26,7 @@ use kvm_ioctls::*;
 use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::cmdline;
 use linux_loader::loader::KernelLoader;
+use net_util::{MacAddr, Tap};
 use pci::{PciConfigIo, PciDevice, PciInterruptPin, PciRoot};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
@@ -153,8 +155,14 @@ pub enum Error {
     /// Cannot create virtio-blk device
     CreateVirtioBlock(io::Error),
 
+    /// Cannot create virtio-net device
+    CreateVirtioNet(vm_virtio::net::Error),
+
     /// Cannot create the system allocator
     CreateSystemAllocator,
+
+    /// Failed parsing network parameters
+    ParseNetworkParameters,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -219,7 +227,7 @@ pub struct VmConfig<'a> {
     disk_path: &'a Path,
     cmdline: cmdline::Cmdline,
     cmdline_addr: GuestAddress,
-
+    net_params: Option<String>,
     memory_size: GuestUsize,
     vcpu_count: u8,
 }
@@ -229,6 +237,7 @@ impl<'a> VmConfig<'a> {
         kernel_path: &'a Path,
         disk_path: &'a Path,
         cmdline_str: String,
+        net_params: Option<String>,
         vcpus: u8,
         memory_size: GuestUsize,
     ) -> Result<Self> {
@@ -240,10 +249,35 @@ impl<'a> VmConfig<'a> {
             disk_path,
             cmdline,
             cmdline_addr: CMDLINE_OFFSET,
+            net_params,
             memory_size,
             vcpu_count: vcpus,
         })
     }
+}
+
+fn parse_net_params(net_params: &str) -> Result<(&str, &str)> {
+    // Split the parameters based on the comma delimiter
+    let params_list: Vec<&str> = net_params.split(',').collect();
+
+    let mut if_name: Option<&str> = None;
+    let mut mac: Option<&str> = None;
+
+    for param in params_list.iter() {
+        if param.starts_with("tap=") {
+            if_name = Some(&param[4..]);
+        } else if param.starts_with("mac=") {
+            mac = Some(&param[4..]);
+        }
+    }
+
+    if let Some(if_name) = if_name {
+        if let Some(mac) = mac {
+            return Ok((if_name, mac));
+        }
+    }
+
+    Err(Error::ParseNetworkParameters)
 }
 
 struct DeviceManager {
@@ -291,18 +325,18 @@ impl DeviceManager {
             .open(&vm_cfg.disk_path)
             .map_err(Error::Disk)?;
 
+        // Add virtio-blk
         let virtio_block_device =
             vm_virtio::Block::new(raw_img, false).map_err(Error::CreateVirtioBlock)?;
         let virtio_block_device = Box::new(virtio_block_device);
-        let mut virtio_pci_device =
-            VirtioPciDevice::new(memory, virtio_block_device).map_err(|_| Error::VirtioDevice)?;
+        let mut virtio_pci_device = VirtioPciDevice::new(memory.clone(), virtio_block_device)
+            .map_err(|_| Error::VirtioDevice)?;
         let bars = virtio_pci_device
             .allocate_bars(allocator)
             .map_err(Error::AllocateBars)?;
 
         for (event, addr, _) in virtio_pci_device.ioeventfds() {
             let io_addr = IoEventAddress::Mmio(addr);
-            println!("Register ioevent at 0x{:x}", addr);
             vm_fd
                 .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)
                 .map_err(Error::RegisterIoevent)?;
@@ -322,6 +356,44 @@ impl DeviceManager {
         pci_root
             .add_device(virtio_pci_device.clone(), &mut mmio_bus, bars)
             .map_err(Error::AddPciDevice)?;
+
+        // Add virtio-net if required
+        if let Some(net_params) = &vm_cfg.net_params {
+            if let Ok((tap_if_name, mac_addr)) = parse_net_params(net_params) {
+                let mac = MacAddr::parse_str(mac_addr).unwrap();
+                let tap = Tap::open_named(tap_if_name).unwrap();
+                let virtio_net_device = vm_virtio::Net::new_with_tap(tap, Some(&mac))
+                    .map_err(Error::CreateVirtioNet)?;
+                let virtio_net_device = Box::new(virtio_net_device);
+                let mut virtio_pci_device = VirtioPciDevice::new(memory.clone(), virtio_net_device)
+                    .map_err(|_| Error::VirtioDevice)?;
+                let bars = virtio_pci_device
+                    .allocate_bars(allocator)
+                    .map_err(Error::AllocateBars)?;
+
+                for (event, addr, _) in virtio_pci_device.ioeventfds() {
+                    let io_addr = IoEventAddress::Mmio(addr);
+                    vm_fd
+                        .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)
+                        .map_err(Error::RegisterIoevent)?;
+                }
+
+                // Assign IRQ to the virtio-blk device
+                let irqfd = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+                let irq_num = allocator.allocate_irq().ok_or(Error::AllocateIrq)?;
+                vm_fd
+                    .register_irqfd(irqfd.as_raw_fd(), irq_num)
+                    .map_err(Error::Irq)?;
+                // Let's use irq line INTA for now.
+                virtio_pci_device.assign_irq(irqfd, irq_num as u32, PciInterruptPin::IntA);
+
+                let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
+
+                pci_root
+                    .add_device(virtio_pci_device.clone(), &mut mmio_bus, bars)
+                    .map_err(Error::AddPciDevice)?;
+            }
+        }
 
         let pci = Arc::new(Mutex::new(PciConfigIo::new(pci_root)));
 
