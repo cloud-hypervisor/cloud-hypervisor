@@ -40,7 +40,7 @@ fn main() {
         .arg(
             Arg::with_name("net")
                 .long("net")
-                .help("Network parameters \"tap=<if_name>,mac=<mac_addr>\"")
+                .help("Network parameters \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>\"")
                 .takes_value(true),
         )
         .arg(
@@ -81,8 +81,12 @@ fn main() {
     let disk_path = disk_arg.as_path();
 
     let mut net_params = None;
-    if let Some(net) = cmd_arguments.value_of("net") {
-        net_params = Some(net.to_string());
+    if cmd_arguments.is_present("net") {
+        if let Some(net) = cmd_arguments.value_of("net") {
+            net_params = Some(net.to_string());
+        } else {
+            net_params = Some(String::new())
+        }
     }
 
     let rng_path = match cmd_arguments.occurrences_of("rng") {

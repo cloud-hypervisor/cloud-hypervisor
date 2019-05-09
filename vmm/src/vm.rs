@@ -31,6 +31,7 @@ use pci::{PciConfigIo, PciDevice, PciInterruptPin, PciRoot};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, stdout};
+use std::net::Ipv4Addr;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
 use std::sync::{Arc, Barrier, Mutex};
@@ -166,6 +167,9 @@ pub enum Error {
 
     /// Failed parsing network parameters
     ParseNetworkParameters,
+
+    /// Cannot open tap interface
+    OpenTap(net_util::TapError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -262,28 +266,59 @@ impl<'a> VmConfig<'a> {
     }
 }
 
-fn parse_net_params(net_params: &str) -> Result<(&str, &str)> {
+#[derive(Debug)]
+struct NetParams<'a> {
+    tap_if_name: Option<&'a str>,
+    ip_addr: Ipv4Addr,
+    net_mask: Ipv4Addr,
+    mac_addr: MacAddr,
+}
+
+fn parse_net_params(net_params: &str) -> Result<NetParams> {
     // Split the parameters based on the comma delimiter
     let params_list: Vec<&str> = net_params.split(',').collect();
 
-    let mut if_name: Option<&str> = None;
-    let mut mac: Option<&str> = None;
+    let mut tap: &str = "";
+    let mut ip: &str = "";
+    let mut mask: &str = "";
+    let mut mac: &str = "";
 
     for param in params_list.iter() {
         if param.starts_with("tap=") {
-            if_name = Some(&param[4..]);
+            tap = &param[4..];
+        } else if param.starts_with("ip=") {
+            ip = &param[3..];
+        } else if param.starts_with("mask=") {
+            mask = &param[5..];
         } else if param.starts_with("mac=") {
-            mac = Some(&param[4..]);
+            mac = &param[4..];
         }
     }
 
-    if let Some(if_name) = if_name {
-        if let Some(mac) = mac {
-            return Ok((if_name, mac));
-        }
+    let mut tap_if_name: Option<&str> = None;
+    let mut ip_addr: Ipv4Addr = "192.168.249.1".parse().unwrap();
+    let mut net_mask: Ipv4Addr = "255.255.255.0".parse().unwrap();
+    let mut mac_addr: MacAddr = MacAddr::parse_str("12:34:56:78:90:ab").unwrap();
+
+    if !tap.is_empty() {
+        tap_if_name = Some(tap);
+    }
+    if !ip.is_empty() {
+        ip_addr = ip.parse().unwrap();
+    }
+    if !mask.is_empty() {
+        net_mask = mask.parse().unwrap();
+    }
+    if !mac.is_empty() {
+        mac_addr = MacAddr::parse_str(mac).unwrap();
     }
 
-    Err(Error::ParseNetworkParameters)
+    Ok(NetParams {
+        tap_if_name,
+        ip_addr,
+        net_mask,
+        mac_addr,
+    })
 }
 
 struct DeviceManager {
@@ -346,11 +381,22 @@ impl DeviceManager {
 
         // Add virtio-net if required
         if let Some(net_params) = &vm_cfg.net_params {
-            if let Ok((tap_if_name, mac_addr)) = parse_net_params(net_params) {
-                let mac = MacAddr::parse_str(mac_addr).unwrap();
-                let tap = Tap::open_named(tap_if_name).unwrap();
-                let virtio_net_device = vm_virtio::Net::new_with_tap(tap, Some(&mac))
+            if let Ok(net_params) = parse_net_params(net_params) {
+                let mut virtio_net_device: vm_virtio::Net;
+
+                if let Some(tap_if_name) = net_params.tap_if_name {
+                    let tap = Tap::open_named(tap_if_name).map_err(Error::OpenTap)?;
+                    virtio_net_device =
+                        vm_virtio::Net::new_with_tap(tap, Some(&net_params.mac_addr))
+                            .map_err(Error::CreateVirtioNet)?;
+                } else {
+                    virtio_net_device = vm_virtio::Net::new(
+                        net_params.ip_addr,
+                        net_params.net_mask,
+                        Some(&net_params.mac_addr),
+                    )
                     .map_err(Error::CreateVirtioNet)?;
+                }
 
                 DeviceManager::add_virtio_pci_device(
                     Box::new(virtio_net_device),
