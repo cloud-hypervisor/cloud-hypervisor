@@ -413,7 +413,8 @@ impl PciConfiguration {
     pub fn get_bar64_addr(&self, bar_num: usize) -> u64 {
         let bar_idx = BAR0_REG + bar_num;
 
-        u64::from(self.registers[bar_idx] & BAR_MEM_ADDR_MASK) | (u64::from(self.registers[bar_idx+1]) << 32)
+        u64::from(self.registers[bar_idx] & BAR_MEM_ADDR_MASK)
+            | (u64::from(self.registers[bar_idx + 1]) << 32)
     }
 
     /// Configures the IRQ line and pin used by this device.
