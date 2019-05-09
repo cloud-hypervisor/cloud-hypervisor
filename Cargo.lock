@@ -92,7 +92,7 @@ dependencies = [
  "epoll 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.54 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.1.0 (git+https://github.com/sameo/vmm-sys-util)",
+ "vmm-sys-util 0.1.0 (git+https://github.com/liujing2/vmm-sys-util)",
 ]
 
 [[package]]
@@ -131,7 +131,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "linux-loader"
 version = "0.1.0"
-source = "git+https://github.com/sameo/linux-loader#f0905480bd9f9aae8b88c63ca5dd6f3469483b65"
+source = "git+https://github.com/bjzhjing/linux-loader#ce59754d2d433b5e1a4929545d8ee4fd52de9072"
 dependencies = [
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
 ]
@@ -148,7 +148,7 @@ dependencies = [
 name = "net_gen"
 version = "0.1.0"
 dependencies = [
- "vmm-sys-util 0.1.0 (git+https://github.com/sameo/vmm-sys-util)",
+ "vmm-sys-util 0.1.0 (git+https://github.com/liujing2/vmm-sys-util)",
 ]
 
 [[package]]
@@ -158,7 +158,7 @@ dependencies = [
  "libc 0.2.54 (registry+https://github.com/rust-lang/crates.io-index)",
  "net_gen 0.1.0",
  "serde 1.0.91 (registry+https://github.com/rust-lang/crates.io-index)",
- "vmm-sys-util 0.1.0 (git+https://github.com/sameo/vmm-sys-util)",
+ "vmm-sys-util 0.1.0 (git+https://github.com/liujing2/vmm-sys-util)",
 ]
 
 [[package]]
@@ -178,7 +178,7 @@ dependencies = [
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-allocator 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.1.0 (git+https://github.com/sameo/vmm-sys-util)",
+ "vmm-sys-util 0.1.0 (git+https://github.com/liujing2/vmm-sys-util)",
 ]
 
 [[package]]
@@ -197,7 +197,7 @@ dependencies = [
  "libc 0.2.54 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "remain 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "vmm-sys-util 0.1.0 (git+https://github.com/sameo/vmm-sys-util)",
+ "vmm-sys-util 0.1.0 (git+https://github.com/liujing2/vmm-sys-util)",
 ]
 
 [[package]]
@@ -446,7 +446,7 @@ dependencies = [
  "virtio-bindings 0.1.0",
  "vm-allocator 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.1.0 (git+https://github.com/sameo/vmm-sys-util)",
+ "vmm-sys-util 0.1.0 (git+https://github.com/liujing2/vmm-sys-util)",
 ]
 
 [[package]]
@@ -459,20 +459,20 @@ dependencies = [
  "kvm-bindings 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-ioctls 0.1.0 (git+https://github.com/rust-vmm/kvm-ioctls)",
  "libc 0.2.54 (registry+https://github.com/rust-lang/crates.io-index)",
- "linux-loader 0.1.0 (git+https://github.com/sameo/linux-loader)",
+ "linux-loader 0.1.0 (git+https://github.com/bjzhjing/linux-loader)",
  "net_util 0.1.0",
  "pci 0.1.0",
  "qcow 0.1.0",
  "vm-allocator 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
- "vmm-sys-util 0.1.0 (git+https://github.com/sameo/vmm-sys-util)",
+ "vmm-sys-util 0.1.0 (git+https://github.com/liujing2/vmm-sys-util)",
 ]
 
 [[package]]
 name = "vmm-sys-util"
 version = "0.1.0"
-source = "git+https://github.com/sameo/vmm-sys-util#766db444eb9ac315ce7139dff9f56e6e9fd2471f"
+source = "git+https://github.com/liujing2/vmm-sys-util#766db444eb9ac315ce7139dff9f56e6e9fd2471f"
 dependencies = [
  "libc 0.2.54 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -511,7 +511,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum kvm-bindings 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "c223e8703d2eb76d990c5f58e29c85b0f6f50e24b823babde927948e7c71fc03"
 "checksum kvm-ioctls 0.1.0 (git+https://github.com/rust-vmm/kvm-ioctls)" = "<none>"
 "checksum libc 0.2.54 (registry+https://github.com/rust-lang/crates.io-index)" = "c6785aa7dd976f5fbf3b71cfd9cd49d7f783c1ff565a858d71031c6c313aa5c6"
-"checksum linux-loader 0.1.0 (git+https://github.com/sameo/linux-loader)" = "<none>"
+"checksum linux-loader 0.1.0 (git+https://github.com/bjzhjing/linux-loader)" = "<none>"
 "checksum log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "c84ec4b527950aa83a329754b01dbe3f58361d1c5efacd1f6d68c494d08a17c6"
 "checksum numtoa 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b8f8bdf33df195859076e54ab11ee78a1b208382d3a26ec40d142ffc1ecc49ef"
 "checksum proc-macro2 0.4.30 (registry+https://github.com/rust-lang/crates.io-index)" = "cf3d2011ab5c909338f7887f4fc896d35932e29146c12c8d01da6b22a80ba759"
@@ -541,7 +541,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum unicode-xid 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fc72304796d0818e357ead4e000d19c9c174ab23dc11093ac919054d20a6a7fc"
 "checksum vec_map 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)" = "05c78687fb1a80548ae3250346c3db86a80a7cdd77bda190189f2d0a0987c81a"
 "checksum vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)" = "<none>"
-"checksum vmm-sys-util 0.1.0 (git+https://github.com/sameo/vmm-sys-util)" = "<none>"
+"checksum vmm-sys-util 0.1.0 (git+https://github.com/liujing2/vmm-sys-util)" = "<none>"
 "checksum winapi 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)" = "f10e386af2b13e47c89e7236a7a14a086791a2b88ebad6df9bf42040195cf770"
 "checksum winapi-i686-pc-windows-gnu 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
 "checksum winapi-x86_64-pc-windows-gnu 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"

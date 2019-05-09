@@ -14,7 +14,7 @@ libc = ">=0.2.39"
 net_util = { path = "../net_util" }
 pci = {path = "../pci"}
 qcow = { path = "../qcow" }
-linux-loader = { git = "https://github.com/sameo/linux-loader" }
+linux-loader = { git = "https://github.com/bjzhjing/linux-loader" }
 vm-virtio = { path = "../vm-virtio" }
 vm-allocator = { path = "../vm-allocator" }
 vmm-sys-util = { git = "https://github.com/liujing2/vmm-sys-util" }
