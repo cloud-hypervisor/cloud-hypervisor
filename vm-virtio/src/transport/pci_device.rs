@@ -364,11 +364,6 @@ impl PciDevice for VirtioPciDevice {
                 PciDeviceError::IoRegistrationFailed(virtio_pci_bar_addr.raw_value(), e)
             })? as u8;
 
-        println!(
-            "VIRTIO PCI BAR starts at 0x{:x}, size 0x{:x}",
-            virtio_pci_bar_addr.raw_value(),
-            CAPABILITY_BAR_SIZE
-        );
         ranges.push((virtio_pci_bar_addr, CAPABILITY_BAR_SIZE));
 
         // Once the BARs are allocated, the capabilities can be added to the PCI configuration.
