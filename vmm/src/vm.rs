@@ -298,7 +298,7 @@ fn parse_net_params(net_params: &str) -> Result<NetParams> {
     let mut tap_if_name: Option<&str> = None;
     let mut ip_addr: Ipv4Addr = "192.168.249.1".parse().unwrap();
     let mut net_mask: Ipv4Addr = "255.255.255.0".parse().unwrap();
-    let mut mac_addr: MacAddr = MacAddr::parse_str("12:34:56:78:90:ab").unwrap();
+    let mut mac_addr: MacAddr = MacAddr::local_random();
 
     if !tap.is_empty() {
         tap_if_name = Some(tap);
