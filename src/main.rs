@@ -104,8 +104,10 @@ fn main() {
         memory = mem.parse::<u64>().unwrap();
     }
 
-    println!("VM [{} vCPUS {} MB of memory]", vcpus, memory);
-    println!("Booting {:?}...", kernel_path);
+    println!(
+        "Cloud Hypervisor Guest\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk: {:?}",
+        vcpus, memory, kernel_path, cmdline, disk_path
+    );
 
     let vm_config = VmConfig::new(
         kernel_path,
