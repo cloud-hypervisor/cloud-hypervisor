@@ -589,11 +589,6 @@ impl<'a> Vm<'a> {
                     flags: 0,
                 };
 
-                println!(
-                    "Size {:?} guest addr 0x{:x} host addr 0x{:x}",
-                    mem_region.memory_size, mem_region.guest_phys_addr, mem_region.userspace_addr
-                );
-
                 // Safe because the guest regions are guaranteed not to overlap.
                 fd.set_user_memory_region(mem_region)
             })
