@@ -120,5 +120,7 @@ fn main() {
     )
     .unwrap();
 
-    vmm::boot_kernel(vm_config).unwrap();
+    if let Err(e) = vmm::boot_kernel(vm_config) {
+        println!("Guest boot failed: {}", e);
+    }
 }
