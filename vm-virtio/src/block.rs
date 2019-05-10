@@ -15,6 +15,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -86,6 +87,49 @@ impl ExecuteError {
     }
 }
 
+pub trait DiskFile: Read + Seek + Write + Clone {}
+impl<D: Read + Seek + Write + Clone> DiskFile for D {}
+
+pub struct RawFile {
+    file: File,
+}
+
+impl RawFile {
+    pub fn new(file: File) -> Self {
+        RawFile { file }
+    }
+}
+
+impl Read for RawFile {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.file.read(buf)
+    }
+}
+
+impl Seek for RawFile {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.file.seek(pos)
+    }
+}
+
+impl Write for RawFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl Clone for RawFile {
+    fn clone(&self) -> Self {
+        RawFile {
+            file: self.file.try_clone().expect("RawFile cloning failed"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum RequestType {
     In,
@@ -119,8 +163,8 @@ fn sector(mem: &GuestMemoryMmap, desc_addr: GuestAddress) -> result::Result<u64,
     mem.read_obj(addr).map_err(Error::GuestMemory)
 }
 
-fn build_device_id(disk_image: &File) -> result::Result<String, Error> {
-    let blk_metadata = match disk_image.metadata() {
+fn build_device_id(disk_path: &PathBuf) -> result::Result<String, Error> {
+    let blk_metadata = match disk_path.metadata() {
         Err(_) => return Err(Error::GetFileMetadata),
         Ok(m) => m,
     };
@@ -135,9 +179,9 @@ fn build_device_id(disk_image: &File) -> result::Result<String, Error> {
     Ok(device_id)
 }
 
-fn build_disk_image_id(disk_image: &File) -> Vec<u8> {
+fn build_disk_image_id(disk_path: &PathBuf) -> Vec<u8> {
     let mut default_disk_image_id = vec![0; VIRTIO_BLK_ID_BYTES as usize];
-    match build_device_id(disk_image) {
+    match build_device_id(disk_path) {
         Err(_) => {
             warn!("Could not generate device id. We'll use a default.");
         }
@@ -275,17 +319,17 @@ impl Request {
     }
 }
 
-struct BlockEpollHandler {
+struct BlockEpollHandler<T: DiskFile> {
     queues: Vec<Queue>,
     mem: GuestMemoryMmap,
-    disk_image: File,
+    disk_image: T,
     disk_nsectors: u64,
     interrupt_status: Arc<AtomicUsize>,
     interrupt_evt: EventFd,
     disk_image_id: Vec<u8>,
 }
 
-impl BlockEpollHandler {
+impl<T: DiskFile> BlockEpollHandler<T> {
     fn process_queue(&mut self, queue_index: usize) -> bool {
         let queue = &mut self.queues[queue_index];
 
@@ -340,14 +384,18 @@ impl BlockEpollHandler {
     }
 
     #[allow(dead_code)]
-    fn update_disk_image(&mut self, disk_image: File) -> result::Result<(), DeviceError> {
+    fn update_disk_image(
+        &mut self,
+        disk_image: T,
+        disk_path: &PathBuf,
+    ) -> result::Result<(), DeviceError> {
         self.disk_image = disk_image;
         self.disk_nsectors = self
             .disk_image
             .seek(SeekFrom::End(0))
             .map_err(DeviceError::IoError)?
             / SECTOR_SIZE;
-        self.disk_image_id = build_disk_image_id(&self.disk_image);
+        self.disk_image_id = build_disk_image_id(disk_path);
         Ok(())
     }
 
@@ -409,9 +457,10 @@ impl BlockEpollHandler {
 }
 
 /// Virtio device for exposing block level read/write operations on a host file.
-pub struct Block {
+pub struct Block<T: DiskFile> {
     kill_evt: Option<EventFd>,
-    disk_image: Option<File>,
+    disk_image: Option<T>,
+    disk_path: PathBuf,
     disk_nsectors: u64,
     avail_features: u64,
     acked_features: u64,
@@ -432,11 +481,15 @@ pub fn build_config_space(disk_size: u64) -> Vec<u8> {
     config
 }
 
-impl Block {
+impl<T: DiskFile> Block<T> {
     /// Create a new virtio block device that operates on the given file.
     ///
     /// The given file must be seekable and sizable.
-    pub fn new(mut disk_image: File, is_disk_read_only: bool) -> io::Result<Block> {
+    pub fn new(
+        mut disk_image: T,
+        disk_path: PathBuf,
+        is_disk_read_only: bool,
+    ) -> io::Result<Block<T>> {
         let disk_size = disk_image.seek(SeekFrom::End(0))? as u64;
         if disk_size % SECTOR_SIZE != 0 {
             warn!(
@@ -455,6 +508,7 @@ impl Block {
         Ok(Block {
             kill_evt: None,
             disk_image: Some(disk_image),
+            disk_path,
             disk_nsectors: disk_size / SECTOR_SIZE,
             avail_features,
             acked_features: 0u64,
@@ -465,7 +519,7 @@ impl Block {
     }
 }
 
-impl Drop for Block {
+impl<T: DiskFile> Drop for Block<T> {
     fn drop(&mut self) {
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
@@ -474,7 +528,7 @@ impl Drop for Block {
     }
 }
 
-impl VirtioDevice for Block {
+impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
     fn device_type(&self) -> u32 {
         VirtioDeviceType::TYPE_BLOCK as u32
     }
@@ -568,13 +622,8 @@ impl VirtioDevice for Block {
             };
         self.kill_evt = Some(self_kill_evt);
 
-        if self.disk_image.is_some() {
-            let disk_image = self.disk_image.as_ref().unwrap().try_clone().map_err(|e| {
-                error!("failed to clone disk image: {}", e);
-                ActivateError::BadActivate
-            })?;
-
-            let disk_image_id = build_disk_image_id(&disk_image);
+        if let Some(disk_image) = self.disk_image.clone() {
+            let disk_image_id = build_disk_image_id(&self.disk_path);
 
             // Save the interrupt EventFD as we need to return it on reset
             // but clone it to pass into the thread.

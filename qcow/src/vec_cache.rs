@@ -15,7 +15,7 @@ pub trait Cacheable {
     fn dirty(&self) -> bool;
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 /// Represents a vector that implements the `Cacheable` trait so it can be held in a cache.
 pub struct VecCache<T: 'static + Copy + Default> {
     vec: Box<[T]>,
@@ -83,7 +83,7 @@ impl<T: 'static + Copy + Default> IndexMut<usize> for VecCache<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CacheMap<T: Cacheable> {
     capacity: usize,
     map: HashMap<usize, T>,

@@ -48,7 +48,7 @@ impl Display for Error {
 }
 
 /// Represents the refcount entries for an open qcow file.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RefCount {
     ref_table: VecCache<u64>,
     refcount_table_offset: u64,

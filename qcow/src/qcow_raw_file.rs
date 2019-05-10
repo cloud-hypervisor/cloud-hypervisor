@@ -134,3 +134,13 @@ impl QcowRawFile {
         address & self.cluster_mask
     }
 }
+
+impl Clone for QcowRawFile {
+    fn clone(&self) -> Self {
+        QcowRawFile {
+            file: self.file.try_clone().expect("QcowRawFile cloning failed"),
+            cluster_size: self.cluster_size,
+            cluster_mask: self.cluster_mask,
+        }
+    }
+}

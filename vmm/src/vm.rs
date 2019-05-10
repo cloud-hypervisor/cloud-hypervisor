@@ -28,6 +28,7 @@ use linux_loader::cmdline;
 use linux_loader::loader::KernelLoader;
 use net_util::{MacAddr, Tap};
 use pci::{PciConfigIo, PciDevice, PciInterruptPin, PciRoot};
+use qcow::{self, ImageType, QcowFile};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, stdout};
@@ -170,6 +171,12 @@ pub enum Error {
 
     /// Cannot open tap interface
     OpenTap(net_util::TapError),
+
+    /// Failed parsing disk image format
+    DetectImageType(qcow::Error),
+
+    /// Cannot open qcow disk path
+    QcowDeviceCreate(qcow::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -367,11 +374,25 @@ impl DeviceManager {
             .map_err(Error::Disk)?;
 
         // Add virtio-blk
-        let virtio_block_device =
-            vm_virtio::Block::new(raw_img, false).map_err(Error::CreateVirtioBlock)?;
+        let image_type = qcow::detect_image_type(&raw_img).map_err(Error::DetectImageType)?;
+        let disk_path = vm_cfg.disk_path.to_path_buf();
+        let block = match image_type {
+            ImageType::Raw => {
+                let raw_img = vm_virtio::RawFile::new(raw_img);
+                let dev = vm_virtio::Block::new(raw_img, disk_path, false)
+                    .map_err(Error::CreateVirtioBlock)?;
+                Box::new(dev) as Box<vm_virtio::VirtioDevice>
+            }
+            ImageType::Qcow2 => {
+                let qcow_img = QcowFile::from(raw_img).map_err(Error::QcowDeviceCreate)?;
+                let dev = vm_virtio::Block::new(qcow_img, disk_path, false)
+                    .map_err(Error::CreateVirtioBlock)?;
+                Box::new(dev) as Box<vm_virtio::VirtioDevice>
+            }
+        };
 
         DeviceManager::add_virtio_pci_device(
-            Box::new(virtio_block_device),
+            block,
             memory.clone(),
             allocator,
             vm_fd,

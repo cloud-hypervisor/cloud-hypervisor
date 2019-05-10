@@ -315,7 +315,7 @@ fn max_refcount_clusters(refcount_order: u32, cluster_size: u32, num_clusters: u
 /// #   Ok(())
 /// # }
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct QcowFile {
     raw_file: QcowRawFile,
     header: QcowHeader,
