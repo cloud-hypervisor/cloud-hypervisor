@@ -55,7 +55,7 @@ const X86_64_IRQ_BASE: u32 = 5;
 // CPUID feature bits
 const ECX_HYPERVISOR_SHIFT: u32 = 31; // Hypervisor bit.
 
-/// Errors associated with the wrappers over KVM ioctls.
+/// Errors associated with VM management
 #[derive(Debug)]
 pub enum Error {
     /// Cannot open the VM file descriptor.
