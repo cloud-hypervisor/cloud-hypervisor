@@ -69,16 +69,20 @@ fn main() {
         .expect("Missing argument: kernel");
     let kernel_path = kernel_arg.as_path();
 
-    let cmdline = cmd_arguments
-        .value_of("cmdline")
-        .map(std::string::ToString::to_string)
-        .expect("Missing argument: cmdline");
-
     let disk_arg = cmd_arguments
         .value_of("disk")
         .map(PathBuf::from)
         .expect("Missing argument: disk");
     let disk_path = disk_arg.as_path();
+
+    let cmdline = if cmd_arguments.is_present("cmdline") {
+        cmd_arguments
+            .value_of("cmdline")
+            .map(std::string::ToString::to_string)
+            .unwrap()
+    } else {
+        String::new()
+    };
 
     let mut net_params = None;
     if cmd_arguments.is_present("net") {
