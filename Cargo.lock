@@ -157,6 +157,7 @@ version = "0.1.0"
 dependencies = [
  "libc 0.2.54 (registry+https://github.com/rust-lang/crates.io-index)",
  "net_gen 0.1.0",
+ "rand 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.91 (registry+https://github.com/rust-lang/crates.io-index)",
  "vmm-sys-util 0.1.0 (git+https://github.com/liujing2/vmm-sys-util)",
 ]

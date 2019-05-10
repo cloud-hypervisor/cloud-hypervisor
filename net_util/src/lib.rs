@@ -11,6 +11,7 @@
 #[macro_use]
 extern crate lazy_static;
 extern crate libc;
+extern crate rand;
 extern crate serde;
 
 extern crate net_gen;
