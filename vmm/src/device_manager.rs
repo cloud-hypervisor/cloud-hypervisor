@@ -591,6 +591,7 @@ impl DeviceManager {
 
         let ioapic =
             DeviceManager::add_ioapic(&address_manager, Arc::clone(&msi_interrupt_manager))?;
+        let ioapic_migratable = Arc::clone(&ioapic) as Arc<Mutex<dyn Migratable>>;
         bus_devices.push(Arc::clone(&ioapic) as Arc<Mutex<dyn BusDevice>>);
 
         // Now we can create the legacy interrupt manager, which needs the freshly
@@ -650,6 +651,8 @@ impl DeviceManager {
 
         device_manager
             .add_legacy_devices(reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?)?;
+
+        device_manager.add_migratable_device(ioapic_migratable);
 
         #[cfg(feature = "acpi")]
         {
@@ -980,6 +983,8 @@ impl DeviceManager {
                 .io_bus
                 .insert(serial.clone(), 0x3f8, 0x8)
                 .map_err(DeviceManagerError::BusError)?;
+
+            self.add_migratable_device(Arc::clone(&serial) as Arc<Mutex<dyn Migratable>>);
 
             Some(serial)
         } else {
