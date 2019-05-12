@@ -29,6 +29,7 @@ use crate::config::{DeviceConfig, DiskConfig, HotplugMethod, NetConfig, PmemConf
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{get_host_cpu_phys_bits, Error as MemoryManagerError, MemoryManager};
+use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID};
 use anyhow::anyhow;
 use arch::{layout, BootProtocol, EntryPoint};
 use devices::{ioapic, HotPlugNotificationFlags};
@@ -51,7 +52,10 @@ use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryMmap,
     GuestMemoryRegion, GuestUsize,
 };
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshotable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshotable,
+    Transportable,
+};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
 
@@ -971,7 +975,78 @@ impl Pausable for Vm {
     }
 }
 
-impl Snapshotable for Vm {}
+#[derive(Serialize, Deserialize)]
+pub struct VmSnapshot {
+    config: Arc<Mutex<VmConfig>>,
+}
+
+const VM_SNAPSHOT_ID: &str = "vm";
+impl Snapshotable for Vm {
+    fn id(&self) -> String {
+        VM_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let current_state = self.get_state().unwrap();
+        if current_state != VmState::Paused {
+            return Err(MigratableError::Snapshot(anyhow!(
+                "Trying to snapshot while VM is running"
+            )));
+        }
+
+        let mut vm_snapshot = Snapshot::new(VM_SNAPSHOT_ID);
+        let vm_snapshot_data = serde_json::to_vec(&VmSnapshot {
+            config: self.get_config(),
+        })
+        .map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        vm_snapshot.add_snapshot(self.cpu_manager.lock().unwrap().snapshot()?);
+        vm_snapshot.add_snapshot(self.memory_manager.lock().unwrap().snapshot()?);
+        vm_snapshot.add_snapshot(self.device_manager.snapshot()?);
+        vm_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", VM_SNAPSHOT_ID),
+            snapshot: vm_snapshot_data,
+        });
+
+        Ok(vm_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(memory_manager_snapshot) = snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID) {
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .restore(*memory_manager_snapshot.clone())?;
+        } else {
+            return Err(MigratableError::Restore(anyhow!(
+                "Missing memory manager snapshot"
+            )));
+        }
+
+        if let Some(device_manager_snapshot) = snapshot.snapshots.get(DEVICE_MANAGER_SNAPSHOT_ID) {
+            self.device_manager
+                .restore(*device_manager_snapshot.clone())?;
+        } else {
+            return Err(MigratableError::Restore(anyhow!(
+                "Missing device manager snapshot"
+            )));
+        }
+
+        if let Some(cpu_manager_snapshot) = snapshot.snapshots.get(CPU_MANAGER_SNAPSHOT_ID) {
+            self.cpu_manager
+                .lock()
+                .unwrap()
+                .restore(*cpu_manager_snapshot.clone())?;
+        } else {
+            return Err(MigratableError::Restore(anyhow!(
+                "Missing CPU manager snapshot"
+            )));
+        }
+
+        Ok(())
+    }
+}
+
 impl Transportable for Vm {}
 impl Migratable for Vm {}
 

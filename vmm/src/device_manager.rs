@@ -19,6 +19,7 @@ use crate::interrupt::{
     KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager, KvmRoutingEntry,
 };
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+use crate::DEVICE_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
@@ -2390,7 +2391,6 @@ impl Pausable for DeviceManager {
     }
 }
 
-const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";
 impl Snapshotable for DeviceManager {
     fn id(&self) -> String {
         DEVICE_MANAGER_SNAPSHOT_ID.to_string()

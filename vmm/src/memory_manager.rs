@@ -4,6 +4,7 @@
 //
 
 use crate::config::HotplugMethod;
+use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
@@ -911,7 +912,6 @@ pub struct MemoryManagerSnapshotData {
     memory_regions: Vec<MemoryRegion>,
 }
 
-const MEMORY_MANAGER_SNAPSHOT_ID: &str = "memory-manager";
 impl Snapshotable for MemoryManager {
     fn id(&self) -> String {
         MEMORY_MANAGER_SNAPSHOT_ID.to_string()
