@@ -13,6 +13,7 @@
 
 use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
+use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
 use anyhow::anyhow;
@@ -1336,7 +1337,6 @@ impl Pausable for CpuManager {
     }
 }
 
-const CPU_MANAGER_SNAPSHOT_ID: &str = "cpu-manager";
 impl Snapshottable for CpuManager {
     fn id(&self) -> String {
         CPU_MANAGER_SNAPSHOT_ID.to_string()

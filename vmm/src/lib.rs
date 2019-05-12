@@ -679,3 +679,7 @@ impl Vmm {
         Ok(())
     }
 }
+
+const CPU_MANAGER_SNAPSHOT_ID: &str = "cpu-manager";
+const MEMORY_MANAGER_SNAPSHOT_ID: &str = "memory-manager";
+const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";

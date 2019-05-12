@@ -29,6 +29,7 @@ use crate::config::{DeviceConfig, DiskConfig, HotplugMethod, NetConfig, PmemConf
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID};
 use anyhow::anyhow;
 use arch::{BootProtocol, EntryPoint};
 use devices::{ioapic, HotPlugNotificationFlags};
@@ -50,7 +51,10 @@ use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryMmap,
     GuestMemoryRegion,
 };
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
 
@@ -930,7 +934,132 @@ impl Pausable for Vm {
     }
 }
 
-impl Snapshottable for Vm {}
+#[derive(Serialize, Deserialize)]
+pub struct VmSnapshot {
+    config: Arc<Mutex<VmConfig>>,
+}
+
+const VM_SNAPSHOT_ID: &str = "vm";
+impl Snapshottable for Vm {
+    fn id(&self) -> String {
+        VM_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let current_state = self.get_state().unwrap();
+        if current_state != VmState::Paused {
+            return Err(MigratableError::Snapshot(anyhow!(
+                "Trying to snapshot while VM is running"
+            )));
+        }
+
+        let mut vm_snapshot = Snapshot::new(VM_SNAPSHOT_ID);
+        let vm_snapshot_data = serde_json::to_vec(&VmSnapshot {
+            config: self.get_config(),
+        })
+        .map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        vm_snapshot.add_snapshot(self.cpu_manager.lock().unwrap().snapshot()?);
+        vm_snapshot.add_snapshot(self.memory_manager.lock().unwrap().snapshot()?);
+        vm_snapshot.add_snapshot(self.device_manager.lock().unwrap().snapshot()?);
+        vm_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", VM_SNAPSHOT_ID),
+            snapshot: vm_snapshot_data,
+        });
+
+        Ok(vm_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        let current_state = self
+            .get_state()
+            .map_err(|e| MigratableError::Restore(anyhow!("Could not get VM state: {:#?}", e)))?;
+        let new_state = VmState::Running;
+        current_state.valid_transition(new_state).map_err(|e| {
+            MigratableError::Restore(anyhow!("Could not restore VM state: {:#?}", e))
+        })?;
+
+        if let Some(memory_manager_snapshot) = snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID) {
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .restore(*memory_manager_snapshot.clone())?;
+        } else {
+            return Err(MigratableError::Restore(anyhow!(
+                "Missing memory manager snapshot"
+            )));
+        }
+
+        if let Some(device_manager_snapshot) = snapshot.snapshots.get(DEVICE_MANAGER_SNAPSHOT_ID) {
+            self.device_manager
+                .lock()
+                .unwrap()
+                .restore(*device_manager_snapshot.clone())?;
+        } else {
+            return Err(MigratableError::Restore(anyhow!(
+                "Missing device manager snapshot"
+            )));
+        }
+
+        if let Some(cpu_manager_snapshot) = snapshot.snapshots.get(CPU_MANAGER_SNAPSHOT_ID) {
+            self.cpu_manager
+                .lock()
+                .unwrap()
+                .restore(*cpu_manager_snapshot.clone())?;
+        } else {
+            return Err(MigratableError::Restore(anyhow!(
+                "Missing CPU manager snapshot"
+            )));
+        }
+
+        if self
+            .device_manager
+            .lock()
+            .unwrap()
+            .console()
+            .input_enabled()
+        {
+            let console = self.device_manager.lock().unwrap().console().clone();
+            let signals = Signals::new(&[SIGWINCH, SIGINT, SIGTERM]);
+            match signals {
+                Ok(signals) => {
+                    self.signals = Some(signals.clone());
+
+                    let on_tty = self.on_tty;
+                    self.threads.push(
+                        thread::Builder::new()
+                            .name("signal_handler".to_string())
+                            .spawn(move || Vm::os_signal_handler(signals, console, on_tty))
+                            .map_err(|e| {
+                                MigratableError::Restore(anyhow!(
+                                    "Could not start console signal thread: {:#?}",
+                                    e
+                                ))
+                            })?,
+                    );
+                }
+                Err(e) => error!("Signal not found {}", e),
+            }
+
+            if self.on_tty {
+                io::stdin().lock().set_raw_mode().map_err(|e| {
+                    MigratableError::Restore(anyhow!(
+                        "Could not set terminal in raw mode: {:#?}",
+                        e
+                    ))
+                })?;
+            }
+        }
+
+        let mut state = self
+            .state
+            .try_write()
+            .map_err(|e| MigratableError::Restore(anyhow!("Could not set VM state: {:#?}", e)))?;
+        *state = new_state;
+        Ok(())
+    }
+}
+
 impl Transportable for Vm {}
 impl Migratable for Vm {}
 
