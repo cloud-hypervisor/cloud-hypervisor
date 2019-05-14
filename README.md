@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.com/intel/cloud-hypervisor.svg?branch=master)](https://travis-ci.com/intel/cloud-hypervisor)
+
 1. [What is Cloud Hypervisor?](#1-what-is-cloud-hypervisor)
    * [Requirements](#requirements)
 	 + [High Level](#high-level)
