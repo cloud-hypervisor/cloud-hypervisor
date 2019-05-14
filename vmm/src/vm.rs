@@ -112,11 +112,11 @@ pub enum Error {
     /// The call to KVM_SET_CPUID2 failed.
     SetSupportedCpusFailed(io::Error),
 
+    /// Cannot create a device manager.
+    DeviceManager(DeviceManagerError),
+
     /// Cannot create EventFd.
     EventFd(io::Error),
-
-    /// Cannot create a device manager.
-    DeviceManager,
 
     /// Cannot add legacy device to Bus.
     BusError(devices::BusError),
@@ -133,23 +133,22 @@ pub enum Error {
     /// Cannot setup terminal in canonical mode.
     SetTerminalCanon(vmm_sys_util::Error),
 
-    /// Cannot allocate IRQ.
-    AllocateIrq,
-
-    /// Cannot allocate PCI BARs
-    AllocateBars(pci::PciDeviceError),
-
-    /// Cannot register ioevent.
-    RegisterIoevent(io::Error),
-
     /// Cannot configure the IRQ.
     Irq(io::Error),
 
-    /// Cannot create virtio device
-    VirtioDevice,
+    /// Cannot create the system allocator
+    CreateSystemAllocator,
 
-    /// Cannot add PCI device
-    AddPciDevice(pci::PciRootError),
+    /// Failed parsing network parameters
+    ParseNetworkParameters,
+}
+pub type Result<T> = result::Result<T, Error>;
+
+/// Errors associated with device manager
+#[derive(Debug)]
+pub enum DeviceManagerError {
+    /// Cannot create EventFd.
+    EventFd(io::Error),
 
     /// Cannot open disk path
     Disk(io::Error),
@@ -163,22 +162,34 @@ pub enum Error {
     /// Cannot create virtio-rng device
     CreateVirtioRng(io::Error),
 
-    /// Cannot create the system allocator
-    CreateSystemAllocator,
-
-    /// Failed parsing network parameters
-    ParseNetworkParameters,
-
-    /// Cannot open tap interface
-    OpenTap(net_util::TapError),
-
     /// Failed parsing disk image format
     DetectImageType(qcow::Error),
 
     /// Cannot open qcow disk path
     QcowDeviceCreate(qcow::Error),
+
+    /// Cannot open tap interface
+    OpenTap(net_util::TapError),
+
+    /// Cannot allocate IRQ.
+    AllocateIrq,
+
+    /// Cannot configure the IRQ.
+    Irq(io::Error),
+
+    /// Cannot allocate PCI BARs
+    AllocateBars(pci::PciDeviceError),
+
+    /// Cannot register ioevent.
+    RegisterIoevent(io::Error),
+
+    /// Cannot create virtio device
+    VirtioDevice(vmm_sys_util::Error),
+
+    /// Cannot add PCI device
+    AddPciDevice(pci::PciRootError),
 }
-pub type Result<T> = result::Result<T, Error>;
+pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 /// A wrapper around creating and using a kvm-based VCPU.
 pub struct Vcpu {
@@ -350,18 +361,20 @@ impl DeviceManager {
         allocator: &mut SystemAllocator,
         vm_fd: &VmFd,
         vm_cfg: &VmConfig,
-    ) -> Result<Self> {
+    ) -> DeviceManagerResult<Self> {
         let io_bus = devices::Bus::new();
         let mut mmio_bus = devices::Bus::new();
-        let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+        let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
         let serial = Arc::new(Mutex::new(devices::legacy::Serial::new_out(
-            serial_evt.try_clone().map_err(Error::EventFd)?,
+            serial_evt
+                .try_clone()
+                .map_err(DeviceManagerError::EventFd)?,
             Box::new(stdout()),
         )));
 
-        let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+        let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
-            exit_evt.try_clone().map_err(Error::EventFd)?,
+            exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
 
         let mut pci_root = PciRoot::new(None);
@@ -371,22 +384,24 @@ impl DeviceManager {
             .read(true)
             .write(true)
             .open(&vm_cfg.disk_path)
-            .map_err(Error::Disk)?;
+            .map_err(DeviceManagerError::Disk)?;
 
         // Add virtio-blk
-        let image_type = qcow::detect_image_type(&raw_img).map_err(Error::DetectImageType)?;
+        let image_type =
+            qcow::detect_image_type(&raw_img).map_err(DeviceManagerError::DetectImageType)?;
         let disk_path = vm_cfg.disk_path.to_path_buf();
         let block = match image_type {
             ImageType::Raw => {
                 let raw_img = vm_virtio::RawFile::new(raw_img);
                 let dev = vm_virtio::Block::new(raw_img, disk_path, false)
-                    .map_err(Error::CreateVirtioBlock)?;
+                    .map_err(DeviceManagerError::CreateVirtioBlock)?;
                 Box::new(dev) as Box<vm_virtio::VirtioDevice>
             }
             ImageType::Qcow2 => {
-                let qcow_img = QcowFile::from(raw_img).map_err(Error::QcowDeviceCreate)?;
+                let qcow_img =
+                    QcowFile::from(raw_img).map_err(DeviceManagerError::QcowDeviceCreate)?;
                 let dev = vm_virtio::Block::new(qcow_img, disk_path, false)
-                    .map_err(Error::CreateVirtioBlock)?;
+                    .map_err(DeviceManagerError::CreateVirtioBlock)?;
                 Box::new(dev) as Box<vm_virtio::VirtioDevice>
             }
         };
@@ -406,17 +421,17 @@ impl DeviceManager {
                 let mut virtio_net_device: vm_virtio::Net;
 
                 if let Some(tap_if_name) = net_params.tap_if_name {
-                    let tap = Tap::open_named(tap_if_name).map_err(Error::OpenTap)?;
+                    let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
                     virtio_net_device =
                         vm_virtio::Net::new_with_tap(tap, Some(&net_params.mac_addr))
-                            .map_err(Error::CreateVirtioNet)?;
+                            .map_err(DeviceManagerError::CreateVirtioNet)?;
                 } else {
                     virtio_net_device = vm_virtio::Net::new(
                         net_params.ip_addr,
                         net_params.net_mask,
                         Some(&net_params.mac_addr),
                     )
-                    .map_err(Error::CreateVirtioNet)?;
+                    .map_err(DeviceManagerError::CreateVirtioNet)?;
                 }
 
                 DeviceManager::add_virtio_pci_device(
@@ -433,7 +448,7 @@ impl DeviceManager {
         // Add virtio-rng if required
         if let Some(rng_path) = &vm_cfg.rng_path {
             let virtio_rng_device =
-                vm_virtio::Rng::new(rng_path).map_err(Error::CreateVirtioRng)?;
+                vm_virtio::Rng::new(rng_path).map_err(DeviceManagerError::CreateVirtioRng)?;
 
             DeviceManager::add_virtio_pci_device(
                 Box::new(virtio_rng_device),
@@ -465,26 +480,28 @@ impl DeviceManager {
         vm_fd: &VmFd,
         pci_root: &mut PciRoot,
         mmio_bus: &mut devices::Bus,
-    ) -> Result<()> {
-        let mut virtio_pci_device =
-            VirtioPciDevice::new(memory, virtio_device).map_err(|_| Error::VirtioDevice)?;
+    ) -> DeviceManagerResult<()> {
+        let mut virtio_pci_device = VirtioPciDevice::new(memory, virtio_device)
+            .map_err(DeviceManagerError::VirtioDevice)?;
         let bars = virtio_pci_device
             .allocate_bars(allocator)
-            .map_err(Error::AllocateBars)?;
+            .map_err(DeviceManagerError::AllocateBars)?;
 
         for (event, addr, _) in virtio_pci_device.ioeventfds() {
             let io_addr = IoEventAddress::Mmio(addr);
             vm_fd
                 .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)
-                .map_err(Error::RegisterIoevent)?;
+                .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
         // Assign IRQ to the virtio-pci device
-        let irqfd = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
-        let irq_num = allocator.allocate_irq().ok_or(Error::AllocateIrq)?;
+        let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+        let irq_num = allocator
+            .allocate_irq()
+            .ok_or(DeviceManagerError::AllocateIrq)?;
         vm_fd
             .register_irqfd(irqfd.as_raw_fd(), irq_num)
-            .map_err(Error::Irq)?;
+            .map_err(DeviceManagerError::Irq)?;
         // Let's use irq line INTA for now.
         virtio_pci_device.assign_irq(irqfd, irq_num as u32, PciInterruptPin::IntA);
 
@@ -492,7 +509,7 @@ impl DeviceManager {
 
         pci_root
             .add_device(virtio_pci_device.clone(), mmio_bus, bars)
-            .map_err(Error::AddPciDevice)?;
+            .map_err(DeviceManagerError::AddPciDevice)?;
 
         Ok(())
     }
@@ -646,7 +663,7 @@ impl<'a> Vm<'a> {
         .ok_or(Error::CreateSystemAllocator)?;
 
         let device_manager = DeviceManager::new(guest_memory.clone(), &mut allocator, &fd, &config)
-            .map_err(|_| Error::DeviceManager)?;
+            .map_err(Error::DeviceManager)?;
         fd.register_irqfd(device_manager.serial_evt.as_raw_fd(), 4)
             .map_err(Error::Irq)?;
 
