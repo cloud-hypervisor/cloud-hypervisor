@@ -80,9 +80,14 @@ fn main() {
         .map(std::string::ToString::to_string)
         .unwrap_or_else(String::new);
 
-    let net_params = cmd_arguments
-        .value_of("net")
-        .map(std::string::ToString::to_string);
+    let mut net_params = None;
+    if cmd_arguments.is_present("net") {
+        if let Some(net) = cmd_arguments.value_of("net") {
+            net_params = Some(net.to_string());
+        } else {
+            net_params = Some(String::new())
+        }
+    }
 
     let rng_path = match cmd_arguments.occurrences_of("rng") {
         0 => None,
