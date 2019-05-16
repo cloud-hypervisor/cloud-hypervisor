@@ -75,38 +75,29 @@ fn main() {
         .expect("Missing argument: disk");
     let disk_path = disk_arg.as_path();
 
-    let cmdline = if cmd_arguments.is_present("cmdline") {
-        cmd_arguments
-            .value_of("cmdline")
-            .map(std::string::ToString::to_string)
-            .unwrap()
-    } else {
-        String::new()
-    };
+    let cmdline = cmd_arguments
+        .value_of("cmdline")
+        .map(std::string::ToString::to_string)
+        .unwrap_or_else(String::new);
 
-    let mut net_params = None;
-    if cmd_arguments.is_present("net") {
-        if let Some(net) = cmd_arguments.value_of("net") {
-            net_params = Some(net.to_string());
-        } else {
-            net_params = Some(String::new())
-        }
-    }
+    let net_params = cmd_arguments
+        .value_of("net")
+        .map(std::string::ToString::to_string);
 
     let rng_path = match cmd_arguments.occurrences_of("rng") {
         0 => None,
         _ => Some(cmd_arguments.value_of("rng").unwrap().to_string()),
     };
 
-    let mut vcpus = DEFAULT_VCPUS;
-    if let Some(cpus) = cmd_arguments.value_of("cpus") {
-        vcpus = cpus.parse::<u8>().unwrap();
-    }
+    let vcpus = cmd_arguments
+        .value_of("cpus")
+        .and_then(|c| c.parse::<u8>().ok())
+        .unwrap_or(DEFAULT_VCPUS);
 
-    let mut memory = DEFAULT_MEMORY;
-    if let Some(mem) = cmd_arguments.value_of("memory") {
-        memory = mem.parse::<u64>().unwrap();
-    }
+    let memory = cmd_arguments
+        .value_of("memory")
+        .and_then(|m| m.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_MEMORY);
 
     println!(
         "Cloud Hypervisor Guest\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk: {:?}",
