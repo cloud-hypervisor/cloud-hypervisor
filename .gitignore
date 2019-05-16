@@ -2,3 +2,5 @@
 **/*.rs.bk
 **/Cargo.lock
 **/rusty-tags.vi
+.vagrant
+*.log

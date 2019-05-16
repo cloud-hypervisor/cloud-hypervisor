@@ -1,0 +1,67 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+box = { 
+  :virtualbox => {
+    :ubuntu => { :name => 'elastic/ubuntu-16.04-x86_64', :version=> '20180708.0.0' },
+    :opensuse => { :name => 'generic/opensuse42', :version=> '1.9.12' }
+  },  
+  :libvirt => {
+    :ubuntu => { :name => 'elastic/ubuntu-16.04-x86_64', :version=> '20180210.0.0' },
+    :opensuse => { :name => 'generic/opensuse42', :version=> '1.9.12' }
+  }
+}
+
+if ENV['no_proxy'] != nil or ENV['NO_PROXY'] != nil 
+  $no_proxy = ENV['NO_PROXY'] || ENV['no_proxy'] || "127.0.0.1,localhost"
+  (1..31).each do |i| 
+    $no_proxy += ",192.168.122.#{i}"
+  end 
+end
+
+distro = (ENV['CLOUDH_DISTRO'] || :ubuntu).to_sym
+puts "[INFO] Linux Distro: #{distro} "
+
+Vagrant.configure("2") do |config|
+  config.vm.provider :libvirt
+  config.vm.provider :virtualbox
+
+  if ENV['http_proxy'] != nil and ENV['https_proxy'] != nil 
+    if not Vagrant.has_plugin?('vagrant-proxyconf')
+      system 'vagrant plugin install vagrant-proxyconf'
+      raise 'vagrant-proxyconf was installed but it requires to execute again'
+    end 
+    config.proxy.http     = ENV['http_proxy'] || ENV['HTTP_PROXY'] || ""
+    config.proxy.https    = ENV['https_proxy'] || ENV['HTTPS_PROXY'] || ""
+    config.proxy.no_proxy = $no_proxy
+  end 
+  [:virtualbox, :libvirt].each do |provider|
+     config.vm.provider provider do |p, override|
+       p.cpus = 2
+       p.memory = 1024
+     end
+  end
+
+  config.vm.provider :virtualbox do |v, override|
+    override.vm.box =  box[:virtualbox][distro][:name]
+    override.vm.box_version = box[:virtualbox][distro][:version]
+  end
+
+  config.vm.provider :libvirt do |v, override|
+    override.vm.box =  box[:libvirt][distro][:name]
+    override.vm.box_version = box[:libvirt][distro][:version]
+    v.nested = true
+    v.cpu_mode = 'host-passthrough'
+    v.management_network_address = "192.168.122.0/27"
+    v.management_network_name = "mgmt-net"
+    v.random_hostname = true
+  end 
+  config.vm.synced_folder '.', '/vagrant', disabled: true
+  config.vm.synced_folder '../', "/home/vagrant/cloud-hypervisor", create: true
+  config.vm.provision 'shell', privileged: false do |sh|
+    sh.inline = <<-SHELL
+      cd /home/vagrant/cloud-hypervisor/
+      ./install.sh | tee install.log
+    SHELL
+  end 
+end
