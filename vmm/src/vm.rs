@@ -141,6 +141,9 @@ pub enum Error {
 
     /// Failed parsing network parameters
     ParseNetworkParameters,
+
+    /// Unexpected KVM_RUN exit reason
+    VcpuUnhandledKvmExit,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -195,6 +198,8 @@ pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 pub struct Vcpu {
     fd: VcpuFd,
     id: u8,
+    io_bus: devices::Bus,
+    mmio_bus: devices::Bus,
 }
 
 impl Vcpu {
@@ -204,10 +209,15 @@ impl Vcpu {
     ///
     /// * `id` - Represents the CPU number between [0, max vcpus).
     /// * `vm` - The virtual machine this vcpu will get attached to.
-    pub fn new(id: u8, vm: &Vm) -> Result<Self> {
+    pub fn new(id: u8, vm: &Vm, io_bus: devices::Bus, mmio_bus: devices::Bus) -> Result<Self> {
         let kvm_vcpu = vm.fd.create_vcpu(id).map_err(Error::VcpuFd)?;
         // Initially the cpuid per vCPU is the one supported by this VM.
-        Ok(Vcpu { fd: kvm_vcpu, id })
+        Ok(Vcpu {
+            fd: kvm_vcpu,
+            id,
+            io_bus,
+            mmio_bus,
+        })
     }
 
     /// Configures a x86_64 specific vcpu and should be called once per vcpu from the vcpu's thread.
@@ -242,8 +252,39 @@ impl Vcpu {
     ///
     /// Note that the state of the VCPU and associated VM must be setup first for this to do
     /// anything useful.
-    pub fn run(&self) -> Result<VcpuExit> {
-        self.fd.run().map_err(Error::VcpuRun)
+    pub fn run(&self) -> Result<()> {
+        match self.fd.run() {
+            Ok(run) => match run {
+                VcpuExit::IoIn(addr, data) => {
+                    self.io_bus.read(u64::from(addr), data);
+                    Ok(())
+                }
+                VcpuExit::IoOut(addr, data) => {
+                    self.io_bus.write(u64::from(addr), data);
+                    Ok(())
+                }
+                VcpuExit::MmioRead(addr, data) => {
+                    self.mmio_bus.read(addr as u64, data);
+                    Ok(())
+                }
+                VcpuExit::MmioWrite(addr, data) => {
+                    self.mmio_bus.write(addr as u64, data);
+                    Ok(())
+                }
+                r => {
+                    error!("Unexpected exit reason on vcpu run: {:?}", r);
+                    Err(Error::VcpuUnhandledKvmExit)
+                }
+            },
+
+            Err(ref e) => match e.raw_os_error().unwrap() {
+                libc::EAGAIN | libc::EINTR => Ok(()),
+                _ => {
+                    error!("VCPU {:?} error {:?}", self.id, e);
+                    Err(Error::VcpuUnhandledKvmExit)
+                }
+            },
+        }
     }
 }
 
@@ -782,10 +823,9 @@ impl<'a> Vm<'a> {
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
 
         for cpu_id in 0..vcpu_count {
-            println!("Starting VCPU {:?}", cpu_id);
             let io_bus = self.devices.io_bus.clone();
             let mmio_bus = self.devices.mmio_bus.clone();
-            let mut vcpu = Vcpu::new(cpu_id, &self)?;
+            let mut vcpu = Vcpu::new(cpu_id, &self, io_bus, mmio_bus)?;
             vcpu.configure(entry_addr, &self)?;
 
             let vcpu_thread_barrier = vcpu_thread_barrier.clone();
@@ -810,67 +850,7 @@ impl<'a> Vm<'a> {
                         // Block until all CPUs are ready.
                         vcpu_thread_barrier.wait();
 
-                        loop {
-                            match vcpu.run() {
-                                Ok(run) => match run {
-                                    VcpuExit::IoIn(addr, data) => {
-                                        io_bus.read(u64::from(addr), data);
-                                    }
-                                    VcpuExit::IoOut(addr, data) => {
-                                        io_bus.write(u64::from(addr), data);
-                                    }
-                                    VcpuExit::MmioRead(addr, data) => {
-                                        mmio_bus.read(addr as u64, data);
-                                    }
-                                    VcpuExit::MmioWrite(addr, data) => {
-                                        mmio_bus.write(addr as u64, data);
-                                    }
-                                    VcpuExit::Unknown => {
-                                        println!("Unknown");
-                                    }
-                                    VcpuExit::Exception => {
-                                        println!("Exception");
-                                    }
-                                    VcpuExit::Hypercall => {}
-                                    VcpuExit::Debug => {}
-                                    VcpuExit::Hlt => {
-                                        println!("HLT");
-                                    }
-                                    VcpuExit::IrqWindowOpen => {}
-                                    VcpuExit::Shutdown => {}
-                                    VcpuExit::FailEntry => {}
-                                    VcpuExit::Intr => {}
-                                    VcpuExit::SetTpr => {}
-                                    VcpuExit::TprAccess => {}
-                                    VcpuExit::S390Sieic => {}
-                                    VcpuExit::S390Reset => {}
-                                    VcpuExit::Dcr => {}
-                                    VcpuExit::Nmi => {}
-                                    VcpuExit::InternalError => {}
-                                    VcpuExit::Osi => {}
-                                    VcpuExit::PaprHcall => {}
-                                    VcpuExit::S390Ucontrol => {}
-                                    VcpuExit::Watchdog => {}
-                                    VcpuExit::S390Tsch => {}
-                                    VcpuExit::Epr => {}
-                                    VcpuExit::SystemEvent => {}
-                                    VcpuExit::S390Stsi => {}
-                                    VcpuExit::IoapicEoi => {}
-                                    VcpuExit::Hyperv => {}
-                                },
-                                Err(Error::VcpuRun(ref e)) => {
-                                    match e.raw_os_error().unwrap() {
-                                        // Why do we check for these if we only return EINVAL?
-                                        libc::EAGAIN | libc::EINTR => {}
-                                        _ => {
-                                            println! {"VCPU {:?} error {:?}", cpu_id, e};
-                                            break;
-                                        }
-                                    }
-                                }
-                                _ => (),
-                            }
-                        }
+                        while vcpu.run().is_ok() {}
                     })
                     .map_err(Error::VcpuSpawn)?,
             );
