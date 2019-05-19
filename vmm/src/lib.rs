@@ -4,6 +4,8 @@
 //
 
 extern crate kvm_ioctls;
+#[macro_use]
+extern crate log;
 
 use kvm_ioctls::*;
 use std::fmt::{self, Display};
