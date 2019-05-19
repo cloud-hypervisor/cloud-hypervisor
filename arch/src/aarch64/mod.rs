@@ -21,6 +21,6 @@ pub fn configure_system(
 }
 
 /// Stub function that needs to be implemented when aarch64 functionality is added.
-pub fn get_reserved_mem_addr() -> usize {
-    0
+pub fn get_reserved_mem_addr() -> Option<usize> {
+    None
 }

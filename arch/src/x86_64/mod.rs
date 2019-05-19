@@ -45,41 +45,23 @@ impl From<Error> for super::Error {
 
 // Where BIOS/VGA magic would live on a real PC.
 const EBDA_START: GuestAddress = GuestAddress(0x9fc00);
-const FIRST_ADDR_PAST_32BITS: GuestAddress = GuestAddress(1 << 32);
-const MEM_32BIT_GAP_SIZE: GuestUsize = (768 << 20);
 
 /// Returns a Vec of the valid memory addresses.
 /// These should be used to configure the GuestMemory structure for the platform.
-/// For x86_64 all addresses are valid from the start of the kernel except a
-/// carve out at the end of 32bit address space.
+/// On x86_64 with cloud-hypervisor we do not support 32-bit PCI devices and thus
+/// do not build a PCI hole somewhere at the end of the 32-bit address space.
 pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize)> {
-    let memory_gap_start = FIRST_ADDR_PAST_32BITS
-        .checked_sub(MEM_32BIT_GAP_SIZE as u64)
-        .expect("32-bit hole is too large");
-    let requested_memory_size = GuestAddress(size as u64);
     let mut regions = Vec::new();
 
-    // case1: guest memory fits before the gap
-    if size as u64 <= memory_gap_start.raw_value() {
-        regions.push((GuestAddress(0), size as usize));
-    // case2: guest memory extends beyond the gap
-    } else {
-        // push memory before the gap
-        regions.push((GuestAddress(0), memory_gap_start.raw_value() as usize));
-        regions.push((
-            FIRST_ADDR_PAST_32BITS,
-            requested_memory_size.unchecked_offset_from(memory_gap_start) as usize,
-        ));
-    }
+    regions.push((GuestAddress(0), size as usize));
 
     regions
 }
 
-/// X86 specific memory hole/memory mapped devices/reserved area.
-pub fn get_32bit_gap_start() -> GuestAddress {
-    FIRST_ADDR_PAST_32BITS
-        .checked_sub(MEM_32BIT_GAP_SIZE)
-        .expect("32-bit hole is too large")
+/// The x86_64 32-bit PCI/device hole start address.
+/// All cloud-hypervisor PCI devices are 64-bit, we don't have such hole.
+pub fn get_reserved_mem_addr() -> Option<GuestAddress> {
+    None
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
@@ -100,8 +82,6 @@ pub fn configure_system(
     const KERNEL_HDR_MAGIC: u32 = 0x53726448;
     const KERNEL_LOADER_OTHER: u8 = 0xff;
     const KERNEL_MIN_ALIGNMENT_BYTES: u32 = 0x1000000; // Must be non-zero.
-    let first_addr_past_32bits = FIRST_ADDR_PAST_32BITS;
-    let end_32bit_gap_start = get_32bit_gap_start();
 
     let himem_start = super::HIMEM_START;
 
@@ -118,31 +98,12 @@ pub fn configure_system(
     params.0.hdr.kernel_alignment = KERNEL_MIN_ALIGNMENT_BYTES;
 
     add_e820_entry(&mut params.0, 0, EBDA_START.raw_value(), E820_RAM)?;
-
-    let mem_end = guest_mem.end_addr();
-    if mem_end < end_32bit_gap_start {
-        add_e820_entry(
-            &mut params.0,
-            himem_start.raw_value(),
-            mem_end.unchecked_offset_from(himem_start),
-            E820_RAM,
-        )?;
-    } else {
-        add_e820_entry(
-            &mut params.0,
-            himem_start.raw_value(),
-            end_32bit_gap_start.unchecked_offset_from(himem_start),
-            E820_RAM,
-        )?;
-        if mem_end > first_addr_past_32bits {
-            add_e820_entry(
-                &mut params.0,
-                first_addr_past_32bits.raw_value(),
-                mem_end.unchecked_offset_from(first_addr_past_32bits),
-                E820_RAM,
-            )?;
-        }
-    }
+    add_e820_entry(
+        &mut params.0,
+        himem_start.raw_value(),
+        guest_mem.end_addr().unchecked_offset_from(himem_start),
+        E820_RAM,
+    )?;
 
     let zero_page_addr = layout::ZERO_PAGE_START;
     guest_mem
@@ -194,16 +155,6 @@ mod tests {
         assert_eq!(2, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(GuestAddress(1 << 32), regions[1].0);
-    }
-
-    #[test]
-    fn test_32bit_gap() {
-        assert_eq!(
-            get_32bit_gap_start(),
-            FIRST_ADDR_PAST_32BITS
-                .checked_sub(MEM_32BIT_GAP_SIZE as u64)
-                .expect("32-bit hole is too large")
-        );
     }
 
     #[test]
