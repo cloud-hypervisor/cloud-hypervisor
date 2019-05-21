@@ -17,7 +17,6 @@ extern crate virtio_bindings;
 extern crate vm_memory;
 
 use std::fmt;
-use std::fs::File;
 use std::io;
 
 mod block;
@@ -88,34 +87,11 @@ const INTERRUPT_STATUS_CONFIG_CHANGED: u32 = 0x2;
 pub enum ActivateError {
     EpollCtl(std::io::Error),
     BadActivate,
-    #[cfg(feature = "vsock")]
-    BadVhostActivate(self::vhost::Error),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;
 
 pub type DeviceEventT = u16;
-
-/// The payload is used to handle events where the internal state of the VirtIO device
-/// needs to be changed.
-#[allow(clippy::large_enum_variant)]
-pub enum EpollHandlerPayload {
-    /// DrivePayload(disk_image)
-    DrivePayload(File),
-    /// Events that do not need a payload.
-    Empty,
-}
-
-type Result<T> = std::result::Result<T, Error>;
-
-pub trait EpollHandler: Send {
-    fn handle_event(
-        &mut self,
-        device_event: DeviceEventT,
-        event_flags: u32,
-        payload: EpollHandlerPayload,
-    ) -> Result<()>;
-}
 
 #[derive(Debug)]
 pub enum Error {
