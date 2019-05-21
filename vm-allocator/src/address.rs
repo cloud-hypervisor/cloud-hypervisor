@@ -181,6 +181,16 @@ impl AddressAllocator {
 
         Some(new_addr)
     }
+
+    /// Free an already allocated address range.
+    /// We can only free a range if it matches exactly an already allocated range.
+    pub fn free(&mut self, address: GuestAddress, size: GuestUsize) {
+        if let Some(&range_size) = self.ranges.get(&address) {
+            if size == range_size {
+                self.ranges.remove(&address);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -288,6 +298,57 @@ mod tests {
         assert_eq!(
             pool.allocate(Some(GuestAddress(0x1b00)), 0x100),
             Some(GuestAddress(0x1b00))
+        );
+    }
+
+    #[test]
+    fn allocate_address_free_and_realloc() {
+        let mut pool = AddressAllocator::new(GuestAddress(0x1000), 0x1000, Some(0x100)).unwrap();
+
+        // First range is [0x1200:0x1a00]
+        assert_eq!(
+            pool.allocate(Some(GuestAddress(0x1200)), 0x800),
+            Some(GuestAddress(0x1200))
+        );
+
+        pool.free(GuestAddress(0x1200), 0x800);
+
+        assert_eq!(
+            pool.allocate(Some(GuestAddress(0x1200)), 0x800),
+            Some(GuestAddress(0x1200))
+        );
+    }
+
+    #[test]
+    fn allocate_address_free_fail_and_realloc() {
+        let mut pool = AddressAllocator::new(GuestAddress(0x1000), 0x1000, Some(0x100)).unwrap();
+
+        // First range is [0x1200:0x1a00]
+        assert_eq!(
+            pool.allocate(Some(GuestAddress(0x1200)), 0x800),
+            Some(GuestAddress(0x1200))
+        );
+
+        // We try to free a range smaller than the allocated one.
+        pool.free(GuestAddress(0x1200), 0x100);
+
+        assert_eq!(pool.allocate(Some(GuestAddress(0x1200)), 0x800), None);
+    }
+
+    #[test]
+    fn allocate_address_fail_free_and_realloc() {
+        let mut pool = AddressAllocator::new(GuestAddress(0x1000), 0x1000, Some(0x100)).unwrap();
+
+        // First allocation fails
+        assert_eq!(pool.allocate(Some(GuestAddress(0x1200)), 0x2000), None);
+
+        // We try to free a range that was not allocated.
+        pool.free(GuestAddress(0x1200), 0x2000);
+
+        // Now we try an allocation that should succeed.
+        assert_eq!(
+            pool.allocate(Some(GuestAddress(0x1200)), 0x800),
+            Some(GuestAddress(0x1200))
         );
     }
 }
