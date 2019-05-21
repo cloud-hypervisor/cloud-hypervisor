@@ -630,6 +630,15 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "vhost_rs"
+version = "0.1.0"
+dependencies = [
+ "bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.58 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.1.0 (git+https://github.com/rust-vmm/vmm-sys-util)",
+]
+
+[[package]]
 name = "virtio-bindings"
 version = "0.1.0"
 
@@ -663,6 +672,7 @@ dependencies = [
  "net_util 0.1.0",
  "pci 0.1.0",
  "tempfile 3.0.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vhost_rs 0.1.0",
  "virtio-bindings 0.1.0",
  "vm-allocator 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",

@@ -21,6 +21,7 @@ use std::io;
 
 mod block;
 mod device;
+pub mod fs;
 pub mod net;
 mod queue;
 mod rng;
@@ -29,6 +30,7 @@ pub mod transport;
 
 pub use self::block::*;
 pub use self::device::*;
+pub use self::fs::*;
 pub use self::net::*;
 pub use self::queue::*;
 pub use self::rng::*;
@@ -40,8 +42,8 @@ const DEVICE_DRIVER_OK: u32 = 0x04;
 const DEVICE_FEATURES_OK: u32 = 0x08;
 const DEVICE_FAILED: u32 = 0x80;
 
-#[allow(dead_code)]
 const VIRTIO_F_VERSION_1: u32 = 32;
+const VIRTIO_F_VERSION_1_BITMASK: u64 = 1 << VIRTIO_F_VERSION_1;
 
 // Types taken from linux/virtio_ids.h
 #[derive(Copy, Clone)]
@@ -57,6 +59,7 @@ enum VirtioDeviceType {
     TYPE_GPU = 16,
     TYPE_INPUT = 18,
     TYPE_VSOCK = 19,
+    TYPE_FS = 26,
 }
 
 // In order to use the `{}` marker, the trait `fmt::Display` must be implemented
@@ -72,6 +75,7 @@ impl fmt::Display for VirtioDeviceType {
             VirtioDeviceType::TYPE_GPU => "gpu",
             VirtioDeviceType::TYPE_9P => "9p",
             VirtioDeviceType::TYPE_VSOCK => "vsock",
+            VirtioDeviceType::TYPE_FS => "fs",
             _ => return Err(std::fmt::Error),
         };
         write!(f, "{}", output)
@@ -87,6 +91,9 @@ const INTERRUPT_STATUS_CONFIG_CHANGED: u32 = 0x2;
 pub enum ActivateError {
     EpollCtl(std::io::Error),
     BadActivate,
+
+    /// Failed to setup vhost-user daemon.
+    VhostUserSetup(fs::Error),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;
