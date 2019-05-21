@@ -100,4 +100,18 @@ impl SystemAllocator {
     ) -> Option<GuestAddress> {
         self.mmio_address_space.allocate(address, size)
     }
+
+    /// Free an IO address range.
+    /// We can only free a range if it matches exactly an already allocated range.
+    pub fn free_io_addresses(&mut self, address: GuestAddress, size: GuestUsize) {
+        if let Some(io_address) = self.io_address_space.as_mut() {
+            io_address.free(address, size)
+        }
+    }
+
+    /// Free an MMIO address range.
+    /// We can only free a range if it matches exactly an already allocated range.
+    pub fn free_mmio_addresses(&mut self, address: GuestAddress, size: GuestUsize) {
+        self.mmio_address_space.free(address, size)
+    }
 }
