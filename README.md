@@ -91,8 +91,11 @@ You can run a guest VM by either using an existing cloud image or booting into y
 
 ### Cloud image
 
-`cloud-hypervisor` also supports booting disk images containing all needed components to run cloud workloads, a.k.a. cloud images.
-To do that we rely on the [Rust Hypervisor Firmware](https://github.com/intel/rust-hypervisor-firmware) project to provide an ELF
+`cloud-hypervisor` supports booting disk images containing all needed
+components to run cloud workloads, a.k.a. cloud images.  To do that we rely on
+the [Rust Hypervisor
+Firmware](https://github.com/intel/rust-hypervisor-firmware) project to provide
+an ELF
 formatted KVM firmware for `cloud-hypervisor` to directly boot into.
 
 We need to get the latest `rust-hypervisor-firmware` release and also a working cloud image. Here we will use a Clear Linux image:
@@ -118,12 +121,14 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 $ popd
 ```
 
+Multiple arguments can be given to the `--disk` parameter, currently the firmware requires that the bootable image is on the first disk.
+
 ### Custom kernel and disk image
 
 #### Building your kernel
 
-`cloud-hypervisor` supports direct kernel boot into a `vmlinux` ELF kernel image.
-You want to build such image first:
+`cloud-hypervisor` also supports direct kernel boot into a `vmlinux` ELF kernel
+image. You want to build such an image first:
 
 ```shell
 
