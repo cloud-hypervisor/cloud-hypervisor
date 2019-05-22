@@ -34,7 +34,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, stdout};
 use std::net::Ipv4Addr;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
 use vm_allocator::SystemAllocator;
@@ -249,7 +249,7 @@ impl Vcpu {
 
 pub struct VmConfig<'a> {
     kernel_path: &'a Path,
-    disk_path: &'a Path,
+    disk_paths: Vec<PathBuf>,
     rng_path: Option<String>,
     cmdline: cmdline::Cmdline,
     cmdline_addr: GuestAddress,
@@ -261,7 +261,7 @@ pub struct VmConfig<'a> {
 impl<'a> VmConfig<'a> {
     pub fn new(
         kernel_path: &'a Path,
-        disk_path: &'a Path,
+        disk_paths: Vec<PathBuf>,
         rng_path: Option<String>,
         cmdline_str: String,
         net_params: Option<String>,
@@ -273,7 +273,7 @@ impl<'a> VmConfig<'a> {
 
         Ok(VmConfig {
             kernel_path,
-            disk_path,
+            disk_paths,
             rng_path,
             cmdline,
             cmdline_addr: CMDLINE_OFFSET,
@@ -379,41 +379,42 @@ impl DeviceManager {
 
         let mut pci_root = PciRoot::new(None);
 
-        // Open block device path
-        let raw_img: File = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&vm_cfg.disk_path)
-            .map_err(DeviceManagerError::Disk)?;
+        for disk_path in &vm_cfg.disk_paths {
+            // Open block device path
+            let raw_img: File = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(disk_path.as_path())
+                .map_err(DeviceManagerError::Disk)?;
 
-        // Add virtio-blk
-        let image_type =
-            qcow::detect_image_type(&raw_img).map_err(DeviceManagerError::DetectImageType)?;
-        let disk_path = vm_cfg.disk_path.to_path_buf();
-        let block = match image_type {
-            ImageType::Raw => {
-                let raw_img = vm_virtio::RawFile::new(raw_img);
-                let dev = vm_virtio::Block::new(raw_img, disk_path, false)
-                    .map_err(DeviceManagerError::CreateVirtioBlock)?;
-                Box::new(dev) as Box<vm_virtio::VirtioDevice>
-            }
-            ImageType::Qcow2 => {
-                let qcow_img =
-                    QcowFile::from(raw_img).map_err(DeviceManagerError::QcowDeviceCreate)?;
-                let dev = vm_virtio::Block::new(qcow_img, disk_path, false)
-                    .map_err(DeviceManagerError::CreateVirtioBlock)?;
-                Box::new(dev) as Box<vm_virtio::VirtioDevice>
-            }
-        };
+            // Add virtio-blk
+            let image_type =
+                qcow::detect_image_type(&raw_img).map_err(DeviceManagerError::DetectImageType)?;
+            let block = match image_type {
+                ImageType::Raw => {
+                    let raw_img = vm_virtio::RawFile::new(raw_img);
+                    let dev = vm_virtio::Block::new(raw_img, disk_path.to_path_buf(), false)
+                        .map_err(DeviceManagerError::CreateVirtioBlock)?;
+                    Box::new(dev) as Box<vm_virtio::VirtioDevice>
+                }
+                ImageType::Qcow2 => {
+                    let qcow_img =
+                        QcowFile::from(raw_img).map_err(DeviceManagerError::QcowDeviceCreate)?;
+                    let dev = vm_virtio::Block::new(qcow_img, disk_path.to_path_buf(), false)
+                        .map_err(DeviceManagerError::CreateVirtioBlock)?;
+                    Box::new(dev) as Box<vm_virtio::VirtioDevice>
+                }
+            };
 
-        DeviceManager::add_virtio_pci_device(
-            block,
-            memory.clone(),
-            allocator,
-            vm_fd,
-            &mut pci_root,
-            &mut mmio_bus,
-        )?;
+            DeviceManager::add_virtio_pci_device(
+                block,
+                memory.clone(),
+                allocator,
+                vm_fd,
+                &mut pci_root,
+                &mut mmio_bus,
+            )?;
+        }
 
         // Add virtio-net if required
         if let Some(net_params) = &vm_cfg.net_params {

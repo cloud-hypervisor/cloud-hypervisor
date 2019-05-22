@@ -35,7 +35,8 @@ fn main() {
             Arg::with_name("disk")
                 .long("disk")
                 .help("Path to VM disk image")
-                .takes_value(true),
+                .takes_value(true)
+                .min_values(1),
         )
         .arg(
             Arg::with_name("net")
@@ -69,11 +70,11 @@ fn main() {
         .expect("Missing argument: kernel");
     let kernel_path = kernel_arg.as_path();
 
-    let disk_arg = cmd_arguments
-        .value_of("disk")
+    let disk_paths: Vec<PathBuf> = cmd_arguments
+        .values_of("disk")
+        .expect("Missing arguments on disk")
         .map(PathBuf::from)
-        .expect("Missing argument: disk");
-    let disk_path = disk_arg.as_path();
+        .collect();
 
     let cmdline = if cmd_arguments.is_present("cmdline") {
         cmd_arguments
@@ -109,13 +110,13 @@ fn main() {
     }
 
     println!(
-        "Cloud Hypervisor Guest\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk: {:?}",
-        vcpus, memory, kernel_path, cmdline, disk_path
+        "Cloud Hypervisor Guest\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
+        vcpus, memory, kernel_path, cmdline, disk_paths,
     );
 
     let vm_config = VmConfig::new(
         kernel_path,
-        disk_path,
+        disk_paths,
         rng_path,
         cmdline,
         net_params,
