@@ -63,6 +63,16 @@ fn main() {
                 .help("Path to entropy source")
                 .default_value(config::DEFAULT_RNG_SOURCE),
         )
+        .arg(
+            Arg::with_name("fs")
+                .long("fs")
+                .help(
+                    "virtio-fs parameters \"tag=<tag_name>,\
+                     sock=<socket_path>,num_queues=<number_of_queues>,\
+                     queue_size=<size_of_each_queue>\"",
+                )
+                .takes_value(true),
+        )
         .get_matches();
 
     // These .unwrap()s cannot fail as there is a default value defined
@@ -85,14 +95,17 @@ fn main() {
     // This .unwrap() cannot fail as there is a default value defined
     let rng = cmd_arguments.value_of("rng").unwrap();
 
+    let fs = cmd_arguments.value_of("fs");
+
     let vm_config = match config::VmConfig::parse(config::VmParams {
         cpus,
         memory,
         kernel,
         cmdline,
         disks,
-        rng,
         net,
+        rng,
+        fs,
     }) {
         Ok(config) => config,
         Err(e) => {

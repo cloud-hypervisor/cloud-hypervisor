@@ -38,6 +38,14 @@ pub enum Error<'a> {
     ParseNetMaskParam(AddrParseError),
     /// Failed parsing network mac parameter.
     ParseNetMacParam(&'a str),
+    /// Failed parsing fs tag parameter.
+    ParseFsTagParam,
+    /// Failed parsing fs socket path parameter.
+    ParseFsSockParam,
+    /// Failed parsing fs number of queues parameter.
+    ParseFsNumQueuesParam(std::num::ParseIntError),
+    /// Failed parsing fs queue size parameter.
+    ParseFsQueueSizeParam(std::num::ParseIntError),
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -47,8 +55,9 @@ pub struct VmParams<'a> {
     pub kernel: &'a str,
     pub cmdline: Option<&'a str>,
     pub disks: Vec<&'a str>,
-    pub rng: &'a str,
     pub net: Option<&'a str>,
+    pub rng: &'a str,
+    pub fs: Option<&'a str>,
 }
 
 pub struct CpusConfig(pub u8);
@@ -128,18 +137,6 @@ impl<'a> DiskConfig<'a> {
     }
 }
 
-pub struct RngConfig<'a> {
-    pub src: &'a Path,
-}
-
-impl<'a> RngConfig<'a> {
-    pub fn parse(rng: &'a str) -> Result<Self> {
-        Ok(RngConfig {
-            src: Path::new(rng),
-        })
-    }
-}
-
 pub struct NetConfig<'a> {
     pub tap: Option<&'a str>,
     pub ip: Ipv4Addr,
@@ -195,14 +192,89 @@ impl<'a> NetConfig<'a> {
     }
 }
 
+pub struct RngConfig<'a> {
+    pub src: &'a Path,
+}
+
+impl<'a> RngConfig<'a> {
+    pub fn parse(rng: &'a str) -> Result<Self> {
+        Ok(RngConfig {
+            src: Path::new(rng),
+        })
+    }
+}
+
+pub struct FsConfig<'a> {
+    pub tag: &'a str,
+    pub sock: &'a Path,
+    pub num_queues: usize,
+    pub queue_size: u16,
+}
+
+impl<'a> FsConfig<'a> {
+    pub fn parse(fs: Option<&'a str>) -> Result<Option<Self>> {
+        if fs.is_none() {
+            return Ok(None);
+        }
+
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = fs.unwrap().split(',').collect();
+
+        let mut tag: &str = "";
+        let mut sock: &str = "";
+        let mut num_queues_str: &str = "";
+        let mut queue_size_str: &str = "";
+
+        for param in params_list.iter() {
+            if param.starts_with("tag=") {
+                tag = &param[4..];
+            } else if param.starts_with("sock=") {
+                sock = &param[5..];
+            } else if param.starts_with("num_queues=") {
+                num_queues_str = &param[11..];
+            } else if param.starts_with("queue_size=") {
+                queue_size_str = &param[11..];
+            }
+        }
+
+        let mut num_queues: usize = 1;
+        let mut queue_size: u16 = 1024;
+
+        if tag.is_empty() {
+            return Err(Error::ParseFsTagParam);
+        }
+        if sock.is_empty() {
+            return Err(Error::ParseFsSockParam);
+        }
+        if !num_queues_str.is_empty() {
+            num_queues = num_queues_str
+                .parse()
+                .map_err(Error::ParseFsNumQueuesParam)?;
+        }
+        if !queue_size_str.is_empty() {
+            queue_size = queue_size_str
+                .parse()
+                .map_err(Error::ParseFsQueueSizeParam)?;
+        }
+
+        Ok(Some(FsConfig {
+            tag,
+            sock: Path::new(sock),
+            num_queues,
+            queue_size,
+        }))
+    }
+}
+
 pub struct VmConfig<'a> {
     pub cpus: CpusConfig,
     pub memory: MemoryConfig,
     pub kernel: KernelConfig<'a>,
     pub cmdline: CmdlineConfig,
     pub disks: Vec<DiskConfig<'a>>,
-    pub rng: RngConfig<'a>,
     pub net: Option<NetConfig<'a>>,
+    pub rng: RngConfig<'a>,
+    pub fs: Option<FsConfig<'a>>,
 }
 
 impl<'a> VmConfig<'a> {
@@ -218,8 +290,9 @@ impl<'a> VmConfig<'a> {
             kernel: KernelConfig::parse(vm_params.kernel)?,
             cmdline: CmdlineConfig::parse(vm_params.cmdline)?,
             disks,
-            rng: RngConfig::parse(vm_params.rng)?,
             net: NetConfig::parse(vm_params.net)?,
+            rng: RngConfig::parse(vm_params.rng)?,
+            fs: FsConfig::parse(vm_params.fs)?,
         })
     }
 }

@@ -28,6 +28,7 @@ use kvm_bindings::{
     KVM_PIT_SPEAKER_DUMMY,
 };
 use kvm_ioctls::*;
+use libc::O_TMPFILE;
 use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::loader::KernelLoader;
 use net_util::Tap;
@@ -38,10 +39,12 @@ use qcow::{self, ImageType, QcowFile};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, stdout};
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
 use vm_allocator::SystemAllocator;
+use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     Address, Bytes, Error as MmapError, GuestAddress, GuestMemory, GuestMemoryMmap,
     GuestMemoryRegion, GuestUsize,
@@ -150,6 +153,12 @@ pub enum Error {
 
     /// Memory is overflow
     MemOverflow,
+
+    /// Failed to create shared file.
+    SharedFileCreate(io::Error),
+
+    /// Failed to set shared file length.
+    SharedFileSetLen(io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -170,6 +179,9 @@ pub enum DeviceManagerError {
 
     /// Cannot create virtio-rng device
     CreateVirtioRng(io::Error),
+
+    /// Cannot create virtio-fs device
+    CreateVirtioFs(vm_virtio::fs::Error),
 
     /// Failed parsing disk image format
     DetectImageType(qcow::Error),
@@ -582,6 +594,25 @@ impl DeviceManager {
             )?;
         }
 
+        // Add virtio-fs if required
+        if let Some(fs_cfg) = &vm_cfg.fs {
+            if let Some(fs_sock) = fs_cfg.sock.to_str() {
+                let virtio_fs_device =
+                    vm_virtio::Fs::new(fs_sock, fs_cfg.tag, fs_cfg.num_queues, fs_cfg.queue_size)
+                        .map_err(DeviceManagerError::CreateVirtioFs)?;
+
+                DeviceManager::add_virtio_pci_device(
+                    Box::new(virtio_fs_device),
+                    memory.clone(),
+                    allocator,
+                    vm_fd,
+                    &mut pci_root,
+                    &mut mmio_bus,
+                    &interrupt_info,
+                )?;
+            }
+        }
+
         let pci = Arc::new(Mutex::new(PciConfigIo::new(pci_root)));
 
         Ok(DeviceManager {
@@ -813,7 +844,23 @@ impl<'a> Vm<'a> {
 
         // Init guest memory
         let arch_mem_regions = arch::arch_memory_regions(u64::from(&config.memory) << 20);
-        let guest_memory = GuestMemoryMmap::new(&arch_mem_regions).map_err(Error::GuestMemory)?;
+
+        let mut mem_regions = Vec::<(GuestAddress, usize, Option<FileOffset>)>::new();
+        for region in arch_mem_regions.iter() {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(O_TMPFILE)
+                .open("/dev/shm")
+                .map_err(Error::SharedFileCreate)?;
+
+            file.set_len(region.1 as u64)
+                .map_err(Error::SharedFileSetLen)?;
+
+            mem_regions.push((region.0, region.1, Some(FileOffset::new(file, 0))));
+        }
+
+        let guest_memory = GuestMemoryMmap::with_files(&mem_regions).map_err(Error::GuestMemory)?;
 
         guest_memory
             .with_regions(|index, region| {
