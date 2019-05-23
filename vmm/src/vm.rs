@@ -21,20 +21,18 @@ extern crate vm_memory;
 extern crate vm_virtio;
 extern crate vmm_sys_util;
 
+use crate::config::VmConfig;
 use kvm_bindings::{kvm_pit_config, kvm_userspace_memory_region, KVM_PIT_SPEAKER_DUMMY};
 use kvm_ioctls::*;
 use libc::{c_void, siginfo_t, EFD_NONBLOCK};
-use linux_loader::cmdline;
 use linux_loader::loader::KernelLoader;
-use net_util::{MacAddr, Tap};
+use net_util::Tap;
 use pci::{PciConfigIo, PciDevice, PciInterruptPin, PciRoot};
 use qcow::{self, ImageType, QcowFile};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, stdout};
-use std::net::Ipv4Addr;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
 use vm_allocator::SystemAllocator;
@@ -48,9 +46,6 @@ use vmm_sys_util::terminal::Terminal;
 use vmm_sys_util::EventFd;
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
-pub const DEFAULT_VCPUS: u8 = 1;
-pub const DEFAULT_MEMORY: GuestUsize = 512;
-const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
 const X86_64_IRQ_BASE: u32 = 5;
 
 // CPUID feature bits
@@ -288,98 +283,6 @@ impl Vcpu {
     }
 }
 
-pub struct VmConfig<'a> {
-    kernel_path: &'a Path,
-    disk_paths: Vec<PathBuf>,
-    rng_path: Option<String>,
-    cmdline: cmdline::Cmdline,
-    cmdline_addr: GuestAddress,
-    net_params: Option<String>,
-    memory_size: GuestUsize,
-    vcpu_count: u8,
-}
-
-impl<'a> VmConfig<'a> {
-    pub fn new(
-        kernel_path: &'a Path,
-        disk_paths: Vec<PathBuf>,
-        rng_path: Option<String>,
-        cmdline_str: String,
-        net_params: Option<String>,
-        vcpus: u8,
-        memory_size: GuestUsize,
-    ) -> Result<Self> {
-        let mut cmdline = cmdline::Cmdline::new(arch::CMDLINE_MAX_SIZE);
-        cmdline.insert_str(cmdline_str).unwrap();
-
-        Ok(VmConfig {
-            kernel_path,
-            disk_paths,
-            rng_path,
-            cmdline,
-            cmdline_addr: CMDLINE_OFFSET,
-            net_params,
-            memory_size,
-            vcpu_count: vcpus,
-        })
-    }
-}
-
-#[derive(Debug)]
-struct NetParams<'a> {
-    tap_if_name: Option<&'a str>,
-    ip_addr: Ipv4Addr,
-    net_mask: Ipv4Addr,
-    mac_addr: MacAddr,
-}
-
-fn parse_net_params(net_params: &str) -> Result<NetParams> {
-    // Split the parameters based on the comma delimiter
-    let params_list: Vec<&str> = net_params.split(',').collect();
-
-    let mut tap: &str = "";
-    let mut ip: &str = "";
-    let mut mask: &str = "";
-    let mut mac: &str = "";
-
-    for param in params_list.iter() {
-        if param.starts_with("tap=") {
-            tap = &param[4..];
-        } else if param.starts_with("ip=") {
-            ip = &param[3..];
-        } else if param.starts_with("mask=") {
-            mask = &param[5..];
-        } else if param.starts_with("mac=") {
-            mac = &param[4..];
-        }
-    }
-
-    let mut tap_if_name: Option<&str> = None;
-    let mut ip_addr: Ipv4Addr = "192.168.249.1".parse().unwrap();
-    let mut net_mask: Ipv4Addr = "255.255.255.0".parse().unwrap();
-    let mut mac_addr: MacAddr = MacAddr::local_random();
-
-    if !tap.is_empty() {
-        tap_if_name = Some(tap);
-    }
-    if !ip.is_empty() {
-        ip_addr = ip.parse().unwrap();
-    }
-    if !mask.is_empty() {
-        net_mask = mask.parse().unwrap();
-    }
-    if !mac.is_empty() {
-        mac_addr = MacAddr::parse_str(mac).unwrap();
-    }
-
-    Ok(NetParams {
-        tap_if_name,
-        ip_addr,
-        net_mask,
-        mac_addr,
-    })
-}
-
 struct DeviceManager {
     io_bus: devices::Bus,
     mmio_bus: devices::Bus,
@@ -420,12 +323,12 @@ impl DeviceManager {
 
         let mut pci_root = PciRoot::new(None);
 
-        for disk_path in &vm_cfg.disk_paths {
+        for disk_cfg in &vm_cfg.disks {
             // Open block device path
             let raw_img: File = OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open(disk_path.as_path())
+                .open(disk_cfg.path)
                 .map_err(DeviceManagerError::Disk)?;
 
             // Add virtio-blk
@@ -434,14 +337,14 @@ impl DeviceManager {
             let block = match image_type {
                 ImageType::Raw => {
                     let raw_img = vm_virtio::RawFile::new(raw_img);
-                    let dev = vm_virtio::Block::new(raw_img, disk_path.to_path_buf(), false)
+                    let dev = vm_virtio::Block::new(raw_img, disk_cfg.path.to_path_buf(), false)
                         .map_err(DeviceManagerError::CreateVirtioBlock)?;
                     Box::new(dev) as Box<vm_virtio::VirtioDevice>
                 }
                 ImageType::Qcow2 => {
                     let qcow_img =
                         QcowFile::from(raw_img).map_err(DeviceManagerError::QcowDeviceCreate)?;
-                    let dev = vm_virtio::Block::new(qcow_img, disk_path.to_path_buf(), false)
+                    let dev = vm_virtio::Block::new(qcow_img, disk_cfg.path.to_path_buf(), false)
                         .map_err(DeviceManagerError::CreateVirtioBlock)?;
                     Box::new(dev) as Box<vm_virtio::VirtioDevice>
                 }
@@ -458,37 +361,32 @@ impl DeviceManager {
         }
 
         // Add virtio-net if required
-        if let Some(net_params) = &vm_cfg.net_params {
-            if let Ok(net_params) = parse_net_params(net_params) {
-                let mut virtio_net_device: vm_virtio::Net;
+        if let Some(net_cfg) = &vm_cfg.net {
+            let mut virtio_net_device: vm_virtio::Net;
 
-                if let Some(tap_if_name) = net_params.tap_if_name {
-                    let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
-                    virtio_net_device =
-                        vm_virtio::Net::new_with_tap(tap, Some(&net_params.mac_addr))
-                            .map_err(DeviceManagerError::CreateVirtioNet)?;
-                } else {
-                    virtio_net_device = vm_virtio::Net::new(
-                        net_params.ip_addr,
-                        net_params.net_mask,
-                        Some(&net_params.mac_addr),
-                    )
+            if let Some(tap_if_name) = net_cfg.tap {
+                let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
+                virtio_net_device = vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac))
                     .map_err(DeviceManagerError::CreateVirtioNet)?;
-                }
-
-                DeviceManager::add_virtio_pci_device(
-                    Box::new(virtio_net_device),
-                    memory.clone(),
-                    allocator,
-                    vm_fd,
-                    &mut pci_root,
-                    &mut mmio_bus,
-                )?;
+            } else {
+                virtio_net_device =
+                    vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac))
+                        .map_err(DeviceManagerError::CreateVirtioNet)?;
             }
+
+            DeviceManager::add_virtio_pci_device(
+                Box::new(virtio_net_device),
+                memory.clone(),
+                allocator,
+                vm_fd,
+                &mut pci_root,
+                &mut mmio_bus,
+            )?;
         }
 
         // Add virtio-rng if required
-        if let Some(rng_path) = &vm_cfg.rng_path {
+        if let Some(rng_path) = vm_cfg.rng.src.to_str() {
+            println!("VIRTIO_RNG PATH {}", rng_path);
             let virtio_rng_device =
                 vm_virtio::Rng::new(rng_path).map_err(DeviceManagerError::CreateVirtioRng)?;
 
@@ -652,11 +550,11 @@ pub struct Vm<'a> {
 
 impl<'a> Vm<'a> {
     pub fn new(kvm: &Kvm, config: VmConfig<'a>) -> Result<Self> {
-        let kernel = File::open(&config.kernel_path).map_err(Error::KernelFile)?;
+        let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
 
         // Init guest memory
-        let arch_mem_regions = arch::arch_memory_regions(config.memory_size << 20);
+        let arch_mem_regions = arch::arch_memory_regions(u64::from(&config.memory) << 20);
         let guest_memory = GuestMemoryMmap::new(&arch_mem_regions).map_err(Error::GuestMemory)?;
 
         guest_memory
@@ -718,7 +616,7 @@ impl<'a> Vm<'a> {
             .add_event(&device_manager.exit_evt, EpollDispatch::Exit)
             .map_err(Error::EpollError)?;
 
-        let vcpus = Vec::with_capacity(config.vcpu_count as usize);
+        let vcpus = Vec::with_capacity(u8::from(&config.cpus) as usize);
 
         Ok(Vm {
             fd,
@@ -734,7 +632,7 @@ impl<'a> Vm<'a> {
 
     pub fn load_kernel(&mut self) -> Result<GuestAddress> {
         let cmdline_cstring =
-            CString::new(self.config.cmdline.clone()).map_err(|_| Error::CmdLine)?;
+            CString::new(self.config.cmdline.args.clone()).map_err(|_| Error::CmdLine)?;
         let entry_addr = linux_loader::loader::Elf::load(
             &self.memory,
             None,
@@ -745,16 +643,16 @@ impl<'a> Vm<'a> {
 
         linux_loader::loader::load_cmdline(
             &self.memory,
-            self.config.cmdline_addr,
+            self.config.cmdline.offset,
             &cmdline_cstring,
         )
         .map_err(|_| Error::CmdLine)?;
 
-        let vcpu_count = self.config.vcpu_count;
+        let vcpu_count = u8::from(&self.config.cpus);
 
         arch::configure_system(
             &self.memory,
-            self.config.cmdline_addr,
+            self.config.cmdline.offset,
             cmdline_cstring.to_bytes().len() + 1,
             vcpu_count,
         )
@@ -818,7 +716,7 @@ impl<'a> Vm<'a> {
     pub fn start(&mut self, entry_addr: GuestAddress) -> Result<()> {
         self.devices.register_devices()?;
 
-        let vcpu_count = self.config.vcpu_count;
+        let vcpu_count = u8::from(&self.config.cpus);
 
         //        let vcpus: Vec<thread::JoinHandle<()>> = Vec::with_capacity(vcpu_count as usize);
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
