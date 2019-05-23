@@ -6,5 +6,15 @@ edition = "2018"
 
 [dependencies]
 clap = "=2.27.1"
-
 vmm = { path = "vmm" }
+
+[dev-dependencies]
+ssh2 = "=0.3.3"
+dirs = "2.0.0"
+
+
+[features]
+default = []
+
+# Integration tests require a special environment to run in
+integration_tests = []

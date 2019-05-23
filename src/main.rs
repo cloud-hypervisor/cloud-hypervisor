@@ -116,3 +116,93 @@ fn main() {
         process::exit(1);
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "integration_tests")]
+mod tests {
+    extern crate vmm;
+
+    use ssh2::Session;
+    use std::fs;
+    use std::net::TcpStream;
+    use std::thread;
+    use vmm::config;
+
+    #[test]
+    fn test_simple_launch() {
+        let handler = thread::spawn(|| {
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut fw_path = workload_path.clone();
+            fw_path.push("hypervisor-fw");
+
+            let mut osdisk_base_path = workload_path.clone();
+            osdisk_base_path.push("clear-29620-cloud.img");
+
+            let osdisk_path = "/tmp/osdisk.img";
+            let cloudinit_path = "/tmp/cloudinit.img";
+
+            fs::copy(osdisk_base_path, osdisk_path)
+                .expect("copying of OS source disk image failed");
+
+            let disks = vec![osdisk_path, cloudinit_path];
+            let vm_config = config::VmConfig::parse(config::VmParams {
+                cpus: "1",
+                memory: "512",
+                kernel: fw_path.to_str().unwrap(),
+                cmdline: None,
+                disks,
+                rng: "/dev/urandom",
+                net: Some("tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"),
+            })
+            .expect("Failed parsing parameters");
+
+            vmm::boot_kernel(vm_config).expect("Booting kernel failed");
+        });
+
+        #[derive(Debug)]
+        enum Error {
+            Connection,
+            Authentication,
+            Command,
+        };
+
+        let mut counter = 0;
+        loop {
+            thread::sleep(std::time::Duration::new(10, 0));
+            match (|| -> Result<(), Error> {
+                let tcp = TcpStream::connect("192.168.2.2:22").map_err(|_| Error::Connection)?;
+                let mut sess = Session::new().unwrap();
+                sess.handshake(&tcp).map_err(|_| Error::Connection)?;
+
+                sess.userauth_password("admin", "cloud123")
+                    .map_err(|_| Error::Authentication)?;
+                assert!(sess.authenticated());
+
+                let mut channel = sess.channel_session().map_err(|_| Error::Command)?;
+                channel.exec("sudo reboot").map_err(|_| Error::Command)?;
+
+                // Intentionally ignore these results here
+                let _ = channel.wait_eof();
+                let _ = channel.wait_close();
+                Ok(())
+            })() {
+                Ok(_) => break,
+                Err(e) => {
+                    counter += 1;
+                    if counter >= 6 {
+                        panic!("Took too many attempts to reboot. Last error: {:?}", e);
+                    }
+                }
+            };
+        }
+
+        handler.join().unwrap();
+    }
+
+    #[test]
+    fn test_simple_launch_again() {
+        test_simple_launch()
+    }
+}
