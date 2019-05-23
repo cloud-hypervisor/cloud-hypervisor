@@ -11,9 +11,11 @@ use kvm_ioctls::*;
 use std::fmt::{self, Display};
 use std::result;
 
+pub mod config;
 pub mod vm;
 
-use self::vm::{Vm, VmConfig};
+use self::config::VmConfig;
+use self::vm::Vm;
 
 /// Errors associated with VM management
 #[derive(Debug)]

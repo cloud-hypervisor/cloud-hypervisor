@@ -9,16 +9,26 @@ extern crate vmm;
 extern crate clap;
 
 use clap::{App, Arg};
-
-use std::path::PathBuf;
-
-use vmm::vm::*;
+use std::process;
+use vmm::config;
 
 fn main() {
     let cmd_arguments = App::new("cloud-hypervisor")
         .version(crate_version!())
         .author(crate_authors!())
         .about("Launch a cloud-hypervisor VMM.")
+        .arg(
+            Arg::with_name("cpus")
+                .long("cpus")
+                .help("Number of virtual CPUs")
+                .default_value(config::DEFAULT_VCPUS),
+        )
+        .arg(
+            Arg::with_name("memory")
+                .long("memory")
+                .help("Amount of RAM (in MiB)")
+                .default_value(config::DEFAULT_MEMORY),
+        )
         .arg(
             Arg::with_name("kernel")
                 .long("kernel")
@@ -41,82 +51,68 @@ fn main() {
         .arg(
             Arg::with_name("net")
                 .long("net")
-                .help("Network parameters \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>\"")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("cpus")
-                .long("cpus")
-                .help("Number of virtual CPUs")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("memory")
-                .long("memory")
-                .help("Amount of RAM (in MB)")
+                .help(
+                    "Network parameters \"tap=<if_name>,\
+                     ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>\"",
+                )
                 .takes_value(true),
         )
         .arg(
             Arg::with_name("rng")
                 .long("rng")
                 .help("Path to entropy source")
-                .default_value("/dev/urandom"),
+                .default_value(config::DEFAULT_RNG_SOURCE),
         )
         .get_matches();
 
-    let kernel_arg = cmd_arguments
-        .value_of("kernel")
-        .map(PathBuf::from)
-        .expect("Missing argument: kernel");
-    let kernel_path = kernel_arg.as_path();
+    // These .unwrap()s cannot fail as there is a default value defined
+    let cpus = cmd_arguments.value_of("cpus").unwrap();
+    let memory = cmd_arguments.value_of("memory").unwrap();
 
-    let disk_paths: Vec<PathBuf> = cmd_arguments
+    let kernel = cmd_arguments
+        .value_of("kernel")
+        .expect("Missing argument: kernel");
+
+    let cmdline = cmd_arguments.value_of("cmdline");
+
+    let disks: Vec<&str> = cmd_arguments
         .values_of("disk")
-        .expect("Missing arguments on disk")
-        .map(PathBuf::from)
+        .expect("Missing argument: disk. Provide at least one")
         .collect();
 
-    let cmdline = cmd_arguments
-        .value_of("cmdline")
-        .map(std::string::ToString::to_string)
-        .unwrap_or_else(String::new);
+    let net = cmd_arguments.value_of("net");
 
-    let net_params = cmd_arguments
-        .value_of("net")
-        .map(std::string::ToString::to_string);
+    // This .unwrap() cannot fail as there is a default value defined
+    let rng = cmd_arguments.value_of("rng").unwrap();
 
-    let rng_path = match cmd_arguments.occurrences_of("rng") {
-        0 => None,
-        _ => Some(cmd_arguments.value_of("rng").unwrap().to_string()),
+    let vm_config = match config::VmConfig::parse(config::VmParams {
+        cpus,
+        memory,
+        kernel,
+        cmdline,
+        disks,
+        rng,
+        net,
+    }) {
+        Ok(config) => config,
+        Err(e) => {
+            println!("Failed parsing parameters {:?}", e);
+            process::exit(1);
+        }
     };
 
-    let vcpus = cmd_arguments
-        .value_of("cpus")
-        .and_then(|c| c.parse::<u8>().ok())
-        .unwrap_or(DEFAULT_VCPUS);
-
-    let memory = cmd_arguments
-        .value_of("memory")
-        .and_then(|m| m.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_MEMORY);
-
     println!(
-        "Cloud Hypervisor Guest\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
-        vcpus, memory, kernel_path, cmdline, disk_paths,
+        "Cloud Hypervisor Guest\n\tvCPUs: {}\n\tMemory: {} MB\
+         \n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
+        u8::from(&vm_config.cpus),
+        u64::from(&vm_config.memory),
+        vm_config.kernel.path,
+        vm_config.cmdline.args.as_str(),
+        vm_config.disks,
     );
-
-    let vm_config = VmConfig::new(
-        kernel_path,
-        disk_paths,
-        rng_path,
-        cmdline,
-        net_params,
-        vcpus,
-        memory,
-    )
-    .unwrap();
 
     if let Err(e) = vmm::boot_kernel(vm_config) {
         println!("Guest boot failed: {}", e);
+        process::exit(1);
     }
 }
