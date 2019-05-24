@@ -13,7 +13,7 @@ use std::result;
 use vm_memory::GuestAddress;
 
 pub const DEFAULT_VCPUS: &str = "1";
-pub const DEFAULT_MEMORY: &str = "512";
+pub const DEFAULT_MEMORY: &str = "size=512";
 pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
 const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
 
@@ -22,8 +22,10 @@ const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
 pub enum Error<'a> {
     /// Failed parsing cpus parameters.
     ParseCpusParams(std::num::ParseIntError),
-    /// Failed parsing memory parameters.
-    ParseMemoryParams(std::num::ParseIntError),
+    /// Failed parsing memory size parameter.
+    ParseMemorySizeParam(std::num::ParseIntError),
+    /// Failed parsing memory file parameter.
+    ParseMemoryFileParam,
     /// Failed parsing kernel parameters.
     ParseKernelParams,
     /// Failed parsing kernel command line parameters.
@@ -76,19 +78,45 @@ impl From<&CpusConfig> for u8 {
     }
 }
 
-pub struct MemoryConfig(pub u64);
-
-impl MemoryConfig {
-    pub fn parse(memory: &str) -> Result<Self> {
-        Ok(MemoryConfig(
-            memory.parse::<u64>().map_err(Error::ParseMemoryParams)?,
-        ))
-    }
+pub struct MemoryConfig<'a> {
+    pub size: u64,
+    pub file: Option<&'a Path>,
 }
 
-impl From<&MemoryConfig> for u64 {
-    fn from(val: &MemoryConfig) -> Self {
-        val.0
+impl<'a> MemoryConfig<'a> {
+    pub fn parse(memory: &'a str) -> Result<Self> {
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = memory.split(',').collect();
+
+        let mut size_str: &str = "";
+        let mut file_str: &str = "";
+        let mut backed = false;
+
+        for param in params_list.iter() {
+            if param.starts_with("size=") {
+                size_str = &param[5..];
+            } else if param.starts_with("file=") {
+                backed = true;
+                file_str = &param[5..];
+            }
+        }
+
+        let file = if backed {
+            if file_str.is_empty() {
+                return Err(Error::ParseMemoryFileParam);
+            }
+
+            Some(Path::new(file_str))
+        } else {
+            None
+        };
+
+        Ok(MemoryConfig {
+            size: size_str
+                .parse::<u64>()
+                .map_err(Error::ParseMemorySizeParam)?,
+            file,
+        })
     }
 }
 
@@ -268,7 +296,7 @@ impl<'a> FsConfig<'a> {
 
 pub struct VmConfig<'a> {
     pub cpus: CpusConfig,
-    pub memory: MemoryConfig,
+    pub memory: MemoryConfig<'a>,
     pub kernel: KernelConfig<'a>,
     pub cmdline: CmdlineConfig,
     pub disks: Vec<DiskConfig<'a>>,
