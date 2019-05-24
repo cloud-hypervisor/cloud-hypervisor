@@ -843,24 +843,29 @@ impl<'a> Vm<'a> {
         let fd = Arc::new(fd);
 
         // Init guest memory
-        let arch_mem_regions = arch::arch_memory_regions(u64::from(&config.memory) << 20);
+        let arch_mem_regions = arch::arch_memory_regions(config.memory.size << 20);
 
-        let mut mem_regions = Vec::<(GuestAddress, usize, Option<FileOffset>)>::new();
-        for region in arch_mem_regions.iter() {
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .custom_flags(O_TMPFILE)
-                .open("/dev/shm")
-                .map_err(Error::SharedFileCreate)?;
+        let guest_memory = match config.memory.file {
+            Some(file) => {
+                let mut mem_regions = Vec::<(GuestAddress, usize, Option<FileOffset>)>::new();
+                for region in arch_mem_regions.iter() {
+                    let file = OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .custom_flags(O_TMPFILE)
+                        .open(file)
+                        .map_err(Error::SharedFileCreate)?;
 
-            file.set_len(region.1 as u64)
-                .map_err(Error::SharedFileSetLen)?;
+                    file.set_len(region.1 as u64)
+                        .map_err(Error::SharedFileSetLen)?;
 
-            mem_regions.push((region.0, region.1, Some(FileOffset::new(file, 0))));
-        }
+                    mem_regions.push((region.0, region.1, Some(FileOffset::new(file, 0))));
+                }
 
-        let guest_memory = GuestMemoryMmap::with_files(&mem_regions).map_err(Error::GuestMemory)?;
+                GuestMemoryMmap::with_files(&mem_regions).map_err(Error::GuestMemory)?
+            }
+            None => GuestMemoryMmap::new(&arch_mem_regions).map_err(Error::GuestMemory)?,
+        };
 
         guest_memory
             .with_regions(|index, region| {
