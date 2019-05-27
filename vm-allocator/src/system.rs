@@ -62,7 +62,7 @@ impl SystemAllocator {
         let page_size = pagesize() as u64;
         Some(SystemAllocator {
             io_address_space: if let (Some(b), Some(s)) = (io_base, io_size) {
-                Some(AddressAllocator::new(b, s, Some(0x400))?)
+                Some(AddressAllocator::new(b, s, Some(0x1))?)
             } else {
                 None
             },
