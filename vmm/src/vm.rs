@@ -691,10 +691,7 @@ impl<'a> Vm<'a> {
                                 .set_canon_mode()
                                 .map_err(Error::SetTerminalCanon)?;
 
-                            // Safe because we're terminating the process anyway.
-                            unsafe {
-                                libc::_exit(0);
-                            }
+                            return Ok(());
                         }
                         EpollDispatch::Stdin => {
                             let mut out = [0u8; 64];
