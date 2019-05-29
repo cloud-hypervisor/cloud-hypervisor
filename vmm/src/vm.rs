@@ -22,12 +22,14 @@ extern crate vm_virtio;
 extern crate vmm_sys_util;
 
 use crate::config::VmConfig;
-use kvm_bindings::{kvm_pit_config, kvm_userspace_memory_region, KVM_PIT_SPEAKER_DUMMY};
+use kvm_bindings::{kvm_msi, kvm_pit_config, kvm_userspace_memory_region, KVM_PIT_SPEAKER_DUMMY};
 use kvm_ioctls::*;
 use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::loader::KernelLoader;
 use net_util::Tap;
-use pci::{IrqClosure, PciConfigIo, PciDevice, PciInterruptPin, PciRoot};
+use pci::{
+    IrqClosure, MsixClosure, MsixTableEntry, PciConfigIo, PciDevice, PciInterruptPin, PciRoot,
+};
 use qcow::{self, ImageType, QcowFile};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
@@ -47,6 +49,7 @@ use vmm_sys_util::EventFd;
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
 const X86_64_IRQ_BASE: u32 = 5;
+const DEFAULT_MSIX_VEC_NUM: u16 = 2;
 
 // CPUID feature bits
 const ECX_HYPERVISOR_SHIFT: u32 = 31; // Hypervisor bit.
@@ -303,8 +306,9 @@ impl DeviceManager {
     fn new(
         memory: GuestMemoryMmap,
         allocator: &mut SystemAllocator,
-        vm_fd: &VmFd,
+        vm_fd: &Arc<VmFd>,
         vm_cfg: &VmConfig,
+        msi_capable: bool,
     ) -> DeviceManagerResult<Self> {
         let io_bus = devices::Bus::new();
         let mut mmio_bus = devices::Bus::new();
@@ -357,6 +361,7 @@ impl DeviceManager {
                 vm_fd,
                 &mut pci_root,
                 &mut mmio_bus,
+                msi_capable,
             )?;
         }
 
@@ -381,6 +386,7 @@ impl DeviceManager {
                 vm_fd,
                 &mut pci_root,
                 &mut mmio_bus,
+                msi_capable,
             )?;
         }
 
@@ -397,6 +403,7 @@ impl DeviceManager {
                 vm_fd,
                 &mut pci_root,
                 &mut mmio_bus,
+                msi_capable,
             )?;
         }
 
@@ -417,12 +424,14 @@ impl DeviceManager {
         virtio_device: Box<vm_virtio::VirtioDevice>,
         memory: GuestMemoryMmap,
         allocator: &mut SystemAllocator,
-        vm_fd: &VmFd,
+        vm_fd: &Arc<VmFd>,
         pci_root: &mut PciRoot,
         mmio_bus: &mut devices::Bus,
+        msi_capable: bool,
     ) -> DeviceManagerResult<()> {
-        let mut virtio_pci_device = VirtioPciDevice::new(memory, virtio_device)
-            .map_err(DeviceManagerError::VirtioDevice)?;
+        let mut virtio_pci_device =
+            VirtioPciDevice::new(memory, virtio_device, DEFAULT_MSIX_VEC_NUM)
+                .map_err(DeviceManagerError::VirtioDevice)?;
 
         let bars = virtio_pci_device
             .allocate_bars(allocator)
@@ -435,19 +444,42 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
-        // Assign IRQ to the virtio-pci device
-        let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-        let irq_num = allocator
-            .allocate_irq()
-            .ok_or(DeviceManagerError::AllocateIrq)?;
-        vm_fd
-            .register_irqfd(irqfd.as_raw_fd(), irq_num)
-            .map_err(DeviceManagerError::Irq)?;
+        if msi_capable {
+            let vm_fd_clone = vm_fd.clone();
 
-        let irq_cb = Arc::new(Box::new(move || irqfd.write(1)) as IrqClosure);
+            let msi_cb = Arc::new(Box::new(move |entry: MsixTableEntry| {
+                let msi_queue = kvm_msi {
+                    address_lo: entry.msg_addr_lo,
+                    address_hi: entry.msg_addr_hi,
+                    data: entry.msg_data,
+                    flags: 0u32,
+                    devid: 0u32,
+                    pad: [0u8; 12],
+                };
 
-        // Let's use irq line INTA for now.
-        virtio_pci_device.assign_irq(irq_cb, irq_num as u32, PciInterruptPin::IntA);
+                vm_fd_clone.signal_msi(msi_queue).map(|ret| {
+                    if ret > 0 {
+                        debug!("MSI message successfully delivered");
+                    } else if ret == 0 {
+                        warn!("failed to deliver MSI message, blocked by guest");
+                    }
+                })
+            }) as MsixClosure);
+
+            virtio_pci_device.assign_msix(msi_cb);
+        } else {
+            let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+
+            let irq_num = allocator
+                .allocate_irq()
+                .ok_or(DeviceManagerError::AllocateIrq)?;
+            vm_fd
+                .register_irqfd(irqfd.as_raw_fd(), irq_num)
+                .map_err(DeviceManagerError::Irq)?;
+
+            let irq_cb = Arc::new(Box::new(move || irqfd.write(1)) as IrqClosure);
+            virtio_pci_device.assign_pin_irq(irq_cb, irq_num as u32, PciInterruptPin::IntA);
+        }
 
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
 
@@ -542,7 +574,7 @@ impl AsRawFd for EpollContext {
 }
 
 pub struct Vm<'a> {
-    fd: VmFd,
+    fd: Arc<VmFd>,
     kernel: File,
     memory: GuestMemoryMmap,
     vcpus: Vec<thread::JoinHandle<()>>,
@@ -557,6 +589,7 @@ impl<'a> Vm<'a> {
     pub fn new(kvm: &Kvm, config: VmConfig<'a>) -> Result<Self> {
         let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
+        let fd = Arc::new(fd);
 
         // Init guest memory
         let arch_mem_regions = arch::arch_memory_regions(u64::from(&config.memory) << 20);
@@ -607,8 +640,14 @@ impl<'a> Vm<'a> {
         )
         .ok_or(Error::CreateSystemAllocator)?;
 
-        let device_manager = DeviceManager::new(guest_memory.clone(), &mut allocator, &fd, &config)
-            .map_err(Error::DeviceManager)?;
+        let device_manager = DeviceManager::new(
+            guest_memory.clone(),
+            &mut allocator,
+            &fd,
+            &config,
+            kvm.check_extension(Cap::SignalMsi),
+        )
+        .map_err(Error::DeviceManager)?;
         fd.register_irqfd(device_manager.serial_evt.as_raw_fd(), 4)
             .map_err(Error::Irq)?;
 
@@ -787,12 +826,6 @@ impl<'a> Vm<'a> {
     /// this VM was constructed.
     pub fn get_memory(&self) -> &GuestMemoryMmap {
         &self.memory
-    }
-
-    /// Gets a reference to the kvm file descriptor owned by this VM.
-    ///
-    pub fn get_fd(&self) -> &VmFd {
-        &self.fd
     }
 
     fn patch_cpuid(cpuid: &mut CpuId) {

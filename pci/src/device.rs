@@ -3,6 +3,7 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use crate::configuration::{self, PciConfiguration};
+use crate::msix::MsixTableEntry;
 use crate::PciInterruptPin;
 use devices::BusDevice;
 use std;
@@ -13,6 +14,8 @@ use vm_memory::{GuestAddress, GuestUsize};
 use vmm_sys_util::EventFd;
 
 pub type IrqClosure = Box<Fn() -> std::result::Result<(), std::io::Error> + Send + Sync>;
+pub type MsixClosure =
+    Box<Fn(MsixTableEntry) -> std::result::Result<(), std::io::Error> + Send + Sync>;
 
 #[derive(Debug)]
 pub enum Error {
@@ -44,7 +47,16 @@ impl Display for Error {
 pub trait PciDevice: BusDevice {
     /// Assign a legacy PCI IRQ to this device.
     /// The device may write to `irq_evt` to trigger an interrupt.
-    fn assign_irq(&mut self, _irq_cb: Arc<IrqClosure>, _irq_num: u32, _irq_pin: PciInterruptPin) {}
+    fn assign_pin_irq(
+        &mut self,
+        _irq_cb: Arc<IrqClosure>,
+        _irq_num: u32,
+        _irq_pin: PciInterruptPin,
+    ) {
+    }
+
+    /// Assign MSI-X to this device.
+    fn assign_msix(&mut self, _msi_cb: Arc<MsixClosure>) {}
 
     /// Allocates the needed PCI BARs space using the `allocate` function which takes a size and
     /// returns an address. Returns a Vec of (GuestAddress, GuestUsize) tuples.
