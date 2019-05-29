@@ -12,6 +12,7 @@ extern crate vmm_sys_util;
 
 mod configuration;
 mod device;
+mod msix;
 mod root;
 
 pub use self::configuration::{
@@ -21,6 +22,7 @@ pub use self::configuration::{
 };
 pub use self::device::Error as PciDeviceError;
 pub use self::device::PciDevice;
+pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry};
 pub use self::root::{PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
 
 /// PCI has four interrupt pins A->D.

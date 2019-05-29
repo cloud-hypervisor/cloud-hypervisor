@@ -22,12 +22,12 @@ extern crate vm_virtio;
 extern crate vmm_sys_util;
 
 use crate::config::VmConfig;
-use kvm_bindings::{kvm_pit_config, kvm_userspace_memory_region, KVM_PIT_SPEAKER_DUMMY};
+use kvm_bindings::{kvm_msi, kvm_pit_config, kvm_userspace_memory_region, KVM_PIT_SPEAKER_DUMMY};
 use kvm_ioctls::*;
 use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::loader::KernelLoader;
 use net_util::Tap;
-use pci::{PciConfigIo, PciDevice, PciInterruptPin, PciRoot};
+use pci::{MsixTableEntry, PciConfigIo, PciDevice, PciRoot};
 use qcow::{self, ImageType, QcowFile};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
@@ -47,6 +47,7 @@ use vmm_sys_util::EventFd;
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
 const X86_64_IRQ_BASE: u32 = 5;
+const DEFAULT_MSIX_VEC_NUM: u16 = 2;
 
 // CPUID feature bits
 const ECX_HYPERVISOR_SHIFT: u32 = 31; // Hypervisor bit.
@@ -259,10 +260,12 @@ impl Vcpu {
                     Ok(())
                 }
                 VcpuExit::MmioRead(addr, data) => {
+                    //println!("###MMIO_R {:?} @ 0x{:x}", data, addr);
                     self.mmio_bus.read(addr as u64, data);
                     Ok(())
                 }
                 VcpuExit::MmioWrite(addr, data) => {
+                    //println!("###MMIO_W {:?} @ 0x{:x}", data, addr);
                     self.mmio_bus.write(addr as u64, data);
                     Ok(())
                 }
@@ -421,8 +424,10 @@ impl DeviceManager {
         pci_root: &mut PciRoot,
         mmio_bus: &mut devices::Bus,
     ) -> DeviceManagerResult<()> {
-        let mut virtio_pci_device = VirtioPciDevice::new(memory, virtio_device)
-            .map_err(DeviceManagerError::VirtioDevice)?;
+        let mut virtio_pci_device =
+            VirtioPciDevice::new(memory, virtio_device, DEFAULT_MSIX_VEC_NUM)
+                .map_err(DeviceManagerError::VirtioDevice)?;
+
         let bars = virtio_pci_device
             .allocate_bars(allocator)
             .map_err(DeviceManagerError::AllocateBars)?;
@@ -434,16 +439,22 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
-        // Assign IRQ to the virtio-pci device
-        let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-        let irq_num = allocator
-            .allocate_irq()
-            .ok_or(DeviceManagerError::AllocateIrq)?;
-        vm_fd
-            .register_irqfd(irqfd.as_raw_fd(), irq_num)
-            .map_err(DeviceManagerError::Irq)?;
-        // Let's use irq line INTA for now.
-        virtio_pci_device.assign_irq(irqfd, irq_num as u32, PciInterruptPin::IntA);
+        let vm_fd_clone = vm_fd.clone();
+
+        let msi_cb = Arc::new(Box::new(move |entry: MsixTableEntry| {
+            let msi_queue = kvm_msi {
+                address_lo: entry.msg_addr_lo,
+                address_hi: entry.msg_addr_hi,
+                data: entry.msg_data,
+                flags: 0u32,
+                devid: 0u32,
+                pad: [0u8; 12],
+            };
+
+            vm_fd_clone.signal_msi(msi_queue).unwrap();
+        }) as Box<Fn(MsixTableEntry) + Send + Sync>);
+
+        virtio_pci_device.assign_msix(msi_cb);
 
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
 

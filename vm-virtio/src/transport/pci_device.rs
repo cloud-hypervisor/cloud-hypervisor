@@ -16,11 +16,13 @@ use byteorder::{ByteOrder, LittleEndian};
 use libc::EFD_NONBLOCK;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use devices::BusDevice;
 use pci::{
-    PciBarConfiguration, PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice,
-    PciDeviceError, PciHeaderType, PciInterruptPin, PciSubclass,
+    MsixCap, MsixConfig, MsixTableEntry, PciBarConfiguration, PciCapability, PciCapabilityID,
+    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciInterruptPin,
+    PciSubclass,
 };
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
@@ -28,8 +30,8 @@ use vmm_sys_util::{EventFd, Result};
 
 use super::VirtioPciCommonConfig;
 use crate::{
-    Queue, VirtioDevice, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
-    DEVICE_FEATURES_OK, DEVICE_INIT,
+    IrqClosure, Queue, VirtioDevice, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
+    DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT,
 };
 
 #[allow(clippy::enum_variant_names)]
@@ -143,7 +145,11 @@ const DEVICE_CONFIG_BAR_OFFSET: u64 = 0x2000;
 const DEVICE_CONFIG_SIZE: u64 = 0x1000;
 const NOTIFICATION_BAR_OFFSET: u64 = 0x3000;
 const NOTIFICATION_SIZE: u64 = 0x1000;
-const CAPABILITY_BAR_SIZE: u64 = 0x4000;
+const MSIX_TABLE_BAR_OFFSET: u64 = 0x6000;
+const MSIX_TABLE_SIZE: u64 = 0x1000;
+const MSIX_PBA_BAR_OFFSET: u64 = 0x7000;
+const MSIX_PBA_SIZE: u64 = 0x1000;
+const CAPABILITY_BAR_SIZE: u64 = 0x8000;
 
 const NOTIFY_OFF_MULTIPLIER: u32 = 4; // A dword per notification address.
 
@@ -157,13 +163,19 @@ pub struct VirtioPciDevice {
     // virtio PCI common configuration
     common_config: VirtioPciCommonConfig,
 
+    // MSI-X config
+    msix_config: Arc<Mutex<MsixConfig>>,
+
+    // Number of MSI-X vectors
+    msix_num: u16,
+
     // Virtio device reference and status
     device: Box<VirtioDevice>,
     device_activated: bool,
 
     // PCI interrupts.
     interrupt_status: Arc<AtomicUsize>,
-    interrupt_evt: Option<EventFd>,
+    interrupt_evt: Option<IrqClosure>,
 
     // virtio queues
     queues: Vec<Queue>,
@@ -178,7 +190,7 @@ pub struct VirtioPciDevice {
 
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
-    pub fn new(memory: GuestMemoryMmap, device: Box<VirtioDevice>) -> Result<Self> {
+    pub fn new(memory: GuestMemoryMmap, device: Box<VirtioDevice>, msix_num: u16) -> Result<Self> {
         let mut queue_evts = Vec::new();
         for _ in device.queue_max_sizes().iter() {
             queue_evts.push(EventFd::new(EFD_NONBLOCK)?)
@@ -210,7 +222,10 @@ impl VirtioPciDevice {
                 device_feature_select: 0,
                 driver_feature_select: 0,
                 queue_select: 0,
+                msix_config: 0,
             },
+            msix_config: Arc::new(Mutex::new(MsixConfig::new(msix_num))),
+            msix_num,
             device,
             device_activated: false,
             interrupt_status: Arc::new(AtomicUsize::new(0)),
@@ -229,10 +244,12 @@ impl VirtioPciDevice {
         self.queue_evts.as_slice()
     }
 
-    /// Gets the event this device uses to interrupt the VM when the used queue is changed.
-    pub fn interrupt_evt(&self) -> Option<&EventFd> {
-        self.interrupt_evt.as_ref()
-    }
+    /*
+        /// Gets the event this device uses to interrupt the VM when the used queue is changed.
+        pub fn interrupt_evt(&self) -> Option<&F> {
+            self.interrupt_evt.as_ref()
+        }
+    */
 
     fn is_driver_ready(&self) -> bool {
         let ready_bits =
@@ -307,15 +324,41 @@ impl VirtioPciDevice {
             .add_capability(&configuration_cap)
             .map_err(PciDeviceError::CapabilitiesSetup)?;
 
+        let msix_cap = MsixCap::new(
+            settings_bar,
+            self.msix_num,
+            MSIX_TABLE_BAR_OFFSET as u32,
+            MSIX_PBA_BAR_OFFSET as u32,
+        );
+        self.configuration
+            .add_capability(&msix_cap)
+            .map_err(PciDeviceError::CapabilitiesSetup)?;
+
         self.settings_bar = settings_bar;
         Ok(())
     }
 }
 
 impl PciDevice for VirtioPciDevice {
-    fn assign_irq(&mut self, irq_evt: EventFd, irq_num: u32, irq_pin: PciInterruptPin) {
+    fn assign_irq(
+        &mut self,
+        irq_evt: Arc<Box<Fn(u16) + Send + Sync>>,
+        irq_num: u32,
+        irq_pin: PciInterruptPin,
+    ) {
         self.configuration.set_irq(irq_num as u8, irq_pin);
         self.interrupt_evt = Some(irq_evt);
+    }
+
+    fn assign_msix(&mut self, msi_cb: Arc<Box<Fn(MsixTableEntry) + Send + Sync>>) {
+        let msix_config = self.msix_config.clone();
+
+        let cb = Arc::new(Box::new(move |idx: u16| {
+            //println!("###SEB MSI-X table entry {}: {:?}", x, msix_config.lock().unwrap().table_entries[x as usize]);
+            (msi_cb)(msix_config.lock().unwrap().table_entries[idx as usize].clone());
+        }) as Box<Fn(u16) + Send + Sync>);
+
+        self.interrupt_evt = Some(cb);
     }
 
     fn config_registers(&self) -> &PciConfiguration {
@@ -355,6 +398,7 @@ impl PciDevice for VirtioPciDevice {
         let virtio_pci_bar_addr = allocator
             .allocate_mmio_addresses(None, CAPABILITY_BAR_SIZE)
             .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
+        //println!("###VIRTIO-PCI ADDR 0x{:x}", (virtio_pci_bar_addr.0 as u64));
         let config = PciBarConfiguration::default()
             .set_register_index(0)
             .set_address(virtio_pci_bar_addr.raw_value())
@@ -408,6 +452,18 @@ impl PciDevice for VirtioPciDevice {
             {
                 // Handled with ioeventfds.
             }
+            o if MSIX_TABLE_BAR_OFFSET <= o && o < MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE => {
+                self.msix_config
+                    .lock()
+                    .unwrap()
+                    .read_table(o - MSIX_TABLE_BAR_OFFSET, data);
+            }
+            o if MSIX_PBA_BAR_OFFSET <= o && o < MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE => {
+                self.msix_config
+                    .lock()
+                    .unwrap()
+                    .read_pba(o - MSIX_PBA_BAR_OFFSET, data);
+            }
             _ => (),
         }
     }
@@ -436,6 +492,18 @@ impl PciDevice for VirtioPciDevice {
             {
                 // Handled with ioeventfds.
             }
+            o if MSIX_TABLE_BAR_OFFSET <= o && o < MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE => {
+                self.msix_config
+                    .lock()
+                    .unwrap()
+                    .write_table(o - MSIX_TABLE_BAR_OFFSET, data);
+            }
+            o if MSIX_PBA_BAR_OFFSET <= o && o < MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE => {
+                self.msix_config
+                    .lock()
+                    .unwrap()
+                    .write_pba(o - MSIX_PBA_BAR_OFFSET, data);
+            }
             _ => (),
         };
 
@@ -443,6 +511,7 @@ impl PciDevice for VirtioPciDevice {
             if let Some(interrupt_evt) = self.interrupt_evt.take() {
                 if self.memory.is_some() {
                     let mem = self.memory.as_ref().unwrap().clone();
+                    //println!("### VIRTIO ACTIVATE 1");
                     self.device
                         .activate(
                             mem,
@@ -451,7 +520,8 @@ impl PciDevice for VirtioPciDevice {
                             self.queues.clone(),
                             self.queue_evts.split_off(0),
                         )
-                        .expect("Failed to activate device");;
+                        .expect("Failed to activate device");
+                    //println!("### VIRTIO ACTIVATE 2");
                     self.device_activated = true;
                 }
             }
@@ -460,6 +530,7 @@ impl PciDevice for VirtioPciDevice {
         // Device has been reset by the driver
         if self.device_activated && self.is_driver_init() {
             if let Some((interrupt_evt, mut queue_evts)) = self.device.reset() {
+                //println!("### VIRTIO RESET");
                 // Upon reset the device returns its interrupt EventFD and it's queue EventFDs
                 self.interrupt_evt = Some(interrupt_evt);
                 self.queue_evts.append(&mut queue_evts);

@@ -40,6 +40,7 @@ pub struct VirtioPciCommonConfig {
     pub device_feature_select: u32,
     pub driver_feature_select: u32,
     pub queue_select: u16,
+    pub msix_config: u16,
 }
 
 impl VirtioPciCommonConfig {
@@ -119,10 +120,11 @@ impl VirtioPciCommonConfig {
     fn read_common_config_word(&self, offset: u64, queues: &[Queue]) -> u16 {
         debug!("read_common_config_word: offset 0x{:x}", offset);
         match offset {
-            0x10 => 0,                   // TODO msi-x (crbug/854765): self.msix_config,
+            0x10 => self.msix_config,
             0x12 => queues.len() as u16, // num_queues
             0x16 => self.queue_select,
             0x18 => self.with_queue(queues, |q| q.size).unwrap_or(0),
+            0x1a => self.with_queue(queues, |q| q.msix_vector).unwrap_or(0),
             0x1c => {
                 if self.with_queue(queues, |q| q.ready).unwrap_or(false) {
                     1
@@ -141,10 +143,10 @@ impl VirtioPciCommonConfig {
     fn write_common_config_word(&mut self, offset: u64, value: u16, queues: &mut Vec<Queue>) {
         debug!("write_common_config_word: offset 0x{:x}", offset);
         match offset {
-            0x10 => (), // TODO msi-x (crbug/854765): self.msix_config = value,
+            0x10 => self.msix_config = value,
             0x16 => self.queue_select = value,
             0x18 => self.with_queue_mut(queues, |q| q.size = value),
-            0x1a => (), // TODO msi-x (crbug/854765): self.with_queue_mut(queues, |q| q.msix_vector = v),
+            0x1a => self.with_queue_mut(queues, |q| q.msix_vector = value),
             0x1c => self.with_queue_mut(queues, |q| q.ready = value == 1),
             _ => {
                 warn!("invalid virtio register word write: 0x{:x}", offset);

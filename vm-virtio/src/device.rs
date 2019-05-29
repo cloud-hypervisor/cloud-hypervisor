@@ -13,6 +13,8 @@ use std::sync::Arc;
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::EventFd;
 
+pub type IrqClosure = Arc<Box<Fn(u16) + Send + Sync>>;
+
 /// Trait for virtio devices to be driven by a virtio transport.
 ///
 /// The lifecycle of a virtio device is to be moved to a virtio transport, which will then query the
@@ -46,7 +48,7 @@ pub trait VirtioDevice: Send {
     fn activate(
         &mut self,
         mem: GuestMemoryMmap,
-        interrupt_evt: EventFd,
+        interrupt_evt: IrqClosure,
         status: Arc<AtomicUsize>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
@@ -54,7 +56,7 @@ pub trait VirtioDevice: Send {
 
     /// Optionally deactivates this device and returns ownership of the guest memory map, interrupt
     /// event, and queue events.
-    fn reset(&mut self) -> Option<(EventFd, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<(IrqClosure, Vec<EventFd>)> {
         None
     }
 

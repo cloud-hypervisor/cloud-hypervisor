@@ -218,6 +218,9 @@ pub struct Queue {
     /// Inidcates if the queue is finished with configuration
     pub ready: bool,
 
+    /// MSI-X vector of the queue
+    pub msix_vector: u16,
+
     /// Guest physical address of the descriptor table
     pub desc_table: GuestAddress,
 
@@ -238,6 +241,7 @@ impl Queue {
             max_size,
             size: max_size,
             ready: false,
+            msix_vector: 0,
             desc_table: GuestAddress(0),
             avail_ring: GuestAddress(0),
             used_ring: GuestAddress(0),

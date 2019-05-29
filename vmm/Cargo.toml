@@ -9,7 +9,7 @@ arch = { path = "../arch" }
 devices = { path = "../devices" }
 epoll = "=4.0.1"
 kvm-bindings = "0.1"
-kvm-ioctls = "0.1.0"
+kvm-ioctls = { git = "https://github.com/sboeuf/kvm-ioctls", branch = "kvm_signal_msi" }
 libc = ">=0.2.39"
 log = "*"
 net_util = { path = "../net_util" }

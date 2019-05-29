@@ -36,7 +36,7 @@ struct RngEpollHandler {
     mem: GuestMemoryMmap,
     random_file: File,
     interrupt_status: Arc<AtomicUsize>,
-    interrupt_evt: EventFd,
+    interrupt_evt: Arc<Box<Fn(u16) + Send + Sync>>,
     queue_evt: EventFd,
     kill_evt: EventFd,
 }
@@ -79,10 +79,8 @@ impl RngEpollHandler {
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
         self.interrupt_status
             .fetch_or(INTERRUPT_STATUS_USED_RING as usize, Ordering::SeqCst);
-        self.interrupt_evt.write(1).map_err(|e| {
-            error!("Failed to signal used queue: {:?}", e);
-            DeviceError::FailedSignalingUsedQueue(e)
-        })
+        (self.interrupt_evt)(self.queues[0].msix_vector);
+        Ok(())
     }
 
     fn run(&mut self) -> result::Result<(), DeviceError> {
@@ -228,7 +226,7 @@ impl VirtioDevice for Rng {
     fn activate(
         &mut self,
         mem: GuestMemoryMmap,
-        interrupt_evt: EventFd,
+        interrupt_evt: Arc<Box<Fn(u16) + Send + Sync>>,
         status: Arc<AtomicUsize>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
