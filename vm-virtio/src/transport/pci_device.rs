@@ -16,11 +16,13 @@ use byteorder::{ByteOrder, LittleEndian};
 use libc::EFD_NONBLOCK;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use devices::BusDevice;
 use pci::{
-    IrqClosure, PciBarConfiguration, PciCapability, PciCapabilityID, PciClassCode,
-    PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciInterruptPin, PciSubclass,
+    IrqClosure, MsixCap, MsixClosure, MsixConfig, PciBarConfiguration, PciCapability,
+    PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
+    PciInterruptPin, PciSubclass,
 };
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
@@ -143,7 +145,11 @@ const DEVICE_CONFIG_BAR_OFFSET: u64 = 0x2000;
 const DEVICE_CONFIG_SIZE: u64 = 0x1000;
 const NOTIFICATION_BAR_OFFSET: u64 = 0x3000;
 const NOTIFICATION_SIZE: u64 = 0x1000;
-const CAPABILITY_BAR_SIZE: u64 = 0x4000;
+const MSIX_TABLE_BAR_OFFSET: u64 = 0x6000;
+const MSIX_TABLE_SIZE: u64 = 0x1000;
+const MSIX_PBA_BAR_OFFSET: u64 = 0x7000;
+const MSIX_PBA_SIZE: u64 = 0x1000;
+const CAPABILITY_BAR_SIZE: u64 = 0x8000;
 
 const NOTIFY_OFF_MULTIPLIER: u32 = 4; // A dword per notification address.
 
@@ -156,6 +162,12 @@ pub struct VirtioPciDevice {
 
     // virtio PCI common configuration
     common_config: VirtioPciCommonConfig,
+
+    // MSI-X config
+    msix_config: Arc<Mutex<MsixConfig>>,
+
+    // Number of MSI-X vectors
+    msix_num: u16,
 
     // Virtio device reference and status
     device: Box<VirtioDevice>,
@@ -178,7 +190,7 @@ pub struct VirtioPciDevice {
 
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
-    pub fn new(memory: GuestMemoryMmap, device: Box<VirtioDevice>) -> Result<Self> {
+    pub fn new(memory: GuestMemoryMmap, device: Box<VirtioDevice>, msix_num: u16) -> Result<Self> {
         let mut queue_evts = Vec::new();
         for _ in device.queue_max_sizes().iter() {
             queue_evts.push(EventFd::new(EFD_NONBLOCK)?)
@@ -210,7 +222,10 @@ impl VirtioPciDevice {
                 device_feature_select: 0,
                 driver_feature_select: 0,
                 queue_select: 0,
+                msix_config: 0,
             },
+            msix_config: Arc::new(Mutex::new(MsixConfig::new(msix_num))),
+            msix_num,
             device,
             device_activated: false,
             interrupt_status: Arc::new(AtomicUsize::new(0)),
@@ -302,16 +317,36 @@ impl VirtioPciDevice {
             .add_capability(&configuration_cap)
             .map_err(PciDeviceError::CapabilitiesSetup)?;
 
+        let msix_cap = MsixCap::new(
+            settings_bar,
+            self.msix_num,
+            MSIX_TABLE_BAR_OFFSET as u32,
+            MSIX_PBA_BAR_OFFSET as u32,
+        );
+        self.configuration
+            .add_capability(&msix_cap)
+            .map_err(PciDeviceError::CapabilitiesSetup)?;
+
         self.settings_bar = settings_bar;
         Ok(())
     }
 }
 
 impl PciDevice for VirtioPciDevice {
-    fn assign_irq(&mut self, irq_cb: Arc<IrqClosure>, irq_num: u32, irq_pin: PciInterruptPin) {
+    fn assign_pin_irq(&mut self, irq_cb: Arc<IrqClosure>, irq_num: u32, irq_pin: PciInterruptPin) {
         self.configuration.set_irq(irq_num as u8, irq_pin);
 
         let cb = Arc::new(Box::new(move |_queue: &Queue| (irq_cb)()) as VirtioInterrupt);
+
+        self.interrupt_cb = Some(cb);
+    }
+
+    fn assign_msix(&mut self, msi_cb: Arc<MsixClosure>) {
+        let msix_config = self.msix_config.clone();
+
+        let cb = Arc::new(Box::new(move |queue: &Queue| {
+            (msi_cb)(msix_config.lock().unwrap().table_entries[queue.vector as usize].clone())
+        }) as VirtioInterruptClosure);
 
         self.interrupt_cb = Some(cb);
     }
@@ -406,6 +441,18 @@ impl PciDevice for VirtioPciDevice {
             {
                 // Handled with ioeventfds.
             }
+            o if MSIX_TABLE_BAR_OFFSET <= o && o < MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE => {
+                self.msix_config
+                    .lock()
+                    .unwrap()
+                    .read_table(o - MSIX_TABLE_BAR_OFFSET, data);
+            }
+            o if MSIX_PBA_BAR_OFFSET <= o && o < MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE => {
+                self.msix_config
+                    .lock()
+                    .unwrap()
+                    .read_pba(o - MSIX_PBA_BAR_OFFSET, data);
+            }
             _ => (),
         }
     }
@@ -433,6 +480,18 @@ impl PciDevice for VirtioPciDevice {
                 && o < NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE =>
             {
                 // Handled with ioeventfds.
+            }
+            o if MSIX_TABLE_BAR_OFFSET <= o && o < MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE => {
+                self.msix_config
+                    .lock()
+                    .unwrap()
+                    .write_table(o - MSIX_TABLE_BAR_OFFSET, data);
+            }
+            o if MSIX_PBA_BAR_OFFSET <= o && o < MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE => {
+                self.msix_config
+                    .lock()
+                    .unwrap()
+                    .write_pba(o - MSIX_PBA_BAR_OFFSET, data);
             }
             _ => (),
         };
