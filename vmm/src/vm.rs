@@ -546,6 +546,7 @@ pub struct Vm<'a> {
     cpuid: CpuId,
     config: VmConfig<'a>,
     epoll: EpollContext,
+    on_tty: bool,
 }
 
 impl<'a> Vm<'a> {
@@ -609,7 +610,11 @@ impl<'a> Vm<'a> {
 
         // Let's add our STDIN fd.
         let mut epoll = EpollContext::new().map_err(Error::EpollError)?;
-        epoll.add_stdin().map_err(Error::EpollError)?;
+
+        let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
+        if on_tty {
+            epoll.add_stdin().map_err(Error::EpollError)?;
+        }
 
         // Let's add an exit event.
         epoll
@@ -627,6 +632,7 @@ impl<'a> Vm<'a> {
             cpuid,
             config,
             epoll,
+            on_tty,
         })
     }
 
@@ -668,11 +674,14 @@ impl<'a> Vm<'a> {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
         let epoll_fd = self.epoll.as_raw_fd();
 
-        let stdin = io::stdin();
-        let stdin_lock = stdin.lock();
-        stdin_lock.set_raw_mode().map_err(Error::SetTerminalRaw)?;
+        if self.on_tty {
+            io::stdin()
+                .lock()
+                .set_raw_mode()
+                .map_err(Error::SetTerminalRaw)?;
+        }
 
-        loop {
+        'outer: loop {
             let num_events =
                 epoll::wait(epoll_fd, -1, &mut events[..]).map_err(Error::EpollError)?;
 
@@ -685,17 +694,14 @@ impl<'a> Vm<'a> {
                             // Consume the event.
                             self.devices.exit_evt.read().map_err(Error::EventFd)?;
 
-                            // Don't forget to set the terminal in canonical mode
-                            // before to exit.
-                            stdin_lock
-                                .set_canon_mode()
-                                .map_err(Error::SetTerminalCanon)?;
-
-                            return Ok(());
+                            break 'outer;
                         }
                         EpollDispatch::Stdin => {
                             let mut out = [0u8; 64];
-                            let count = stdin_lock.read_raw(&mut out).map_err(Error::Serial)?;
+                            let count = io::stdin()
+                                .lock()
+                                .read_raw(&mut out)
+                                .map_err(Error::Serial)?;
 
                             self.devices
                                 .serial
@@ -708,6 +714,17 @@ impl<'a> Vm<'a> {
                 }
             }
         }
+
+        if self.on_tty {
+            // Don't forget to set the terminal in canonical mode
+            // before to exit.
+            io::stdin()
+                .lock()
+                .set_canon_mode()
+                .map_err(Error::SetTerminalCanon)?;
+        }
+
+        Ok(())
     }
 
     pub fn start(&mut self, entry_addr: GuestAddress) -> Result<()> {
