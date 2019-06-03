@@ -573,7 +573,7 @@ impl<'a> Vm<'a> {
                 };
 
                 // Safe because the guest regions are guaranteed not to overlap.
-                fd.set_user_memory_region(mem_region)
+                unsafe { fd.set_user_memory_region(mem_region) }
             })
             .map_err(|_| Error::GuestMemory(MmapError::NoMemoryRegion))?;
 
@@ -838,7 +838,7 @@ pub fn test_vm() {
         };
 
         // Safe because the guest regions are guaranteed not to overlap.
-        vm_fd.set_user_memory_region(mem_region)
+        unsafe { vm_fd.set_user_memory_region(mem_region) }
     })
     .expect("Cannot configure guest memory");
     mem.write_slice(&code, load_addr)
