@@ -1,0 +1,155 @@
+steps:
+  - label: "build-gnu-x86"
+    commands:
+     - cargo build --release
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "build-gnu-x86-mmap"
+    commands:
+     - cargo build --release --features=backend-mmap
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "build-gnu-arm-mmap"
+    commands:
+     - cargo build --release --features=backend-mmap
+    retry:
+      automatic: false
+    agents:
+      platform: arm.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "build-musl-arm-mmap"
+    commands:
+     - cargo build --release --features=backend-mmap --target aarch64-unknown-linux-musl
+    retry:
+      automatic: false
+    agents:
+      platform: arm.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "style"
+    command: cargo fmt --all -- --check
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "unittests-gnu-x86"
+    commands:
+     - cargo test --all-features
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "unittests-musl-x86"
+    commands:
+     - cargo test --all-features --target x86_64-unknown-linux-musl
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "unittests-gnu-arm"
+    commands:
+     - cargo test --all-features
+    retry:
+      automatic: false
+    agents:
+      platform: arm.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "unittests-musl-arm"
+    commands:
+     - cargo test --all-features --target aarch64-unknown-linux-musl
+    retry:
+      automatic: false
+    agents:
+      platform: arm.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "clippy-x86"
+    commands:
+     - cargo clippy --all
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "check-warnings-x86"
+    commands:
+      - RUSTFLAGS="-D warnings" cargo check --all-targets
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "check-warnings-arm"
+    commands:
+      - RUSTFLAGS="-D warnings" cargo check --all-targets
+    retry:
+      automatic: false
+    agents:
+      platform: arm.metal
+      os: linux
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true

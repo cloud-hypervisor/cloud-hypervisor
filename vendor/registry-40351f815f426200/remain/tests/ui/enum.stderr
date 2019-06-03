@@ -1,0 +1,5 @@
+error: Bbb should sort before Ccc
+ --> $DIR/enum.rs:8:5
+  |
+8 |     Bbb(u8, u8),
+  |     ^^^

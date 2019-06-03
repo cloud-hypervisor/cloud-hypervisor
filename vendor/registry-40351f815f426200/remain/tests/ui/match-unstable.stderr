@@ -1,0 +1,5 @@
+error: E::Bbb should sort before E::Ccc
+  --> $DIR/match-unstable.rs:15:5
+   |
+15 |     #[sorted]
+   |     ^^^^^^^^^

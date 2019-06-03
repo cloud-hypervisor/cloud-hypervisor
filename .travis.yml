@@ -11,4 +11,4 @@ script:
   - cargo build --release
   - cargo test
   - cargo clippy --all-targets --all-features -- -D warnings
-  - find . -name "*.rs" | xargs rustfmt --check
+  - find . -name "*.rs" | grep -v "vendor/" | xargs rustfmt --check

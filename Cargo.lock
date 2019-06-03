@@ -75,7 +75,10 @@ name = "cloud-hypervisor"
 version = "0.1.0"
 dependencies = [
  "clap 2.27.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "linux-loader 0.1.0 (git+https://github.com/bjzhjing/linux-loader?rev=2b95f1e1958a2b6399b590f64344cab5b4a6d608)",
+ "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory?rev=281b8bd6cd2927f7a65130194b203a1c2b0ad2e3)",
  "vmm 0.1.0",
+ "vmm-sys-util 0.1.0 (git+https://github.com/rust-vmm/vmm-sys-util?rev=60fe35bea0bdce8b36c6186a740878880f944bdc)",
 ]
 
 [[package]]
@@ -134,6 +137,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "linux-loader"
 version = "0.1.0"
 source = "git+https://github.com/bjzhjing/linux-loader#55c985a16d63dceccbd30952f0e93a73b25a8191"
+dependencies = [
+ "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
+]
+
+[[package]]
+name = "linux-loader"
+version = "0.1.0"
+source = "git+https://github.com/bjzhjing/linux-loader?rev=2b95f1e1958a2b6399b590f64344cab5b4a6d608#2b95f1e1958a2b6399b590f64344cab5b4a6d608"
 dependencies = [
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
 ]
@@ -434,6 +445,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vm-memory"
+version = "0.1.0"
+source = "git+https://github.com/rust-vmm/vm-memory?rev=281b8bd6cd2927f7a65130194b203a1c2b0ad2e3#281b8bd6cd2927f7a65130194b203a1c2b0ad2e3"
+dependencies = [
+ "libc 0.2.58 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "vm-virtio"
 version = "0.1.0"
 dependencies = [
@@ -482,6 +501,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmm-sys-util"
+version = "0.1.0"
+source = "git+https://github.com/rust-vmm/vmm-sys-util?rev=60fe35bea0bdce8b36c6186a740878880f944bdc#60fe35bea0bdce8b36c6186a740878880f944bdc"
+dependencies = [
+ "libc 0.2.58 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -516,6 +543,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum kvm-ioctls 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "f87b0c7322658f94e9fcf661146c9761a487813f3154e6a67a24fc59c68f5306"
 "checksum libc 0.2.58 (registry+https://github.com/rust-lang/crates.io-index)" = "6281b86796ba5e4366000be6e9e18bf35580adf9e63fbe2294aadb587613a319"
 "checksum linux-loader 0.1.0 (git+https://github.com/bjzhjing/linux-loader)" = "<none>"
+"checksum linux-loader 0.1.0 (git+https://github.com/bjzhjing/linux-loader?rev=2b95f1e1958a2b6399b590f64344cab5b4a6d608)" = "<none>"
 "checksum log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "c84ec4b527950aa83a329754b01dbe3f58361d1c5efacd1f6d68c494d08a17c6"
 "checksum numtoa 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b8f8bdf33df195859076e54ab11ee78a1b208382d3a26ec40d142ffc1ecc49ef"
 "checksum proc-macro2 0.4.30 (registry+https://github.com/rust-lang/crates.io-index)" = "cf3d2011ab5c909338f7887f4fc896d35932e29146c12c8d01da6b22a80ba759"
@@ -545,7 +573,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum unicode-xid 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fc72304796d0818e357ead4e000d19c9c174ab23dc11093ac919054d20a6a7fc"
 "checksum vec_map 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)" = "05c78687fb1a80548ae3250346c3db86a80a7cdd77bda190189f2d0a0987c81a"
 "checksum vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)" = "<none>"
+"checksum vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory?rev=281b8bd6cd2927f7a65130194b203a1c2b0ad2e3)" = "<none>"
 "checksum vmm-sys-util 0.1.0 (git+https://github.com/liujing2/vmm-sys-util)" = "<none>"
+"checksum vmm-sys-util 0.1.0 (git+https://github.com/rust-vmm/vmm-sys-util?rev=60fe35bea0bdce8b36c6186a740878880f944bdc)" = "<none>"
 "checksum winapi 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)" = "f10e386af2b13e47c89e7236a7a14a086791a2b88ebad6df9bf42040195cf770"
 "checksum winapi-i686-pc-windows-gnu 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
 "checksum winapi-x86_64-pc-windows-gnu 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
