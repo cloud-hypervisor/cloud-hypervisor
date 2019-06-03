@@ -8,3 +8,15 @@ edition = "2018"
 clap = "=2.27.1"
 
 vmm = { path = "vmm" }
+
+[dependencies.vm-memory]
+git = "https://github.com/rust-vmm/vm-memory"
+rev = "281b8bd6cd2927f7a65130194b203a1c2b0ad2e3"
+
+[dependencies.vmm-sys-util]
+git = "https://github.com/rust-vmm/vmm-sys-util"
+rev = "60fe35bea0bdce8b36c6186a740878880f944bdc"
+
+[dependencies.linux-loader]
+git = "https://github.com/bjzhjing/linux-loader"
+rev = "2b95f1e1958a2b6399b590f64344cab5b4a6d608"

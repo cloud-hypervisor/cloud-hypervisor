@@ -1,0 +1,17 @@
+[package]
+name = "vm-memory"
+version = "0.1.0"
+authors = ["Liu Jiang <gerry@linux.alibaba.com>"]
+repository = "https://github.com/rust-vmm/vm-memory"
+license = "Apache-2.0"
+
+[features]
+default = []
+backend-mmap = []
+
+[dependencies]
+libc = ">=0.2.39"
+
+[dev-dependencies]
+matches = ">=0"
+tempfile = ">=3.0.2"

@@ -1,0 +1,75 @@
+steps:
+  - label: "build-gnu-x86"
+    commands:
+     - cargo build --release
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+
+  - label: "build-gnu-arm"
+    commands:
+     - cargo build --release
+    retry:
+      automatic: false
+    agents:
+      platform: arm.metal
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+          
+  - label: "style"
+    command: cargo fmt --all -- --check
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+  
+  - label: "unittests-gnu-x86"
+    commands:
+     - cargo test
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+    plugins:
+      - docker#v3.0.1:
+          privileged: true
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+          tmpfs: [ "/tmp:exec" ]
+          
+  - label: "unittests-gnu-arm"
+    commands:
+     - cargo test
+    retry:
+      automatic: false
+    agents:
+      platform: arm.metal
+    plugins:
+      - docker#v3.0.1:
+          privileged: true
+          image: "fandree/rust-vmm-dev"
+          always-pull: true
+          tmpfs: [ "/tmp:exec" ]
+  
+  - label: "clippy-x86"
+    commands:
+     - cargo clippy --all -- -D warnings
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+    plugins:
+      - docker#v3.0.1:
+          image: "fandree/rust-vmm-dev"
+          always-pull: true

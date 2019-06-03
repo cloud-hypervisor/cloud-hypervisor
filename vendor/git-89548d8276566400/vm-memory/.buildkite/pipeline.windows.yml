@@ -1,0 +1,79 @@
+steps:
+  - label: "build-msvc-x86"
+    commands:
+     - cargo build --release
+    retry:
+      automatic: true
+    agents:
+      platform: x86_64
+      os: windows
+    plugins:
+      - petrutlucian94/docker#v3.1.1:
+          image: "lpetrut/rust_win_buildtools"
+          always-pull: true
+
+  - label: "build-msvc-x86-mmap"
+    commands:
+     - cargo build --release --features=backend-mmap
+    retry:
+      automatic: true
+    agents:
+      platform: x86_64
+      os: windows
+    plugins:
+      - petrutlucian94/docker#v3.1.1:
+          image: "lpetrut/rust_win_buildtools"
+          always-pull: true
+
+  - label: "style"
+    command: cargo fmt --all -- --check
+    retry:
+      automatic: true
+    agents:
+      platform: x86_64
+      os: windows
+    plugins:
+      - petrutlucian94/docker#v3.1.1:
+          image: "lpetrut/rust_win_buildtools"
+          always-pull: true
+
+  - label: "unittests-msvc-x86"
+    commands:
+     - cargo test --all-features
+    retry:
+      automatic: true
+    agents:
+      platform: x86_64
+      os: windows
+    plugins:
+      - petrutlucian94/docker#v3.1.1:
+          image: "lpetrut/rust_win_buildtools"
+          always-pull: true
+
+  - label: "clippy-x86"
+    commands:
+     - cargo clippy --all
+    retry:
+      automatic: true
+    agents:
+      platform: x86_64
+      os: windows
+    plugins:
+      - petrutlucian94/docker#v3.1.1:
+          image: "lpetrut/rust_win_buildtools"
+          always-pull: true
+
+  - label: "check-warnings-x86"
+    commands:
+      - cargo check --all-targets
+    retry:
+      automatic: true
+    agents:
+      platform: x86_64
+      os: windows
+    plugins:
+      - petrutlucian94/docker#v3.1.1:
+          image: "lpetrut/rust_win_buildtools"
+          always-pull: true
+          environment:
+            - "RUSTFLAGS=-D warnings"

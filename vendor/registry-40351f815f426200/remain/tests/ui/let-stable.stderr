@@ -1,0 +1,5 @@
+error: E::Bbb should sort before E::Ccc
+  --> $DIR/let-stable.rs:17:9
+   |
+17 |         E::Bbb(_, _) => {}
+   |         ^^^^^^

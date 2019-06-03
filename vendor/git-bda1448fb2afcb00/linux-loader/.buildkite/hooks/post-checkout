@@ -1,0 +1,5 @@
+#!/bin/bash
+
+wget http://mirror.centos.org/centos/7/os/x86_64/Packages/kernel-3.10.0-957.el7.x86_64.rpm
+rpm2cpio kernel-3.10.0-957.el7.x86_64.rpm | cpio -idmv ./boot/vmlinuz-3.10.0-957.el7.x86_64
+
