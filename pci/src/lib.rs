@@ -20,7 +20,7 @@ pub use self::configuration::{
     PciSubclass,
 };
 pub use self::device::Error as PciDeviceError;
-pub use self::device::PciDevice;
+pub use self::device::{IrqClosure, PciDevice};
 pub use self::root::{PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
 
 /// PCI has four interrupt pins A->D.

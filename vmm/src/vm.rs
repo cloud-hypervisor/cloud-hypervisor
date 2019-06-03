@@ -27,7 +27,7 @@ use kvm_ioctls::*;
 use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::loader::KernelLoader;
 use net_util::Tap;
-use pci::{PciConfigIo, PciDevice, PciInterruptPin, PciRoot};
+use pci::{IrqClosure, PciConfigIo, PciDevice, PciInterruptPin, PciRoot};
 use qcow::{self, ImageType, QcowFile};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
@@ -423,6 +423,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<()> {
         let mut virtio_pci_device = VirtioPciDevice::new(memory, virtio_device)
             .map_err(DeviceManagerError::VirtioDevice)?;
+
         let bars = virtio_pci_device
             .allocate_bars(allocator)
             .map_err(DeviceManagerError::AllocateBars)?;
@@ -442,8 +443,11 @@ impl DeviceManager {
         vm_fd
             .register_irqfd(irqfd.as_raw_fd(), irq_num)
             .map_err(DeviceManagerError::Irq)?;
+
+        let irq_cb = Arc::new(Box::new(move || irqfd.write(1)) as IrqClosure);
+
         // Let's use irq line INTA for now.
-        virtio_pci_device.assign_irq(irqfd, irq_num as u32, PciInterruptPin::IntA);
+        virtio_pci_device.assign_irq(irq_cb, irq_num as u32, PciInterruptPin::IntA);
 
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
 

@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use devices::BusDevice;
 use pci::{
-    PciBarConfiguration, PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice,
-    PciDeviceError, PciHeaderType, PciInterruptPin, PciSubclass,
+    IrqClosure, PciBarConfiguration, PciCapability, PciCapabilityID, PciClassCode,
+    PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciInterruptPin, PciSubclass,
 };
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
@@ -28,8 +28,8 @@ use vmm_sys_util::{EventFd, Result};
 
 use super::VirtioPciCommonConfig;
 use crate::{
-    Queue, VirtioDevice, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
-    DEVICE_FEATURES_OK, DEVICE_INIT,
+    Queue, VirtioDevice, VirtioInterrupt, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
+    DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT,
 };
 
 #[allow(clippy::enum_variant_names)]
@@ -163,7 +163,7 @@ pub struct VirtioPciDevice {
 
     // PCI interrupts.
     interrupt_status: Arc<AtomicUsize>,
-    interrupt_evt: Option<EventFd>,
+    interrupt_cb: Option<Arc<VirtioInterrupt>>,
 
     // virtio queues
     queues: Vec<Queue>,
@@ -214,7 +214,7 @@ impl VirtioPciDevice {
             device,
             device_activated: false,
             interrupt_status: Arc::new(AtomicUsize::new(0)),
-            interrupt_evt: None,
+            interrupt_cb: None,
             queues,
             queue_evts,
             memory: Some(memory),
@@ -227,11 +227,6 @@ impl VirtioPciDevice {
     /// value being written equals the index of the event in this list.
     pub fn queue_evts(&self) -> &[EventFd] {
         self.queue_evts.as_slice()
-    }
-
-    /// Gets the event this device uses to interrupt the VM when the used queue is changed.
-    pub fn interrupt_evt(&self) -> Option<&EventFd> {
-        self.interrupt_evt.as_ref()
     }
 
     fn is_driver_ready(&self) -> bool {
@@ -313,9 +308,12 @@ impl VirtioPciDevice {
 }
 
 impl PciDevice for VirtioPciDevice {
-    fn assign_irq(&mut self, irq_evt: EventFd, irq_num: u32, irq_pin: PciInterruptPin) {
+    fn assign_irq(&mut self, irq_cb: Arc<IrqClosure>, irq_num: u32, irq_pin: PciInterruptPin) {
         self.configuration.set_irq(irq_num as u8, irq_pin);
-        self.interrupt_evt = Some(irq_evt);
+
+        let cb = Arc::new(Box::new(move |_queue: &Queue| (irq_cb)()) as VirtioInterrupt);
+
+        self.interrupt_cb = Some(cb);
     }
 
     fn config_registers(&self) -> &PciConfiguration {
@@ -440,18 +438,18 @@ impl PciDevice for VirtioPciDevice {
         };
 
         if !self.device_activated && self.is_driver_ready() && self.are_queues_valid() {
-            if let Some(interrupt_evt) = self.interrupt_evt.take() {
+            if let Some(interrupt_cb) = self.interrupt_cb.take() {
                 if self.memory.is_some() {
                     let mem = self.memory.as_ref().unwrap().clone();
                     self.device
                         .activate(
                             mem,
-                            interrupt_evt,
+                            interrupt_cb,
                             self.interrupt_status.clone(),
                             self.queues.clone(),
                             self.queue_evts.split_off(0),
                         )
-                        .expect("Failed to activate device");;
+                        .expect("Failed to activate device");
                     self.device_activated = true;
                 }
             }
@@ -459,9 +457,9 @@ impl PciDevice for VirtioPciDevice {
 
         // Device has been reset by the driver
         if self.device_activated && self.is_driver_init() {
-            if let Some((interrupt_evt, mut queue_evts)) = self.device.reset() {
+            if let Some((interrupt_cb, mut queue_evts)) = self.device.reset() {
                 // Upon reset the device returns its interrupt EventFD and it's queue EventFDs
-                self.interrupt_evt = Some(interrupt_evt);
+                self.interrupt_cb = Some(interrupt_cb);
                 self.queue_evts.append(&mut queue_evts);
 
                 self.device_activated = false;
