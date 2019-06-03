@@ -26,6 +26,7 @@ use super::{
     ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
     VirtioDeviceType, INTERRUPT_STATUS_USED_RING,
 };
+use crate::VirtioInterrupt;
 use virtio_bindings::virtio_blk::*;
 use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 use vmm_sys_util::EventFd;
@@ -325,7 +326,7 @@ struct BlockEpollHandler<T: DiskFile> {
     disk_image: T,
     disk_nsectors: u64,
     interrupt_status: Arc<AtomicUsize>,
-    interrupt_evt: EventFd,
+    interrupt_cb: Arc<VirtioInterrupt>,
     disk_image_id: Vec<u8>,
 }
 
@@ -374,10 +375,10 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         used_count > 0
     }
 
-    fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
+    fn signal_used_queue(&self, queue_index: usize) -> result::Result<(), DeviceError> {
         self.interrupt_status
             .fetch_or(INTERRUPT_STATUS_USED_RING as usize, Ordering::SeqCst);
-        self.interrupt_evt.write(1).map_err(|e| {
+        (self.interrupt_cb)(&self.queues[queue_index]).map_err(|e| {
             error!("Failed to signal used queue: {:?}", e);
             DeviceError::FailedSignalingUsedQueue(e)
         })
@@ -435,7 +436,7 @@ impl<T: DiskFile> BlockEpollHandler<T> {
                             error!("Failed to get queue event: {:?}", e);
                             break 'epoll;
                         } else if self.process_queue(0) {
-                            if let Err(e) = self.signal_used_queue() {
+                            if let Err(e) = self.signal_used_queue(0) {
                                 error!("Failed to signal used queue: {:?}", e);
                                 break 'epoll;
                             }
@@ -466,7 +467,7 @@ pub struct Block<T: DiskFile> {
     acked_features: u64,
     config_space: Vec<u8>,
     queue_evt: Option<EventFd>,
-    interrupt_evt: Option<EventFd>,
+    interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
 pub fn build_config_space(disk_size: u64) -> Vec<u8> {
@@ -514,7 +515,7 @@ impl<T: DiskFile> Block<T> {
             acked_features: 0u64,
             config_space: build_config_space(disk_size),
             queue_evt: None,
-            interrupt_evt: None,
+            interrupt_cb: None,
         })
     }
 }
@@ -598,7 +599,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
     fn activate(
         &mut self,
         mem: GuestMemoryMmap,
-        interrupt_evt: EventFd,
+        interrupt_cb: Arc<VirtioInterrupt>,
         status: Arc<AtomicUsize>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
@@ -627,16 +628,8 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 
             // Save the interrupt EventFD as we need to return it on reset
             // but clone it to pass into the thread.
-            self.interrupt_evt = Some(interrupt_evt);
-            let interrupt_evt = self
-                .interrupt_evt
-                .as_ref()
-                .unwrap()
-                .try_clone()
-                .map_err(|e| {
-                    error!("failed to clone interrupt EventFd: {}", e);
-                    ActivateError::BadActivate
-                })?;
+            self.interrupt_cb = Some(interrupt_cb);
+            let interrupt_cb = self.interrupt_cb.as_ref().unwrap().clone();
 
             // Save the queue EventFD as we need to return it on reset
             // but clone it to pass into the thread.
@@ -652,7 +645,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                 disk_image,
                 disk_nsectors: self.disk_nsectors,
                 interrupt_status: status,
-                interrupt_evt,
+                interrupt_cb,
                 disk_image_id,
             };
 
@@ -670,7 +663,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         Err(ActivateError::BadActivate)
     }
 
-    fn reset(&mut self) -> Option<(EventFd, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
@@ -678,7 +671,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 
         // Return the interrupt and queue EventFDs
         Some((
-            self.interrupt_evt.take().unwrap(),
+            self.interrupt_cb.take().unwrap(),
             vec![self.queue_evt.take().unwrap()],
         ))
     }

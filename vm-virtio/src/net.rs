@@ -28,6 +28,7 @@ use super::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
     INTERRUPT_STATUS_USED_RING,
 };
+use crate::VirtioInterrupt;
 use net_util::{MacAddr, Tap, TapError, MAC_ADDR_LEN};
 use virtio_bindings::virtio_net::*;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
@@ -121,15 +122,15 @@ struct NetEpollHandler {
     rx: RxVirtio,
     tx: TxVirtio,
     interrupt_status: Arc<AtomicUsize>,
-    interrupt_evt: EventFd,
+    interrupt_cb: Arc<VirtioInterrupt>,
     kill_evt: EventFd,
 }
 
 impl NetEpollHandler {
-    fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
+    fn signal_used_queue(&self, queue: &Queue) -> result::Result<(), DeviceError> {
         self.interrupt_status
             .fetch_or(INTERRUPT_STATUS_USED_RING as usize, Ordering::SeqCst);
-        self.interrupt_evt.write(1).map_err(|e| {
+        (self.interrupt_cb)(queue).map_err(|e| {
             error!("Failed to signal used queue: {:?}", e);
             DeviceError::FailedSignalingUsedQueue(e)
         })
@@ -219,7 +220,7 @@ impl NetEpollHandler {
         }
         if self.rx.deferred_irqs {
             self.rx.deferred_irqs = false;
-            self.signal_used_queue()
+            self.signal_used_queue(&self.rx.queue)
         } else {
             Ok(())
         }
@@ -234,7 +235,7 @@ impl NetEpollHandler {
                 self.process_rx()
             } else if self.rx.deferred_irqs {
                 self.rx.deferred_irqs = false;
-                self.signal_used_queue()
+                self.signal_used_queue(&self.rx.queue)
             } else {
                 Ok(())
             }
@@ -374,7 +375,7 @@ impl NetEpollHandler {
                                 self.process_rx().unwrap();
                             } else if self.rx.deferred_irqs {
                                 self.rx.deferred_irqs = false;
-                                self.signal_used_queue().unwrap();
+                                self.signal_used_queue(&self.rx.queue).unwrap();
                             }
                         } else {
                             self.process_rx().unwrap();
@@ -538,7 +539,7 @@ impl VirtioDevice for Net {
     fn activate(
         &mut self,
         mem: GuestMemoryMmap,
-        interrupt_evt: EventFd,
+        interrupt_cb: Arc<VirtioInterrupt>,
         status: Arc<AtomicUsize>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
@@ -573,7 +574,7 @@ impl VirtioDevice for Net {
                 rx: RxVirtio::new(rx_queue, rx_queue_evt),
                 tx: TxVirtio::new(tx_queue, tx_queue_evt),
                 interrupt_status: status,
-                interrupt_evt,
+                interrupt_cb,
                 kill_evt,
             };
 
