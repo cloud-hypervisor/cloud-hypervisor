@@ -119,15 +119,18 @@ fn main() {
 
 #[cfg(test)]
 #[cfg(feature = "integration_tests")]
-mod tests {
-    extern crate vmm;
+#[macro_use]
+extern crate credibility;
 
+#[cfg(test)]
+#[cfg(feature = "integration_tests")]
+mod tests {
     use ssh2::Session;
     use std::fs;
     use std::io::Read;
     use std::net::TcpStream;
+    use std::process::Command;
     use std::thread;
-    use vmm::config;
 
     fn ssh_command(command: &str) -> String {
         let mut s = String::new();
@@ -192,47 +195,102 @@ mod tests {
         (disks, String::from(fw_path.to_str().unwrap()))
     }
 
-    #[test]
-    fn test_simple_launch() {
-        let handler = thread::spawn(|| {
-            let (disks, fw_path) = prepare_files();
+    fn get_cpu_count() -> u32 {
+        ssh_command("grep -c processor /proc/cpuinfo")
+            .trim()
+            .parse()
+            .unwrap()
+    }
 
-            let vm_config = config::VmConfig::parse(config::VmParams {
-                cpus: "1",
-                memory: "512",
-                kernel: fw_path.as_str(),
-                cmdline: None,
-                disks,
-                rng: "/dev/urandom",
-                net: Some("tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"),
-            })
-            .expect("Failed parsing parameters");
+    fn get_total_memory() -> u32 {
+        ssh_command("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")
+            .trim()
+            .parse::<u32>()
+            .unwrap()
+    }
 
-            vmm::boot_kernel(vm_config).expect("Booting kernel failed");
-        });
-
-        thread::sleep(std::time::Duration::new(10, 0));
-        assert_eq!(ssh_command("grep -c processor /proc/cpuinfo").trim(), "1");
-        assert_eq!(
-            ssh_command("grep MemTotal /proc/meminfo").trim(),
-            "MemTotal:         496400 kB"
-        );
-
-        assert!(
-            ssh_command("cat /proc/sys/kernel/random/entropy_avail")
-                .trim()
-                .parse::<u32>()
-                .unwrap()
-                >= 1000
-        );
-
-        ssh_command("sudo reboot");
-
-        handler.join().unwrap();
+    fn get_entropy() -> u32 {
+        ssh_command("cat /proc/sys/kernel/random/entropy_avail")
+            .trim()
+            .parse::<u32>()
+            .unwrap()
     }
 
     #[test]
-    fn test_simple_launch_again() {
-        test_simple_launch()
+    fn test_simple_launch() {
+        test_block!(tb, "", {
+            let (disks, fw_path) = prepare_files();
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "512"])
+                .args(&["--kernel", fw_path.as_str()])
+                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            aver_eq!(tb, get_cpu_count(), 1);
+            aver_eq!(tb, get_total_memory(), 496_400);
+
+            aver!(tb, get_entropy() >= 1000);
+
+            ssh_command("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_multi_cpu() {
+        test_block!(tb, "", {
+            let (disks, fw_path) = prepare_files();
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "2"])
+                .args(&["--memory", "512"])
+                .args(&["--kernel", fw_path.as_str()])
+                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            aver_eq!(tb, get_cpu_count(), 2);
+
+            ssh_command("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_large_memory() {
+        test_block!(tb, "", {
+            let (disks, fw_path) = prepare_files();
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "5120"])
+                .args(&["--kernel", fw_path.as_str()])
+                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            aver!(tb, get_total_memory() > 5_063_800);
+
+            ssh_command("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
     }
 }
