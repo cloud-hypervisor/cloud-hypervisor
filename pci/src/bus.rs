@@ -26,25 +26,20 @@ pub enum PciRootError {
 }
 pub type Result<T> = std::result::Result<T, PciRootError>;
 
-/// Emulates the PCI Root bridge.
+/// Emulates the PCI Root bridge device.
 pub struct PciRoot {
-    /// Bus configuration for the root device.
-    configuration: PciConfiguration,
-    /// Devices attached to this bridge.
-    devices: Vec<Arc<Mutex<dyn PciDevice>>>,
+    /// Configuration space.
+    config: PciConfiguration,
 }
 
 impl PciRoot {
-    /// Create an empty PCI root bus.
-    pub fn new(configuration: Option<PciConfiguration>) -> Self {
-        if let Some(config) = configuration {
-            PciRoot {
-                configuration: config,
-                devices: Vec::new(),
-            }
+    /// Create an empty PCI root bridge.
+    pub fn new(config: Option<PciConfiguration>) -> Self {
+        if let Some(config) = config {
+            PciRoot { config }
         } else {
             PciRoot {
-                configuration: PciConfiguration::new(
+                config: PciConfiguration::new(
                     VENDOR_ID_INTEL,
                     DEVICE_ID_INTEL_VIRT_PCIE_HOST,
                     PciClassCode::BridgeDevice,
@@ -55,126 +50,102 @@ impl PciRoot {
                     0,
                     None,
                 ),
-                devices: Vec::new(),
-            }
-        }
-    }
-
-    /// Add a `device` to this root PCI bus.
-    pub fn add_device(&mut self, pci_device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
-        self.devices.push(pci_device);
-        Ok(())
-    }
-
-    /// Register Guest Address mapping of a `device` to IO bus.
-    pub fn register_mapping(
-        &self,
-        device: Arc<Mutex<dyn BusDevice>>,
-        bus: &mut devices::Bus,
-        bars: Vec<(GuestAddress, GuestUsize)>,
-    ) -> Result<()> {
-        for (address, size) in bars {
-            bus.insert(device.clone(), address.raw_value(), size)
-                .map_err(PciRootError::MmioInsert)?;
-        }
-        Ok(())
-    }
-    pub fn config_space_read(
-        &self,
-        bus: usize,
-        device: usize,
-        _function: usize,
-        register: usize,
-    ) -> u32 {
-        // Only support one bus.
-        if bus != 0 {
-            return 0xffff_ffff;
-        }
-
-        match device {
-            0 => {
-                // If bus and device are both zero, then read from the root config.
-                self.configuration.read_config_register(register)
-            }
-            dev_num => self.devices.get(dev_num - 1).map_or(0xffff_ffff, |d| {
-                d.lock().unwrap().read_config_register(register)
-            }),
-        }
-    }
-
-    pub fn config_space_write(
-        &mut self,
-        bus: usize,
-        device: usize,
-        _function: usize,
-        register: usize,
-        offset: u64,
-        data: &[u8],
-    ) {
-        if offset as usize + data.len() > 4 {
-            return;
-        }
-
-        // Only support one bus.
-        if bus != 0 {
-            return;
-        }
-
-        match device {
-            0 => {
-                // If bus and device are both zero, then read from the root config.
-                self.configuration
-                    .write_config_register(register, offset, data);
-            }
-            dev_num => {
-                if let Some(d) = self.devices.get(dev_num - 1) {
-                    d.lock()
-                        .unwrap()
-                        .write_config_register(register, offset, data);
-                }
             }
         }
     }
 }
 
-/// Emulates PCI configuration access mechanism #1 (I/O ports 0xcf8 and 0xcfc).
+impl BusDevice for PciRoot {}
+
+impl PciDevice for PciRoot {
+    fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
+        self.config.write_config_register(reg_idx, offset, data);
+    }
+
+    fn read_config_register(&self, reg_idx: usize) -> u32 {
+        self.config.read_reg(reg_idx)
+    }
+}
+
 pub struct PciConfigIo {
-    /// PCI root bridge.
-    pci_root: PciRoot,
-    /// Current address to read/write from (0xcf8 register, litte endian).
+    /// Devices attached to this bus.
+    /// Device 0 is host bridge.
+    devices: Vec<Arc<Mutex<dyn PciDevice>>>,
+    /// Config space register.
     config_address: u32,
 }
 
 impl PciConfigIo {
     pub fn new(pci_root: PciRoot) -> Self {
+        let mut devices: Vec<Arc<Mutex<dyn PciDevice>>> = Vec::new();
+        devices.push(Arc::new(Mutex::new(pci_root)));
+
         PciConfigIo {
-            pci_root,
+            devices,
             config_address: 0,
         }
     }
 
-    fn config_space_read(&self) -> u32 {
+    pub fn register_mapping(
+        &self,
+        dev: Arc<Mutex<dyn BusDevice>>,
+        bus: &mut devices::Bus,
+        bars: Vec<(GuestAddress, GuestUsize)>,
+    ) -> Result<()> {
+        for (address, size) in bars {
+            bus.insert(dev.clone(), address.raw_value(), size)
+                .map_err(PciRootError::MmioInsert)?;
+        }
+        Ok(())
+    }
+
+    pub fn add_device(&mut self, device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
+        self.devices.push(device);
+        Ok(())
+    }
+
+    pub fn config_space_read(&self) -> u32 {
         let enabled = (self.config_address & 0x8000_0000) != 0;
         if !enabled {
             return 0xffff_ffff;
         }
 
-        let (bus, device, function, register) =
+        let (bus, device, _function, register) =
             parse_config_address(self.config_address & !0x8000_0000);
-        self.pci_root
-            .config_space_read(bus, device, function, register)
+
+        // Only support one bus.
+        if bus != 0 {
+            return 0xffff_ffff;
+        }
+
+        self.devices.get(device).map_or(0xffff_ffff, |d| {
+            d.lock().unwrap().read_config_register(register)
+        })
     }
 
-    fn config_space_write(&mut self, offset: u64, data: &[u8]) {
+    pub fn config_space_write(&mut self, offset: u64, data: &[u8]) {
+        if offset as usize + data.len() > 4 {
+            return;
+        }
+
         let enabled = (self.config_address & 0x8000_0000) != 0;
         if !enabled {
             return;
         }
 
-        let (bus, device, function, register) =
+        let (bus, device, _function, register) =
             parse_config_address(self.config_address & !0x8000_0000);
-        self.pci_root
-            .config_space_write(bus, device, function, register, offset, data)
+
+        // Only support one bus.
+        if bus != 0 {
+            return;
+        }
+
+        if let Some(d) = self.devices.get(device) {
+            d.lock()
+                .unwrap()
+                .write_config_register(register, offset, data);
+        }
     }
 
     fn set_config_address(&mut self, offset: u64, data: &[u8]) {
@@ -232,25 +203,49 @@ impl BusDevice for PciConfigIo {
 
 /// Emulates PCI memory-mapped configuration access mechanism.
 pub struct PciConfigMmio {
-    /// PCI root bridge.
-    pci_root: PciRoot,
+    /// Devices attached to this bus.
+    /// Device 0 is host bridge.
+    devices: Vec<Arc<Mutex<dyn PciDevice>>>,
 }
 
 impl PciConfigMmio {
     pub fn new(pci_root: PciRoot) -> Self {
-        PciConfigMmio { pci_root }
+        let mut devices: Vec<Arc<Mutex<dyn PciDevice>>> = Vec::new();
+
+        devices.push(Arc::new(Mutex::new(pci_root)));
+        PciConfigMmio { devices }
     }
 
     fn config_space_read(&self, config_address: u32) -> u32 {
-        let (bus, device, function, register) = parse_config_address(config_address);
-        self.pci_root
-            .config_space_read(bus, device, function, register)
+        let (bus, device, _function, register) = parse_config_address(config_address);
+
+        // Only support one bus.
+        if bus != 0 {
+            return 0xffff_ffff;
+        }
+
+        self.devices.get(device).map_or(0xffff_ffff, |d| {
+            d.lock().unwrap().read_config_register(register)
+        })
     }
 
     fn config_space_write(&mut self, config_address: u32, offset: u64, data: &[u8]) {
-        let (bus, device, function, register) = parse_config_address(config_address);
-        self.pci_root
-            .config_space_write(bus, device, function, register, offset, data)
+        if offset as usize + data.len() > 4 {
+            return;
+        }
+
+        let (bus, device, _function, register) = parse_config_address(config_address);
+
+        // Only support one bus.
+        if bus != 0 {
+            return;
+        }
+
+        if let Some(d) = self.devices.get(device) {
+            d.lock()
+                .unwrap()
+                .write_config_register(register, offset, data);
+        }
     }
 }
 
