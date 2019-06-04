@@ -6,11 +6,6 @@ git = "https://github.com/bjzhjing/linux-loader"
 rev = "2b95f1e1958a2b6399b590f64344cab5b4a6d608"
 replace-with = "vendor+https://github.com/bjzhjing/linux-loader"
 
-[source."https://github.com/liujing2/vmm-sys-util"]
-git = "https://github.com/liujing2/vmm-sys-util"
-branch = "master"
-replace-with = "vendor+https://github.com/liujing2/vmm-sys-util"
-
 [source."https://github.com/rust-vmm/vm-memory"]
 git = "https://github.com/rust-vmm/vm-memory"
 rev = "281b8bd6cd2927f7a65130194b203a1c2b0ad2e3"
@@ -26,9 +21,6 @@ directory = "./vendor/registry-40351f815f426200"
 
 [source."vendor+https://github.com/bjzhjing/linux-loader"]
 directory = "./vendor/git-4af8f4552cd0d200"
-
-[source."vendor+https://github.com/liujing2/vmm-sys-util"]
-directory = "./vendor/git-ccfa5f04f3f14300"
 
 [source."vendor+https://github.com/rust-vmm/vm-memory"]
 directory = "./vendor/git-89548d8276566400"

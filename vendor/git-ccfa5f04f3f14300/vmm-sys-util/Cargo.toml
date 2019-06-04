@@ -1,9 +1,0 @@
-[package]
-name = "vmm-sys-util"
-version = "0.1.0"
-authors = ["Jing Liu <jing2.liu@linux.intel.com>"]
-license = "Apache-2.0"
-
-[dependencies]
-libc = ">=0.2.39"
-

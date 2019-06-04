@@ -16,7 +16,7 @@ pci = { path = "../pci" }
 tempfile = ">=3.0.2"
 virtio-bindings = { path = "../virtio-bindings" }
 vm-allocator = { path = "../vm-allocator" }
-vmm-sys-util = { git = "https://github.com/liujing2/vmm-sys-util" }
+vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 
 [dependencies.vm-memory]
 git = "https://github.com/rust-vmm/vm-memory"
