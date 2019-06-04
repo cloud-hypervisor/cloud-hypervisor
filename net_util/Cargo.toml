@@ -9,7 +9,7 @@ rand = ">=0.6.5"
 serde = ">=1.0.27"
 
 net_gen = { path = "../net_gen" }
-vmm-sys-util = { git = "https://github.com/liujing2/vmm-sys-util" }
+vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 
 [dev-dependencies]
 lazy_static = ">=1.1.0"

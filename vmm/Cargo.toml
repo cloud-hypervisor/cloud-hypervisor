@@ -18,7 +18,7 @@ qcow = { path = "../qcow" }
 linux-loader = { git = "https://github.com/bjzhjing/linux-loader" }
 vm-virtio = { path = "../vm-virtio" }
 vm-allocator = { path = "../vm-allocator" }
-vmm-sys-util = { git = "https://github.com/liujing2/vmm-sys-util" }
+vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 
 [dependencies.vm-memory]
 git = "https://github.com/rust-vmm/vm-memory"
