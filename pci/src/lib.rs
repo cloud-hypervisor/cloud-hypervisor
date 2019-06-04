@@ -10,20 +10,21 @@ extern crate kvm_ioctls;
 extern crate vm_memory;
 extern crate vmm_sys_util;
 
+mod bus;
 mod configuration;
 mod device;
 mod msix;
-mod root;
 
+pub use self::bus::{PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
 pub use self::configuration::{
     PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciCapability, PciCapabilityID,
     PciClassCode, PciConfiguration, PciHeaderType, PciMassStorageSubclass,
     PciNetworkControllerSubclass, PciProgrammingInterface, PciSerialBusSubClass, PciSubclass,
 };
-pub use self::device::Error as PciDeviceError;
-pub use self::device::{InterruptDelivery, InterruptParameters, PciDevice};
+pub use self::device::{
+    Error as PciDeviceError, InterruptDelivery, InterruptParameters, PciDevice,
+};
 pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry};
-pub use self::root::{PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
 
 /// PCI has four interrupt pins A->D.
 #[derive(Copy, Clone)]

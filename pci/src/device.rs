@@ -90,11 +90,11 @@ pub trait PciDevice: BusDevice {
     /// Reads from a BAR region mapped in to the device.
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - Filled with the data from `addr`.
-    fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]);
+    fn read_bar(&mut self, _base: u64, _offset: u64, _data: &mut [u8]) {}
     /// Writes to a BAR region mapped in to the device.
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - The data to write.
-    fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]);
+    fn write_bar(&mut self, _base: u64, _offset: u64, _data: &[u8]) {}
     /// Invoked when the device is sandboxed.
     fn on_device_sandboxed(&mut self) {}
 }

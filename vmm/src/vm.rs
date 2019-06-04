@@ -525,7 +525,8 @@ impl DeviceManager {
             exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
 
-        let mut pci_root = PciRoot::new(None);
+        let pci_root = PciRoot::new(None);
+        let mut pci = PciConfigIo::new(pci_root);
 
         for disk_cfg in &vm_cfg.disks {
             // Open block device path
@@ -559,7 +560,7 @@ impl DeviceManager {
                 memory.clone(),
                 allocator,
                 vm_fd,
-                &mut pci_root,
+                &mut pci,
                 &mut mmio_bus,
                 &interrupt_info,
             )?;
@@ -584,7 +585,7 @@ impl DeviceManager {
                 memory.clone(),
                 allocator,
                 vm_fd,
-                &mut pci_root,
+                &mut pci,
                 &mut mmio_bus,
                 &interrupt_info,
             )?;
@@ -600,7 +601,7 @@ impl DeviceManager {
                 memory.clone(),
                 allocator,
                 vm_fd,
-                &mut pci_root,
+                &mut pci,
                 &mut mmio_bus,
                 &interrupt_info,
             )?;
@@ -623,7 +624,7 @@ impl DeviceManager {
                         memory.clone(),
                         allocator,
                         vm_fd,
-                        &mut pci_root,
+                        &mut pci,
                         &mut mmio_bus,
                         &interrupt_info,
                     )?;
@@ -688,14 +689,14 @@ impl DeviceManager {
                     memory.clone(),
                     allocator,
                     vm_fd,
-                    &mut pci_root,
+                    &mut pci,
                     &mut mmio_bus,
                     &interrupt_info,
                 )?;
             }
         }
 
-        let pci = Arc::new(Mutex::new(PciConfigIo::new(pci_root)));
+        let pci = Arc::new(Mutex::new(pci));
 
         Ok(DeviceManager {
             io_bus,
@@ -713,7 +714,7 @@ impl DeviceManager {
         memory: GuestMemoryMmap,
         allocator: &mut SystemAllocator,
         vm_fd: &Arc<VmFd>,
-        pci_root: &mut PciRoot,
+        pci: &mut PciConfigIo,
         mmio_bus: &mut devices::Bus,
         interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
@@ -804,12 +805,10 @@ impl DeviceManager {
 
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
 
-        pci_root
-            .add_device(virtio_pci_device.clone())
+        pci.add_device(virtio_pci_device.clone())
             .map_err(DeviceManagerError::AddPciDevice)?;
 
-        pci_root
-            .register_mapping(virtio_pci_device.clone(), mmio_bus, bars)
+        pci.register_mapping(virtio_pci_device.clone(), mmio_bus, bars)
             .map_err(DeviceManagerError::AddPciDevice)?;
 
         Ok(())
