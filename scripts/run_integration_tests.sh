@@ -28,8 +28,8 @@ rm /tmp/cloudinit.img
 mkdosfs -n config-2 -C /tmp/cloudinit.img 8192
 mcopy -oi /tmp/cloudinit.img -s test_data/cloud-init/openstack ::
 
-cargo test --features "integration_tests" --no-run
-find target/debug/deps/ -name cloud_hypervisor* | xargs -n1 sudo setcap cap_net_admin+ep
+cargo build
+sudo setcap cap_net_admin+ep target/debug/cloud-hypervisor
 
 # Tests must be executed serially for now as they have a hardcoded IP address
 cargo test --features "integration_tests" -- --test-threads=1
