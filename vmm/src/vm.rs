@@ -692,7 +692,11 @@ impl DeviceManager {
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
 
         pci_root
-            .add_device(virtio_pci_device.clone(), mmio_bus, bars)
+            .add_device(virtio_pci_device.clone())
+            .map_err(DeviceManagerError::AddPciDevice)?;
+
+        pci_root
+            .register_mapping(virtio_pci_device.clone(), mmio_bus, bars)
             .map_err(DeviceManagerError::AddPciDevice)?;
 
         Ok(())

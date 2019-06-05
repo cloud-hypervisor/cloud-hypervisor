@@ -397,6 +397,15 @@ impl PciDevice for VirtioPciDevice {
         }
     }
 
+    fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
+        self.configuration
+            .write_config_register(reg_idx, offset, data);
+    }
+
+    fn read_config_register(&self, reg_idx: usize) -> u32 {
+        self.configuration.read_reg(reg_idx)
+    }
+
     fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
         let bar0 = self
             .configuration
@@ -588,14 +597,5 @@ impl BusDevice for VirtioPciDevice {
 
     fn write(&mut self, offset: u64, data: &[u8]) {
         self.write_bar(offset, data)
-    }
-
-    fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
-        self.configuration
-            .write_config_register(reg_idx, offset, data);
-    }
-
-    fn read_config_register(&self, reg_idx: usize) -> u32 {
-        self.configuration.read_config_register(reg_idx)
     }
 }
