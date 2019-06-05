@@ -80,6 +80,13 @@ pub trait PciDevice: BusDevice {
     fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
         Vec::new()
     }
+    /// Sets a register in the configuration space.
+    /// * `reg_idx` - The index of the config register to modify.
+    /// * `offset` - Offset in to the register.
+    fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]);
+    /// Gets a register from the configuration space.
+    /// * `reg_idx` - The index of the config register to read.
+    fn read_config_register(&self, reg_idx: usize) -> u32;
     /// Reads from a BAR region mapped in to the device.
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - Filled with the data from `addr`.

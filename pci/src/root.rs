@@ -3,7 +3,7 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use crate::configuration::{PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType};
-use crate::device::Error as PciDeviceError;
+use crate::device::{Error as PciDeviceError, PciDevice};
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use std;
@@ -31,7 +31,7 @@ pub struct PciRoot {
     /// Bus configuration for the root device.
     configuration: PciConfiguration,
     /// Devices attached to this bridge.
-    devices: Vec<Arc<Mutex<dyn BusDevice>>>,
+    devices: Vec<Arc<Mutex<dyn PciDevice>>>,
 }
 
 impl PciRoot {
@@ -61,8 +61,14 @@ impl PciRoot {
     }
 
     /// Add a `device` to this root PCI bus.
-    pub fn add_device(
-        &mut self,
+    pub fn add_device(&mut self, pci_device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
+        self.devices.push(pci_device);
+        Ok(())
+    }
+
+    /// Register Guest Address mapping of a `device` to IO bus.
+    pub fn register_mapping(
+        &self,
         device: Arc<Mutex<dyn BusDevice>>,
         bus: &mut devices::Bus,
         bars: Vec<(GuestAddress, GuestUsize)>,
@@ -71,11 +77,8 @@ impl PciRoot {
             bus.insert(device.clone(), address.raw_value(), size)
                 .map_err(PciRootError::MmioInsert)?;
         }
-
-        self.devices.push(device);
         Ok(())
     }
-
     pub fn config_space_read(
         &self,
         bus: usize,
