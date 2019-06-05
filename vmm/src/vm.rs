@@ -28,7 +28,7 @@ use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::loader::KernelLoader;
 use net_util::Tap;
 use pci::{
-    IrqClosure, MsixClosure, MsixTableEntry, PciConfigIo, PciDevice, PciInterruptPin, PciRoot,
+    InterruptDelivery, InterruptParameters, PciConfigIo, PciDevice, PciInterruptPin, PciRoot,
 };
 use qcow::{self, ImageType, QcowFile};
 use std::ffi::CString;
@@ -447,24 +447,31 @@ impl DeviceManager {
         if msi_capable {
             let vm_fd_clone = vm_fd.clone();
 
-            let msi_cb = Arc::new(Box::new(move |entry: MsixTableEntry| {
-                let msi_queue = kvm_msi {
-                    address_lo: entry.msg_addr_lo,
-                    address_hi: entry.msg_addr_hi,
-                    data: entry.msg_data,
-                    flags: 0u32,
-                    devid: 0u32,
-                    pad: [0u8; 12],
-                };
+            let msi_cb = Arc::new(Box::new(move |p: InterruptParameters| {
+                if let Some(entry) = p.msix {
+                    let msi_queue = kvm_msi {
+                        address_lo: entry.msg_addr_lo,
+                        address_hi: entry.msg_addr_hi,
+                        data: entry.msg_data,
+                        flags: 0u32,
+                        devid: 0u32,
+                        pad: [0u8; 12],
+                    };
 
-                vm_fd_clone.signal_msi(msi_queue).map(|ret| {
-                    if ret > 0 {
-                        debug!("MSI message successfully delivered");
-                    } else if ret == 0 {
-                        warn!("failed to deliver MSI message, blocked by guest");
-                    }
-                })
-            }) as MsixClosure);
+                    return vm_fd_clone.signal_msi(msi_queue).map(|ret| {
+                        if ret > 0 {
+                            debug!("MSI message successfully delivered");
+                        } else if ret == 0 {
+                            warn!("failed to deliver MSI message, blocked by guest");
+                        }
+                    });
+                }
+
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "missing MSI-X entry",
+                ))
+            }) as InterruptDelivery);
 
             virtio_pci_device.assign_msix(msi_cb);
         } else {
@@ -477,7 +484,9 @@ impl DeviceManager {
                 .register_irqfd(irqfd.as_raw_fd(), irq_num)
                 .map_err(DeviceManagerError::Irq)?;
 
-            let irq_cb = Arc::new(Box::new(move || irqfd.write(1)) as IrqClosure);
+            let irq_cb = Arc::new(
+                Box::new(move |_p: InterruptParameters| irqfd.write(1)) as InterruptDelivery
+            );
             virtio_pci_device.assign_pin_irq(irq_cb, irq_num as u32, PciInterruptPin::IntA);
         }
 

@@ -13,9 +13,12 @@ use vm_allocator::SystemAllocator;
 use vm_memory::{GuestAddress, GuestUsize};
 use vmm_sys_util::EventFd;
 
-pub type IrqClosure = Box<Fn() -> std::result::Result<(), std::io::Error> + Send + Sync>;
-pub type MsixClosure =
-    Box<Fn(MsixTableEntry) -> std::result::Result<(), std::io::Error> + Send + Sync>;
+pub struct InterruptParameters {
+    pub msix: Option<MsixTableEntry>,
+}
+
+pub type InterruptDelivery =
+    Box<Fn(InterruptParameters) -> std::result::Result<(), std::io::Error> + Send + Sync>;
 
 #[derive(Debug)]
 pub enum Error {
@@ -49,14 +52,14 @@ pub trait PciDevice: BusDevice {
     /// The device may write to `irq_evt` to trigger an interrupt.
     fn assign_pin_irq(
         &mut self,
-        _irq_cb: Arc<IrqClosure>,
+        _irq_cb: Arc<InterruptDelivery>,
         _irq_num: u32,
         _irq_pin: PciInterruptPin,
     ) {
     }
 
     /// Assign MSI-X to this device.
-    fn assign_msix(&mut self, _msi_cb: Arc<MsixClosure>) {}
+    fn assign_msix(&mut self, _msi_cb: Arc<InterruptDelivery>) {}
 
     /// Allocates the needed PCI BARs space using the `allocate` function which takes a size and
     /// returns an address. Returns a Vec of (GuestAddress, GuestUsize) tuples.
