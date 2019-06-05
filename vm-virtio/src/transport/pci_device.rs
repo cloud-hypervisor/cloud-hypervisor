@@ -20,9 +20,9 @@ use std::sync::Mutex;
 
 use devices::BusDevice;
 use pci::{
-    IrqClosure, MsixCap, MsixClosure, MsixConfig, PciBarConfiguration, PciCapability,
-    PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
-    PciInterruptPin, PciSubclass,
+    InterruptDelivery, InterruptParameters, MsixCap, MsixConfig, PciBarConfiguration,
+    PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
+    PciHeaderType, PciInterruptPin, PciSubclass,
 };
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
@@ -333,20 +333,33 @@ impl VirtioPciDevice {
 }
 
 impl PciDevice for VirtioPciDevice {
-    fn assign_pin_irq(&mut self, irq_cb: Arc<IrqClosure>, irq_num: u32, irq_pin: PciInterruptPin) {
+    fn assign_pin_irq(
+        &mut self,
+        irq_cb: Arc<InterruptDelivery>,
+        irq_num: u32,
+        irq_pin: PciInterruptPin,
+    ) {
         self.configuration.set_irq(irq_num as u8, irq_pin);
 
-        let cb = Arc::new(Box::new(move |_queue: &Queue| (irq_cb)()) as VirtioInterrupt);
+        let cb = Arc::new(Box::new(move |_queue: &Queue| {
+            let param = InterruptParameters { msix: None };
+            (irq_cb)(param)
+        }) as VirtioInterrupt);
 
         self.interrupt_cb = Some(cb);
     }
 
-    fn assign_msix(&mut self, msi_cb: Arc<MsixClosure>) {
+    fn assign_msix(&mut self, msi_cb: Arc<InterruptDelivery>) {
         let msix_config = self.msix_config.clone();
 
         let cb = Arc::new(Box::new(move |queue: &Queue| {
-            (msi_cb)(msix_config.lock().unwrap().table_entries[queue.vector as usize].clone())
-        }) as VirtioInterruptClosure);
+            let param = InterruptParameters {
+                msix: Some(
+                    msix_config.lock().unwrap().table_entries[queue.vector as usize].clone(),
+                ),
+            };
+            (msi_cb)(param)
+        }) as VirtioInterrupt);
 
         self.interrupt_cb = Some(cb);
     }
