@@ -1,5 +1,0 @@
-error: c should sort before d
- --> $DIR/struct.rs:6:5
-  |
-6 |     c: usize,
-  |     ^
