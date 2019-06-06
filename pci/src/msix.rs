@@ -56,40 +56,89 @@ impl MsixConfig {
     }
 
     pub fn read_table(&mut self, offset: u64, data: &mut [u8]) {
-        assert!(data.len() == 4);
+        assert!((data.len() == 4 || data.len() == 8));
 
         let index: usize = (offset / MSIX_TABLE_ENTRIES_MODULO) as usize;
-        let value = match offset % MSIX_TABLE_ENTRIES_MODULO {
-            0x0 => self.table_entries[index].msg_addr_lo,
-            0x4 => self.table_entries[index].msg_addr_hi,
-            0x8 => self.table_entries[index].msg_data,
-            0x10 => self.table_entries[index].vector_ctl,
-            _ => {
-                error!("invalid offset");
-                0
+        let modulo_offset = offset % MSIX_TABLE_ENTRIES_MODULO;
+
+        match data.len() {
+            4 => {
+                let value = match modulo_offset {
+                    0x0 => self.table_entries[index].msg_addr_lo,
+                    0x4 => self.table_entries[index].msg_addr_hi,
+                    0x8 => self.table_entries[index].msg_data,
+                    0x10 => self.table_entries[index].vector_ctl,
+                    _ => {
+                        error!("invalid offset");
+                        0
+                    }
+                };
+
+                debug!("MSI_R TABLE offset 0x{:x} data 0x{:x}", offset, value);
+                LittleEndian::write_u32(data, value);
             }
-        };
+            8 => {
+                let value = match modulo_offset {
+                    0x0 => {
+                        (u64::from(self.table_entries[index].msg_addr_hi) << 32)
+                            | u64::from(self.table_entries[index].msg_addr_lo)
+                    }
+                    0x8 => {
+                        (u64::from(self.table_entries[index].vector_ctl) << 32)
+                            | u64::from(self.table_entries[index].msg_data)
+                    }
+                    _ => {
+                        error!("invalid offset");
+                        0
+                    }
+                };
 
-        debug!("MSI_R TABLE offset 0x{:x} data 0x{:x}", offset, value);
-
-        LittleEndian::write_u32(data, value);
+                debug!("MSI_R TABLE offset 0x{:x} data 0x{:x}", offset, value);
+                LittleEndian::write_u64(data, value);
+            }
+            _ => {
+                error!("invalid data length");
+            }
+        }
     }
 
     pub fn write_table(&mut self, offset: u64, data: &[u8]) {
-        assert!(data.len() == 4);
-
-        let value = LittleEndian::read_u32(data);
+        assert!((data.len() == 4 || data.len() == 8));
 
         let index: usize = (offset / MSIX_TABLE_ENTRIES_MODULO) as usize;
-        match offset % MSIX_TABLE_ENTRIES_MODULO {
-            0x0 => self.table_entries[index].msg_addr_lo = value,
-            0x4 => self.table_entries[index].msg_addr_hi = value,
-            0x8 => self.table_entries[index].msg_data = value,
-            0x10 => self.table_entries[index].vector_ctl = value,
-            _ => error!("invalid offset"),
-        };
+        let modulo_offset = offset % MSIX_TABLE_ENTRIES_MODULO;
 
-        debug!("MSI_W TABLE offset 0x{:x} data 0x{:x}", offset, value);
+        match data.len() {
+            4 => {
+                let value = LittleEndian::read_u32(data);
+                match modulo_offset {
+                    0x0 => self.table_entries[index].msg_addr_lo = value,
+                    0x4 => self.table_entries[index].msg_addr_hi = value,
+                    0x8 => self.table_entries[index].msg_data = value,
+                    0x10 => self.table_entries[index].vector_ctl = value,
+                    _ => error!("invalid offset"),
+                };
+
+                debug!("MSI_W TABLE offset 0x{:x} data 0x{:x}", offset, value);
+            }
+            8 => {
+                let value = LittleEndian::read_u64(data);
+                match modulo_offset {
+                    0x0 => {
+                        self.table_entries[index].msg_addr_lo = (value & 0xffff_ffffu64) as u32;
+                        self.table_entries[index].msg_addr_hi = (value >> 32) as u32;
+                    }
+                    0x8 => {
+                        self.table_entries[index].msg_data = (value & 0xffff_ffffu64) as u32;
+                        self.table_entries[index].vector_ctl = (value >> 32) as u32;
+                    }
+                    _ => error!("invalid offset"),
+                };
+
+                debug!("MSI_W TABLE offset 0x{:x} data 0x{:x}", offset, value);
+            }
+            _ => error!("invalid data length"),
+        };
     }
 
     pub fn read_pba(&mut self, offset: u64, data: &mut [u8]) {
