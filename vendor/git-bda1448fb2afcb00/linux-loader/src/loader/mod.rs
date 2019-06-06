@@ -182,7 +182,6 @@ impl KernelLoader for Elf {
             return Err(Error::InvalidProgramHeaderSize);
         }
         if (ehdr.e_phoff as usize) < mem::size_of::<elf::Elf64_Ehdr>() {
-            
             return Err(Error::InvalidProgramHeaderOffset);
         }
         if (highmem_start_address.is_some())
@@ -383,7 +382,7 @@ mod test {
     #[cfg(feature = "bzImage")]
     fn make_bzImage() -> Vec<u8> {
         let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../../.buildkite/hooks/boot/vmlinuz-3.10.0-957.el7.x86_64"));
+        v.extend_from_slice(include_bytes!("./boot/vmlinuz-4.9.0-9-amd64"));
         v
     }
 
@@ -556,6 +555,7 @@ mod test {
         assert_eq!(val, '\0' as u8);
     }
 
+    #[cfg(feature = "elf")]
     #[test]
     fn bad_magic() {
         let gm = create_guest_mem();
@@ -568,6 +568,7 @@ mod test {
         );
     }
 
+    #[cfg(feature = "elf")]
     #[test]
     fn bad_endian() {
         // Only little endian is supported
@@ -581,6 +582,7 @@ mod test {
         );
     }
 
+    #[cfg(feature = "elf")]
     #[test]
     fn bad_phoff() {
         // program header has to be past the end of the elf header

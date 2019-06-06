@@ -15,10 +15,13 @@ log = "*"
 net_util = { path = "../net_util" }
 pci = {path = "../pci"}
 qcow = { path = "../qcow" }
-linux-loader = { git = "https://github.com/bjzhjing/linux-loader" }
 vm-virtio = { path = "../vm-virtio" }
 vm-allocator = { path = "../vm-allocator" }
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
+
+[dependencies.linux-loader]
+git = "https://github.com/bjzhjing/linux-loader"
+features = ["elf"]
 
 [dependencies.vm-memory]
 git = "https://github.com/rust-vmm/vm-memory"

@@ -1,5 +1,6 @@
 #!/bin/bash
 
-wget http://mirror.centos.org/centos/7/os/x86_64/Packages/kernel-3.10.0-957.el7.x86_64.rpm
-rpm2cpio kernel-3.10.0-957.el7.x86_64.rpm | cpio -idmv ./boot/vmlinuz-3.10.0-957.el7.x86_64
+wget http://ftp.debian.org/debian/pool/main/l/linux/linux-image-4.9.0-9-amd64_4.9.168-1_amd64.deb -P $BUILDKITE_BUILD_CHECKOUT_PATH/linux-loader/src/loader
+dpkg-deb -x $BUILDKITE_BUILD_CHECKOUT_PATH/linux-loader/src/loader/linux-image-4.9.0-9-amd64_4.9.168-1_amd64.deb 
+
 

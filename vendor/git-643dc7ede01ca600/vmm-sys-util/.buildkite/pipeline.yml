@@ -6,70 +6,30 @@ steps:
       automatic: false
     agents:
       platform: x86_64.metal
-      os: linux
     plugins:
       - docker#v3.0.1:
           image: "rustvmm/dev:v2"
           always-pull: true
 
-  - label: "build-gnu-x86-mmap"
+  - label: "build-gnu-arm"
     commands:
-     - cargo build --release --features=backend-mmap
-    retry:
-      automatic: false
-    agents:
-      platform: x86_64.metal
-      os: linux
-    plugins:
-      - docker#v3.0.1:
-          image: "rustvmm/dev:v2"
-          always-pull: true
-
-  - label: "build-gnu-arm-mmap"
-    commands:
-     - cargo build --release --features=backend-mmap
+     - cargo build --release
     retry:
       automatic: false
     agents:
       platform: arm.metal
-      os: linux
     plugins:
       - docker#v3.0.1:
           image: "rustvmm/dev:v2"
           always-pull: true
-
-  - label: "build-musl-arm-mmap"
+          
+  - label: "build-musl-arm"
     commands:
-     - cargo build --release --features=backend-mmap --target aarch64-unknown-linux-musl
+     - cargo build --release --target aarch64-unknown-linux-musl
     retry:
       automatic: false
     agents:
       platform: arm.metal
-      os: linux
-    plugins:
-      - docker#v3.0.1:
-          image: "rustvmm/dev:v2"
-          always-pull: true
-
-  - label: "style"
-    command: cargo fmt --all -- --check
-    retry:
-      automatic: false
-    agents:
-      platform: x86_64.metal
-      os: linux
-    plugins:
-      - docker#v3.0.1:
-          image: "rustvmm/dev:v2"
-          always-pull: true
-
-  - label: "unittests-gnu-x86"
-    commands:
-     - cargo test --all-features
-    retry:
-      automatic: false
-    agents:
-      platform: x86_64.metal
       os: linux
     plugins:
       - docker#v3.0.1:
@@ -89,19 +49,6 @@ steps:
           image: "rustvmm/dev:v2"
           always-pull: true
 
-  - label: "unittests-gnu-arm"
-    commands:
-     - cargo test --all-features
-    retry:
-      automatic: false
-    agents:
-      platform: arm.metal
-      os: linux
-    plugins:
-      - docker#v3.0.1:
-          image: "rustvmm/dev:v2"
-          always-pull: true
-
   - label: "unittests-musl-arm"
     commands:
      - cargo test --all-features --target aarch64-unknown-linux-musl
@@ -115,6 +62,46 @@ steps:
           image: "rustvmm/dev:v2"
           always-pull: true
 
+
+  - label: "style"
+    command: cargo fmt --all -- --check
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+    plugins:
+      - docker#v3.0.1:
+          image: "rustvmm/dev:v2"
+          always-pull: true
+  
+  - label: "unittests-gnu-x86"
+    commands:
+     - cargo test
+    retry:
+      automatic: false
+    agents:
+      platform: x86_64.metal
+    plugins:
+      - docker#v3.0.1:
+          privileged: true
+          image: "rustvmm/dev:v2"
+          always-pull: true
+          tmpfs: [ "/tmp:exec" ]
+          
+  - label: "unittests-gnu-arm"
+    commands:
+     - cargo test
+    retry:
+      automatic: false
+    agents:
+      platform: arm.metal
+    plugins:
+      - docker#v3.0.1:
+          privileged: true
+          image: "rustvmm/dev:v2"
+          always-pull: true
+          tmpfs: [ "/tmp:exec" ]
+  
   - label: "clippy-x86"
     commands:
      - cargo clippy --all -- -D warnings
@@ -122,7 +109,6 @@ steps:
       automatic: false
     agents:
       platform: x86_64.metal
-      os: linux
     plugins:
       - docker#v3.0.1:
           image: "rustvmm/dev:v2"
@@ -135,7 +121,6 @@ steps:
       automatic: false
     agents:
       platform: arm.metal
-      os: linux
     plugins:
       - docker#v3.0.1:
           image: "rustvmm/dev:v2"
