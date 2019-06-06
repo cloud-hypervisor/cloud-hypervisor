@@ -137,19 +137,27 @@ impl PciSubclass for PciVirtioSubclass {
 }
 
 // Allocate one bar for the structs pointed to by the capability structures.
+// As per the PCI specification, because the same BAR shares MSI-X and non
+// MSI-X structures, it is recommended to use 8KiB alignment for all those
+// structures.
 const COMMON_CONFIG_BAR_OFFSET: u64 = 0x0000;
 const COMMON_CONFIG_SIZE: u64 = 56;
-const ISR_CONFIG_BAR_OFFSET: u64 = 0x1000;
+const ISR_CONFIG_BAR_OFFSET: u64 = 0x2000;
 const ISR_CONFIG_SIZE: u64 = 1;
-const DEVICE_CONFIG_BAR_OFFSET: u64 = 0x2000;
+const DEVICE_CONFIG_BAR_OFFSET: u64 = 0x4000;
 const DEVICE_CONFIG_SIZE: u64 = 0x1000;
-const NOTIFICATION_BAR_OFFSET: u64 = 0x3000;
+const NOTIFICATION_BAR_OFFSET: u64 = 0x6000;
 const NOTIFICATION_SIZE: u64 = 0x1000;
-const MSIX_TABLE_BAR_OFFSET: u64 = 0x6000;
-const MSIX_TABLE_SIZE: u64 = 0x1000;
-const MSIX_PBA_BAR_OFFSET: u64 = 0x7000;
-const MSIX_PBA_SIZE: u64 = 0x1000;
-const CAPABILITY_BAR_SIZE: u64 = 0x8000;
+const MSIX_TABLE_BAR_OFFSET: u64 = 0x8000;
+// The size is 256KiB because the table can hold up to 2048 entries, with each
+// entry being 128 bits (4 DWORDS).
+const MSIX_TABLE_SIZE: u64 = 0x40000;
+const MSIX_PBA_BAR_OFFSET: u64 = 0x48000;
+// The size is 2KiB because the Pending Bit Array has one bit per vector and it
+// can support up to 2048 vectors.
+const MSIX_PBA_SIZE: u64 = 0x800;
+// The BAR size must be a power of 2.
+const CAPABILITY_BAR_SIZE: u64 = 0x80000;
 
 const NOTIFY_OFF_MULTIPLIER: u32 = 4; // A dword per notification address.
 
