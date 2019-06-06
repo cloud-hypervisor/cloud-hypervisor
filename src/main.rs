@@ -293,4 +293,36 @@ mod tests {
             Ok(())
         });
     }
+
+    #[test]
+    fn test_pci_msi() {
+        test_block!(tb, "", {
+            let (disks, fw_path) = prepare_files();
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "512"])
+                .args(&["--kernel", fw_path.as_str()])
+                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            aver_eq!(
+                tb,
+                ssh_command("grep -c PCI-MSI /proc/interrupts")
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap(),
+                8
+            );
+
+            ssh_command("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
 }
