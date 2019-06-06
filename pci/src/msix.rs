@@ -130,36 +130,8 @@ impl MsixConfig {
         }
     }
 
-    pub fn write_pba(&mut self, offset: u64, data: &[u8]) {
-        assert!((data.len() == 4 || data.len() == 8));
-
-        let index: usize = (offset / MSIX_PBA_ENTRIES_MODULO) as usize;
-        let modulo_offset = offset % MSIX_PBA_ENTRIES_MODULO;
-
-        match data.len() {
-            4 => {
-                let value = LittleEndian::read_u32(data);
-                match modulo_offset {
-                    0x0 => self.pba_entries[index] = u64::from(value),
-                    0x4 => self.pba_entries[index] = u64::from(value) << 32,
-                    _ => error!("invalid offset"),
-                }
-
-                debug!("MSI_W PBA offset 0x{:x} data 0x{:x}", offset, value);
-            }
-            8 => {
-                let value = LittleEndian::read_u64(data);
-                match modulo_offset {
-                    0x0 => self.pba_entries[index] = value,
-                    _ => error!("invalid offset"),
-                }
-
-                debug!("MSI_W PBA offset 0x{:x} data 0x{:x}", offset, value);
-            }
-            _ => {
-                error!("invalid data length");
-            }
-        }
+    pub fn write_pba(&mut self, _offset: u64, _data: &[u8]) {
+        error!("Pending Bit Array is read only");
     }
 }
 
