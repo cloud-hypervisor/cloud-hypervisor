@@ -6,7 +6,10 @@
 extern crate byteorder;
 extern crate vm_memory;
 
-use crate::{PciCapability, PciCapabilityID};
+use std::sync::Arc;
+
+use crate::device::InterruptParameters;
+use crate::{InterruptDelivery, PciCapability, PciCapabilityID};
 use byteorder::{ByteOrder, LittleEndian};
 use vm_memory::ByteValued;
 
@@ -37,11 +40,12 @@ impl Default for MsixTableEntry {
 pub struct MsixConfig {
     pub table_entries: Vec<MsixTableEntry>,
     pub pba_entries: Vec<u64>,
+    interrupt_cb: Option<Arc<InterruptDelivery>>,
 }
 
 impl MsixConfig {
     pub fn new(msix_vectors: u16) -> Self {
-        assert!(msix_vectors < MAX_MSIX_VECTORS_PER_DEVICE);
+        assert!(msix_vectors <= MAX_MSIX_VECTORS_PER_DEVICE);
 
         let mut table_entries: Vec<MsixTableEntry> = Vec::new();
         table_entries.resize_with(msix_vectors as usize, Default::default);
@@ -52,7 +56,12 @@ impl MsixConfig {
         MsixConfig {
             table_entries,
             pba_entries,
+            interrupt_cb: None,
         }
+    }
+
+    pub fn register_interrupt_cb(&mut self, cb: Arc<InterruptDelivery>) {
+        self.interrupt_cb = Some(cb);
     }
 
     pub fn read_table(&mut self, offset: u64, data: &mut [u8]) {
@@ -108,6 +117,9 @@ impl MsixConfig {
         let index: usize = (offset / MSIX_TABLE_ENTRIES_MODULO) as usize;
         let modulo_offset = offset % MSIX_TABLE_ENTRIES_MODULO;
 
+        // Store the value of the vector control register
+        let mut old_vector_ctl: Option<u32> = None;
+
         match data.len() {
             4 => {
                 let value = LittleEndian::read_u32(data);
@@ -115,7 +127,10 @@ impl MsixConfig {
                     0x0 => self.table_entries[index].msg_addr_lo = value,
                     0x4 => self.table_entries[index].msg_addr_hi = value,
                     0x8 => self.table_entries[index].msg_data = value,
-                    0x10 => self.table_entries[index].vector_ctl = value,
+                    0x10 => {
+                        old_vector_ctl = Some(self.table_entries[index].vector_ctl);
+                        self.table_entries[index].vector_ctl = value;
+                    }
                     _ => error!("invalid offset"),
                 };
 
@@ -129,6 +144,7 @@ impl MsixConfig {
                         self.table_entries[index].msg_addr_hi = (value >> 32) as u32;
                     }
                     0x8 => {
+                        old_vector_ctl = Some(self.table_entries[index].vector_ctl);
                         self.table_entries[index].msg_data = (value & 0xffff_ffffu64) as u32;
                         self.table_entries[index].vector_ctl = (value >> 32) as u32;
                     }
@@ -139,6 +155,32 @@ impl MsixConfig {
             }
             _ => error!("invalid data length"),
         };
+
+        // After the MSI-X table entry has been updated, it is necessary to
+        // check if the vector control masking bit has changed. In case the
+        // bit has been flipped from 1 to 0, we need to inject a MSI message
+        // if the corresponding pending bit from the PBA is set. Once the MSI
+        // has been injected, the pending bit in the PBA needs to be cleared.
+        if let Some(old_vector_ctl) = old_vector_ctl {
+            // Check is bit has been flipped
+            if old_vector_ctl == 0x0000_0001u32
+                && self.table_entries[index].vector_ctl == 0x0000_0000u32
+                && self.get_pba_bit(index as u16) == 1
+            {
+                // Inject the MSI message
+                if let Some(cb) = &self.interrupt_cb {
+                    match (cb)(InterruptParameters {
+                        msix: Some(&self.table_entries[index]),
+                    }) {
+                        Ok(_) => debug!("MSI-X injected on vector control flip"),
+                        Err(e) => error!("failed to inject MSI-X: {}", e),
+                    };
+                }
+
+                // Clear the bit from PBA
+                self.set_pba_bit(index as u16, true);
+            }
+        }
     }
 
     pub fn read_pba(&mut self, offset: u64, data: &mut [u8]) {
@@ -181,6 +223,30 @@ impl MsixConfig {
 
     pub fn write_pba(&mut self, _offset: u64, _data: &[u8]) {
         error!("Pending Bit Array is read only");
+    }
+
+    pub fn set_pba_bit(&mut self, vector: u16, reset: bool) {
+        assert!(vector < MAX_MSIX_VECTORS_PER_DEVICE);
+
+        let index: usize = (vector as usize) / BITS_PER_PBA_ENTRY;
+        let shift: usize = (vector as usize) % BITS_PER_PBA_ENTRY;
+        let mut mask: u64 = (1 << shift) as u64;
+
+        if reset {
+            mask = !mask;
+            self.pba_entries[index] &= mask;
+        } else {
+            self.pba_entries[index] |= mask;
+        }
+    }
+
+    fn get_pba_bit(&mut self, vector: u16) -> u8 {
+        assert!(vector < MAX_MSIX_VECTORS_PER_DEVICE);
+
+        let index: usize = (vector as usize) / BITS_PER_PBA_ENTRY;
+        let shift: usize = (vector as usize) % BITS_PER_PBA_ENTRY;
+
+        ((self.pba_entries[index] >> shift) & 0x0000_0001u64) as u8
     }
 }
 

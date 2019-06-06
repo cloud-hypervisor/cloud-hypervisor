@@ -13,8 +13,8 @@ use vm_allocator::SystemAllocator;
 use vm_memory::{GuestAddress, GuestUsize};
 use vmm_sys_util::EventFd;
 
-pub struct InterruptParameters {
-    pub msix: Option<MsixTableEntry>,
+pub struct InterruptParameters<'a> {
+    pub msix: Option<&'a MsixTableEntry>,
 }
 
 pub type InterruptDelivery =

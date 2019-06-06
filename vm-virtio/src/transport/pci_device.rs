@@ -358,15 +358,27 @@ impl PciDevice for VirtioPciDevice {
     }
 
     fn assign_msix(&mut self, msi_cb: Arc<InterruptDelivery>) {
+        self.msix_config
+            .lock()
+            .unwrap()
+            .register_interrupt_cb(msi_cb.clone());
+
         let msix_config = self.msix_config.clone();
 
         let cb = Arc::new(Box::new(move |queue: &Queue| {
-            let param = InterruptParameters {
-                msix: Some(
-                    msix_config.lock().unwrap().table_entries[queue.vector as usize].clone(),
-                ),
-            };
-            (msi_cb)(param)
+            let entry = &msix_config.lock().unwrap().table_entries[queue.vector as usize];
+
+            // In case the vector control register associated with the entry
+            // has its first bit set, this means the vector is masked and the
+            // device should not inject the interrupt.
+            // Instead, the Pending Bit Array table is updated to reflect there
+            // is a pending interrupt for this specific vector.
+            if entry.vector_ctl == 0x0000_0001u32 {
+                msix_config.lock().unwrap().set_pba_bit(queue.vector, false);
+                return Ok(());
+            }
+
+            (msi_cb)(InterruptParameters { msix: Some(entry) })
         }) as VirtioInterrupt);
 
         self.interrupt_cb = Some(cb);
