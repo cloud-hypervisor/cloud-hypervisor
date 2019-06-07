@@ -171,7 +171,7 @@ pub struct VirtioPciDevice {
     common_config: VirtioPciCommonConfig,
 
     // MSI-X config
-    msix_config: Arc<Mutex<MsixConfig>>,
+    msix_config: Option<Arc<Mutex<MsixConfig>>>,
 
     // Number of MSI-X vectors
     msix_num: u16,
@@ -210,7 +210,13 @@ impl VirtioPciDevice {
 
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + device.device_type() as u16;
 
-        let msix_config = Arc::new(Mutex::new(MsixConfig::new(msix_num)));
+        let (msix_config, msix_config_clone) = if msix_num > 0 {
+            let msix_config = Arc::new(Mutex::new(MsixConfig::new(msix_num)));
+            let msix_config_clone = msix_config.clone();
+            (Some(msix_config), Some(msix_config_clone))
+        } else {
+            (None, None)
+        };
 
         let configuration = PciConfiguration::new(
             VIRTIO_PCI_VENDOR_ID,
@@ -221,7 +227,7 @@ impl VirtioPciDevice {
             PciHeaderType::Device,
             VIRTIO_PCI_VENDOR_ID,
             pci_device_id,
-            Some(msix_config.clone()),
+            msix_config_clone,
         );
 
         Ok(VirtioPciDevice {
@@ -327,15 +333,17 @@ impl VirtioPciDevice {
             .add_capability(&configuration_cap)
             .map_err(PciDeviceError::CapabilitiesSetup)?;
 
-        let msix_cap = MsixCap::new(
-            settings_bar,
-            self.msix_num,
-            MSIX_TABLE_BAR_OFFSET as u32,
-            MSIX_PBA_BAR_OFFSET as u32,
-        );
-        self.configuration
-            .add_capability(&msix_cap)
-            .map_err(PciDeviceError::CapabilitiesSetup)?;
+        if self.msix_config.is_some() {
+            let msix_cap = MsixCap::new(
+                settings_bar,
+                self.msix_num,
+                MSIX_TABLE_BAR_OFFSET as u32,
+                MSIX_PBA_BAR_OFFSET as u32,
+            );
+            self.configuration
+                .add_capability(&msix_cap)
+                .map_err(PciDeviceError::CapabilitiesSetup)?;
+        }
 
         self.settings_bar = settings_bar;
         Ok(())
@@ -360,31 +368,33 @@ impl PciDevice for VirtioPciDevice {
     }
 
     fn assign_msix(&mut self, msi_cb: Arc<InterruptDelivery>) {
-        self.msix_config
-            .lock()
-            .unwrap()
-            .register_interrupt_cb(msi_cb.clone());
+        if let Some(msix_config) = &self.msix_config {
+            msix_config
+                .lock()
+                .unwrap()
+                .register_interrupt_cb(msi_cb.clone());
 
-        let msix_config = self.msix_config.clone();
+            let msix_config_clone = msix_config.clone();
 
-        let cb = Arc::new(Box::new(move |queue: &Queue| {
-            let config = &mut msix_config.lock().unwrap();
-            let entry = &config.table_entries[queue.vector as usize];
+            let cb = Arc::new(Box::new(move |queue: &Queue| {
+                let config = &mut msix_config_clone.lock().unwrap();
+                let entry = &config.table_entries[queue.vector as usize];
 
-            // In case the vector control register associated with the entry
-            // has its first bit set, this means the vector is masked and the
-            // device should not inject the interrupt.
-            // Instead, the Pending Bit Array table is updated to reflect there
-            // is a pending interrupt for this specific vector.
-            if config.is_masked() || entry.is_masked() {
-                config.set_pba_bit(queue.vector, false);
-                return Ok(());
-            }
+                // In case the vector control register associated with the entry
+                // has its first bit set, this means the vector is masked and the
+                // device should not inject the interrupt.
+                // Instead, the Pending Bit Array table is updated to reflect there
+                // is a pending interrupt for this specific vector.
+                if config.is_masked() || entry.is_masked() {
+                    config.set_pba_bit(queue.vector, false);
+                    return Ok(());
+                }
 
-            (msi_cb)(InterruptParameters { msix: Some(entry) })
-        }) as VirtioInterrupt);
+                (msi_cb)(InterruptParameters { msix: Some(entry) })
+            }) as VirtioInterrupt);
 
-        self.interrupt_cb = Some(cb);
+            self.interrupt_cb = Some(cb);
+        }
     }
 
     fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
@@ -470,16 +480,20 @@ impl PciDevice for VirtioPciDevice {
                 // Handled with ioeventfds.
             }
             o if MSIX_TABLE_BAR_OFFSET <= o && o < MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE => {
-                self.msix_config
-                    .lock()
-                    .unwrap()
-                    .read_table(o - MSIX_TABLE_BAR_OFFSET, data);
+                if let Some(msix_config) = &self.msix_config {
+                    msix_config
+                        .lock()
+                        .unwrap()
+                        .read_table(o - MSIX_TABLE_BAR_OFFSET, data);
+                }
             }
             o if MSIX_PBA_BAR_OFFSET <= o && o < MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE => {
-                self.msix_config
-                    .lock()
-                    .unwrap()
-                    .read_pba(o - MSIX_PBA_BAR_OFFSET, data);
+                if let Some(msix_config) = &self.msix_config {
+                    msix_config
+                        .lock()
+                        .unwrap()
+                        .read_pba(o - MSIX_PBA_BAR_OFFSET, data);
+                }
             }
             _ => (),
         }
@@ -510,16 +524,20 @@ impl PciDevice for VirtioPciDevice {
                 // Handled with ioeventfds.
             }
             o if MSIX_TABLE_BAR_OFFSET <= o && o < MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE => {
-                self.msix_config
-                    .lock()
-                    .unwrap()
-                    .write_table(o - MSIX_TABLE_BAR_OFFSET, data);
+                if let Some(msix_config) = &self.msix_config {
+                    msix_config
+                        .lock()
+                        .unwrap()
+                        .write_table(o - MSIX_TABLE_BAR_OFFSET, data);
+                }
             }
             o if MSIX_PBA_BAR_OFFSET <= o && o < MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE => {
-                self.msix_config
-                    .lock()
-                    .unwrap()
-                    .write_pba(o - MSIX_PBA_BAR_OFFSET, data);
+                if let Some(msix_config) = &self.msix_config {
+                    msix_config
+                        .lock()
+                        .unwrap()
+                        .write_pba(o - MSIX_PBA_BAR_OFFSET, data);
+                }
             }
             _ => (),
         };
