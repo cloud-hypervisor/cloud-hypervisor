@@ -52,7 +52,8 @@ const X86_64_IRQ_BASE: u32 = 5;
 const DEFAULT_MSIX_VEC_NUM: u16 = 2;
 
 // CPUID feature bits
-const ECX_HYPERVISOR_SHIFT: u32 = 31; // Hypervisor bit.
+const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
+const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 
 /// Errors associated with VM management
 #[derive(Debug)]
@@ -583,6 +584,16 @@ impl AsRawFd for EpollContext {
     }
 }
 
+struct CpuidPatch {
+    function: u32,
+    index: u32,
+    flags_bit: Option<u8>,
+    eax_bit: Option<u8>,
+    ebx_bit: Option<u8>,
+    ecx_bit: Option<u8>,
+    edx_bit: Option<u8>,
+}
+
 pub struct Vm<'a> {
     fd: Arc<VmFd>,
     kernel: File,
@@ -627,18 +638,44 @@ impl<'a> Vm<'a> {
         // Create IRQ chip
         fd.create_irq_chip().map_err(Error::VmSetup)?;
 
-        // Creates an in-kernel device model for the PIT.
-        let mut pit_config = kvm_pit_config::default();
-        // We need to enable the emulation of a dummy speaker port stub so that writing to port 0x61
-        // (i.e. KVM_SPEAKER_BASE_ADDRESS) does not trigger an exit to user space.
-        pit_config.flags = KVM_PIT_SPEAKER_DUMMY;
-        fd.create_pit2(pit_config).map_err(Error::VmSetup)?;
-
         // Supported CPUID
         let mut cpuid = kvm
             .get_supported_cpuid(MAX_KVM_CPUID_ENTRIES)
             .map_err(Error::VmSetup)?;
-        Vm::patch_cpuid(&mut cpuid);
+
+        let mut cpuid_patches = Vec::new();
+        if kvm.check_extension(Cap::TscDeadlineTimer) {
+            // Patch tsc deadline timer bit
+            cpuid_patches.push(CpuidPatch {
+                function: 1,
+                index: 0,
+                flags_bit: None,
+                eax_bit: None,
+                ebx_bit: None,
+                ecx_bit: Some(TSC_DEADLINE_TIMER_ECX_BIT),
+                edx_bit: None,
+            });
+        } else {
+            // Creates an in-kernel device model for the PIT.
+            let mut pit_config = kvm_pit_config::default();
+            // We need to enable the emulation of a dummy speaker port stub so that writing to port 0x61
+            // (i.e. KVM_SPEAKER_BASE_ADDRESS) does not trigger an exit to user space.
+            pit_config.flags = KVM_PIT_SPEAKER_DUMMY;
+            fd.create_pit2(pit_config).map_err(Error::VmSetup)?;
+        }
+
+        // Patch hypervisor bit
+        cpuid_patches.push(CpuidPatch {
+            function: 1,
+            index: 0,
+            flags_bit: None,
+            eax_bit: None,
+            ebx_bit: None,
+            ecx_bit: Some(HYPERVISOR_ECX_BIT),
+            edx_bit: None,
+        });
+
+        Vm::patch_cpuid(&mut cpuid, cpuid_patches);
 
         // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
         let mut allocator = SystemAllocator::new(
@@ -838,13 +875,27 @@ impl<'a> Vm<'a> {
         &self.memory
     }
 
-    fn patch_cpuid(cpuid: &mut CpuId) {
+    fn patch_cpuid(cpuid: &mut CpuId, patches: Vec<CpuidPatch>) {
         let entries = cpuid.mut_entries_slice();
 
         for entry in entries.iter_mut() {
-            if let 1 = entry.function {
-                if entry.index == 0 {
-                    entry.ecx |= 1 << ECX_HYPERVISOR_SHIFT;
+            for patch in patches.iter() {
+                if entry.function == patch.function && entry.index == patch.index {
+                    if let Some(flags_bit) = patch.flags_bit {
+                        entry.flags |= 1 << flags_bit;
+                    }
+                    if let Some(eax_bit) = patch.eax_bit {
+                        entry.eax |= 1 << eax_bit;
+                    }
+                    if let Some(ebx_bit) = patch.ebx_bit {
+                        entry.ebx |= 1 << ebx_bit;
+                    }
+                    if let Some(ecx_bit) = patch.ecx_bit {
+                        entry.ecx |= 1 << ecx_bit;
+                    }
+                    if let Some(edx_bit) = patch.edx_bit {
+                        entry.edx |= 1 << edx_bit;
+                    }
                 }
             }
         }
