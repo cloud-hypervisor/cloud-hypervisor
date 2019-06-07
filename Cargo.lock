@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "linux-loader"
 version = "0.1.0"
-source = "git+https://github.com/bjzhjing/linux-loader#912dbb58c8a859c10735066d5a2089cd4073904c"
+source = "git+https://github.com/bjzhjing/linux-loader#ed36dbf364e90e3e27d5bd521d297b89aa6ed4bd"
 dependencies = [
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
 ]
