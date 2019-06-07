@@ -429,9 +429,10 @@ impl DeviceManager {
         mmio_bus: &mut devices::Bus,
         msi_capable: bool,
     ) -> DeviceManagerResult<()> {
-        let mut virtio_pci_device =
-            VirtioPciDevice::new(memory, virtio_device, DEFAULT_MSIX_VEC_NUM)
-                .map_err(DeviceManagerError::VirtioDevice)?;
+        let msix_num = if msi_capable { DEFAULT_MSIX_VEC_NUM } else { 0 };
+
+        let mut virtio_pci_device = VirtioPciDevice::new(memory, virtio_device, msix_num)
+            .map_err(DeviceManagerError::VirtioDevice)?;
 
         let bars = virtio_pci_device
             .allocate_bars(allocator)
