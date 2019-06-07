@@ -17,6 +17,7 @@ const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
 const MSIX_PBA_ENTRIES_MODULO: u64 = 8;
 const BITS_PER_PBA_ENTRY: usize = 64;
+const FUNCTION_MASK_BIT: u8 = 14;
 
 #[derive(Debug, Clone)]
 pub struct MsixTableEntry {
@@ -24,6 +25,12 @@ pub struct MsixTableEntry {
     pub msg_addr_hi: u32,
     pub msg_data: u32,
     pub vector_ctl: u32,
+}
+
+impl MsixTableEntry {
+    pub fn is_masked(&self) -> bool {
+        self.vector_ctl == 1u32
+    }
 }
 
 impl Default for MsixTableEntry {
@@ -41,6 +48,7 @@ pub struct MsixConfig {
     pub table_entries: Vec<MsixTableEntry>,
     pub pba_entries: Vec<u64>,
     interrupt_cb: Option<Arc<InterruptDelivery>>,
+    masked: bool,
 }
 
 impl MsixConfig {
@@ -57,11 +65,34 @@ impl MsixConfig {
             table_entries,
             pba_entries,
             interrupt_cb: None,
+            masked: false,
         }
     }
 
     pub fn register_interrupt_cb(&mut self, cb: Arc<InterruptDelivery>) {
         self.interrupt_cb = Some(cb);
+    }
+
+    pub fn is_masked(&self) -> bool {
+        self.masked
+    }
+
+    pub fn set_msg_ctl(&mut self, reg: u16) {
+        let old_masked = self.masked;
+
+        self.masked = ((reg >> FUNCTION_MASK_BIT) & 1u16) == 1u16;
+
+        // If the Function Mask bit was set, and has just been cleared, it's
+        // important to go through the entire PBA to check if there was any
+        // pending MSI-X message to inject, given that the vector is not
+        // masked.
+        if old_masked && !self.masked {
+            for (index, entry) in self.table_entries.clone().iter().enumerate() {
+                if !entry.is_masked() && self.get_pba_bit(index as u16) == 1 {
+                    self.inject_msix_and_clear_pba(index);
+                }
+            }
+        }
     }
 
     pub fn read_table(&mut self, offset: u64, data: &mut [u8]) {
@@ -117,8 +148,8 @@ impl MsixConfig {
         let index: usize = (offset / MSIX_TABLE_ENTRIES_MODULO) as usize;
         let modulo_offset = offset % MSIX_TABLE_ENTRIES_MODULO;
 
-        // Store the value of the vector control register
-        let mut old_vector_ctl: Option<u32> = None;
+        // Store the value of the entry before modification
+        let mut old_entry: Option<MsixTableEntry> = None;
 
         match data.len() {
             4 => {
@@ -128,7 +159,7 @@ impl MsixConfig {
                     0x4 => self.table_entries[index].msg_addr_hi = value,
                     0x8 => self.table_entries[index].msg_data = value,
                     0x10 => {
-                        old_vector_ctl = Some(self.table_entries[index].vector_ctl);
+                        old_entry = Some(self.table_entries[index].clone());
                         self.table_entries[index].vector_ctl = value;
                     }
                     _ => error!("invalid offset"),
@@ -144,7 +175,7 @@ impl MsixConfig {
                         self.table_entries[index].msg_addr_hi = (value >> 32) as u32;
                     }
                     0x8 => {
-                        old_vector_ctl = Some(self.table_entries[index].vector_ctl);
+                        old_entry = Some(self.table_entries[index].clone());
                         self.table_entries[index].msg_data = (value & 0xffff_ffffu64) as u32;
                         self.table_entries[index].vector_ctl = (value >> 32) as u32;
                     }
@@ -161,24 +192,16 @@ impl MsixConfig {
         // bit has been flipped from 1 to 0, we need to inject a MSI message
         // if the corresponding pending bit from the PBA is set. Once the MSI
         // has been injected, the pending bit in the PBA needs to be cleared.
-        if let Some(old_vector_ctl) = old_vector_ctl {
-            // Check is bit has been flipped
-            if old_vector_ctl == 0x0000_0001u32
-                && self.table_entries[index].vector_ctl == 0x0000_0000u32
+        // All of this is valid only if MSI-X has not been masked for the whole
+        // device.
+        if let Some(old_entry) = old_entry {
+            // Check if bit has been flipped
+            if !self.is_masked()
+                && old_entry.is_masked()
+                && !self.table_entries[index].is_masked()
                 && self.get_pba_bit(index as u16) == 1
             {
-                // Inject the MSI message
-                if let Some(cb) = &self.interrupt_cb {
-                    match (cb)(InterruptParameters {
-                        msix: Some(&self.table_entries[index]),
-                    }) {
-                        Ok(_) => debug!("MSI-X injected on vector control flip"),
-                        Err(e) => error!("failed to inject MSI-X: {}", e),
-                    };
-                }
-
-                // Clear the bit from PBA
-                self.set_pba_bit(index as u16, true);
+                self.inject_msix_and_clear_pba(index);
             }
         }
     }
@@ -240,13 +263,28 @@ impl MsixConfig {
         }
     }
 
-    fn get_pba_bit(&mut self, vector: u16) -> u8 {
+    fn get_pba_bit(&self, vector: u16) -> u8 {
         assert!(vector < MAX_MSIX_VECTORS_PER_DEVICE);
 
         let index: usize = (vector as usize) / BITS_PER_PBA_ENTRY;
         let shift: usize = (vector as usize) % BITS_PER_PBA_ENTRY;
 
         ((self.pba_entries[index] >> shift) & 0x0000_0001u64) as u8
+    }
+
+    fn inject_msix_and_clear_pba(&mut self, vector: usize) {
+        // Inject the MSI message
+        if let Some(cb) = &self.interrupt_cb {
+            match (cb)(InterruptParameters {
+                msix: Some(&self.table_entries[vector]),
+            }) {
+                Ok(_) => debug!("MSI-X injected on vector control flip"),
+                Err(e) => error!("failed to inject MSI-X: {}", e),
+            };
+        }
+
+        // Clear the bit from PBA
+        self.set_pba_bit(vector as u16, true);
     }
 }
 

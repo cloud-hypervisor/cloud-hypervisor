@@ -53,6 +53,7 @@ impl PciRoot {
                     PciHeaderType::Bridge,
                     0,
                     0,
+                    None,
                 ),
                 devices: Vec::new(),
             }

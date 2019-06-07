@@ -12,7 +12,6 @@ extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vmm_sys_util;
 
-use byteorder::{ByteOrder, LittleEndian};
 use libc::EFD_NONBLOCK;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -211,6 +210,8 @@ impl VirtioPciDevice {
 
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + device.device_type() as u16;
 
+        let msix_config = Arc::new(Mutex::new(MsixConfig::new(msix_num)));
+
         let configuration = PciConfiguration::new(
             VIRTIO_PCI_VENDOR_ID,
             pci_device_id,
@@ -220,6 +221,7 @@ impl VirtioPciDevice {
             PciHeaderType::Device,
             VIRTIO_PCI_VENDOR_ID,
             pci_device_id,
+            Some(msix_config.clone()),
         );
 
         Ok(VirtioPciDevice {
@@ -232,7 +234,7 @@ impl VirtioPciDevice {
                 queue_select: 0,
                 msix_config: 0,
             },
-            msix_config: Arc::new(Mutex::new(MsixConfig::new(msix_num))),
+            msix_config,
             msix_num,
             device,
             device_activated: false,
@@ -366,15 +368,16 @@ impl PciDevice for VirtioPciDevice {
         let msix_config = self.msix_config.clone();
 
         let cb = Arc::new(Box::new(move |queue: &Queue| {
-            let entry = &msix_config.lock().unwrap().table_entries[queue.vector as usize];
+            let config = &mut msix_config.lock().unwrap();
+            let entry = &config.table_entries[queue.vector as usize];
 
             // In case the vector control register associated with the entry
             // has its first bit set, this means the vector is masked and the
             // device should not inject the interrupt.
             // Instead, the Pending Bit Array table is updated to reflect there
             // is a pending interrupt for this specific vector.
-            if entry.vector_ctl == 0x0000_0001u32 {
-                msix_config.lock().unwrap().set_pba_bit(queue.vector, false);
+            if config.is_masked() || entry.is_masked() {
+                config.set_pba_bit(queue.vector, false);
                 return Ok(());
             }
 
@@ -382,14 +385,6 @@ impl PciDevice for VirtioPciDevice {
         }) as VirtioInterrupt);
 
         self.interrupt_cb = Some(cb);
-    }
-
-    fn config_registers(&self) -> &PciConfiguration {
-        &self.configuration
-    }
-
-    fn config_registers_mut(&mut self) -> &mut PciConfiguration {
-        &mut self.configuration
     }
 
     fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
@@ -578,24 +573,11 @@ impl BusDevice for VirtioPciDevice {
     }
 
     fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
-        if offset as usize + data.len() > 4 {
-            return;
-        }
-
-        let regs = self.config_registers_mut();
-
-        match data.len() {
-            1 => regs.write_byte(reg_idx * 4 + offset as usize, data[0]),
-            2 => regs.write_word(
-                reg_idx * 4 + offset as usize,
-                u16::from(data[0]) | (u16::from(data[1]) << 8),
-            ),
-            4 => regs.write_reg(reg_idx, LittleEndian::read_u32(data)),
-            _ => (),
-        }
+        self.configuration
+            .write_config_register(reg_idx, offset, data);
     }
 
     fn read_config_register(&self, reg_idx: usize) -> u32 {
-        self.config_registers().read_reg(reg_idx)
+        self.configuration.read_config_register(reg_idx)
     }
 }
