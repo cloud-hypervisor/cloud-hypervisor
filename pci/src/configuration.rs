@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use crate::PciInterruptPin;
+use std::sync::{Arc, Mutex};
+
+use crate::{MsixConfig, PciInterruptPin};
 use byteorder::{ByteOrder, LittleEndian};
 use std::fmt::{self, Display};
 
@@ -132,6 +134,7 @@ pub trait PciProgrammingInterface {
 }
 
 /// Types of PCI capabilities.
+#[derive(PartialEq)]
 pub enum PciCapabilityID {
     ListID = 0,
     PowerManagement = 0x01,
@@ -171,6 +174,8 @@ pub struct PciConfiguration {
     bar_used: [bool; NUM_BAR_REGS],
     // Contains the byte offset and size of the last capability.
     last_capability: Option<(usize, usize)>,
+    msix_cap_reg_idx: Option<usize>,
+    msix_config: Option<Arc<Mutex<MsixConfig>>>,
 }
 
 /// See pci_regs.h in kernel
@@ -245,6 +250,7 @@ impl PciConfiguration {
         header_type: PciHeaderType,
         subsystem_vendor_id: u16,
         subsystem_id: u16,
+        msix_config: Option<Arc<Mutex<MsixConfig>>>,
     ) -> Self {
         let mut registers = [0u32; NUM_CONFIGURATION_REGISTERS];
         let mut writable_bits = [0u32; NUM_CONFIGURATION_REGISTERS];
@@ -278,6 +284,8 @@ impl PciConfiguration {
             writable_bits,
             bar_used: [false; NUM_BAR_REGS],
             last_capability: None,
+            msix_cap_reg_idx: None,
+            msix_config,
         }
     }
 
@@ -455,6 +463,11 @@ impl PciConfiguration {
             self.write_byte_internal(cap_offset + i + 2, *byte, false);
         }
         self.last_capability = Some((cap_offset, total_len));
+
+        if cap_data.id() == PciCapabilityID::MSIX {
+            self.msix_cap_reg_idx = Some(cap_offset / 4);
+        }
+
         Ok(cap_offset)
     }
 
@@ -467,6 +480,18 @@ impl PciConfiguration {
     pub fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
         if offset as usize + data.len() > 4 {
             return;
+        }
+
+        // Handle potential write to MSI-X message control register
+        if let Some(msix_cap_reg_idx) = self.msix_cap_reg_idx {
+            if let Some(msix_config) = &self.msix_config {
+                if msix_cap_reg_idx == reg_idx && offset == 2 && data.len() == 2 {
+                    msix_config
+                        .lock()
+                        .unwrap()
+                        .set_msg_ctl(LittleEndian::read_u16(data));
+                }
+            }
         }
 
         match data.len() {

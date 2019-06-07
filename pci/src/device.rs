@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use crate::configuration::{self, PciConfiguration};
+use crate::configuration;
 use crate::msix::MsixTableEntry;
 use crate::PciInterruptPin;
 use devices::BusDevice;
@@ -80,10 +80,6 @@ pub trait PciDevice: BusDevice {
     fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
         Vec::new()
     }
-    /// Gets the configuration registers of the Pci Device.
-    fn config_registers(&self) -> &PciConfiguration; // TODO - remove these
-    /// Gets the configuration registers of the Pci Device for modification.
-    fn config_registers_mut(&mut self) -> &mut PciConfiguration;
     /// Reads from a BAR region mapped in to the device.
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - Filled with the data from `addr`.
