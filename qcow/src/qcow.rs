@@ -112,7 +112,10 @@ pub enum ImageType {
 const QCOW_MAGIC: u32 = 0x5146_49fb;
 // Default to a cluster size of 2^DEFAULT_CLUSTER_BITS
 const DEFAULT_CLUSTER_BITS: u32 = 16;
-const MAX_CLUSTER_BITS: u32 = 30;
+// Limit clusters to reasonable sizes. Choose the same limits as qemu. Making the clusters smaller
+// increases the amount of overhead for book keeping.
+const MIN_CLUSTER_BITS: u32 = 9;
+const MAX_CLUSTER_BITS: u32 = 21;
 // Only support 2 byte refcounts, 2^refcount_order bits.
 const DEFAULT_REFCOUNT_ORDER: u32 = 4;
 
@@ -369,14 +372,10 @@ impl QcowFile {
         }
 
         let cluster_bits: u32 = header.cluster_bits;
-        if cluster_bits > MAX_CLUSTER_BITS {
+        if cluster_bits < MIN_CLUSTER_BITS || cluster_bits > MAX_CLUSTER_BITS {
             return Err(Error::InvalidClusterSize);
         }
         let cluster_size = 0x01u64 << cluster_bits;
-        if cluster_size < size_of::<u64>() as u64 {
-            // Can't fit an offset in a cluster, nothing is going to work.
-            return Err(Error::InvalidClusterSize);
-        }
 
         // No current support for backing files.
         if header.backing_file_offset != 0 {
