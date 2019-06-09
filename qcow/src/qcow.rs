@@ -31,6 +31,7 @@ pub enum Error {
     BackingFilesNotSupported,
     CompressedBlocksNotSupported,
     EvictingCache(io::Error),
+    FileTooBig(u64),
     GettingFileSize(io::Error),
     GettingRefcount(refcount::Error),
     InvalidClusterIndex,
@@ -40,9 +41,10 @@ pub enum Error {
     InvalidMagic,
     InvalidOffset(u64),
     InvalidRefcountTableOffset,
-    InvalidRefcountTableSize,
+    InvalidRefcountTableSize(u64),
     NoFreeClusters,
     NoRefcountClusters,
+    NotEnoughSpaceForRefcounts,
     OpeningFile(io::Error),
     ReadingData(io::Error),
     ReadingHeader(io::Error),
@@ -54,6 +56,8 @@ pub enum Error {
     SettingFileSize(io::Error),
     SettingRefcountRefcount(io::Error),
     SizeTooSmallForNumberOfClusters,
+    TooManyL1Entries(u64),
+    TooManyRefcounts(u64),
     UnsupportedRefcountOrder,
     UnsupportedVersion(u32),
     WritingData(io::Error),
@@ -72,6 +76,7 @@ impl Display for Error {
             BackingFilesNotSupported => write!(f, "backing files not supported"),
             CompressedBlocksNotSupported => write!(f, "compressed blocks not supported"),
             EvictingCache(e) => write!(f, "failed to evict cache: {}", e),
+            FileTooBig(size) => write!(f, "file larger than max of 1TB: {}", size),
             GettingFileSize(e) => write!(f, "failed to get file size: {}", e),
             GettingRefcount(e) => write!(f, "failed to get refcount: {}", e),
             InvalidClusterIndex => write!(f, "invalid cluster index"),
@@ -81,9 +86,10 @@ impl Display for Error {
             InvalidMagic => write!(f, "invalid magic"),
             InvalidOffset(_) => write!(f, "invalid offset"),
             InvalidRefcountTableOffset => write!(f, "invalid refcount table offset"),
-            InvalidRefcountTableSize => write!(f, "invalid refcount table size"),
+            InvalidRefcountTableSize(size) => write!(f, "invalid refcount table size: {}", size),
             NoFreeClusters => write!(f, "no free clusters"),
             NoRefcountClusters => write!(f, "no refcount clusters"),
+            NotEnoughSpaceForRefcounts => write!(f, "not enough space for refcounts"),
             OpeningFile(e) => write!(f, "failed to open file: {}", e),
             ReadingData(e) => write!(f, "failed to read data: {}", e),
             ReadingHeader(e) => write!(f, "failed to read header: {}", e),
@@ -95,6 +101,8 @@ impl Display for Error {
             SettingFileSize(e) => write!(f, "failed to set file size: {}", e),
             SettingRefcountRefcount(e) => write!(f, "failed to set refcount refcount: {}", e),
             SizeTooSmallForNumberOfClusters => write!(f, "size too small for number of clusters"),
+            TooManyL1Entries(count) => write!(f, "l1 entry table too large: {}", count),
+            TooManyRefcounts(count) => write!(f, "ref count table too large: {}", count),
             UnsupportedRefcountOrder => write!(f, "unsupported refcount order"),
             UnsupportedVersion(v) => write!(f, "unsupported version: {}", v),
             WritingData(e) => write!(f, "failed to write data: {}", e),
@@ -116,6 +124,10 @@ const DEFAULT_CLUSTER_BITS: u32 = 16;
 // increases the amount of overhead for book keeping.
 const MIN_CLUSTER_BITS: u32 = 9;
 const MAX_CLUSTER_BITS: u32 = 21;
+// The L1 and RefCount table are kept in RAM, only handle files that require less than 35M entries.
+// This easily covers 1 TB files. When support for bigger files is needed the assumptions made to
+// keep these tables in RAM needs to be thrown out.
+const MAX_RAM_POINTER_TABLE_SIZE: u64 = 35_000_000;
 // Only support 2 byte refcounts, 2^refcount_order bits.
 const DEFAULT_REFCOUNT_ORDER: u32 = 4;
 
@@ -435,6 +447,9 @@ impl QcowFile {
         let num_l2_clusters = div_round_up_u64(num_clusters, l2_size);
         let l1_clusters = div_round_up_u64(num_l2_clusters, cluster_size);
         let header_clusters = div_round_up_u64(size_of::<QcowHeader>() as u64, cluster_size);
+        if num_l2_clusters > MAX_RAM_POINTER_TABLE_SIZE {
+            return Err(Error::TooManyL1Entries(num_l2_clusters));
+        }
         let l1_table = VecCache::from_vec(
             raw_file
                 .read_pointer_table(
@@ -451,6 +466,9 @@ impl QcowFile {
             cluster_size as u32,
             (num_clusters + l1_clusters + num_l2_clusters + header_clusters) as u32,
         );
+        if l1_clusters + refcount_clusters > MAX_RAM_POINTER_TABLE_SIZE {
+            return Err(Error::TooManyRefcounts(refcount_clusters));
+        }
         let refcount_block_entries = cluster_size / refcount_bytes;
         let refcounts = RefCount::new(
             &mut raw_file,
@@ -719,7 +737,7 @@ impl QcowFile {
                 while refcounts[first_free_cluster as usize] != 0 {
                     first_free_cluster += 1;
                     if first_free_cluster >= refcounts.len() as u64 {
-                        return Err(Error::InvalidRefcountTableSize);
+                        return Err(Error::NotEnoughSpaceForRefcounts);
                     }
                 }
 
@@ -819,13 +837,13 @@ impl QcowFile {
         max_valid_cluster_index += refblock_clusters + reftable_clusters;
         max_valid_cluster_index += refblocks_for_refs + reftable_clusters_for_refs;
 
-        if max_valid_cluster_index > usize::max_value() as u64 {
-            return Err(Error::InvalidRefcountTableSize);
+        if max_valid_cluster_index > MAX_RAM_POINTER_TABLE_SIZE {
+            return Err(Error::InvalidRefcountTableSize(max_valid_cluster_index));
         }
 
         let max_valid_cluster_offset = max_valid_cluster_index * cluster_size;
         if max_valid_cluster_offset < file_size - cluster_size {
-            return Err(Error::InvalidRefcountTableSize);
+            return Err(Error::InvalidRefcountTableSize(max_valid_cluster_offset));
         }
 
         let mut refcounts = vec![0; max_valid_cluster_index as usize];
@@ -1696,13 +1714,37 @@ mod tests {
         ]
     }
 
+    // Test case found by clusterfuzz to allocate excessive memory.
+    fn test_huge_header() -> Vec<u8> {
+        vec![
+            0x51, 0x46, 0x49, 0xfb, // magic
+            0x00, 0x00, 0x00, 0x03, // version
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // backing file offset
+            0x00, 0x00, 0x00, 0x00, // backing file size
+            0x00, 0x00, 0x00, 0x09, // cluster_bits
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, // size
+            0x00, 0x00, 0x00, 0x00, // crypt method
+            0x00, 0x00, 0x01, 0x00, // L1 size
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, // L1 table offset
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, // refcount table offset
+            0x00, 0x00, 0x00, 0x03, // refcount table clusters
+            0x00, 0x00, 0x00, 0x00, // nb snapshots
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, // snapshots offset
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // incompatible_features
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // compatible_features
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // autoclear_features
+            0x00, 0x00, 0x00, 0x04, // refcount_order
+            0x00, 0x00, 0x00, 0x68, // header_length
+        ]
+    }
+
     fn with_basic_file<F>(header: &[u8], mut testfn: F)
     where
         F: FnMut(File),
     {
         let mut disk_file: File = tempfile().unwrap();
         disk_file.write_all(&header).unwrap();
-        disk_file.set_len(0x5_0000).unwrap();
+        disk_file.set_len(0x1_0000_0000).unwrap();
         disk_file.seek(SeekFrom::Start(0)).unwrap();
 
         testfn(disk_file); // File closed when the function exits.
@@ -1770,6 +1812,54 @@ mod tests {
         header[99] = 2;
         with_basic_file(&header, |disk_file: File| {
             QcowFile::from(disk_file).expect_err("Invalid refcount order worked.");
+        });
+    }
+
+    #[test]
+    fn invalid_cluster_bits() {
+        let mut header = test_huge_header();
+        header[23] = 3;
+        with_basic_file(&test_huge_header(), |disk_file: File| {
+            QcowFile::from(disk_file).expect_err("Failed to create file.");
+        });
+    }
+
+    #[test]
+    fn test_header_huge_file() {
+        let header = test_huge_header();
+        with_basic_file(&header, |disk_file: File| {
+            QcowFile::from(disk_file).expect_err("Failed to create file.");
+        });
+    }
+
+    #[test]
+    fn test_header_1_tb_file_min_cluster() {
+        let mut header = test_huge_header();
+        header[24] = 0;
+        header[26] = 1;
+        header[31] = 0;
+        // 1 TB with the min cluster size makes the arrays too big, it should fail.
+        with_basic_file(&header, |disk_file: File| {
+            QcowFile::from(disk_file).expect_err("Failed to create file.");
+        });
+    }
+
+    #[test]
+    fn test_header_1_tb_file() {
+        let mut header = test_huge_header();
+        // reset to 1 TB size.
+        header[24] = 0;
+        header[26] = 1;
+        header[31] = 0;
+        // set cluster_bits
+        header[23] = 16;
+        with_basic_file(&header, |disk_file: File| {
+            let mut qcow = QcowFile::from(disk_file).expect("Failed to create file.");
+            qcow.seek(SeekFrom::Start(0x100_0000_0000 - 8))
+                .expect("Failed to seek.");
+            let value = 0x0000_0040_3f00_ffffu64;
+            qcow.write_all(&value.to_le_bytes())
+                .expect("failed to write data");
         });
     }
 
