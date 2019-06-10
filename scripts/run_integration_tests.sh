@@ -24,6 +24,27 @@ if [ ! -f "$OS_IMAGE" ]; then
     popd
 fi
 
+
+VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
+BZIMAGE_IMAGE="$WORKLOADS_DIR/bzImage"
+
+if [ ! -f "$VMLINUX_IMAGE" ]; then
+    SRCDIR=$PWD
+    pushd $WORKLOADS_DIR
+    wget --quiet https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.0.21.tar.xz
+    tar xf linux-5.0.21.tar.xz
+    pushd linux-5.0.21
+    cp $SRCDIR/resources/linux-5.0-config .config
+    make bzImage -j `nproc`
+    cp vmlinux $VMLINUX_IMAGE
+    cp arch/x86/boot/bzImage $BZIMAGE_IMAGE
+    popd
+    rm linux-5.0.21.tar.xz
+    rm -r linux-5.0.21
+    popd
+fi
+
+
 rm /tmp/cloudinit.img
 mkdosfs -n config-2 -C /tmp/cloudinit.img 8192
 mcopy -oi /tmp/cloudinit.img -s test_data/cloud-init/openstack ::

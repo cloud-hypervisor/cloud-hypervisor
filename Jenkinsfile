@@ -5,6 +5,7 @@ stage ("Builds") {
 		}
 		stage ('Install system packages') {
 			sh "sudo apt-get -y install build-essential mtools libssl-dev pkg-config"
+			sh 'sudo apt-get -y install flex bison libelf-dev'
 		}
 		stage ('Install Rust') {
 			sh "nohup curl https://sh.rustup.rs -sSf | sh -s -- -y"
