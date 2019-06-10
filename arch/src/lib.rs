@@ -15,6 +15,7 @@ extern crate libc;
 
 extern crate arch_gen;
 extern crate kvm_ioctls;
+extern crate linux_loader;
 extern crate vm_memory;
 
 use std::result;

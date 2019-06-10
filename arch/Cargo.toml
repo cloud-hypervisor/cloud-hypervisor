@@ -15,5 +15,9 @@ arch_gen = { path = "../arch_gen" }
 git = "https://github.com/rust-vmm/vm-memory"
 features = ["backend-mmap"]
 
+[dependencies.linux-loader]
+git = "https://github.com/bjzhjing/linux-loader"
+features = ["elf", "bzimage"]
+
 [dev-dependencies]
 rand = ">=0.5.5"

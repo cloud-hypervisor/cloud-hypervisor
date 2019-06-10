@@ -55,6 +55,9 @@ const DEFAULT_MSIX_VEC_NUM: u16 = 2;
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 
+// 64 bit direct boot entry offset for bzImage
+const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
+
 /// Errors associated with VM management
 #[derive(Debug)]
 pub enum Error {
@@ -143,6 +146,9 @@ pub enum Error {
 
     /// Unexpected KVM_RUN exit reason
     VcpuUnhandledKvmExit,
+
+    /// Memory is overflow
+    MemOverflow,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -797,13 +803,24 @@ impl<'a> Vm<'a> {
     pub fn load_kernel(&mut self) -> Result<GuestAddress> {
         let cmdline_cstring =
             CString::new(self.config.cmdline.args.clone()).map_err(|_| Error::CmdLine)?;
-        let entry_addr = linux_loader::loader::Elf::load(
+        let entry_addr = match linux_loader::loader::Elf::load(
             &self.memory,
             None,
             &mut self.kernel,
             Some(arch::HIMEM_START),
-        )
-        .map_err(Error::KernelLoad)?;
+        ) {
+            Ok(entry_addr) => entry_addr,
+            Err(linux_loader::loader::Error::InvalidElfMagicNumber) => {
+                linux_loader::loader::BzImage::load(
+                    &self.memory,
+                    None,
+                    &mut self.kernel,
+                    Some(arch::HIMEM_START),
+                )
+                .map_err(Error::KernelLoad)?
+            }
+            _ => panic!("Invalid elf file"),
+        };
 
         linux_loader::loader::load_cmdline(
             &self.memory,
@@ -814,15 +831,38 @@ impl<'a> Vm<'a> {
 
         let vcpu_count = u8::from(&self.config.cpus);
 
-        arch::configure_system(
-            &self.memory,
-            self.config.cmdline.offset,
-            cmdline_cstring.to_bytes().len() + 1,
-            vcpu_count,
-        )
-        .map_err(|_| Error::CmdLine)?;
+        match entry_addr.setup_header {
+            Some(hdr) => {
+                arch::configure_system(
+                    &self.memory,
+                    self.config.cmdline.offset,
+                    cmdline_cstring.to_bytes().len() + 1,
+                    vcpu_count,
+                    Some(hdr),
+                )
+                .map_err(|_| Error::CmdLine)?;
 
-        Ok(entry_addr.kernel_load)
+                let load_addr = entry_addr
+                    .kernel_load
+                    .raw_value()
+                    .checked_add(KERNEL_64BIT_ENTRY_OFFSET)
+                    .ok_or(Error::MemOverflow)?;
+
+                Ok(GuestAddress(load_addr))
+            }
+            None => {
+                arch::configure_system(
+                    &self.memory,
+                    self.config.cmdline.offset,
+                    cmdline_cstring.to_bytes().len() + 1,
+                    vcpu_count,
+                    None,
+                )
+                .map_err(|_| Error::CmdLine)?;
+
+                Ok(entry_addr.kernel_load)
+            }
+        }
     }
 
     pub fn control_loop(&mut self) -> Result<()> {
