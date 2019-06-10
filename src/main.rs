@@ -232,8 +232,7 @@ mod tests {
             thread::sleep(std::time::Duration::new(10, 0));
 
             aver_eq!(tb, get_cpu_count(), 1);
-            aver_eq!(tb, get_total_memory(), 496_400);
-
+            aver!(tb, get_total_memory() > 496_000);
             aver!(tb, get_entropy() >= 1000);
 
             ssh_command("sudo reboot");
@@ -284,7 +283,7 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(10, 0));
 
-            aver!(tb, get_total_memory() > 5_063_800);
+            aver!(tb, get_total_memory() > 5_063_000);
 
             ssh_command("sudo reboot");
             thread::sleep(std::time::Duration::new(10, 0));
