@@ -13,7 +13,7 @@ pub mod regs;
 
 use std::mem;
 
-use arch_gen::x86::bootparam::{boot_params, E820_RAM};
+use linux_loader::loader::bootparam::{boot_params, setup_header, E820_RAM};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestUsize,
 };
@@ -95,6 +95,7 @@ pub fn configure_system(
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
     num_cpus: u8,
+    setup_hdr: Option<setup_header>,
 ) -> super::Result<()> {
     const KERNEL_BOOT_FLAG_MAGIC: u16 = 0xaa55;
     const KERNEL_HDR_MAGIC: u32 = 0x53726448;
@@ -110,12 +111,18 @@ pub fn configure_system(
 
     let mut params: BootParamsWrapper = BootParamsWrapper(boot_params::default());
 
-    params.0.hdr.type_of_loader = KERNEL_LOADER_OTHER;
-    params.0.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
-    params.0.hdr.header = KERNEL_HDR_MAGIC;
-    params.0.hdr.cmd_line_ptr = cmdline_addr.raw_value() as u32;
-    params.0.hdr.cmdline_size = cmdline_size as u32;
-    params.0.hdr.kernel_alignment = KERNEL_MIN_ALIGNMENT_BYTES;
+    if setup_hdr.is_some() {
+        params.0.hdr = setup_hdr.unwrap();
+        params.0.hdr.cmd_line_ptr = cmdline_addr.raw_value() as u32;
+        params.0.hdr.cmdline_size = cmdline_size as u32;
+    } else {
+        params.0.hdr.type_of_loader = KERNEL_LOADER_OTHER;
+        params.0.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
+        params.0.hdr.header = KERNEL_HDR_MAGIC;
+        params.0.hdr.cmd_line_ptr = cmdline_addr.raw_value() as u32;
+        params.0.hdr.cmdline_size = cmdline_size as u32;
+        params.0.hdr.kernel_alignment = KERNEL_MIN_ALIGNMENT_BYTES;
+    };
 
     add_e820_entry(&mut params.0, 0, EBDA_START.raw_value(), E820_RAM)?;
 
