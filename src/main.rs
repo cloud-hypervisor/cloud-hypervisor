@@ -183,7 +183,7 @@ mod tests {
         fw_path.push("hypervisor-fw");
 
         let mut osdisk_base_path = workload_path.clone();
-        osdisk_base_path.push("clear-29620-cloud.img");
+        osdisk_base_path.push("clear-29810-cloud.img");
 
         let osdisk_path = "/tmp/osdisk.img";
         let cloudinit_path = "/tmp/cloudinit.img";

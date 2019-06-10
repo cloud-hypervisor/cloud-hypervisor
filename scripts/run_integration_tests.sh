@@ -14,14 +14,14 @@ if [ ! -f "$FW" ]; then
     popd
 fi
 
-OS_IMAGE_NAME="clear-29620-cloud.img"
-OS_IMAGE_URL="https://download.clearlinux.org/releases/29620/clear/clear-29620-cloud.img.xz"
+OS_IMAGE_NAME="clear-29810-cloud.img"
+OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$OS_IMAGE_NAME.xz"
 OS_IMAGE="$WORKLOADS_DIR/$OS_IMAGE_NAME"
 if [ ! -f "$OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
     wget --quiet $OS_IMAGE_URL
     unxz $OS_IMAGE_NAME.xz
-popd
+    popd
 fi
 
 rm /tmp/cloudinit.img
