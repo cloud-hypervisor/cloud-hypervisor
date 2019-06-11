@@ -202,6 +202,13 @@ mod tests {
             .unwrap()
     }
 
+    fn get_initial_apicid() -> u32 {
+        ssh_command("grep \"initial apicid\" /proc/cpuinfo | grep -o \"[0-9]*\"")
+            .trim()
+            .parse()
+            .unwrap()
+    }
+
     fn get_total_memory() -> u32 {
         ssh_command("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")
             .trim()
@@ -232,6 +239,7 @@ mod tests {
             thread::sleep(std::time::Duration::new(10, 0));
 
             aver_eq!(tb, get_cpu_count(), 1);
+            aver_eq!(tb, get_initial_apicid(), 0);
             aver!(tb, get_total_memory() > 496_000);
             aver!(tb, get_entropy() >= 1000);
 

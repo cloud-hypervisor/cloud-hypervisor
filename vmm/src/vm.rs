@@ -193,6 +193,15 @@ pub enum DeviceManagerError {
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
+#[allow(dead_code)]
+#[derive(Copy, Clone)]
+enum CpuidReg {
+    EAX,
+    EBX,
+    ECX,
+    EDX,
+}
+
 /// A wrapper around creating and using a kvm-based VCPU.
 pub struct Vcpu {
     fd: VcpuFd,
@@ -227,8 +236,10 @@ impl Vcpu {
     /// * `kernel_start_addr` - Offset from `guest_mem` at which the kernel starts.
     /// * `vm` - The virtual machine this vcpu will get attached to.
     pub fn configure(&mut self, kernel_start_addr: GuestAddress, vm: &Vm) -> Result<()> {
+        let mut cpuid = vm.cpuid.clone();
+        Vcpu::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(self.id));
         self.fd
-            .set_cpuid2(&vm.cpuid)
+            .set_cpuid2(&cpuid)
             .map_err(Error::SetSupportedCpusFailed)?;
 
         arch::x86_64::regs::setup_msrs(&self.fd).map_err(Error::MSRSConfiguration)?;
@@ -283,6 +294,35 @@ impl Vcpu {
                     Err(Error::VcpuUnhandledKvmExit)
                 }
             },
+        }
+    }
+
+    fn set_cpuid_reg(
+        cpuid: &mut CpuId,
+        function: u32,
+        index: Option<u32>,
+        reg: CpuidReg,
+        value: u32,
+    ) {
+        let entries = cpuid.mut_entries_slice();
+
+        for entry in entries.iter_mut() {
+            if entry.function == function && (index == None || index.unwrap() == entry.index) {
+                match reg {
+                    CpuidReg::EAX => {
+                        entry.eax = value;
+                    }
+                    CpuidReg::EBX => {
+                        entry.ebx = value;
+                    }
+                    CpuidReg::ECX => {
+                        entry.ecx = value;
+                    }
+                    CpuidReg::EDX => {
+                        entry.edx = value;
+                    }
+                }
+            }
         }
     }
 }
