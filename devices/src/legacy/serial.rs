@@ -5,12 +5,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+use crate::{BusDevice, Interrupt};
 use std::collections::VecDeque;
 use std::{io, result};
-
-use vmm_sys_util::{EventFd, Result};
-
-use BusDevice;
+use vmm_sys_util::Result;
 
 const LOOP_SIZE: usize = 0x40;
 
@@ -57,7 +55,7 @@ const DEFAULT_BAUD_DIVISOR: u16 = 12; // 9600 bps
 pub struct Serial {
     interrupt_enable: u8,
     interrupt_identification: u8,
-    interrupt_evt: EventFd,
+    interrupt: Box<Interrupt>,
     line_control: u8,
     line_status: u8,
     modem_control: u8,
@@ -69,11 +67,11 @@ pub struct Serial {
 }
 
 impl Serial {
-    fn new(interrupt_evt: EventFd, out: Option<Box<io::Write + Send>>) -> Serial {
+    fn new(interrupt: Box<Interrupt>, out: Option<Box<io::Write + Send>>) -> Serial {
         Serial {
             interrupt_enable: 0,
             interrupt_identification: DEFAULT_INTERRUPT_IDENTIFICATION,
-            interrupt_evt,
+            interrupt,
             line_control: DEFAULT_LINE_CONTROL,
             line_status: DEFAULT_LINE_STATUS,
             modem_control: DEFAULT_MODEM_CONTROL,
@@ -86,13 +84,13 @@ impl Serial {
     }
 
     /// Constructs a Serial port ready for output.
-    pub fn new_out(interrupt_evt: EventFd, out: Box<io::Write + Send>) -> Serial {
-        Self::new(interrupt_evt, Some(out))
+    pub fn new_out(interrupt: Box<Interrupt>, out: Box<io::Write + Send>) -> Serial {
+        Self::new(interrupt, Some(out))
     }
 
     /// Constructs a Serial port with no connected output.
-    pub fn new_sink(interrupt_evt: EventFd) -> Serial {
-        Self::new(interrupt_evt, None)
+    pub fn new_sink(interrupt: Box<Interrupt>) -> Serial {
+        Self::new(interrupt, None)
     }
 
     /// Queues raw bytes for the guest to read and signals the interrupt if the line status would
@@ -151,7 +149,7 @@ impl Serial {
     }
 
     fn trigger_interrupt(&mut self) -> result::Result<(), io::Error> {
-        self.interrupt_evt.write(1)
+        self.interrupt.deliver()
     }
 
     fn iir_reset(&mut self) {

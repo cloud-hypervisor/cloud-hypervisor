@@ -14,7 +14,7 @@ extern crate vm_memory;
 extern crate vmm_sys_util;
 
 use std::fs::File;
-use std::io;
+use std::{io, result};
 
 mod bus;
 pub mod legacy;
@@ -57,4 +57,8 @@ pub enum Error {
         event: DeviceEventT,
     },
     IoError(io::Error),
+}
+
+pub trait Interrupt: Send {
+    fn deliver(&self) -> result::Result<(), std::io::Error>;
 }

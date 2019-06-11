@@ -135,9 +135,6 @@ pub enum Error {
     /// Cannot setup terminal in canonical mode.
     SetTerminalCanon(vmm_sys_util::Error),
 
-    /// Cannot configure the IRQ.
-    Irq(io::Error),
-
     /// Cannot create the system allocator
     CreateSystemAllocator,
 
@@ -371,13 +368,28 @@ impl Vcpu {
     }
 }
 
+struct KernelIoapicIrq {
+    evt: EventFd,
+}
+
+impl KernelIoapicIrq {
+    fn new(evt: EventFd) -> Self {
+        KernelIoapicIrq { evt }
+    }
+}
+
+impl devices::Interrupt for KernelIoapicIrq {
+    fn deliver(&self) -> result::Result<(), io::Error> {
+        self.evt.write(1)
+    }
+}
+
 struct DeviceManager {
     io_bus: devices::Bus,
     mmio_bus: devices::Bus,
 
     // Serial port on 0x3f8
     serial: Arc<Mutex<devices::legacy::Serial>>,
-    serial_evt: EventFd,
 
     // i8042 device for exit
     i8042: Arc<Mutex<devices::legacy::I8042Device>>,
@@ -397,14 +409,21 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Self> {
         let io_bus = devices::Bus::new();
         let mut mmio_bus = devices::Bus::new();
+
+        // Serial is tied to IRQ #4
+        let serial_irq = 4;
         let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+        vm_fd
+            .register_irqfd(serial_evt.as_raw_fd(), serial_irq as u32)
+            .map_err(DeviceManagerError::Irq)?;
+
+        // Add serial device
         let serial = Arc::new(Mutex::new(devices::legacy::Serial::new_out(
-            serial_evt
-                .try_clone()
-                .map_err(DeviceManagerError::EventFd)?,
+            Box::new(KernelIoapicIrq::new(serial_evt)),
             Box::new(stdout()),
         )));
 
+        // Add a shutdown device (i8042)
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
             exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
@@ -498,7 +517,6 @@ impl DeviceManager {
             io_bus,
             mmio_bus,
             serial,
-            serial_evt,
             i8042,
             exit_evt,
             pci,
@@ -769,8 +787,6 @@ impl<'a> Vm<'a> {
             kvm.check_extension(Cap::SignalMsi),
         )
         .map_err(Error::DeviceManager)?;
-        fd.register_irqfd(device_manager.serial_evt.as_raw_fd(), 4)
-            .map_err(Error::Irq)?;
 
         // Let's add our STDIN fd.
         let mut epoll = EpollContext::new().map_err(Error::EpollError)?;
