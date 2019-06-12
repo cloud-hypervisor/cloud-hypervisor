@@ -202,6 +202,73 @@ enum CpuidReg {
     EDX,
 }
 
+struct CpuidPatch {
+    function: u32,
+    index: u32,
+    flags_bit: Option<u8>,
+    eax_bit: Option<u8>,
+    ebx_bit: Option<u8>,
+    ecx_bit: Option<u8>,
+    edx_bit: Option<u8>,
+}
+
+impl CpuidPatch {
+    fn set_cpuid_reg(
+        cpuid: &mut CpuId,
+        function: u32,
+        index: Option<u32>,
+        reg: CpuidReg,
+        value: u32,
+    ) {
+        let entries = cpuid.mut_entries_slice();
+
+        for entry in entries.iter_mut() {
+            if entry.function == function && (index == None || index.unwrap() == entry.index) {
+                match reg {
+                    CpuidReg::EAX => {
+                        entry.eax = value;
+                    }
+                    CpuidReg::EBX => {
+                        entry.ebx = value;
+                    }
+                    CpuidReg::ECX => {
+                        entry.ecx = value;
+                    }
+                    CpuidReg::EDX => {
+                        entry.edx = value;
+                    }
+                }
+            }
+        }
+    }
+
+    fn patch_cpuid(cpuid: &mut CpuId, patches: Vec<CpuidPatch>) {
+        let entries = cpuid.mut_entries_slice();
+
+        for entry in entries.iter_mut() {
+            for patch in patches.iter() {
+                if entry.function == patch.function && entry.index == patch.index {
+                    if let Some(flags_bit) = patch.flags_bit {
+                        entry.flags |= 1 << flags_bit;
+                    }
+                    if let Some(eax_bit) = patch.eax_bit {
+                        entry.eax |= 1 << eax_bit;
+                    }
+                    if let Some(ebx_bit) = patch.ebx_bit {
+                        entry.ebx |= 1 << ebx_bit;
+                    }
+                    if let Some(ecx_bit) = patch.ecx_bit {
+                        entry.ecx |= 1 << ecx_bit;
+                    }
+                    if let Some(edx_bit) = patch.edx_bit {
+                        entry.edx |= 1 << edx_bit;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// A wrapper around creating and using a kvm-based VCPU.
 pub struct Vcpu {
     fd: VcpuFd,
@@ -237,7 +304,7 @@ impl Vcpu {
     /// * `vm` - The virtual machine this vcpu will get attached to.
     pub fn configure(&mut self, kernel_start_addr: GuestAddress, vm: &Vm) -> Result<()> {
         let mut cpuid = vm.cpuid.clone();
-        Vcpu::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(self.id));
+        CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(self.id));
         self.fd
             .set_cpuid2(&cpuid)
             .map_err(Error::SetSupportedCpusFailed)?;
@@ -294,35 +361,6 @@ impl Vcpu {
                     Err(Error::VcpuUnhandledKvmExit)
                 }
             },
-        }
-    }
-
-    fn set_cpuid_reg(
-        cpuid: &mut CpuId,
-        function: u32,
-        index: Option<u32>,
-        reg: CpuidReg,
-        value: u32,
-    ) {
-        let entries = cpuid.mut_entries_slice();
-
-        for entry in entries.iter_mut() {
-            if entry.function == function && (index == None || index.unwrap() == entry.index) {
-                match reg {
-                    CpuidReg::EAX => {
-                        entry.eax = value;
-                    }
-                    CpuidReg::EBX => {
-                        entry.ebx = value;
-                    }
-                    CpuidReg::ECX => {
-                        entry.ecx = value;
-                    }
-                    CpuidReg::EDX => {
-                        entry.edx = value;
-                    }
-                }
-            }
         }
     }
 }
@@ -624,16 +662,6 @@ impl AsRawFd for EpollContext {
     }
 }
 
-struct CpuidPatch {
-    function: u32,
-    index: u32,
-    flags_bit: Option<u8>,
-    eax_bit: Option<u8>,
-    ebx_bit: Option<u8>,
-    ecx_bit: Option<u8>,
-    edx_bit: Option<u8>,
-}
-
 pub struct Vm<'a> {
     fd: Arc<VmFd>,
     kernel: File,
@@ -715,7 +743,7 @@ impl<'a> Vm<'a> {
             edx_bit: None,
         });
 
-        Vm::patch_cpuid(&mut cpuid, cpuid_patches);
+        CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
 
         // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
         let mut allocator = SystemAllocator::new(
@@ -913,32 +941,6 @@ impl<'a> Vm<'a> {
     /// this VM was constructed.
     pub fn get_memory(&self) -> &GuestMemoryMmap {
         &self.memory
-    }
-
-    fn patch_cpuid(cpuid: &mut CpuId, patches: Vec<CpuidPatch>) {
-        let entries = cpuid.mut_entries_slice();
-
-        for entry in entries.iter_mut() {
-            for patch in patches.iter() {
-                if entry.function == patch.function && entry.index == patch.index {
-                    if let Some(flags_bit) = patch.flags_bit {
-                        entry.flags |= 1 << flags_bit;
-                    }
-                    if let Some(eax_bit) = patch.eax_bit {
-                        entry.eax |= 1 << eax_bit;
-                    }
-                    if let Some(ebx_bit) = patch.ebx_bit {
-                        entry.ebx |= 1 << ebx_bit;
-                    }
-                    if let Some(ecx_bit) = patch.ecx_bit {
-                        entry.ecx |= 1 << ecx_bit;
-                    }
-                    if let Some(edx_bit) = patch.edx_bit {
-                        entry.edx |= 1 << edx_bit;
-                    }
-                }
-            }
-        }
     }
 }
 
