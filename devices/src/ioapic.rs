@@ -9,12 +9,17 @@
 // Implementation of an intel 82093AA Input/Output Advanced Programmable Interrupt Controller
 // See https://pdos.csail.mit.edu/6.828/2016/readings/ia32/ioapic.pdf for a specification.
 
-use crate::BusDevice;
 use byteorder::{ByteOrder, LittleEndian};
 use kvm_bindings::kvm_msi;
 use kvm_ioctls::VmFd;
 use std::sync::Arc;
 use std::{io, result};
+
+use vm_device::device::{Device, IoResource, IoType, IrqResource};
+use vm_memory::{Address, GuestAddress};
+
+/// Ioapic I/O base address
+pub const IOAPIC_IO_PORT_BASE_ADDRESS: u32 = 0xfec0_0000;
 
 #[derive(Debug)]
 pub enum Error {
@@ -158,9 +163,20 @@ pub struct Ioapic {
     vm_fd: Arc<VmFd>,
 }
 
-impl BusDevice for Ioapic {
-    fn read(&mut self, offset: u64, data: &mut [u8]) {
+impl Device for Ioapic {
+    fn name(&self) -> String {
+        "Ioapic".to_string()
+    }
+
+    fn set_resources(&mut self, _res: &[IoResource], _irq: Option<IrqResource>) {}
+
+    fn read(&mut self, addr: GuestAddress, data: &mut [u8], _io_type: IoType) {
         assert!(data.len() == 4);
+
+        let offset = addr
+            .raw_value()
+            .checked_sub(u64::from(IOAPIC_IO_PORT_BASE_ADDRESS))
+            .expect("I/O Port address is invalid.");
 
         debug!("IOAPIC_R @ offset 0x{:x}", offset);
 
@@ -176,8 +192,13 @@ impl BusDevice for Ioapic {
         LittleEndian::write_u32(data, value);
     }
 
-    fn write(&mut self, offset: u64, data: &[u8]) {
+    fn write(&mut self, addr: GuestAddress, data: &[u8], _io_type: IoType) {
         assert!(data.len() == 4);
+
+        let offset = addr
+            .raw_value()
+            .checked_sub(u64::from(IOAPIC_IO_PORT_BASE_ADDRESS))
+            .expect("I/O Port address is invalid.");
 
         debug!("IOAPIC_W @ offset 0x{:x}", offset);
 

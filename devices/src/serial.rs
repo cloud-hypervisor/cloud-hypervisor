@@ -5,10 +5,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use crate::{BusDevice, Interrupt};
+use crate::Interrupt;
 use std::collections::VecDeque;
 use std::{io, result};
+
 use vmm_sys_util::Result;
+
+use vm_device::device::{Device, IoResource, IoType, IrqResource};
+use vm_memory::{Address, GuestAddress};
 
 const LOOP_SIZE: usize = 0x40;
 
@@ -47,6 +51,9 @@ const DEFAULT_LINE_CONTROL: u8 = 0x3; // 8-bits per character
 const DEFAULT_MODEM_CONTROL: u8 = 0x8; // Auxiliary output 2
 const DEFAULT_MODEM_STATUS: u8 = 0x20 | 0x10 | 0x80; // data ready, clear to send, carrier detect
 const DEFAULT_BAUD_DIVISOR: u16 = 12; // 9600 bps
+
+/// Serial port I/O address.
+pub const SERIAL_IO_PORT_BASE_ADDRESS: u16 = 0x3f8;
 
 /// Emulates serial COM ports commonly seen on x86 I/O ports 0x3f8/0x2f8/0x3e8/0x2e8.
 ///
@@ -188,8 +195,19 @@ impl Serial {
     }
 }
 
-impl BusDevice for Serial {
-    fn read(&mut self, offset: u64, data: &mut [u8]) {
+impl Device for Serial {
+    fn name(&self) -> String {
+        "Serial".to_string()
+    }
+
+    fn set_resources(&mut self, _res: &[IoResource], _irq: Option<IrqResource>) {}
+
+    fn read(&mut self, addr: GuestAddress, data: &mut [u8], _io_type: IoType) {
+        let offset = addr
+            .raw_value()
+            .checked_sub(u64::from(SERIAL_IO_PORT_BASE_ADDRESS))
+            .expect("I/O Port address is invalid.");
+
         if data.len() != 1 {
             return;
         }
@@ -219,7 +237,12 @@ impl BusDevice for Serial {
         };
     }
 
-    fn write(&mut self, offset: u64, data: &[u8]) {
+    fn write(&mut self, addr: GuestAddress, data: &[u8], _io_type: IoType) {
+        let offset = addr
+            .raw_value()
+            .checked_sub(u64::from(SERIAL_IO_PORT_BASE_ADDRESS))
+            .expect("I/O Port address is invalid.");
+
         if data.len() != 1 {
             return;
         }

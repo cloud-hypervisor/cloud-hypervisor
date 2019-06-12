@@ -6,7 +6,6 @@ edition = "2018"
 
 [dependencies]
 arch = { path = "../arch" }
-devices = { path = "../devices" }
 epoll = "=4.0.1"
 kvm-bindings = "0.1"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
@@ -15,6 +14,8 @@ log = "*"
 net_util = { path = "../net_util" }
 pci = {path = "../pci"}
 qcow = { path = "../qcow" }
+devices = { path = "../devices" }
+vm-device = { path = "../vm-device" }
 vm-virtio = { path = "../vm-virtio" }
 vm-allocator = { path = "../vm-allocator" }
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }

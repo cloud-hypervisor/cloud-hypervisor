@@ -13,14 +13,20 @@ extern crate kvm_ioctls;
 extern crate libc;
 #[macro_use]
 extern crate log;
+extern crate vm_device;
 extern crate vm_memory;
 extern crate vmm_sys_util;
+
+pub mod i8042;
+pub mod serial;
 
 use std::fs::File;
 use std::{io, result};
 
 pub mod ioapic;
-pub mod legacy;
+
+pub use self::i8042::I8042Device;
+pub use self::serial::Serial;
 
 pub type DeviceEventT = u16;
 

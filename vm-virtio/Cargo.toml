@@ -6,7 +6,6 @@ edition = "2018"
 
 [dependencies]
 byteorder = "=1.2.1"
-devices = { path = "../devices" }
 epoll = "=4.0.1"
 libc = ">=0.2.39"
 log = "*"
@@ -14,8 +13,10 @@ net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
 pci = { path = "../pci" }
 tempfile = ">=3.0.2"
+devices = { path = "../devices" }
 virtio-bindings = { path = "../virtio-bindings" }
 vm-allocator = { path = "../vm-allocator" }
+vm-device = { path = "../vm-device" }
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 
 [dependencies.vm-memory]

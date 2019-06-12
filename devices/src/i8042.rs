@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+use vm_device::device::{Device, IoResource, IoType, IrqResource};
+use vm_memory::{Address, GuestAddress};
 use vmm_sys_util::EventFd;
 
-use BusDevice;
+/// i8042 device is located at I/O port 0x61.
+pub const I8042_IO_PORT_BASE_ADDRESS: u16 = 0x61;
 
 /// A i8042 PS/2 controller that emulates just enough to shutdown the machine.
 pub struct I8042Device {
@@ -21,8 +24,17 @@ impl I8042Device {
 // i8042 device is located at I/O port 0x61. We partially implement two 8-bit
 // registers: port 0x61 (I8042_PORT_B_REG, offset 0 from base of 0x61), and
 // port 0x64 (I8042_COMMAND_REG, offset 3 from base of 0x61).
-impl BusDevice for I8042Device {
-    fn read(&mut self, offset: u64, data: &mut [u8]) {
+impl Device for I8042Device {
+    fn name(&self) -> String {
+        "I8042".to_string()
+    }
+
+    fn read(&mut self, addr: GuestAddress, data: &mut [u8], _io_type: IoType) {
+        let offset = addr
+            .raw_value()
+            .checked_sub(u64::from(I8042_IO_PORT_BASE_ADDRESS))
+            .expect("I/O Port address is invalid.");
+
         if data.len() == 1 && offset == 3 {
             data[0] = 0x0;
         } else if data.len() == 1 && offset == 0 {
@@ -32,11 +44,18 @@ impl BusDevice for I8042Device {
         }
     }
 
-    fn write(&mut self, offset: u64, data: &[u8]) {
+    fn write(&mut self, addr: GuestAddress, data: &[u8], _io_type: IoType) {
+        let offset = addr
+            .raw_value()
+            .checked_sub(u64::from(I8042_IO_PORT_BASE_ADDRESS))
+            .expect("I/O Port address is invalid.");
+
         if data.len() == 1 && data[0] == 0xfe && offset == 3 {
             if let Err(e) = self.reset_evt.write(1) {
                 println!("Error triggering i8042 reset event: {}", e);
             }
         }
     }
+
+    fn set_resources(&mut self, _res: &[IoResource], _irq: Option<IrqResource>) {}
 }

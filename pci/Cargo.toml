@@ -7,10 +7,10 @@ edition = "2018"
 [dependencies]
 vm-allocator = { path = "../vm-allocator" }
 byteorder = "*"
-devices = { path = "../devices" }
 kvm-bindings = "0.1"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
 libc = ">=0.2.39"
 log = "*"
+vm-device = { path = "../vm-device" }
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }

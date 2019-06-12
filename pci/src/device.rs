@@ -5,11 +5,11 @@
 use crate::configuration;
 use crate::msix::MsixTableEntry;
 use crate::PciInterruptPin;
-use devices::BusDevice;
 use std;
 use std::fmt::{self, Display};
 use std::sync::Arc;
-use vm_allocator::SystemAllocator;
+use vm_allocator::{Error as AllocatorError, SystemAllocator};
+use vm_device::device::Device;
 use vm_memory::{GuestAddress, GuestUsize};
 use vmm_sys_util::EventFd;
 
@@ -25,7 +25,7 @@ pub enum Error {
     /// Setup of the device capabilities failed.
     CapabilitiesSetup(configuration::Error),
     /// Allocating space for an IO BAR failed.
-    IoAllocationFailed(u64),
+    IoAllocationFailed(AllocatorError),
     /// Registering an IO BAR failed.
     IoRegistrationFailed(u64, configuration::Error),
 }
@@ -37,9 +37,7 @@ impl Display for Error {
 
         match self {
             CapabilitiesSetup(e) => write!(f, "failed to add capability {}", e),
-            IoAllocationFailed(size) => {
-                write!(f, "failed to allocate space for an IO BAR, size={}", size)
-            }
+            IoAllocationFailed(e) => write!(f, "failed to allocate space for an IO BAR, err={}", e),
             IoRegistrationFailed(addr, e) => {
                 write!(f, "failed to register an IO BAR, addr={} err={}", addr, e)
             }
@@ -47,16 +45,13 @@ impl Display for Error {
     }
 }
 
-pub trait PciDevice: BusDevice {
+pub trait PciDevice: Device {
     /// Assign a legacy PCI IRQ to this device.
+    fn assign_pin_irq(&mut self, _irq_num: u32, _irq_pin: PciInterruptPin) {}
+
+    /// Assign a legacy PCI IRQ callback to this device.
     /// The device may write to `irq_evt` to trigger an interrupt.
-    fn assign_pin_irq(
-        &mut self,
-        _irq_cb: Arc<InterruptDelivery>,
-        _irq_num: u32,
-        _irq_pin: PciInterruptPin,
-    ) {
-    }
+    fn assign_irq_cb(&mut self, _irq_cb: Arc<InterruptDelivery>) {}
 
     /// Assign MSI-X to this device.
     fn assign_msix(&mut self, _msi_cb: Arc<InterruptDelivery>) {}

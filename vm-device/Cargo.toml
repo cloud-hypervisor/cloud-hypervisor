@@ -6,5 +6,5 @@ repository = "https://github.com/rust-vmm/vm-device"
 license = "Apache-2.0 OR BSD-3-Clause"
 
 [dependencies]
-vm-allocator = { path = "vm-allocator" }
+vm-allocator = { path = "../vm-allocator" }
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }

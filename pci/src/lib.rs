@@ -5,8 +5,8 @@
 //! Implements pci devices and busses.
 #[macro_use]
 extern crate log;
-extern crate devices;
 extern crate kvm_ioctls;
+extern crate vm_device;
 extern crate vm_memory;
 extern crate vmm_sys_util;
 
@@ -23,7 +23,9 @@ pub use self::configuration::{
 pub use self::device::Error as PciDeviceError;
 pub use self::device::{InterruptDelivery, InterruptParameters, PciDevice};
 pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry};
-pub use self::root::{PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
+pub use self::root::{
+    PciConfigIo, PciConfigMmio, PciRoot, PciRootError, PCI_CONFIG_IO_PORT_BASE_ADDRESS,
+};
 
 /// PCI has four interrupt pins A->D.
 #[derive(Copy, Clone)]

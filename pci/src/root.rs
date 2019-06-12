@@ -3,27 +3,24 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use crate::configuration::{PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType};
-use crate::device::{Error as PciDeviceError, PciDevice};
+use crate::device::PciDevice;
 use byteorder::{ByteOrder, LittleEndian};
-use devices::BusDevice;
 use std;
 use std::sync::Arc;
 use std::sync::Mutex;
-use vm_memory::{Address, GuestAddress, GuestUsize};
+use vm_device::device::{Device, IoResource, IoType, IrqResource};
+use vm_memory::{Address, GuestAddress};
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
 const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;
 
+/// Emulated PCI configuration access mechanism #1 I/O Port base address.
+pub const PCI_CONFIG_IO_PORT_BASE_ADDRESS: u16 = 0xcf8;
+
 /// Errors for device manager.
 #[derive(Debug)]
-pub enum PciRootError {
-    /// Could not allocate device address space for the device.
-    AllocateDeviceAddrs(PciDeviceError),
-    /// Could not allocate an IRQ number.
-    AllocateIrq,
-    /// Could not add a device to the mmio bus.
-    MmioInsert(devices::BusError),
-}
+pub enum PciRootError {}
+
 pub type Result<T> = std::result::Result<T, PciRootError>;
 
 /// Emulates the PCI Root bridge.
@@ -61,22 +58,8 @@ impl PciRoot {
     }
 
     /// Add a `device` to this root PCI bus.
-    pub fn add_device(&mut self, pci_device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
-        self.devices.push(pci_device);
-        Ok(())
-    }
-
-    /// Register Guest Address mapping of a `device` to IO bus.
-    pub fn register_mapping(
-        &self,
-        device: Arc<Mutex<dyn BusDevice>>,
-        bus: &mut devices::Bus,
-        bars: Vec<(GuestAddress, GuestUsize)>,
-    ) -> Result<()> {
-        for (address, size) in bars {
-            bus.insert(device.clone(), address.raw_value(), size)
-                .map_err(PciRootError::MmioInsert)?;
-        }
+    pub fn add_device(&mut self, device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
+        self.devices.push(device);
         Ok(())
     }
     pub fn config_space_read(
@@ -153,6 +136,10 @@ impl PciConfigIo {
         }
     }
 
+    pub fn add_device(&mut self, device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
+        self.pci_root.add_device(device)
+    }
+
     fn config_space_read(&self) -> u32 {
         let enabled = (self.config_address & 0x8000_0000) != 0;
         if !enabled {
@@ -197,9 +184,18 @@ impl PciConfigIo {
     }
 }
 
-impl BusDevice for PciConfigIo {
-    fn read(&mut self, offset: u64, data: &mut [u8]) {
+impl Device for PciConfigIo {
+    fn name(&self) -> String {
+        "PciConfigIo".to_string()
+    }
+
+    fn read(&mut self, addr: GuestAddress, data: &mut [u8], _io_type: IoType) {
         // `offset` is relative to 0xcf8
+        let offset = addr
+            .raw_value()
+            .checked_sub(u64::from(PCI_CONFIG_IO_PORT_BASE_ADDRESS))
+            .expect("I/O Port address is invalid.");
+
         let value = match offset {
             0...3 => self.config_address,
             4...7 => self.config_space_read(),
@@ -220,14 +216,21 @@ impl BusDevice for PciConfigIo {
         }
     }
 
-    fn write(&mut self, offset: u64, data: &[u8]) {
+    fn write(&mut self, addr: GuestAddress, data: &[u8], _io_type: IoType) {
         // `offset` is relative to 0xcf8
+        let offset = addr
+            .raw_value()
+            .checked_sub(u64::from(PCI_CONFIG_IO_PORT_BASE_ADDRESS))
+            .expect("I/O Port address is invalid.");
+
         match offset {
             o @ 0...3 => self.set_config_address(o, data),
             o @ 4...7 => self.config_space_write(o - 4, data),
             _ => (),
         };
     }
+
+    fn set_resources(&mut self, _res: &[IoResource], _irq: Option<IrqResource>) {}
 }
 
 /// Emulates PCI memory-mapped configuration access mechanism.
@@ -254,30 +257,36 @@ impl PciConfigMmio {
     }
 }
 
-impl BusDevice for PciConfigMmio {
-    fn read(&mut self, offset: u64, data: &mut [u8]) {
+impl Device for PciConfigMmio {
+    fn name(&self) -> String {
+        "PciConfigMmio".to_string()
+    }
+
+    fn read(&mut self, offset: GuestAddress, data: &mut [u8], _io_type: IoType) {
         // Only allow reads to the register boundary.
-        let start = offset as usize % 4;
+        let start = offset.0 as usize % 4;
         let end = start + data.len();
-        if end > 4 || offset > u64::from(u32::max_value()) {
+        if end > 4 || offset.0 > u64::from(u32::max_value()) {
             for d in data {
                 *d = 0xff;
             }
             return;
         }
 
-        let value = self.config_space_read(offset as u32);
+        let value = self.config_space_read(offset.0 as u32);
         for i in start..end {
             data[i - start] = (value >> (i * 8)) as u8;
         }
     }
 
-    fn write(&mut self, offset: u64, data: &[u8]) {
-        if offset > u64::from(u32::max_value()) {
+    fn write(&mut self, offset: GuestAddress, data: &[u8], _io_type: IoType) {
+        if offset.0 > u64::from(u32::max_value()) {
             return;
         }
-        self.config_space_write(offset as u32, offset % 4, data)
+        self.config_space_write(offset.0 as u32, offset.0 % 4, data)
     }
+
+    fn set_resources(&mut self, _res: &[IoResource], _irq: Option<IrqResource>) {}
 }
 
 // Parse the CONFIG_ADDRESS register to a (bus, device, function, register) tuple.
