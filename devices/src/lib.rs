@@ -8,8 +8,11 @@
 //! Emulates virtual and hardware devices.
 extern crate byteorder;
 extern crate epoll;
+extern crate kvm_bindings;
+extern crate kvm_ioctls;
 extern crate libc;
-
+#[macro_use]
+extern crate log;
 extern crate vm_memory;
 extern crate vmm_sys_util;
 
@@ -17,6 +20,7 @@ use std::fs::File;
 use std::{io, result};
 
 mod bus;
+pub mod ioapic;
 pub mod legacy;
 
 pub use self::bus::{Bus, BusDevice, Error as BusError};
