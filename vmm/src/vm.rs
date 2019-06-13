@@ -181,7 +181,7 @@ pub enum DeviceManagerError {
     OpenTap(net_util::TapError),
 
     /// Cannot allocate IRQ.
-    AllocateIrq,
+    AllocateIrq(vm_allocator::Error),
 
     /// Cannot configure the IRQ.
     Irq(io::Error),
@@ -656,8 +656,8 @@ impl DeviceManager {
             virtio_pci_device.assign_msix(msi_cb);
         } else {
             let irq_num = allocator
-                .allocate_irq()
-                .ok_or(DeviceManagerError::AllocateIrq)?;
+                .allocate_irq(None)
+                .map_err(DeviceManagerError::AllocateIrq)?;
 
             let irq_cb = if let Some(ioapic) = interrupt_info.ioapic {
                 let ioapic_clone = ioapic.clone();
@@ -903,6 +903,8 @@ impl<'a> Vm<'a> {
             GuestAddress(0),
             1 << 36 as GuestUsize,
             X86_64_IRQ_BASE,
+            24,
+            1,
         )
         .ok_or(Error::CreateSystemAllocator)?;
 
