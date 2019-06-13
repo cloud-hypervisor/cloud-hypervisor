@@ -1,0 +1,17 @@
+[package]
+name = "vfio"
+version = "0.0.1"
+authors = ["The Cloud Hypervisor Authors"]
+
+[dependencies]
+byteorder = ">=1.2.1"
+kvm-bindings = "0.1"
+kvm-ioctls = "0.1.0"
+libc = ">=0.2.39"
+log = "*"
+vfio-bindings = { path = "../vfio-bindings" }
+vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
+
+[dependencies.vm-memory]
+git = "https://github.com/rust-vmm/vm-memory"
+features = ["backend-mmap"]
