@@ -16,7 +16,7 @@ git = "https://github.com/rust-vmm/vm-memory"
 features = ["backend-mmap"]
 
 [dependencies.linux-loader]
-git = "https://github.com/bjzhjing/linux-loader"
+git = "https://github.com/rust-vmm/linux-loader"
 features = ["elf", "bzimage"]
 
 [dev-dependencies]
