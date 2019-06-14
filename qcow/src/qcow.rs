@@ -38,6 +38,7 @@ pub enum Error {
     InvalidClusterSize,
     InvalidIndex,
     InvalidL1TableOffset,
+    InvalidL1TableSize(u32),
     InvalidMagic,
     InvalidOffset(u64),
     InvalidRefcountTableOffset,
@@ -83,6 +84,7 @@ impl Display for Error {
             InvalidClusterSize => write!(f, "invalid cluster size"),
             InvalidIndex => write!(f, "invalid index"),
             InvalidL1TableOffset => write!(f, "invalid L1 table offset"),
+            InvalidL1TableSize(size) => write!(f, "invalid L1 table size {}", size),
             InvalidMagic => write!(f, "invalid magic"),
             InvalidOffset(_) => write!(f, "invalid offset"),
             InvalidRefcountTableOffset => write!(f, "invalid refcount table offset"),
@@ -385,6 +387,11 @@ impl QcowFile {
         // Only v2 and v3 files are supported.
         if header.version != 2 && header.version != 3 {
             return Err(Error::UnsupportedVersion(header.version));
+        }
+
+        // Make sure that the L1 table fits in RAM.
+        if u64::from(header.l1_size) > MAX_RAM_POINTER_TABLE_SIZE {
+            return Err(Error::InvalidL1TableSize(header.l1_size));
         }
 
         let cluster_bits: u32 = header.cluster_bits;
@@ -1827,6 +1834,15 @@ mod tests {
     #[test]
     fn test_header_huge_file() {
         let header = test_huge_header();
+        with_basic_file(&header, |disk_file: File| {
+            QcowFile::from(disk_file).expect_err("Failed to create file.");
+        });
+    }
+
+    #[test]
+    fn test_huge_l1_table() {
+        let mut header = valid_header_v3();
+        header[36] = 0x12;
         with_basic_file(&header, |disk_file: File| {
             QcowFile::from(disk_file).expect_err("Failed to create file.");
         });
