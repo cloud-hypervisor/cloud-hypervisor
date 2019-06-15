@@ -211,6 +211,34 @@ mod tests {
         (disks, String::from(fw_path.to_str().unwrap()))
     }
 
+    fn prepare_virtiofsd() -> (std::process::Child, String) {
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
+
+        let mut virtiofsd_path = workload_path.clone();
+        virtiofsd_path.push("virtiofsd");
+        let virtiofsd_path = String::from(virtiofsd_path.to_str().unwrap());
+
+        let mut shared_dir_path = workload_path.clone();
+        shared_dir_path.push("shared_dir");
+        let shared_dir_path = String::from(shared_dir_path.to_str().unwrap());
+
+        let virtiofsd_socket_path = String::from("/tmp/virtiofs.sock");
+
+        // Start the daemon
+        let child = Command::new(virtiofsd_path.as_str())
+            .args(&[
+                "-o",
+                format!("vhost_user_socket={}", virtiofsd_socket_path).as_str(),
+            ])
+            .args(&["-o", format!("source={}", shared_dir_path).as_str()])
+            .args(&["-o", "cache=none"])
+            .spawn()
+            .unwrap();
+
+        (child, virtiofsd_socket_path)
+    }
+
     fn get_cpu_count() -> u32 {
         ssh_command("grep -c processor /proc/cpuinfo")
             .trim()
@@ -439,7 +467,7 @@ mod tests {
             let (disks, fw_path) = prepare_files();
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
-                .args(&["--memory", "512"])
+                .args(&["--memory", "size=512"])
                 .args(&["--kernel", fw_path.as_str()])
                 .args(&["--disk", disks[0], disks[1]])
                 .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
@@ -469,6 +497,62 @@ mod tests {
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_virtio_fs() {
+        test_block!(tb, "", {
+            let (disks, _) = prepare_files();
+            let (mut daemon_child, virtiofsd_socket_path) = prepare_virtiofsd();
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path.clone();
+            kernel_path.push("vmlinux-custom");
+
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512,file=/dev/shm"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&[
+                    "--fs",
+                    format!(
+                        "tag=virtiofs,sock={},num_queues=1,queue_size=1024",
+                        virtiofsd_socket_path
+                    )
+                    .as_str(),
+                ])
+                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Mount shared directory through virtio_fs filesystem
+            aver_eq!(
+                tb,
+                ssh_command("mkdir -p mount_dir && sudo mount -t virtio_fs /dev/null mount_dir/ -o tag=virtiofs,rootmode=040000,user_id=1001,group_id=1001 && echo ok")
+                    .trim(),
+                "ok"
+            );
+            // Check file1 exists and its content is "foo"
+            aver_eq!(tb, ssh_command("cat mount_dir/file1").trim(), "foo");
+            // Check file2 does not exist
+            aver_ne!(
+                tb,
+                ssh_command("ls mount_dir/file2").trim(),
+                "mount_dir/file2"
+            );
+            // Check file3 exists and its content is "bar"
+            aver_eq!(tb, ssh_command("cat mount_dir/file3").trim(), "bar");
+
+            ssh_command("sudo reboot");
+            let _ = child.wait();
+            let _ = daemon_child.wait();
             Ok(())
         });
     }
