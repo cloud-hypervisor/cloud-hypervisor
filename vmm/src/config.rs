@@ -66,6 +66,7 @@ pub struct VmParams<'a> {
     pub fs: Option<Vec<&'a str>>,
     pub pmem: Option<Vec<&'a str>>,
     pub serial: &'a str,
+    pub devices: Option<Vec<&'a str>>,
 }
 
 fn parse_size(size: &str) -> Result<u64> {
@@ -376,6 +377,19 @@ impl<'a> SerialConfig<'a> {
     }
 }
 
+#[derive(Debug)]
+pub struct DeviceConfig<'a> {
+    pub path: &'a Path,
+}
+
+impl<'a> DeviceConfig<'a> {
+    pub fn parse(device: &'a str) -> Result<Self> {
+        Ok(DeviceConfig {
+            path: Path::new(device),
+        })
+    }
+}
+
 pub struct VmConfig<'a> {
     pub cpus: CpusConfig,
     pub memory: MemoryConfig<'a>,
@@ -387,6 +401,7 @@ pub struct VmConfig<'a> {
     pub fs: Option<Vec<FsConfig<'a>>>,
     pub pmem: Option<Vec<PmemConfig<'a>>>,
     pub serial: SerialConfig<'a>,
+    pub devices: Option<Vec<DeviceConfig<'a>>>,
 }
 
 impl<'a> VmConfig<'a> {
@@ -427,6 +442,15 @@ impl<'a> VmConfig<'a> {
             pmem = Some(pmem_config_list);
         }
 
+        let mut devices: Option<Vec<DeviceConfig>> = None;
+        if let Some(device_list) = &vm_params.devices {
+            let mut device_config_list = Vec::new();
+            for item in device_list.iter() {
+                device_config_list.push(DeviceConfig::parse(item)?);
+            }
+            devices = Some(device_config_list);
+        }
+
         Ok(VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
@@ -438,6 +462,7 @@ impl<'a> VmConfig<'a> {
             fs,
             pmem,
             serial: SerialConfig::parse(vm_params.serial)?,
+            devices,
         })
     }
 }

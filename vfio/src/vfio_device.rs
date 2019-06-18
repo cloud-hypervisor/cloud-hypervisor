@@ -14,6 +14,7 @@ use std::mem::size_of;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::prelude::FileExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::u32;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::*;
@@ -229,7 +230,7 @@ struct VfioGroup {
 }
 
 impl VfioGroup {
-    fn new(id: u32, vm: &VmFd) -> Result<Self> {
+    fn new(id: u32, vm: &Arc<VmFd>) -> Result<Self> {
         let mut group_path = String::from("/dev/vfio/");
         let s_id = &id;
         group_path.push_str(s_id.to_string().as_str());
@@ -381,7 +382,7 @@ impl VfioDevice {
     /// Create a new vfio device, then guest read/write on this device could be
     /// transfered into kernel vfio.
     /// sysfspath specify the vfio device path in sys file system.
-    pub fn new(sysfspath: &Path, vm: &VmFd, mem: GuestMemoryMmap) -> Result<Self> {
+    pub fn new(sysfspath: &Path, vm: &Arc<VmFd>, mem: GuestMemoryMmap) -> Result<Self> {
         let mut uuid_path = PathBuf::new();
         uuid_path.push(sysfspath);
         uuid_path.push("iommu_group");
@@ -477,7 +478,8 @@ impl VfioDevice {
             let ret =
                 unsafe { ioctl_with_mut_ref(dev, VFIO_DEVICE_GET_REGION_INFO(), &mut reg_info) };
             if ret < 0 {
-                return Err(VfioError::VfioDeviceGetRegionInfo);
+                error!("Could not get region #{} info", i);
+                continue;
             }
 
             let region = VfioRegion {
@@ -485,6 +487,12 @@ impl VfioDevice {
                 size: reg_info.size,
                 offset: reg_info.offset,
             };
+
+            println!("Region #{}", i);
+            println!("\tflag 0x{:x}", region.flags);
+            println!("\tsize 0x{:x}", region.size);
+            println!("\toffset 0x{:x}", region.offset);
+
             regions.push(region);
         }
 
@@ -496,9 +504,9 @@ impl VfioDevice {
     /// buf: data destination and buf length is read size
     /// addr: offset in the region
     pub fn region_read(&self, index: u32, buf: &mut [u8], addr: u64) {
-        let stub: &VfioRegion;
+        let region: &VfioRegion;
         match self.regions.get(index as usize) {
-            Some(v) => stub = v,
+            Some(v) => region = v,
             None => {
                 warn!("region read with invalid index: {}", index);
                 return;
@@ -506,7 +514,7 @@ impl VfioDevice {
         }
 
         let size = buf.len() as u64;
-        if size > stub.size || addr + size > stub.size {
+        if size > region.size || addr + size > region.size {
             warn!(
                 "region read with invalid parameter, add: {}, size: {}",
                 addr, size
@@ -514,7 +522,7 @@ impl VfioDevice {
             return;
         }
 
-        if let Err(e) = self.device.read_exact_at(buf, stub.offset + addr) {
+        if let Err(e) = self.device.read_exact_at(buf, region.offset + addr) {
             warn!(
                 "Failed to read region in index: {}, addr: {}, error: {}",
                 index, addr, e
