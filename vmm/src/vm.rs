@@ -16,6 +16,7 @@ extern crate kvm_ioctls;
 extern crate libc;
 extern crate linux_loader;
 extern crate net_util;
+extern crate vfio;
 extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
@@ -43,6 +44,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
+use vfio::{VfioDevice, VfioPciDevice};
 use vm_allocator::SystemAllocator;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
@@ -209,6 +211,10 @@ pub enum DeviceManagerError {
 
     /// Cannot add PCI device
     AddPciDevice(pci::PciRootError),
+
+    VfioCreate(vfio::VfioError),
+
+    VfioPciCreate(vfio::VfioPciError),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -620,6 +626,47 @@ impl DeviceManager {
             }
         }
 
+        // Add VFIO devices
+        for vfio_device in &vm_cfg.devices {
+            println!("Adding VFIO device {:?}", vfio_device.path);
+            let vfio_device = VfioDevice::new(vfio_device.path, vm_fd, memory.clone())
+                .map_err(DeviceManagerError::VfioCreate)?;
+
+            let irq_fd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+
+            let mut vfio_pci_device = VfioPciDevice::new(Box::new(vfio_device))
+                .map_err(DeviceManagerError::VfioPciCreate)?;
+
+            let bars = vfio_pci_device
+                .allocate_bars(allocator)
+                .map_err(DeviceManagerError::AllocateBars)?;
+
+            let irq_num = allocator
+                .allocate_irq()
+                .ok_or(DeviceManagerError::AllocateIrq)?;
+
+            vm_fd
+                .register_irqfd(irq_fd.as_raw_fd(), irq_num)
+                .map_err(DeviceManagerError::Irq)?;
+
+            let irq_cb = Arc::new(
+                Box::new(move |_p: InterruptParameters| {Ok(())}) as InterruptDelivery
+            );
+
+            vfio_pci_device.assign_pin_irq(Some(irq_fd), irq_cb,
+                                           irq_num as u32, PciInterruptPin::IntA);
+
+            let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
+
+            pci_root
+                .add_device(vfio_pci_device.clone())
+                .map_err(DeviceManagerError::AddPciDevice)?;
+
+            pci_root
+                .register_mapping(vfio_pci_device.clone(), &mut mmio_bus, bars)
+                .map_err(DeviceManagerError::AddPciDevice)?;
+        }
+
         let pci = Arc::new(Mutex::new(PciConfigIo::new(pci_root)));
 
         Ok(DeviceManager {
@@ -721,6 +768,7 @@ impl DeviceManager {
             };
 
             virtio_pci_device.assign_pin_irq(
+                None,
                 Arc::new(irq_cb),
                 irq_num as u32,
                 PciInterruptPin::IntA,
@@ -1097,6 +1145,7 @@ impl<'a> Vm<'a> {
 
                             break 'outer;
                         }
+
                         EpollDispatch::Stdin => {
                             let mut out = [0u8; 64];
                             let count = io::stdin()

@@ -52,6 +52,7 @@ pub trait PciDevice: BusDevice {
     /// The device may write to `irq_evt` to trigger an interrupt.
     fn assign_pin_irq(
         &mut self,
+        _irq_fd: Option<EventFd>,
         _irq_cb: Arc<InterruptDelivery>,
         _irq_num: u32,
         _irq_pin: PciInterruptPin,

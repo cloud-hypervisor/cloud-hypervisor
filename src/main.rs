@@ -77,6 +77,12 @@ fn main() {
                 .takes_value(true)
                 .min_values(1),
         )
+        .arg(
+            Arg::with_name("device")
+                .long("device")
+                .takes_value(true)
+                .help("Sysfs path to a device"),
+        )
         .get_matches();
 
     // These .unwrap()s cannot fail as there is a default value defined
@@ -94,6 +100,10 @@ fn main() {
         .expect("Missing argument: disk. Provide at least one")
         .collect();
 
+    let devices: Vec<&str> = cmd_arguments
+        .values_of("device")
+        .expect("Missing argument: device. Provide at least one")
+        .collect();;
     let net = cmd_arguments.value_of("net");
 
     // This .unwrap() cannot fail as there is a default value defined
@@ -110,6 +120,7 @@ fn main() {
         net,
         rng,
         fs,
+        devices,
     }) {
         Ok(config) => config,
         Err(e) => {

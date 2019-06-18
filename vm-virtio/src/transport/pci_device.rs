@@ -353,6 +353,7 @@ impl VirtioPciDevice {
 impl PciDevice for VirtioPciDevice {
     fn assign_pin_irq(
         &mut self,
+        _irq_evt: Option<EventFd>,
         irq_cb: Arc<InterruptDelivery>,
         irq_num: u32,
         irq_pin: PciInterruptPin,
