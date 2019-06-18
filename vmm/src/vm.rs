@@ -22,7 +22,11 @@ extern crate vm_virtio;
 extern crate vmm_sys_util;
 
 use crate::config::VmConfig;
-use kvm_bindings::{kvm_msi, kvm_pit_config, kvm_userspace_memory_region, KVM_PIT_SPEAKER_DUMMY};
+use devices::ioapic;
+use kvm_bindings::{
+    kvm_enable_cap, kvm_msi, kvm_pit_config, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP,
+    KVM_PIT_SPEAKER_DUMMY,
+};
 use kvm_ioctls::*;
 use libc::{c_void, siginfo_t, EFD_NONBLOCK};
 use linux_loader::loader::KernelLoader;
@@ -278,6 +282,7 @@ pub struct Vcpu {
     id: u8,
     io_bus: devices::Bus,
     mmio_bus: devices::Bus,
+    ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
 }
 
 impl Vcpu {
@@ -287,7 +292,13 @@ impl Vcpu {
     ///
     /// * `id` - Represents the CPU number between [0, max vcpus).
     /// * `vm` - The virtual machine this vcpu will get attached to.
-    pub fn new(id: u8, vm: &Vm, io_bus: devices::Bus, mmio_bus: devices::Bus) -> Result<Self> {
+    pub fn new(
+        id: u8,
+        vm: &Vm,
+        io_bus: devices::Bus,
+        mmio_bus: devices::Bus,
+        ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
+    ) -> Result<Self> {
         let kvm_vcpu = vm.fd.create_vcpu(id).map_err(Error::VcpuFd)?;
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Vcpu {
@@ -295,6 +306,7 @@ impl Vcpu {
             id,
             io_bus,
             mmio_bus,
+            ioapic,
         })
     }
 
@@ -351,6 +363,12 @@ impl Vcpu {
                     self.mmio_bus.write(addr as u64, data);
                     Ok(())
                 }
+                VcpuExit::IoapicEoi(vector) => {
+                    if let Some(ioapic) = &self.ioapic {
+                        ioapic.lock().unwrap().end_of_interrupt(vector);
+                    }
+                    Ok(())
+                }
                 r => {
                     error!("Unexpected exit reason on vcpu run: {:?}", r);
                     Err(Error::VcpuUnhandledKvmExit)
@@ -366,6 +384,11 @@ impl Vcpu {
             },
         }
     }
+}
+
+struct InterruptInfo<'a> {
+    msi_capable: bool,
+    ioapic: &'a Option<Arc<Mutex<ioapic::Ioapic>>>,
 }
 
 struct KernelIoapicIrq {
@@ -384,6 +407,32 @@ impl devices::Interrupt for KernelIoapicIrq {
     }
 }
 
+struct UserIoapicIrq {
+    ioapic: Arc<Mutex<ioapic::Ioapic>>,
+    irq: usize,
+}
+
+impl UserIoapicIrq {
+    fn new(ioapic: Arc<Mutex<ioapic::Ioapic>>, irq: usize) -> Self {
+        UserIoapicIrq { ioapic, irq }
+    }
+}
+
+impl devices::Interrupt for UserIoapicIrq {
+    fn deliver(&self) -> result::Result<(), io::Error> {
+        self.ioapic
+            .lock()
+            .unwrap()
+            .service_irq(self.irq)
+            .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("failed to inject IRQ #{}: {:?}", self.irq, e),
+                )
+            })
+    }
+}
+
 struct DeviceManager {
     io_bus: devices::Bus,
     mmio_bus: devices::Bus,
@@ -394,6 +443,9 @@ struct DeviceManager {
     // i8042 device for exit
     i8042: Arc<Mutex<devices::legacy::I8042Device>>,
     exit_evt: EventFd,
+
+    // IOAPIC
+    ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
 
     // PCI root
     pci: Arc<Mutex<PciConfigIo>>,
@@ -406,20 +458,39 @@ impl DeviceManager {
         vm_fd: &Arc<VmFd>,
         vm_cfg: &VmConfig,
         msi_capable: bool,
+        userspace_ioapic: bool,
     ) -> DeviceManagerResult<Self> {
         let io_bus = devices::Bus::new();
         let mut mmio_bus = devices::Bus::new();
 
+        let ioapic = if userspace_ioapic {
+            // Create IOAPIC
+            Some(Arc::new(Mutex::new(ioapic::Ioapic::new(vm_fd.clone()))))
+        } else {
+            None
+        };
+
+        let interrupt_info = InterruptInfo {
+            msi_capable,
+            ioapic: &ioapic,
+        };
+
         // Serial is tied to IRQ #4
         let serial_irq = 4;
-        let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-        vm_fd
-            .register_irqfd(serial_evt.as_raw_fd(), serial_irq as u32)
-            .map_err(DeviceManagerError::Irq)?;
+        let interrupt: Box<devices::Interrupt> = if let Some(ioapic) = &ioapic {
+            Box::new(UserIoapicIrq::new(ioapic.clone(), serial_irq))
+        } else {
+            let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+            vm_fd
+                .register_irqfd(serial_evt.as_raw_fd(), serial_irq as u32)
+                .map_err(DeviceManagerError::Irq)?;
+
+            Box::new(KernelIoapicIrq::new(serial_evt))
+        };
 
         // Add serial device
         let serial = Arc::new(Mutex::new(devices::legacy::Serial::new_out(
-            Box::new(KernelIoapicIrq::new(serial_evt)),
+            interrupt,
             Box::new(stdout()),
         )));
 
@@ -465,7 +536,7 @@ impl DeviceManager {
                 vm_fd,
                 &mut pci_root,
                 &mut mmio_bus,
-                msi_capable,
+                &interrupt_info,
             )?;
         }
 
@@ -490,7 +561,7 @@ impl DeviceManager {
                 vm_fd,
                 &mut pci_root,
                 &mut mmio_bus,
-                msi_capable,
+                &interrupt_info,
             )?;
         }
 
@@ -507,7 +578,7 @@ impl DeviceManager {
                 vm_fd,
                 &mut pci_root,
                 &mut mmio_bus,
-                msi_capable,
+                &interrupt_info,
             )?;
         }
 
@@ -519,6 +590,7 @@ impl DeviceManager {
             serial,
             i8042,
             exit_evt,
+            ioapic,
             pci,
         })
     }
@@ -530,9 +602,13 @@ impl DeviceManager {
         vm_fd: &Arc<VmFd>,
         pci_root: &mut PciRoot,
         mmio_bus: &mut devices::Bus,
-        msi_capable: bool,
+        interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
-        let msix_num = if msi_capable { DEFAULT_MSIX_VEC_NUM } else { 0 };
+        let msix_num = if interrupt_info.msi_capable {
+            DEFAULT_MSIX_VEC_NUM
+        } else {
+            0
+        };
 
         let mut virtio_pci_device = VirtioPciDevice::new(memory, virtio_device, msix_num)
             .map_err(DeviceManagerError::VirtioDevice)?;
@@ -548,7 +624,7 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
-        if msi_capable {
+        if interrupt_info.msi_capable {
             let vm_fd_clone = vm_fd.clone();
 
             let msi_cb = Arc::new(Box::new(move |p: InterruptParameters| {
@@ -579,19 +655,38 @@ impl DeviceManager {
 
             virtio_pci_device.assign_msix(msi_cb);
         } else {
-            let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-
             let irq_num = allocator
                 .allocate_irq()
                 .ok_or(DeviceManagerError::AllocateIrq)?;
-            vm_fd
-                .register_irqfd(irqfd.as_raw_fd(), irq_num)
-                .map_err(DeviceManagerError::Irq)?;
 
-            let irq_cb = Arc::new(
+            let irq_cb = if let Some(ioapic) = interrupt_info.ioapic {
+                let ioapic_clone = ioapic.clone();
+                Box::new(move |_p: InterruptParameters| {
+                    ioapic_clone
+                        .lock()
+                        .unwrap()
+                        .service_irq(irq_num as usize)
+                        .map_err(|e| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                format!("failed to inject IRQ #{}: {:?}", irq_num, e),
+                            )
+                        })
+                }) as InterruptDelivery
+            } else {
+                let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+                vm_fd
+                    .register_irqfd(irqfd.as_raw_fd(), irq_num)
+                    .map_err(DeviceManagerError::Irq)?;
+
                 Box::new(move |_p: InterruptParameters| irqfd.write(1)) as InterruptDelivery
+            };
+
+            virtio_pci_device.assign_pin_irq(
+                Arc::new(irq_cb),
+                irq_num as u32,
+                PciInterruptPin::IntA,
             );
-            virtio_pci_device.assign_pin_irq(irq_cb, irq_num as u32, PciInterruptPin::IntA);
         }
 
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
@@ -618,6 +713,14 @@ impl DeviceManager {
         self.io_bus
             .insert(self.pci.clone(), 0xcf8, 0x8)
             .map_err(Error::BusError)?;
+
+        if let Some(ioapic) = &self.ioapic {
+            // Insert IOAPIC
+            self.mmio_bus
+                .insert(ioapic.clone(), 0xfec0_0000, 0x20)
+                .map_err(Error::BusError)?;
+        }
+
         Ok(())
     }
 }
@@ -727,16 +830,33 @@ impl<'a> Vm<'a> {
         fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize)
             .map_err(Error::VmSetup)?;
 
-        // Create IRQ chip
-        fd.create_irq_chip().map_err(Error::VmSetup)?;
-
         // Supported CPUID
         let mut cpuid = kvm
             .get_supported_cpuid(MAX_KVM_CPUID_ENTRIES)
             .map_err(Error::VmSetup)?;
 
+        let msi_capable = kvm.check_extension(Cap::SignalMsi);
+
         let mut cpuid_patches = Vec::new();
+        let mut userspace_ioapic = false;
         if kvm.check_extension(Cap::TscDeadlineTimer) {
+            if kvm.check_extension(Cap::SplitIrqchip) && msi_capable {
+                // Create split irqchip
+                // Only the local APIC is emulated in kernel, both PICs and IOAPIC
+                // are not.
+                let mut cap: kvm_enable_cap = Default::default();
+                cap.cap = KVM_CAP_SPLIT_IRQCHIP;
+                cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
+                fd.enable_cap(&cap).map_err(Error::VmSetup)?;
+
+                // Because of the split irqchip, we need a userspace IOAPIC.
+                userspace_ioapic = true;
+            } else {
+                // Create irqchip
+                // A local APIC, 2 PICs and an IOAPIC are emulated in kernel.
+                fd.create_irq_chip().map_err(Error::VmSetup)?;
+            }
+
             // Patch tsc deadline timer bit
             cpuid_patches.push(CpuidPatch {
                 function: 1,
@@ -748,6 +868,9 @@ impl<'a> Vm<'a> {
                 edx_bit: None,
             });
         } else {
+            // Create irqchip
+            // A local APIC, 2 PICs and an IOAPIC are emulated in kernel.
+            fd.create_irq_chip().map_err(Error::VmSetup)?;
             // Creates an in-kernel device model for the PIT.
             let mut pit_config = kvm_pit_config::default();
             // We need to enable the emulation of a dummy speaker port stub so that writing to port 0x61
@@ -784,7 +907,8 @@ impl<'a> Vm<'a> {
             &mut allocator,
             &fd,
             &config,
-            kvm.check_extension(Cap::SignalMsi),
+            msi_capable,
+            userspace_ioapic,
         )
         .map_err(Error::DeviceManager)?;
 
@@ -952,7 +1076,13 @@ impl<'a> Vm<'a> {
         for cpu_id in 0..vcpu_count {
             let io_bus = self.devices.io_bus.clone();
             let mmio_bus = self.devices.mmio_bus.clone();
-            let mut vcpu = Vcpu::new(cpu_id, &self, io_bus, mmio_bus)?;
+            let ioapic = if let Some(ioapic) = &self.devices.ioapic {
+                Some(ioapic.clone())
+            } else {
+                None
+            };
+
+            let mut vcpu = Vcpu::new(cpu_id, &self, io_bus, mmio_bus, ioapic)?;
             vcpu.configure(entry_addr, &self)?;
 
             let vcpu_thread_barrier = vcpu_thread_barrier.clone();
@@ -1094,7 +1224,7 @@ pub fn test_vm() {
             VcpuExit::Epr => {}
             VcpuExit::SystemEvent => {}
             VcpuExit::S390Stsi => {}
-            VcpuExit::IoapicEoi => {}
+            VcpuExit::IoapicEoi(_vector) => {}
             VcpuExit::Hyperv => {}
         }
         //        r => panic!("unexpected exit reason: {:?}", r),
