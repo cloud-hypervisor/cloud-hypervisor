@@ -23,6 +23,7 @@ mod block;
 mod device;
 pub mod fs;
 pub mod net;
+mod pmem;
 mod queue;
 mod rng;
 
@@ -32,6 +33,7 @@ pub use self::block::*;
 pub use self::device::*;
 pub use self::fs::*;
 pub use self::net::*;
+pub use self::pmem::*;
 pub use self::queue::*;
 pub use self::rng::*;
 
@@ -60,6 +62,7 @@ enum VirtioDeviceType {
     TYPE_INPUT = 18,
     TYPE_VSOCK = 19,
     TYPE_FS = 26,
+    TYPE_PMEM = 27,
 }
 
 // In order to use the `{}` marker, the trait `fmt::Display` must be implemented
@@ -76,6 +79,7 @@ impl fmt::Display for VirtioDeviceType {
             VirtioDeviceType::TYPE_9P => "9p",
             VirtioDeviceType::TYPE_VSOCK => "vsock",
             VirtioDeviceType::TYPE_FS => "fs",
+            VirtioDeviceType::TYPE_PMEM => "pmem",
             _ => return Err(std::fmt::Error),
         };
         write!(f, "{}", output)
