@@ -41,6 +41,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, stdout};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
 use vm_allocator::SystemAllocator;
@@ -183,6 +184,9 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-fs device
     CreateVirtioFs(vm_virtio::fs::Error),
 
+    /// Cannot create virtio-pmem device
+    CreateVirtioPmem(io::Error),
+
     /// Failed parsing disk image format
     DetectImageType(qcow::Error),
 
@@ -209,6 +213,15 @@ pub enum DeviceManagerError {
 
     /// Cannot add PCI device
     AddPciDevice(pci::PciRootError),
+
+    /// Cannot open persistent memory file
+    PmemFileOpen(io::Error),
+
+    /// Cannot set persistent memory file size
+    PmemFileSetLen(io::Error),
+
+    /// Cannot find a memory range for persistent memory
+    PmemRangeAllocation,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -579,7 +592,6 @@ impl DeviceManager {
 
         // Add virtio-rng if required
         if let Some(rng_path) = vm_cfg.rng.src.to_str() {
-            println!("VIRTIO_RNG PATH {}", rng_path);
             let virtio_rng_device =
                 vm_virtio::Rng::new(rng_path).map_err(DeviceManagerError::CreateVirtioRng)?;
 
@@ -618,6 +630,68 @@ impl DeviceManager {
                     )?;
                 }
             }
+        }
+
+        // Add virtio-pmem if required
+        if let Some(pmem_cfg) = &vm_cfg.pmem {
+            let size = pmem_cfg.size;
+
+            let pmem_guest_addr = allocator
+                .allocate_mmio_addresses(None, size as GuestUsize)
+                .ok_or(DeviceManagerError::PmemRangeAllocation)?;
+
+            let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
+                (O_TMPFILE, true)
+            } else {
+                (0, false)
+            };
+
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(custom_flags)
+                .open(pmem_cfg.file)
+                .map_err(DeviceManagerError::PmemFileOpen)?;
+
+            if set_len {
+                file.set_len(size)
+                    .map_err(DeviceManagerError::PmemFileSetLen)?;
+            }
+
+            let addr = unsafe {
+                libc::mmap(
+                    null_mut(),
+                    size as usize,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_NORESERVE | libc::MAP_SHARED,
+                    file.as_raw_fd(),
+                    0 as libc::off_t,
+                ) as *mut u8
+            };
+
+            let mem_region = kvm_userspace_memory_region {
+                slot: memory.num_regions() as u32,
+                guest_phys_addr: pmem_guest_addr.raw_value(),
+                memory_size: size,
+                userspace_addr: addr as u64,
+                flags: 0,
+            };
+            // Safe because the guest regions are guaranteed not to overlap.
+            let _ = unsafe { vm_fd.set_user_memory_region(mem_region) };
+
+            let virtio_pmem_device =
+                vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize)
+                    .map_err(DeviceManagerError::CreateVirtioPmem)?;
+
+            DeviceManager::add_virtio_pci_device(
+                Box::new(virtio_pmem_device),
+                memory.clone(),
+                allocator,
+                vm_fd,
+                &mut pci_root,
+                &mut mmio_bus,
+                &interrupt_info,
+            )?;
         }
 
         let pci = Arc::new(Mutex::new(PciConfigIo::new(pci_root)));

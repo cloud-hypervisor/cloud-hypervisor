@@ -48,6 +48,10 @@ pub enum Error<'a> {
     ParseFsNumQueuesParam(std::num::ParseIntError),
     /// Failed parsing fs queue size parameter.
     ParseFsQueueSizeParam(std::num::ParseIntError),
+    /// Failed parsing persitent memory file parameter.
+    ParsePmemFileParam,
+    /// Failed parsing persitent memory size parameter.
+    ParsePmemSizeParam(std::num::ParseIntError),
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -60,6 +64,7 @@ pub struct VmParams<'a> {
     pub net: Option<&'a str>,
     pub rng: &'a str,
     pub fs: Option<Vec<&'a str>>,
+    pub pmem: Option<&'a str>,
 }
 
 pub struct CpusConfig(pub u8);
@@ -291,6 +296,42 @@ impl<'a> FsConfig<'a> {
     }
 }
 
+pub struct PmemConfig<'a> {
+    pub file: &'a Path,
+    pub size: u64,
+}
+
+impl<'a> PmemConfig<'a> {
+    pub fn parse(pmem: Option<&'a str>) -> Result<Option<Self>> {
+        if pmem.is_none() {
+            return Ok(None);
+        }
+
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = pmem.unwrap().split(',').collect();
+
+        let mut file_str: &str = "";
+        let mut size_str: &str = "";
+
+        for param in params_list.iter() {
+            if param.starts_with("file=") {
+                file_str = &param[5..];
+            } else if param.starts_with("size=") {
+                size_str = &param[5..];
+            }
+        }
+
+        if file_str.is_empty() {
+            return Err(Error::ParsePmemFileParam);
+        }
+
+        Ok(Some(PmemConfig {
+            file: Path::new(file_str),
+            size: size_str.parse::<u64>().map_err(Error::ParsePmemSizeParam)?,
+        }))
+    }
+}
+
 pub struct VmConfig<'a> {
     pub cpus: CpusConfig,
     pub memory: MemoryConfig<'a>,
@@ -300,6 +341,7 @@ pub struct VmConfig<'a> {
     pub net: Option<NetConfig<'a>>,
     pub rng: RngConfig<'a>,
     pub fs: Option<Vec<FsConfig<'a>>>,
+    pub pmem: Option<PmemConfig<'a>>,
 }
 
 impl<'a> VmConfig<'a> {
@@ -327,6 +369,7 @@ impl<'a> VmConfig<'a> {
             net: NetConfig::parse(vm_params.net)?,
             rng: RngConfig::parse(vm_params.rng)?,
             fs,
+            pmem: PmemConfig::parse(vm_params.pmem)?,
         })
     }
 }
