@@ -77,6 +77,15 @@ fn main() {
                 .takes_value(true)
                 .min_values(1),
         )
+        .arg(
+            Arg::with_name("pmem")
+                .long("pmem")
+                .help(
+                    "Persistent memory parameters \"file=<backing_file_path>,\
+                     size=<persistent_memory_size>\"",
+                )
+                .takes_value(true),
+        )
         .get_matches();
 
     // These .unwrap()s cannot fail as there is a default value defined
@@ -101,6 +110,8 @@ fn main() {
 
     let fs: Option<Vec<&str>> = cmd_arguments.values_of("fs").map(|x| x.collect());
 
+    let pmem = cmd_arguments.value_of("pmem");
+
     let vm_config = match config::VmConfig::parse(config::VmParams {
         cpus,
         memory,
@@ -110,6 +121,7 @@ fn main() {
         net,
         rng,
         fs,
+        pmem,
     }) {
         Ok(config) => config,
         Err(e) => {
