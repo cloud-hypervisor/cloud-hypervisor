@@ -24,6 +24,14 @@ if [ ! -f "$OS_IMAGE" ]; then
     popd
 fi
 
+OS_RAW_IMAGE_NAME="clear-29810-cloud-raw.img"
+OS_RAW_IMAGE="$WORKLOADS_DIR/$OS_RAW_IMAGE_NAME"
+if [ ! -f "$OS_RAW_IMAGE" ]; then
+    pushd $WORKLOADS_DIR
+    qemu-img convert -p -f qcow2 -O raw $OS_IMAGE_NAME $OS_RAW_IMAGE_NAME
+    popd
+fi
+
 # Build generic kernel
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
 BZIMAGE_IMAGE="$WORKLOADS_DIR/bzImage"

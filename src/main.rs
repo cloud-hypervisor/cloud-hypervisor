@@ -155,10 +155,11 @@ extern crate credibility;
 #[cfg(feature = "integration_tests")]
 mod tests {
     use ssh2::Session;
-    use std::fs;
-    use std::io::Read;
+    use std::fs::{self, read, OpenOptions};
+    use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::process::Command;
+    use std::string::String;
     use std::thread;
 
     fn ssh_command(command: &str) -> String {
@@ -214,12 +215,18 @@ mod tests {
         let mut osdisk_base_path = workload_path.clone();
         osdisk_base_path.push("clear-29810-cloud.img");
 
+        let mut osdisk_raw_base_path = workload_path.clone();
+        osdisk_raw_base_path.push("clear-29810-cloud-raw.img");
+
         let osdisk_path = "/tmp/osdisk.img";
+        let osdisk_raw_path = "/tmp/osdisk_raw.img";
         let cloudinit_path = "/tmp/cloudinit.img";
 
         fs::copy(osdisk_base_path, osdisk_path).expect("copying of OS source disk image failed");
+        fs::copy(osdisk_raw_base_path, osdisk_raw_path)
+            .expect("copying of OS source disk raw image failed");
 
-        let disks = vec![osdisk_path, cloudinit_path];
+        let disks = vec![osdisk_path, cloudinit_path, osdisk_raw_path];
 
         (disks, String::from(fw_path.to_str().unwrap()))
     }
@@ -566,6 +573,131 @@ mod tests {
             ssh_command("sudo reboot");
             let _ = child.wait();
             let _ = daemon_child.wait();
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_virtio_pmem() {
+        test_block!(tb, "", {
+            let (disks, _) = prepare_files();
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path.clone();
+            kernel_path.push("vmlinux-custom");
+
+            let pmem_backend_path = "/tmp/pmem-file";
+            let mut pmem_backend_file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(pmem_backend_path)
+                .unwrap();
+
+            let pmem_backend_content = "foo";
+            pmem_backend_file
+                .write_all(pmem_backend_content.as_bytes())
+                .unwrap();
+            let pmem_backend_file_size = 0x1000;
+            pmem_backend_file.set_len(pmem_backend_file_size).unwrap();
+
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&[
+                    "--pmem",
+                    format!(
+                        "file={},size={}",
+                        pmem_backend_path,
+                        pmem_backend_file_size
+                    )
+                    .as_str(),
+                ])
+                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Check for the presence of /dev/pmem0
+            aver_eq!(tb, ssh_command("ls /dev/pmem0").trim(), "/dev/pmem0");
+            // Check content
+            aver_eq!(
+                tb,
+                &ssh_command("sudo cat /dev/pmem0").trim()[..pmem_backend_content.len()],
+                pmem_backend_content
+            );
+            // Modify content
+            let new_content = "bar";
+            ssh_command(
+                format!(
+                    "sudo bash -c 'echo {} > /dev/pmem0' && sudo sync /dev/pmem0",
+                    new_content
+                )
+                .as_str(),
+            );
+
+            // Check content from host
+            aver_eq!(
+                tb,
+                &String::from_utf8(read(pmem_backend_path).unwrap())
+                    .unwrap()
+                    .as_str()[..new_content.len()],
+                new_content
+            );
+
+            ssh_command("sudo reboot");
+            let _ = child.wait();
+
+            // Cleanup the file
+            fs::remove_file(pmem_backend_path).unwrap();
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_boot_from_virtio_pmem() {
+        test_block!(tb, "", {
+            let (disks, _) = prepare_files();
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path.clone();
+            kernel_path.push("vmlinux-custom");
+
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--disk", disks[1]])
+                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&[
+                    "--pmem",
+                    format!(
+                        "file={},size={}",
+                        disks[2],
+                        fs::metadata(disks[2]).unwrap().len()
+                    )
+                    .as_str(),
+                ])
+                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Simple checks to validate the VM booted properly
+            aver_eq!(tb, get_cpu_count(), 1);
+            aver!(tb, get_total_memory() > 496_000);
+
+            ssh_command("sudo reboot");
+            let _ = child.wait();
+
             Ok(())
         });
     }
