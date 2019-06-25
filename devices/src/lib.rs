@@ -19,11 +19,8 @@ extern crate vmm_sys_util;
 use std::fs::File;
 use std::{io, result};
 
-mod bus;
 pub mod ioapic;
 pub mod legacy;
-
-pub use self::bus::{Bus, BusDevice, Error as BusError};
 
 pub type DeviceEventT = u16;
 
