@@ -1053,8 +1053,8 @@ impl<'a> Vm<'a> {
 
         // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
         let mut allocator = SystemAllocator::new(
-            None,
-            None,
+            GuestAddress(0),
+            1 << 16 as GuestUsize,
             GuestAddress(0),
             1 << 36 as GuestUsize,
             X86_64_IRQ_BASE,
