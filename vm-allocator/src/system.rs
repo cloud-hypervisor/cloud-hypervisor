@@ -13,6 +13,7 @@ use crate::address::AddressAllocator;
 use crate::id::IdAllocator;
 
 use libc::{sysconf, _SC_PAGESIZE};
+use std::fmt::{self, Display};
 use std::result;
 use std::sync::{Arc, Mutex};
 
@@ -25,6 +26,19 @@ pub enum Error {
     AddressAllocate(crate::address::Error),
     /// Id allocation failed.
     IdAllocate(crate::id::Error),
+}
+
+impl Display for Error {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::Error::*;
+
+        match self {
+            NoneAddress => write!(f, "The address being allocated is null"),
+            AddressAllocate(e) => write!(f, "Address being allocated failed, err={}", e),
+            IdAllocate(e) => write!(f, "Address being allocated failed, err={}", e),
+        }
+    }
 }
 
 pub type Result<T> = result::Result<T, Error>;

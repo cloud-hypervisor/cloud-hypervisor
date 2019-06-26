@@ -7,12 +7,25 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::fmt::{self, Display};
 use std::result;
 
 #[derive(Debug)]
 pub enum Error {
     Overflow,
     Duplicated,
+}
+
+impl Display for Error {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::Error::*;
+
+        match self {
+            Overflow => write!(f, "Integer is overflow"),
+            Duplicated => write!(f, "Integer being allocated is duplicated"),
+        }
+    }
 }
 
 pub type Result<T> = result::Result<T, Error>;

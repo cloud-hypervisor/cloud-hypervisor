@@ -8,6 +8,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::collections::btree_map::BTreeMap;
+use std::fmt::{self, Display};
 use std::result;
 use vm_memory::{Address, GuestAddress, GuestUsize};
 
@@ -17,6 +18,20 @@ pub enum Error {
     Overlap,
     UnalignedAddress,
     NullRequest,
+}
+
+impl Display for Error {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::Error::*;
+
+        match self {
+            Overflow => write!(f, "Address being allocated is overflow"),
+            Overlap => write!(f, "Address being allocated is overlap"),
+            UnalignedAddress => write!(f, "Address being allocated is unaligned"),
+            NullRequest => write!(f, "Address being allocated is null"),
+        }
+    }
 }
 
 pub type Result<T> = result::Result<T, Error>;
