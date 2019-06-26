@@ -289,6 +289,7 @@ impl PciDevice for VfioPciDevice {
             let mut lsb_bytes: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
             let mut msb_bytes: [u8; 4] = [0, 0, 0, 0];
             let mut region_size: u64;
+            let bar_addr: GuestAddress;
 
             // Read the BAR size (Starts by all 1s to the BAR)
             self.device.region_write(
@@ -334,6 +335,10 @@ impl PciDevice for VfioPciDevice {
                 // Find the first bit that's set to 1.
                 let first_bit = lsb_size.trailing_zeros();
                 region_size = 2u64.pow(first_bit);
+                // We need to allocate a guest PIO address range for that BAR.
+                bar_addr = allocator
+                    .allocate_io_addresses(None, region_size)
+                    .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
             } else {
                 if is_64bit_bar {
                     let msb_bar_id = bar_id + 1;
@@ -365,15 +370,14 @@ impl PciDevice for VfioPciDevice {
                 // Find the first that's set to 1.
                 let first_bit = region_size.trailing_zeros();
                 region_size = 2u64.pow(first_bit);
+
+                // We need to allocate a guest MMIO address range for that BAR.
+                bar_addr = allocator
+                    .allocate_mmio_addresses(None, region_size)
+                    .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
             }
 
             println! {"\tRegion size {}", region_size};
-
-            // We need to allocate a guest address range for that BAR.
-            let bar_addr = allocator
-                .allocate_mmio_addresses(None, region_size)
-                .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
-
             println!("\tBAR address 0x{:x}", bar_addr.raw_value());
 
             // We can now build our BAR configuration block.
