@@ -37,7 +37,7 @@ fn pagesize() -> usize {
 ///
 /// ```
 pub struct SystemAllocator {
-    io_address_space: Option<AddressAllocator>,
+    io_address_space: AddressAllocator,
     mmio_address_space: AddressAllocator,
     next_irq: u32,
 }
@@ -53,19 +53,15 @@ impl SystemAllocator {
     /// * `mmio_size` - The size of MMIO memory.
     /// * `first_irq` - The first irq number to give out.
     pub fn new(
-        io_base: Option<GuestAddress>,
-        io_size: Option<GuestUsize>,
+        io_base: GuestAddress,
+        io_size: GuestUsize,
         mmio_base: GuestAddress,
         mmio_size: GuestUsize,
         first_irq: u32,
     ) -> Option<Self> {
         let page_size = pagesize() as u64;
         Some(SystemAllocator {
-            io_address_space: if let (Some(b), Some(s)) = (io_base, io_size) {
-                Some(AddressAllocator::new(b, s, Some(0x1))?)
-            } else {
-                None
-            },
+            io_address_space: AddressAllocator::new(io_base, io_size, Some(0x1))?,
             mmio_address_space: AddressAllocator::new(mmio_base, mmio_size, Some(page_size))?,
             next_irq: first_irq,
         })
@@ -84,12 +80,10 @@ impl SystemAllocator {
     /// Reserves a section of `size` bytes of IO address space.
     pub fn allocate_io_addresses(
         &mut self,
-        address: GuestAddress,
+        address: Option<GuestAddress>,
         size: GuestUsize,
     ) -> Option<GuestAddress> {
-        self.io_address_space
-            .as_mut()?
-            .allocate(Some(address), size)
+        self.io_address_space.allocate(address, size)
     }
 
     /// Reserves a section of `size` bytes of MMIO address space.
@@ -104,9 +98,7 @@ impl SystemAllocator {
     /// Free an IO address range.
     /// We can only free a range if it matches exactly an already allocated range.
     pub fn free_io_addresses(&mut self, address: GuestAddress, size: GuestUsize) {
-        if let Some(io_address) = self.io_address_space.as_mut() {
-            io_address.free(address, size)
-        }
+        self.io_address_space.free(address, size)
     }
 
     /// Free an MMIO address range.
