@@ -239,7 +239,9 @@ impl VfioPciDevice {
 impl Drop for VfioPciDevice {
     fn drop(&mut self) {
         if self.msi_capability.enabled {
-            self.device.msi_disable();
+            if self.device.disable_msi().is_err() {
+                error!("Could not disable MSI");
+            }
         }
 
         if self.device.unset_dma_map().is_err() {
@@ -459,7 +461,9 @@ impl PciDevice for VfioPciDevice {
             }
             if !was_enabled && is_enabled {
                 if let Some(ref interrupt_evt) = self.interrupt_evt {
-                    self.device.msi_enable(interrupt_evt);
+                    if self.device.enable_msi(interrupt_evt).is_err() {
+                        error!("Could not enable MSI");
+                    }
 
                     // add msi into kvm routing table
                     let mut address: u64 = 0;
@@ -516,7 +520,9 @@ impl PciDevice for VfioPciDevice {
 //                    self.add_msi_routing(self.virq, address, data);
                 }
             } else if was_enabled && !is_enabled {
-                self.device.msi_disable();
+                if self.device.disable_msi().is_err() {
+                    error!("Could not disable MSI");
+                }
             }
 
             self.msi_capability.enabled = is_enabled;

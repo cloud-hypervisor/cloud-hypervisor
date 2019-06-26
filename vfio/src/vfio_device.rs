@@ -4,6 +4,7 @@
 //
 use byteorder::{ByteOrder, LittleEndian};
 use kvm_ioctls::*;
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -370,11 +371,18 @@ struct VfioRegion {
     offset: u64,
 }
 
+struct VfioIrq {
+    flags: u32,
+    index: u32,
+    count: u32,
+}
+
 /// Vfio device for exposing regions which could be read/write to kernel vfio device.
 pub struct VfioDevice {
     device: File,
     group: VfioGroup,
     regions: Vec<VfioRegion>,
+    irqs: HashMap<u32, VfioIrq>,
     mem: GuestMemoryMmap,
 }
 
@@ -396,23 +404,29 @@ impl VfioDevice {
         let group = VfioGroup::new(group_id, vm)?;
         let device = group.get_device(sysfspath)?;
         let regions = Self::get_regions(&device)?;
+        let irqs = Self::get_irqs(&device)?;
 
         Ok(VfioDevice {
             device,
             group,
             regions,
+            irqs,
             mem,
         })
     }
 
-    /// enable vfio device's MSI and associate EventFd with this MSI
-    pub fn msi_enable(&self, fd: &EventFd) {
+    pub fn enable_irq(&self, irq_index: u32, fd: &EventFd) -> Result<()> {
+        let irq = self.irqs.get(&irq_index).ok_or(VfioError::VfioDeviceSetIrq)?;
+        if irq.count == 0 {
+            return Err(VfioError::VfioDeviceSetIrq);
+        }
+
         let mut irq_set = vec_with_array_field::<vfio_irq_set, u32>(1);
         irq_set[0].argsz = mem::size_of::<vfio_irq_set>() as u32 + 4;
         irq_set[0].flags = VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER;
-        irq_set[0].index = VFIO_PCI_MSI_IRQ_INDEX;
+        irq_set[0].index = irq_index;
         irq_set[0].start = 0;
-        irq_set[0].count = 1;
+        irq_set[0].count = irq.count;
 
         {
             // irq_set.data could be none, bool or fd according to flags, so irq_set.data
@@ -426,23 +440,107 @@ impl VfioDevice {
         // Safe as we are the owner of self and irq_set which are valid value
         let ret = unsafe { ioctl_with_ref(self, VFIO_DEVICE_SET_IRQS(), &irq_set[0]) };
         if ret < 0 {
-            error!("Vfio device enable MSI error");
+            return Err(VfioError::VfioDeviceSetIrq);
         }
+
+        Ok(())
     }
 
-    pub fn msi_disable(&self) {
+    pub fn disable_irq(&self, irq_index: u32) -> Result<()> {
+        let irq = self.irqs.get(&irq_index).ok_or(VfioError::VfioDeviceSetIrq)?;
+        if irq.count == 0 {
+            return Err(VfioError::VfioDeviceSetIrq);
+        }
+
         let mut irq_set = vec_with_array_field::<vfio_irq_set, u32>(0);
         irq_set[0].argsz = mem::size_of::<vfio_irq_set>() as u32;
-        irq_set[0].flags = VFIO_IRQ_SET_DATA_NONE | VFIO_IRQ_SET_ACTION_TRIGGER;
-        irq_set[0].index = VFIO_PCI_MSI_IRQ_INDEX;
+        irq_set[0].flags = VFIO_IRQ_SET_ACTION_MASK;
+        irq_set[0].index = irq_index;
         irq_set[0].start = 0;
-        irq_set[0].count = 0;
+        irq_set[0].count = irq.count;
 
         // Safe as we are the owner of self and irq_set which are valid value
         let ret = unsafe { ioctl_with_ref(self, VFIO_DEVICE_SET_IRQS(), &irq_set[0]) };
         if ret < 0 {
-            error!("Vfio device disable MSI error");
+            return Err(VfioError::VfioDeviceSetIrq);
         }
+
+        Ok(())
+    }
+
+    pub fn enable_intx(&self, fd: &EventFd) -> Result<()> {
+        self.enable_irq(VFIO_PCI_INTX_IRQ_INDEX, fd)
+    }
+
+    pub fn disable_intx(&self) -> Result<()> {
+        self.disable_irq(VFIO_PCI_INTX_IRQ_INDEX)
+    }
+
+    pub fn enable_msi(&self, fd: &EventFd) -> Result<()> {
+        self.enable_irq(VFIO_PCI_MSI_IRQ_INDEX, fd)
+    }
+
+    pub fn disable_msi(&self) -> Result<()> {
+        self.disable_irq(VFIO_PCI_MSI_IRQ_INDEX)
+    }
+
+    pub fn enable_msix(&self, fd: &EventFd) -> Result<()> {
+        self.enable_irq(VFIO_PCI_MSIX_IRQ_INDEX, fd)
+    }
+
+    pub fn disable_msix(&self) -> Result<()> {
+        self.disable_irq(VFIO_PCI_MSIX_IRQ_INDEX)
+    }
+
+    fn get_irqs(dev: &File) -> Result<HashMap<u32, VfioIrq>> {
+        let mut irqs: HashMap<u32, VfioIrq> = HashMap::new();
+        let mut dev_info = vfio_device_info {
+            argsz: mem::size_of::<vfio_device_info>() as u32,
+            flags: 0,
+            num_regions: 0,
+            num_irqs: 0,
+        };
+        // Safe as we are the owner of dev and dev_info which are valid value,
+        // and we verify the return value.
+        let ret = unsafe { ioctl_with_mut_ref(dev, VFIO_DEVICE_GET_INFO(), &mut dev_info) };
+        if ret < 0
+            || (dev_info.flags & VFIO_DEVICE_FLAGS_PCI) == 0
+            || dev_info.num_regions < VFIO_PCI_CONFIG_REGION_INDEX + 1
+            || dev_info.num_irqs < VFIO_PCI_MSIX_IRQ_INDEX + 1
+        {
+            return Err(VfioError::VfioDeviceGetInfo);
+        }
+
+        for index in 0..dev_info.num_irqs {
+            let mut irq_info = vfio_irq_info {
+                argsz: mem::size_of::<vfio_irq_info>() as u32,
+                flags: 0,
+                index,
+                count: 0,
+            };
+
+            let ret =
+                unsafe { ioctl_with_mut_ref(dev, VFIO_DEVICE_GET_IRQ_INFO(), &mut irq_info) };
+            if ret < 0 {
+                warn!("Could not get VFIO IRQ info for index {:}", index);
+                continue;
+            }
+
+            let irq = VfioIrq {
+                flags: irq_info.flags,
+                index,
+                count: irq_info.count,
+            };
+
+            println!("IRQ #{}", index);
+            println!("\tflag 0x{:x}", irq.flags);
+            println!("\tindex {}", irq.index);
+            println!("\tcount {}", irq.count);
+
+            irqs.insert(index, irq);
+        }
+
+        Ok(irqs)
     }
 
     fn get_regions(dev: &File) -> Result<Vec<VfioRegion>> {
