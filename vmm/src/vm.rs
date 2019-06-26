@@ -43,8 +43,8 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
 use vm_allocator::SystemAllocator;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion, GuestUsize,
-    MmapError,
+    Address, Bytes, Error as MmapError, GuestAddress, GuestMemory, GuestMemoryMmap,
+    GuestMemoryRegion, GuestUsize,
 };
 use vm_virtio::transport::VirtioPciDevice;
 use vmm_sys_util::signal::register_signal_handler;
