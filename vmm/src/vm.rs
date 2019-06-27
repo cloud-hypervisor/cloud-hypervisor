@@ -595,21 +595,28 @@ impl DeviceManager {
         }
 
         // Add virtio-fs if required
-        if let Some(fs_cfg) = &vm_cfg.fs {
-            if let Some(fs_sock) = fs_cfg.sock.to_str() {
-                let virtio_fs_device =
-                    vm_virtio::Fs::new(fs_sock, fs_cfg.tag, fs_cfg.num_queues, fs_cfg.queue_size)
-                        .map_err(DeviceManagerError::CreateVirtioFs)?;
+        if let Some(fs_list_cfg) = &vm_cfg.fs {
+            for fs_cfg in fs_list_cfg.iter() {
+                println!("####VIRTIO-FS config {:?}", fs_cfg);
+                if let Some(fs_sock) = fs_cfg.sock.to_str() {
+                    let virtio_fs_device = vm_virtio::Fs::new(
+                        fs_sock,
+                        fs_cfg.tag,
+                        fs_cfg.num_queues,
+                        fs_cfg.queue_size,
+                    )
+                    .map_err(DeviceManagerError::CreateVirtioFs)?;
 
-                DeviceManager::add_virtio_pci_device(
-                    Box::new(virtio_fs_device),
-                    memory.clone(),
-                    allocator,
-                    vm_fd,
-                    &mut pci_root,
-                    &mut mmio_bus,
-                    &interrupt_info,
-                )?;
+                    DeviceManager::add_virtio_pci_device(
+                        Box::new(virtio_fs_device),
+                        memory.clone(),
+                        allocator,
+                        vm_fd,
+                        &mut pci_root,
+                        &mut mmio_bus,
+                        &interrupt_info,
+                    )?;
+                }
             }
         }
 

@@ -74,7 +74,8 @@ fn main() {
                      sock=<socket_path>,num_queues=<number_of_queues>,\
                      queue_size=<size_of_each_queue>\"",
                 )
-                .takes_value(true),
+                .takes_value(true)
+                .min_values(1),
         )
         .get_matches();
 
@@ -98,7 +99,7 @@ fn main() {
     // This .unwrap() cannot fail as there is a default value defined
     let rng = cmd_arguments.value_of("rng").unwrap();
 
-    let fs = cmd_arguments.value_of("fs");
+    let fs: Option<Vec<&str>> = cmd_arguments.values_of("fs").map(|x| x.collect());
 
     let vm_config = match config::VmConfig::parse(config::VmParams {
         cpus,
