@@ -59,7 +59,7 @@ pub struct VmParams<'a> {
     pub disks: Vec<&'a str>,
     pub net: Option<&'a str>,
     pub rng: &'a str,
-    pub fs: Option<&'a str>,
+    pub fs: Option<Vec<&'a str>>,
 }
 
 pub struct CpusConfig(pub u8);
@@ -232,6 +232,7 @@ impl<'a> RngConfig<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct FsConfig<'a> {
     pub tag: &'a str,
     pub sock: &'a Path,
@@ -240,13 +241,9 @@ pub struct FsConfig<'a> {
 }
 
 impl<'a> FsConfig<'a> {
-    pub fn parse(fs: Option<&'a str>) -> Result<Option<Self>> {
-        if fs.is_none() {
-            return Ok(None);
-        }
-
+    pub fn parse(fs: &'a str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = fs.unwrap().split(',').collect();
+        let params_list: Vec<&str> = fs.split(',').collect();
 
         let mut tag: &str = "";
         let mut sock: &str = "";
@@ -285,12 +282,12 @@ impl<'a> FsConfig<'a> {
                 .map_err(Error::ParseFsQueueSizeParam)?;
         }
 
-        Ok(Some(FsConfig {
+        Ok(FsConfig {
             tag,
             sock: Path::new(sock),
             num_queues,
             queue_size,
-        }))
+        })
     }
 }
 
@@ -302,7 +299,7 @@ pub struct VmConfig<'a> {
     pub disks: Vec<DiskConfig<'a>>,
     pub net: Option<NetConfig<'a>>,
     pub rng: RngConfig<'a>,
-    pub fs: Option<FsConfig<'a>>,
+    pub fs: Option<Vec<FsConfig<'a>>>,
 }
 
 impl<'a> VmConfig<'a> {
@@ -310,6 +307,15 @@ impl<'a> VmConfig<'a> {
         let mut disks: Vec<DiskConfig> = Vec::new();
         for disk in vm_params.disks.iter() {
             disks.push(DiskConfig::parse(disk)?);
+        }
+
+        let mut fs: Option<Vec<FsConfig>> = None;
+        if let Some(fs_list) = &vm_params.fs {
+            let mut fs_config_list = Vec::new();
+            for item in fs_list.iter() {
+                fs_config_list.push(FsConfig::parse(item)?);
+            }
+            fs = Some(fs_config_list);
         }
 
         Ok(VmConfig {
@@ -320,7 +326,7 @@ impl<'a> VmConfig<'a> {
             disks,
             net: NetConfig::parse(vm_params.net)?,
             rng: RngConfig::parse(vm_params.rng)?,
-            fs: FsConfig::parse(vm_params.fs)?,
+            fs,
         })
     }
 }
