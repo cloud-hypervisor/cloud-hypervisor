@@ -742,7 +742,7 @@ impl<'a> Vm<'a> {
         )
         .ok_or(Error::CreateSystemAllocator)?;
 
-        let mut device_manager = DeviceManager::new(Arc::new(Mutex::new(allocator)));
+        let mut device_manager = DeviceManager::new(allocator.clone());
 
         // Create devices
         let mut devices = Devices::new(&fd, userspace_ioapic).map_err(Error::Devices)?;

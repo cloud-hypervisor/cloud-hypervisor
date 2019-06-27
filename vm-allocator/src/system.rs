@@ -66,6 +66,7 @@ fn pagesize() -> usize {
 ///    assert_eq!(allocator.allocate_mmio_addresses(None, 0x1000), Some(GuestAddress(0x1fffe000)));
 ///
 /// ```
+#[derive(Clone)]
 pub struct SystemAllocator {
     io_address_space: Arc<Mutex<Option<AddressAllocator>>>,
     mmio_address_space: Arc<Mutex<AddressAllocator>>,

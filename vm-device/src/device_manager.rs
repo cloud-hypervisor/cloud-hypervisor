@@ -66,7 +66,8 @@ pub type Result<T> = result::Result<T, Error>;
 /// System device manager serving for all devices management and VM exit handling.
 pub struct DeviceManager {
     /// System allocator reference.
-    resource: Arc<Mutex<SystemAllocator>>,
+    //resource: Arc<Mutex<SystemAllocator>>,
+    resource: SystemAllocator,
     /// Devices information mapped by instance id.
     devices: HashMap<u32, DeviceDescriptor>,
     /// Range mapping for VM exit mmio operations.
@@ -78,7 +79,7 @@ pub struct DeviceManager {
 impl DeviceManager {
     /// Create a new `DeviceManager` with a `SystemAllocator` reference which would be
     /// used to allocate resource for devices.
-    pub fn new(resource: Arc<Mutex<SystemAllocator>>) -> Self {
+    pub fn new(resource: SystemAllocator) -> Self {
         DeviceManager {
             resource,
             devices: HashMap::new(),
@@ -117,8 +118,6 @@ impl DeviceManager {
     fn allocate_resources(&mut self, resources: &mut Vec<IoResource>) -> Result<(u32)> {
         let id = self
             .resource
-            .lock()
-            .expect("failed to acquire lock.")
             .allocate_instance_id()
             .map_err(Error::InstanceIdAllocate)?;
 
@@ -130,8 +129,6 @@ impl DeviceManager {
                     }
                     res.addr = Some(
                         self.resource
-                            .lock()
-                            .expect("failed to acquire lock")
                             .allocate_io_addresses(res.addr.unwrap(), res.size)
                             .map_err(Error::AddressAllocate)?,
                     );
@@ -139,8 +136,6 @@ impl DeviceManager {
                 IoType::PhysicalMmio | IoType::Mmio => {
                     res.addr = Some(
                         self.resource
-                            .lock()
-                            .expect("failed to acquire lock")
                             .allocate_mmio_addresses(res.addr, res.size)
                             .map_err(Error::AddressAllocate)?,
                     )
@@ -153,22 +148,13 @@ impl DeviceManager {
     fn free_resources(&mut self, resources: &[IoResource], id: u32) {
         for res in resources.iter() {
             match res.res_type {
-                IoType::Pio => self
-                    .resource
-                    .lock()
-                    .expect("failed to acquire lock")
-                    .free_io_addresses(res.addr.unwrap(), res.size),
+                IoType::Pio => self.resource.free_io_addresses(res.addr.unwrap(), res.size),
                 IoType::PhysicalMmio | IoType::Mmio => self
                     .resource
-                    .lock()
-                    .expect("failed to acquire lock")
                     .free_mmio_addresses(res.addr.unwrap(), res.size),
             }
         }
-        self.resource
-            .lock()
-            .expect("failed to acquire lock")
-            .free_instance_id(id);
+        self.resource.free_instance_id(id);
     }
 
     fn register_resources(
@@ -211,8 +197,6 @@ impl DeviceManager {
                 // Allocate irq resource
                 let irq_num = self
                     .resource
-                    .lock()
-                    .expect("failed to acquire lock")
                     .allocate_irq(irq)
                     .map_err(Error::IrqAllocate)?;
                 Ok(Some(IrqResource(Some(irq_num))))
@@ -223,11 +207,7 @@ impl DeviceManager {
 
     fn free_irq_resource(&mut self, interrupt: Option<IrqResource>) {
         match interrupt {
-            Some(IrqResource(irq)) => self
-                .resource
-                .lock()
-                .expect("failed to acquire lock")
-                .free_irq(irq),
+            Some(IrqResource(irq)) => self.resource.free_irq(irq),
             None => return,
         }
     }
