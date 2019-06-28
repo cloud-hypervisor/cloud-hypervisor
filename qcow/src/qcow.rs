@@ -77,7 +77,11 @@ impl Display for Error {
             BackingFilesNotSupported => write!(f, "backing files not supported"),
             CompressedBlocksNotSupported => write!(f, "compressed blocks not supported"),
             EvictingCache(e) => write!(f, "failed to evict cache: {}", e),
-            FileTooBig(size) => write!(f, "file larger than max of 1TB: {}", size),
+            FileTooBig(size) => write!(
+                f,
+                "file larger than max of {}: {}",
+                MAX_QCOW_FILE_SIZE, size
+            ),
             GettingFileSize(e) => write!(f, "failed to get file size: {}", e),
             GettingRefcount(e) => write!(f, "failed to get refcount: {}", e),
             InvalidClusterIndex => write!(f, "invalid cluster index"),
@@ -117,6 +121,9 @@ pub enum ImageType {
     Raw,
     Qcow2,
 }
+
+// Maximum data size supported.
+const MAX_QCOW_FILE_SIZE: u64 = 0x01 << 44; // 16 TB.
 
 // QCOW magic constant that starts the header.
 const QCOW_MAGIC: u32 = 0x5146_49fb;
@@ -399,6 +406,11 @@ impl QcowFile {
             return Err(Error::InvalidClusterSize);
         }
         let cluster_size = 0x01u64 << cluster_bits;
+
+        // Limit the total size of the disk.
+        if header.size > MAX_QCOW_FILE_SIZE {
+            return Err(Error::FileTooBig(header.size));
+        }
 
         // No current support for backing files.
         if header.backing_file_offset != 0 {
@@ -1834,6 +1846,15 @@ mod tests {
     #[test]
     fn test_header_huge_file() {
         let header = test_huge_header();
+        with_basic_file(&header, |disk_file: File| {
+            QcowFile::from(disk_file).expect_err("Failed to create file.");
+        });
+    }
+
+    #[test]
+    fn test_header_crazy_file_size_rejected() {
+        let mut header = valid_header_v3();
+        &mut header[24..32].copy_from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1e]);
         with_basic_file(&header, |disk_file: File| {
             QcowFile::from(disk_file).expect_err("Failed to create file.");
         });
