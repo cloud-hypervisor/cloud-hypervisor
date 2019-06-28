@@ -633,65 +633,67 @@ impl DeviceManager {
         }
 
         // Add virtio-pmem if required
-        if let Some(pmem_cfg) = &vm_cfg.pmem {
-            let size = pmem_cfg.size;
+        if let Some(pmem_list_cfg) = &vm_cfg.pmem {
+            for pmem_cfg in pmem_list_cfg.iter() {
+                let size = pmem_cfg.size;
 
-            let pmem_guest_addr = allocator
-                .allocate_mmio_addresses(None, size as GuestUsize)
-                .ok_or(DeviceManagerError::PmemRangeAllocation)?;
+                let pmem_guest_addr = allocator
+                    .allocate_mmio_addresses(None, size as GuestUsize)
+                    .ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
-            let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
-                (O_TMPFILE, true)
-            } else {
-                (0, false)
-            };
+                let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
+                    (O_TMPFILE, true)
+                } else {
+                    (0, false)
+                };
 
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .custom_flags(custom_flags)
-                .open(pmem_cfg.file)
-                .map_err(DeviceManagerError::PmemFileOpen)?;
+                let file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .custom_flags(custom_flags)
+                    .open(pmem_cfg.file)
+                    .map_err(DeviceManagerError::PmemFileOpen)?;
 
-            if set_len {
-                file.set_len(size)
-                    .map_err(DeviceManagerError::PmemFileSetLen)?;
+                if set_len {
+                    file.set_len(size)
+                        .map_err(DeviceManagerError::PmemFileSetLen)?;
+                }
+
+                let addr = unsafe {
+                    libc::mmap(
+                        null_mut(),
+                        size as usize,
+                        libc::PROT_READ | libc::PROT_WRITE,
+                        libc::MAP_NORESERVE | libc::MAP_SHARED,
+                        file.as_raw_fd(),
+                        0 as libc::off_t,
+                    ) as *mut u8
+                };
+
+                let mem_region = kvm_userspace_memory_region {
+                    slot: memory.num_regions() as u32,
+                    guest_phys_addr: pmem_guest_addr.raw_value(),
+                    memory_size: size,
+                    userspace_addr: addr as u64,
+                    flags: 0,
+                };
+                // Safe because the guest regions are guaranteed not to overlap.
+                let _ = unsafe { vm_fd.set_user_memory_region(mem_region) };
+
+                let virtio_pmem_device =
+                    vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize)
+                        .map_err(DeviceManagerError::CreateVirtioPmem)?;
+
+                DeviceManager::add_virtio_pci_device(
+                    Box::new(virtio_pmem_device),
+                    memory.clone(),
+                    allocator,
+                    vm_fd,
+                    &mut pci_root,
+                    &mut mmio_bus,
+                    &interrupt_info,
+                )?;
             }
-
-            let addr = unsafe {
-                libc::mmap(
-                    null_mut(),
-                    size as usize,
-                    libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_NORESERVE | libc::MAP_SHARED,
-                    file.as_raw_fd(),
-                    0 as libc::off_t,
-                ) as *mut u8
-            };
-
-            let mem_region = kvm_userspace_memory_region {
-                slot: memory.num_regions() as u32,
-                guest_phys_addr: pmem_guest_addr.raw_value(),
-                memory_size: size,
-                userspace_addr: addr as u64,
-                flags: 0,
-            };
-            // Safe because the guest regions are guaranteed not to overlap.
-            let _ = unsafe { vm_fd.set_user_memory_region(mem_region) };
-
-            let virtio_pmem_device =
-                vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize)
-                    .map_err(DeviceManagerError::CreateVirtioPmem)?;
-
-            DeviceManager::add_virtio_pci_device(
-                Box::new(virtio_pmem_device),
-                memory.clone(),
-                allocator,
-                vm_fd,
-                &mut pci_root,
-                &mut mmio_bus,
-                &interrupt_info,
-            )?;
         }
 
         let pci = Arc::new(Mutex::new(PciConfigIo::new(pci_root)));

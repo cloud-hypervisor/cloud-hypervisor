@@ -64,7 +64,7 @@ pub struct VmParams<'a> {
     pub net: Option<&'a str>,
     pub rng: &'a str,
     pub fs: Option<Vec<&'a str>>,
-    pub pmem: Option<&'a str>,
+    pub pmem: Option<Vec<&'a str>>,
 }
 
 pub struct CpusConfig(pub u8);
@@ -302,13 +302,9 @@ pub struct PmemConfig<'a> {
 }
 
 impl<'a> PmemConfig<'a> {
-    pub fn parse(pmem: Option<&'a str>) -> Result<Option<Self>> {
-        if pmem.is_none() {
-            return Ok(None);
-        }
-
+    pub fn parse(pmem: &'a str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = pmem.unwrap().split(',').collect();
+        let params_list: Vec<&str> = pmem.split(',').collect();
 
         let mut file_str: &str = "";
         let mut size_str: &str = "";
@@ -325,10 +321,10 @@ impl<'a> PmemConfig<'a> {
             return Err(Error::ParsePmemFileParam);
         }
 
-        Ok(Some(PmemConfig {
+        Ok(PmemConfig {
             file: Path::new(file_str),
             size: size_str.parse::<u64>().map_err(Error::ParsePmemSizeParam)?,
-        }))
+        })
     }
 }
 
@@ -341,7 +337,7 @@ pub struct VmConfig<'a> {
     pub net: Option<NetConfig<'a>>,
     pub rng: RngConfig<'a>,
     pub fs: Option<Vec<FsConfig<'a>>>,
-    pub pmem: Option<PmemConfig<'a>>,
+    pub pmem: Option<Vec<PmemConfig<'a>>>,
 }
 
 impl<'a> VmConfig<'a> {
@@ -360,6 +356,15 @@ impl<'a> VmConfig<'a> {
             fs = Some(fs_config_list);
         }
 
+        let mut pmem: Option<Vec<PmemConfig>> = None;
+        if let Some(pmem_list) = &vm_params.pmem {
+            let mut pmem_config_list = Vec::new();
+            for item in pmem_list.iter() {
+                pmem_config_list.push(PmemConfig::parse(item)?);
+            }
+            pmem = Some(pmem_config_list);
+        }
+
         Ok(VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
@@ -369,7 +374,7 @@ impl<'a> VmConfig<'a> {
             net: NetConfig::parse(vm_params.net)?,
             rng: RngConfig::parse(vm_params.rng)?,
             fs,
-            pmem: PmemConfig::parse(vm_params.pmem)?,
+            pmem,
         })
     }
 }

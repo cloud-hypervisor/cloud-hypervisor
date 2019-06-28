@@ -84,7 +84,8 @@ fn main() {
                     "Persistent memory parameters \"file=<backing_file_path>,\
                      size=<persistent_memory_size>\"",
                 )
-                .takes_value(true),
+                .takes_value(true)
+                .min_values(1),
         )
         .get_matches();
 
@@ -110,7 +111,7 @@ fn main() {
 
     let fs: Option<Vec<&str>> = cmd_arguments.values_of("fs").map(|x| x.collect());
 
-    let pmem = cmd_arguments.value_of("pmem");
+    let pmem: Option<Vec<&str>> = cmd_arguments.values_of("pmem").map(|x| x.collect());
 
     let vm_config = match config::VmConfig::parse(config::VmParams {
         cpus,
