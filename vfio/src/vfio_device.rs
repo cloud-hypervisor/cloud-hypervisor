@@ -371,6 +371,7 @@ impl VfioGroup {
             dev_fd,
             num_regions: dev_info.num_regions,
             num_irqs: dev_info.num_irqs,
+            flags: dev_info.flags,
         })
     }
 }
@@ -404,6 +405,7 @@ struct VfioDeviceInfo {
     dev_fd: File,
     num_regions: u32,
     num_irqs: u32,
+    flags: u32,
 }
 
 /// Vfio device for exposing regions which could be read/write to kernel vfio device.
@@ -412,6 +414,7 @@ pub struct VfioDevice {
     group: VfioGroup,
     regions: Vec<VfioRegion>,
     irqs: HashMap<u32, VfioIrq>,
+    flags: u32,
     mem: GuestMemoryMmap,
 }
 
@@ -440,8 +443,15 @@ impl VfioDevice {
             group,
             regions,
             irqs,
+            flags: dev_info.flags,
             mem,
         })
+    }
+
+    pub fn reset(&self) {
+        if (self.flags & VFIO_DEVICE_FLAGS_RESET) != 0 {
+            unsafe { ioctl(self, VFIO_DEVICE_RESET()) };
+        }
     }
 
     pub fn enable_irq(&self, irq_index: u32, fd: &EventFd) -> Result<()> {

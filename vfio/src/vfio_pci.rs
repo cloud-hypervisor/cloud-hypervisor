@@ -98,6 +98,8 @@ pub struct VfioPciDevice {
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
     pub fn new(device: Box<VfioDevice>) -> Result<Self> {
+        device.reset();
+
         let mut id = vec![0; 4];
         // Vendor and device IDs
         device.region_read(VFIO_PCI_CONFIG_REGION_INDEX, &mut id, 0x0);
