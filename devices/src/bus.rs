@@ -97,11 +97,11 @@ impl Bus {
         Some((*range, dev))
     }
 
-    pub fn get_device(&self, addr: u64) -> Option<(u64, &Mutex<BusDevice>)> {
+    pub fn resolve(&self, addr: u64) -> Option<(u64, u64, &Mutex<BusDevice>)> {
         if let Some((range, dev)) = self.first_before(addr) {
             let offset = addr - range.base;
             if offset < range.len {
-                return Some((offset, dev));
+                return Some((range.base, offset, dev));
             }
         }
         None
@@ -137,7 +137,7 @@ impl Bus {
     ///
     /// Returns true on success, otherwise `data` is untouched.
     pub fn read(&self, addr: u64, data: &mut [u8]) -> bool {
-        if let Some((offset, dev)) = self.get_device(addr) {
+        if let Some((_base, offset, dev)) = self.resolve(addr) {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
             dev.lock()
                 .expect("Failed to acquire device lock")
@@ -152,7 +152,7 @@ impl Bus {
     ///
     /// Returns true on success, otherwise `data` is untouched.
     pub fn write(&self, addr: u64, data: &[u8]) -> bool {
-        if let Some((offset, dev)) = self.get_device(addr) {
+        if let Some((_base, offset, dev)) = self.resolve(addr) {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
             dev.lock()
                 .expect("Failed to acquire device lock")
