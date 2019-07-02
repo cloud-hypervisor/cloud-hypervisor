@@ -21,7 +21,8 @@ use devices::BusDevice;
 use pci::{
     InterruptDelivery, InterruptParameters, MsixCap, MsixConfig, PciBarConfiguration,
     PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
-    PciHeaderType, PciInterruptPin, PciSubclass,
+    PciHeaderType, PciInterruptPin, PciMassStorageSubclass, PciNetworkControllerSubclass,
+    PciSubclass,
 };
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
@@ -29,8 +30,8 @@ use vmm_sys_util::{EventFd, Result};
 
 use super::VirtioPciCommonConfig;
 use crate::{
-    Queue, VirtioDevice, VirtioInterrupt, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
-    DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT,
+    Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER,
+    DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT,
 };
 
 #[allow(clippy::enum_variant_names)]
@@ -218,11 +219,26 @@ impl VirtioPciDevice {
             (None, None)
         };
 
+        let (class, subclass) = match VirtioDeviceType::from(device.device_type()) {
+            VirtioDeviceType::TYPE_NET => (
+                PciClassCode::NetworkController,
+                &PciNetworkControllerSubclass::EthernetController as &PciSubclass,
+            ),
+            VirtioDeviceType::TYPE_BLOCK => (
+                PciClassCode::MassStorage,
+                &PciMassStorageSubclass::MassStorage as &PciSubclass,
+            ),
+            _ => (
+                PciClassCode::Other,
+                &PciVirtioSubclass::NonTransitionalBase as &PciSubclass,
+            ),
+        };
+
         let configuration = PciConfiguration::new(
             VIRTIO_PCI_VENDOR_ID,
             pci_device_id,
-            PciClassCode::Other,
-            &PciVirtioSubclass::NonTransitionalBase,
+            class,
+            subclass,
             None,
             PciHeaderType::Device,
             VIRTIO_PCI_VENDOR_ID,
