@@ -34,26 +34,40 @@ pub enum Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
+/// Holds a base and length representing the address space occupied by a `BusDevice`.
+///
+/// * base - The address at which the range start.
+/// * len - The length of the range in bytes.
 #[derive(Debug, Copy, Clone)]
-struct BusRange(u64, u64);
+pub struct BusRange {
+    pub base: u64,
+    pub len: u64,
+}
+
+impl BusRange {
+    /// Returns true if there is overlap with the given range.
+    pub fn overlaps(&self, base: u64, len: u64) -> bool {
+        self.base < (base + len) && base < self.base + self.len
+    }
+}
 
 impl Eq for BusRange {}
 
 impl PartialEq for BusRange {
     fn eq(&self, other: &BusRange) -> bool {
-        self.0 == other.0
+        self.base == other.base
     }
 }
 
 impl Ord for BusRange {
     fn cmp(&self, other: &BusRange) -> Ordering {
-        self.0.cmp(&other.0)
+        self.base.cmp(&other.base)
     }
 }
 
 impl PartialOrd for BusRange {
     fn partial_cmp(&self, other: &BusRange) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0)
+        self.base.partial_cmp(&other.base)
     }
 }
 
@@ -75,19 +89,18 @@ impl Bus {
     }
 
     fn first_before(&self, addr: u64) -> Option<(BusRange, &Mutex<BusDevice>)> {
-        // for when we switch to rustc 1.17: self.devices.range(..addr).iter().rev().next()
-        for (range, dev) in self.devices.iter().rev() {
-            if range.0 <= addr {
-                return Some((*range, dev));
-            }
-        }
-        None
+        let (range, dev) = self
+            .devices
+            .range(..=BusRange { base: addr, len: 1 })
+            .rev()
+            .next()?;
+        Some((*range, dev))
     }
 
     pub fn get_device(&self, addr: u64) -> Option<(u64, &Mutex<BusDevice>)> {
-        if let Some((BusRange(start, len), dev)) = self.first_before(addr) {
-            let offset = addr - start;
-            if offset < len {
+        if let Some((range, dev)) = self.first_before(addr) {
+            let offset = addr - range.base;
+            if offset < range.len {
                 return Some((offset, dev));
             }
         }
@@ -100,24 +113,20 @@ impl Bus {
             return Err(Error::Overlap);
         }
 
-        // Reject all cases where the new device's base is within an old device's range.
-        if self.get_device(base).is_some() {
+        // Reject all cases where the new device's range overlaps with an existing device.
+        if self
+            .devices
+            .iter()
+            .any(|(range, _dev)| range.overlaps(base, len))
+        {
             return Err(Error::Overlap);
         }
 
-        // The above check will miss an overlap in which the new device's base address is before the
-        // range of another device. To catch that case, we search for a device with a range before
-        // the new device's range's end. If there is no existing device in that range that starts
-        // after the new device, then there will be no overlap.
-        if let Some((BusRange(start, _), _)) = self.first_before(base + len - 1) {
-            // Such a device only conflicts with the new device if it also starts after the new
-            // device because of our initial `get_device` check above.
-            if start >= base {
-                return Err(Error::Overlap);
-            }
-        }
-
-        if self.devices.insert(BusRange(base, len), device).is_some() {
+        if self
+            .devices
+            .insert(BusRange { base, len }, device)
+            .is_some()
+        {
             return Err(Error::Overlap);
         }
 
@@ -232,14 +241,14 @@ mod tests {
 
     #[test]
     fn busrange_cmp_and_clone() {
-        assert_eq!(BusRange(0x10, 2), BusRange(0x10, 3));
-        assert_eq!(BusRange(0x10, 2), BusRange(0x10, 2));
+        let range = BusRange { base: 0x10, len: 2 };
+        assert_eq!(range, BusRange { base: 0x10, len: 3 });
+        assert_eq!(range, BusRange { base: 0x10, len: 2 });
 
-        assert!(BusRange(0x10, 2) < BusRange(0x12, 1));
-        assert!(BusRange(0x10, 2) < BusRange(0x12, 3));
+        assert!(range < BusRange { base: 0x12, len: 1 });
+        assert!(range < BusRange { base: 0x12, len: 3 });
 
-        let bus_range = BusRange(0x10, 2);
-        assert_eq!(bus_range, bus_range.clone());
+        assert_eq!(range, range.clone());
 
         let mut bus = Bus::new();
         let mut data = [1, 2, 3, 4];
@@ -252,5 +261,21 @@ mod tests {
         assert_eq!(data, [1, 2, 3, 4]);
         assert!(bus_clone.read(0x10, &mut data));
         assert_eq!(data, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn bus_range_overlap() {
+        let a = BusRange {
+            base: 0x1000,
+            len: 0x400,
+        };
+        assert!(a.overlaps(0x1000, 0x400));
+        assert!(a.overlaps(0xf00, 0x400));
+        assert!(a.overlaps(0x1000, 0x01));
+        assert!(a.overlaps(0xfff, 0x02));
+        assert!(a.overlaps(0x1100, 0x100));
+        assert!(a.overlaps(0x13ff, 0x100));
+        assert!(!a.overlaps(0x1400, 0x100));
+        assert!(!a.overlaps(0xf00, 0x100));
     }
 }
