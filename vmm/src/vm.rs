@@ -609,7 +609,6 @@ impl DeviceManager {
         // Add virtio-fs if required
         if let Some(fs_list_cfg) = &vm_cfg.fs {
             for fs_cfg in fs_list_cfg.iter() {
-                println!("####VIRTIO-FS config {:?}", fs_cfg);
                 if let Some(fs_sock) = fs_cfg.sock.to_str() {
                     let virtio_fs_device = vm_virtio::Fs::new(
                         fs_sock,
