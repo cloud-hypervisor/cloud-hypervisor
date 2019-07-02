@@ -124,6 +124,50 @@ impl PciSubclass for PciSerialBusSubClass {
     }
 }
 
+/// Mass Storage Sub Classes
+#[allow(dead_code)]
+#[derive(Copy, Clone)]
+pub enum PciMassStorageSubclass {
+    SCSIStorage = 0x00,
+    IDEInterface = 0x01,
+    FloppyController = 0x02,
+    IPIController = 0x03,
+    RAIDController = 0x04,
+    ATAController = 0x05,
+    SATAController = 0x06,
+    SerialSCSIController = 0x07,
+    NVMController = 0x08,
+    MassStorage = 0x80,
+}
+
+impl PciSubclass for PciMassStorageSubclass {
+    fn get_register_value(&self) -> u8 {
+        *self as u8
+    }
+}
+
+/// Network Controller Sub Classes
+#[allow(dead_code)]
+#[derive(Copy, Clone)]
+pub enum PciNetworkControllerSubclass {
+    EthernetController = 0x00,
+    TokenRingController = 0x01,
+    FDDIController = 0x02,
+    ATMController = 0x03,
+    ISDNController = 0x04,
+    WorldFipController = 0x05,
+    PICMGController = 0x06,
+    InfinibandController = 0x07,
+    FabricController = 0x08,
+    NetworkController = 0x80,
+}
+
+impl PciSubclass for PciNetworkControllerSubclass {
+    fn get_register_value(&self) -> u8 {
+        *self as u8
+    }
+}
+
 /// A PCI class programming interface. Each combination of `PciClassCode` and
 /// `PciSubclass` can specify a set of register-level programming interfaces.
 /// This trait is implemented by each programming interface.
