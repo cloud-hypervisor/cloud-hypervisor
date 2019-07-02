@@ -159,7 +159,7 @@ pub struct Ioapic {
 }
 
 impl BusDevice for Ioapic {
-    fn read(&mut self, offset: u64, data: &mut [u8]) {
+    fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         assert!(data.len() == 4);
 
         debug!("IOAPIC_R @ offset 0x{:x}", offset);
@@ -176,7 +176,7 @@ impl BusDevice for Ioapic {
         LittleEndian::write_u32(data, value);
     }
 
-    fn write(&mut self, offset: u64, data: &[u8]) {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
         assert!(data.len() == 4);
 
         debug!("IOAPIC_W @ offset 0x{:x}", offset);

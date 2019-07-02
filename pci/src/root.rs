@@ -198,7 +198,7 @@ impl PciConfigIo {
 }
 
 impl BusDevice for PciConfigIo {
-    fn read(&mut self, offset: u64, data: &mut [u8]) {
+    fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         // `offset` is relative to 0xcf8
         let value = match offset {
             0...3 => self.config_address,
@@ -220,7 +220,7 @@ impl BusDevice for PciConfigIo {
         }
     }
 
-    fn write(&mut self, offset: u64, data: &[u8]) {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
         // `offset` is relative to 0xcf8
         match offset {
             o @ 0...3 => self.set_config_address(o, data),
@@ -255,7 +255,7 @@ impl PciConfigMmio {
 }
 
 impl BusDevice for PciConfigMmio {
-    fn read(&mut self, offset: u64, data: &mut [u8]) {
+    fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         // Only allow reads to the register boundary.
         let start = offset as usize % 4;
         let end = start + data.len();
@@ -272,7 +272,7 @@ impl BusDevice for PciConfigMmio {
         }
     }
 
-    fn write(&mut self, offset: u64, data: &[u8]) {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
         if offset > u64::from(u32::max_value()) {
             return;
         }

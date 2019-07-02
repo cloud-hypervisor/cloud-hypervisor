@@ -22,7 +22,7 @@ impl I8042Device {
 // registers: port 0x61 (I8042_PORT_B_REG, offset 0 from base of 0x61), and
 // port 0x64 (I8042_COMMAND_REG, offset 3 from base of 0x61).
 impl BusDevice for I8042Device {
-    fn read(&mut self, offset: u64, data: &mut [u8]) {
+    fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         if data.len() == 1 && offset == 3 {
             data[0] = 0x0;
         } else if data.len() == 1 && offset == 0 {
@@ -32,7 +32,7 @@ impl BusDevice for I8042Device {
         }
     }
 
-    fn write(&mut self, offset: u64, data: &[u8]) {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
         if data.len() == 1 && data[0] == 0xfe && offset == 3 {
             if let Err(e) = self.reset_evt.write(1) {
                 println!("Error triggering i8042 reset event: {}", e);
