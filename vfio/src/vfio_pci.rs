@@ -512,16 +512,16 @@ impl PciDevice for VfioPciDevice {
         u32::from_le_bytes(config)
     }
 
-    fn read_bar(&mut self, _base: u64, addr: u64, data: &mut [u8]) {
-        println!("READBAR 0x{:x}", addr);
+    fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
+        let addr = base + offset;
         if let Some(region) = self.find_region(addr) {
             let offset = addr - region.start.raw_value();
             self.device.region_read(region.index, data, offset);
         }
     }
 
-    fn write_bar(&mut self, _base: u64, addr: u64, data: &[u8]) {
-        println!("WRITEBAR 0x{:x}", addr);
+    fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) {
+        let addr = base + offset;
         if let Some(region) = self.find_region(addr) {
             let offset = addr - region.start.raw_value();
             self.device.region_write(region.index, data, offset);
