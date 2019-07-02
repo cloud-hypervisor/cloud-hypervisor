@@ -335,20 +335,43 @@ impl VfioGroup {
         }
     }
 
-    fn get_device(&self, name: &Path) -> Result<File> {
+    fn get_device(&self, name: &Path) -> Result<VfioDeviceInfo> {
         let uuid_osstr = name.file_name().ok_or(VfioError::InvalidPath)?;
         let uuid_str = uuid_osstr.to_str().ok_or(VfioError::InvalidPath)?;
         let path: CString = CString::new(uuid_str.as_bytes()).expect("CString::new() failed");
         let path_ptr = path.as_ptr();
 
         // Safe as we are the owner of self and path_ptr which are valid value.
-        let ret = unsafe { ioctl_with_ptr(self, VFIO_GROUP_GET_DEVICE_FD(), path_ptr) };
-        if ret < 0 {
+        let fd = unsafe { ioctl_with_ptr(self, VFIO_GROUP_GET_DEVICE_FD(), path_ptr) };
+        if fd < 0 {
             return Err(VfioError::GroupGetDeviceFD);
         }
 
-        // Safe as ret is valid FD
-        Ok(unsafe { File::from_raw_fd(ret) })
+        // Safe as fd is valid FD
+        let dev_fd = unsafe { File::from_raw_fd(fd) };
+
+        let mut dev_info = vfio_device_info {
+            argsz: mem::size_of::<vfio_device_info>() as u32,
+            flags: 0,
+            num_regions: 0,
+            num_irqs: 0,
+        };
+        // Safe as we are the owner of dev and dev_info which are valid value,
+        // and we verify the return value.
+        let ret = unsafe { ioctl_with_mut_ref(&dev_fd, VFIO_DEVICE_GET_INFO(), &mut dev_info) };
+        if ret < 0
+            || (dev_info.flags & VFIO_DEVICE_FLAGS_PCI) == 0
+            || dev_info.num_regions < VFIO_PCI_CONFIG_REGION_INDEX + 1
+            || dev_info.num_irqs < VFIO_PCI_MSIX_IRQ_INDEX + 1
+        {
+            return Err(VfioError::VfioDeviceGetInfo);
+        }
+
+        Ok(VfioDeviceInfo {
+            dev_fd,
+            num_regions: dev_info.num_regions,
+            num_irqs: dev_info.num_irqs,
+        })
     }
 }
 
@@ -377,6 +400,12 @@ struct VfioIrq {
     count: u32,
 }
 
+struct VfioDeviceInfo {
+    dev_fd: File,
+    num_regions: u32,
+    num_irqs: u32,
+}
+
 /// Vfio device for exposing regions which could be read/write to kernel vfio device.
 pub struct VfioDevice {
     device: File,
@@ -402,12 +431,12 @@ impl VfioDevice {
             .map_err(|_| VfioError::InvalidPath)?;
 
         let group = VfioGroup::new(group_id, vm)?;
-        let device = group.get_device(sysfspath)?;
-        let regions = Self::get_regions(&device)?;
-        let irqs = Self::get_irqs(&device)?;
+        let dev_info = group.get_device(sysfspath)?;
+        let regions = Self::get_regions(&dev_info.dev_fd, dev_info.num_regions)?;
+        let irqs = Self::get_irqs(&dev_info.dev_fd, dev_info.num_irqs)?;
 
         Ok(VfioDevice {
-            device,
+            device: dev_info.dev_fd,
             group,
             regions,
             irqs,
@@ -492,26 +521,10 @@ impl VfioDevice {
         self.disable_irq(VFIO_PCI_MSIX_IRQ_INDEX)
     }
 
-    fn get_irqs(dev: &File) -> Result<HashMap<u32, VfioIrq>> {
+    fn get_irqs(dev: &File, num_irqs: u32) -> Result<HashMap<u32, VfioIrq>> {
         let mut irqs: HashMap<u32, VfioIrq> = HashMap::new();
-        let mut dev_info = vfio_device_info {
-            argsz: mem::size_of::<vfio_device_info>() as u32,
-            flags: 0,
-            num_regions: 0,
-            num_irqs: 0,
-        };
-        // Safe as we are the owner of dev and dev_info which are valid value,
-        // and we verify the return value.
-        let ret = unsafe { ioctl_with_mut_ref(dev, VFIO_DEVICE_GET_INFO(), &mut dev_info) };
-        if ret < 0
-            || (dev_info.flags & VFIO_DEVICE_FLAGS_PCI) == 0
-            || dev_info.num_regions < VFIO_PCI_CONFIG_REGION_INDEX + 1
-            || dev_info.num_irqs < VFIO_PCI_MSIX_IRQ_INDEX + 1
-        {
-            return Err(VfioError::VfioDeviceGetInfo);
-        }
 
-        for index in 0..dev_info.num_irqs {
+        for index in 0..num_irqs {
             let mut irq_info = vfio_irq_info {
                 argsz: mem::size_of::<vfio_irq_info>() as u32,
                 flags: 0,
@@ -543,26 +556,10 @@ impl VfioDevice {
         Ok(irqs)
     }
 
-    fn get_regions(dev: &File) -> Result<Vec<VfioRegion>> {
+    fn get_regions(dev: &File, num_regions: u32) -> Result<Vec<VfioRegion>> {
         let mut regions: Vec<VfioRegion> = Vec::new();
-        let mut dev_info = vfio_device_info {
-            argsz: mem::size_of::<vfio_device_info>() as u32,
-            flags: 0,
-            num_regions: 0,
-            num_irqs: 0,
-        };
-        // Safe as we are the owner of dev and dev_info which are valid value,
-        // and we verify the return value.
-        let ret = unsafe { ioctl_with_mut_ref(dev, VFIO_DEVICE_GET_INFO(), &mut dev_info) };
-        if ret < 0
-            || (dev_info.flags & VFIO_DEVICE_FLAGS_PCI) == 0
-            || dev_info.num_regions < VFIO_PCI_CONFIG_REGION_INDEX + 1
-            || dev_info.num_irqs < VFIO_PCI_MSIX_IRQ_INDEX + 1
-        {
-            return Err(VfioError::VfioDeviceGetInfo);
-        }
 
-        for i in VFIO_PCI_BAR0_REGION_INDEX..dev_info.num_regions {
+        for i in VFIO_PCI_BAR0_REGION_INDEX..num_regions {
             let mut reg_info = vfio_region_info {
                 argsz: mem::size_of::<vfio_region_info>() as u32,
                 flags: 0,
