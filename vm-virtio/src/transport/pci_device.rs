@@ -480,7 +480,7 @@ impl PciDevice for VirtioPciDevice {
         Ok(ranges)
     }
 
-    fn read_bar(&mut self, offset: u64, data: &mut [u8]) {
+    fn read_bar(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         match offset {
             o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => self.common_config.read(
                 o - COMMON_CONFIG_BAR_OFFSET,
@@ -524,7 +524,7 @@ impl PciDevice for VirtioPciDevice {
         }
     }
 
-    fn write_bar(&mut self, offset: u64, data: &[u8]) {
+    fn write_bar(&mut self, _base: u64, offset: u64, data: &[u8]) {
         match offset {
             o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => self.common_config.write(
                 o - COMMON_CONFIG_BAR_OFFSET,
@@ -607,11 +607,11 @@ impl PciDevice for VirtioPciDevice {
 }
 
 impl BusDevice for VirtioPciDevice {
-    fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        self.read_bar(offset, data)
+    fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
+        self.read_bar(base, offset, data)
     }
 
-    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
-        self.write_bar(offset, data)
+    fn write(&mut self, base: u64, offset: u64, data: &[u8]) {
+        self.write_bar(base, offset, data)
     }
 }
