@@ -63,6 +63,25 @@ enum VirtioDeviceType {
     TYPE_VSOCK = 19,
     TYPE_FS = 26,
     TYPE_PMEM = 27,
+    TYPE_UNKNOWN = 0xFF,
+}
+
+impl From<u32> for VirtioDeviceType {
+    fn from(t: u32) -> Self {
+        match t {
+            1 => VirtioDeviceType::TYPE_NET,
+            2 => VirtioDeviceType::TYPE_BLOCK,
+            4 => VirtioDeviceType::TYPE_RNG,
+            5 => VirtioDeviceType::TYPE_BALLOON,
+            9 => VirtioDeviceType::TYPE_9P,
+            16 => VirtioDeviceType::TYPE_GPU,
+            18 => VirtioDeviceType::TYPE_INPUT,
+            19 => VirtioDeviceType::TYPE_VSOCK,
+            26 => VirtioDeviceType::TYPE_FS,
+            27 => VirtioDeviceType::TYPE_PMEM,
+            _ => VirtioDeviceType::TYPE_UNKNOWN,
+        }
+    }
 }
 
 // In order to use the `{}` marker, the trait `fmt::Display` must be implemented
