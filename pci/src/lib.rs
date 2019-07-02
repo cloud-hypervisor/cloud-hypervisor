@@ -17,8 +17,8 @@ mod root;
 
 pub use self::configuration::{
     PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciCapability, PciCapabilityID,
-    PciClassCode, PciConfiguration, PciHeaderType, PciProgrammingInterface, PciSerialBusSubClass,
-    PciSubclass,
+    PciClassCode, PciConfiguration, PciHeaderType, PciMassStorageSubclass,
+    PciNetworkControllerSubclass, PciProgrammingInterface, PciSerialBusSubClass, PciSubclass,
 };
 pub use self::device::Error as PciDeviceError;
 pub use self::device::{InterruptDelivery, InterruptParameters, PciDevice};
