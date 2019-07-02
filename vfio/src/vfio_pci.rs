@@ -32,6 +32,11 @@ const PCI_CONFIG_IO_BAR: u32 = 0x1;
 const PCI_CONFIG_MEMORY_BAR_FLAG_MASK: u32 = 0xf;
 const PCI_CONFIG_MEMORY_BAR_64BIT: u32 = 0x2 << 1;
 
+// First BAR register index
+const BAR0_REG: usize = 4;
+// Number of BARs for a PCI device
+const BAR_NUMS: usize = 6;
+
 #[derive(Debug)]
 pub enum VfioPciError {
     NewVfioPciDevice,
@@ -340,13 +345,11 @@ impl PciDevice for VfioPciDevice {
                 }
 
                 let msb_size = u32::from_le_bytes(msb_bytes);
-                println! {"\tMSB size 0x{:x}", msb_size};
 
                 // Clear the first four bytes from our LSB.
                 lsb_size &= 0xffff_fff0;
 
                 region_size = u64::from(msb_size);
-                println! {"\tMSB size 0x{:x}", region_size};
                 region_size <<= 32;
                 region_size |= u64::from(lsb_size);
 
@@ -360,7 +363,7 @@ impl PciDevice for VfioPciDevice {
                     .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
             }
 
-            println! {"\tRegion size {}", region_size};
+            println!("\tRegion size {}", region_size);
             println!("\tBAR address 0x{:x}", bar_addr.raw_value());
 
             // We can now build our BAR configuration block.
@@ -380,27 +383,6 @@ impl PciDevice for VfioPciDevice {
                 index: bar_id as u32,
             });
 
-            // Now write the new BAR back to the VFIO region.
-            // This will actually reprogram the physical device.
-            let mut lsb_address = bar_addr.raw_value() as u32;
-            lsb_address |= lsb_flag;
-            lsb_bytes = lsb_address.to_le_bytes();
-            self.device.region_write(
-                VFIO_PCI_CONFIG_REGION_INDEX,
-                lsb_bytes.as_mut(),
-                (PCI_CONFIG_BAR_OFFSET + bar_id * 4) as u64,
-            );
-
-            if is_64bit_bar {
-                let msb_address = (bar_addr.raw_value() >> 32) as u32;
-                msb_bytes = msb_address.to_le_bytes();
-                self.device.region_write(
-                    VFIO_PCI_CONFIG_REGION_INDEX,
-                    msb_bytes.as_mut(),
-                    (PCI_CONFIG_BAR_OFFSET + (bar_id + 1) * 4) as u64,
-                );
-            }
-
             bar_id += 1;
             if is_64bit_bar {
                 bar_id += 1;
@@ -415,16 +397,20 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
-        println!("WRITE VFIO CONFIG REG 0x{:x}", reg_idx);
-
-        // Write to the VFIO config region.
-        let start = (reg_idx * 4) as u64 + offset;
-        self.device
-            .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, start);
-
         // Keep our configuration map updated.
         self.configuration
             .write_config_register(reg_idx, offset, data);
+
+        // When the guest wants to write to a BAR, we trap it into
+        // our local configuration space. We're not reprogramming
+        // VFIO device.
+        if reg_idx >= BAR0_REG && reg_idx < BAR0_REG + BAR_NUMS {
+            return;
+        }
+
+        let start = (reg_idx * 4) as u64 + offset;
+        self.device
+            .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, start);
 
         if self.msi_capability.in_range(start, data.len()) {
             let was_enabled = self.msi_capability.enabled;
@@ -507,7 +493,15 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn read_config_register(&self, reg_idx: usize) -> u32 {
-        // The config register read comes from the device itself.
+        // When reading the BARs, we trap it and return what comes
+        // from our local configuration space. We want the guest to
+        // use that and not the VFIO device BARs as it does not map
+        // with the guest address space.
+        if reg_idx >= BAR0_REG && reg_idx < BAR0_REG + BAR_NUMS {
+            return self.configuration.read_reg(reg_idx);
+        }
+
+        // The config register read comes from the VFIO device itself.
         let mut config: [u8; 4] = [0, 0, 0, 0];
         self.device.region_read(
             VFIO_PCI_CONFIG_REGION_INDEX,
