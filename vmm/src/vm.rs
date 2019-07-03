@@ -658,7 +658,7 @@ impl DeviceManager {
                 let size = pmem_cfg.size;
 
                 let pmem_guest_addr = allocator
-                    .allocate_mmio_addresses(None, size as GuestUsize)
+                    .allocate_mmio_addresses(None, size as GuestUsize, None)
                     .ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
                 let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {

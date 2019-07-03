@@ -449,7 +449,7 @@ impl PciDevice for VirtioPciDevice {
         // Allocate the virtio-pci capability BAR.
         // See http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-740004
         let virtio_pci_bar_addr = allocator
-            .allocate_mmio_addresses(None, CAPABILITY_BAR_SIZE)
+            .allocate_mmio_addresses(None, CAPABILITY_BAR_SIZE, None)
             .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
         let config = PciBarConfiguration::default()
             .set_register_index(0)
@@ -468,7 +468,7 @@ impl PciDevice for VirtioPciDevice {
         // Allocate the device specific BARs.
         for config in self.device.get_device_bars() {
             let device_bar_addr = allocator
-                .allocate_mmio_addresses(None, config.get_size())
+                .allocate_mmio_addresses(None, config.get_size(), None)
                 .ok_or_else(|| PciDeviceError::IoAllocationFailed(config.get_size()))?;
             config.set_address(device_bar_addr.raw_value());
             let _device_bar = self.configuration.add_pci_bar(&config).map_err(|e| {
