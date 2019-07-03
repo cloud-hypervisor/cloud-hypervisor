@@ -486,7 +486,6 @@ impl VfioDeviceInfo {
 }
 
 /// Vfio device for exposing regions which could be read/write to kernel vfio device.
-#[allow(dead_code)]
 pub struct VfioDevice {
     device: File,
     flags: u32,
@@ -524,6 +523,13 @@ impl VfioDevice {
             irqs,
             mem,
         })
+    }
+
+    /// VFIO device reset
+    pub fn reset(&self) {
+        if self.flags & VFIO_DEVICE_FLAGS_RESET != 0 {
+            unsafe { ioctl(self, VFIO_DEVICE_RESET()) };
+        }
     }
 
     pub fn enable_irq(&self, irq_index: u32, fd: &EventFd) -> Result<()> {
