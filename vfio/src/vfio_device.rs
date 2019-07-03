@@ -369,6 +369,7 @@ impl VfioGroup {
 
         Ok(VfioDeviceInfo {
             device,
+            flags: dev_info.flags,
             num_regions: dev_info.num_regions,
             num_irqs: dev_info.num_irqs,
         })
@@ -402,6 +403,7 @@ struct VfioIrq {
 
 struct VfioDeviceInfo {
     device: File,
+    flags: u32,
     num_regions: u32,
     num_irqs: u32,
 }
@@ -484,8 +486,10 @@ impl VfioDeviceInfo {
 }
 
 /// Vfio device for exposing regions which could be read/write to kernel vfio device.
+#[allow(dead_code)]
 pub struct VfioDevice {
     device: File,
+    flags: u32,
     group: VfioGroup,
     regions: Vec<VfioRegion>,
     irqs: HashMap<u32, VfioIrq>,
@@ -514,6 +518,7 @@ impl VfioDevice {
 
         Ok(VfioDevice {
             device: device_info.device,
+            flags: device_info.flags,
             group,
             regions,
             irqs,
