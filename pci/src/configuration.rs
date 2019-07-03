@@ -178,7 +178,10 @@ pub trait PciProgrammingInterface {
 }
 
 /// Types of PCI capabilities.
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
+#[allow(dead_code)]
+#[allow(non_camel_case_types)]
+#[repr(C)]
 pub enum PciCapabilityID {
     ListID = 0,
     PowerManagement = 0x01,
@@ -201,6 +204,35 @@ pub enum PciCapabilityID {
     SATADataIndexConf = 0x12,
     PCIAdvancedFeatures = 0x13,
     PCIEnhancedAllocation = 0x14,
+}
+
+impl From<u8> for PciCapabilityID {
+    fn from(c: u8) -> Self {
+        match c {
+            0 => PciCapabilityID::ListID,
+            0x01 => PciCapabilityID::PowerManagement,
+            0x02 => PciCapabilityID::AcceleratedGraphicsPort,
+            0x03 => PciCapabilityID::VitalProductData,
+            0x04 => PciCapabilityID::SlotIdentification,
+            0x05 => PciCapabilityID::MessageSignalledInterrupts,
+            0x06 => PciCapabilityID::CompactPCIHotSwap,
+            0x07 => PciCapabilityID::PCIX,
+            0x08 => PciCapabilityID::HyperTransport,
+            0x09 => PciCapabilityID::VendorSpecific,
+            0x0A => PciCapabilityID::Debugport,
+            0x0B => PciCapabilityID::CompactPCICentralResourceControl,
+            0x0C => PciCapabilityID::PCIStandardHotPlugController,
+            0x0D => PciCapabilityID::BridgeSubsystemVendorDeviceID,
+            0x0E => PciCapabilityID::AGPTargetPCIPCIbridge,
+            0x0F => PciCapabilityID::SecureDevice,
+            0x10 => PciCapabilityID::PCIExpress,
+            0x11 => PciCapabilityID::MSIX,
+            0x12 => PciCapabilityID::SATADataIndexConf,
+            0x13 => PciCapabilityID::PCIAdvancedFeatures,
+            0x14 => PciCapabilityID::PCIEnhancedAllocation,
+            _ => PciCapabilityID::ListID,
+        }
+    }
 }
 
 /// A PCI capability list. Devices can optionally specify capabilities in their configuration space.
