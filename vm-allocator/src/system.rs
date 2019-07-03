@@ -33,7 +33,7 @@ fn pagesize() -> usize {
 ///           5).unwrap();
 ///    assert_eq!(allocator.allocate_irq(), Some(5));
 ///    assert_eq!(allocator.allocate_irq(), Some(6));
-///    assert_eq!(allocator.allocate_mmio_addresses(None, 0x1000), Some(GuestAddress(0x1fffe000)));
+///    assert_eq!(allocator.allocate_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fffe000)));
 ///
 /// ```
 pub struct SystemAllocator {
@@ -44,8 +44,7 @@ pub struct SystemAllocator {
 
 impl SystemAllocator {
     /// Creates a new `SystemAllocator` for managing addresses and irq numvers.
-    /// Can return `None` if `base` + `size` overflows a u64 or if alignment isn't a power
-    /// of two.
+    /// Can return `None` if `base` + `size` overflows a u64
     ///
     /// * `io_base` - The starting address of IO memory.
     /// * `io_size` - The size of IO memory.
@@ -59,10 +58,9 @@ impl SystemAllocator {
         mmio_size: GuestUsize,
         first_irq: u32,
     ) -> Option<Self> {
-        let page_size = pagesize() as u64;
         Some(SystemAllocator {
-            io_address_space: AddressAllocator::new(io_base, io_size, Some(0x1))?,
-            mmio_address_space: AddressAllocator::new(mmio_base, mmio_size, Some(page_size))?,
+            io_address_space: AddressAllocator::new(io_base, io_size)?,
+            mmio_address_space: AddressAllocator::new(mmio_base, mmio_size)?,
             next_irq: first_irq,
         })
     }
@@ -82,8 +80,10 @@ impl SystemAllocator {
         &mut self,
         address: Option<GuestAddress>,
         size: GuestUsize,
+        align_size: Option<GuestUsize>,
     ) -> Option<GuestAddress> {
-        self.io_address_space.allocate(address, size)
+        self.io_address_space
+            .allocate(address, size, Some(align_size.unwrap_or(0x1)))
     }
 
     /// Reserves a section of `size` bytes of MMIO address space.
@@ -91,8 +91,13 @@ impl SystemAllocator {
         &mut self,
         address: Option<GuestAddress>,
         size: GuestUsize,
+        align_size: Option<GuestUsize>,
     ) -> Option<GuestAddress> {
-        self.mmio_address_space.allocate(address, size)
+        self.mmio_address_space.allocate(
+            address,
+            size,
+            Some(align_size.unwrap_or(pagesize() as u64)),
+        )
     }
 
     /// Free an IO address range.
