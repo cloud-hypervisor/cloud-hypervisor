@@ -339,7 +339,7 @@ impl PciDevice for VfioPciDevice {
                 region_size = 2u64.pow(first_bit);
                 // We need to allocate a guest PIO address range for that BAR.
                 bar_addr = allocator
-                    .allocate_io_addresses(None, region_size)
+                    .allocate_io_addresses(None, region_size, Some(region_size))
                     .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
             } else {
                 if is_64bit_bar {
@@ -375,7 +375,7 @@ impl PciDevice for VfioPciDevice {
 
                 // We need to allocate a guest MMIO address range for that BAR.
                 bar_addr = allocator
-                    .allocate_mmio_addresses(None, region_size)
+                    .allocate_mmio_addresses(None, region_size, Some(region_size))
                     .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
             }
 

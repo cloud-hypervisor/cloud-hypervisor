@@ -37,37 +37,28 @@ pub type Result<T> = result::Result<T, Error>;
 pub struct AddressAllocator {
     base: GuestAddress,
     end: GuestAddress,
-    alignment: GuestUsize,
     ranges: BTreeMap<GuestAddress, GuestUsize>,
 }
 
 impl AddressAllocator {
     /// Creates a new `AddressAllocator` for managing a range of addresses.
-    /// Can return `None` if `pool_base` + `pool_size` overflows a u64 or if alignment isn't a power
-    /// of two.
+    /// Can return `None` if `base` + `size` overflows a u64.
     ///
-    /// * `pool_base` - The starting address of the range to manage.
-    /// * `pool_size` - The size of the address range in bytes.
-    /// * `align_size` - The minimum size of an address region to align to, defaults to four.
+    /// * `base` - The starting address of the range to manage.
+    /// * `size` - The size of the address range in bytes.
     pub fn new(
         base: GuestAddress,
         size: GuestUsize,
-        align_size: Option<GuestUsize>,
     ) -> Option<Self> {
         if size == 0 {
             return None;
         }
 
         let end = base.checked_add(size - 1)?;
-        let alignment = align_size.unwrap_or(4);
-        if !alignment.is_power_of_two() || alignment == 0 {
-            return None;
-        }
 
         let mut allocator = AddressAllocator {
             base,
             end,
-            alignment,
             ranges: BTreeMap::new(),
         };
 
@@ -78,9 +69,9 @@ impl AddressAllocator {
         Some(allocator)
     }
 
-    fn align_address(&self, address: GuestAddress) -> GuestAddress {
-        let align_adjust = if address.raw_value() % self.alignment != 0 {
-            self.alignment - (address.raw_value() % self.alignment)
+    fn align_address(&self, address: GuestAddress, alignment: GuestUsize) -> GuestAddress {
+        let align_adjust = if address.raw_value() % alignment != 0 {
+            alignment - (address.raw_value() % alignment)
         } else {
             0
         };
@@ -92,8 +83,9 @@ impl AddressAllocator {
         &self,
         req_address: GuestAddress,
         req_size: GuestUsize,
+        alignment: GuestUsize
     ) -> Result<GuestAddress> {
-        let aligned_address = self.align_address(req_address);
+        let aligned_address = self.align_address(req_address, alignment);
 
         // The requested address should be aligned.
         if aligned_address != req_address {
@@ -133,7 +125,7 @@ impl AddressAllocator {
         Err(Error::Overflow)
     }
 
-    fn first_available_range(&self, req_size: GuestUsize) -> Option<GuestAddress> {
+    fn first_available_range(&self, req_size: GuestUsize, alignment: GuestUsize) -> Option<GuestAddress> {
         let mut prev_end_address = self.base;
 
         for (address, size) in self.ranges.iter() {
@@ -143,11 +135,11 @@ impl AddressAllocator {
             // we will tend to always allocate new ranges there as well. In other words,
             // ranges accumulate at the end of the address space.
             if address
-                .unchecked_sub(self.align_address(prev_end_address).raw_value())
+                .unchecked_sub(self.align_address(prev_end_address, alignment).raw_value())
                 .raw_value()
                 >= req_size
             {
-                return Some(self.align_address(address.unchecked_sub(req_size + self.alignment)));
+                return Some(self.align_address(address.unchecked_sub(req_size + alignment), alignment));
             }
 
             prev_end_address = address.unchecked_add(*size);
@@ -157,24 +149,31 @@ impl AddressAllocator {
     }
 
     /// Allocates a range of addresses from the managed region. Returns `Some(allocated_address)`
-    /// when successful, or `None` if an area of `size` can't be allocated.
+    /// when successful, or `None` if an area of `size` can't be allocated or if alignment isn't
+    /// a power of two.
     pub fn allocate(
         &mut self,
         address: Option<GuestAddress>,
         size: GuestUsize,
+        align_size: Option<GuestUsize>,
     ) -> Option<GuestAddress> {
         if size == 0 {
             return None;
         }
 
+        let alignment = align_size.unwrap_or(4);
+        if !alignment.is_power_of_two() || alignment == 0 {
+            return None;
+        }
+
         let new_addr = match address {
-            Some(req_address) => match self.available_range(req_address, size) {
+            Some(req_address) => match self.available_range(req_address, size, alignment) {
                 Ok(addr) => addr,
                 Err(_) => {
                     return None;
                 }
             },
-            None => self.first_available_range(size)?,
+            None => self.first_available_range(size, alignment)?,
         };
 
         self.ranges.insert(new_addr, size);
