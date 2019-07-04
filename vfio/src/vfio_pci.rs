@@ -62,17 +62,21 @@ impl PciSubclass for PciVfioSubclass {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Copy, Clone)]
-struct MsiCapability {
-    pointer: u8,
-    length: u8,
-    enabled: bool,
+struct MsiCap {
+    offset: u32,
+    length: u32,
+    msg_ctl: u16,
+    msg_address: u64,
+    msg_data: u16,
 }
 
-impl MsiCapability {
+#[allow(dead_code)]
+impl MsiCap {
     fn in_range(self, start: u64, length: usize) -> bool {
-        if start > u64::from(self.pointer)
-            && start < u64::from(self.pointer + self.length)
+        if start > u64::from(self.offset)
+            && start < u64::from(self.offset + self.length)
             && length < self.length as usize
         {
             return true;
@@ -80,6 +84,20 @@ impl MsiCapability {
 
         false
     }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Default)]
+struct MsixCap {
+    offset: u32,
+    msg_ctl: u16,
+    table: u32,
+    pba: u32,
+}
+
+struct InterruptCap {
+    msi: Option<MsiCap>,
+    msix: Option<MsixCap>,
 }
 
 #[derive(Copy, Clone)]
@@ -95,7 +113,7 @@ pub struct VfioPciDevice {
     configuration: PciConfiguration,
     interrupt_evt: Option<EventFd>,
     mmio_regions: Vec<MmioRegion>,
-    msi_capability: MsiCapability,
+    interrupt_capabilities: InterruptCap,
     virq: u32,
 }
 
@@ -128,23 +146,141 @@ impl VfioPciDevice {
             None,
         );
 
-        let mut msi_capability = MsiCapability {
-            pointer: 0,
-            length: 0,
-            enabled: false,
+        let interrupt_capabilities = InterruptCap {
+            msi: None,
+            msix: None,
         };
+
+        let mut vfio_pci_device = VfioPciDevice {
+            device: Arc::new(device),
+            configuration,
+            interrupt_evt: None,
+            mmio_regions: Vec::new(),
+            interrupt_capabilities,
+            virq: 0,
+        };
+
+        vfio_pci_device.parse_capabilities();
+
+        Ok(vfio_pci_device)
+    }
+
+    fn parse_msix_capabilities(&mut self, cap: u8) {
+        let mut msg_ctl: u16 = 0;
+        let mut table: u32 = 0;
+        let mut pba: u32 = 0;
+
+        // safe as convert u16 to &[u8;2]
+        self.device.region_read(
+            VFIO_PCI_CONFIG_REGION_INDEX,
+            unsafe {
+                ::std::slice::from_raw_parts_mut(&mut *(&mut msg_ctl as *mut u16 as *mut u8), 2)
+            },
+            (cap + 2).into(),
+        );
+
+        self.device.region_read(
+            VFIO_PCI_CONFIG_REGION_INDEX,
+            unsafe {
+                ::std::slice::from_raw_parts_mut(&mut *(&mut table as *mut u32 as *mut u8), 4)
+            },
+            (cap + 4).into(),
+        );
+
+        self.device.region_read(
+            VFIO_PCI_CONFIG_REGION_INDEX,
+            unsafe { ::std::slice::from_raw_parts_mut(&mut *(&mut pba as *mut u32 as *mut u8), 4) },
+            (cap + 8).into(),
+        );
+
+        println!(
+            "MSIX cap @0x{:x} ctl 0x{:x} table 0x{:x} PBA 0x{:x}",
+            cap, msg_ctl, table, pba
+        );
+
+        self.interrupt_capabilities.msix = Some(MsixCap {
+            offset: cap.into(),
+            msg_ctl,
+            table,
+            pba,
+        });
+    }
+
+    fn parse_msi_capabilities(&mut self, cap: u8) {
+        let mut msi_len: u8 = 0xa;
+        let mut msg_ctl: u16 = 0;
+        let mut msg_address_lsb: u32 = 0xff;
+        let mut msg_address_msb: u32 = 0x0;
+
+        // safe as convert u16 to &[u8;2]
+        self.device.region_read(
+            VFIO_PCI_CONFIG_REGION_INDEX,
+            unsafe {
+                ::std::slice::from_raw_parts_mut(&mut *(&mut msg_ctl as *mut u16 as *mut u8), 2)
+            },
+            (cap + 2).into(),
+        );
+
+        if msg_ctl & 0x80 != 0 {
+            msi_len += 4;
+            self.device.region_read(
+                VFIO_PCI_CONFIG_REGION_INDEX,
+                unsafe {
+                    ::std::slice::from_raw_parts_mut(
+                        &mut *(&mut msg_address_msb as *mut u32 as *mut u8),
+                        4,
+                    )
+                },
+                (cap + 8).into(),
+            );
+        }
+        if msg_ctl & 0x100 != 0 {
+            msi_len += 0xa;
+        }
+
+        self.device.region_read(
+            VFIO_PCI_CONFIG_REGION_INDEX,
+            unsafe {
+                ::std::slice::from_raw_parts_mut(
+                    &mut *(&mut msg_address_lsb as *mut u32 as *mut u8),
+                    4,
+                )
+            },
+            (cap + 4).into(),
+        );
+
+        let mut msg_address = u64::from(msg_address_msb);
+        msg_address <<= 32;
+        msg_address |= u64::from(msg_address_lsb);
+
+        println!(
+            "MSI cap @0x{:x} ctl 0x{:x} address 0x{:x}",
+            cap, msg_ctl, msg_address
+        );
+
+        self.interrupt_capabilities.msi = Some(MsiCap {
+            offset: cap.into(),
+            length: msi_len.into(),
+            msg_ctl,
+            msg_address,
+            msg_data: 0,
+        });
+    }
+
+    fn parse_capabilities(&mut self) {
         let mut cap_next: u8 = 0;
 
         // safe as convert u8 to &[u8;1]
-        device.region_read(
+        self.device.region_read(
             VFIO_PCI_CONFIG_REGION_INDEX,
             unsafe { ::std::slice::from_raw_parts_mut(&mut cap_next, 1) },
             PCI_CONFIG_CAPABILITY_OFFSET,
         );
+
         while cap_next != 0 {
             let mut cap_id: u8 = 0;
             // safe as convert u8 to &[u8;1]
-            device.region_read(
+            self.device.region_read(
                 VFIO_PCI_CONFIG_REGION_INDEX,
                 unsafe { ::std::slice::from_raw_parts_mut(&mut cap_id, 1) },
                 cap_next.into(),
@@ -152,68 +288,24 @@ impl VfioPciDevice {
 
             println!("Found cap ID 0x{:x}", cap_id);
 
-            // Special case for MSI capability
-            if cap_id == PciCapabilityID::MessageSignalledInterrupts as u8 {
-                let mut msi_len: u8 = 0xa;
-                let mut msi_ctl: u16 = 0;
-                let mut msi_address: u32 = 0xff;
-                // safe as convert u16 to &[u8;2]
-                device.region_read(
-                    VFIO_PCI_CONFIG_REGION_INDEX,
-                    unsafe {
-                        ::std::slice::from_raw_parts_mut(
-                            &mut *(&mut msi_ctl as *mut u16 as *mut u8),
-                            2,
-                        )
-                    },
-                    (cap_next + 2).into(),
-                );
-                if msi_ctl & 0x80 != 0 {
-                    msi_len += 4;
+            match PciCapabilityID::from(cap_id) {
+                PciCapabilityID::MessageSignalledInterrupts => {
+                    self.parse_msi_capabilities(cap_next);
                 }
-                if msi_ctl & 0x100 != 0 {
-                    msi_len += 0xa;
+                PciCapabilityID::MSIX => {
+                    self.parse_msix_capabilities(cap_next);
                 }
-
-                device.region_read(
-                    VFIO_PCI_CONFIG_REGION_INDEX,
-                    unsafe {
-                        ::std::slice::from_raw_parts_mut(
-                            &mut *(&mut msi_address as *mut u32 as *mut u8),
-                            4,
-                        )
-                    },
-                    (cap_next + 4).into(),
-                );
-
-                println!("MSI ADDRESS 0x{:x} MSI CTL 0x{:x}", msi_address, msi_ctl);
-
-                // We keep track of the current MSI capability pointer
-                // and length.
-                // We will use it to catch MSI programming from the guest,
-                // in write_config_register.
-                msi_capability.pointer = cap_next;
-                msi_capability.length = msi_len;
-                break;
-            }
+                _ => {}
+            };
 
             // Read next capability.
             // safe as convert u8 to &[u8;1]
-            device.region_read(
+            self.device.region_read(
                 VFIO_PCI_CONFIG_REGION_INDEX,
                 unsafe { ::std::slice::from_raw_parts_mut(&mut cap_next, 1) },
                 (cap_next + 1).into(),
             );
         }
-
-        Ok(VfioPciDevice {
-            device: Arc::new(device),
-            configuration,
-            interrupt_evt: None,
-            mmio_regions: Vec::new(),
-            msi_capability,
-            virq: 0,
-        })
     }
 
     fn find_region(&self, addr: u64) -> Option<MmioRegion> {
@@ -230,7 +322,7 @@ impl VfioPciDevice {
 
 impl Drop for VfioPciDevice {
     fn drop(&mut self) {
-        if self.msi_capability.enabled && self.device.disable_msi().is_err() {
+        if self.interrupt_capabilities.msi.is_some() && self.device.disable_msi().is_err() {
             error!("Could not disable MSI");
         }
 
@@ -413,85 +505,6 @@ impl PciDevice for VfioPciDevice {
         let start = (reg_idx * 4) as u64 + offset;
         self.device
             .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, start);
-
-        if self.msi_capability.in_range(start, data.len()) {
-            let was_enabled = self.msi_capability.enabled;
-            let mut msi_ctl: u16 = 0;
-            // safe as convert u16 into &[u8;2]
-            self.device.region_read(
-                VFIO_PCI_CONFIG_REGION_INDEX,
-                unsafe {
-                    ::std::slice::from_raw_parts_mut(&mut *(&mut msi_ctl as *mut u16 as *mut u8), 2)
-                },
-                (self.msi_capability.pointer + 2).into(),
-            );
-            let is_enabled = msi_ctl & 0x1 != 0;
-            if !was_enabled && is_enabled {
-                if let Some(ref interrupt_evt) = self.interrupt_evt {
-                    if self.device.enable_msi(interrupt_evt).is_err() {
-                        error!("Could not enable MSI");
-                    }
-
-                    // add msi into kvm routing table
-                    let mut address: u64 = 0;
-                    let mut data: u32 = 0;
-                    // 64bit address
-                    if msi_ctl & 0x80 != 0 {
-                        // safe as convert u64 into &[u8;8]
-                        self.device.region_read(
-                            VFIO_PCI_CONFIG_REGION_INDEX,
-                            unsafe {
-                                ::std::slice::from_raw_parts_mut(
-                                    &mut *(&mut address as *mut u64 as *mut u8),
-                                    8,
-                                )
-                            },
-                            (self.msi_capability.pointer + 4).into(),
-                        );
-                        // safe as convert u32 into &[u8;4]
-                        self.device.region_read(
-                            VFIO_PCI_CONFIG_REGION_INDEX,
-                            unsafe {
-                                ::std::slice::from_raw_parts_mut(
-                                    &mut *(&mut data as *mut u32 as *mut u8),
-                                    4,
-                                )
-                            },
-                            (self.msi_capability.pointer + 0xC).into(),
-                        );
-                    } else {
-                        // 32 bit address
-                        // safe as convert u64 into &[u8;4]
-                        self.device.region_read(
-                            VFIO_PCI_CONFIG_REGION_INDEX,
-                            unsafe {
-                                ::std::slice::from_raw_parts_mut(
-                                    &mut *(&mut address as *mut u64 as *mut u8),
-                                    4,
-                                )
-                            },
-                            (self.msi_capability.pointer + 4).into(),
-                        );
-                        // safe as convert u32 into &[u8;8]
-                        self.device.region_read(
-                            VFIO_PCI_CONFIG_REGION_INDEX,
-                            unsafe {
-                                ::std::slice::from_raw_parts_mut(
-                                    &mut *(&mut data as *mut u32 as *mut u8),
-                                    4,
-                                )
-                            },
-                            (self.msi_capability.pointer + 8).into(),
-                        );
-                    }
-                    //                    self.add_msi_routing(self.virq, address, data);
-                }
-            } else if was_enabled && !is_enabled && self.device.disable_msi().is_err() {
-                error!("Could not disable MSI");
-            }
-
-            self.msi_capability.enabled = is_enabled;
-        }
     }
 
     fn read_config_register(&self, reg_idx: usize) -> u32 {
