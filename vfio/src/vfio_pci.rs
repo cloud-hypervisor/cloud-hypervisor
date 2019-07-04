@@ -73,20 +73,6 @@ struct MsiCap {
 }
 
 #[allow(dead_code)]
-impl MsiCap {
-    fn in_range(self, start: u64, length: usize) -> bool {
-        if start > u64::from(self.offset)
-            && start < u64::from(self.offset + self.length)
-            && length < self.length as usize
-        {
-            return true;
-        }
-
-        false
-    }
-}
-
-#[allow(dead_code)]
 #[derive(Clone, Copy, Default)]
 struct MsixCap {
     offset: u32,
@@ -308,6 +294,44 @@ impl VfioPciDevice {
         }
     }
 
+    // Check if there is an MSI or MSIX capability structure at a given config
+    // space offset.
+    fn msi_capability(&self, offset: u64) -> Option<PciCapabilityID> {
+        if let Some(msi_cap) = self.interrupt_capabilities.msi {
+            if offset == u64::from(msi_cap.offset) {
+                return Some(PciCapabilityID::MessageSignalledInterrupts);
+            }
+        }
+
+        if let Some(msix_cap) = self.interrupt_capabilities.msix {
+            if offset == u64::from(msix_cap.offset) {
+                return Some(PciCapabilityID::MSIX);
+            }
+        }
+
+        None
+    }
+
+    fn msi_enabled(&self) -> bool {
+        if let Some(msi_cap) = self.interrupt_capabilities.msi {
+            if msi_cap.msg_ctl & 0x1 == 0x1 {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn msix_enabled(&self) -> bool {
+        if let Some(msix_cap) = self.interrupt_capabilities.msix {
+            if msix_cap.msg_ctl & 0x8000 == 0x8000 {
+                return true;
+            }
+        }
+
+        false
+    }
+
     fn find_region(&self, addr: u64) -> Option<MmioRegion> {
         for region in self.mmio_regions.iter() {
             if addr >= region.start.raw_value()
@@ -502,9 +526,55 @@ impl PciDevice for VfioPciDevice {
             return;
         }
 
-        let start = (reg_idx * 4) as u64 + offset;
+        let base = (reg_idx * 4) as u8;
+        let start = u64::from(base) + offset;
         self.device
             .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, start);
+
+        match self.msi_capability(u64::from(base)) {
+            Some(PciCapabilityID::MessageSignalledInterrupts) => {
+                let old_enabled = self.msi_enabled();
+                self.parse_msi_capabilities(base);
+                let new_enabled = self.msi_enabled();
+
+                if !old_enabled && new_enabled {
+                    // Switching from disabled to enabled
+                    if let Some(ref interrupt_evt) = self.interrupt_evt {
+                        println!("VFIO: Enabling MSI");
+                        if let Err(e) = self.device.enable_msi(interrupt_evt) {
+                            warn!("Could not enable MSI: {}", e);
+                        }
+                    }
+                } else if old_enabled && !new_enabled {
+                    // Switching from enabled to disabled
+                    println!("VFIO: Disabling MSI");
+                    if let Err(e) = self.device.disable_msi() {
+                        warn!("Could not disable MSI: {}", e);
+                    }
+                }
+            }
+            Some(PciCapabilityID::MSIX) => {
+                let old_enabled = self.msix_enabled();
+                self.parse_msix_capabilities(base);
+                let new_enabled = self.msix_enabled();
+
+                if !old_enabled && new_enabled {
+                    // Switching from disabled to enabled
+                    if let Some(ref interrupt_evt) = self.interrupt_evt {
+                        println!("VFIO: Enabling MSIX");
+                        if let Err(e) = self.device.enable_msix(interrupt_evt) {
+                            warn!("Could not enable MSIX: {}", e);
+                        }
+                    }
+                } else if old_enabled && !new_enabled {
+                    println!("VFIO: Disabling MSIX");
+                    if let Err(e) = self.device.disable_msix() {
+                        warn!("Could not disable MSIX: {}", e);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn read_config_register(&self, reg_idx: usize) -> u32 {
