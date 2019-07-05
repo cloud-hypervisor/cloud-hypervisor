@@ -9,11 +9,16 @@ extern crate vm_allocator;
 extern crate vm_memory;
 
 use devices::BusDevice;
+use kvm_bindings::kvm_userspace_memory_region;
+use kvm_ioctls::*;
 use pci::{
     InterruptDelivery, PciBarConfiguration, PciCapabilityID, PciClassCode, PciConfiguration,
     PciDevice, PciDeviceError, PciHeaderType, PciInterruptPin, PciSubclass,
 };
 use std::fmt;
+use std::io;
+use std::os::unix::io::AsRawFd;
+use std::ptr::null_mut;
 use std::sync::Arc;
 use std::u32;
 use vfio_bindings::bindings::vfio::*;
@@ -40,6 +45,8 @@ const BAR_NUMS: usize = 6;
 #[derive(Debug)]
 pub enum VfioPciError {
     NewVfioPciDevice,
+    MapRegionHost(io::Error),
+    MapRegionGuest(io::Error),
 }
 pub type Result<T> = std::result::Result<T, VfioPciError>;
 
@@ -47,6 +54,14 @@ impl fmt::Display for VfioPciError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             VfioPciError::NewVfioPciDevice => write!(f, "failed to create VFIO PCI device"),
+            VfioPciError::MapRegionHost(e) => write!(
+                f,
+                "failed to mmap VFIO PCI device region on device file: {}",
+                e
+            ),
+            VfioPciError::MapRegionGuest(e) => {
+                write!(f, "failed to map VFIO PCI region into guest: {}", e)
+            }
         }
     }
 }
@@ -341,6 +356,62 @@ impl VfioPciDevice {
             }
         }
         None
+    }
+
+    pub fn map_mmio_regions(&mut self, vm: &Arc<VmFd>, mem_slots: u32) -> Result<()> {
+        let mut slot = mem_slots;
+        let fd = self.device.as_raw_fd();
+
+        for region in self.mmio_regions.iter() {
+            let region_flags = self.device.get_region_flags(region.index);
+            if region_flags & VFIO_REGION_INFO_FLAG_MMAP != 0 {
+                let mut prot = 0;
+                if region_flags & VFIO_REGION_INFO_FLAG_READ != 0 {
+                    prot |= libc::PROT_READ;
+                }
+                if region_flags & VFIO_REGION_INFO_FLAG_WRITE != 0 {
+                    prot |= libc::PROT_WRITE;
+                }
+                let (mmap_offset, mmap_size) = self.device.get_region_mmap(region.index);
+                let offset = self.device.get_region_offset(region.index) + mmap_offset;
+
+                let host_addr = unsafe {
+                    libc::mmap(
+                        null_mut(),
+                        mmap_size as usize,
+                        prot,
+                        libc::MAP_SHARED,
+                        fd,
+                        offset as libc::off_t,
+                    )
+                };
+
+                if host_addr == libc::MAP_FAILED {
+                    error!(
+                        "Could not mmap regions, error:{}",
+                        io::Error::last_os_error()
+                    );
+                    continue;
+                }
+
+                let mem_region = kvm_userspace_memory_region {
+                    slot,
+                    guest_phys_addr: region.start.raw_value() + mmap_offset,
+                    memory_size: mmap_size as u64,
+                    userspace_addr: host_addr as u64,
+                    flags: 0,
+                };
+
+                // Safe because the guest regions are guaranteed not to overlap.
+                unsafe {
+                    vm.set_user_memory_region(mem_region)
+                        .map_err(VfioPciError::MapRegionGuest)?;
+                }
+                slot += 1;
+            }
+        }
+
+        Ok(())
     }
 }
 

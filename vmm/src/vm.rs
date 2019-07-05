@@ -45,7 +45,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
-use vfio::{VfioDevice, VfioPciDevice};
+use vfio::{VfioDevice, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
@@ -231,6 +231,9 @@ pub enum DeviceManagerError {
     VfioCreate(vfio::VfioError),
 
     VfioPciCreate(vfio::VfioPciError),
+
+    /// Failed to map VFIO MMIO region.
+    VfioMapRegion(VfioPciError),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -493,6 +496,7 @@ impl DeviceManager {
         vm_cfg: &VmConfig,
         msi_capable: bool,
         userspace_ioapic: bool,
+        mem_slots: u32,
     ) -> DeviceManagerResult<Self> {
         let io_bus = devices::Bus::new();
         let mut mmio_bus = devices::Bus::new();
@@ -737,6 +741,10 @@ impl DeviceManager {
                 let bars = vfio_pci_device
                     .allocate_bars(allocator)
                     .map_err(DeviceManagerError::AllocateBars)?;
+
+                vfio_pci_device
+                    .map_mmio_regions(vm_fd, mem_slots)
+                    .map_err(DeviceManagerError::VfioMapRegion)?;
 
                 let irq_num = allocator
                     .allocate_irq()
@@ -1119,6 +1127,7 @@ impl<'a> Vm<'a> {
             &config,
             msi_capable,
             userspace_ioapic,
+            arch_mem_regions.len() as u32,
         )
         .map_err(Error::DeviceManager)?;
 
