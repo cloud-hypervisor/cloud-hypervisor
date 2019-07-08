@@ -58,7 +58,8 @@ fn main() {
                     "Network parameters \"tap=<if_name>,\
                      ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>\"",
                 )
-                .takes_value(true),
+                .takes_value(true)
+                .min_values(1),
         )
         .arg(
             Arg::with_name("rng")
@@ -104,7 +105,7 @@ fn main() {
         .expect("Missing argument: disk. Provide at least one")
         .collect();
 
-    let net = cmd_arguments.value_of("net");
+    let net: Option<Vec<&str>> = cmd_arguments.values_of("net").map(|x| x.collect());
 
     // This .unwrap() cannot fail as there is a default value defined
     let rng = cmd_arguments.value_of("rng").unwrap();
@@ -297,7 +298,10 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
                 .args(&["--disk", disks[0], disks[1]])
-                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&[
+                    "--net",
+                    "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
+                ])
                 .spawn()
                 .unwrap();
 
@@ -325,7 +329,10 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
                 .args(&["--disk", disks[0], disks[1]])
-                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&[
+                    "--net",
+                    "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
+                ])
                 .spawn()
                 .unwrap();
 
@@ -350,7 +357,10 @@ mod tests {
                 .args(&["--memory", "size=5120M"])
                 .args(&["--kernel", fw_path.as_str()])
                 .args(&["--disk", disks[0], disks[1]])
-                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&[
+                    "--net",
+                    "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
+                ])
                 .spawn()
                 .unwrap();
 
@@ -375,7 +385,10 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
                 .args(&["--disk", disks[0], disks[1]])
-                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&[
+                    "--net",
+                    "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
+                ])
                 .spawn()
                 .unwrap();
 
@@ -413,7 +426,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--disk", disks[0], disks[1]])
-                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&["--net", "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0"])
                 .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
@@ -455,7 +468,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--disk", disks[0], disks[1]])
-                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&["--net", "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0"])
                 .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
@@ -491,7 +504,10 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
                 .args(&["--disk", disks[0], disks[1]])
-                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&[
+                    "--net",
+                    "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
+                ])
                 .spawn()
                 .unwrap();
 
@@ -538,7 +554,7 @@ mod tests {
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--disk", disks[0], disks[1]])
-                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&["--net", "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0"])
                 .args(&[
                     "--fs",
                     format!(
@@ -608,7 +624,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--disk", disks[0], disks[1]])
-                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&["--net", "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0"])
                 .args(&[
                     "--pmem",
                     format!(
@@ -676,7 +692,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--disk", disks[1]])
-                .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
+                .args(&["--net", "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0"])
                 .args(&[
                     "--pmem",
                     format!(
@@ -699,6 +715,44 @@ mod tests {
             ssh_command("sudo reboot");
             let _ = child.wait();
 
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_multiple_network_interfaces() {
+        test_block!(tb, "", {
+            let (disks, fw_path) = prepare_files();
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", fw_path.as_str()])
+                .args(&["--disk", disks[0], disks[1]])
+                .args(&[
+                    "--net",
+                    "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
+                    "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
+                    "tap=,mac=fe:1f:9e:e1:60:f2,ip=192.168.4.1,mask=255.255.255.0",
+                ])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // 3 network interfaces + default localhost ==> 4 interfaces
+            aver_eq!(
+                tb,
+                ssh_command("ip -o link | wc -l")
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap(),
+                4
+            );
+
+            ssh_command("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
             Ok(())
         });
     }

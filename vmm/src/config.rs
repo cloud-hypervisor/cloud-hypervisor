@@ -59,7 +59,7 @@ pub struct VmParams<'a> {
     pub kernel: &'a str,
     pub cmdline: Option<&'a str>,
     pub disks: Vec<&'a str>,
-    pub net: Option<&'a str>,
+    pub net: Option<Vec<&'a str>>,
     pub rng: &'a str,
     pub fs: Option<Vec<&'a str>>,
     pub pmem: Option<Vec<&'a str>>,
@@ -192,13 +192,9 @@ pub struct NetConfig<'a> {
 }
 
 impl<'a> NetConfig<'a> {
-    pub fn parse(net: Option<&'a str>) -> Result<Option<Self>> {
-        if net.is_none() {
-            return Ok(None);
-        }
-
+    pub fn parse(net: &'a str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = net.unwrap().split(',').collect();
+        let params_list: Vec<&str> = net.split(',').collect();
 
         let mut tap_str: &str = "";
         let mut ip_str: &str = "";
@@ -235,7 +231,7 @@ impl<'a> NetConfig<'a> {
             mac = MacAddr::parse_str(mac_str).map_err(Error::ParseNetMacParam)?;
         }
 
-        Ok(Some(NetConfig { tap, ip, mask, mac }))
+        Ok(NetConfig { tap, ip, mask, mac })
     }
 }
 
@@ -348,7 +344,7 @@ pub struct VmConfig<'a> {
     pub kernel: KernelConfig<'a>,
     pub cmdline: CmdlineConfig,
     pub disks: Vec<DiskConfig<'a>>,
-    pub net: Option<NetConfig<'a>>,
+    pub net: Option<Vec<NetConfig<'a>>>,
     pub rng: RngConfig<'a>,
     pub fs: Option<Vec<FsConfig<'a>>>,
     pub pmem: Option<Vec<PmemConfig<'a>>>,
@@ -359,6 +355,15 @@ impl<'a> VmConfig<'a> {
         let mut disks: Vec<DiskConfig> = Vec::new();
         for disk in vm_params.disks.iter() {
             disks.push(DiskConfig::parse(disk)?);
+        }
+
+        let mut net: Option<Vec<NetConfig>> = None;
+        if let Some(net_list) = &vm_params.net {
+            let mut net_config_list = Vec::new();
+            for item in net_list.iter() {
+                net_config_list.push(NetConfig::parse(item)?);
+            }
+            net = Some(net_config_list);
         }
 
         let mut fs: Option<Vec<FsConfig>> = None;
@@ -385,7 +390,7 @@ impl<'a> VmConfig<'a> {
             kernel: KernelConfig::parse(vm_params.kernel)?,
             cmdline: CmdlineConfig::parse(vm_params.cmdline)?,
             disks,
-            net: NetConfig::parse(vm_params.net)?,
+            net,
             rng: RngConfig::parse(vm_params.rng)?,
             fs,
             pmem,
