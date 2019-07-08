@@ -733,8 +733,6 @@ impl DeviceManager {
                 let vfio_device = VfioDevice::new(device_cfg.path, vm_fd, memory.clone())
                     .map_err(DeviceManagerError::VfioCreate)?;
 
-                let irq_fd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-
                 let mut vfio_pci_device =
                     VfioPciDevice::new(vfio_device).map_err(DeviceManagerError::VfioPciCreate)?;
 
@@ -745,24 +743,6 @@ impl DeviceManager {
                 vfio_pci_device
                     .map_mmio_regions(vm_fd, mem_slots)
                     .map_err(DeviceManagerError::VfioMapRegion)?;
-
-                let irq_num = allocator
-                    .allocate_irq()
-                    .ok_or(DeviceManagerError::AllocateIrq)?;
-
-                vm_fd
-                    .register_irqfd(irq_fd.as_raw_fd(), irq_num)
-                    .map_err(DeviceManagerError::Irq)?;
-
-                let irq_cb =
-                    Arc::new(Box::new(move |_p: InterruptParameters| Ok(())) as InterruptDelivery);
-
-                vfio_pci_device.assign_pin_irq(
-                    Some(irq_fd),
-                    irq_cb,
-                    irq_num as u32,
-                    PciInterruptPin::IntA,
-                );
 
                 let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
 

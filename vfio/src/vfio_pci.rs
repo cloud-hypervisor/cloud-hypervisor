@@ -12,8 +12,8 @@ use devices::BusDevice;
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::*;
 use pci::{
-    InterruptDelivery, PciBarConfiguration, PciCapabilityID, PciClassCode, PciConfiguration,
-    PciDevice, PciDeviceError, PciHeaderType, PciInterruptPin, PciSubclass,
+    PciBarConfiguration, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice,
+    PciDeviceError, PciHeaderType, PciSubclass,
 };
 use std::fmt;
 use std::io;
@@ -115,7 +115,6 @@ pub struct VfioPciDevice {
     interrupt_evt: Option<EventFd>,
     mmio_regions: Vec<MmioRegion>,
     interrupt_capabilities: InterruptCap,
-    virq: u32,
 }
 
 impl VfioPciDevice {
@@ -158,7 +157,6 @@ impl VfioPciDevice {
             interrupt_evt: None,
             mmio_regions: Vec::new(),
             interrupt_capabilities,
-            virq: 0,
         };
 
         vfio_pci_device.parse_capabilities();
@@ -438,18 +436,6 @@ impl BusDevice for VfioPciDevice {
 }
 
 impl PciDevice for VfioPciDevice {
-    fn assign_pin_irq(
-        &mut self,
-        irq_evt: Option<EventFd>,
-        _irq_cb: Arc<InterruptDelivery>,
-        irq_num: u32,
-        irq_pin: PciInterruptPin,
-    ) {
-        self.configuration.set_irq(irq_num as u8, irq_pin);
-        self.interrupt_evt = irq_evt;
-        self.virq = irq_num;
-    }
-
     fn allocate_bars(
         &mut self,
         allocator: &mut SystemAllocator,
