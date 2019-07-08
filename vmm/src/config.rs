@@ -58,7 +58,7 @@ pub struct VmParams<'a> {
     pub memory: &'a str,
     pub kernel: &'a str,
     pub cmdline: Option<&'a str>,
-    pub disks: Vec<&'a str>,
+    pub disks: Option<Vec<&'a str>>,
     pub net: Option<Vec<&'a str>>,
     pub rng: &'a str,
     pub fs: Option<Vec<&'a str>>,
@@ -343,7 +343,7 @@ pub struct VmConfig<'a> {
     pub memory: MemoryConfig<'a>,
     pub kernel: KernelConfig<'a>,
     pub cmdline: CmdlineConfig,
-    pub disks: Vec<DiskConfig<'a>>,
+    pub disks: Option<Vec<DiskConfig<'a>>>,
     pub net: Option<Vec<NetConfig<'a>>>,
     pub rng: RngConfig<'a>,
     pub fs: Option<Vec<FsConfig<'a>>>,
@@ -352,9 +352,13 @@ pub struct VmConfig<'a> {
 
 impl<'a> VmConfig<'a> {
     pub fn parse(vm_params: VmParams<'a>) -> Result<Self> {
-        let mut disks: Vec<DiskConfig> = Vec::new();
-        for disk in vm_params.disks.iter() {
-            disks.push(DiskConfig::parse(disk)?);
+        let mut disks: Option<Vec<DiskConfig>> = None;
+        if let Some(disk_list) = &vm_params.disks {
+            let mut disk_config_list = Vec::new();
+            for item in disk_list.iter() {
+                disk_config_list.push(DiskConfig::parse(item)?);
+            }
+            disks = Some(disk_config_list);
         }
 
         let mut net: Option<Vec<NetConfig>> = None;

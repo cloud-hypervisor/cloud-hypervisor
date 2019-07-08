@@ -528,42 +528,46 @@ impl DeviceManager {
         let pci_root = PciRoot::new(None);
         let mut pci = PciConfigIo::new(pci_root);
 
-        for disk_cfg in &vm_cfg.disks {
-            // Open block device path
-            let raw_img: File = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(disk_cfg.path)
-                .map_err(DeviceManagerError::Disk)?;
+        // Add virtio-blk if required
+        if let Some(disk_list_cfg) = &vm_cfg.disks {
+            for disk_cfg in disk_list_cfg.iter() {
+                // Open block device path
+                let raw_img: File = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(disk_cfg.path)
+                    .map_err(DeviceManagerError::Disk)?;
 
-            // Add virtio-blk
-            let image_type =
-                qcow::detect_image_type(&raw_img).map_err(DeviceManagerError::DetectImageType)?;
-            let block = match image_type {
-                ImageType::Raw => {
-                    let raw_img = vm_virtio::RawFile::new(raw_img);
-                    let dev = vm_virtio::Block::new(raw_img, disk_cfg.path.to_path_buf(), false)
-                        .map_err(DeviceManagerError::CreateVirtioBlock)?;
-                    Box::new(dev) as Box<vm_virtio::VirtioDevice>
-                }
-                ImageType::Qcow2 => {
-                    let qcow_img =
-                        QcowFile::from(raw_img).map_err(DeviceManagerError::QcowDeviceCreate)?;
-                    let dev = vm_virtio::Block::new(qcow_img, disk_cfg.path.to_path_buf(), false)
-                        .map_err(DeviceManagerError::CreateVirtioBlock)?;
-                    Box::new(dev) as Box<vm_virtio::VirtioDevice>
-                }
-            };
+                let image_type = qcow::detect_image_type(&raw_img)
+                    .map_err(DeviceManagerError::DetectImageType)?;
+                let block = match image_type {
+                    ImageType::Raw => {
+                        let raw_img = vm_virtio::RawFile::new(raw_img);
+                        let dev =
+                            vm_virtio::Block::new(raw_img, disk_cfg.path.to_path_buf(), false)
+                                .map_err(DeviceManagerError::CreateVirtioBlock)?;
+                        Box::new(dev) as Box<vm_virtio::VirtioDevice>
+                    }
+                    ImageType::Qcow2 => {
+                        let qcow_img = QcowFile::from(raw_img)
+                            .map_err(DeviceManagerError::QcowDeviceCreate)?;
+                        let dev =
+                            vm_virtio::Block::new(qcow_img, disk_cfg.path.to_path_buf(), false)
+                                .map_err(DeviceManagerError::CreateVirtioBlock)?;
+                        Box::new(dev) as Box<vm_virtio::VirtioDevice>
+                    }
+                };
 
-            DeviceManager::add_virtio_pci_device(
-                block,
-                memory.clone(),
-                allocator,
-                vm_fd,
-                &mut pci,
-                &mut mmio_bus,
-                &interrupt_info,
-            )?;
+                DeviceManager::add_virtio_pci_device(
+                    block,
+                    memory.clone(),
+                    allocator,
+                    vm_fd,
+                    &mut pci,
+                    &mut mmio_bus,
+                    &interrupt_info,
+                )?;
+            }
         }
 
         // Add virtio-net if required

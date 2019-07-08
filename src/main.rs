@@ -100,10 +100,7 @@ fn main() {
 
     let cmdline = cmd_arguments.value_of("cmdline");
 
-    let disks: Vec<&str> = cmd_arguments
-        .values_of("disk")
-        .expect("Missing argument: disk. Provide at least one")
-        .collect();
+    let disks: Option<Vec<&str>> = cmd_arguments.values_of("disk").map(|x| x.collect());
 
     let net: Option<Vec<&str>> = cmd_arguments.values_of("net").map(|x| x.collect());
 
