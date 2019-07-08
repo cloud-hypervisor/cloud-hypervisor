@@ -19,7 +19,9 @@ const MSIX_PBA_ENTRIES_MODULO: u64 = 8;
 const BITS_PER_PBA_ENTRY: usize = 64;
 const FUNCTION_MASK_BIT: u8 = 14;
 
-#[derive(Debug, Clone)]
+#[repr(packed)]
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct MsixTableEntry {
     pub msg_addr_lo: u32,
     pub msg_addr_hi: u32,
@@ -43,6 +45,9 @@ impl Default for MsixTableEntry {
         }
     }
 }
+
+// It is safe to implement ByteValued. All members are simple numbers and any value is valid.
+unsafe impl ByteValued for MsixTableEntry {}
 
 pub struct MsixConfig {
     pub table_entries: Vec<MsixTableEntry>,
@@ -159,7 +164,7 @@ impl MsixConfig {
                     0x4 => self.table_entries[index].msg_addr_hi = value,
                     0x8 => self.table_entries[index].msg_data = value,
                     0x10 => {
-                        old_entry = Some(self.table_entries[index].clone());
+                        old_entry = Some(self.table_entries[index]);
                         self.table_entries[index].vector_ctl = value;
                     }
                     _ => error!("invalid offset"),
@@ -175,7 +180,7 @@ impl MsixConfig {
                         self.table_entries[index].msg_addr_hi = (value >> 32) as u32;
                     }
                     0x8 => {
-                        old_entry = Some(self.table_entries[index].clone());
+                        old_entry = Some(self.table_entries[index]);
                         self.table_entries[index].msg_data = (value & 0xffff_ffffu64) as u32;
                         self.table_entries[index].vector_ctl = (value >> 32) as u32;
                     }

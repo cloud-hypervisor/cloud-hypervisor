@@ -548,6 +548,7 @@ impl VfioDeviceInfo {
 
 /// Vfio device for exposing regions which could be read/write to kernel vfio device.
 pub struct VfioDevice {
+    vm: Arc<VmFd>,
     device: File,
     flags: u32,
     group: VfioGroup,
@@ -576,7 +577,10 @@ impl VfioDevice {
         let regions = device_info.get_regions()?;
         let irqs = device_info.get_irqs()?;
 
+        //        let new_vm = Arc::clone(vm);
+
         Ok(VfioDevice {
+            vm: Arc::clone(vm),
             device: device_info.device,
             flags: device_info.flags,
             group,
@@ -682,6 +686,25 @@ impl VfioDevice {
             Some(v) => v.flags,
             None => 0,
         }
+    }
+
+    pub fn max_interrupts(&self) -> u32 {
+        let mut max_interrupts = 0;
+        let irq_indexes = vec![
+            VFIO_PCI_INTX_IRQ_INDEX,
+            VFIO_PCI_MSI_IRQ_INDEX,
+            VFIO_PCI_MSIX_IRQ_INDEX,
+        ];
+
+        for index in irq_indexes {
+            if let Some(irq_info) = self.irqs.get(&index) {
+                if irq_info.count > max_interrupts {
+                    max_interrupts = irq_info.count;
+                }
+            }
+        }
+
+        max_interrupts
     }
 
     /// get a region's offset

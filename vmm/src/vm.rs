@@ -733,8 +733,8 @@ impl DeviceManager {
                 let vfio_device = VfioDevice::new(device_cfg.path, vm_fd, memory.clone())
                     .map_err(DeviceManagerError::VfioCreate)?;
 
-                let mut vfio_pci_device =
-                    VfioPciDevice::new(vfio_device).map_err(DeviceManagerError::VfioPciCreate)?;
+                let mut vfio_pci_device = VfioPciDevice::new(vm_fd, allocator, vfio_device)
+                    .map_err(DeviceManagerError::VfioPciCreate)?;
 
                 let bars = vfio_pci_device
                     .allocate_bars(allocator)

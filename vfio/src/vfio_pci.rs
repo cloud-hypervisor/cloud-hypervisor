@@ -12,8 +12,8 @@ use devices::BusDevice;
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::*;
 use pci::{
-    PciBarConfiguration, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice,
-    PciDeviceError, PciHeaderType, PciSubclass,
+    InterruptDelivery, MsixTableEntry, PciBarConfiguration, PciCapabilityID, PciClassCode,
+    PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciInterruptPin, PciSubclass,
 };
 use std::fmt;
 use std::io;
@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::u32;
 use vfio_bindings::bindings::vfio::*;
 use vm_allocator::SystemAllocator;
-use vm_memory::{Address, GuestAddress, GuestUsize};
+use vm_memory::{Address, ByteValued, GuestAddress, GuestUsize};
 use vmm_sys_util::EventFd;
 
 use crate::vfio_device::VfioDevice;
@@ -44,6 +44,9 @@ const BAR_NUMS: usize = 6;
 
 #[derive(Debug)]
 pub enum VfioPciError {
+    AllocateGsi,
+    EventFd(io::Error),
+    IrqFd(io::Error),
     NewVfioPciDevice,
     MapRegionHost(io::Error),
     MapRegionGuest(io::Error),
@@ -53,6 +56,9 @@ pub type Result<T> = std::result::Result<T, VfioPciError>;
 impl fmt::Display for VfioPciError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            VfioPciError::AllocateGsi => write!(f, "failed to allocate GSI"),
+            VfioPciError::EventFd(e) => write!(f, "failed to create eventfd: {}", e),
+            VfioPciError::IrqFd(e) => write!(f, "failed to register irqfd: {}", e),
             VfioPciError::NewVfioPciDevice => write!(f, "failed to create VFIO PCI device"),
             VfioPciError::MapRegionHost(e) => write!(
                 f,
@@ -108,6 +114,40 @@ struct MmioRegion {
     index: u32,
 }
 
+#[derive(Copy, Clone)]
+struct MsiVector {
+    msg_addr_lo: u32,
+    msg_addr_hi: u32,
+    msg_data: u32,
+    dev_id: u32,
+}
+
+struct InterruptRoute {
+    gsi: u32,
+    irq_fd: EventFd,
+    msi_vector: Option<MsiVector>,
+}
+
+impl InterruptRoute {
+    fn new(
+        vm: &Arc<VmFd>,
+        allocator: &mut SystemAllocator,
+        msi_vector: Option<MsiVector>,
+    ) -> Result<Self> {
+        let irq_fd = EventFd::new(libc::EFD_NONBLOCK).map_err(VfioPciError::EventFd)?;
+        let gsi = allocator.allocate_irq().ok_or(VfioPciError::AllocateGsi)?;
+
+        vm.register_irqfd(irq_fd.as_raw_fd(), gsi)
+            .map_err(VfioPciError::IrqFd)?;
+
+        Ok(InterruptRoute {
+            gsi,
+            irq_fd,
+            msi_vector,
+        })
+    }
+}
+
 /// Implements the Vfio Pci device, then a pci device is added into vm
 pub struct VfioPciDevice {
     device: Arc<VfioDevice>,
@@ -115,11 +155,19 @@ pub struct VfioPciDevice {
     interrupt_evt: Option<EventFd>,
     mmio_regions: Vec<MmioRegion>,
     interrupt_capabilities: InterruptCap,
+<<<<<<< HEAD
+=======
+    interrupt_routes: Vec<InterruptRoute>,
+>>>>>>> 424c71b... MSI vector junk
 }
 
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
-    pub fn new(device: VfioDevice) -> Result<Self> {
+    pub fn new(
+        vm_fd: &Arc<VmFd>,
+        allocator: &mut SystemAllocator,
+        device: VfioDevice,
+    ) -> Result<Self> {
         device.reset();
 
         let mut id = vec![0; 4];
@@ -157,9 +205,21 @@ impl VfioPciDevice {
             interrupt_evt: None,
             mmio_regions: Vec::new(),
             interrupt_capabilities,
+<<<<<<< HEAD
+=======
+            interrupt_routes: Vec::new(),
+>>>>>>> 424c71b... MSI vector junk
         };
 
         vfio_pci_device.parse_capabilities();
+
+        // Allocate temporary interrupt routes for now.
+        // The MSI vectors will be filled when the guest driver programs the device.
+        let max_interrupts = vfio_pci_device.device.max_interrupts();
+        for _ in 0..max_interrupts {
+            let mut route = InterruptRoute::new(vm_fd, allocator, None)?;
+            vfio_pci_device.interrupt_routes.push(route);
+        }
 
         Ok(vfio_pci_device)
     }
@@ -343,6 +403,48 @@ impl VfioPciDevice {
         }
 
         false
+    }
+
+    fn msi_vectors(&self) -> Option<Vec<MsiVector>> {
+        if let Some(msix_cap) = self.interrupt_capabilities.msix {
+            let mut table_size: u32 = (msix_cap.msg_ctl & !0x1000).into();
+            table_size += 1;
+            let table_offset: u32 = msix_cap.table >> 3;
+            let msix_bar: u32 = msix_cap.table & 0x7;
+            // Enable MSI-X
+            let mut msg_ctl: u16 = msix_cap.msg_ctl | 0x8000;
+
+            println!("Writing 0x{:x} at 0x{:x}", msg_ctl, msix_cap.offset + 2);
+            self.device.region_write(
+                VFIO_PCI_CONFIG_REGION_INDEX,
+                unsafe {
+                    ::std::slice::from_raw_parts_mut(
+                        ::std::mem::transmute::<&mut u16, &mut u8>(&mut msg_ctl),
+                        2,
+                    )
+                },
+                (msix_cap.offset + 2) as u64,
+            );
+
+            println!(
+                "MSIX table - size:{} offset:{} BAR:{}",
+                table_size, table_offset, msix_bar
+            );
+
+            for v in 0..table_size {
+                let mut vector: MsixTableEntry = Default::default();
+                let mut buf = vec![0; 16];
+                println!("(Default) MSIX vector#{} {:?}", v, buf);
+                self.device.region_read(
+                    VFIO_PCI_BAR1_REGION_INDEX,
+                    &mut buf,
+                    (table_offset + (v * 16)).into(),
+                );
+                println!("READ MSIX vector at 0x{:x}", table_offset + (v * 16));
+                println!("MSIX vector#{} {:?}", v, buf);
+            }
+        }
+        None
     }
 
     fn find_region(&self, addr: u64) -> Option<MmioRegion> {
@@ -615,10 +717,17 @@ impl PciDevice for VfioPciDevice {
                 self.parse_msix_capabilities(base);
                 let new_enabled = self.msix_enabled();
 
+                println!(
+                    "MSI-X: Old enabled {} new enabled {}",
+                    old_enabled, new_enabled
+                );
+                self.msi_vectors();
+
                 if !old_enabled && new_enabled {
                     // Switching from disabled to enabled
                     if let Some(ref interrupt_evt) = self.interrupt_evt {
                         println!("VFIO: Enabling MSIX");
+                        let msix_vectors = self.msi_vectors();
                         if let Err(e) = self.device.enable_msix(interrupt_evt) {
                             warn!("Could not enable MSIX: {}", e);
                         }
