@@ -10,7 +10,7 @@ write_files:
     permissions: 0644
     content: |
         [Match]
-        Name=en*
+        MACAddress=12:34:56:78:90:ab
 
         [Network]
         Address=192.168.2.2/24

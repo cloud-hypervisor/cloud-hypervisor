@@ -567,28 +567,30 @@ impl DeviceManager {
         }
 
         // Add virtio-net if required
-        if let Some(net_cfg) = &vm_cfg.net {
-            let mut virtio_net_device: vm_virtio::Net;
+        if let Some(net_list_cfg) = &vm_cfg.net {
+            for net_cfg in net_list_cfg.iter() {
+                let mut virtio_net_device: vm_virtio::Net;
 
-            if let Some(tap_if_name) = net_cfg.tap {
-                let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
-                virtio_net_device = vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac))
-                    .map_err(DeviceManagerError::CreateVirtioNet)?;
-            } else {
-                virtio_net_device =
-                    vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac))
+                if let Some(tap_if_name) = net_cfg.tap {
+                    let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
+                    virtio_net_device = vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac))
                         .map_err(DeviceManagerError::CreateVirtioNet)?;
-            }
+                } else {
+                    virtio_net_device =
+                        vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac))
+                            .map_err(DeviceManagerError::CreateVirtioNet)?;
+                }
 
-            DeviceManager::add_virtio_pci_device(
-                Box::new(virtio_net_device),
-                memory.clone(),
-                allocator,
-                vm_fd,
-                &mut pci,
-                &mut mmio_bus,
-                &interrupt_info,
-            )?;
+                DeviceManager::add_virtio_pci_device(
+                    Box::new(virtio_net_device),
+                    memory.clone(),
+                    allocator,
+                    vm_fd,
+                    &mut pci,
+                    &mut mmio_bus,
+                    &interrupt_info,
+                )?;
+            }
         }
 
         // Add virtio-rng if required
