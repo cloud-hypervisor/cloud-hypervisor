@@ -135,7 +135,7 @@ fn main() {
         "Cloud Hypervisor Guest\n\tvCPUs: {}\n\tMemory: {} MB\
          \n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
         u8::from(&vm_config.cpus),
-        vm_config.memory.size,
+        vm_config.memory.size >> 20,
         vm_config.kernel.path,
         vm_config.cmdline.args.as_str(),
         vm_config.disks,
@@ -294,7 +294,7 @@ mod tests {
             let (disks, fw_path) = prepare_files();
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
-                .args(&["--memory", "size=512"])
+                .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
                 .args(&["--disk", disks[0], disks[1]])
                 .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
@@ -322,7 +322,7 @@ mod tests {
             let (disks, fw_path) = prepare_files();
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "2"])
-                .args(&["--memory", "size=512"])
+                .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
                 .args(&["--disk", disks[0], disks[1]])
                 .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
@@ -347,7 +347,7 @@ mod tests {
             let (disks, fw_path) = prepare_files();
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
-                .args(&["--memory", "size=5120"])
+                .args(&["--memory", "size=5120M"])
                 .args(&["--kernel", fw_path.as_str()])
                 .args(&["--disk", disks[0], disks[1]])
                 .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
@@ -372,7 +372,7 @@ mod tests {
             let (disks, fw_path) = prepare_files();
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
-                .args(&["--memory", "size=512"])
+                .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
                 .args(&["--disk", disks[0], disks[1]])
                 .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
@@ -410,7 +410,7 @@ mod tests {
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
-                .args(&["--memory", "size=512"])
+                .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--disk", disks[0], disks[1]])
                 .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
@@ -452,7 +452,7 @@ mod tests {
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
-                .args(&["--memory", "size=512"])
+                .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--disk", disks[0], disks[1]])
                 .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
@@ -488,7 +488,7 @@ mod tests {
             let (disks, fw_path) = prepare_files();
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
-                .args(&["--memory", "size=512"])
+                .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
                 .args(&["--disk", disks[0], disks[1]])
                 .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
@@ -535,7 +535,7 @@ mod tests {
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
-                .args(&["--memory", "size=512,file=/dev/shm"])
+                .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--disk", disks[0], disks[1]])
                 .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
@@ -605,7 +605,7 @@ mod tests {
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
-                .args(&["--memory", "size=512"])
+                .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--disk", disks[0], disks[1]])
                 .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
@@ -673,7 +673,7 @@ mod tests {
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
-                .args(&["--memory", "size=512"])
+                .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--disk", disks[1]])
                 .args(&["--net", "tap=,mac=,ip=192.168.2.1,mask=255.255.255.0"])
