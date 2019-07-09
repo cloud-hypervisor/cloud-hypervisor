@@ -211,27 +211,15 @@ impl VfioPciDevice {
         let device = Arc::new(device);
         device.reset();
 
-        let mut id = vec![0; 4];
-        // Vendor and device IDs
-        device.region_read(VFIO_PCI_CONFIG_REGION_INDEX, &mut id, 0x0);
-
-        let device_id: u16 = u16::from(id[0]) | u16::from(id[1]) << 8;
-        let vendor_id: u16 = u16::from(id[2]) | u16::from(id[3]) << 8;
-
-        // Sub vendor and device IDs
-        device.region_read(VFIO_PCI_CONFIG_REGION_INDEX, &mut id, 0x40);
-        let sub_vendor_id: u16 = u16::from(id[0]) | u16::from(id[1]) << 8;
-        let sub_device_id: u16 = u16::from(id[2]) | u16::from(id[3]) << 8;
-
         let configuration = PciConfiguration::new(
-            vendor_id,
-            device_id,
+            0,
+            0,
             PciClassCode::Other,
             &PciVfioSubclass::VfioSubclass,
             None,
             PciHeaderType::Device,
-            sub_vendor_id,
-            sub_device_id,
+            0,
+            0,
             None,
         );
 
