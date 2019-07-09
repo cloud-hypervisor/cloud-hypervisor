@@ -924,7 +924,7 @@ impl<'a> Vm<'a> {
         let fd = Arc::new(fd);
 
         // Init guest memory
-        let arch_mem_regions = arch::arch_memory_regions(config.memory.size << 20);
+        let arch_mem_regions = arch::arch_memory_regions(config.memory.size);
 
         let guest_memory = match config.memory.file {
             Some(file) => {

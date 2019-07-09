@@ -22,8 +22,6 @@ const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
 pub enum Error<'a> {
     /// Failed parsing cpus parameters.
     ParseCpusParams(std::num::ParseIntError),
-    /// Failed parsing memory size parameter.
-    ParseMemorySizeParam(std::num::ParseIntError),
     /// Failed parsing memory file parameter.
     ParseMemoryFileParam,
     /// Failed parsing kernel parameters.
@@ -50,8 +48,8 @@ pub enum Error<'a> {
     ParseFsQueueSizeParam(std::num::ParseIntError),
     /// Failed parsing persitent memory file parameter.
     ParsePmemFileParam,
-    /// Failed parsing persitent memory size parameter.
-    ParsePmemSizeParam(std::num::ParseIntError),
+    /// Failed parsing size parameter.
+    ParseSizeParam(std::num::ParseIntError),
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -65,6 +63,24 @@ pub struct VmParams<'a> {
     pub rng: &'a str,
     pub fs: Option<Vec<&'a str>>,
     pub pmem: Option<Vec<&'a str>>,
+}
+
+fn parse_size(size: &str) -> Result<u64> {
+    let s = size.trim();
+
+    let shift = if s.ends_with('K') {
+        10
+    } else if s.ends_with('M') {
+        20
+    } else if s.ends_with('G') {
+        30
+    } else {
+        0
+    };
+
+    let s = s.trim_end_matches(|c| c == 'K' || c == 'M' || c == 'G');
+    let res = s.parse::<u64>().map_err(Error::ParseSizeParam)?;
+    Ok(res << shift)
 }
 
 pub struct CpusConfig(pub u8);
@@ -117,9 +133,7 @@ impl<'a> MemoryConfig<'a> {
         };
 
         Ok(MemoryConfig {
-            size: size_str
-                .parse::<u64>()
-                .map_err(Error::ParseMemorySizeParam)?,
+            size: parse_size(size_str)?,
             file,
         })
     }
@@ -323,7 +337,7 @@ impl<'a> PmemConfig<'a> {
 
         Ok(PmemConfig {
             file: Path::new(file_str),
-            size: size_str.parse::<u64>().map_err(Error::ParsePmemSizeParam)?,
+            size: parse_size(size_str)?,
         })
     }
 }
