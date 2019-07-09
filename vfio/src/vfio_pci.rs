@@ -28,8 +28,8 @@ use vmm_sys_util::EventFd;
 
 use crate::vfio_device::VfioDevice;
 
-const PCI_CONFIG_BAR_OFFSET: u64 = 0x10;
-const PCI_CONFIG_CAPABILITY_OFFSET: u64 = 0x34;
+const PCI_CONFIG_BAR_OFFSET: u32 = 0x10;
+const PCI_CONFIG_CAPABILITY_OFFSET: u32 = 0x34;
 // IO BAR when first BAR bit is 1.
 const PCI_CONFIG_IO_BAR: u32 = 0x1;
 
@@ -150,9 +150,50 @@ impl InterruptRoute {
     }
 }
 
+struct VfioPciConfig {
+    device: Arc<VfioDevice>,
+}
+
+impl VfioPciConfig {
+    fn new(device: Arc<VfioDevice>) -> Self {
+        VfioPciConfig { device }
+    }
+
+    fn read_config_byte(&self, offset: u32) -> u8 {
+        let mut data: [u8; 1] = [0];
+        self.device
+            .region_read(VFIO_PCI_CONFIG_REGION_INDEX, data.as_mut(), offset.into());
+
+        data[0]
+    }
+
+    fn read_config_word(&self, offset: u32) -> u16 {
+        let mut data: [u8; 2] = [0, 0];
+        self.device
+            .region_read(VFIO_PCI_CONFIG_REGION_INDEX, data.as_mut(), offset.into());
+
+        u16::from_le_bytes(data)
+    }
+
+    fn read_config_dword(&self, offset: u32) -> u32 {
+        let mut data: [u8; 4] = [0, 0, 0, 0];
+        self.device
+            .region_read(VFIO_PCI_CONFIG_REGION_INDEX, data.as_mut(), offset.into());
+
+        u32::from_le_bytes(data)
+    }
+
+    fn write_config_dword(&self, buf: u32, offset: u32) {
+        let data: [u8; 4] = buf.to_le_bytes();
+        self.device
+            .region_write(VFIO_PCI_CONFIG_REGION_INDEX, &data, offset.into())
+    }
+}
+
 /// Implements the Vfio Pci device, then a pci device is added into vm
 pub struct VfioPciDevice {
     device: Arc<VfioDevice>,
+    vfio_pci_configuration: VfioPciConfig,
     configuration: PciConfiguration,
     interrupt_evt: Option<EventFd>,
     mmio_regions: Vec<MmioRegion>,
@@ -167,6 +208,7 @@ impl VfioPciDevice {
         allocator: &mut SystemAllocator,
         device: VfioDevice,
     ) -> Result<Self> {
+        let device = Arc::new(device);
         device.reset();
 
         let mut id = vec![0; 4];
@@ -193,14 +235,17 @@ impl VfioPciDevice {
             None,
         );
 
+        let vfio_pci_configuration = VfioPciConfig::new(Arc::clone(&device));
+
         let interrupt_capabilities = InterruptCap {
             msi: None,
             msix: None,
         };
 
         let mut vfio_pci_device = VfioPciDevice {
-            device: Arc::new(device),
+            device,
             configuration,
+            vfio_pci_configuration,
             interrupt_evt: None,
             mmio_regions: Vec::new(),
             interrupt_capabilities,
@@ -249,32 +294,17 @@ impl VfioPciDevice {
     }
 
     fn parse_msix_capabilities(&mut self, cap: u8) {
-        let mut msg_ctl: u16 = 0;
-        let mut table: u32 = 0;
-        let mut pba: u32 = 0;
+        let msg_ctl = self
+            .vfio_pci_configuration
+            .read_config_word((cap + 2).into());
 
-        // safe as convert u16 to &[u8;2]
-        self.device.region_read(
-            VFIO_PCI_CONFIG_REGION_INDEX,
-            unsafe {
-                ::std::slice::from_raw_parts_mut(&mut *(&mut msg_ctl as *mut u16 as *mut u8), 2)
-            },
-            (cap + 2).into(),
-        );
+        let table = self
+            .vfio_pci_configuration
+            .read_config_dword((cap + 4).into());
 
-        self.device.region_read(
-            VFIO_PCI_CONFIG_REGION_INDEX,
-            unsafe {
-                ::std::slice::from_raw_parts_mut(&mut *(&mut table as *mut u32 as *mut u8), 4)
-            },
-            (cap + 4).into(),
-        );
-
-        self.device.region_read(
-            VFIO_PCI_CONFIG_REGION_INDEX,
-            unsafe { ::std::slice::from_raw_parts_mut(&mut *(&mut pba as *mut u32 as *mut u8), 4) },
-            (cap + 8).into(),
-        );
+        let pba = self
+            .vfio_pci_configuration
+            .read_config_dword((cap + 4).into());
 
         println!(
             "MSIX cap @0x{:x} ctl 0x{:x} table 0x{:x} PBA 0x{:x}",
@@ -291,46 +321,25 @@ impl VfioPciDevice {
 
     fn parse_msi_capabilities(&mut self, cap: u8) {
         let mut msi_len: u8 = 0xa;
-        let mut msg_ctl: u16 = 0;
-        let mut msg_address_lsb: u32 = 0xff;
         let mut msg_address_msb: u32 = 0x0;
 
-        // safe as convert u16 to &[u8;2]
-        self.device.region_read(
-            VFIO_PCI_CONFIG_REGION_INDEX,
-            unsafe {
-                ::std::slice::from_raw_parts_mut(&mut *(&mut msg_ctl as *mut u16 as *mut u8), 2)
-            },
-            (cap + 2).into(),
-        );
+        let msg_ctl = self
+            .vfio_pci_configuration
+            .read_config_word((cap + 2).into());
 
         if msg_ctl & 0x80 != 0 {
             msi_len += 4;
-            self.device.region_read(
-                VFIO_PCI_CONFIG_REGION_INDEX,
-                unsafe {
-                    ::std::slice::from_raw_parts_mut(
-                        &mut *(&mut msg_address_msb as *mut u32 as *mut u8),
-                        4,
-                    )
-                },
-                (cap + 8).into(),
-            );
+            msg_address_msb = self
+                .vfio_pci_configuration
+                .read_config_dword((cap + 8).into());
         }
         if msg_ctl & 0x100 != 0 {
             msi_len += 0xa;
         }
 
-        self.device.region_read(
-            VFIO_PCI_CONFIG_REGION_INDEX,
-            unsafe {
-                ::std::slice::from_raw_parts_mut(
-                    &mut *(&mut msg_address_lsb as *mut u32 as *mut u8),
-                    4,
-                )
-            },
-            (cap + 4).into(),
-        );
+        let msg_address_lsb = self
+            .vfio_pci_configuration
+            .read_config_dword((cap + 4).into());
 
         let mut msg_address = u64::from(msg_address_msb);
         msg_address <<= 32;
@@ -351,23 +360,14 @@ impl VfioPciDevice {
     }
 
     fn parse_capabilities(&mut self) {
-        let mut cap_next: u8 = 0;
-
-        // safe as convert u8 to &[u8;1]
-        self.device.region_read(
-            VFIO_PCI_CONFIG_REGION_INDEX,
-            unsafe { ::std::slice::from_raw_parts_mut(&mut cap_next, 1) },
-            PCI_CONFIG_CAPABILITY_OFFSET,
-        );
+        let mut cap_next = self
+            .vfio_pci_configuration
+            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
 
         while cap_next != 0 {
-            let mut cap_id: u8 = 0;
-            // safe as convert u8 to &[u8;1]
-            self.device.region_read(
-                VFIO_PCI_CONFIG_REGION_INDEX,
-                unsafe { ::std::slice::from_raw_parts_mut(&mut cap_id, 1) },
-                cap_next.into(),
-            );
+            let cap_id = self
+                .vfio_pci_configuration
+                .read_config_byte(cap_next.into());
 
             println!("Found cap ID 0x{:x}", cap_id);
 
@@ -381,13 +381,9 @@ impl VfioPciDevice {
                 _ => {}
             };
 
-            // Read next capability.
-            // safe as convert u8 to &[u8;1]
-            self.device.region_read(
-                VFIO_PCI_CONFIG_REGION_INDEX,
-                unsafe { ::std::slice::from_raw_parts_mut(&mut cap_next, 1) },
-                (cap_next + 1).into(),
-            );
+            cap_next = self
+                .vfio_pci_configuration
+                .read_config_byte((cap_next + 1).into());
         }
     }
 
@@ -549,33 +545,28 @@ impl PciDevice for VfioPciDevice {
         allocator: &mut SystemAllocator,
     ) -> std::result::Result<Vec<(GuestAddress, GuestUsize)>, PciDeviceError> {
         let mut ranges = Vec::new();
-        let mut bar_id = u64::from(VFIO_PCI_BAR0_REGION_INDEX);
+        let mut bar_id = VFIO_PCI_BAR0_REGION_INDEX as u32;
 
         // Going through all regular regions to compute the BAR size.
         // We're not saving the BAR address to restore it, because we
         // are going to allocate a guest address for each BAR and write
         // that new address back.
-        while bar_id < VFIO_PCI_ROM_REGION_INDEX.into() {
+        while bar_id < VFIO_PCI_ROM_REGION_INDEX {
             println!("Going through region #{}", bar_id);
-            let mut lsb_bytes: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
-            let mut msb_bytes: [u8; 4] = [0, 0, 0, 0];
+            let mut lsb_size: u32 = 0xffff_ffff;
+            let mut msb_size = 0;
             let mut region_size: u64;
             let bar_addr: GuestAddress;
 
             // Read the BAR size (Starts by all 1s to the BAR)
-            self.device.region_write(
-                VFIO_PCI_CONFIG_REGION_INDEX,
-                lsb_bytes.as_mut(),
-                (PCI_CONFIG_BAR_OFFSET + bar_id * 4) as u64,
-            );
-            self.device.region_read(
-                VFIO_PCI_CONFIG_REGION_INDEX,
-                lsb_bytes.as_mut(),
-                (PCI_CONFIG_BAR_OFFSET + bar_id * 4) as u64,
-            );
+            let bar_offset = PCI_CONFIG_BAR_OFFSET + bar_id * 4;
+
+            self.vfio_pci_configuration
+                .write_config_dword(lsb_size, bar_offset);
+            lsb_size = self.vfio_pci_configuration.read_config_dword(bar_offset);
 
             // We've just read the BAR size back. Or at least its LSB.
-            let mut lsb_size = u32::from_le_bytes(lsb_bytes);
+            //            let mut lsb_size = u32::from_le_bytes(lsb_bytes);
             let lsb_flag = lsb_size & PCI_CONFIG_MEMORY_BAR_FLAG_MASK;
 
             println! {"\tLSB size 0x{:x} flags 0x{:x}", lsb_size, lsb_flag};
@@ -612,22 +603,16 @@ impl PciDevice for VfioPciDevice {
                     .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
             } else {
                 if is_64bit_bar {
-                    let msb_bar_id = bar_id + 1;
-                    msb_bytes = [0xff, 0xff, 0xff, 0xff];
+                    msb_size = 0xffff_ffff;
+                    let msb_bar_offset: u32 = PCI_CONFIG_BAR_OFFSET + (bar_id + 1) * 4;
 
-                    self.device.region_write(
-                        VFIO_PCI_CONFIG_REGION_INDEX,
-                        msb_bytes.as_mut(),
-                        (PCI_CONFIG_BAR_OFFSET + msb_bar_id * 4) as u64,
-                    );
-                    self.device.region_read(
-                        VFIO_PCI_CONFIG_REGION_INDEX,
-                        msb_bytes.as_mut(),
-                        (PCI_CONFIG_BAR_OFFSET + msb_bar_id * 4) as u64,
-                    );
+                    self.vfio_pci_configuration
+                        .write_config_dword(msb_bar_offset, msb_size);
+
+                    msb_size = self
+                        .vfio_pci_configuration
+                        .read_config_dword(msb_bar_offset);
                 }
-
-                let msb_size = u32::from_le_bytes(msb_bytes);
 
                 // Clear the first four bytes from our LSB.
                 lsb_size &= 0xffff_fff0;
@@ -758,14 +743,8 @@ impl PciDevice for VfioPciDevice {
         }
 
         // The config register read comes from the VFIO device itself.
-        let mut config: [u8; 4] = [0, 0, 0, 0];
-        self.device.region_read(
-            VFIO_PCI_CONFIG_REGION_INDEX,
-            config.as_mut(),
-            (reg_idx * 4) as u64,
-        );
-
-        u32::from_le_bytes(config)
+        self.vfio_pci_configuration
+            .read_config_dword((reg_idx * 4) as u32)
     }
 
     fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
