@@ -12,8 +12,8 @@ use devices::BusDevice;
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::*;
 use pci::{
-    InterruptDelivery, MsixTableEntry, PciBarConfiguration, PciCapabilityID, PciClassCode,
-    PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciInterruptPin, PciSubclass,
+    PciBarConfiguration, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice,
+    PciDeviceError, PciHeaderType, PciSubclass,
 };
 use std::fmt;
 use std::io;
@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::u32;
 use vfio_bindings::bindings::vfio::*;
 use vm_allocator::SystemAllocator;
-use vm_memory::{Address, ByteValued, GuestAddress, GuestUsize};
+use vm_memory::{Address, GuestAddress, GuestUsize};
 use vmm_sys_util::EventFd;
 
 use crate::vfio_device::VfioDevice;
@@ -114,6 +114,7 @@ struct MmioRegion {
     index: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Copy, Clone)]
 struct MsiVector {
     msg_addr_lo: u32,
@@ -122,6 +123,7 @@ struct MsiVector {
     dev_id: u32,
 }
 
+#[allow(dead_code)]
 struct InterruptRoute {
     gsi: u32,
     irq_fd: EventFd,
@@ -155,10 +157,7 @@ pub struct VfioPciDevice {
     interrupt_evt: Option<EventFd>,
     mmio_regions: Vec<MmioRegion>,
     interrupt_capabilities: InterruptCap,
-<<<<<<< HEAD
-=======
     interrupt_routes: Vec<InterruptRoute>,
->>>>>>> 424c71b... MSI vector junk
 }
 
 impl VfioPciDevice {
@@ -205,10 +204,7 @@ impl VfioPciDevice {
             interrupt_evt: None,
             mmio_regions: Vec::new(),
             interrupt_capabilities,
-<<<<<<< HEAD
-=======
             interrupt_routes: Vec::new(),
->>>>>>> 424c71b... MSI vector junk
         };
 
         vfio_pci_device.parse_capabilities();
@@ -222,6 +218,34 @@ impl VfioPciDevice {
         }
 
         Ok(vfio_pci_device)
+    }
+
+    fn write_msi_capabilities(&mut self, _offset: u64, _data: &[u8]) {}
+    fn write_msix_capabilities(&mut self, offset: u64, data: &[u8]) {
+        let len = data.len();
+        let mut msix_cap = self.interrupt_capabilities.msix.unwrap();
+
+        // Write MSI-X msg_ctl
+        if len == 2 && offset == 2 {
+            let ctl: [u8; 2] = [data[0], data[1]];
+            msix_cap.msg_ctl = u16::from_le_bytes(ctl);
+        }
+
+        if len == 4 {
+            let buf: [u8; 4] = [data[0], data[1], data[2], data[3]];
+
+            // Write MSI-X table offset
+            if offset == 4 {
+                msix_cap.table = u32::from_le_bytes(buf);
+            }
+
+            // Write MSI-X PBA offset
+            if offset == 8 {
+                msix_cap.pba = u32::from_le_bytes(buf);
+            }
+        }
+
+        self.interrupt_capabilities.msix = Some(msix_cap);
     }
 
     fn parse_msix_capabilities(&mut self, cap: u8) {
@@ -411,20 +435,6 @@ impl VfioPciDevice {
             table_size += 1;
             let table_offset: u32 = msix_cap.table >> 3;
             let msix_bar: u32 = msix_cap.table & 0x7;
-            // Enable MSI-X
-            let mut msg_ctl: u16 = msix_cap.msg_ctl | 0x8000;
-
-            println!("Writing 0x{:x} at 0x{:x}", msg_ctl, msix_cap.offset + 2);
-            self.device.region_write(
-                VFIO_PCI_CONFIG_REGION_INDEX,
-                unsafe {
-                    ::std::slice::from_raw_parts_mut(
-                        ::std::mem::transmute::<&mut u16, &mut u8>(&mut msg_ctl),
-                        2,
-                    )
-                },
-                (msix_cap.offset + 2) as u64,
-            );
 
             println!(
                 "MSIX table - size:{} offset:{} BAR:{}",
@@ -432,16 +442,12 @@ impl VfioPciDevice {
             );
 
             for v in 0..table_size {
-                let mut vector: MsixTableEntry = Default::default();
                 let mut buf = vec![0; 16];
-                println!("(Default) MSIX vector#{} {:?}", v, buf);
                 self.device.region_read(
                     VFIO_PCI_BAR1_REGION_INDEX,
                     &mut buf,
                     (table_offset + (v * 16)).into(),
                 );
-                println!("READ MSIX vector at 0x{:x}", table_offset + (v * 16));
-                println!("MSIX vector#{} {:?}", v, buf);
             }
         }
         None
@@ -687,13 +693,11 @@ impl PciDevice for VfioPciDevice {
 
         let base = (reg_idx * 4) as u8;
         let start = u64::from(base) + offset;
-        self.device
-            .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, start);
 
         match self.msi_capability(u64::from(base)) {
             Some(PciCapabilityID::MessageSignalledInterrupts) => {
                 let old_enabled = self.msi_enabled();
-                self.parse_msi_capabilities(base);
+                self.write_msi_capabilities(offset, data);
                 let new_enabled = self.msi_enabled();
 
                 if !old_enabled && new_enabled {
@@ -714,9 +718,8 @@ impl PciDevice for VfioPciDevice {
             }
             Some(PciCapabilityID::MSIX) => {
                 let old_enabled = self.msix_enabled();
-                self.parse_msix_capabilities(base);
+                self.write_msix_capabilities(offset, data);
                 let new_enabled = self.msix_enabled();
-
                 println!(
                     "MSI-X: Old enabled {} new enabled {}",
                     old_enabled, new_enabled
@@ -727,7 +730,6 @@ impl PciDevice for VfioPciDevice {
                     // Switching from disabled to enabled
                     if let Some(ref interrupt_evt) = self.interrupt_evt {
                         println!("VFIO: Enabling MSIX");
-                        let msix_vectors = self.msi_vectors();
                         if let Err(e) = self.device.enable_msix(interrupt_evt) {
                             warn!("Could not enable MSIX: {}", e);
                         }
@@ -741,6 +743,9 @@ impl PciDevice for VfioPciDevice {
             }
             _ => {}
         }
+
+        self.device
+            .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, start);
     }
 
     fn read_config_register(&self, reg_idx: usize) -> u32 {

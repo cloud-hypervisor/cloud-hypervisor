@@ -548,7 +548,6 @@ impl VfioDeviceInfo {
 
 /// Vfio device for exposing regions which could be read/write to kernel vfio device.
 pub struct VfioDevice {
-    vm: Arc<VmFd>,
     device: File,
     flags: u32,
     group: VfioGroup,
@@ -580,7 +579,6 @@ impl VfioDevice {
         //        let new_vm = Arc::clone(vm);
 
         Ok(VfioDevice {
-            vm: Arc::clone(vm),
             device: device_info.device,
             flags: device_info.flags,
             group,
