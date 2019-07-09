@@ -195,7 +195,6 @@ pub struct VfioPciDevice {
     device: Arc<VfioDevice>,
     vfio_pci_configuration: VfioPciConfig,
     configuration: PciConfiguration,
-    interrupt_evt: Option<EventFd>,
     mmio_regions: Vec<MmioRegion>,
     interrupt_capabilities: InterruptCap,
     interrupt_routes: Vec<InterruptRoute>,
@@ -234,7 +233,6 @@ impl VfioPciDevice {
             device,
             configuration,
             vfio_pci_configuration,
-            interrupt_evt: None,
             mmio_regions: Vec::new(),
             interrupt_capabilities,
             interrupt_routes: Vec::new(),
@@ -411,30 +409,6 @@ impl VfioPciDevice {
         }
 
         false
-    }
-
-    fn msi_vectors(&self) -> Option<Vec<MsiVector>> {
-        if let Some(msix_cap) = self.interrupt_capabilities.msix {
-            let mut table_size: u32 = (msix_cap.msg_ctl & !0x1000).into();
-            table_size += 1;
-            let table_offset: u32 = msix_cap.table >> 3;
-            let msix_bar: u32 = msix_cap.table & 0x7;
-
-            println!(
-                "MSIX table - size:{} offset:{} BAR:{}",
-                table_size, table_offset, msix_bar
-            );
-
-            for v in 0..table_size {
-                let mut buf = vec![0; 16];
-                self.device.region_read(
-                    VFIO_PCI_BAR1_REGION_INDEX,
-                    &mut buf,
-                    (table_offset + (v * 16)).into(),
-                );
-            }
-        }
-        None
     }
 
     fn find_region(&self, addr: u64) -> Option<MmioRegion> {
@@ -675,11 +649,9 @@ impl PciDevice for VfioPciDevice {
 
                 if !old_enabled && new_enabled {
                     // Switching from disabled to enabled
-                    if let Some(ref interrupt_evt) = self.interrupt_evt {
-                        println!("VFIO: Enabling MSI");
-                        if let Err(e) = self.device.enable_msi(interrupt_evt) {
-                            warn!("Could not enable MSI: {}", e);
-                        }
+                    println!("VFIO: Enabling MSI");
+                    if let Err(e) = self.device.enable_msi(&self.interrupt_routes[0].irq_fd) {
+                        warn!("Could not enable MSI: {}", e);
                     }
                 } else if old_enabled && !new_enabled {
                     // Switching from enabled to disabled
@@ -697,15 +669,12 @@ impl PciDevice for VfioPciDevice {
                     "MSI-X: Old enabled {} new enabled {}",
                     old_enabled, new_enabled
                 );
-                self.msi_vectors();
 
                 if !old_enabled && new_enabled {
                     // Switching from disabled to enabled
-                    if let Some(ref interrupt_evt) = self.interrupt_evt {
-                        println!("VFIO: Enabling MSIX");
-                        if let Err(e) = self.device.enable_msix(interrupt_evt) {
-                            warn!("Could not enable MSIX: {}", e);
-                        }
+                    println!("VFIO: Enabling MSIX");
+                    if let Err(e) = self.device.enable_msix(&self.interrupt_routes[0].irq_fd) {
+                        warn!("Could not enable MSIX: {}", e);
                     }
                 } else if old_enabled && !new_enabled {
                     println!("VFIO: Disabling MSIX");
