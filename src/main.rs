@@ -286,6 +286,12 @@ mod tests {
             .unwrap()
     }
 
+    fn get_pci_bridge_class() -> String {
+        ssh_command("cat /sys/bus/pci/devices/0000:00:00.0/class")
+            .trim()
+            .to_string()
+    }
+
     #[test]
     fn test_simple_launch() {
         test_block!(tb, "", {
@@ -308,6 +314,7 @@ mod tests {
             aver_eq!(tb, get_initial_apicid(), 0);
             aver!(tb, get_total_memory() > 496_000);
             aver!(tb, get_entropy() >= 1000);
+            aver_eq!(tb, get_pci_bridge_class(), "0x060000");
 
             ssh_command("sudo reboot");
             thread::sleep(std::time::Duration::new(10, 0));
