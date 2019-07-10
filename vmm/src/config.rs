@@ -13,7 +13,7 @@ use std::result;
 use vm_memory::GuestAddress;
 
 pub const DEFAULT_VCPUS: &str = "1";
-pub const DEFAULT_MEMORY: &str = "size=512";
+pub const DEFAULT_MEMORY: &str = "size=512M";
 pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
 const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
 
