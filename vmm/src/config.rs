@@ -50,6 +50,8 @@ pub enum Error<'a> {
     ParsePmemFileParam,
     /// Failed parsing size parameter.
     ParseSizeParam(std::num::ParseIntError),
+    /// Failed parsing serial parameter.
+    ParseSerialParam,
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -63,6 +65,7 @@ pub struct VmParams<'a> {
     pub rng: &'a str,
     pub fs: Option<Vec<&'a str>>,
     pub pmem: Option<Vec<&'a str>>,
+    pub serial: &'a str,
 }
 
 fn parse_size(size: &str) -> Result<u64> {
@@ -338,6 +341,41 @@ impl<'a> PmemConfig<'a> {
     }
 }
 
+#[derive(PartialEq)]
+pub enum SerialOutputMode {
+    Off,
+    Tty,
+    File,
+}
+
+pub struct SerialConfig<'a> {
+    pub file: Option<&'a Path>,
+    pub mode: SerialOutputMode,
+}
+
+impl<'a> SerialConfig<'a> {
+    pub fn parse(param: &'a str) -> Result<Self> {
+        if param == "off" {
+            Ok(Self {
+                mode: SerialOutputMode::Off,
+                file: None,
+            })
+        } else if param == "tty" {
+            Ok(Self {
+                mode: SerialOutputMode::Tty,
+                file: None,
+            })
+        } else if param.starts_with("file=") {
+            Ok(Self {
+                mode: SerialOutputMode::File,
+                file: Some(Path::new(&param[5..])),
+            })
+        } else {
+            Err(Error::ParseSerialParam)
+        }
+    }
+}
+
 pub struct VmConfig<'a> {
     pub cpus: CpusConfig,
     pub memory: MemoryConfig<'a>,
@@ -348,6 +386,7 @@ pub struct VmConfig<'a> {
     pub rng: RngConfig<'a>,
     pub fs: Option<Vec<FsConfig<'a>>>,
     pub pmem: Option<Vec<PmemConfig<'a>>>,
+    pub serial: SerialConfig<'a>,
 }
 
 impl<'a> VmConfig<'a> {
@@ -398,6 +437,7 @@ impl<'a> VmConfig<'a> {
             rng: RngConfig::parse(vm_params.rng)?,
             fs,
             pmem,
+            serial: SerialConfig::parse(vm_params.serial)?,
         })
     }
 }

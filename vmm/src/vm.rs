@@ -21,7 +21,7 @@ extern crate vm_memory;
 extern crate vm_virtio;
 extern crate vmm_sys_util;
 
-use crate::config::VmConfig;
+use crate::config::{SerialOutputMode, VmConfig};
 use devices::ioapic;
 use kvm_bindings::{
     kvm_enable_cap, kvm_msi, kvm_pit_config, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP,
@@ -222,6 +222,9 @@ pub enum DeviceManagerError {
 
     /// Cannot find a memory range for persistent memory
     PmemRangeAllocation,
+
+    /// Error creating serial output file
+    SerialOutputFileOpen(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -463,7 +466,7 @@ struct DeviceManager {
     mmio_bus: devices::Bus,
 
     // Serial port on 0x3f8
-    serial: Arc<Mutex<devices::legacy::Serial>>,
+    serial: Option<Arc<Mutex<devices::legacy::Serial>>>,
 
     // i8042 device for exit
     i8042: Arc<Mutex<devices::legacy::I8042Device>>,
@@ -500,24 +503,35 @@ impl DeviceManager {
             ioapic: &ioapic,
         };
 
-        // Serial is tied to IRQ #4
-        let serial_irq = 4;
-        let interrupt: Box<devices::Interrupt> = if let Some(ioapic) = &ioapic {
-            Box::new(UserIoapicIrq::new(ioapic.clone(), serial_irq))
-        } else {
-            let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-            vm_fd
-                .register_irqfd(serial_evt.as_raw_fd(), serial_irq as u32)
-                .map_err(DeviceManagerError::Irq)?;
-
-            Box::new(KernelIoapicIrq::new(serial_evt))
+        let serial_writer: Option<Box<io::Write + Send>> = match vm_cfg.serial.mode {
+            SerialOutputMode::File => Some(Box::new(
+                File::create(vm_cfg.serial.file.unwrap())
+                    .map_err(DeviceManagerError::SerialOutputFileOpen)?,
+            )),
+            SerialOutputMode::Tty => Some(Box::new(stdout())),
+            SerialOutputMode::Off => None,
         };
+        let serial = if serial_writer.is_some() {
+            // Serial is tied to IRQ #4
+            let serial_irq = 4;
+            let interrupt: Box<devices::Interrupt> = if let Some(ioapic) = &ioapic {
+                Box::new(UserIoapicIrq::new(ioapic.clone(), serial_irq))
+            } else {
+                let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+                vm_fd
+                    .register_irqfd(serial_evt.as_raw_fd(), serial_irq as u32)
+                    .map_err(DeviceManagerError::Irq)?;
 
-        // Add serial device
-        let serial = Arc::new(Mutex::new(devices::legacy::Serial::new_out(
-            interrupt,
-            Box::new(stdout()),
-        )));
+                Box::new(KernelIoapicIrq::new(serial_evt))
+            };
+
+            Some(Arc::new(Mutex::new(devices::legacy::Serial::new_out(
+                interrupt,
+                serial_writer.unwrap(),
+            ))))
+        } else {
+            None
+        };
 
         // Add a shutdown device (i8042)
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
@@ -821,10 +835,12 @@ impl DeviceManager {
     }
 
     pub fn register_devices(&mut self) -> Result<()> {
-        // Insert serial device
-        self.io_bus
-            .insert(self.serial.clone(), 0x3f8, 0x8)
-            .map_err(Error::BusError)?;
+        if self.serial.is_some() {
+            // Insert serial device
+            self.io_bus
+                .insert(self.serial.as_ref().unwrap().clone(), 0x3f8, 0x8)
+                .map_err(Error::BusError)?;
+        }
 
         // Insert i8042 device
         self.io_bus
@@ -1155,7 +1171,7 @@ impl<'a> Vm<'a> {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
         let epoll_fd = self.epoll.as_raw_fd();
 
-        if self.on_tty {
+        if self.devices.serial.is_some() && self.on_tty {
             io::stdin()
                 .lock()
                 .set_raw_mode()
@@ -1178,18 +1194,22 @@ impl<'a> Vm<'a> {
                             break 'outer;
                         }
                         EpollDispatch::Stdin => {
-                            let mut out = [0u8; 64];
-                            let count = io::stdin()
-                                .lock()
-                                .read_raw(&mut out)
-                                .map_err(Error::Serial)?;
+                            if self.devices.serial.is_some() {
+                                let mut out = [0u8; 64];
+                                let count = io::stdin()
+                                    .lock()
+                                    .read_raw(&mut out)
+                                    .map_err(Error::Serial)?;
 
-                            self.devices
-                                .serial
-                                .lock()
-                                .expect("Failed to process stdin event due to poisoned lock")
-                                .queue_input_bytes(&out[..count])
-                                .map_err(Error::Serial)?;
+                                self.devices
+                                    .serial
+                                    .as_ref()
+                                    .unwrap()
+                                    .lock()
+                                    .expect("Failed to process stdin event due to poisoned lock")
+                                    .queue_input_bytes(&out[..count])
+                                    .map_err(Error::Serial)?;
+                            }
                         }
                     }
                 }
