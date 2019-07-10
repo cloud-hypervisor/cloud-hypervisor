@@ -85,7 +85,7 @@ impl PciSubclass for PciVfioSubclass {
 
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
-struct MsiCap {
+struct VfioMsiCap {
     offset: u32,
     length: u32,
     msg_ctl: u16,
@@ -95,7 +95,7 @@ struct MsiCap {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Default)]
-struct MsixCap {
+struct VfioMsixCap {
     offset: u32,
     msg_ctl: u16,
     table: u32,
@@ -103,8 +103,8 @@ struct MsixCap {
 }
 
 struct InterruptCap {
-    msi: Option<MsiCap>,
-    msix: Option<MsixCap>,
+    msi: Option<VfioMsiCap>,
+    msix: Option<VfioMsixCap>,
 }
 
 #[derive(Copy, Clone)]
@@ -115,11 +115,12 @@ struct MmioRegion {
 }
 
 #[allow(dead_code)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 struct MsiVector {
     msg_addr_lo: u32,
     msg_addr_hi: u32,
     msg_data: u32,
+    control: u32,
     dev_id: u32,
 }
 
@@ -127,15 +128,11 @@ struct MsiVector {
 struct InterruptRoute {
     gsi: u32,
     irq_fd: EventFd,
-    msi_vector: Option<MsiVector>,
+    msi_vector: MsiVector,
 }
 
 impl InterruptRoute {
-    fn new(
-        vm: &Arc<VmFd>,
-        allocator: &mut SystemAllocator,
-        msi_vector: Option<MsiVector>,
-    ) -> Result<Self> {
+    fn new(vm: &Arc<VmFd>, allocator: &mut SystemAllocator, msi_vector: MsiVector) -> Result<Self> {
         let irq_fd = EventFd::new(libc::EFD_NONBLOCK).map_err(VfioPciError::EventFd)?;
         let gsi = allocator.allocate_irq().ok_or(VfioPciError::AllocateGsi)?;
 
@@ -191,7 +188,9 @@ impl VfioPciConfig {
 }
 
 /// Implements the Vfio Pci device, then a pci device is added into vm
+#[allow(dead_code)]
 pub struct VfioPciDevice {
+    vm_fd: Arc<VmFd>,
     device: Arc<VfioDevice>,
     vfio_pci_configuration: VfioPciConfig,
     configuration: PciConfiguration,
@@ -230,6 +229,7 @@ impl VfioPciDevice {
         };
 
         let mut vfio_pci_device = VfioPciDevice {
+            vm_fd: vm_fd.clone(),
             device,
             configuration,
             vfio_pci_configuration,
@@ -244,7 +244,8 @@ impl VfioPciDevice {
         // The MSI vectors will be filled when the guest driver programs the device.
         let max_interrupts = vfio_pci_device.device.max_interrupts();
         for _ in 0..max_interrupts {
-            let mut route = InterruptRoute::new(vm_fd, allocator, None)?;
+            let mut msi_vector: MsiVector = Default::default();
+            let mut route = InterruptRoute::new(vm_fd, allocator, msi_vector)?;
             vfio_pci_device.interrupt_routes.push(route);
         }
 
@@ -297,7 +298,7 @@ impl VfioPciDevice {
             cap, msg_ctl, table, pba
         );
 
-        self.interrupt_capabilities.msix = Some(MsixCap {
+        self.interrupt_capabilities.msix = Some(VfioMsixCap {
             offset: cap.into(),
             msg_ctl,
             table,
@@ -336,7 +337,7 @@ impl VfioPciDevice {
             cap, msg_ctl, msg_address
         );
 
-        self.interrupt_capabilities.msi = Some(MsiCap {
+        self.interrupt_capabilities.msi = Some(VfioMsiCap {
             offset: cap.into(),
             length: msi_len.into(),
             msg_ctl,
@@ -375,7 +376,7 @@ impl VfioPciDevice {
 
     // Check if there is an MSI or MSIX capability structure at a given config
     // space offset.
-    fn msi_capability(&self, offset: u64) -> Option<PciCapabilityID> {
+    fn msi_capability_access(&self, offset: u64) -> Option<PciCapabilityID> {
         if let Some(msi_cap) = self.interrupt_capabilities.msi {
             if offset == u64::from(msi_cap.offset) {
                 return Some(PciCapabilityID::MessageSignalledInterrupts);
@@ -389,6 +390,50 @@ impl VfioPciDevice {
         }
 
         None
+    }
+
+    fn msix_table_access(&self, bar_index: u32, offset: u64) -> bool {
+        if let Some(msix_cap) = self.interrupt_capabilities.msix {
+            let table_offset: u64 = u64::from(msix_cap.table) >> 3;
+            let table_size: u64 = u64::from((msix_cap.msg_ctl & 0x7ff) + 1) * 16;
+            let msix_bar: u32 = msix_cap.table & 0x7;
+
+            return bar_index == msix_bar
+                && offset >= table_offset
+                && offset < table_offset + table_size;
+        }
+
+        false
+    }
+
+    fn msix_table_update(&mut self, offset: u64, data: &[u8]) {
+        let entry_size: u64 = 16;
+
+        let table_offset = offset % entry_size;
+        let table_index: usize = (offset / entry_size) as usize;
+
+        if table_index > self.interrupt_routes.len() - 1 {
+            return;
+        }
+
+        if data.len() != 4 {
+            return;
+        }
+
+        let value: [u8; 4] = [data[0], data[1], data[2], data[3]];
+        let vector_data = u32::from_le_bytes(value);
+        println!(
+            "Update for MSI-X vector #{} offset 0x{:x} data 0x{:x}",
+            table_index, table_offset, vector_data
+        );
+
+        match table_offset {
+            0 => self.interrupt_routes[table_index].msi_vector.msg_addr_lo = vector_data,
+            0x4 => self.interrupt_routes[table_index].msi_vector.msg_addr_hi = vector_data,
+            0x8 => self.interrupt_routes[table_index].msi_vector.msg_data = vector_data,
+            0xc => self.interrupt_routes[table_index].msi_vector.control = vector_data,
+            _ => {}
+        }
     }
 
     fn msi_enabled(&self) -> bool {
@@ -641,7 +686,7 @@ impl PciDevice for VfioPciDevice {
         let base = (reg_idx * 4) as u8;
         let start = u64::from(base) + offset;
 
-        match self.msi_capability(u64::from(base)) {
+        match self.msi_capability_access(u64::from(base)) {
             Some(PciCapabilityID::MessageSignalledInterrupts) => {
                 let old_enabled = self.msi_enabled();
                 self.write_msi_capabilities(offset, data);
@@ -716,7 +761,12 @@ impl PciDevice for VfioPciDevice {
         let addr = base + offset;
         if let Some(region) = self.find_region(addr) {
             let offset = addr - region.start.raw_value();
-            self.device.region_write(region.index, data, offset);
+
+            if self.msix_table_access(region.index, offset) {
+                self.msix_table_update(offset, data);
+            } else {
+                self.device.region_write(region.index, data, offset);
+            }
         }
     }
 }
