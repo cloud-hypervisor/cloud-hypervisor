@@ -88,27 +88,28 @@ fn main() {
                 .takes_value(true)
                 .min_values(1),
         )
+        .arg(
+            Arg::with_name("serial")
+                .long("serial")
+                .help("Control serial port: off|tty|file=/path/to/a/file")
+                .default_value("tty"),
+        )
         .get_matches();
 
     // These .unwrap()s cannot fail as there is a default value defined
     let cpus = cmd_arguments.value_of("cpus").unwrap();
     let memory = cmd_arguments.value_of("memory").unwrap();
+    let rng = cmd_arguments.value_of("rng").unwrap();
+    let serial = cmd_arguments.value_of("serial").unwrap();
 
     let kernel = cmd_arguments
         .value_of("kernel")
         .expect("Missing argument: kernel");
-
     let cmdline = cmd_arguments.value_of("cmdline");
 
     let disks: Option<Vec<&str>> = cmd_arguments.values_of("disk").map(|x| x.collect());
-
     let net: Option<Vec<&str>> = cmd_arguments.values_of("net").map(|x| x.collect());
-
-    // This .unwrap() cannot fail as there is a default value defined
-    let rng = cmd_arguments.value_of("rng").unwrap();
-
     let fs: Option<Vec<&str>> = cmd_arguments.values_of("fs").map(|x| x.collect());
-
     let pmem: Option<Vec<&str>> = cmd_arguments.values_of("pmem").map(|x| x.collect());
 
     let vm_config = match config::VmConfig::parse(config::VmParams {
@@ -121,6 +122,7 @@ fn main() {
         rng,
         fs,
         pmem,
+        serial,
     }) {
         Ok(config) => config,
         Err(e) => {
@@ -757,6 +759,104 @@ mod tests {
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_serial_disable() {
+        test_block!(tb, "", {
+            let (disks, fw_path) = prepare_files();
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", fw_path.as_str()])
+                .args(&["--disk", disks[0], disks[1]])
+                .args(&[
+                    "--net",
+                    "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
+                ])
+                .args(&["--serial", "off"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Test that there is no ttyS0
+            aver_eq!(
+                tb,
+                ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap(),
+                0
+            );
+
+            // Further test that we're MSI only now
+            aver_eq!(
+                tb,
+                ssh_command("cat /proc/interrupts | grep -c 'IO-APIC'")
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap(),
+                0
+            );
+
+            ssh_command("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_serial_file() {
+        test_block!(tb, "", {
+            let serial_path = std::path::Path::new("/tmp/serial-output");
+            let (disks, fw_path) = prepare_files();
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", fw_path.as_str()])
+                .args(&["--disk", disks[0], disks[1]])
+                .args(&[
+                    "--net",
+                    "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
+                ])
+                .args(&[
+                    "--serial",
+                    format!("file={}", serial_path.to_str().unwrap()).as_str(),
+                ])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Test that there is a ttyS0
+            aver_eq!(
+                tb,
+                ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap(),
+                1
+            );
+
+            ssh_command("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Do this check after shutdown of the VM as an easy way to ensure
+            // all writes are flushed to disk
+            let mut f = std::fs::File::open(serial_path).unwrap();
+            let mut buf = String::new();
+            f.read_to_string(&mut buf).unwrap();
+            aver!(tb, buf.contains("cloud login:"));
+            std::fs::remove_file(serial_path).unwrap();
+
+            let _ = child.kill();
+            let _ = child.wait();
+
             Ok(())
         });
     }
