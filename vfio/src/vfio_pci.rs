@@ -718,9 +718,15 @@ impl PciDevice for VfioPciDevice {
                 if !old_enabled && new_enabled {
                     // Switching from disabled to enabled
                     println!("VFIO: Enabling MSIX");
-                // if let Err(e) = self.device.enable_msix(&self.interrupt_routes[0].irq_fd) {
-                //     warn!("Could not enable MSIX: {}", e);
-                // }
+                    let mut event_fds: Vec<EventFd> = Vec::new();
+
+                    for r in &self.interrupt_routes {
+                        event_fds.push(r.irq_fd.try_clone().unwrap());
+                    }
+
+                    if let Err(e) = self.device.enable_msix(event_fds) {
+                        warn!("Could not enable MSIX: {}", e);
+                    }
                 } else if old_enabled && !new_enabled {
                     println!("VFIO: Disabling MSIX");
                     if let Err(e) = self.device.disable_msix() {
