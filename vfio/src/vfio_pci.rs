@@ -650,9 +650,9 @@ impl PciDevice for VfioPciDevice {
                 if !old_enabled && new_enabled {
                     // Switching from disabled to enabled
                     println!("VFIO: Enabling MSI");
-                    if let Err(e) = self.device.enable_msi(&self.interrupt_routes[0].irq_fd) {
-                        warn!("Could not enable MSI: {}", e);
-                    }
+                // if let Err(e) = self.device.enable_msi(&self.interrupt_routes[0].irq_fd) {
+                //     warn!("Could not enable MSI: {}", e);
+                // }
                 } else if old_enabled && !new_enabled {
                     // Switching from enabled to disabled
                     println!("VFIO: Disabling MSI");
@@ -673,9 +673,9 @@ impl PciDevice for VfioPciDevice {
                 if !old_enabled && new_enabled {
                     // Switching from disabled to enabled
                     println!("VFIO: Enabling MSIX");
-                    if let Err(e) = self.device.enable_msix(&self.interrupt_routes[0].irq_fd) {
-                        warn!("Could not enable MSIX: {}", e);
-                    }
+                // if let Err(e) = self.device.enable_msix(&self.interrupt_routes[0].irq_fd) {
+                //     warn!("Could not enable MSIX: {}", e);
+                // }
                 } else if old_enabled && !new_enabled {
                     println!("VFIO: Disabling MSIX");
                     if let Err(e) = self.device.disable_msix() {

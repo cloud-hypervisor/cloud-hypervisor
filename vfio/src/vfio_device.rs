@@ -595,7 +595,7 @@ impl VfioDevice {
         }
     }
 
-    pub fn enable_irq(&self, irq_index: u32, fd: &EventFd) -> Result<()> {
+    pub fn enable_irq(&self, irq_index: u32, event_fds: Vec<EventFd>) -> Result<()> {
         let irq = self
             .irqs
             .get(&irq_index)
@@ -604,8 +604,9 @@ impl VfioDevice {
             return Err(VfioError::VfioDeviceSetIrq);
         }
 
-        let mut irq_set = vec_with_array_field::<vfio_irq_set, u32>(1);
-        irq_set[0].argsz = mem::size_of::<vfio_irq_set>() as u32 + 4;
+        let mut irq_set = vec_with_array_field::<vfio_irq_set, u32>(event_fds.len());
+        irq_set[0].argsz = mem::size_of::<vfio_irq_set>() as u32
+            + (event_fds.len() * mem::size_of::<u32>()) as u32;
         irq_set[0].flags = VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER;
         irq_set[0].index = irq_index;
         irq_set[0].start = 0;
@@ -613,11 +614,20 @@ impl VfioDevice {
 
         {
             // irq_set.data could be none, bool or fd according to flags, so irq_set.data
-            // is u8 default, here irq_set.data is fd as u32, so 4 default u8 are combined
-            // together as u32. It is safe as enough space is reserved through
-            // vec_with_array_field(u32)<1>.
-            let fds = unsafe { irq_set[0].data.as_mut_slice(4) };
-            LittleEndian::write_u32(fds, fd.as_raw_fd() as u32);
+            // is u8 default, here irq_set.data is a vector of fds as u32, so 4 default u8
+            // are combined together as u32 for each fd.
+            // It is safe as enough space is reserved through
+            // vec_with_array_field(u32)<event_fds.len()>.
+            let fds = unsafe {
+                irq_set[0]
+                    .data
+                    .as_mut_slice(event_fds.len() * mem::size_of::<u32>())
+            };
+            for (index, event_fd) in event_fds.iter().enumerate() {
+                let fds_offset = index * mem::size_of::<u32>();
+                let fd = &mut fds[fds_offset..fds_offset + mem::size_of::<u32>()];
+                LittleEndian::write_u32(fd, event_fd.as_raw_fd() as u32);
+            }
         }
 
         // Safe as we are the owner of self and irq_set which are valid value
@@ -654,24 +664,24 @@ impl VfioDevice {
         Ok(())
     }
 
-    pub fn enable_intx(&self, fd: &EventFd) -> Result<()> {
-        self.enable_irq(VFIO_PCI_INTX_IRQ_INDEX, fd)
+    pub fn enable_intx(&self, fds: Vec<EventFd>) -> Result<()> {
+        self.enable_irq(VFIO_PCI_INTX_IRQ_INDEX, fds)
     }
 
     pub fn disable_intx(&self) -> Result<()> {
         self.disable_irq(VFIO_PCI_INTX_IRQ_INDEX)
     }
 
-    pub fn enable_msi(&self, fd: &EventFd) -> Result<()> {
-        self.enable_irq(VFIO_PCI_MSI_IRQ_INDEX, fd)
+    pub fn enable_msi(&self, fds: Vec<EventFd>) -> Result<()> {
+        self.enable_irq(VFIO_PCI_MSI_IRQ_INDEX, fds)
     }
 
     pub fn disable_msi(&self) -> Result<()> {
         self.disable_irq(VFIO_PCI_MSI_IRQ_INDEX)
     }
 
-    pub fn enable_msix(&self, fd: &EventFd) -> Result<()> {
-        self.enable_irq(VFIO_PCI_MSIX_IRQ_INDEX, fd)
+    pub fn enable_msix(&self, fds: Vec<EventFd>) -> Result<()> {
+        self.enable_irq(VFIO_PCI_MSIX_IRQ_INDEX, fds)
     }
 
     pub fn disable_msix(&self) -> Result<()> {
