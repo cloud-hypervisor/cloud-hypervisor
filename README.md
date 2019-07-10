@@ -115,7 +115,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel ./hypervisor-fw \
 	--disk ./clear-29160-kvm.img \
 	--cpus 4 \
-	--memory 1024M \
+	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
 	--rng
 $ popd
@@ -170,7 +170,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--disk ./clear-29160-kvm.img \
 	--cmdline "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
 	--cpus 4 \
-	--memory 1024M \
+	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
 	--rng
 ```
