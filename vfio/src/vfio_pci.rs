@@ -252,6 +252,16 @@ impl VfioPciDevice {
         Ok(vfio_pci_device)
     }
 
+    fn irq_fds(&self) -> Result<Vec<EventFd>> {
+        let mut irq_fds: Vec<EventFd> = Vec::new();
+
+        for r in &self.interrupt_routes {
+            irq_fds.push(r.irq_fd.try_clone().map_err(VfioPciError::EventFd)?);
+        }
+
+        Ok(irq_fds)
+    }
+
     fn write_msi_capabilities(&mut self, _offset: u64, _data: &[u8]) {}
     fn write_msix_capabilities(&mut self, offset: u64, data: &[u8]) {
         let len = data.len();
@@ -695,9 +705,14 @@ impl PciDevice for VfioPciDevice {
                 if !old_enabled && new_enabled {
                     // Switching from disabled to enabled
                     println!("VFIO: Enabling MSI");
-                // if let Err(e) = self.device.enable_msi(&self.interrupt_routes[0].irq_fd) {
-                //     warn!("Could not enable MSI: {}", e);
-                // }
+                    match self.irq_fds() {
+                        Ok(fds) => {
+                            if let Err(e) = self.device.enable_msi(fds) {
+                                warn!("Could not enable MSI: {}", e);
+                            }
+                        }
+                        Err(e) => warn!("Could not get IRQ fds: {}", e),
+                    }
                 } else if old_enabled && !new_enabled {
                     // Switching from enabled to disabled
                     println!("VFIO: Disabling MSI");
@@ -718,14 +733,14 @@ impl PciDevice for VfioPciDevice {
                 if !old_enabled && new_enabled {
                     // Switching from disabled to enabled
                     println!("VFIO: Enabling MSIX");
-                    let mut event_fds: Vec<EventFd> = Vec::new();
 
-                    for r in &self.interrupt_routes {
-                        event_fds.push(r.irq_fd.try_clone().unwrap());
-                    }
-
-                    if let Err(e) = self.device.enable_msix(event_fds) {
-                        warn!("Could not enable MSIX: {}", e);
+                    match self.irq_fds() {
+                        Ok(fds) => {
+                            if let Err(e) = self.device.enable_msix(fds) {
+                                warn!("Could not enable MSIX: {}", e);
+                            }
+                        }
+                        Err(e) => warn!("Could not get IRQ fds: {}", e),
                     }
                 } else if old_enabled && !new_enabled {
                     println!("VFIO: Disabling MSIX");
