@@ -10,6 +10,7 @@
 use vm_memory::{GuestAddress, GuestUsize};
 
 use crate::address::AddressAllocator;
+use crate::gsi::{GsiAllocator, GsiApic};
 
 use libc::{sysconf, _SC_PAGESIZE};
 
@@ -39,7 +40,7 @@ fn pagesize() -> usize {
 pub struct SystemAllocator {
     io_address_space: AddressAllocator,
     mmio_address_space: AddressAllocator,
-    next_irq: u32,
+    gsi_allocator: GsiAllocator,
 }
 
 impl SystemAllocator {
@@ -56,23 +57,23 @@ impl SystemAllocator {
         io_size: GuestUsize,
         mmio_base: GuestAddress,
         mmio_size: GuestUsize,
-        first_irq: u32,
+        apics: Vec<GsiApic>,
     ) -> Option<Self> {
         Some(SystemAllocator {
             io_address_space: AddressAllocator::new(io_base, io_size)?,
             mmio_address_space: AddressAllocator::new(mmio_base, mmio_size)?,
-            next_irq: first_irq,
+            gsi_allocator: GsiAllocator::new(apics),
         })
     }
 
     /// Reserves the next available system irq number.
     pub fn allocate_irq(&mut self) -> Option<u32> {
-        if let Some(irq_num) = self.next_irq.checked_add(1) {
-            self.next_irq = irq_num;
-            Some(irq_num - 1)
-        } else {
-            None
-        }
+        self.gsi_allocator.allocate_irq().ok()
+    }
+
+    /// Reserves the next available GSI.
+    pub fn allocate_gsi(&mut self) -> Option<u32> {
+        self.gsi_allocator.allocate_gsi().ok()
     }
 
     /// Reserves a section of `size` bytes of IO address space.

@@ -46,7 +46,7 @@ use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
 use vfio::{VfioDevice, VfioPciDevice, VfioPciError};
-use vm_allocator::SystemAllocator;
+use vm_allocator::{GsiApic, SystemAllocator};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     Address, Bytes, Error as MmapError, GuestAddress, GuestMemory, GuestMemoryMmap,
@@ -1090,13 +1090,18 @@ impl<'a> Vm<'a> {
 
         CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
 
+        let ioapic = GsiApic::new(
+            X86_64_IRQ_BASE,
+            ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
+        );
+
         // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
         let mut allocator = SystemAllocator::new(
             GuestAddress(0),
             1 << 16 as GuestUsize,
             GuestAddress(0),
             1 << 36 as GuestUsize,
-            X86_64_IRQ_BASE,
+            vec![ioapic],
         )
         .ok_or(Error::CreateSystemAllocator)?;
 
