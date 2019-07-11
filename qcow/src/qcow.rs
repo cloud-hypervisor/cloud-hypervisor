@@ -1065,11 +1065,7 @@ impl QcowFile {
     fn get_new_cluster(&mut self) -> std::io::Result<u64> {
         // First use a pre allocated cluster if one is available.
         if let Some(free_cluster) = self.avail_clusters.pop() {
-            let cluster_size = self.raw_file.cluster_size() as usize;
-            self.raw_file
-                .file_mut()
-                .seek(SeekFrom::Start(free_cluster))?;
-            self.raw_file.file_mut().write_zeroes(cluster_size)?;
+            self.raw_file.zero_cluster(free_cluster)?;
             return Ok(free_cluster);
         }
 

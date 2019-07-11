@@ -7,6 +7,7 @@ use std::io::{self, BufWriter, Seek, SeekFrom};
 use std::mem::size_of;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use vmm_sys_util::WriteZeroes;
 
 /// A qcow file. Allows reading/writing clusters and appending clusters.
 #[derive(Debug)]
@@ -132,6 +133,14 @@ impl QcowRawFile {
     /// Returns the offset of `address` within a cluster.
     pub fn cluster_offset(&self, address: u64) -> u64 {
         address & self.cluster_mask
+    }
+
+    /// Zeros out a cluster in the file.
+    pub fn zero_cluster(&mut self, address: u64) -> io::Result<()> {
+        let cluster_size = self.cluster_size as usize;
+        self.file.seek(SeekFrom::Start(address))?;
+        self.file.write_zeroes(cluster_size)?;
+        Ok(())
     }
 }
 
