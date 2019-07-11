@@ -54,6 +54,7 @@ pub enum VfioPciError {
     NewVfioPciDevice,
     MapRegionHost(io::Error),
     MapRegionGuest(io::Error),
+    SetGsiRouting(io::Error),
 }
 pub type Result<T> = std::result::Result<T, VfioPciError>;
 
@@ -72,6 +73,7 @@ impl fmt::Display for VfioPciError {
             VfioPciError::MapRegionGuest(e) => {
                 write!(f, "failed to map VFIO PCI region into guest: {}", e)
             }
+            VfioPciError::SetGsiRouting(e) => write!(f, "failed to set GSI routes for KVM: {}", e),
         }
     }
 }
@@ -266,7 +268,7 @@ impl VfioPciDevice {
         Ok(irq_fds)
     }
 
-    fn kvm_routes(&self) -> Result<&kvm_irq_routing> {
+    fn kvm_routes(&self) -> Result<()> {
         println!("Building KVM routes");
         let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
         for (idx, route) in self.interrupt_routes.iter().enumerate() {
@@ -308,7 +310,9 @@ impl VfioPciDevice {
             println!("kvm_irq_routing gsi {}, type {}", item.gsi, item.type_);
         }
 
-        Ok(irq_routing)
+        self.vm_fd
+            .set_gsi_routing(irq_routing)
+            .map_err(VfioPciError::SetGsiRouting)
     }
 
     fn write_msi_capabilities(&mut self, _offset: u64, _data: &[u8]) {}
@@ -756,9 +760,8 @@ impl PciDevice for VfioPciDevice {
                     println!("VFIO: Enabling MSI");
                     match self.irq_fds() {
                         Ok(fds) => {
-                            match self.kvm_routes() {
-                                Ok(routes) => self.vm_fd.set_gsi_routing(routes).unwrap(),
-                                Err(e) => warn!("Could not Set KVM routes: {}", e),
+                            if let Err(e) = self.kvm_routes() {
+                                warn!("Could not Set KVM routes: {}", e);
                             }
 
                             if let Err(e) = self.device.enable_msi(fds) {
@@ -790,9 +793,8 @@ impl PciDevice for VfioPciDevice {
 
                     match self.irq_fds() {
                         Ok(fds) => {
-                            match self.kvm_routes() {
-                                Ok(routes) => self.vm_fd.set_gsi_routing(routes).unwrap(),
-                                Err(e) => warn!("Could not Set KVM routes: {}", e),
+                            if let Err(e) = self.kvm_routes() {
+                                warn!("Could not Set KVM routes: {}", e);
                             }
 
                             if let Err(e) = self.device.enable_msix(fds) {
