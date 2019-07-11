@@ -14,7 +14,9 @@ extern crate libc;
 extern crate vm_memory;
 
 mod address;
+mod gsi;
 mod system;
 
 pub use crate::address::AddressAllocator;
+pub use crate::gsi::{GsiAllocator, GsiApic};
 pub use crate::system::SystemAllocator;
