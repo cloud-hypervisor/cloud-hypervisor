@@ -9,7 +9,7 @@ vm-allocator = { path = "../vm-allocator" }
 byteorder = "*"
 devices = { path = "../devices" }
 kvm-bindings = "0.1"
-kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
+kvm-ioctls = { git = "https://github.com/sboeuf/kvm-ioctls", branch = "add_gsi_routing" }
 libc = ">=0.2.39"
 log = "*"
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
