@@ -10,8 +10,7 @@ extern crate vm_memory;
 
 use devices::BusDevice;
 use kvm_bindings::{
-    kvm_irq_routing, kvm_irq_routing_entry, kvm_irq_routing_entry__bindgen_ty_1,
-    kvm_userspace_memory_region,
+    kvm_irq_routing, kvm_irq_routing_entry, kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI,
 };
 use kvm_ioctls::*;
 use pci::{
@@ -271,18 +270,23 @@ impl VfioPciDevice {
     fn kvm_routes(&self) -> Result<()> {
         println!("Building KVM routes");
         let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
-        for (idx, route) in self.interrupt_routes.iter().enumerate() {
+        for route in self.interrupt_routes.iter() {
+            // Do not add masked vectors to the GSI mapping
+            if route.msi_vector.control & 0x1 == 0x1 {
+                continue;
+            }
+
             let mut entry = kvm_irq_routing_entry {
                 gsi: route.gsi,
-                type_: 2,
-                flags: 0,
-                pad: 0,
-                u: kvm_irq_routing_entry__bindgen_ty_1::default(),
+                type_: KVM_IRQ_ROUTING_MSI,
+                ..Default::default()
             };
 
-            unsafe { entry.u.msi.address_lo = 0xfee0_0000 };
-            unsafe { entry.u.msi.address_hi = 0x0 };
-            unsafe { entry.u.msi.data = (0x4025 + idx) as u32 };
+            unsafe {
+                entry.u.msi.address_lo = route.msi_vector.msg_addr_lo;
+                entry.u.msi.address_hi = route.msi_vector.msg_addr_hi;
+                entry.u.msi.data = route.msi_vector.msg_data;
+            };
 
             entry_vec.push(entry);
         }
@@ -305,10 +309,6 @@ impl VfioPciDevice {
             entries.copy_from_slice(&entry_vec);
         }
         irq_routing.nr = entry_vec.len() as u32;
-
-        for item in unsafe { irq_routing.entries.as_slice(entry_vec.len()) }.iter() {
-            println!("kvm_irq_routing gsi {}, type {}", item.gsi, item.type_);
-        }
 
         self.vm_fd
             .set_gsi_routing(irq_routing)
@@ -497,6 +497,12 @@ impl VfioPciDevice {
             0xc => self.interrupt_routes[table_index].msi_vector.control = vector_data,
             _ => {}
         }
+
+        if self.msix_enabled() && !self.msix_function_mask() {
+            if let Err(e) = self.kvm_routes() {
+                warn!("Could not Set KVM routes: {}", e);
+            }
+        }
     }
 
     fn msi_enabled(&self) -> bool {
@@ -512,6 +518,16 @@ impl VfioPciDevice {
     fn msix_enabled(&self) -> bool {
         if let Some(msix_cap) = self.interrupt_capabilities.msix {
             if msix_cap.msg_ctl & 0x8000 == 0x8000 {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn msix_function_mask(&self) -> bool {
+        if let Some(msix_cap) = self.interrupt_capabilities.msix {
+            if msix_cap.msg_ctl & 0x4000 == 0x4000 {
                 return true;
             }
         }
@@ -793,10 +809,6 @@ impl PciDevice for VfioPciDevice {
 
                     match self.irq_fds() {
                         Ok(fds) => {
-                            if let Err(e) = self.kvm_routes() {
-                                warn!("Could not Set KVM routes: {}", e);
-                            }
-
                             if let Err(e) = self.device.enable_msix(fds) {
                                 warn!("Could not enable MSIX: {}", e);
                             }
@@ -815,6 +827,8 @@ impl PciDevice for VfioPciDevice {
 
         self.device
             .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, start);
+
+        println!("FUNCTION MASK: {}", self.msix_function_mask());
     }
 
     fn read_config_register(&self, reg_idx: usize) -> u32 {
