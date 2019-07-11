@@ -134,7 +134,7 @@ struct InterruptRoute {
 impl InterruptRoute {
     fn new(vm: &Arc<VmFd>, allocator: &mut SystemAllocator, msi_vector: MsiVector) -> Result<Self> {
         let irq_fd = EventFd::new(libc::EFD_NONBLOCK).map_err(VfioPciError::EventFd)?;
-        let gsi = allocator.allocate_irq().ok_or(VfioPciError::AllocateGsi)?;
+        let gsi = allocator.allocate_gsi().ok_or(VfioPciError::AllocateGsi)?;
 
         vm.register_irqfd(irq_fd.as_raw_fd(), gsi)
             .map_err(VfioPciError::IrqFd)?;
