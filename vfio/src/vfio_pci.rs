@@ -249,8 +249,8 @@ impl VfioPciDevice {
         // The MSI vectors will be filled when the guest driver programs the device.
         let max_interrupts = vfio_pci_device.device.max_interrupts();
         for _ in 0..max_interrupts {
-            let mut msi_vector: MsiVector = Default::default();
-            let mut route = InterruptRoute::new(vm_fd, allocator, msi_vector)?;
+            let msi_vector: MsiVector = Default::default();
+            let route = InterruptRoute::new(vm_fd, allocator, msi_vector)?;
             vfio_pci_device.interrupt_routes.push(route);
         }
 
