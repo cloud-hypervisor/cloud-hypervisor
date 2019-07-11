@@ -496,7 +496,7 @@ impl DeviceManager {
         vm_cfg: &VmConfig,
         msi_capable: bool,
         userspace_ioapic: bool,
-        mem_slots: u32,
+        _mem_slots: u32,
     ) -> DeviceManagerResult<Self> {
         let io_bus = devices::Bus::new();
         let mut mmio_bus = devices::Bus::new();
@@ -740,9 +740,9 @@ impl DeviceManager {
                     .allocate_bars(allocator)
                     .map_err(DeviceManagerError::AllocateBars)?;
 
-                vfio_pci_device
-                    .map_mmio_regions(vm_fd, mem_slots)
-                    .map_err(DeviceManagerError::VfioMapRegion)?;
+                // vfio_pci_device
+                //     .map_mmio_regions(vm_fd, mem_slots)
+                //     .map_err(DeviceManagerError::VfioMapRegion)?;
 
                 let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
 
