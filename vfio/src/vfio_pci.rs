@@ -9,7 +9,10 @@ extern crate vm_allocator;
 extern crate vm_memory;
 
 use devices::BusDevice;
-use kvm_bindings::kvm_userspace_memory_region;
+use kvm_bindings::{
+    kvm_irq_routing, kvm_irq_routing_entry, kvm_irq_routing_entry__bindgen_ty_1,
+    kvm_userspace_memory_region,
+};
 use kvm_ioctls::*;
 use pci::{
     PciBarConfiguration, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice,
@@ -17,6 +20,7 @@ use pci::{
 };
 use std::fmt;
 use std::io;
+use std::mem;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::Arc;
@@ -260,6 +264,51 @@ impl VfioPciDevice {
         }
 
         Ok(irq_fds)
+    }
+
+    fn kvm_routes(&self) -> Result<&kvm_irq_routing> {
+        println!("Building KVM routes");
+        let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
+        for (idx, route) in self.interrupt_routes.iter().enumerate() {
+            let mut entry = kvm_irq_routing_entry {
+                gsi: route.gsi,
+                type_: 2,
+                flags: 0,
+                pad: 0,
+                u: kvm_irq_routing_entry__bindgen_ty_1::default(),
+            };
+
+            unsafe { entry.u.msi.address_lo = 0xfee0_0000 };
+            unsafe { entry.u.msi.address_hi = 0x0 };
+            unsafe { entry.u.msi.data = (0x4025 + idx) as u32 };
+
+            entry_vec.push(entry);
+        }
+
+        let vec_size_bytes = mem::size_of::<kvm_irq_routing>()
+            + (entry_vec.len() * mem::size_of::<kvm_irq_routing_entry>());
+        let vec: Vec<u8> = Vec::with_capacity(vec_size_bytes);
+        #[allow(clippy::cast_ptr_alignment)]
+        let irq_routing: &mut kvm_irq_routing = unsafe {
+            // Converting the vector's memory to a struct is unsafe.  Carefully using the read-only
+            // vector to size and set the members ensures no out-of-bounds errors below.
+            &mut *(vec.as_ptr() as *mut kvm_irq_routing)
+        };
+
+        unsafe {
+            // Mapping the unsized array to a slice is unsafe because the length isn't known.
+            // Providing the length used to create the struct guarantees the entire slice is valid.
+            let entries: &mut [kvm_irq_routing_entry] =
+                irq_routing.entries.as_mut_slice(entry_vec.len());
+            entries.copy_from_slice(&entry_vec);
+        }
+        irq_routing.nr = entry_vec.len() as u32;
+
+        for item in unsafe { irq_routing.entries.as_slice(entry_vec.len()) }.iter() {
+            println!("kvm_irq_routing gsi {}, type {}", item.gsi, item.type_);
+        }
+
+        Ok(irq_routing)
     }
 
     fn write_msi_capabilities(&mut self, _offset: u64, _data: &[u8]) {}
@@ -707,6 +756,11 @@ impl PciDevice for VfioPciDevice {
                     println!("VFIO: Enabling MSI");
                     match self.irq_fds() {
                         Ok(fds) => {
+                            match self.kvm_routes() {
+                                Ok(routes) => self.vm_fd.set_gsi_routing(routes).unwrap(),
+                                Err(e) => warn!("Could not Set KVM routes: {}", e),
+                            }
+
                             if let Err(e) = self.device.enable_msi(fds) {
                                 warn!("Could not enable MSI: {}", e);
                             }
@@ -736,6 +790,11 @@ impl PciDevice for VfioPciDevice {
 
                     match self.irq_fds() {
                         Ok(fds) => {
+                            match self.kvm_routes() {
+                                Ok(routes) => self.vm_fd.set_gsi_routing(routes).unwrap(),
+                                Err(e) => warn!("Could not Set KVM routes: {}", e),
+                            }
+
                             if let Err(e) = self.device.enable_msix(fds) {
                                 warn!("Could not enable MSIX: {}", e);
                             }
