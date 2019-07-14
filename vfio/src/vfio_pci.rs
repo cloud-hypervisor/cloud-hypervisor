@@ -11,7 +11,9 @@ use crate::vec_with_array_field;
 use crate::vfio_device::VfioDevice;
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
-use kvm_bindings::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
+use kvm_bindings::{
+    kvm_irq_routing, kvm_irq_routing_entry, kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI,
+};
 use kvm_ioctls::*;
 use pci::{
     MsiCap, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType, PciCapabilityID,
@@ -19,6 +21,7 @@ use pci::{
     MSIX_TABLE_ENTRY_SIZE,
 };
 use std::os::unix::io::AsRawFd;
+use std::ptr::null_mut;
 use std::sync::Arc;
 use std::{fmt, io};
 use vfio_bindings::bindings::vfio::*;
@@ -32,6 +35,7 @@ pub enum VfioPciError {
     EventFd(io::Error),
     IrqFd(io::Error),
     NewVfioPciDevice,
+    MapRegionGuest(io::Error),
     SetGsiRouting(io::Error),
 }
 pub type Result<T> = std::result::Result<T, VfioPciError>;
@@ -43,6 +47,9 @@ impl fmt::Display for VfioPciError {
             VfioPciError::EventFd(e) => write!(f, "failed to create eventfd: {}", e),
             VfioPciError::IrqFd(e) => write!(f, "failed to register irqfd: {}", e),
             VfioPciError::NewVfioPciDevice => write!(f, "failed to create VFIO PCI device"),
+            VfioPciError::MapRegionGuest(e) => {
+                write!(f, "failed to map VFIO PCI region into guest: {}", e)
+            }
             VfioPciError::SetGsiRouting(e) => write!(f, "failed to set GSI routes for KVM: {}", e),
         }
     }
@@ -577,6 +584,74 @@ impl VfioPciDevice {
             }
         }
         None
+    }
+
+    /// Map MMIO regions into the guest, and avoid VM exits when the guest tries
+    /// to reach those regions.
+    pub fn map_mmio_regions(&mut self, vm: &Arc<VmFd>, mem_slots: u32) -> Result<()> {
+        let mut slot = mem_slots;
+        let fd = self.device.as_raw_fd();
+
+        for region in self.mmio_regions.iter() {
+            // We want to skip the mapping of the BAR containing the MSI-X
+            // table even if it is mappable. The reason is we need to trap
+            // any access to the MSI-X table and update the GSI routing
+            // accordingly.
+            if let Some(msix) = &self.interrupt.msix {
+                if region.index == msix.cap.table_bir() || region.index == msix.cap.pba_bir() {
+                    continue;
+                }
+            }
+
+            let region_flags = self.device.get_region_flags(region.index);
+            if region_flags & VFIO_REGION_INFO_FLAG_MMAP != 0 {
+                let mut prot = 0;
+                if region_flags & VFIO_REGION_INFO_FLAG_READ != 0 {
+                    prot |= libc::PROT_READ;
+                }
+                if region_flags & VFIO_REGION_INFO_FLAG_WRITE != 0 {
+                    prot |= libc::PROT_WRITE;
+                }
+                let (mmap_offset, mmap_size) = self.device.get_region_mmap(region.index);
+                let offset = self.device.get_region_offset(region.index) + mmap_offset;
+
+                let host_addr = unsafe {
+                    libc::mmap(
+                        null_mut(),
+                        mmap_size as usize,
+                        prot,
+                        libc::MAP_SHARED,
+                        fd,
+                        offset as libc::off_t,
+                    )
+                };
+
+                if host_addr == libc::MAP_FAILED {
+                    error!(
+                        "Could not mmap regions, error:{}",
+                        io::Error::last_os_error()
+                    );
+                    continue;
+                }
+
+                let mem_region = kvm_userspace_memory_region {
+                    slot,
+                    guest_phys_addr: region.start.raw_value() + mmap_offset,
+                    memory_size: mmap_size as u64,
+                    userspace_addr: host_addr as u64,
+                    flags: 0,
+                };
+
+                // Safe because the guest regions are guaranteed not to overlap.
+                unsafe {
+                    vm.set_user_memory_region(mem_region)
+                        .map_err(VfioPciError::MapRegionGuest)?;
+                }
+                slot += 1;
+            }
+        }
+
+        Ok(())
     }
 }
 
