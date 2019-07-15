@@ -8,11 +8,13 @@ extern crate pci;
 extern crate vm_allocator;
 
 use crate::vfio_device::VfioDevice;
+use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use kvm_ioctls::*;
 use pci::{
-    PciBarConfiguration, PciBarRegionType, PciClassCode, PciConfiguration, PciDevice,
-    PciDeviceError, PciHeaderType, PciSubclass,
+    MsiCap, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType, PciCapabilityID,
+    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
+    MSIX_TABLE_ENTRY_SIZE,
 };
 use std::sync::Arc;
 use vfio_bindings::bindings::vfio::*;
@@ -27,6 +29,158 @@ enum PciVfioSubclass {
 impl PciSubclass for PciVfioSubclass {
     fn get_register_value(&self) -> u8 {
         *self as u8
+    }
+}
+
+enum InterruptUpdateAction {
+    EnableMsi,
+    DisableMsi,
+    EnableMsix,
+    DisableMsix,
+}
+
+#[derive(Copy, Clone)]
+struct VfioMsi {
+    cap: MsiCap,
+    cap_offset: u32,
+}
+
+impl VfioMsi {
+    fn update(&mut self, offset: u64, data: &[u8]) -> Option<InterruptUpdateAction> {
+        let old_enabled = self.cap.enabled();
+
+        self.cap.update(offset, data);
+
+        let new_enabled = self.cap.enabled();
+
+        if !old_enabled && new_enabled {
+            return Some(InterruptUpdateAction::EnableMsi);
+        }
+
+        if old_enabled && !new_enabled {
+            return Some(InterruptUpdateAction::DisableMsi);
+        }
+
+        None
+    }
+}
+
+struct VfioMsix {
+    bar: MsixConfig,
+    cap: MsixCap,
+    cap_offset: u32,
+}
+
+impl VfioMsix {
+    fn update(&mut self, offset: u64, data: &[u8]) -> Option<InterruptUpdateAction> {
+        let old_enabled = self.cap.enabled();
+
+        // Update "Message Control" word
+        if offset == 2 && data.len() == 2 {
+            self.cap.set_msg_ctl(LittleEndian::read_u16(data));
+        }
+
+        let new_enabled = self.cap.enabled();
+
+        if !old_enabled && new_enabled {
+            return Some(InterruptUpdateAction::EnableMsix);
+        }
+
+        if old_enabled && !new_enabled {
+            return Some(InterruptUpdateAction::DisableMsix);
+        }
+
+        None
+    }
+
+    fn table_accessed(&self, bar_index: u32, offset: u64) -> bool {
+        let table_offset: u64 = u64::from(self.cap.table_offset());
+        let table_size: u64 = u64::from(self.cap.table_size()) * (MSIX_TABLE_ENTRY_SIZE as u64);
+        let table_bir: u32 = self.cap.table_bir();
+
+        bar_index == table_bir && offset >= table_offset && offset < table_offset + table_size
+    }
+}
+
+struct Interrupt {
+    msi: Option<VfioMsi>,
+    msix: Option<VfioMsix>,
+}
+
+impl Interrupt {
+    fn update_msi(&mut self, offset: u64, data: &[u8]) -> Option<InterruptUpdateAction> {
+        if let Some(ref mut msi) = &mut self.msi {
+            let action = msi.update(offset, data);
+            return action;
+        }
+
+        None
+    }
+
+    fn update_msix(&mut self, offset: u64, data: &[u8]) -> Option<InterruptUpdateAction> {
+        if let Some(ref mut msix) = &mut self.msix {
+            let action = msix.update(offset, data);
+            return action;
+        }
+
+        None
+    }
+
+    fn accessed(&self, offset: u64) -> Option<(PciCapabilityID, u64)> {
+        if let Some(msi) = &self.msi {
+            if offset >= u64::from(msi.cap_offset)
+                && offset < u64::from(msi.cap_offset) + msi.cap.size()
+            {
+                return Some((
+                    PciCapabilityID::MessageSignalledInterrupts,
+                    u64::from(msi.cap_offset),
+                ));
+            }
+        }
+
+        if let Some(msix) = &self.msix {
+            if offset == u64::from(msix.cap_offset) {
+                return Some((PciCapabilityID::MSIX, u64::from(msix.cap_offset)));
+            }
+        }
+
+        None
+    }
+
+    fn msix_enabled(&self) -> bool {
+        if let Some(msix) = &self.msix {
+            return msix.cap.enabled();
+        }
+
+        false
+    }
+
+    fn msix_function_masked(&self) -> bool {
+        if let Some(msix) = &self.msix {
+            return msix.cap.masked();
+        }
+
+        false
+    }
+
+    fn msix_table_accessed(&self, bar_index: u32, offset: u64) -> bool {
+        if let Some(msix) = &self.msix {
+            return msix.table_accessed(bar_index, offset);
+        }
+
+        false
+    }
+
+    fn msix_write_table(&mut self, offset: u64, data: &[u8]) {
+        if let Some(ref mut msix) = &mut self.msix {
+            msix.bar.write_table(offset, data)
+        }
+    }
+
+    fn msix_read_table(&self, offset: u64, data: &mut [u8]) {
+        if let Some(msix) = &self.msix {
+            msix.bar.read_table(offset, data)
+        }
     }
 }
 
@@ -89,6 +243,7 @@ pub struct VfioPciDevice {
     vfio_pci_configuration: VfioPciConfig,
     configuration: PciConfiguration,
     mmio_regions: Vec<MmioRegion>,
+    interrupt: Interrupt,
 }
 
 impl VfioPciDevice {
@@ -121,9 +276,90 @@ impl VfioPciDevice {
             configuration,
             vfio_pci_configuration,
             mmio_regions: Vec::new(),
+            interrupt: Interrupt {
+                msi: None,
+                msix: None,
+            },
         };
 
+        vfio_pci_device.parse_capabilities();
+
         Ok(vfio_pci_device)
+    }
+
+    fn parse_msix_capabilities(&mut self, cap: u8) {
+        let msg_ctl = self
+            .vfio_pci_configuration
+            .read_config_word((cap + 2).into());
+
+        let table = self
+            .vfio_pci_configuration
+            .read_config_dword((cap + 4).into());
+
+        let pba = self
+            .vfio_pci_configuration
+            .read_config_dword((cap + 8).into());
+
+        let msix_cap = MsixCap {
+            msg_ctl,
+            table,
+            pba,
+        };
+        let msix_config = MsixConfig::new(msix_cap.table_size());
+
+        self.interrupt.msix = Some(VfioMsix {
+            bar: msix_config,
+            cap: msix_cap,
+            cap_offset: cap.into(),
+        });
+    }
+
+    fn parse_msi_capabilities(&mut self, cap: u8) {
+        let msg_ctl = self
+            .vfio_pci_configuration
+            .read_config_word((cap + 2).into());
+
+        self.interrupt.msi = Some(VfioMsi {
+            cap: MsiCap {
+                msg_ctl,
+                ..Default::default()
+            },
+            cap_offset: cap.into(),
+        });
+    }
+
+    fn parse_capabilities(&mut self) {
+        let mut cap_next = self
+            .vfio_pci_configuration
+            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
+
+        while cap_next != 0 {
+            let cap_id = self
+                .vfio_pci_configuration
+                .read_config_byte(cap_next.into());
+
+            match PciCapabilityID::from(cap_id) {
+                PciCapabilityID::MessageSignalledInterrupts => {
+                    self.parse_msi_capabilities(cap_next);
+                }
+                PciCapabilityID::MSIX => {
+                    self.parse_msix_capabilities(cap_next);
+                }
+                _ => {}
+            };
+
+            cap_next = self
+                .vfio_pci_configuration
+                .read_config_byte((cap_next + 1).into());
+        }
+    }
+
+    fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) {
+        self.interrupt.update_msix(offset, data);
+    }
+
+    fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) {
+        self.interrupt.update_msix(offset, data);
     }
 
     fn find_region(&self, addr: u64) -> Option<MmioRegion> {
@@ -140,6 +376,14 @@ impl VfioPciDevice {
 
 impl Drop for VfioPciDevice {
     fn drop(&mut self) {
+        if self.interrupt.msi.is_some() && self.device.disable_msi().is_err() {
+            error!("Could not disable MSI");
+        }
+
+        if self.interrupt.msix.is_some() && self.device.disable_msix().is_err() {
+            error!("Could not disable MSI-X");
+        }
+
         if self.device.unset_dma_map().is_err() {
             error!("failed to remove all guest memory regions from iommu table");
         }
@@ -322,6 +566,23 @@ impl PciDevice for VfioPciDevice {
         let reg = (reg_idx * PCI_CONFIG_REGISTER_SIZE) as u64;
         self.device
             .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, reg + offset);
+
+        // If the MSI or MSI-X capabilities are accessed, we need to
+        // update our local cache accordingly.
+        // Depending on how the capabilities are modified, this could
+        // trigger a VFIO MSI or MSI-X toggle.
+        if let Some((cap_id, cap_base)) = self.interrupt.accessed(reg) {
+            let cap_offset: u64 = reg - cap_base + offset;
+            match cap_id {
+                PciCapabilityID::MessageSignalledInterrupts => {
+                    self.update_msi_capabilities(cap_offset, data);
+                }
+                PciCapabilityID::MSIX => {
+                    self.update_msix_capabilities(cap_offset, data);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn read_config_register(&self, reg_idx: usize) -> u32 {
