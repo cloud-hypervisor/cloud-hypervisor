@@ -16,6 +16,7 @@ extern crate kvm_ioctls;
 extern crate libc;
 extern crate linux_loader;
 extern crate net_util;
+extern crate vfio;
 extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
@@ -45,6 +46,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, str, thread};
+use vfio::{VfioDevice, VfioPciDevice, VfioPciError};
 use vm_allocator::{GsiApic, SystemAllocator};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
@@ -245,6 +247,15 @@ pub enum DeviceManagerError {
 
     /// Error creating console output file
     ConsoleOutputFileOpen(io::Error),
+
+    /// Cannot create a VFIO device
+    VfioCreate(vfio::VfioError),
+
+    /// Cannot create a VFIO PCI device
+    VfioPciCreate(vfio::VfioPciError),
+
+    /// Failed to map VFIO MMIO region.
+    VfioMapRegion(VfioPciError),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -513,6 +524,7 @@ impl DeviceManager {
         vm_cfg: &VmConfig,
         msi_capable: bool,
         userspace_ioapic: bool,
+        mem_slots: u32,
     ) -> DeviceManagerResult<Self> {
         let mut io_bus = devices::Bus::new();
         let mut mmio_bus = devices::Bus::new();
@@ -606,6 +618,16 @@ impl DeviceManager {
             &mut pci,
             &mut buses,
             &interrupt_info,
+        )?;
+
+        DeviceManager::add_vfio_devices(
+            memory.clone(),
+            allocator,
+            vm_fd,
+            &vm_cfg,
+            &mut pci,
+            &mut buses,
+            mem_slots,
         )?;
 
         let pci = Arc::new(Mutex::new(pci));
@@ -921,6 +943,43 @@ impl DeviceManager {
             }
         }
 
+        Ok(())
+    }
+
+    fn add_vfio_devices(
+        memory: GuestMemoryMmap,
+        allocator: &mut SystemAllocator,
+        vm_fd: &Arc<VmFd>,
+        vm_cfg: &VmConfig,
+        pci: &mut PciConfigIo,
+        buses: &mut BusInfo,
+        mem_slots: u32,
+    ) -> DeviceManagerResult<()> {
+        if let Some(device_list_cfg) = &vm_cfg.devices {
+            for device_cfg in device_list_cfg.iter() {
+                let vfio_device = VfioDevice::new(device_cfg.path, vm_fd, memory.clone())
+                    .map_err(DeviceManagerError::VfioCreate)?;
+
+                let mut vfio_pci_device = VfioPciDevice::new(vm_fd, allocator, vfio_device)
+                    .map_err(DeviceManagerError::VfioPciCreate)?;
+
+                let bars = vfio_pci_device
+                    .allocate_bars(allocator)
+                    .map_err(DeviceManagerError::AllocateBars)?;
+
+                vfio_pci_device
+                    .map_mmio_regions(vm_fd, mem_slots)
+                    .map_err(DeviceManagerError::VfioMapRegion)?;
+
+                let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
+
+                pci.add_device(vfio_pci_device.clone())
+                    .map_err(DeviceManagerError::AddPciDevice)?;
+
+                pci.register_mapping(vfio_pci_device.clone(), buses.io, buses.mmio, bars)
+                    .map_err(DeviceManagerError::AddPciDevice)?;
+            }
+        }
         Ok(())
     }
 
@@ -1322,6 +1381,7 @@ impl<'a> Vm<'a> {
             &config,
             msi_capable,
             userspace_ioapic,
+            arch_mem_regions.len() as u32,
         )
         .map_err(Error::DeviceManager)?;
 

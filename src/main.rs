@@ -100,6 +100,13 @@ fn main() {
                 .help("Control (virtio) console: off|tty|file=/path/to/a/file")
                 .default_value("tty"),
         )
+        .arg(
+            Arg::with_name("device")
+                .long("device")
+                .help("Direct device assignment parameter")
+                .takes_value(true)
+                .min_values(1),
+        )
         .get_matches();
 
     // These .unwrap()s cannot fail as there is a default value defined
@@ -118,6 +125,7 @@ fn main() {
     let console = cmd_arguments.value_of("console").unwrap();
     let fs: Option<Vec<&str>> = cmd_arguments.values_of("fs").map(|x| x.collect());
     let pmem: Option<Vec<&str>> = cmd_arguments.values_of("pmem").map(|x| x.collect());
+    let devices: Option<Vec<&str>> = cmd_arguments.values_of("device").map(|x| x.collect());
 
     let vm_config = match config::VmConfig::parse(config::VmParams {
         cpus,
@@ -131,6 +139,7 @@ fn main() {
         pmem,
         serial,
         console,
+        devices,
     }) {
         Ok(config) => config,
         Err(e) => {
