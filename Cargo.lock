@@ -303,7 +303,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "kvm-ioctls"
 version = "0.2.0"
-source = "git+https://github.com/rust-vmm/kvm-ioctls#c024055f7fe6a18508a05c0dbc905d300f91e003"
+source = "git+https://github.com/rust-vmm/kvm-ioctls#37669f60a04a65b9e81cc62ac4a484ea0ed421ca"
 dependencies = [
  "kvm-bindings 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",

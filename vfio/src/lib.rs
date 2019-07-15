@@ -24,7 +24,7 @@ mod vfio_pci;
 use std::mem::size_of;
 
 pub use vfio_device::{VfioDevice, VfioError};
-pub use vfio_pci::VfioPciDevice;
+pub use vfio_pci::{VfioPciDevice, VfioPciError};
 
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
 fn vec_with_size_in_bytes<T: Default>(size_in_bytes: usize) -> Vec<T> {
