@@ -32,38 +32,22 @@ if [ ! -f "$OS_RAW_IMAGE" ]; then
     popd
 fi
 
-# Build generic kernel
+
+# Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
 BZIMAGE_IMAGE="$WORKLOADS_DIR/bzImage"
 
-if [ ! -f "$VMLINUX_IMAGE" ]; then
-    SRCDIR=$PWD
-    pushd $WORKLOADS_DIR
-    wget --quiet https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.0.21.tar.xz
-    tar xf linux-5.0.21.tar.xz
-    pushd linux-5.0.21
-    cp $SRCDIR/resources/linux-5.0-config .config
-    make bzImage -j `nproc`
-    cp vmlinux $VMLINUX_IMAGE
-    cp arch/x86/boot/bzImage $BZIMAGE_IMAGE
-    popd
-    rm linux-5.0.21.tar.xz
-    rm -r linux-5.0.21
-    popd
-fi
-
-# Build custom kernel based on virtio-pmem and virtio-fs upstream patches
-VMLINUX_CUSTOM_IMAGE="$WORKLOADS_DIR/vmlinux-custom"
 LINUX_CUSTOM_DIR="linux-custom"
 
-if [ ! -f "$VMLINUX_CUSTOM_IMAGE" ]; then
+if [ ! -f "$VMLINUX_IMAGE" ]; then
     SRCDIR=$PWD
     pushd $WORKLOADS_DIR
     git clone --depth 1 "https://github.com/sboeuf/linux.git" -b "virtio-pmem_and_virtio-fs" $LINUX_CUSTOM_DIR
     pushd $LINUX_CUSTOM_DIR
     cp $SRCDIR/resources/linux-virtio-pmem-and-virtio-fs-config .config
     make bzImage -j `nproc`
-    cp vmlinux $VMLINUX_CUSTOM_IMAGE
+    cp vmlinux $VMLINUX_IMAGE
+    cp arch/x86/boot/bzImage $BZIMAGE_IMAGE
     popd
     rm -r $LINUX_CUSTOM_DIR
     popd
