@@ -250,7 +250,7 @@ impl VirtioPciCommonConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ActivateResult;
+    use crate::{ActivateResult, VirtioInterrupt};
 
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
@@ -271,7 +271,7 @@ mod tests {
         fn activate(
             &mut self,
             _mem: GuestMemoryMmap,
-            _interrupt_evt: EventFd,
+            _interrupt_evt: Arc<VirtioInterrupt>,
             _status: Arc<AtomicUsize>,
             _queues: Vec<Queue>,
             _queue_evts: Vec<EventFd>,
@@ -298,6 +298,7 @@ mod tests {
             device_feature_select: 0x0,
             driver_feature_select: 0x0,
             queue_select: 0xff,
+            msix_config: 0,
         };
 
         let dev = &mut DummyDevice(0) as &mut dyn VirtioDevice;
