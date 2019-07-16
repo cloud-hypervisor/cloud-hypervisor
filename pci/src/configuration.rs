@@ -632,6 +632,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn add_capability() {
         let mut cfg = PciConfiguration::new(
             0x1234,
