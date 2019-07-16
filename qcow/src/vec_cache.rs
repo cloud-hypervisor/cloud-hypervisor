@@ -178,8 +178,8 @@ mod tests {
 
         // Check that three of the four items inserted are still there and that the most recently
         // inserted is one of them.
-        let num_items = (0..=3).filter(|k| cache.contains_key(&k)).count();
+        let num_items = (0..=3).filter(|k| cache.contains_key(*k)).count();
         assert_eq!(num_items, 3);
-        assert!(cache.contains_key(&3));
+        assert!(cache.contains_key(3));
     }
 }
