@@ -620,7 +620,7 @@ mod tests {
     fn create_pair(path: &str) -> (Master, Endpoint<MasterReq>) {
         let listener = Listener::new(path, true).unwrap();
         listener.set_nonblocking(true).unwrap();
-        let master = Master::connect(path).unwrap();
+        let master = Master::connect(path, 2).unwrap();
         let slave = listener.accept().unwrap().unwrap();
         (master, Endpoint::from_stream(slave))
     }
@@ -630,7 +630,7 @@ mod tests {
         let listener = Listener::new(UNIX_SOCKET_MASTER, true).unwrap();
         listener.set_nonblocking(true).unwrap();
 
-        let mut master = Master::connect(UNIX_SOCKET_MASTER).unwrap();
+        let mut master = Master::connect(UNIX_SOCKET_MASTER, 2).unwrap();
         let mut slave = Endpoint::<MasterReq>::from_stream(listener.accept().unwrap().unwrap());
 
         // Send two messages continuously
@@ -654,13 +654,13 @@ mod tests {
     fn test_create_failure() {
         let _ = Listener::new(UNIX_SOCKET_MASTER2, true).unwrap();
         let _ = Listener::new(UNIX_SOCKET_MASTER2, false).is_err();
-        assert!(Master::connect(UNIX_SOCKET_MASTER2).is_err());
+        assert!(Master::connect(UNIX_SOCKET_MASTER2, 2).is_err());
 
         let listener = Listener::new(UNIX_SOCKET_MASTER2, true).unwrap();
         assert!(Listener::new(UNIX_SOCKET_MASTER2, false).is_err());
         listener.set_nonblocking(true).unwrap();
 
-        let _master = Master::connect(UNIX_SOCKET_MASTER2).unwrap();
+        let _master = Master::connect(UNIX_SOCKET_MASTER2, 2).unwrap();
         let _slave = listener.accept().unwrap().unwrap();
     }
 
