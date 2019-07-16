@@ -185,7 +185,7 @@ fn add_e820_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arch_gen::x86::bootparam::e820entry;
+    use linux_loader::loader::bootparam::e820entry;
 
     #[test]
     fn regions_lt_4gb() {
@@ -217,7 +217,7 @@ mod tests {
     fn test_system_configuration() {
         let no_vcpus = 4;
         let gm = GuestMemoryMmap::new(&vec![(GuestAddress(0), 0x10000)]).unwrap();
-        let config_err = configure_system(&gm, GuestAddress(0), 0, 1);
+        let config_err = configure_system(&gm, GuestAddress(0), 0, 1, None);
         assert!(config_err.is_err());
         assert_eq!(
             config_err.unwrap_err(),
@@ -230,19 +230,19 @@ mod tests {
         let mem_size = 128 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
         let gm = GuestMemoryMmap::new(&arch_mem_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, no_vcpus).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None).unwrap();
 
         // Now assigning some memory that is equal to the start of the 32bit memory hole.
         let mem_size = 3328 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
         let gm = GuestMemoryMmap::new(&arch_mem_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, no_vcpus).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None).unwrap();
 
         // Now assigning some memory that falls after the 32bit memory hole.
         let mem_size = 3330 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
         let gm = GuestMemoryMmap::new(&arch_mem_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, no_vcpus).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None).unwrap();
     }
 
     #[test]
