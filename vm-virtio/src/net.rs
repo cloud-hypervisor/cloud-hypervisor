@@ -9,7 +9,6 @@ use epoll;
 use libc::EAGAIN;
 use libc::EFD_NONBLOCK;
 use std::cmp;
-#[cfg(not(test))]
 use std::io::Read;
 use std::io::{self, Write};
 use std::mem;
@@ -296,7 +295,6 @@ impl NetEpollHandler {
         Ok(())
     }
 
-    #[cfg(not(test))]
     fn read_tap(&mut self) -> io::Result<usize> {
         self.tap.read(&mut self.rx.frame_buf)
     }
