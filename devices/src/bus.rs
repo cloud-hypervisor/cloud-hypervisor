@@ -173,13 +173,13 @@ mod tests {
 
     struct ConstantDevice;
     impl BusDevice for ConstantDevice {
-        fn read(&mut self, offset: u64, data: &mut [u8]) {
+        fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
             for (i, v) in data.iter_mut().enumerate() {
                 *v = (offset as u8) + (i as u8);
             }
         }
 
-        fn write(&mut self, offset: u64, data: &[u8]) {
+        fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
             for (i, v) in data.iter().enumerate() {
                 assert_eq!(*v, (offset as u8) + (i as u8))
             }
