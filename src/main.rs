@@ -733,7 +733,7 @@ mod tests {
             workload_path.push("workloads");
 
             let mut kernel_path = workload_path.clone();
-            kernel_path.push("vmlinux-custom");
+            kernel_path.push("vmlinux");
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
@@ -788,7 +788,7 @@ mod tests {
             workload_path.push("workloads");
 
             let mut kernel_path = workload_path.clone();
-            kernel_path.push("vmlinux-custom");
+            kernel_path.push("vmlinux");
 
             let pmem_backend_path = guest.tmp_dir.path().join("/tmp/pmem-file");
             let mut pmem_backend_file = OpenOptions::new()
@@ -868,7 +868,7 @@ mod tests {
             workload_path.push("workloads");
 
             let mut kernel_path = workload_path.clone();
-            kernel_path.push("vmlinux-custom");
+            kernel_path.push("vmlinux");
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
