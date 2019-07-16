@@ -643,6 +643,7 @@ mod tests {
             PciHeaderType::Device,
             0xABCD,
             0x2468,
+            None,
         );
 
         // Add two capabilities with different contents.
@@ -704,6 +705,7 @@ mod tests {
             PciHeaderType::Device,
             0xABCD,
             0x2468,
+            None,
         );
 
         let class_reg = cfg.read_reg(2);
