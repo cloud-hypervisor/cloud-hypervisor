@@ -1623,7 +1623,7 @@ mod tests {
     use super::*;
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom, Write};
-    use sys_util::SharedMemory;
+    use tempfile::tempfile;
 
     fn valid_header() -> Vec<u8> {
         vec![
@@ -1652,8 +1652,7 @@ mod tests {
     where
         F: FnMut(File),
     {
-        let shm = SharedMemory::new(None).unwrap();
-        let mut disk_file: File = shm.into();
+        let mut disk_file: File = tempfile().unwrap();
         disk_file.write_all(&header).unwrap();
         disk_file.set_len(0x5_0000).unwrap();
         disk_file.seek(SeekFrom::Start(0)).unwrap();
@@ -1665,8 +1664,8 @@ mod tests {
     where
         F: FnMut(QcowFile),
     {
-        let shm = SharedMemory::new(None).unwrap();
-        let qcow_file = QcowFile::new(shm.into(), file_size).unwrap();
+        let tmp = tempfile().unwrap();
+        let qcow_file = QcowFile::new(tmp, file_size).unwrap();
 
         testfn(qcow_file); // File closed when the function exits.
     }
@@ -1674,8 +1673,7 @@ mod tests {
     #[test]
     fn default_header() {
         let header = QcowHeader::create_for_size(0x10_0000);
-        let shm = SharedMemory::new(None).unwrap();
-        let mut disk_file: File = shm.into();
+        let mut disk_file: File = tempfile().unwrap();
         header
             .write_to(&mut disk_file)
             .expect("Failed to write header to shm.");

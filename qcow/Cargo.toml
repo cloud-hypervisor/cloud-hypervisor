@@ -14,3 +14,6 @@ libc = "*"
 log = "*"
 remain = "*"
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
+
+[dev-dependencies]
+tempfile = "*"
