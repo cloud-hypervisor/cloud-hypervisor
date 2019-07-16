@@ -18,3 +18,5 @@ default = []
 
 # Integration tests require a special environment to run in
 integration_tests = []
+
+[workspace]
