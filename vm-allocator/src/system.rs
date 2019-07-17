@@ -31,6 +31,7 @@ fn pagesize() -> usize {
 ///   let mut allocator = SystemAllocator::new(
 ///           GuestAddress(0x1000), 0x10000,
 ///           GuestAddress(0x10000000), 0x10000000,
+///           GuestAddress(0x20000000), 0x100000,
 ///           vec![GsiApic::new(5, 19)]).unwrap();
 ///    assert_eq!(allocator.allocate_irq(), Some(5));
 ///    assert_eq!(allocator.allocate_irq(), Some(6));
@@ -40,6 +41,7 @@ fn pagesize() -> usize {
 pub struct SystemAllocator {
     io_address_space: AddressAllocator,
     mmio_address_space: AddressAllocator,
+    mmio_hole_address_space: AddressAllocator,
     gsi_allocator: GsiAllocator,
 }
 
@@ -57,11 +59,14 @@ impl SystemAllocator {
         io_size: GuestUsize,
         mmio_base: GuestAddress,
         mmio_size: GuestUsize,
+        mmio_hole_base: GuestAddress,
+        mmio_hole_size: GuestUsize,
         apics: Vec<GsiApic>,
     ) -> Option<Self> {
         Some(SystemAllocator {
             io_address_space: AddressAllocator::new(io_base, io_size)?,
             mmio_address_space: AddressAllocator::new(mmio_base, mmio_size)?,
+            mmio_hole_address_space: AddressAllocator::new(mmio_hole_base, mmio_hole_size)?,
             gsi_allocator: GsiAllocator::new(apics),
         })
     }
@@ -95,6 +100,20 @@ impl SystemAllocator {
         align_size: Option<GuestUsize>,
     ) -> Option<GuestAddress> {
         self.mmio_address_space.allocate(
+            address,
+            size,
+            Some(align_size.unwrap_or(pagesize() as u64)),
+        )
+    }
+
+    /// Reserves a section of `size` bytes of MMIO address space.
+    pub fn allocate_mmio_hole_addresses(
+        &mut self,
+        address: Option<GuestAddress>,
+        size: GuestUsize,
+        align_size: Option<GuestUsize>,
+    ) -> Option<GuestAddress> {
+        self.mmio_hole_address_space.allocate(
             address,
             size,
             Some(align_size.unwrap_or(pagesize() as u64)),

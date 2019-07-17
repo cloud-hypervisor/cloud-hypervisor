@@ -33,6 +33,15 @@ pub enum Error {
 }
 pub type Result<T> = result::Result<T, Error>;
 
+#[derive(PartialEq)]
+pub enum RegionType {
+    /// RAM type
+    Ram,
+    /// Reserved type. Designate a region which should not be considered as
+    /// RAM. Useful to specify a PCI hole for instance.
+    Reserved,
+}
+
 // 1MB.  We don't put anything above here except the kernel itself.
 pub const HIMEM_START: GuestAddress = GuestAddress(0x100000);
 

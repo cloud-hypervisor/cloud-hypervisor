@@ -22,6 +22,7 @@ extern crate vm_virtio;
 extern crate vmm_sys_util;
 
 use crate::config::{SerialOutputMode, VmConfig};
+use arch::RegionType;
 use devices::ioapic;
 use kvm_bindings::{
     kvm_enable_cap, kvm_msi, kvm_pit_config, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP,
@@ -65,6 +66,10 @@ const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 
 // 64 bit direct boot entry offset for bzImage
 const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
+
+// IOAPIC address range
+const IOAPIC_RANGE_ADDR: u64 = 0xfec0_0000;
+const IOAPIC_RANGE_SIZE: u64 = 0x20;
 
 /// Errors associated with VM management
 #[derive(Debug)]
@@ -160,6 +165,12 @@ pub enum Error {
 
     /// Failed to set shared file length.
     SharedFileSetLen(io::Error),
+
+    /// Failed to allocate a memory range.
+    MemoryRangeAllocation,
+
+    /// Failed to allocate the IOAPIC memory range.
+    IoapicRangeAllocation,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -667,8 +678,10 @@ impl DeviceManager {
             for pmem_cfg in pmem_list_cfg.iter() {
                 let size = pmem_cfg.size;
 
+                // The memory needs to be 2MiB aligned in order to support
+                // hugepages.
                 let pmem_guest_addr = allocator
-                    .allocate_mmio_addresses(None, size as GuestUsize, None)
+                    .allocate_mmio_addresses(None, size as GuestUsize, Some(0x0020_0000))
                     .ok_or(DeviceManagerError::PmemRangeAllocation)?;
 
                 let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
@@ -870,7 +883,7 @@ impl DeviceManager {
         if let Some(ioapic) = &self.ioapic {
             // Insert IOAPIC
             self.mmio_bus
-                .insert(ioapic.clone(), 0xfec0_0000, 0x20)
+                .insert(ioapic.clone(), IOAPIC_RANGE_ADDR, IOAPIC_RANGE_SIZE)
                 .map_err(Error::BusError)?;
         }
 
@@ -963,10 +976,31 @@ impl<'a> Vm<'a> {
         // Init guest memory
         let arch_mem_regions = arch::arch_memory_regions(config.memory.size);
 
+        let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
+            .iter()
+            .filter(|r| r.2 == RegionType::Ram)
+            .map(|r| (r.0, r.1))
+            .collect();
+        let reserved_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
+            .iter()
+            .filter(|r| r.2 == RegionType::Reserved)
+            .map(|r| (r.0, r.1))
+            .collect();
+
+        // Check the number of reserved regions, and only take the first one
+        // that's acrtually a 32-bit hole.
+        let mut mem_hole = (GuestAddress(0), 0);
+        for region in reserved_regions.iter() {
+            if region.0.unchecked_add(region.1 as u64).raw_value() <= 0x1_0000_0000 {
+                mem_hole = (region.0, region.1);
+                break;
+            }
+        }
+
         let guest_memory = match config.memory.file {
             Some(file) => {
                 let mut mem_regions = Vec::<(GuestAddress, usize, Option<FileOffset>)>::new();
-                for region in arch_mem_regions.iter() {
+                for region in ram_regions.iter() {
                     let file = OpenOptions::new()
                         .read(true)
                         .write(true)
@@ -982,7 +1016,7 @@ impl<'a> Vm<'a> {
 
                 GuestMemoryMmap::with_files(&mem_regions).map_err(Error::GuestMemory)?
             }
-            None => GuestMemoryMmap::new(&arch_mem_regions).map_err(Error::GuestMemory)?,
+            None => GuestMemoryMmap::new(&ram_regions).map_err(Error::GuestMemory)?,
         };
 
         guest_memory
@@ -1077,9 +1111,37 @@ impl<'a> Vm<'a> {
             1 << 16 as GuestUsize,
             GuestAddress(0),
             1 << 36 as GuestUsize,
+            mem_hole.0,
+            mem_hole.1 as GuestUsize,
             vec![ioapic],
         )
         .ok_or(Error::CreateSystemAllocator)?;
+
+        // Allocate RAM and Reserved address ranges.
+        for region in arch_mem_regions.iter() {
+            allocator
+                .allocate_mmio_addresses(Some(region.0), region.1 as GuestUsize, None)
+                .ok_or(Error::MemoryRangeAllocation)?;
+        }
+
+        // Allocate IOAPIC address in the memory hole if necessary.
+        if IOAPIC_RANGE_ADDR >= mem_hole.0.raw_value() && IOAPIC_RANGE_SIZE < mem_hole.1 as u64 {
+            allocator
+                .allocate_mmio_hole_addresses(
+                    Some(GuestAddress(IOAPIC_RANGE_ADDR)),
+                    IOAPIC_RANGE_SIZE as GuestUsize,
+                    None,
+                )
+                .ok_or(Error::IoapicRangeAllocation)?;
+        } else {
+            allocator
+                .allocate_mmio_addresses(
+                    Some(GuestAddress(IOAPIC_RANGE_ADDR)),
+                    IOAPIC_RANGE_SIZE as GuestUsize,
+                    None,
+                )
+                .ok_or(Error::IoapicRangeAllocation)?;
+        }
 
         let device_manager = DeviceManager::new(
             guest_memory.clone(),
