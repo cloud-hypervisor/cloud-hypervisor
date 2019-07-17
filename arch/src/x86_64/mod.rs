@@ -11,9 +11,9 @@ pub mod layout;
 mod mptable;
 pub mod regs;
 
-use std::mem;
-
+use crate::RegionType;
 use linux_loader::loader::bootparam::{boot_params, setup_header, E820_RAM};
+use std::mem;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestUsize,
 };
@@ -52,7 +52,7 @@ const MEM_32BIT_GAP_SIZE: GuestUsize = (768 << 20);
 /// These should be used to configure the GuestMemory structure for the platform.
 /// For x86_64 all addresses are valid from the start of the kernel except a
 /// carve out at the end of 32bit address space.
-pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize)> {
+pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, RegionType)> {
     let memory_gap_start = FIRST_ADDR_PAST_32BITS
         .checked_sub(MEM_32BIT_GAP_SIZE as u64)
         .expect("32-bit hole is too large");
@@ -61,16 +61,28 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize)> {
 
     // case1: guest memory fits before the gap
     if size as u64 <= memory_gap_start.raw_value() {
-        regions.push((GuestAddress(0), size as usize));
+        regions.push((GuestAddress(0), size as usize, RegionType::Ram));
     // case2: guest memory extends beyond the gap
     } else {
         // push memory before the gap
-        regions.push((GuestAddress(0), memory_gap_start.raw_value() as usize));
+        regions.push((
+            GuestAddress(0),
+            memory_gap_start.raw_value() as usize,
+            RegionType::Ram,
+        ));
         regions.push((
             FIRST_ADDR_PAST_32BITS,
             requested_memory_size.unchecked_offset_from(memory_gap_start) as usize,
+            RegionType::Ram,
         ));
     }
+
+    // Add the 32 bits hole as a "reserved" region.
+    regions.push((
+        memory_gap_start,
+        MEM_32BIT_GAP_SIZE as usize,
+        RegionType::Reserved,
+    ));
 
     regions
 }
@@ -190,7 +202,7 @@ mod tests {
     #[test]
     fn regions_lt_4gb() {
         let regions = arch_memory_regions(1 << 29 as GuestUsize);
-        assert_eq!(1, regions.len());
+        assert_eq!(2, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(1usize << 29, regions[0].1);
     }
@@ -198,7 +210,7 @@ mod tests {
     #[test]
     fn regions_gt_4gb() {
         let regions = arch_memory_regions((1 << 32 as GuestUsize) + 0x8000);
-        assert_eq!(2, regions.len());
+        assert_eq!(3, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(GuestAddress(1 << 32), regions[1].0);
     }
@@ -229,19 +241,34 @@ mod tests {
         // Now assigning some memory that falls before the 32bit memory hole.
         let mem_size = 128 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
-        let gm = GuestMemoryMmap::new(&arch_mem_regions).unwrap();
+        let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
+            .iter()
+            .filter(|r| r.2 == RegionType::Ram)
+            .map(|r| (r.0, r.1))
+            .collect();
+        let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
         configure_system(&gm, GuestAddress(0), 0, no_vcpus, None).unwrap();
 
         // Now assigning some memory that is equal to the start of the 32bit memory hole.
         let mem_size = 3328 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
-        let gm = GuestMemoryMmap::new(&arch_mem_regions).unwrap();
+        let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
+            .iter()
+            .filter(|r| r.2 == RegionType::Ram)
+            .map(|r| (r.0, r.1))
+            .collect();
+        let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
         configure_system(&gm, GuestAddress(0), 0, no_vcpus, None).unwrap();
 
         // Now assigning some memory that falls after the 32bit memory hole.
         let mem_size = 3330 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
-        let gm = GuestMemoryMmap::new(&arch_mem_regions).unwrap();
+        let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
+            .iter()
+            .filter(|r| r.2 == RegionType::Ram)
+            .map(|r| (r.0, r.1))
+            .collect();
+        let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
         configure_system(&gm, GuestAddress(0), 0, no_vcpus, None).unwrap();
     }
 
