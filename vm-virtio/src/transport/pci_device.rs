@@ -354,6 +354,7 @@ impl VirtioPciDevice {
                 settings_bar,
                 self.msix_num,
                 MSIX_TABLE_BAR_OFFSET as u32,
+                settings_bar,
                 MSIX_PBA_BAR_OFFSET as u32,
             );
             self.configuration
@@ -401,7 +402,7 @@ impl PciDevice for VirtioPciDevice {
                 // device should not inject the interrupt.
                 // Instead, the Pending Bit Array table is updated to reflect there
                 // is a pending interrupt for this specific vector.
-                if config.is_masked() || entry.is_masked() {
+                if config.masked() || entry.masked() {
                     config.set_pba_bit(queue.vector, false);
                     return Ok(());
                 }

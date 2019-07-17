@@ -18,6 +18,10 @@ const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
 const MSIX_PBA_ENTRIES_MODULO: u64 = 8;
 const BITS_PER_PBA_ENTRY: usize = 64;
 const FUNCTION_MASK_BIT: u8 = 14;
+const MSIX_ENABLE_BIT: u8 = 15;
+const FUNCTION_MASK_MASK: u16 = (1 << FUNCTION_MASK_BIT) as u16;
+const MSIX_ENABLE_MASK: u16 = (1 << MSIX_ENABLE_BIT) as u16;
+pub const MSIX_TABLE_ENTRY_SIZE: usize = 16;
 
 #[derive(Debug, Clone)]
 pub struct MsixTableEntry {
@@ -28,8 +32,8 @@ pub struct MsixTableEntry {
 }
 
 impl MsixTableEntry {
-    pub fn is_masked(&self) -> bool {
-        self.vector_ctl == 1u32
+    pub fn masked(&self) -> bool {
+        self.vector_ctl & 0x1 == 0x1
     }
 }
 
@@ -73,7 +77,7 @@ impl MsixConfig {
         self.interrupt_cb = Some(cb);
     }
 
-    pub fn is_masked(&self) -> bool {
+    pub fn masked(&self) -> bool {
         self.masked
     }
 
@@ -88,14 +92,14 @@ impl MsixConfig {
         // masked.
         if old_masked && !self.masked {
             for (index, entry) in self.table_entries.clone().iter().enumerate() {
-                if !entry.is_masked() && self.get_pba_bit(index as u16) == 1 {
+                if !entry.masked() && self.get_pba_bit(index as u16) == 1 {
                     self.inject_msix_and_clear_pba(index);
                 }
             }
         }
     }
 
-    pub fn read_table(&mut self, offset: u64, data: &mut [u8]) {
+    pub fn read_table(&self, offset: u64, data: &mut [u8]) {
         assert!((data.len() == 4 || data.len() == 8));
 
         let index: usize = (offset / MSIX_TABLE_ENTRIES_MODULO) as usize;
@@ -196,9 +200,9 @@ impl MsixConfig {
         // device.
         if let Some(old_entry) = old_entry {
             // Check if bit has been flipped
-            if !self.is_masked()
-                && old_entry.is_masked()
-                && !self.table_entries[index].is_masked()
+            if !self.masked()
+                && old_entry.masked()
+                && !self.table_entries[index].masked()
                 && self.get_pba_bit(index as u16) == 1
             {
                 self.inject_msix_and_clear_pba(index);
@@ -297,15 +301,15 @@ pub struct MsixCap {
     //   13-11: Reserved
     //   14:    Mask. Mask all MSI-X when set.
     //   15:    Enable. Enable all MSI-X when set.
-    msg_ctl: u16,
+    pub msg_ctl: u16,
     // Table. Contains the offset and the BAR indicator (BIR)
     //   2-0:  Table BAR indicator (BIR). Can be 0 to 5.
     //   31-3: Table offset in the BAR pointed by the BIR.
-    table: u32,
+    pub table: u32,
     // Pending Bit Array. Contains the offset and the BAR indicator (BIR)
     //   2-0:  PBA BAR indicator (BIR). Can be 0 to 5.
     //   31-3: PBA offset in the BAR pointed by the BIR.
-    pba: u32,
+    pub pba: u32,
 }
 
 // It is safe to implement ByteValued. All members are simple numbers and any value is valid.
@@ -322,7 +326,13 @@ impl PciCapability for MsixCap {
 }
 
 impl MsixCap {
-    pub fn new(pci_bar: u8, table_size: u16, table_off: u32, pba_off: u32) -> Self {
+    pub fn new(
+        table_pci_bar: u8,
+        table_size: u16,
+        table_off: u32,
+        pba_pci_bar: u8,
+        pba_off: u32,
+    ) -> Self {
         assert!(table_size < MAX_MSIX_VECTORS_PER_DEVICE);
 
         // Set the table size and enable MSI-X.
@@ -330,8 +340,41 @@ impl MsixCap {
 
         MsixCap {
             msg_ctl,
-            table: (table_off & 0xffff_fff8u32) | u32::from(pci_bar & 0x7u8),
-            pba: (pba_off & 0xffff_fff8u32) | u32::from(pci_bar & 0x7u8),
+            table: (table_off & 0xffff_fff8u32) | u32::from(table_pci_bar & 0x7u8),
+            pba: (pba_off & 0xffff_fff8u32) | u32::from(pba_pci_bar & 0x7u8),
         }
+    }
+
+    pub fn set_msg_ctl(&mut self, data: u16) {
+        self.msg_ctl = (self.msg_ctl & !(FUNCTION_MASK_MASK | MSIX_ENABLE_MASK))
+            | (data & (FUNCTION_MASK_MASK | MSIX_ENABLE_MASK));
+    }
+
+    pub fn masked(&self) -> bool {
+        (self.msg_ctl >> FUNCTION_MASK_BIT) & 0x1 == 0x1
+    }
+
+    pub fn enabled(&self) -> bool {
+        (self.msg_ctl >> MSIX_ENABLE_BIT) & 0x1 == 0x1
+    }
+
+    pub fn table_offset(&self) -> u32 {
+        self.table >> 3
+    }
+
+    pub fn pba_offset(&self) -> u32 {
+        self.pba >> 3
+    }
+
+    pub fn table_bir(&self) -> u32 {
+        self.table & 0x7
+    }
+
+    pub fn pba_bir(&self) -> u32 {
+        self.pba & 0x7
+    }
+
+    pub fn table_size(&self) -> u16 {
+        (self.msg_ctl & 0x7ff) + 1
     }
 }
