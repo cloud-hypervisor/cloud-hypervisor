@@ -247,6 +247,7 @@ pub trait PciCapability {
 pub struct PciConfiguration {
     registers: [u32; NUM_CONFIGURATION_REGISTERS],
     writable_bits: [u32; NUM_CONFIGURATION_REGISTERS], // writable bits for each register.
+    bar_size: [u32; NUM_BAR_REGS],
     bar_used: [bool; NUM_BAR_REGS],
     // Contains the byte offset and size of the last capability.
     last_capability: Option<(usize, usize)>,
@@ -330,6 +331,7 @@ impl PciConfiguration {
     ) -> Self {
         let mut registers = [0u32; NUM_CONFIGURATION_REGISTERS];
         let mut writable_bits = [0u32; NUM_CONFIGURATION_REGISTERS];
+        let bar_size = [0u32; NUM_BAR_REGS];
         registers[0] = u32::from(device_id) << 16 | u32::from(vendor_id);
         // TODO(dverkamp): Status should be write-1-to-clear
         writable_bits[1] = 0x0000_ffff; // Status (r/o), command (r/w)
@@ -358,6 +360,7 @@ impl PciConfiguration {
         PciConfiguration {
             registers,
             writable_bits,
+            bar_size,
             bar_used: [false; NUM_BAR_REGS],
             last_capability: None,
             msix_cap_reg_idx: None,
@@ -372,8 +375,17 @@ impl PciConfiguration {
 
     /// Writes a 32bit register to `reg_idx` in the register map.
     pub fn write_reg(&mut self, reg_idx: usize, value: u32) {
+        let mut mask = self.writable_bits[reg_idx];
+        if reg_idx >= BAR0_REG && reg_idx < BAR0_REG + NUM_BAR_REGS {
+            // Handle very specific case where the BAR is being written with
+            // all 1's to retrieve the BAR size on next BAR reading.
+            if value == 0xffff_ffff {
+                mask = self.bar_size[reg_idx - 4];
+            }
+        }
+
         if let Some(r) = self.registers.get_mut(reg_idx) {
-            *r = value & self.writable_bits[reg_idx];
+            *r = (*r & !self.writable_bits[reg_idx]) | (value & mask);
         } else {
             warn!("bad PCI register write {}", reg_idx);
         }
@@ -467,7 +479,8 @@ impl PciConfiguration {
                 }
 
                 self.registers[bar_idx + 1] = (config.addr >> 32) as u32;
-                self.writable_bits[bar_idx + 1] = !((config.size >> 32).wrapping_sub(1)) as u32;
+                self.writable_bits[bar_idx + 1] = 0xffff_ffff;
+                self.bar_size[config.reg_idx + 1] = (config.size >> 32) as u32;
                 self.bar_used[config.reg_idx + 1] = true;
             }
         }
@@ -481,7 +494,8 @@ impl PciConfiguration {
         };
 
         self.registers[bar_idx] = ((config.addr as u32) & mask) | lower_bits;
-        self.writable_bits[bar_idx] = !(config.size - 1) as u32;
+        self.writable_bits[bar_idx] = mask;
+        self.bar_size[config.reg_idx] = config.size as u32;
         self.bar_used[config.reg_idx] = true;
         Ok(config.reg_idx)
     }
