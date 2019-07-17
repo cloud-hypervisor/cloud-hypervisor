@@ -632,6 +632,11 @@ impl PciBarConfiguration {
     pub fn get_size(&self) -> u64 {
         self.size
     }
+
+    pub fn set_region_type(mut self, region_type: PciBarRegionType) -> Self {
+        self.region_type = region_type;
+        self
+    }
 }
 
 #[cfg(test)]
