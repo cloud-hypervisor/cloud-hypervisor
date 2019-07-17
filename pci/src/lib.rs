@@ -24,7 +24,7 @@ pub use self::configuration::{
 pub use self::device::{
     Error as PciDeviceError, InterruptDelivery, InterruptParameters, PciDevice,
 };
-pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry};
+pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry, MSIX_TABLE_ENTRY_SIZE};
 
 /// PCI has four interrupt pins A->D.
 #[derive(Copy, Clone)]
