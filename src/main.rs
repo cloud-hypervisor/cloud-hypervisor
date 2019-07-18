@@ -162,6 +162,7 @@ mod tests {
     use std::process::Command;
     use std::string::String;
     use std::thread;
+    use tempdir::TempDir;
 
     fn ssh_command(command: &str) -> String {
         let mut s = String::new();
@@ -206,7 +207,7 @@ mod tests {
         s
     }
 
-    fn prepare_files() -> (Vec<&'static str>, String) {
+    fn prepare_files(tmp_dir: &TempDir) -> (Vec<String>, String) {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
@@ -219,12 +220,13 @@ mod tests {
         let mut osdisk_raw_base_path = workload_path.clone();
         osdisk_raw_base_path.push("clear-29810-cloud-raw.img");
 
-        let osdisk_path = "/tmp/osdisk.img";
-        let osdisk_raw_path = "/tmp/osdisk_raw.img";
-        let cloudinit_path = "/tmp/cloudinit.img";
+        let cloudinit_path = String::from("/tmp/cloudinit.img");
 
-        fs::copy(osdisk_base_path, osdisk_path).expect("copying of OS source disk image failed");
-        fs::copy(osdisk_raw_base_path, osdisk_raw_path)
+        let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
+        let osdisk_raw_path = String::from(tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
+
+        fs::copy(osdisk_base_path, &osdisk_path).expect("copying of OS source disk image failed");
+        fs::copy(osdisk_raw_base_path, &osdisk_raw_path)
             .expect("copying of OS source disk raw image failed");
 
         let disks = vec![osdisk_path, cloudinit_path, osdisk_raw_path];
@@ -232,7 +234,7 @@ mod tests {
         (disks, String::from(fw_path.to_str().unwrap()))
     }
 
-    fn prepare_virtiofsd() -> (std::process::Child, String) {
+    fn prepare_virtiofsd(tmp_dir: &TempDir) -> (std::process::Child, String) {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
@@ -244,7 +246,8 @@ mod tests {
         shared_dir_path.push("shared_dir");
         let shared_dir_path = String::from(shared_dir_path.to_str().unwrap());
 
-        let virtiofsd_socket_path = String::from("/tmp/virtiofs.sock");
+        let virtiofsd_socket_path =
+            String::from(tmp_dir.path().join("virtiofs.sock").to_str().unwrap());
 
         // Start the daemon
         let child = Command::new(virtiofsd_path.as_str())
@@ -297,12 +300,13 @@ mod tests {
     #[test]
     fn test_simple_launch() {
         test_block!(tb, "", {
-            let (disks, fw_path) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, fw_path) = prepare_files(&tmp_dir);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&[
                     "--net",
                     "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
@@ -329,12 +333,13 @@ mod tests {
     #[test]
     fn test_multi_cpu() {
         test_block!(tb, "", {
-            let (disks, fw_path) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, fw_path) = prepare_files(&tmp_dir);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "2"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&[
                     "--net",
                     "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
@@ -357,12 +362,13 @@ mod tests {
     #[test]
     fn test_large_memory() {
         test_block!(tb, "", {
-            let (disks, fw_path) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, fw_path) = prepare_files(&tmp_dir);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=5120M"])
                 .args(&["--kernel", fw_path.as_str()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&[
                     "--net",
                     "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
@@ -385,12 +391,13 @@ mod tests {
     #[test]
     fn test_pci_msi() {
         test_block!(tb, "", {
-            let (disks, fw_path) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, fw_path) = prepare_files(&tmp_dir);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&[
                     "--net",
                     "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
@@ -420,7 +427,8 @@ mod tests {
     #[test]
     fn test_vmlinux_boot() {
         test_block!(tb, "", {
-            let (disks, _) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, _) = prepare_files(&tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -431,7 +439,7 @@ mod tests {
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&["--net", "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0"])
                 .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
@@ -462,7 +470,8 @@ mod tests {
     #[test]
     fn test_bzimage_boot() {
         test_block!(tb, "", {
-            let (disks, _) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, _) = prepare_files(&tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -473,7 +482,7 @@ mod tests {
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&["--net", "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0"])
                 .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
@@ -504,12 +513,13 @@ mod tests {
     #[test]
     fn test_split_irqchip() {
         test_block!(tb, "", {
-            let (disks, fw_path) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, fw_path) = prepare_files(&tmp_dir);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&[
                     "--net",
                     "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
@@ -547,8 +557,9 @@ mod tests {
     #[test]
     fn test_virtio_fs() {
         test_block!(tb, "", {
-            let (disks, _) = prepare_files();
-            let (mut daemon_child, virtiofsd_socket_path) = prepare_virtiofsd();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, _) = prepare_files(&tmp_dir);
+            let (mut daemon_child, virtiofsd_socket_path) = prepare_virtiofsd(&tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -559,7 +570,7 @@ mod tests {
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&["--net", "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0"])
                 .args(&[
                     "--fs",
@@ -603,19 +614,20 @@ mod tests {
     #[test]
     fn test_virtio_pmem() {
         test_block!(tb, "", {
-            let (disks, _) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, _) = prepare_files(&tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
             let mut kernel_path = workload_path.clone();
             kernel_path.push("vmlinux-custom");
 
-            let pmem_backend_path = "/tmp/pmem-file";
+            let pmem_backend_path = tmp_dir.path().join("/tmp/pmem-file");
             let mut pmem_backend_file = OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
-                .open(pmem_backend_path)
+                .open(&pmem_backend_path)
                 .unwrap();
 
             let pmem_backend_content = "foo";
@@ -629,13 +641,13 @@ mod tests {
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&["--net", "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0"])
                 .args(&[
                     "--pmem",
                     format!(
                         "file={},size={}",
-                        pmem_backend_path,
+                        pmem_backend_path.to_str().unwrap(),
                         pmem_backend_file_size
                     )
                     .as_str(),
@@ -676,9 +688,6 @@ mod tests {
             ssh_command("sudo reboot");
             let _ = child.wait();
 
-            // Cleanup the file
-            fs::remove_file(pmem_backend_path).unwrap();
-
             Ok(())
         });
     }
@@ -686,7 +695,8 @@ mod tests {
     #[test]
     fn test_boot_from_virtio_pmem() {
         test_block!(tb, "", {
-            let (disks, _) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, _) = prepare_files(&tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -697,14 +707,14 @@ mod tests {
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk", disks[1]])
+                .args(&["--disk", disks[1].as_str()])
                 .args(&["--net", "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0"])
                 .args(&[
                     "--pmem",
                     format!(
                         "file={},size={}",
                         disks[2],
-                        fs::metadata(disks[2]).unwrap().len()
+                        fs::metadata(&disks[2]).unwrap().len()
                     )
                     .as_str(),
                 ])
@@ -728,12 +738,13 @@ mod tests {
     #[test]
     fn test_multiple_network_interfaces() {
         test_block!(tb, "", {
-            let (disks, fw_path) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, fw_path) = prepare_files(&tmp_dir);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&[
                     "--net",
                     "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
@@ -766,12 +777,13 @@ mod tests {
     #[test]
     fn test_serial_disable() {
         test_block!(tb, "", {
-            let (disks, fw_path) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, fw_path) = prepare_files(&tmp_dir);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&[
                     "--net",
                     "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
@@ -813,13 +825,15 @@ mod tests {
     #[test]
     fn test_serial_file() {
         test_block!(tb, "", {
-            let serial_path = std::path::Path::new("/tmp/serial-output");
-            let (disks, fw_path) = prepare_files();
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let (disks, fw_path) = prepare_files(&tmp_dir);
+
+            let serial_path = tmp_dir.path().join("/tmp/serial-output");
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", fw_path.as_str()])
-                .args(&["--disk", disks[0], disks[1]])
+                .args(&["--disk", disks[0].as_str(), disks[1].as_str()])
                 .args(&[
                     "--net",
                     "tap=,mac=12:34:56:78:90:ab,ip=192.168.2.1,mask=255.255.255.0",
@@ -852,7 +866,6 @@ mod tests {
             let mut buf = String::new();
             f.read_to_string(&mut buf).unwrap();
             aver!(tb, buf.contains("cloud login:"));
-            std::fs::remove_file(serial_path).unwrap();
 
             let _ = child.kill();
             let _ = child.wait();
