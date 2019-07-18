@@ -502,7 +502,7 @@ mod tests {
             aver_eq!(tb, guest.get_cpu_count(), 1);
             aver_eq!(tb, guest.get_initial_apicid(), 0);
             aver!(tb, guest.get_total_memory() > 496_000);
-            aver!(tb, guest.get_entropy() >= 1000);
+            aver!(tb, guest.get_entropy() >= 900);
             aver_eq!(tb, guest.get_pci_bridge_class(), "0x060000");
 
             guest.ssh_command("sudo reboot");
@@ -620,7 +620,7 @@ mod tests {
 
             aver_eq!(tb, guest.get_cpu_count(), 1);
             aver!(tb, guest.get_total_memory() > 496_000);
-            aver!(tb, guest.get_entropy() >= 1000);
+            aver!(tb, guest.get_entropy() >= 900);
             aver_eq!(
                 tb,
                 guest
@@ -663,7 +663,7 @@ mod tests {
 
             aver_eq!(tb, guest.get_cpu_count(), 1);
             aver!(tb, guest.get_total_memory() > 496_000);
-            aver!(tb, guest.get_entropy() >= 1000);
+            aver!(tb, guest.get_entropy() >= 900);
             aver_eq!(
                 tb,
                 guest
