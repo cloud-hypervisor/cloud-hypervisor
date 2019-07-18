@@ -154,6 +154,11 @@ extern crate credibility;
 
 #[cfg(test)]
 #[cfg(feature = "integration_tests")]
+#[macro_use]
+extern crate lazy_static;
+
+#[cfg(test)]
+#[cfg(feature = "integration_tests")]
 mod tests {
     use ssh2::Session;
     use std::fs::{self, read, OpenOptions};
@@ -161,8 +166,13 @@ mod tests {
     use std::net::TcpStream;
     use std::process::Command;
     use std::string::String;
+    use std::sync::Mutex;
     use std::thread;
     use tempdir::TempDir;
+
+    lazy_static! {
+        static ref NEXT_VM_ID: Mutex<u8> = Mutex::new(1);
+    }
 
     struct Guest {
         tmp_dir: TempDir,
@@ -206,13 +216,17 @@ mod tests {
         fn new() -> Self {
             let tmp_dir = TempDir::new("ch").unwrap();
 
+            let mut guard = NEXT_VM_ID.lock().unwrap();
+            let id = *guard;
+            *guard = id + 1;
+
             let mut guest = Guest {
                 tmp_dir,
                 disks: Vec::new(),
                 fw_path: String::new(),
-                guest_ip: String::from("192.168.2.2"),
-                host_ip: String::from("192.168.2.1"),
-                guest_mac: String::from("12:34:56:78:90:ab"),
+                guest_ip: format!("192.168.{}.2", id),
+                host_ip: format!("192.168.{}.1", id),
+                guest_mac: format!("12:34:56:78:90:{:02x}", id),
             };
 
             guest.prepare_files();
