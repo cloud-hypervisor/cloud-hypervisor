@@ -13,6 +13,7 @@ ssh2 = "=0.3.3"
 dirs = "2.0.0"
 credibility = "0.1.3"
 tempdir="0.3.7"
+lazy_static=">=1.1.0"
 
 [features]
 default = []
