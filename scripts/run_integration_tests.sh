@@ -86,10 +86,6 @@ if [ ! -d "$SHARED_DIR" ]; then
     echo "bar" > "$SHARED_DIR/file3"
 fi
 
-rm /tmp/cloudinit.img
-mkdosfs -n config-2 -C /tmp/cloudinit.img 8192
-mcopy -oi /tmp/cloudinit.img -s test_data/cloud-init/openstack ::
-
 cargo build
 sudo setcap cap_net_admin+ep target/debug/cloud-hypervisor
 

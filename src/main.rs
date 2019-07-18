@@ -207,6 +207,49 @@ mod tests {
         s
     }
 
+    fn prepare_cloudinit(tmp_dir: &TempDir) -> String {
+        let cloudinit_file_path = String::from(tmp_dir.path().join("cloudinit").to_str().unwrap());
+
+        let cloud_init_directory = tmp_dir.path().join("cloud-init").join("openstack");
+
+        fs::create_dir_all(&cloud_init_directory.join("latest"))
+            .expect("Expect creating cloud-init directory to succeed");
+
+        let source_file_dir = std::env::current_dir()
+            .unwrap()
+            .join("test_data")
+            .join("cloud-init")
+            .join("openstack")
+            .join("latest");
+
+        fs::copy(
+            source_file_dir.join("meta_data.json"),
+            cloud_init_directory.join("latest").join("meta_data.json"),
+        )
+        .expect("Expect copying cloud-init meta_data.json to succeed");
+        fs::copy(
+            source_file_dir.join("user_data"),
+            cloud_init_directory.join("latest").join("user_data"),
+        )
+        .expect("Expect copying cloud-init user_data to succeed");
+
+        std::process::Command::new("mkdosfs")
+            .args(&["-n", "config-2"])
+            .args(&["-C", cloudinit_file_path.as_str()])
+            .arg("8192")
+            .spawn()
+            .expect("Expect creating disk image to succeed");
+
+        std::process::Command::new("mcopy")
+            .arg("-o")
+            .args(&["-i", cloudinit_file_path.as_str()])
+            .args(&["-s", cloud_init_directory.to_str().unwrap(), "::"])
+            .spawn()
+            .expect("Expect copying files to disk image to succeed");
+
+        cloudinit_file_path
+    }
+
     fn prepare_files(tmp_dir: &TempDir) -> (Vec<String>, String) {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
@@ -220,10 +263,9 @@ mod tests {
         let mut osdisk_raw_base_path = workload_path.clone();
         osdisk_raw_base_path.push("clear-29810-cloud-raw.img");
 
-        let cloudinit_path = String::from("/tmp/cloudinit.img");
-
         let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
         let osdisk_raw_path = String::from(tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
+        let cloudinit_path = prepare_cloudinit(&tmp_dir);
 
         fs::copy(osdisk_base_path, &osdisk_path).expect("copying of OS source disk image failed");
         fs::copy(osdisk_raw_base_path, &osdisk_raw_path)
