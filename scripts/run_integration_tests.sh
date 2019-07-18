@@ -89,5 +89,4 @@ fi
 cargo build
 sudo setcap cap_net_admin+ep target/debug/cloud-hypervisor
 
-# Tests must be executed serially for now as they have a hardcoded IP address
-cargo test --features "integration_tests" -- --test-threads=1
+cargo test --features "integration_tests"
