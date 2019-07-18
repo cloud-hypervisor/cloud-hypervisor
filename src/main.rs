@@ -207,7 +207,12 @@ mod tests {
         s
     }
 
-    fn prepare_cloudinit(tmp_dir: &TempDir) -> String {
+    fn prepare_cloudinit(
+        tmp_dir: &TempDir,
+        guest_ip_addr: &str,
+        host_ip_addr: &str,
+        mac_addr: &str,
+    ) -> String {
         let cloudinit_file_path = String::from(tmp_dir.path().join("cloudinit").to_str().unwrap());
 
         let cloud_init_directory = tmp_dir.path().join("cloud-init").join("openstack");
@@ -227,11 +232,22 @@ mod tests {
             cloud_init_directory.join("latest").join("meta_data.json"),
         )
         .expect("Expect copying cloud-init meta_data.json to succeed");
-        fs::copy(
-            source_file_dir.join("user_data"),
-            cloud_init_directory.join("latest").join("user_data"),
-        )
-        .expect("Expect copying cloud-init user_data to succeed");
+
+        let mut user_data_string = String::new();
+
+        fs::File::open(source_file_dir.join("user_data"))
+            .unwrap()
+            .read_to_string(&mut user_data_string)
+            .expect("Expected reading user_data file in to succeed");
+
+        user_data_string = user_data_string.replace("192.168.2.1", host_ip_addr);
+        user_data_string = user_data_string.replace("192.168.2.2", guest_ip_addr);
+        user_data_string = user_data_string.replace("12:34:56:78:90:ab", mac_addr);
+
+        fs::File::create(cloud_init_directory.join("latest").join("user_data"))
+            .unwrap()
+            .write_all(&user_data_string.as_bytes())
+            .expect("Expected writing out user_data to succeed");
 
         std::process::Command::new("mkdosfs")
             .args(&["-n", "config-2"])
@@ -265,7 +281,8 @@ mod tests {
 
         let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
         let osdisk_raw_path = String::from(tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
-        let cloudinit_path = prepare_cloudinit(&tmp_dir);
+        let cloudinit_path =
+            prepare_cloudinit(&tmp_dir, "192.168.2.2", "192.168.2.1", "12:34:56:78:90:ab");
 
         fs::copy(osdisk_base_path, &osdisk_path).expect("copying of OS source disk image failed");
         fs::copy(osdisk_raw_base_path, &osdisk_raw_path)
