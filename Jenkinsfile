@@ -15,6 +15,7 @@ stage ("Builds") {
 			sh "scripts/run_unit_tests.sh"
 		}
 		stage ('Run integration tests') {
+                        sh "sudo mount -t tmpfs tmpfs /tmp"
 			sh "sudo chmod a+rw /dev/kvm"
 			sh "scripts/run_integration_tests.sh"
 		}
