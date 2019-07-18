@@ -202,7 +202,7 @@ mod tests {
                     }
                 }
             };
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(10 * counter, 0));
         }
         s
     }
@@ -314,7 +314,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             aver_eq!(tb, get_cpu_count(), 1);
             aver_eq!(tb, get_initial_apicid(), 0);
@@ -347,7 +347,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             aver_eq!(tb, get_cpu_count(), 2);
 
@@ -376,7 +376,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             aver!(tb, get_total_memory() > 5_063_000);
 
@@ -405,7 +405,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             aver_eq!(
                 tb,
@@ -445,7 +445,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             aver_eq!(tb, get_cpu_count(), 1);
             aver!(tb, get_total_memory() > 496_000);
@@ -488,7 +488,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             aver_eq!(tb, get_cpu_count(), 1);
             aver!(tb, get_total_memory() > 496_000);
@@ -527,7 +527,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             aver_eq!(
                 tb,
@@ -584,7 +584,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             // Mount shared directory through virtio_fs filesystem
             aver_eq!(
@@ -656,7 +656,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             // Check for the presence of /dev/pmem0
             aver_eq!(tb, ssh_command("ls /dev/pmem0").trim(), "/dev/pmem0");
@@ -722,7 +722,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             // Simple checks to validate the VM booted properly
             aver_eq!(tb, get_cpu_count(), 1);
@@ -754,7 +754,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             // 3 network interfaces + default localhost ==> 4 interfaces
             aver_eq!(
@@ -792,7 +792,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             // Test that there is no ttyS0
             aver_eq!(
@@ -845,7 +845,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             // Test that there is a ttyS0
             aver_eq!(
