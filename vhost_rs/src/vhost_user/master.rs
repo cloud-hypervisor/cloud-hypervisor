@@ -352,7 +352,7 @@ impl VhostUserMaster for Master {
 
         let mut node = self.node.lock().unwrap();
         // depends on VhostUserProtocolFeatures::CONFIG
-        if node.acked_virtio_features & VhostUserProtocolFeatures::CONFIG.bits() == 0 {
+        if node.acked_protocol_features & VhostUserProtocolFeatures::CONFIG.bits() == 0 {
             return error_code(VhostUserError::InvalidOperation);
         }
 
@@ -384,11 +384,11 @@ impl VhostUserMaster for Master {
 
         let mut node = self.node.lock().unwrap();
         // depends on VhostUserProtocolFeatures::CONFIG
-        if node.acked_virtio_features & VhostUserProtocolFeatures::CONFIG.bits() == 0 {
+        if node.acked_protocol_features & VhostUserProtocolFeatures::CONFIG.bits() == 0 {
             return error_code(VhostUserError::InvalidOperation);
         }
 
-        let hdr = node.send_request_with_payload(MasterReq::GET_CONFIG, &body, buf, None)?;
+        let hdr = node.send_request_with_payload(MasterReq::SET_CONFIG, &body, buf, None)?;
         node.wait_for_ack(&hdr).map_err(|e| e.into())
     }
 
