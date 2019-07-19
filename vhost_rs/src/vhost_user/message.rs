@@ -575,10 +575,9 @@ impl VhostUserMsgValidator for VhostUserConfig {
     fn is_valid(&self) -> bool {
         if (self.flags & !VhostUserConfigFlags::all().bits()) != 0 {
             return false;
-        } else if self.offset < VHOST_USER_CONFIG_OFFSET
-            || self.offset >= VHOST_USER_CONFIG_SIZE
+        } else if self.offset >= VHOST_USER_CONFIG_SIZE
             || self.size == 0
-            || self.size > (VHOST_USER_CONFIG_SIZE - VHOST_USER_CONFIG_OFFSET)
+            || self.size > VHOST_USER_CONFIG_SIZE
             || self.size + self.offset > VHOST_USER_CONFIG_SIZE
         {
             return false;
