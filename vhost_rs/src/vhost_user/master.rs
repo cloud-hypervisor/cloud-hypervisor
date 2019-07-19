@@ -603,7 +603,7 @@ impl MasterInternal {
     #[inline]
     fn new_request_header(request: MasterReq, size: u32) -> VhostUserMsgHeader<MasterReq> {
         // TODO: handle NEED_REPLY flag
-        VhostUserMsgHeader::new(request, 0, size)
+        VhostUserMsgHeader::new(request, 0x1, size)
     }
 }
 
