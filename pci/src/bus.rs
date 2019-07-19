@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use crate::configuration::{PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType};
+use crate::configuration::{
+    PciBarRegionType, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
+};
 use crate::device::{Error as PciDeviceError, PciDevice};
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
@@ -21,6 +23,8 @@ pub enum PciRootError {
     AllocateDeviceAddrs(PciDeviceError),
     /// Could not allocate an IRQ number.
     AllocateIrq,
+    /// Could not add a device to the port io bus.
+    PioInsert(devices::BusError),
     /// Could not add a device to the mmio bus.
     MmioInsert(devices::BusError),
 }
@@ -89,12 +93,23 @@ impl PciConfigIo {
     pub fn register_mapping(
         &self,
         dev: Arc<Mutex<dyn BusDevice>>,
-        bus: &mut devices::Bus,
-        bars: Vec<(GuestAddress, GuestUsize)>,
+        io_bus: &mut devices::Bus,
+        mmio_bus: &mut devices::Bus,
+        bars: Vec<(GuestAddress, GuestUsize, PciBarRegionType)>,
     ) -> Result<()> {
-        for (address, size) in bars {
-            bus.insert(dev.clone(), address.raw_value(), size)
-                .map_err(PciRootError::MmioInsert)?;
+        for (address, size, type_) in bars {
+            match type_ {
+                PciBarRegionType::IORegion => {
+                    io_bus
+                        .insert(dev.clone(), address.raw_value(), size)
+                        .map_err(PciRootError::PioInsert)?;
+                }
+                PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                    mmio_bus
+                        .insert(dev.clone(), address.raw_value(), size)
+                        .map_err(PciRootError::MmioInsert)?;
+                }
+            }
         }
         Ok(())
     }

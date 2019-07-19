@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use crate::configuration;
+use crate::configuration::{self, PciBarRegionType};
 use crate::msix::MsixTableEntry;
 use crate::PciInterruptPin;
 use devices::BusDevice;
@@ -66,7 +66,7 @@ pub trait PciDevice: BusDevice {
     fn allocate_bars(
         &mut self,
         _allocator: &mut SystemAllocator,
-    ) -> Result<Vec<(GuestAddress, GuestUsize)>> {
+    ) -> Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>> {
         Ok(Vec::new())
     }
 

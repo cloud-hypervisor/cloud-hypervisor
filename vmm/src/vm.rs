@@ -414,6 +414,11 @@ impl Vcpu {
     }
 }
 
+struct BusInfo<'a> {
+    io: &'a mut devices::Bus,
+    mmio: &'a mut devices::Bus,
+}
+
 struct InterruptInfo<'a> {
     msi_capable: bool,
     ioapic: &'a Option<Arc<Mutex<ioapic::Ioapic>>>,
@@ -488,8 +493,13 @@ impl DeviceManager {
         msi_capable: bool,
         userspace_ioapic: bool,
     ) -> DeviceManagerResult<Self> {
-        let io_bus = devices::Bus::new();
+        let mut io_bus = devices::Bus::new();
         let mut mmio_bus = devices::Bus::new();
+
+        let mut buses = BusInfo {
+            io: &mut io_bus,
+            mmio: &mut mmio_bus,
+        };
 
         let ioapic = if userspace_ioapic {
             // Create IOAPIC
@@ -578,7 +588,7 @@ impl DeviceManager {
                     allocator,
                     vm_fd,
                     &mut pci,
-                    &mut mmio_bus,
+                    &mut buses,
                     &interrupt_info,
                 )?;
             }
@@ -605,7 +615,7 @@ impl DeviceManager {
                     allocator,
                     vm_fd,
                     &mut pci,
-                    &mut mmio_bus,
+                    &mut buses,
                     &interrupt_info,
                 )?;
             }
@@ -622,7 +632,7 @@ impl DeviceManager {
                 allocator,
                 vm_fd,
                 &mut pci,
-                &mut mmio_bus,
+                &mut buses,
                 &interrupt_info,
             )?;
         }
@@ -645,7 +655,7 @@ impl DeviceManager {
                         allocator,
                         vm_fd,
                         &mut pci,
-                        &mut mmio_bus,
+                        &mut buses,
                         &interrupt_info,
                     )?;
                 }
@@ -710,7 +720,7 @@ impl DeviceManager {
                     allocator,
                     vm_fd,
                     &mut pci,
-                    &mut mmio_bus,
+                    &mut buses,
                     &interrupt_info,
                 )?;
             }
@@ -735,7 +745,7 @@ impl DeviceManager {
         allocator: &mut SystemAllocator,
         vm_fd: &Arc<VmFd>,
         pci: &mut PciConfigIo,
-        mmio_bus: &mut devices::Bus,
+        buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
         let msix_num = if interrupt_info.msi_capable {
@@ -828,8 +838,13 @@ impl DeviceManager {
         pci.add_device(virtio_pci_device.clone())
             .map_err(DeviceManagerError::AddPciDevice)?;
 
-        pci.register_mapping(virtio_pci_device.clone(), mmio_bus, bars)
-            .map_err(DeviceManagerError::AddPciDevice)?;
+        pci.register_mapping(
+            virtio_pci_device.clone(),
+            &mut buses.io,
+            &mut buses.mmio,
+            bars,
+        )
+        .map_err(DeviceManagerError::AddPciDevice)?;
 
         Ok(())
     }
