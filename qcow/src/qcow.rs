@@ -116,6 +116,7 @@ const MAX_CLUSTER_BITS: u32 = 30;
 // Only support 2 byte refcounts, 2^refcount_order bits.
 const DEFAULT_REFCOUNT_ORDER: u32 = 4;
 
+const V2_BARE_HEADER_SIZE: u32 = 72;
 const V3_BARE_HEADER_SIZE: u32 = 104;
 
 // bits 0-8 and 56-63 are reserved.
@@ -175,9 +176,11 @@ impl QcowHeader {
             f.read_u64::<BigEndian>().map_err(Error::ReadingHeader)
         }
 
+        let version = read_u32_from_file(f)?;
+
         Ok(QcowHeader {
             magic,
-            version: read_u32_from_file(f)?,
+            version,
             backing_file_offset: read_u64_from_file(f)?,
             backing_file_size: read_u32_from_file(f)?,
             cluster_bits: read_u32_from_file(f)?,
@@ -189,16 +192,36 @@ impl QcowHeader {
             refcount_table_clusters: read_u32_from_file(f)?,
             nb_snapshots: read_u32_from_file(f)?,
             snapshots_offset: read_u64_from_file(f)?,
-            incompatible_features: read_u64_from_file(f)?,
-            compatible_features: read_u64_from_file(f)?,
-            autoclear_features: read_u64_from_file(f)?,
-            refcount_order: read_u32_from_file(f)?,
-            header_size: read_u32_from_file(f)?,
+            incompatible_features: if version == 2 {
+                0
+            } else {
+                read_u64_from_file(f)?
+            },
+            compatible_features: if version == 2 {
+                0
+            } else {
+                read_u64_from_file(f)?
+            },
+            autoclear_features: if version == 2 {
+                0
+            } else {
+                read_u64_from_file(f)?
+            },
+            refcount_order: if version == 2 {
+                DEFAULT_REFCOUNT_ORDER
+            } else {
+                read_u32_from_file(f)?
+            },
+            header_size: if version == 2 {
+                V2_BARE_HEADER_SIZE
+            } else {
+                read_u32_from_file(f)?
+            },
         })
     }
 
     /// Create a header for the given `size`.
-    pub fn create_for_size(size: u64) -> QcowHeader {
+    pub fn create_for_size(version: u32, size: u64) -> QcowHeader {
         let cluster_bits: u32 = DEFAULT_CLUSTER_BITS;
         let cluster_size: u32 = 0x01 << cluster_bits;
         // L2 blocks are always one cluster long. They contain cluster_size/sizeof(u64) addresses.
@@ -209,7 +232,7 @@ impl QcowHeader {
         let header_clusters = div_round_up_u32(size_of::<QcowHeader>() as u32, cluster_size);
         QcowHeader {
             magic: QCOW_MAGIC,
-            version: 3,
+            version,
             backing_file_offset: 0,
             backing_file_size: 0,
             cluster_bits: DEFAULT_CLUSTER_BITS,
@@ -240,7 +263,11 @@ impl QcowHeader {
             compatible_features: 0,
             autoclear_features: 0,
             refcount_order: DEFAULT_REFCOUNT_ORDER,
-            header_size: V3_BARE_HEADER_SIZE,
+            header_size: if version == 2 {
+                V2_BARE_HEADER_SIZE
+            } else {
+                V3_BARE_HEADER_SIZE
+            },
         }
     }
 
@@ -336,8 +363,8 @@ impl QcowFile {
     pub fn from(mut file: File) -> Result<QcowFile> {
         let header = QcowHeader::new(&mut file)?;
 
-        // Only v3 files are supported.
-        if header.version != 3 {
+        // Only v2 and v3 files are supported.
+        if header.version != 2 && header.version != 3 {
             return Err(Error::UnsupportedVersion(header.version));
         }
 
@@ -461,8 +488,8 @@ impl QcowFile {
     }
 
     /// Creates a new QcowFile at the given path.
-    pub fn new(mut file: File, virtual_size: u64) -> Result<QcowFile> {
-        let header = QcowHeader::create_for_size(virtual_size);
+    pub fn new(mut file: File, version: u32, virtual_size: u64) -> Result<QcowFile> {
+        let header = QcowHeader::create_for_size(version, virtual_size);
         file.seek(SeekFrom::Start(0)).map_err(Error::SeekingFile)?;
         header.write_to(&mut file)?;
 
@@ -1569,7 +1596,7 @@ where
 
     match dst_type {
         ImageType::Qcow2 => {
-            let mut dst_writer = QcowFile::new(dst_file, src_size)?;
+            let mut dst_writer = QcowFile::new(dst_file, 3, src_size)?;
             convert_reader_writer(reader, &mut dst_writer, src_size)
         }
         ImageType::Raw => {
@@ -1625,7 +1652,7 @@ mod tests {
     use std::io::{Read, Seek, SeekFrom, Write};
     use tempfile::tempfile;
 
-    fn valid_header() -> Vec<u8> {
+    fn valid_header_v3() -> Vec<u8> {
         vec![
             0x51u8, 0x46, 0x49, 0xfb, // magic
             0x00, 0x00, 0x00, 0x03, // version
@@ -1648,6 +1675,24 @@ mod tests {
         ]
     }
 
+    fn valid_header_v2() -> Vec<u8> {
+        vec![
+            0x51u8, 0x46, 0x49, 0xfb, // magic
+            0x00, 0x00, 0x00, 0x02, // version
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // backing file offset
+            0x00, 0x00, 0x00, 0x00, // backing file size
+            0x00, 0x00, 0x00, 0x10, // cluster_bits
+            0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, // size
+            0x00, 0x00, 0x00, 0x00, // crypt method
+            0x00, 0x00, 0x01, 0x00, // L1 size
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, // L1 table offset
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, // refcount table offset
+            0x00, 0x00, 0x00, 0x03, // refcount table clusters
+            0x00, 0x00, 0x00, 0x00, // nb snapshots
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, // snapshots offset
+        ]
+    }
+
     fn with_basic_file<F>(header: &[u8], mut testfn: F)
     where
         F: FnMut(File),
@@ -1665,26 +1710,46 @@ mod tests {
         F: FnMut(QcowFile),
     {
         let tmp = tempfile().unwrap();
-        let qcow_file = QcowFile::new(tmp, file_size).unwrap();
+        let qcow_file = QcowFile::new(tmp, 3, file_size).unwrap();
 
         testfn(qcow_file); // File closed when the function exits.
     }
 
     #[test]
-    fn default_header() {
-        let header = QcowHeader::create_for_size(0x10_0000);
+    fn default_header_v2() {
+        let header = QcowHeader::create_for_size(2, 0x10_0000);
         let mut disk_file: File = tempfile().unwrap();
         header
             .write_to(&mut disk_file)
-            .expect("Failed to write header to shm.");
+            .expect("Failed to write header to temporary file.");
+        disk_file.seek(SeekFrom::Start(0)).unwrap();
+        QcowFile::from(disk_file).expect("Failed to create Qcow from default Header");
+    }
+
+    #[test]
+    fn default_header_v3() {
+        let header = QcowHeader::create_for_size(3, 0x10_0000);
+        let mut disk_file: File = tempfile().unwrap();
+        header
+            .write_to(&mut disk_file)
+            .expect("Failed to write header to temporary file.");
         disk_file.seek(SeekFrom::Start(0)).unwrap();
         QcowFile::from(disk_file).expect("Failed to create Qcow from default Header");
     }
 
     #[test]
     fn header_read() {
-        with_basic_file(&valid_header(), |mut disk_file: File| {
-            QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
+        with_basic_file(&valid_header_v2(), |mut disk_file: File| {
+            let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
+            assert_eq!(header.version, 2);
+            assert_eq!(header.refcount_order, DEFAULT_REFCOUNT_ORDER);
+            assert_eq!(header.header_size, V2_BARE_HEADER_SIZE);
+        });
+        with_basic_file(&valid_header_v3(), |mut disk_file: File| {
+            let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
+            assert_eq!(header.version, 3);
+            assert_eq!(header.refcount_order, DEFAULT_REFCOUNT_ORDER);
+            assert_eq!(header.header_size, V3_BARE_HEADER_SIZE);
         });
     }
 
@@ -1698,7 +1763,7 @@ mod tests {
 
     #[test]
     fn invalid_refcount_order() {
-        let mut header = valid_header();
+        let mut header = valid_header_v3();
         header[99] = 2;
         with_basic_file(&header, |disk_file: File| {
             QcowFile::from(disk_file).expect_err("Invalid refcount order worked.");
@@ -1707,7 +1772,7 @@ mod tests {
 
     #[test]
     fn write_read_start() {
-        with_basic_file(&valid_header(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: File| {
             let mut q = QcowFile::from(disk_file).unwrap();
             q.write(b"test first bytes")
                 .expect("Failed to write test string.");
@@ -1720,7 +1785,7 @@ mod tests {
 
     #[test]
     fn offset_write_read() {
-        with_basic_file(&valid_header(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: File| {
             let mut q = QcowFile::from(disk_file).unwrap();
             let b = [0x55u8; 0x1000];
             q.seek(SeekFrom::Start(0xfff2000)).expect("Failed to seek.");
@@ -1734,7 +1799,7 @@ mod tests {
 
     #[test]
     fn write_zeroes_read() {
-        with_basic_file(&valid_header(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: File| {
             let mut q = QcowFile::from(disk_file).unwrap();
             // Write some test data.
             let b = [0x55u8; 0x1000];
@@ -1760,7 +1825,7 @@ mod tests {
         // Choose a size that is larger than a cluster.
         // valid_header uses cluster_bits = 12, which corresponds to a cluster size of 4096.
         const CHUNK_SIZE: usize = 4096 * 2 + 512;
-        with_basic_file(&valid_header(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: File| {
             let mut q = QcowFile::from(disk_file).unwrap();
             // Write some test data.
             let b = [0x55u8; CHUNK_SIZE];
@@ -1781,7 +1846,11 @@ mod tests {
 
     #[test]
     fn test_header() {
-        with_basic_file(&valid_header(), |disk_file: File| {
+        with_basic_file(&valid_header_v2(), |disk_file: File| {
+            let q = QcowFile::from(disk_file).unwrap();
+            assert_eq!(q.virtual_size(), 0x20_0000_0000);
+        });
+        with_basic_file(&valid_header_v3(), |disk_file: File| {
             let q = QcowFile::from(disk_file).unwrap();
             assert_eq!(q.virtual_size(), 0x20_0000_0000);
         });
@@ -1789,7 +1858,7 @@ mod tests {
 
     #[test]
     fn read_small_buffer() {
-        with_basic_file(&valid_header(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: File| {
             let mut q = QcowFile::from(disk_file).unwrap();
             let mut b = [5u8; 16];
             q.seek(SeekFrom::Start(1000)).expect("Failed to seek.");
@@ -1801,7 +1870,7 @@ mod tests {
 
     #[test]
     fn replay_ext4() {
-        with_basic_file(&valid_header(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: File| {
             let mut q = QcowFile::from(disk_file).unwrap();
             const BUF_SIZE: usize = 0x1000;
             let mut b = [0u8; BUF_SIZE];
@@ -2337,7 +2406,7 @@ mod tests {
 
     #[test]
     fn rebuild_refcounts() {
-        with_basic_file(&valid_header(), |mut disk_file: File| {
+        with_basic_file(&valid_header_v3(), |mut disk_file: File| {
             let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
             let cluster_size = 65536;
             let mut raw_file =
