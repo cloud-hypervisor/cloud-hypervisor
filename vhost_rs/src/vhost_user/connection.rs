@@ -197,6 +197,45 @@ impl<R: Req> Endpoint<R> {
         Ok(())
     }
 
+    /// Send a message with header, body and config info. Optional file descriptors may be attached to
+    /// the message.
+    ///
+    /// # Return:
+    /// * - number of bytes sent on success
+    /// * - SocketRetry: temporary error caused by signals or short of resources.
+    /// * - SocketBroken: the underline socket is broken.
+    /// * - SocketError: other socket related errors.
+    /// * - PartialMessage: received a partial message.
+    pub fn send_config_message(
+        &mut self,
+        hdr: &VhostUserMsgHeader<R>,
+        user_config: &VhostUserConfig,
+        buf: &mut [u8],
+        fds: Option<&[RawFd]>,
+    ) -> Result<()> {
+        // Safe because there can't be other mutable referance to hdr and body.
+        let iovs = unsafe {
+            [
+                slice::from_raw_parts(
+                    hdr as *const VhostUserMsgHeader<R> as *const u8,
+                    mem::size_of::<VhostUserMsgHeader<R>>(),
+                ),
+                slice::from_raw_parts(
+                    user_config as *const VhostUserConfig as *const u8,
+                    mem::size_of::<VhostUserConfig>(),
+                ),
+                slice::from_raw_parts(buf.as_ptr() as *const u8, buf.len()),
+            ]
+        };
+        let bytes = self.send_iovec(&iovs[..], fds)?;
+        let total =
+            mem::size_of::<VhostUserMsgHeader<R>>() + mem::size_of::<VhostUserConfig>() + buf.len();
+        if bytes != total {
+            return Err(Error::PartialMessage);
+        }
+        Ok(())
+    }
+
     /// Send a message with header, body and payload. Optional file descriptors
     /// may also be attached to the message.
     ///
