@@ -196,8 +196,10 @@ mod tests {
         disks: Vec<String>,
         fw_path: String,
         guest_ip: String,
+        l2_guest_ip: String,
         host_ip: String,
         guest_mac: String,
+        l2_guest_mac: String,
     }
 
     fn prepare_virtiofsd(tmp_dir: &TempDir) -> (std::process::Child, String) {
@@ -230,25 +232,31 @@ mod tests {
     }
 
     impl Guest {
-        fn new() -> Self {
+        fn new_from_ip_range(class: &str, id: u8) -> Self {
             let tmp_dir = TempDir::new("ch").unwrap();
-
-            let mut guard = NEXT_VM_ID.lock().unwrap();
-            let id = *guard;
-            *guard = id + 1;
 
             let mut guest = Guest {
                 tmp_dir,
                 disks: Vec::new(),
                 fw_path: String::new(),
-                guest_ip: format!("192.168.{}.2", id),
-                host_ip: format!("192.168.{}.1", id),
+                guest_ip: format!("{}.{}.2", class, id),
+                l2_guest_ip: format!("{}.{}.3", class, id),
+                host_ip: format!("{}.{}.1", class, id),
                 guest_mac: format!("12:34:56:78:90:{:02x}", id),
+                l2_guest_mac: format!("de:ad:be:ef:12:{:02x}", id),
             };
 
             guest.prepare_files();
 
             guest
+        }
+
+        fn new() -> Self {
+            let mut guard = NEXT_VM_ID.lock().unwrap();
+            let id = *guard;
+            *guard = id + 1;
+
+            Self::new_from_ip_range("192.168", id)
         }
 
         fn prepare_cloudinit(&self) -> String {
@@ -282,7 +290,9 @@ mod tests {
 
             user_data_string = user_data_string.replace("192.168.2.1", &self.host_ip);
             user_data_string = user_data_string.replace("192.168.2.2", &self.guest_ip);
+            user_data_string = user_data_string.replace("192.168.2.3", &self.l2_guest_ip);
             user_data_string = user_data_string.replace("12:34:56:78:90:ab", &self.guest_mac);
+            user_data_string = user_data_string.replace("de:ad:be:ef:12:34", &self.l2_guest_mac);
 
             fs::File::create(cloud_init_directory.join("latest").join("user_data"))
                 .unwrap()
@@ -343,7 +353,7 @@ mod tests {
             )
         }
 
-        fn ssh_command(&self, command: &str) -> String {
+        fn ssh_command_ip(&self, command: &str, ip: &str) -> String {
             let mut s = String::new();
             #[derive(Debug)]
             enum Error {
@@ -355,8 +365,8 @@ mod tests {
             let mut counter = 0;
             loop {
                 match (|| -> Result<(), Error> {
-                    let tcp = TcpStream::connect(format!("{}:22", self.guest_ip))
-                        .map_err(|_| Error::Connection)?;
+                    let tcp =
+                        TcpStream::connect(format!("{}:22", ip)).map_err(|_| Error::Connection)?;
                     let mut sess = Session::new().unwrap();
                     sess.handshake(&tcp).map_err(|_| Error::Connection)?;
 
@@ -385,6 +395,18 @@ mod tests {
                 thread::sleep(std::time::Duration::new(10 * counter, 0));
             }
             s
+        }
+
+        fn ssh_command(&self, command: &str) -> String {
+            self.ssh_command_ip(command, &self.guest_ip)
+        }
+
+        fn ssh_command_l1(&self, command: &str) -> String {
+            self.ssh_command_ip(command, &self.guest_ip)
+        }
+
+        fn ssh_command_l2(&self, command: &str) -> String {
+            self.ssh_command_ip(command, &self.l2_guest_ip)
         }
 
         fn get_cpu_count(&self) -> u32 {
@@ -1095,4 +1117,123 @@ mod tests {
         });
     }
 
+    #[test]
+    // The VFIO integration test starts a qemu guest and then direct assigns
+    // one of the virtio-PCI device to a cloud-hypervisor nested guest. The
+    // test assigns one of the 2 virtio-pci networking interface, and thus
+    // the cloud-hypervisor guest will get a networking interface through that
+    // direct assignment.
+    // The test starts the QEMU guest with 2 TAP backed networking interfaces,
+    // bound through a simple bridge on the host. So if the nested
+    // cloud-hypervisor succeeds in getting a directly assigned interface from
+    // its QEMU host, we should be able to ssh into it, and verify that it's
+    // running with the right kernel command line (We tag the cloud-hypervisor
+    // command line for that puspose).
+    fn test_vfio() {
+        test_block!(tb, "", {
+            let guest = Guest::new_from_ip_range("172.16", 0);
+
+            let home = dirs::home_dir().unwrap();
+            let mut cloud_init_vfio_base_path = home.clone();
+            cloud_init_vfio_base_path.push("workloads");
+            cloud_init_vfio_base_path.push("vfio");
+            cloud_init_vfio_base_path.push("cloudinit.img");
+
+            // We copy our cloudinit into the vfio mount point, for the nested
+            // cloud-hypervisor guest to use.
+            fs::copy(&guest.disks[1], &cloud_init_vfio_base_path)
+                .expect("copying of cloud-init disk failed");
+
+            let vfio_9p_path = format!(
+                "local,id=shared,path={}/workloads/vfio/,security_model=none",
+                home.to_str().unwrap()
+            );
+
+            let ovmf_path = format!("{}/workloads/OVMF.fd", home.to_str().unwrap());
+            let os_disk = format!("file={},format=qcow2", guest.disks[0].as_str());
+            let cloud_init_disk = format!("file={},format=raw", guest.disks[1].as_str());
+
+            let vfio_tap0 = "vfio-tap0";
+            let vfio_tap1 = "vfio-tap1";
+
+            let ssh_net = "ssh-net";
+            let vfio_net = "vfio-net";
+
+            let netdev_ssh = format!(
+                "tap,ifname={},id={},script=no,downscript=no",
+                vfio_tap0, ssh_net
+            );
+            let netdev_ssh_device = format!(
+                "virtio-net-pci,netdev={},disable-legacy=on,iommu_platform=on,ats=on,mac={}",
+                ssh_net, guest.guest_mac
+            );
+
+            let netdev_vfio = format!(
+                "tap,ifname={},id={},script=no,downscript=no",
+                vfio_tap1, vfio_net
+            );
+            let netdev_vfio_device = format!(
+                "virtio-net-pci,netdev={},disable-legacy=on,iommu_platform=on,ats=on,mac={}",
+                vfio_net, guest.l2_guest_mac
+            );
+
+            let mut qemu_child = Command::new("qemu-system-x86_64")
+                .args(&["-machine", "q35,accel=kvm,kernel_irqchip=split"])
+                .args(&["-bios", &ovmf_path])
+                .args(&["-smp", "sockets=1,cpus=4,cores=2"])
+                .args(&["-cpu", "host"])
+                .args(&["-m", "1024"])
+                .args(&["-vga", "none"])
+                .args(&["-nographic"])
+                .args(&["-drive", &os_disk])
+                .args(&["-drive", &cloud_init_disk])
+                .args(&["-device", "virtio-rng-pci"])
+                .args(&["-netdev", &netdev_ssh])
+                .args(&["-device", &netdev_ssh_device])
+                .args(&["-netdev", &netdev_vfio])
+                .args(&["-device", &netdev_vfio_device])
+                .args(&[
+                    "-device",
+                    "intel-iommu,intremap=on,caching-mode=on,device-iotlb=on",
+                ])
+                .args(&["-fsdev", &vfio_9p_path])
+                .args(&[
+                    "-device",
+                    "virtio-9p-pci,fsdev=shared,mount_tag=cloud_hypervisor",
+                ])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(30, 0));
+
+            guest.ssh_command_l1("sudo systemctl start vfio");
+            thread::sleep(std::time::Duration::new(30, 0));
+
+            // We booted our cloud hypervisor L2 guest with a "VFIOTAG" tag
+            // added to its kernel command line.
+            // Let's ssh into it and verify that it's there. If it is it means
+            // we're in the right guest (The L2 one) because the QEMU L1 guest
+            // does not have this command line tag.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command_l2("cat /proc/cmdline | grep -c 'VFIOTAG'")
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap(),
+                1
+            );
+
+            guest.ssh_command_l2("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            guest.ssh_command_l1("sudo shutdown -h now");
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            let _ = qemu_child.kill();
+            let _ = qemu_child.wait();
+
+            Ok(())
+        });
+    }
 }
