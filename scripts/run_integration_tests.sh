@@ -14,6 +14,14 @@ if [ ! -f "$FW" ]; then
     popd
 fi
 
+OVMF_URL="https://cdn.download.clearlinux.org/image/OVMF.fd"
+OVMF="$WORKLOADS_DIR/OVMF.fd"
+if [ ! -f "$OVMF" ]; then
+    pushd $WORKLOADS_DIR
+    wget --quiet $OVMF_URL
+    popd
+fi
+
 OS_IMAGE_NAME="clear-29810-cloud.img"
 OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$OS_IMAGE_NAME.xz"
 OS_IMAGE="$WORKLOADS_DIR/$OS_IMAGE_NAME"
@@ -86,7 +94,42 @@ if [ ! -d "$SHARED_DIR" ]; then
     echo "bar" > "$SHARED_DIR/file3"
 fi
 
+VFIO_DIR="$WORKLOADS_DIR/vfio"
+if [ ! -d "$VFIO_DIR" ]; then
+    mkdir -p $VFIO_DIR
+    cp $OS_IMAGE $VFIO_DIR
+    cp $FW $VFIO_DIR
+    cp $VMLINUX_IMAGE $VFIO_DIR
+fi
+
+# VFIO test network setup.
+# We reserve a different IP class for it: 172.16.0.0/24.
+sudo ip link add name vfio-br0 type bridge
+sudo ip link set vfio-br0 up
+sudo ip addr add 172.16.0.1/24 dev vfio-br0
+
+sudo ip tuntap add vfio-tap0 mode tap
+sudo ip link set vfio-tap0 master vfio-br0
+sudo ip link set vfio-tap0 up
+
+sudo ip tuntap add vfio-tap1 mode tap
+sudo ip link set vfio-tap1 master vfio-br0
+sudo ip link set vfio-tap1 up
+
 cargo build
 sudo setcap cap_net_admin+ep target/debug/cloud-hypervisor
 
+# We always copy a fresh version of our binary for our L2 guest.
+cp target/debug/cloud-hypervisor $VFIO_DIR
+# We need qemu to have NET_ADMIN as well.
+sudo setcap cap_net_admin+ep /usr/bin/qemu-system-x86_64
+
+sudo adduser $USER kvm
+newgrp kvm << EOF
 cargo test --features "integration_tests"
+EOF
+
+# Tear VFIO test network down
+sudo ip link del vfio-br0
+sudo ip link del vfio-tap0
+sudo ip link del vfio-tap1
