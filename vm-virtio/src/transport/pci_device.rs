@@ -20,9 +20,9 @@ use std::sync::Mutex;
 use devices::BusDevice;
 use pci::{
     InterruptDelivery, InterruptParameters, MsixCap, MsixConfig, PciBarConfiguration,
-    PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
-    PciHeaderType, PciInterruptPin, PciMassStorageSubclass, PciNetworkControllerSubclass,
-    PciSubclass,
+    PciBarRegionType, PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice,
+    PciDeviceError, PciHeaderType, PciInterruptPin, PciMassStorageSubclass,
+    PciNetworkControllerSubclass, PciSubclass,
 };
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
@@ -444,7 +444,8 @@ impl PciDevice for VirtioPciDevice {
     fn allocate_bars(
         &mut self,
         allocator: &mut SystemAllocator,
-    ) -> std::result::Result<Vec<(GuestAddress, GuestUsize)>, PciDeviceError> {
+    ) -> std::result::Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError>
+    {
         let mut ranges = Vec::new();
 
         // Allocate the virtio-pci capability BAR.
@@ -461,7 +462,11 @@ impl PciDevice for VirtioPciDevice {
                 PciDeviceError::IoRegistrationFailed(virtio_pci_bar_addr.raw_value(), e)
             })? as u8;
 
-        ranges.push((virtio_pci_bar_addr, CAPABILITY_BAR_SIZE));
+        ranges.push((
+            virtio_pci_bar_addr,
+            CAPABILITY_BAR_SIZE,
+            PciBarRegionType::Memory64BitRegion,
+        ));
 
         // Once the BARs are allocated, the capabilities can be added to the PCI configuration.
         self.add_pci_capabilities(virtio_pci_bar)?;
@@ -475,7 +480,11 @@ impl PciDevice for VirtioPciDevice {
             let _device_bar = self.configuration.add_pci_bar(&config).map_err(|e| {
                 PciDeviceError::IoRegistrationFailed(device_bar_addr.raw_value(), e)
             })?;
-            ranges.push((device_bar_addr, config.get_size()));
+            ranges.push((
+                device_bar_addr,
+                config.get_size(),
+                PciBarRegionType::Memory64BitRegion,
+            ));
         }
 
         Ok(ranges)
