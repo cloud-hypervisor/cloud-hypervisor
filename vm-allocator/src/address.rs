@@ -127,25 +127,32 @@ impl AddressAllocator {
         req_size: GuestUsize,
         alignment: GuestUsize,
     ) -> Option<GuestAddress> {
-        let mut prev_end_address = self.base;
+        let reversed_ranges: Vec<(&GuestAddress, &GuestUsize)> = self.ranges.iter().rev().collect();
 
-        for (address, size) in self.ranges.iter() {
+        for (idx, (address, _size)) in reversed_ranges.iter().enumerate() {
+            let next_range_idx = idx + 1;
+            let prev_end_address = if next_range_idx >= reversed_ranges.len() {
+                self.base
+            } else {
+                reversed_ranges[next_range_idx]
+                    .0
+                    .unchecked_add(*(reversed_ranges[next_range_idx].1))
+            };
+
             // If we have enough space between this range and the previous one,
             // we return the start of this range minus the requested size.
             // As each new range is allocated at the end of the available address space,
             // we will tend to always allocate new ranges there as well. In other words,
             // ranges accumulate at the end of the address space.
-            if address
-                .unchecked_sub(self.align_address(prev_end_address, alignment).raw_value())
-                .raw_value()
-                >= req_size
+            if let Some(size_delta) =
+                address.checked_sub(self.align_address(prev_end_address, alignment).raw_value())
             {
-                return Some(
-                    self.align_address(address.unchecked_sub(req_size + alignment), alignment),
-                );
+                if size_delta.raw_value() >= req_size {
+                    return Some(
+                        self.align_address(address.unchecked_sub(req_size + alignment), alignment),
+                    );
+                }
             }
-
-            prev_end_address = address.unchecked_add(*size);
         }
 
         None
@@ -257,7 +264,7 @@ mod tests {
         );
         assert_eq!(
             pool.allocate(None, 0x10, Some(0x100)),
-            Some(GuestAddress(0x10b00))
+            Some(GuestAddress(0x10d00))
         );
     }
 
