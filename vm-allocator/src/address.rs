@@ -90,7 +90,7 @@ impl AddressAllocator {
         }
 
         // The aligned address should be within the address space range.
-        if aligned_address >= self.end || aligned_address <= self.base {
+        if aligned_address >= self.end || aligned_address < self.base {
             return Err(Error::Overflow);
         }
 
