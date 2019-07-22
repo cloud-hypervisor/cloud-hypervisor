@@ -20,6 +20,7 @@ use std::fmt;
 use std::io;
 
 mod block;
+mod console;
 mod device;
 pub mod fs;
 pub mod net;
@@ -30,6 +31,7 @@ mod rng;
 pub mod transport;
 
 pub use self::block::*;
+pub use self::console::*;
 pub use self::device::*;
 pub use self::fs::*;
 pub use self::net::*;
@@ -55,6 +57,7 @@ const VIRTIO_F_VERSION_1_BITMASK: u64 = 1 << VIRTIO_F_VERSION_1;
 enum VirtioDeviceType {
     TYPE_NET = 1,
     TYPE_BLOCK = 2,
+    TYPE_CONSOLE = 3,
     TYPE_RNG = 4,
     TYPE_BALLOON = 5,
     TYPE_9P = 9,
