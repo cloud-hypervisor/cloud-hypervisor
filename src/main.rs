@@ -172,7 +172,7 @@ mod tests {
     use std::fs::{self, read, OpenOptions};
     use std::io::{Read, Write};
     use std::net::TcpStream;
-    use std::process::Command;
+    use std::process::{Command, Stdio};
     use std::string::String;
     use std::sync::Mutex;
     use std::thread;
@@ -411,6 +411,45 @@ mod tests {
                 .trim()
                 .to_string()
         }
+        fn get_pci_device_ids(&self) -> String {
+            self.ssh_command("cat /sys/bus/pci/devices/*/device")
+                .trim()
+                .to_string()
+        }
+
+        fn get_pci_vendor_ids(&self) -> String {
+            self.ssh_command("cat /sys/bus/pci/devices/*/vendor")
+                .trim()
+                .to_string()
+        }
+
+        fn is_console_detected(&self) -> bool {
+            !(self
+                .ssh_command("dmesg | grep \"hvc0] enabled\"")
+                .trim()
+                .to_string()
+                .is_empty())
+        }
+
+        fn does_device_vendor_pair_match(&self, device_id: &str, vendor_id: &str) -> bool {
+            // We are checking if console device's device id and vendor id pair matches
+            let devices = self.get_pci_device_ids();
+            let devices: Vec<&str> = devices.split('\n').collect();
+            let vendors = self.get_pci_vendor_ids();
+            let vendors: Vec<&str> = vendors.split('\n').collect();
+
+            for (index, d_id) in devices.iter().enumerate() {
+                if *d_id == device_id {
+                    if let Some(v_id) = vendors.get(index) {
+                        if *v_id == vendor_id {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            false
+        }
     }
 
     #[test]
@@ -515,7 +554,7 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap(),
-                8
+                10
             );
 
             guest.ssh_command("sudo reboot");
@@ -558,7 +597,7 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap(),
-                8
+                10
             );
 
             guest.ssh_command("sudo reboot");
@@ -601,7 +640,7 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap(),
-                8
+                10
             );
 
             guest.ssh_command("sudo reboot");
@@ -965,4 +1004,86 @@ mod tests {
             Ok(())
         });
     }
+
+    #[test]
+    fn test_virtio_console() {
+        test_block!(tb, "", {
+            let guest = Guest::new();
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--console", "tty"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            aver!(tb, guest.does_device_vendor_pair_match("0x1043", "0x1af4"));
+            aver!(tb, guest.is_console_detected());
+
+            let text = String::from("On a branch floating down river a cricket, singing.");
+            let cmd = format!("sudo -E bash -c 'echo {} > /dev/hvc0'", text);
+            guest.ssh_command(&cmd);
+
+            guest.ssh_command("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+
+            match child.wait_with_output() {
+                Ok(out) => {
+                    aver!(tb, String::from_utf8_lossy(&out.stdout).contains(&text));
+                }
+                Err(_) => aver!(tb, false),
+            }
+
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_console_file() {
+        test_block!(tb, "", {
+            let guest = Guest::new();
+
+            let console_path = guest.tmp_dir.path().join("/tmp/console-output");
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&[
+                    "--console",
+                    format!("file={}", console_path.to_str().unwrap()).as_str(),
+                ])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Test that there is a ttyS0
+            aver!(tb, guest.is_console_detected());
+
+            guest.ssh_command("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Do this check after shutdown of the VM as an easy way to ensure
+            // all writes are flushed to disk
+            let mut f = std::fs::File::open(console_path).unwrap();
+            let mut buf = String::new();
+            f.read_to_string(&mut buf).unwrap();
+            aver!(tb, buf.contains("cloud login:"));
+
+            let _ = child.kill();
+            let _ = child.wait();
+
+            Ok(())
+        });
+    }
+
 }
