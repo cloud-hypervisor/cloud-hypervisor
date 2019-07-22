@@ -50,8 +50,10 @@ pub enum Error<'a> {
     ParsePmemFileParam,
     /// Failed parsing size parameter.
     ParseSizeParam(std::num::ParseIntError),
-    /// Failed parsing serial parameter.
-    ParseSerialParam,
+    /// Failed parsing console parameter.
+    ParseConsoleParam,
+    /// Both console and serial are tty.
+    ParseTTYParam,
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -66,6 +68,7 @@ pub struct VmParams<'a> {
     pub fs: Option<Vec<&'a str>>,
     pub pmem: Option<Vec<&'a str>>,
     pub serial: &'a str,
+    pub console: &'a str,
 }
 
 fn parse_size(size: &str) -> Result<u64> {
@@ -342,36 +345,36 @@ impl<'a> PmemConfig<'a> {
 }
 
 #[derive(PartialEq)]
-pub enum SerialOutputMode {
+pub enum ConsoleOutputMode {
     Off,
     Tty,
     File,
 }
 
-pub struct SerialConfig<'a> {
+pub struct ConsoleConfig<'a> {
     pub file: Option<&'a Path>,
-    pub mode: SerialOutputMode,
+    pub mode: ConsoleOutputMode,
 }
 
-impl<'a> SerialConfig<'a> {
+impl<'a> ConsoleConfig<'a> {
     pub fn parse(param: &'a str) -> Result<Self> {
         if param == "off" {
             Ok(Self {
-                mode: SerialOutputMode::Off,
+                mode: ConsoleOutputMode::Off,
                 file: None,
             })
         } else if param == "tty" {
             Ok(Self {
-                mode: SerialOutputMode::Tty,
+                mode: ConsoleOutputMode::Tty,
                 file: None,
             })
         } else if param.starts_with("file=") {
             Ok(Self {
-                mode: SerialOutputMode::File,
+                mode: ConsoleOutputMode::File,
                 file: Some(Path::new(&param[5..])),
             })
         } else {
-            Err(Error::ParseSerialParam)
+            Err(Error::ParseConsoleParam)
         }
     }
 }
@@ -386,7 +389,8 @@ pub struct VmConfig<'a> {
     pub rng: RngConfig<'a>,
     pub fs: Option<Vec<FsConfig<'a>>>,
     pub pmem: Option<Vec<PmemConfig<'a>>>,
-    pub serial: SerialConfig<'a>,
+    pub serial: ConsoleConfig<'a>,
+    pub console: ConsoleConfig<'a>,
 }
 
 impl<'a> VmConfig<'a> {
@@ -427,6 +431,12 @@ impl<'a> VmConfig<'a> {
             pmem = Some(pmem_config_list);
         }
 
+        let console = ConsoleConfig::parse(vm_params.console)?;
+        let serial = ConsoleConfig::parse(vm_params.serial)?;
+        if console.mode == ConsoleOutputMode::Tty && serial.mode == ConsoleOutputMode::Tty {
+            return Err(Error::ParseTTYParam);
+        }
+
         Ok(VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
@@ -437,7 +447,8 @@ impl<'a> VmConfig<'a> {
             rng: RngConfig::parse(vm_params.rng)?,
             fs,
             pmem,
-            serial: SerialConfig::parse(vm_params.serial)?,
+            serial,
+            console,
         })
     }
 }

@@ -92,6 +92,12 @@ fn main() {
             Arg::with_name("serial")
                 .long("serial")
                 .help("Control serial port: off|tty|file=/path/to/a/file")
+                .default_value("off"),
+        )
+        .arg(
+            Arg::with_name("console")
+                .long("console")
+                .help("Control (virtio) console: off|tty|file=/path/to/a/file")
                 .default_value("tty"),
         )
         .get_matches();
@@ -109,6 +115,7 @@ fn main() {
 
     let disks: Option<Vec<&str>> = cmd_arguments.values_of("disk").map(|x| x.collect());
     let net: Option<Vec<&str>> = cmd_arguments.values_of("net").map(|x| x.collect());
+    let console = cmd_arguments.value_of("console").unwrap();
     let fs: Option<Vec<&str>> = cmd_arguments.values_of("fs").map(|x| x.collect());
     let pmem: Option<Vec<&str>> = cmd_arguments.values_of("pmem").map(|x| x.collect());
 
@@ -123,6 +130,7 @@ fn main() {
         fs,
         pmem,
         serial,
+        console,
     }) {
         Ok(config) => config,
         Err(e) => {
