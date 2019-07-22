@@ -21,7 +21,7 @@ extern crate vm_memory;
 extern crate vm_virtio;
 extern crate vmm_sys_util;
 
-use crate::config::{SerialOutputMode, VmConfig};
+use crate::config::{ConsoleOutputMode, VmConfig};
 use arch::RegionType;
 use devices::ioapic;
 use kvm_bindings::{
@@ -142,6 +142,9 @@ pub enum Error {
     /// Write to the serial console failed.
     Serial(vmm_sys_util::Error),
 
+    /// Write to the virtio console failed.
+    Console(vmm_sys_util::Error),
+
     /// Cannot setup terminal in raw mode.
     SetTerminalRaw(vmm_sys_util::Error),
 
@@ -188,6 +191,9 @@ pub enum DeviceManagerError {
 
     /// Cannot create virtio-net device
     CreateVirtioNet(vm_virtio::net::Error),
+
+    /// Cannot create virtio-console device
+    CreateVirtioConsole(io::Error),
 
     /// Cannot create virtio-rng device
     CreateVirtioRng(io::Error),
@@ -236,6 +242,9 @@ pub enum DeviceManagerError {
 
     /// Error creating serial output file
     SerialOutputFileOpen(io::Error),
+
+    /// Error creating console output file
+    ConsoleOutputFileOpen(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -483,6 +492,7 @@ struct DeviceManager {
 
     // Serial port on 0x3f8
     serial: Option<Arc<Mutex<devices::legacy::Serial>>>,
+    console: Option<Arc<vm_virtio::ConsoleInput>>,
 
     // i8042 device for exit
     i8042: Arc<Mutex<devices::legacy::I8042Device>>,
@@ -525,12 +535,12 @@ impl DeviceManager {
         };
 
         let serial_writer: Option<Box<io::Write + Send>> = match vm_cfg.serial.mode {
-            SerialOutputMode::File => Some(Box::new(
+            ConsoleOutputMode::File => Some(Box::new(
                 File::create(vm_cfg.serial.file.unwrap())
                     .map_err(DeviceManagerError::SerialOutputFileOpen)?,
             )),
-            SerialOutputMode::Tty => Some(Box::new(stdout())),
-            SerialOutputMode::Off => None,
+            ConsoleOutputMode::Tty => Some(Box::new(stdout())),
+            ConsoleOutputMode::Off => None,
         };
         let serial = if serial_writer.is_some() {
             // Serial is tied to IRQ #4
@@ -631,6 +641,31 @@ impl DeviceManager {
                 )?;
             }
         }
+
+        let console_writer: Option<Box<io::Write + Send>> = match vm_cfg.console.mode {
+            ConsoleOutputMode::File => Some(Box::new(
+                File::create(vm_cfg.console.file.unwrap())
+                    .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
+            )),
+            ConsoleOutputMode::Tty => Some(Box::new(stdout())),
+            ConsoleOutputMode::Off => None,
+        };
+        let console = if console_writer.is_some() {
+            let (virtio_console_device, console) = vm_virtio::Console::new(console_writer)
+                .map_err(DeviceManagerError::CreateVirtioConsole)?;
+            DeviceManager::add_virtio_pci_device(
+                Box::new(virtio_console_device),
+                memory.clone(),
+                allocator,
+                vm_fd,
+                &mut pci,
+                &mut buses,
+                &interrupt_info,
+            )?;
+            Some(console)
+        } else {
+            None
+        };
 
         // Add virtio-rng if required
         if let Some(rng_path) = vm_cfg.rng.src.to_str() {
@@ -745,6 +780,7 @@ impl DeviceManager {
             io_bus,
             mmio_bus,
             serial,
+            console,
             i8042,
             exit_evt,
             ioapic,
@@ -1253,7 +1289,7 @@ impl<'a> Vm<'a> {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
         let epoll_fd = self.epoll.as_raw_fd();
 
-        if self.devices.serial.is_some() && self.on_tty {
+        if (self.devices.serial.is_some() || self.devices.console.is_some()) && self.on_tty {
             io::stdin()
                 .lock()
                 .set_raw_mode()
@@ -1276,13 +1312,13 @@ impl<'a> Vm<'a> {
                             break 'outer;
                         }
                         EpollDispatch::Stdin => {
-                            if self.devices.serial.is_some() {
-                                let mut out = [0u8; 64];
-                                let count = io::stdin()
-                                    .lock()
-                                    .read_raw(&mut out)
-                                    .map_err(Error::Serial)?;
+                            let mut out = [0u8; 64];
+                            let count = io::stdin()
+                                .lock()
+                                .read_raw(&mut out)
+                                .map_err(Error::Serial)?;
 
+                            if self.devices.serial.is_some() {
                                 self.devices
                                     .serial
                                     .as_ref()
@@ -1291,6 +1327,14 @@ impl<'a> Vm<'a> {
                                     .expect("Failed to process stdin event due to poisoned lock")
                                     .queue_input_bytes(&out[..count])
                                     .map_err(Error::Serial)?;
+                            }
+
+                            if self.devices.console.is_some() {
+                                self.devices
+                                    .console
+                                    .as_ref()
+                                    .unwrap()
+                                    .queue_input_bytes(&out[..count]);
                             }
                         }
                     }
