@@ -143,4 +143,5 @@ pub enum Error {
     EpollCreateFd(io::Error),
     EpollCtl(io::Error),
     EpollWait(io::Error),
+    FailedSignalingDriver(io::Error),
 }

@@ -19,6 +19,7 @@ vfio = { path = "../vfio" }
 vm-virtio = { path = "../vm-virtio" }
 vm-allocator = { path = "../vm-allocator" }
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
+signal-hook = "0.1.10"
 
 [dependencies.linux-loader]
 git = "https://github.com/rust-vmm/linux-loader"
