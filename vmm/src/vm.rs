@@ -16,6 +16,7 @@ extern crate kvm_ioctls;
 extern crate libc;
 extern crate linux_loader;
 extern crate net_util;
+extern crate signal_hook;
 extern crate vfio;
 extern crate vm_allocator;
 extern crate vm_memory;
@@ -31,13 +32,14 @@ use kvm_bindings::{
 };
 use kvm_ioctls::*;
 use libc::O_TMPFILE;
-use libc::{c_void, siginfo_t, EFD_NONBLOCK};
+use libc::{c_void, siginfo_t, EFD_NONBLOCK, TIOCGWINSZ};
 use linux_loader::loader::KernelLoader;
 use net_util::Tap;
 use pci::{
     InterruptDelivery, InterruptParameters, PciConfigIo, PciDevice, PciInterruptPin, PciRoot,
 };
 use qcow::{self, ImageType, QcowFile};
+use signal_hook::{iterator::Signals, SIGWINCH};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
@@ -491,6 +493,23 @@ impl UserIoapicIrq {
     }
 }
 
+pub fn get_win_size() -> (u16, u16) {
+    #[repr(C)]
+    struct WS {
+        rows: u16,
+        cols: u16,
+    };
+    let ws: WS = WS {
+        rows: 0u16,
+        cols: 0u16,
+    };
+    unsafe {
+        libc::ioctl(0, TIOCGWINSZ, &ws);
+    }
+
+    (ws.cols, ws.rows)
+}
+
 impl devices::Interrupt for UserIoapicIrq {
     fn deliver(&self) -> result::Result<(), io::Error> {
         self.ioapic
@@ -512,7 +531,7 @@ struct DeviceManager {
 
     // Serial port on 0x3f8
     serial: Option<Arc<Mutex<devices::legacy::Serial>>>,
-    console: Option<Arc<vm_virtio::ConsoleInput>>,
+    console_input: Option<Arc<vm_virtio::ConsoleInput>>,
 
     // i8042 device for exit
     i8042: Arc<Mutex<devices::legacy::I8042Device>>,
@@ -604,9 +623,11 @@ impl DeviceManager {
             ConsoleOutputMode::Null => Some(Box::new(sink())),
             ConsoleOutputMode::Off => None,
         };
+        let (col, row) = get_win_size();
         let console = if console_writer.is_some() {
-            let (virtio_console_device, console) = vm_virtio::Console::new(console_writer)
-                .map_err(DeviceManagerError::CreateVirtioConsole)?;
+            let (virtio_console_device, console_input) =
+                vm_virtio::Console::new(console_writer, col, row)
+                    .map_err(DeviceManagerError::CreateVirtioConsole)?;
             DeviceManager::add_virtio_pci_device(
                 Box::new(virtio_console_device),
                 vm_info.memory.clone(),
@@ -616,7 +637,7 @@ impl DeviceManager {
                 &mut buses,
                 &interrupt_info,
             )?;
-            Some(console)
+            Some(console_input)
         } else {
             None
         };
@@ -638,7 +659,7 @@ impl DeviceManager {
             io_bus,
             mmio_bus,
             serial,
-            console,
+            console_input: console,
             i8042,
             exit_evt,
             ioapic,
@@ -1447,7 +1468,7 @@ impl<'a> Vm<'a> {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
         let epoll_fd = self.epoll.as_raw_fd();
 
-        if (self.devices.serial.is_some() || self.devices.console.is_some()) && self.on_tty {
+        if (self.devices.serial.is_some() || self.devices.console_input.is_some()) && self.on_tty {
             io::stdin()
                 .lock()
                 .set_raw_mode()
@@ -1503,11 +1524,11 @@ impl<'a> Vm<'a> {
                                     .map_err(Error::Serial)?;
                             }
 
-                            if self.devices.console.is_some()
+                            if self.devices.console_input.is_some()
                                 && self.config.console.mode.input_enabled()
                             {
                                 self.devices
-                                    .console
+                                    .console_input
                                     .as_ref()
                                     .unwrap()
                                     .queue_input_bytes(&out[..count]);
@@ -1528,6 +1549,15 @@ impl<'a> Vm<'a> {
         }
 
         Ok(())
+    }
+
+    fn os_signal_handler(signals: Signals, console_input_clone: Arc<vm_virtio::ConsoleInput>) {
+        for signal in signals.forever() {
+            if signal == SIGWINCH {
+                let (col, row) = get_win_size();
+                console_input_clone.update_console_size(col, row);
+            }
+        }
     }
 
     pub fn start(&mut self, entry_addr: GuestAddress) -> Result<()> {
@@ -1581,6 +1611,16 @@ impl<'a> Vm<'a> {
         // Unblock all CPU threads.
         vcpu_thread_barrier.wait();
 
+        if let Some(console_input) = &self.devices.console_input {
+            let console_input_clone = console_input.clone();
+            let signals = Signals::new(&[SIGWINCH]);
+            match signals {
+                Ok(sig) => {
+                    thread::spawn(move || Vm::os_signal_handler(sig, console_input_clone));
+                }
+                Err(e) => error!("Signal not found {}", e),
+            }
+        }
         self.control_loop()?;
 
         Ok(())

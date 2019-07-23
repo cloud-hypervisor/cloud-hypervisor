@@ -19,7 +19,8 @@ use super::{
     VirtioInterruptType, VIRTIO_F_VERSION_1,
 };
 use crate::VirtioInterrupt;
-use vm_memory::{Bytes, GuestMemoryMmap};
+use std::sync::atomic::{AtomicU64, Ordering};
+use vm_memory::{ByteValued, Bytes, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -33,6 +34,23 @@ const OUTPUT_QUEUE_EVENT: DeviceEventT = 1;
 const INPUT_EVENT: DeviceEventT = 2;
 // The device has been dropped.
 const KILL_EVENT: DeviceEventT = 3;
+// Console configuration change event is triggered.
+const CONFIG_EVENT: DeviceEventT = 4;
+
+//Console size feature bit
+const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
+
+#[derive(Copy, Clone, Debug, Default)]
+#[repr(C)]
+pub struct VirtioConsoleConfig {
+    cols: u16,
+    rows: u16,
+    max_nr_ports: u32,
+    emerg_wr: u32,
+}
+
+// Safe because it only has data and has no implicit padding.
+unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {
     queues: Vec<Queue>,
@@ -43,6 +61,7 @@ struct ConsoleEpollHandler {
     input_queue_evt: EventFd,
     output_queue_evt: EventFd,
     input_evt: EventFd,
+    config_evt: EventFd,
     kill_evt: EventFd,
 }
 
@@ -161,6 +180,14 @@ impl ConsoleEpollHandler {
         epoll::ctl(
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.config_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(CONFIG_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
             self.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
         )
@@ -216,6 +243,17 @@ impl ConsoleEpollHandler {
                             }
                         }
                     }
+                    CONFIG_EVENT => {
+                        if let Err(e) = self.config_evt.read() {
+                            error!("Failed to get config event: {:?}", e);
+                            break 'epoll;
+                        } else if let Err(e) =
+                            (self.interrupt_cb)(&VirtioInterruptType::Config, None)
+                        {
+                            error!("Failed to signal console driver: {:?}", e);
+                        }
+                    }
+
                     KILL_EVENT => {
                         debug!("KILL_EVENT received, stopping epoll loop");
                         break 'epoll;
@@ -231,19 +269,13 @@ impl ConsoleEpollHandler {
     }
 }
 
-/// Virtio device for exposing console to the guest OS through virtio.
-pub struct Console {
-    kill_evt: Option<EventFd>,
-    avail_features: u64,
-    acked_features: u64,
-    input: Arc<ConsoleInput>,
-    out: Option<Box<io::Write + Send>>,
-}
-
 /// Input device.
 pub struct ConsoleInput {
     input_evt: EventFd,
+    config_evt: EventFd,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
+    config: Arc<Mutex<VirtioConsoleConfig>>,
+    acked_features: AtomicU64,
 }
 
 impl ConsoleInput {
@@ -252,18 +284,64 @@ impl ConsoleInput {
         in_buffer.extend(input);
         let _ = self.input_evt.write(1);
     }
+
+    pub fn update_console_size(&self, cols: u16, rows: u16) {
+        if self
+            .acked_features
+            .fetch_and(1u64 << VIRTIO_CONSOLE_F_SIZE, Ordering::SeqCst)
+            != 0
+        {
+            self.config.lock().unwrap().update_console_size(cols, rows);
+            //Send the interrupt to the driver
+            let _ = self.config_evt.write(1);
+        }
+    }
+}
+
+impl VirtioConsoleConfig {
+    pub fn new(cols: u16, rows: u16) -> Self {
+        VirtioConsoleConfig {
+            cols,
+            rows,
+            max_nr_ports: 1u32,
+            emerg_wr: 0u32,
+        }
+    }
+
+    pub fn update_console_size(&mut self, cols: u16, rows: u16) {
+        self.cols = cols;
+        self.rows = rows;
+    }
+}
+
+/// Virtio device for exposing console to the guest OS through virtio.
+pub struct Console {
+    kill_evt: Option<EventFd>,
+    avail_features: u64,
+    acked_features: u64,
+    config: Arc<Mutex<VirtioConsoleConfig>>,
+    input: Arc<ConsoleInput>,
+    out: Option<Box<io::Write + Send>>,
 }
 
 impl Console {
     /// Create a new virtio console device that gets random data from /dev/urandom.
-    pub fn new(out: Option<Box<io::Write + Send>>) -> io::Result<(Console, Arc<ConsoleInput>)> {
-        let avail_features = 1u64 << VIRTIO_F_VERSION_1;
+    pub fn new(
+        out: Option<Box<io::Write + Send>>,
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<(Console, Arc<ConsoleInput>)> {
+        let avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_CONSOLE_F_SIZE;
 
         let input_evt = EventFd::new(EFD_NONBLOCK).unwrap();
-
+        let config_evt = EventFd::new(EFD_NONBLOCK).unwrap();
+        let console_config = Arc::new(Mutex::new(VirtioConsoleConfig::new(cols, rows)));
         let console_input = Arc::new(ConsoleInput {
             input_evt,
+            config_evt,
             in_buffer: Arc::new(Mutex::new(VecDeque::new())),
+            config: console_config.clone(),
+            acked_features: AtomicU64::new(0),
         });
 
         Ok((
@@ -271,6 +349,7 @@ impl Console {
                 kill_evt: None,
                 avail_features,
                 acked_features: 0u64,
+                config: console_config,
                 input: console_input.clone(),
                 out,
             },
@@ -331,12 +410,24 @@ impl VirtioDevice for Console {
         self.acked_features |= v;
     }
 
-    fn read_config(&self, _offset: u64, _data: &mut [u8]) {
-        warn!("Device specific configuration is not defined yet");
+    fn read_config(&self, offset: u64, mut data: &mut [u8]) {
+        let config = self.config.lock().unwrap();
+        let config_slice = config.as_slice();
+        let config_len = config_slice.len() as u64;
+        if offset >= config_len {
+            error!("Failed to read config space");
+            return;
+        }
+
+        if let Some(end) = offset.checked_add(data.len() as u64) {
+            // This write can't fail, offset and end are checked against config_len.
+            data.write_all(&config_slice[offset as usize..cmp::min(end, config_len) as usize])
+                .unwrap();
+        }
     }
 
     fn write_config(&mut self, _offset: u64, _data: &[u8]) {
-        warn!("Device specific configuration is not defined yet");
+        warn!("No device specific configration requires write");
     }
 
     fn activate(
@@ -365,6 +456,16 @@ impl VirtioDevice for Console {
             };
         self.kill_evt = Some(self_kill_evt);
 
+        self.input
+            .acked_features
+            .store(self.acked_features, Ordering::Relaxed);
+
+        if (self.acked_features & (1u64 << VIRTIO_CONSOLE_F_SIZE)) != 0 {
+            if let Err(e) = (interrupt_cb)(&VirtioInterruptType::Config, None) {
+                error!("Failed to signal console driver: {:?}", e);
+            }
+        }
+
         if let Some(out) = self.out.take() {
             let mut handler = ConsoleEpollHandler {
                 queues,
@@ -375,6 +476,7 @@ impl VirtioDevice for Console {
                 input_queue_evt: queue_evts.remove(0),
                 output_queue_evt: queue_evts.remove(0),
                 input_evt: self.input.input_evt.try_clone().unwrap(),
+                config_evt: self.input.config_evt.try_clone().unwrap(),
                 kill_evt,
             };
 
