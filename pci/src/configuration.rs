@@ -457,7 +457,7 @@ impl PciConfiguration {
         let bar_idx = BAR0_REG + config.reg_idx;
         let end_addr = config
             .addr
-            .checked_add(config.size)
+            .checked_add(config.size - 1)
             .ok_or_else(|| Error::BarAddressInvalid(config.addr, config.size))?;
         match config.region_type {
             PciBarRegionType::Memory32BitRegion | PciBarRegionType::IORegion => {
