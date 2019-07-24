@@ -35,7 +35,7 @@ fn pagesize() -> usize {
 ///           vec![GsiApic::new(5, 19)]).unwrap();
 ///    assert_eq!(allocator.allocate_irq(), Some(5));
 ///    assert_eq!(allocator.allocate_irq(), Some(6));
-///    assert_eq!(allocator.allocate_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fffe000)));
+///    assert_eq!(allocator.allocate_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fff_f000)));
 ///
 /// ```
 pub struct SystemAllocator {

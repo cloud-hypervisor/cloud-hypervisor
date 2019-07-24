@@ -30,7 +30,7 @@ pub type Result<T> = result::Result<T, Error>;
 /// # use vm_memory::{Address, GuestAddress, GuestUsize};
 ///   AddressAllocator::new(GuestAddress(0x1000), 0x10000).map(|mut pool| {
 ///       assert_eq!(pool.allocate(None, 0x110, Some(0x100)), Some(GuestAddress(0x10e00)));
-///       assert_eq!(pool.allocate(None, 0x100, Some(0x100)), Some(GuestAddress(0x10c00)));
+///       assert_eq!(pool.allocate(None, 0x100, Some(0x100)), Some(GuestAddress(0x10d00)));
 ///   });
 /// ```
 #[derive(Debug, Eq, PartialEq)]
@@ -147,9 +147,10 @@ impl AddressAllocator {
             if let Some(size_delta) =
                 address.checked_sub(self.align_address(prev_end_address, alignment).raw_value())
             {
+                let adjust = if alignment > 1 { alignment - 1 } else { 0 };
                 if size_delta.raw_value() >= req_size {
                     return Some(
-                        self.align_address(address.unchecked_sub(req_size + alignment), alignment),
+                        self.align_address(address.unchecked_sub(req_size + adjust), alignment),
                     );
                 }
             }
@@ -242,12 +243,12 @@ mod tests {
         let mut pool = AddressAllocator::new(GuestAddress(0x1000), 0x1000).unwrap();
         assert_eq!(
             pool.allocate(None, 0x800, Some(0x100)),
-            Some(GuestAddress(0x1700))
+            Some(GuestAddress(0x1800))
         );
         assert_eq!(pool.allocate(None, 0x900, Some(0x100)), None);
         assert_eq!(
             pool.allocate(None, 0x400, Some(0x100)),
-            Some(GuestAddress(0x1200))
+            Some(GuestAddress(0x1400))
         );
     }
 
@@ -260,11 +261,11 @@ mod tests {
         );
         assert_eq!(
             pool.allocate(None, 0x100, Some(0x100)),
-            Some(GuestAddress(0x10c00))
+            Some(GuestAddress(0x10d00))
         );
         assert_eq!(
             pool.allocate(None, 0x10, Some(0x100)),
-            Some(GuestAddress(0x10d00))
+            Some(GuestAddress(0x10c00))
         );
     }
 
