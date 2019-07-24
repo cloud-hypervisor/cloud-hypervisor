@@ -168,12 +168,33 @@ $ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hyperviso
 $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
 	--disk ./clear-29160-kvm.img \
+	--cmdline "console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
+	--cpus 4 \
+	--memory size=1024M \
+	--net "tap=,mac=,ip=,mask=" \
+	--rng
+```
+
+The above example use the `virtio-console` device as the guest console, and this
+device may not be enabled soon enough by the guest kernel to get early kernel
+debug messages.
+
+When in need for earlier debug messages, using the legacy serial device based
+console is preferred:
+
+```
+$ ./cloud-hypervisor/target/release/cloud-hypervisor \
+	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
+	--console off \
+	--serial tty \
+	--disk ./clear-29160-kvm.img \
 	--cmdline "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
 	--cpus 4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
 	--rng
 ```
+
 
 # 3. Status
 
