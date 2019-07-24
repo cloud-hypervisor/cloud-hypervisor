@@ -14,7 +14,7 @@ use libc::{EINVAL, ENOSPC, ENOTSUP};
 use remain::sorted;
 use vmm_sys_util::{FileSetLen, FileSync, PunchHole, SeekHole, WriteZeroes};
 
-use std::cmp::min;
+use std::cmp::{max, min};
 use std::fmt::{self, Display};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -53,6 +53,8 @@ pub enum Error {
     ReadingRefCountBlock(refcount::Error),
     ReadingRefCounts(io::Error),
     RebuildingRefCounts(io::Error),
+    RefcountTableOffEnd,
+    RefcountTableTooLarge,
     SeekingFile(io::Error),
     SettingFileSize(io::Error),
     SettingRefcountRefcount(io::Error),
@@ -103,6 +105,8 @@ impl Display for Error {
             ReadingRefCountBlock(e) => write!(f, "failed to read ref count block: {}", e),
             ReadingRefCounts(e) => write!(f, "failed to read ref counts: {}", e),
             RebuildingRefCounts(e) => write!(f, "failed to rebuild ref counts: {}", e),
+            RefcountTableOffEnd => write!(f, "refcount table offset past file end"),
+            RefcountTableTooLarge => write!(f, "too many clusters specified for refcount table"),
             SeekingFile(e) => write!(f, "failed to seek file: {}", e),
             SettingFileSize(e) => write!(f, "failed to set file size: {}", e),
             SettingRefcountRefcount(e) => write!(f, "failed to set refcount refcount: {}", e),
@@ -432,8 +436,13 @@ impl QcowFile {
         }
         offset_is_cluster_boundary(header.backing_file_offset, header.cluster_bits)?;
         offset_is_cluster_boundary(header.l1_table_offset, header.cluster_bits)?;
-        offset_is_cluster_boundary(header.refcount_table_offset, header.cluster_bits)?;
         offset_is_cluster_boundary(header.snapshots_offset, header.cluster_bits)?;
+        // refcount table must be a cluster boundary, and within the file's virtual or actual size.
+        offset_is_cluster_boundary(header.refcount_table_offset, header.cluster_bits)?;
+        let file_size = file.metadata().map_err(Error::GettingFileSize)?.len();
+        if header.refcount_table_offset > max(file_size, header.size) {
+            return Err(Error::RefcountTableOffEnd);
+        }
 
         // The first cluster should always have a non-zero refcount, so if it is 0,
         // this is an old file with broken refcounts, which requires a rebuild.
@@ -485,6 +494,10 @@ impl QcowFile {
             cluster_size as u32,
             (num_clusters + l1_clusters + num_l2_clusters + header_clusters) as u32,
         );
+        // Check that the given header doesn't have a suspiciously sized refcount table.
+        if u64::from(header.refcount_table_clusters) > 2 * refcount_clusters {
+            return Err(Error::RefcountTableTooLarge);
+        }
         if l1_clusters + refcount_clusters > MAX_RAM_POINTER_TABLE_SIZE {
             return Err(Error::TooManyRefcounts(refcount_clusters));
         }
@@ -1893,6 +1906,24 @@ mod tests {
             let value = 0x0000_0040_3f00_ffffu64;
             qcow.write_all(&value.to_le_bytes())
                 .expect("failed to write data");
+        });
+    }
+
+    #[test]
+    fn test_header_huge_num_refcounts() {
+        let mut header = valid_header_v3();
+        &mut header[56..60].copy_from_slice(&[0x02, 0x00, 0xe8, 0xff]);
+        with_basic_file(&header, |disk_file: File| {
+            QcowFile::from(disk_file).expect_err("Created disk with crazy refcount clusters");
+        });
+    }
+
+    #[test]
+    fn test_header_huge_refcount_offset() {
+        let mut header = valid_header_v3();
+        &mut header[48..56].copy_from_slice(&[0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x02, 0x00]);
+        with_basic_file(&header, |disk_file: File| {
+            QcowFile::from(disk_file).expect_err("Created disk with crazy refcount offset");
         });
     }
 
