@@ -1400,7 +1400,7 @@ impl<'a> Vm<'a> {
             &config,
             msi_capable,
             userspace_ioapic,
-            arch_mem_regions.len() as u32,
+            ram_regions.len() as u32,
         )
         .map_err(Error::DeviceManager)?;
 
