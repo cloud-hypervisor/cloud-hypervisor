@@ -478,7 +478,7 @@ impl VfioPciDevice {
         }
     }
 
-    fn update_msi_interrupt_routes(&mut self, msi: &VfioMsi) {
+    fn update_msi_interrupt_routes(&mut self, msi: &VfioMsi) -> Result<()> {
         let num_vectors = msi.cap.num_enabled_vectors();
         for (idx, route) in self.interrupt_routes.iter_mut().enumerate() {
             // Mask the MSI vector if the amount of vectors supported by the
@@ -499,17 +499,17 @@ impl VfioPciDevice {
         // Check if we need to update KVM GSI mapping, based on the status of
         // the "MSI Enable" bit.
         if msi.cap.enabled() {
-            if let Err(e) = self.set_kvm_routes() {
-                warn!("Could not Set KVM routes: {}", e);
-            }
+            return self.set_kvm_routes();
         }
+
+        Ok(())
     }
 
     fn read_msix_table(&mut self, offset: u64, data: &mut [u8]) {
         self.interrupt.msix_read_table(offset, data);
     }
 
-    fn update_msix_table(&mut self, offset: u64, data: &[u8]) {
+    fn update_msix_table(&mut self, offset: u64, data: &[u8]) -> Result<()> {
         self.interrupt.msix_write_table(offset, data);
 
         if self.interrupt.msix_enabled() && !self.interrupt.msix_function_masked() {
@@ -523,13 +523,13 @@ impl VfioPciDevice {
                 }
             }
 
-            if let Err(e) = self.set_kvm_routes() {
-                warn!("Could not Set KVM routes: {}", e);
-            }
+            return self.set_kvm_routes();
         }
+
+        Ok(())
     }
 
-    fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) {
+    fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
         match self.interrupt.update_msi(offset, data) {
             Some(InterruptUpdateAction::EnableMsi) => match self.irq_fds() {
                 Ok(fds) => {
@@ -552,8 +552,10 @@ impl VfioPciDevice {
         // changes to the cache, and based on the state of masking flags, the
         // KVM GSI routes should be configured.
         if let Some(msi) = self.interrupt.msi {
-            self.update_msi_interrupt_routes(&msi);
+            return self.update_msi_interrupt_routes(&msi);
         }
+
+        Ok(())
     }
 
     fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) {
@@ -881,7 +883,9 @@ impl PciDevice for VfioPciDevice {
             let cap_offset: u64 = reg - cap_base + offset;
             match cap_id {
                 PciCapabilityID::MessageSignalledInterrupts => {
-                    self.update_msi_capabilities(cap_offset, data);
+                    if let Err(e) = self.update_msi_capabilities(cap_offset, data) {
+                        error!("Could not update MSI capabilities: {}", e);
+                    }
                 }
                 PciCapabilityID::MSIX => {
                     self.update_msix_capabilities(cap_offset, data);
@@ -943,7 +947,9 @@ impl PciDevice for VfioPciDevice {
 
             // If the MSI-X table is written to, we need to update our cache.
             if self.interrupt.msix_table_accessed(region.index, offset) {
-                self.update_msix_table(offset, data);
+                if let Err(e) = self.update_msix_table(offset, data) {
+                    error!("Could not update MSI-X table: {}", e);
+                }
             } else {
                 self.device.region_write(region.index, data, offset);
             }
