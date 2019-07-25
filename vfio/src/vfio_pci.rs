@@ -767,6 +767,7 @@ impl PciDevice for VfioPciDevice {
                 let first_bit = lsb_size.trailing_zeros();
                 region_size = 2u64.pow(first_bit);
                 // We need to allocate a guest PIO address range for that BAR.
+                // The address needs to be 4 bytes aligned.
                 bar_addr = allocator
                     .allocate_io_addresses(None, region_size, Some(0x4))
                     .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
@@ -798,13 +799,24 @@ impl PciDevice for VfioPciDevice {
                 region_size = 2u64.pow(first_bit);
 
                 // We need to allocate a guest MMIO address range for that BAR.
+                // In case the BAR is mappable directly, this means it might be
+                // set as KVM user memory region, which expects to deal with 4K
+                // pages. Therefore, the aligment has to be set accordingly.
+                let bar_alignment =
+                    if self.device.get_region_flags(bar_id) & VFIO_REGION_INFO_FLAG_MMAP != 0 {
+                        // 4K alignment
+                        0x1000
+                    } else {
+                        // Default 16 bytes alignment
+                        0x10
+                    };
                 if is_64bit_bar {
                     bar_addr = allocator
-                        .allocate_mmio_addresses(None, region_size, Some(0x1000))
+                        .allocate_mmio_addresses(None, region_size, Some(bar_alignment))
                         .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
                 } else {
                     bar_addr = allocator
-                        .allocate_mmio_hole_addresses(None, region_size, Some(0x1000))
+                        .allocate_mmio_hole_addresses(None, region_size, Some(bar_alignment))
                         .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
                 }
             }
