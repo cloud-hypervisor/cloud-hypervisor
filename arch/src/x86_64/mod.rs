@@ -46,42 +46,58 @@ impl From<Error> for super::Error {
 // Where BIOS/VGA magic would live on a real PC.
 const EBDA_START: GuestAddress = GuestAddress(0x9fc00);
 const FIRST_ADDR_PAST_32BITS: GuestAddress = GuestAddress(1 << 32);
-const MEM_32BIT_GAP_SIZE: GuestUsize = (768 << 20);
+
+// Our 32-bit memory gap starts at 3G.
+const MEM_32BIT_GAP_START: GuestAddress = GuestAddress(0xc000_0000);
+
+// Our 32-bit memory gap size is 1GB.
+const MEM_32BIT_GAP_SIZE: GuestUsize = (1024 << 20);
+
+// We reserve 768MB in our memory gap for 32-bit devices (e.g. 32-bit PCI BARs).
+const MEM_32BIT_DEVICES_GAP_SIZE: GuestUsize = (768 << 20);
 
 /// Returns a Vec of the valid memory addresses.
 /// These should be used to configure the GuestMemory structure for the platform.
 /// For x86_64 all addresses are valid from the start of the kernel except a
 /// carve out at the end of 32bit address space.
 pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, RegionType)> {
-    let memory_gap_start = FIRST_ADDR_PAST_32BITS
-        .checked_sub(MEM_32BIT_GAP_SIZE as u64)
-        .expect("32-bit hole is too large");
+    let reserved_memory_gap_start = MEM_32BIT_GAP_START
+        .checked_add(MEM_32BIT_DEVICES_GAP_SIZE)
+        .expect("32-bit reserved region is too large");
+
     let requested_memory_size = GuestAddress(size as u64);
     let mut regions = Vec::new();
 
     // case1: guest memory fits before the gap
-    if size as u64 <= memory_gap_start.raw_value() {
+    if size as u64 <= MEM_32BIT_GAP_START.raw_value() {
         regions.push((GuestAddress(0), size as usize, RegionType::Ram));
     // case2: guest memory extends beyond the gap
     } else {
         // push memory before the gap
         regions.push((
             GuestAddress(0),
-            memory_gap_start.raw_value() as usize,
+            MEM_32BIT_GAP_START.raw_value() as usize,
             RegionType::Ram,
         ));
         regions.push((
             FIRST_ADDR_PAST_32BITS,
-            requested_memory_size.unchecked_offset_from(memory_gap_start) as usize,
+            requested_memory_size.unchecked_offset_from(MEM_32BIT_GAP_START) as usize,
             RegionType::Ram,
         ));
     }
 
-    // Add the 32 bits hole as a sub region.
+    // Add the 32-bit device memory hole as a sub region.
     regions.push((
-        memory_gap_start,
-        MEM_32BIT_GAP_SIZE as usize,
+        MEM_32BIT_GAP_START,
+        MEM_32BIT_DEVICES_GAP_SIZE as usize,
         RegionType::SubRegion,
+    ));
+
+    // Add the 32-bit reserved memory hole as a sub region.
+    regions.push((
+        reserved_memory_gap_start,
+        (MEM_32BIT_GAP_SIZE - MEM_32BIT_DEVICES_GAP_SIZE) as usize,
+        RegionType::Reserved,
     ));
 
     regions
@@ -202,7 +218,7 @@ mod tests {
     #[test]
     fn regions_lt_4gb() {
         let regions = arch_memory_regions(1 << 29 as GuestUsize);
-        assert_eq!(2, regions.len());
+        assert_eq!(3, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(1usize << 29, regions[0].1);
     }
@@ -210,7 +226,7 @@ mod tests {
     #[test]
     fn regions_gt_4gb() {
         let regions = arch_memory_regions((1 << 32 as GuestUsize) + 0x8000);
-        assert_eq!(3, regions.len());
+        assert_eq!(4, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(GuestAddress(1 << 32), regions[1].0);
     }

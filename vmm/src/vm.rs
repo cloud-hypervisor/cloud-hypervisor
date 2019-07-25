@@ -1237,11 +1237,6 @@ impl<'a> Vm<'a> {
             .filter(|r| r.2 == RegionType::SubRegion)
             .map(|r| (r.0, r.1))
             .collect();
-        let _reserved_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
-            .iter()
-            .filter(|r| r.2 == RegionType::Reserved)
-            .map(|r| (r.0, r.1))
-            .collect();
 
         // Check the number of reserved regions, and only take the first one
         // that's acrtually a 32-bit hole.
@@ -1378,25 +1373,6 @@ impl<'a> Vm<'a> {
             allocator
                 .allocate_mmio_addresses(Some(region.0), region.1 as GuestUsize, None)
                 .ok_or(Error::MemoryRangeAllocation)?;
-        }
-
-        // Allocate IOAPIC address in the memory hole if necessary.
-        if IOAPIC_RANGE_ADDR >= mem_hole.0.raw_value() && IOAPIC_RANGE_SIZE < mem_hole.1 as u64 {
-            allocator
-                .allocate_mmio_hole_addresses(
-                    Some(GuestAddress(IOAPIC_RANGE_ADDR)),
-                    IOAPIC_RANGE_SIZE as GuestUsize,
-                    None,
-                )
-                .ok_or(Error::IoapicRangeAllocation)?;
-        } else {
-            allocator
-                .allocate_mmio_addresses(
-                    Some(GuestAddress(IOAPIC_RANGE_ADDR)),
-                    IOAPIC_RANGE_SIZE as GuestUsize,
-                    None,
-                )
-                .ok_or(Error::IoapicRangeAllocation)?;
         }
 
         let device_manager = DeviceManager::new(
