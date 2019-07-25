@@ -4,7 +4,6 @@
 //
 use crate::vec_with_array_field;
 use byteorder::{ByteOrder, LittleEndian};
-use kvm_ioctls::*;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::fmt;
@@ -14,7 +13,6 @@ use std::mem;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::prelude::FileExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::u32;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::*;
@@ -197,12 +195,11 @@ impl AsRawFd for VfioContainer {
 
 struct VfioGroup {
     group: File,
-    device: Arc<DeviceFd>,
     container: VfioContainer,
 }
 
 impl VfioGroup {
-    fn new(id: u32, device: Arc<DeviceFd>) -> Result<Self> {
+    fn new(id: u32) -> Result<Self> {
         let group_path = Path::new("/dev/vfio").join(id.to_string());
         let group = OpenOptions::new()
             .read(true)
@@ -242,41 +239,7 @@ impl VfioGroup {
 
         container.set_iommu(VFIO_TYPE1v2_IOMMU)?;
 
-        Self::kvm_device_add_group(&device, &group)?;
-
-        Ok(VfioGroup {
-            group,
-            device,
-            container,
-        })
-    }
-
-    fn kvm_device_add_group(device_fd: &Arc<DeviceFd>, group: &File) -> Result<()> {
-        let group_fd = group.as_raw_fd();
-        let group_fd_ptr = &group_fd as *const i32;
-        let dev_attr = kvm_bindings::kvm_device_attr {
-            flags: 0,
-            group: kvm_bindings::KVM_DEV_VFIO_GROUP,
-            attr: u64::from(kvm_bindings::KVM_DEV_VFIO_GROUP_ADD),
-            addr: group_fd_ptr as u64,
-        };
-
-        device_fd
-            .set_device_attr(&dev_attr)
-            .map_err(VfioError::KvmSetDeviceAttr)
-    }
-
-    fn kvm_device_del_group(&self) -> std::result::Result<(), io::Error> {
-        let group_fd = self.as_raw_fd();
-        let group_fd_ptr = &group_fd as *const i32;
-        let dev_attr = kvm_bindings::kvm_device_attr {
-            flags: 0,
-            group: kvm_bindings::KVM_DEV_VFIO_GROUP,
-            attr: u64::from(kvm_bindings::KVM_DEV_VFIO_GROUP_DEL),
-            addr: group_fd_ptr as u64,
-        };
-
-        self.device.set_device_attr(&dev_attr)
+        Ok(VfioGroup { group, container })
     }
 
     fn unset_container(&self) -> std::result::Result<(), io::Error> {
@@ -340,13 +303,6 @@ impl AsRawFd for VfioGroup {
 
 impl Drop for VfioGroup {
     fn drop(&mut self) {
-        match self.kvm_device_del_group() {
-            Ok(_) => {}
-            Err(e) => {
-                error!("Could not delete VFIO group: {:?}", e);
-            }
-        }
-
         match self.unset_container() {
             Ok(_) => {}
             Err(e) => {
@@ -520,7 +476,7 @@ impl VfioDevice {
     /// Create a new vfio device, then guest read/write on this device could be
     /// transfered into kernel vfio.
     /// sysfspath specify the vfio device path in sys file system.
-    pub fn new(sysfspath: &Path, device_fd: Arc<DeviceFd>, mem: GuestMemoryMmap) -> Result<Self> {
+    pub fn new(sysfspath: &Path, mem: GuestMemoryMmap) -> Result<Self> {
         let uuid_path: PathBuf = [sysfspath, Path::new("iommu_group")].iter().collect();
         let group_path = uuid_path.read_link().map_err(|_| VfioError::InvalidPath)?;
         let group_osstr = group_path.file_name().ok_or(VfioError::InvalidPath)?;
@@ -529,7 +485,7 @@ impl VfioDevice {
             .parse::<u32>()
             .map_err(|_| VfioError::InvalidPath)?;
 
-        let group = VfioGroup::new(group_id, device_fd)?;
+        let group = VfioGroup::new(group_id)?;
         let device_info = group.get_device(sysfspath)?;
         let regions = device_info.get_regions()?;
         let irqs = device_info.get_irqs()?;
