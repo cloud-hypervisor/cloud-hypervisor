@@ -37,8 +37,17 @@ pub type Result<T> = result::Result<T, Error>;
 pub enum RegionType {
     /// RAM type
     Ram,
-    /// Reserved type. Designate a region which should not be considered as
-    /// RAM. Useful to specify a PCI hole for instance.
+
+    /// SubRegion memory region.
+    /// A SubRegion is a memory region sub-region, allowing for a region
+    /// to be split into sub regions managed separately.
+    /// For example, the x86 32-bit memory hole is a SubRegion.
+    SubRegion,
+
+    /// Reserved type.
+    /// A Reserved memory region is one that should not be used for memory
+    /// allocation. This type can be used to prevent the VMM from allocating
+    /// memory ranges in a specific address range.
     Reserved,
 }
 
