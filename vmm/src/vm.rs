@@ -969,6 +969,7 @@ impl DeviceManager {
         buses: &mut BusInfo,
         mem_slots: u32,
     ) -> DeviceManagerResult<()> {
+        let mut mem_slot = mem_slots;
         if let Some(device_list_cfg) = &vm_cfg.devices {
             // Create the KVM VFIO device
             let device_fd = DeviceManager::create_kvm_device(vm_fd)?;
@@ -986,8 +987,8 @@ impl DeviceManager {
                     .allocate_bars(allocator)
                     .map_err(DeviceManagerError::AllocateBars)?;
 
-                vfio_pci_device
-                    .map_mmio_regions(vm_fd, mem_slots)
+                mem_slot = vfio_pci_device
+                    .map_mmio_regions(vm_fd, mem_slot)
                     .map_err(DeviceManagerError::VfioMapRegion)?;
 
                 let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));

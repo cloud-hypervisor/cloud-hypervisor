@@ -588,9 +588,18 @@ impl VfioPciDevice {
 
     /// Map MMIO regions into the guest, and avoid VM exits when the guest tries
     /// to reach those regions.
-    pub fn map_mmio_regions(&mut self, vm: &Arc<VmFd>, mem_slots: u32) -> Result<()> {
-        let mut slot = mem_slots;
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - The KVM VM file descriptor. It is used to set the VFIO MMIO regions
+    ///          as KVM user memory regions.
+    /// * `mem_slot` - The KVM memory slot to set the user memopry regions.
+    /// # Return value
+    ///
+    /// This function returns the updated KVM memory slot id.
+    pub fn map_mmio_regions(&mut self, vm: &Arc<VmFd>, mem_slot: u32) -> Result<u32> {
         let fd = self.device.as_raw_fd();
+        let mut new_mem_slot = mem_slot;
 
         for region in self.mmio_regions.iter() {
             // We want to skip the mapping of the BAR containing the MSI-X
@@ -635,7 +644,7 @@ impl VfioPciDevice {
                 }
 
                 let mem_region = kvm_userspace_memory_region {
-                    slot,
+                    slot: new_mem_slot as u32,
                     guest_phys_addr: region.start.raw_value() + mmap_offset,
                     memory_size: mmap_size as u64,
                     userspace_addr: host_addr as u64,
@@ -647,11 +656,11 @@ impl VfioPciDevice {
                     vm.set_user_memory_region(mem_region)
                         .map_err(VfioPciError::MapRegionGuest)?;
                 }
-                slot += 1;
+                new_mem_slot += 1;
             }
         }
 
-        Ok(())
+        Ok(new_mem_slot)
     }
 }
 
