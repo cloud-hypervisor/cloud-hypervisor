@@ -706,6 +706,8 @@ const PCI_CONFIG_MEMORY_BAR_64BIT: u32 = 0x4;
 const PCI_CONFIG_REGISTER_SIZE: usize = 4;
 // Number of BARs for a PCI device
 const BAR_NUMS: usize = 6;
+// PCI ROM expansion BAR register index
+const PCI_ROM_EXP_BAR_INDEX: usize = 12;
 
 impl PciDevice for VfioPciDevice {
     fn allocate_bars(
@@ -894,6 +896,12 @@ impl PciDevice for VfioPciDevice {
         // with the guest address space.
         if reg_idx >= PCI_CONFIG_BAR0_INDEX && reg_idx < PCI_CONFIG_BAR0_INDEX + BAR_NUMS {
             return self.configuration.read_reg(reg_idx);
+        }
+
+        // Since the ROM expansion BAR is not yet handled by the code, it is
+        // more proper to expose it to the guest as being disabled.
+        if reg_idx == PCI_ROM_EXP_BAR_INDEX {
+            return 0;
         }
 
         // The config register read comes from the VFIO device itself.
