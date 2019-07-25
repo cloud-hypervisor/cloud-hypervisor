@@ -708,6 +708,8 @@ const PCI_CONFIG_REGISTER_SIZE: usize = 4;
 const BAR_NUMS: usize = 6;
 // PCI ROM expansion BAR register index
 const PCI_ROM_EXP_BAR_INDEX: usize = 12;
+// PCI interrupt pin and line register index
+const PCI_INTX_REG_INDEX: usize = 15;
 
 impl PciDevice for VfioPciDevice {
     fn allocate_bars(
@@ -904,9 +906,21 @@ impl PciDevice for VfioPciDevice {
             return 0;
         }
 
+        // Since we don't support INTx (only MSI and MSI-X), we should not
+        // expose an invalid Interrupt Pin to the guest. By using a specific
+        // mask in case the register being read correspond to the interrupt
+        // register, this code makes sure to always expose an Interrupt Pin
+        // value of 0, which stands for no interrupt pin support.
+        let mask = if reg_idx == PCI_INTX_REG_INDEX {
+            0xffff_00ff
+        } else {
+            0xffff_ffff
+        };
+
         // The config register read comes from the VFIO device itself.
         self.vfio_pci_configuration
             .read_config_dword((reg_idx * 4) as u32)
+            & mask
     }
 
     fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
