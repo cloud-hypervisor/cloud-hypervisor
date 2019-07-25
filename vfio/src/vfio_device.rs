@@ -36,7 +36,6 @@ pub enum VfioError {
     UnsetContainer,
     ContainerSetIOMMU,
     GroupGetDeviceFD,
-    CreateVfioKvmDevice(io::Error),
     KvmSetDeviceAttr(io::Error),
     VfioDeviceGetInfo,
     VfioDeviceGetRegionInfo,
@@ -77,9 +76,6 @@ impl fmt::Display for VfioError {
                 "failed to set container's IOMMU driver type as VfioType1V2"
             ),
             VfioError::GroupGetDeviceFD => write!(f, "failed to get vfio device fd"),
-            VfioError::CreateVfioKvmDevice(e) => {
-                write!(f, "failed to create KVM vfio device: {}", e)
-            }
             VfioError::KvmSetDeviceAttr(e) => {
                 write!(f, "failed to set KVM vfio device's attribute: {}", e)
             }
@@ -201,12 +197,12 @@ impl AsRawFd for VfioContainer {
 
 struct VfioGroup {
     group: File,
-    device: DeviceFd,
+    device: Arc<DeviceFd>,
     container: VfioContainer,
 }
 
 impl VfioGroup {
-    fn new(id: u32, vm: &Arc<VmFd>) -> Result<Self> {
+    fn new(id: u32, device: Arc<DeviceFd>) -> Result<Self> {
         let group_path = Path::new("/dev/vfio").join(id.to_string());
         let group = OpenOptions::new()
             .read(true)
@@ -246,7 +242,7 @@ impl VfioGroup {
 
         container.set_iommu(VFIO_TYPE1v2_IOMMU)?;
 
-        let device = Self::kvm_device_add_group(vm, &group)?;
+        Self::kvm_device_add_group(&device, &group)?;
 
         Ok(VfioGroup {
             group,
@@ -255,17 +251,7 @@ impl VfioGroup {
         })
     }
 
-    fn kvm_device_add_group(vm: &VmFd, group: &File) -> Result<DeviceFd> {
-        let mut vfio_dev = kvm_bindings::kvm_create_device {
-            type_: kvm_bindings::kvm_device_type_KVM_DEV_TYPE_VFIO,
-            fd: 0,
-            flags: 0,
-        };
-
-        let device_fd = vm
-            .create_device(&mut vfio_dev)
-            .map_err(VfioError::CreateVfioKvmDevice)?;
-
+    fn kvm_device_add_group(device_fd: &Arc<DeviceFd>, group: &File) -> Result<()> {
         let group_fd = group.as_raw_fd();
         let group_fd_ptr = &group_fd as *const i32;
         let dev_attr = kvm_bindings::kvm_device_attr {
@@ -277,9 +263,7 @@ impl VfioGroup {
 
         device_fd
             .set_device_attr(&dev_attr)
-            .map_err(VfioError::KvmSetDeviceAttr)?;
-
-        Ok(device_fd)
+            .map_err(VfioError::KvmSetDeviceAttr)
     }
 
     fn kvm_device_del_group(&self) -> std::result::Result<(), io::Error> {
@@ -536,7 +520,7 @@ impl VfioDevice {
     /// Create a new vfio device, then guest read/write on this device could be
     /// transfered into kernel vfio.
     /// sysfspath specify the vfio device path in sys file system.
-    pub fn new(sysfspath: &Path, vm: &Arc<VmFd>, mem: GuestMemoryMmap) -> Result<Self> {
+    pub fn new(sysfspath: &Path, device_fd: Arc<DeviceFd>, mem: GuestMemoryMmap) -> Result<Self> {
         let uuid_path: PathBuf = [sysfspath, Path::new("iommu_group")].iter().collect();
         let group_path = uuid_path.read_link().map_err(|_| VfioError::InvalidPath)?;
         let group_osstr = group_path.file_name().ok_or(VfioError::InvalidPath)?;
@@ -545,7 +529,7 @@ impl VfioDevice {
             .parse::<u32>()
             .map_err(|_| VfioError::InvalidPath)?;
 
-        let group = VfioGroup::new(group_id, vm)?;
+        let group = VfioGroup::new(group_id, device_fd)?;
         let device_info = group.get_device(sysfspath)?;
         let regions = device_info.get_regions()?;
         let irqs = device_info.get_irqs()?;

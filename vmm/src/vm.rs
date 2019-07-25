@@ -256,6 +256,9 @@ pub enum DeviceManagerError {
 
     /// Failed to map VFIO MMIO region.
     VfioMapRegion(VfioPciError),
+
+    /// Failed to create the KVM device.
+    CreateKvmDevice(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -946,6 +949,17 @@ impl DeviceManager {
         Ok(())
     }
 
+    fn create_kvm_device(vm: &Arc<VmFd>) -> DeviceManagerResult<DeviceFd> {
+        let mut vfio_dev = kvm_bindings::kvm_create_device {
+            type_: kvm_bindings::kvm_device_type_KVM_DEV_TYPE_VFIO,
+            fd: 0,
+            flags: 0,
+        };
+
+        vm.create_device(&mut vfio_dev)
+            .map_err(DeviceManagerError::CreateKvmDevice)
+    }
+
     fn add_vfio_devices(
         memory: GuestMemoryMmap,
         allocator: &mut SystemAllocator,
@@ -956,9 +970,14 @@ impl DeviceManager {
         mem_slots: u32,
     ) -> DeviceManagerResult<()> {
         if let Some(device_list_cfg) = &vm_cfg.devices {
+            // Create the KVM VFIO device
+            let device_fd = DeviceManager::create_kvm_device(vm_fd)?;
+            let device_fd = Arc::new(device_fd);
+
             for device_cfg in device_list_cfg.iter() {
-                let vfio_device = VfioDevice::new(device_cfg.path, vm_fd, memory.clone())
-                    .map_err(DeviceManagerError::VfioCreate)?;
+                let vfio_device =
+                    VfioDevice::new(device_cfg.path, device_fd.clone(), memory.clone())
+                        .map_err(DeviceManagerError::VfioCreate)?;
 
                 let mut vfio_pci_device = VfioPciDevice::new(vm_fd, allocator, vfio_device)
                     .map_err(DeviceManagerError::VfioPciCreate)?;
