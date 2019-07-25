@@ -77,11 +77,11 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
         ));
     }
 
-    // Add the 32 bits hole as a "reserved" region.
+    // Add the 32 bits hole as a sub region.
     regions.push((
         memory_gap_start,
         MEM_32BIT_GAP_SIZE as usize,
-        RegionType::Reserved,
+        RegionType::SubRegion,
     ));
 
     regions

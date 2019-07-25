@@ -1232,7 +1232,12 @@ impl<'a> Vm<'a> {
             .filter(|r| r.2 == RegionType::Ram)
             .map(|r| (r.0, r.1))
             .collect();
-        let reserved_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
+        let sub_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
+            .iter()
+            .filter(|r| r.2 == RegionType::SubRegion)
+            .map(|r| (r.0, r.1))
+            .collect();
+        let _reserved_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
             .iter()
             .filter(|r| r.2 == RegionType::Reserved)
             .map(|r| (r.0, r.1))
@@ -1241,7 +1246,7 @@ impl<'a> Vm<'a> {
         // Check the number of reserved regions, and only take the first one
         // that's acrtually a 32-bit hole.
         let mut mem_hole = (GuestAddress(0), 0);
-        for region in reserved_regions.iter() {
+        for region in sub_regions.iter() {
             if region.0.unchecked_add(region.1 as u64).raw_value() <= 0x1_0000_0000 {
                 mem_hole = (region.0, region.1);
                 break;
