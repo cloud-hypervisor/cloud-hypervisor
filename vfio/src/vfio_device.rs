@@ -123,7 +123,7 @@ impl VfioContainer {
         unsafe { ioctl(self, VFIO_GET_API_VERSION()) }
     }
 
-    fn check_extension(&self, val: u32) -> Result<()> {
+    fn check_type_extension(&self, val: u32) -> Result<()> {
         if val != VFIO_TYPE1_IOMMU && val != VFIO_TYPE1v2_IOMMU {
             return Err(VfioError::VfioInvalidType);
         }
@@ -135,6 +135,13 @@ impl VfioContainer {
         }
 
         Ok(())
+    }
+
+    fn cache_coherence(&self) -> bool {
+        // Safe as file is vfio container and make sure val is valid.
+        let ret = unsafe { ioctl_with_val(self, VFIO_CHECK_EXTENSION(), VFIO_DMA_CC_IOMMU.into()) };
+
+        ret != 0
     }
 
     fn set_iommu(&self, val: u32) -> Result<()> {
@@ -199,6 +206,7 @@ struct VfioGroup {
     group: File,
     device: Arc<DeviceFd>,
     container: VfioContainer,
+    cache_coherent: bool,
 }
 
 impl VfioGroup {
@@ -230,7 +238,12 @@ impl VfioGroup {
             return Err(VfioError::VfioApiVersion);
         }
 
-        container.check_extension(VFIO_TYPE1v2_IOMMU)?;
+        container.check_type_extension(VFIO_TYPE1v2_IOMMU)?;
+
+        let cache_coherent = container.cache_coherence();
+        if !cache_coherent {
+            warn!("IOMMU container for group {} is not DMA cache coherent", id);
+        }
 
         // Safe as we are the owner of group and container_raw_fd which are valid value,
         // and we verify the ret value
@@ -242,12 +255,15 @@ impl VfioGroup {
 
         container.set_iommu(VFIO_TYPE1v2_IOMMU)?;
 
-        Self::kvm_device_add_group(&device, &group)?;
+        if cache_coherent {
+            Self::kvm_device_add_group(&device, &group)?;
+        }
 
         Ok(VfioGroup {
             group,
             device,
             container,
+            cache_coherent,
         })
     }
 
@@ -340,10 +356,12 @@ impl AsRawFd for VfioGroup {
 
 impl Drop for VfioGroup {
     fn drop(&mut self) {
-        match self.kvm_device_del_group() {
-            Ok(_) => {}
-            Err(e) => {
-                error!("Could not delete VFIO group: {:?}", e);
+        if self.cache_coherent {
+            match self.kvm_device_del_group() {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Could not delete VFIO group: {:?}", e);
+                }
             }
         }
 
