@@ -15,16 +15,15 @@ use std::io::{self, Write};
 use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, INTERRUPT_STATUS_USED_RING, VIRTIO_F_VERSION_1,
+    VirtioDeviceType, VIRTIO_F_VERSION_1,
 };
-use crate::VirtioInterrupt;
+use crate::{VirtioInterrupt, VirtioInterruptType};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap, GuestUsize,
 };
@@ -157,7 +156,6 @@ struct PmemEpollHandler {
     queue: Queue,
     mem: GuestMemoryMmap,
     disk: File,
-    interrupt_status: Arc<AtomicUsize>,
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evt: EventFd,
     kill_evt: EventFd,
@@ -209,9 +207,7 @@ impl PmemEpollHandler {
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
-        self.interrupt_status
-            .fetch_or(INTERRUPT_STATUS_USED_RING as usize, Ordering::SeqCst);
-        (self.interrupt_cb)(&self.queue).map_err(|e| {
+        (self.interrupt_cb)(&VirtioInterruptType::Queue, Some(&self.queue)).map_err(|e| {
             error!("Failed to signal used queue: {:?}", e);
             DeviceError::FailedSignalingUsedQueue(e)
         })
@@ -374,7 +370,6 @@ impl VirtioDevice for Pmem {
         &mut self,
         mem: GuestMemoryMmap,
         interrupt_cb: Arc<VirtioInterrupt>,
-        status: Arc<AtomicUsize>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -402,7 +397,6 @@ impl VirtioDevice for Pmem {
                 queue: queues.remove(0),
                 mem,
                 disk,
-                interrupt_status: status,
                 interrupt_cb,
                 queue_evt: queue_evts.remove(0),
                 kill_evt,

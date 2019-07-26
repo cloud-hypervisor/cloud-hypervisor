@@ -8,6 +8,8 @@
 extern crate byteorder;
 
 use byteorder::{ByteOrder, LittleEndian};
+use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::Arc;
 use vm_memory::GuestAddress;
 
 use crate::{Queue, VirtioDevice};
@@ -40,7 +42,7 @@ pub struct VirtioPciCommonConfig {
     pub device_feature_select: u32,
     pub driver_feature_select: u32,
     pub queue_select: u16,
-    pub msix_config: u16,
+    pub msix_config: Arc<AtomicU16>,
 }
 
 impl VirtioPciCommonConfig {
@@ -120,7 +122,7 @@ impl VirtioPciCommonConfig {
     fn read_common_config_word(&self, offset: u64, queues: &[Queue]) -> u16 {
         debug!("read_common_config_word: offset 0x{:x}", offset);
         match offset {
-            0x10 => self.msix_config,
+            0x10 => self.msix_config.load(Ordering::SeqCst),
             0x12 => queues.len() as u16, // num_queues
             0x16 => self.queue_select,
             0x18 => self.with_queue(queues, |q| q.size).unwrap_or(0),
@@ -143,7 +145,7 @@ impl VirtioPciCommonConfig {
     fn write_common_config_word(&mut self, offset: u64, value: u16, queues: &mut Vec<Queue>) {
         debug!("write_common_config_word: offset 0x{:x}", offset);
         match offset {
-            0x10 => self.msix_config = value,
+            0x10 => self.msix_config.store(value, Ordering::SeqCst),
             0x16 => self.queue_select = value,
             0x18 => self.with_queue_mut(queues, |q| q.size = value),
             0x1a => self.with_queue_mut(queues, |q| q.vector = value),
@@ -272,7 +274,6 @@ mod tests {
             &mut self,
             _mem: GuestMemoryMmap,
             _interrupt_evt: Arc<VirtioInterrupt>,
-            _status: Arc<AtomicUsize>,
             _queues: Vec<Queue>,
             _queue_evts: Vec<EventFd>,
         ) -> ActivateResult {
@@ -298,7 +299,7 @@ mod tests {
             device_feature_select: 0x0,
             driver_feature_select: 0x0,
             queue_select: 0xff,
-            msix_config: 0,
+            msix_config: Arc::new(AtomicU16::new(0)),
         };
 
         let dev = &mut DummyDevice(0) as &mut dyn VirtioDevice;
