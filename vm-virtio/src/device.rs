@@ -8,12 +8,20 @@
 
 use super::*;
 use pci::{PciBarConfiguration, PciCapability};
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::EventFd;
 
-pub type VirtioInterrupt = Box<Fn(&Queue) -> std::result::Result<(), std::io::Error> + Send + Sync>;
+pub enum VirtioInterruptType {
+    Config,
+    Queue,
+}
+
+pub type VirtioInterrupt = Box<
+    Fn(&VirtioInterruptType, Option<&Queue>) -> std::result::Result<(), std::io::Error>
+        + Send
+        + Sync,
+>;
 
 /// Trait for virtio devices to be driven by a virtio transport.
 ///
@@ -49,7 +57,6 @@ pub trait VirtioDevice: Send {
         &mut self,
         mem: GuestMemoryMmap,
         interrupt_evt: Arc<VirtioInterrupt>,
-        status: Arc<AtomicUsize>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult;

@@ -2,11 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType,
-    INTERRUPT_STATUS_USED_RING,
-};
-use crate::{VirtioInterrupt, VIRTIO_F_VERSION_1_BITMASK};
+use super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
+use crate::{VirtioInterrupt, VirtioInterruptType, VIRTIO_F_VERSION_1_BITMASK};
 use epoll;
 use libc::EFD_NONBLOCK;
 use std::cmp;
@@ -14,7 +11,6 @@ use std::io;
 use std::io::Write;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use vhost_rs::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
@@ -92,7 +88,6 @@ type Result<T> = result::Result<T, Error>;
 
 struct FsEpollHandler {
     vu_call_evt_queue_list: Vec<(EventFd, Queue)>,
-    interrupt_status: Arc<AtomicUsize>,
     interrupt_cb: Arc<VirtioInterrupt>,
     kill_evt: EventFd,
 }
@@ -137,16 +132,15 @@ impl FsEpollHandler {
                         if let Err(e) = self.vu_call_evt_queue_list[x].0.read() {
                             error!("Failed to get queue event: {:?}", e);
                             break 'epoll;
-                        } else {
-                            self.interrupt_status
-                                .fetch_or(INTERRUPT_STATUS_USED_RING as usize, Ordering::SeqCst);
-                            if let Err(e) = (self.interrupt_cb)(&self.vu_call_evt_queue_list[x].1) {
-                                error!(
-                                    "Failed to signal used queue: {:?}",
-                                    DeviceError::FailedSignalingUsedQueue(e)
-                                );
-                                break 'epoll;
-                            }
+                        } else if let Err(e) = (self.interrupt_cb)(
+                            &VirtioInterruptType::Queue,
+                            Some(&self.vu_call_evt_queue_list[x].1),
+                        ) {
+                            error!(
+                                "Failed to signal used queue: {:?}",
+                                DeviceError::FailedSignalingUsedQueue(e)
+                            );
+                            break 'epoll;
                         }
                     }
                     x if (x == kill_evt_index) => {
@@ -390,7 +384,6 @@ impl VirtioDevice for Fs {
         &mut self,
         mem: GuestMemoryMmap,
         interrupt_cb: Arc<VirtioInterrupt>,
-        status: Arc<AtomicUsize>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -419,7 +412,6 @@ impl VirtioDevice for Fs {
 
         let mut handler = FsEpollHandler {
             vu_call_evt_queue_list,
-            interrupt_status: status,
             interrupt_cb,
             kill_evt,
         };

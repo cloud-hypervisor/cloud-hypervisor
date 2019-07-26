@@ -13,7 +13,7 @@ extern crate vm_memory;
 extern crate vmm_sys_util;
 
 use libc::EFD_NONBLOCK;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -30,8 +30,9 @@ use vmm_sys_util::{EventFd, Result};
 
 use super::VirtioPciCommonConfig;
 use crate::{
-    Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER,
-    DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT,
+    Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
+    DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
+    DEVICE_INIT, INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
 };
 
 #[allow(clippy::enum_variant_names)]
@@ -254,7 +255,7 @@ impl VirtioPciDevice {
                 device_feature_select: 0,
                 driver_feature_select: 0,
                 queue_select: 0,
-                msix_config: 0,
+                msix_config: Arc::new(AtomicU16::new(0)),
             },
             msix_config,
             msix_num,
@@ -376,10 +377,20 @@ impl PciDevice for VirtioPciDevice {
     ) {
         self.configuration.set_irq(irq_num as u8, irq_pin);
 
-        let cb = Arc::new(Box::new(move |_queue: &Queue| {
-            let param = InterruptParameters { msix: None };
-            (irq_cb)(param)
-        }) as VirtioInterrupt);
+        let interrupt_status = self.interrupt_status.clone();
+        let cb = Arc::new(Box::new(
+            move |int_type: &VirtioInterruptType, _queue: Option<&Queue>| {
+                let param = InterruptParameters { msix: None };
+
+                let status = match int_type {
+                    VirtioInterruptType::Config => INTERRUPT_STATUS_CONFIG_CHANGED,
+                    VirtioInterruptType::Queue => INTERRUPT_STATUS_USED_RING,
+                };
+                interrupt_status.fetch_or(status as usize, Ordering::SeqCst);
+
+                (irq_cb)(param)
+            },
+        ) as VirtioInterrupt);
 
         self.interrupt_cb = Some(cb);
     }
@@ -393,22 +404,38 @@ impl PciDevice for VirtioPciDevice {
 
             let msix_config_clone = msix_config.clone();
 
-            let cb = Arc::new(Box::new(move |queue: &Queue| {
-                let config = &mut msix_config_clone.lock().unwrap();
-                let entry = &config.table_entries[queue.vector as usize];
+            let common_config_msi_vector = self.common_config.msix_config.clone();
+            let cb = Arc::new(Box::new(
+                move |int_type: &VirtioInterruptType, queue: Option<&Queue>| {
+                    let vector = match int_type {
+                        VirtioInterruptType::Config => {
+                            common_config_msi_vector.load(Ordering::SeqCst)
+                        }
+                        VirtioInterruptType::Queue => {
+                            if let Some(q) = queue {
+                                q.vector
+                            } else {
+                                0
+                            }
+                        }
+                    };
 
-                // In case the vector control register associated with the entry
-                // has its first bit set, this means the vector is masked and the
-                // device should not inject the interrupt.
-                // Instead, the Pending Bit Array table is updated to reflect there
-                // is a pending interrupt for this specific vector.
-                if config.masked() || entry.masked() {
-                    config.set_pba_bit(queue.vector, false);
-                    return Ok(());
-                }
+                    let config = &mut msix_config_clone.lock().unwrap();
+                    let entry = &config.table_entries[vector as usize];
 
-                (msi_cb)(InterruptParameters { msix: Some(entry) })
-            }) as VirtioInterrupt);
+                    // In case the vector control register associated with the entry
+                    // has its first bit set, this means the vector is masked and the
+                    // device should not inject the interrupt.
+                    // Instead, the Pending Bit Array table is updated to reflect there
+                    // is a pending interrupt for this specific vector.
+                    if config.masked() || entry.masked() {
+                        config.set_pba_bit(vector, false);
+                        return Ok(());
+                    }
+
+                    (msi_cb)(InterruptParameters { msix: Some(entry) })
+                },
+            ) as VirtioInterrupt);
 
             self.interrupt_cb = Some(cb);
         }
@@ -585,7 +612,6 @@ impl PciDevice for VirtioPciDevice {
                         .activate(
                             mem,
                             interrupt_cb,
-                            self.interrupt_status.clone(),
                             self.queues.clone(),
                             self.queue_evts.split_off(0),
                         )

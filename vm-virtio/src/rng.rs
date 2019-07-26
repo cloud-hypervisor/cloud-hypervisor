@@ -9,16 +9,15 @@ use std::fs::File;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    INTERRUPT_STATUS_USED_RING, VIRTIO_F_VERSION_1,
+    VIRTIO_F_VERSION_1,
 };
-use crate::VirtioInterrupt;
+use crate::{VirtioInterrupt, VirtioInterruptType};
 use vm_memory::{Bytes, GuestMemoryMmap};
 use vmm_sys_util::EventFd;
 
@@ -35,7 +34,6 @@ struct RngEpollHandler {
     queues: Vec<Queue>,
     mem: GuestMemoryMmap,
     random_file: File,
-    interrupt_status: Arc<AtomicUsize>,
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evt: EventFd,
     kill_evt: EventFd,
@@ -77,9 +75,7 @@ impl RngEpollHandler {
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
-        self.interrupt_status
-            .fetch_or(INTERRUPT_STATUS_USED_RING as usize, Ordering::SeqCst);
-        (self.interrupt_cb)(&self.queues[0]).map_err(|e| {
+        (self.interrupt_cb)(&VirtioInterruptType::Queue, Some(&self.queues[0])).map_err(|e| {
             error!("Failed to signal used queue: {:?}", e);
             DeviceError::FailedSignalingUsedQueue(e)
         })
@@ -229,7 +225,6 @@ impl VirtioDevice for Rng {
         &mut self,
         mem: GuestMemoryMmap,
         interrupt_cb: Arc<VirtioInterrupt>,
-        status: Arc<AtomicUsize>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -257,7 +252,6 @@ impl VirtioDevice for Rng {
                 queues,
                 mem,
                 random_file,
-                interrupt_status: status,
                 interrupt_cb,
                 queue_evt: queue_evts.remove(0),
                 kill_evt,

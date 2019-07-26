@@ -17,14 +17,13 @@ use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, INTERRUPT_STATUS_USED_RING,
+    VirtioDeviceType, VirtioInterruptType,
 };
 use crate::VirtioInterrupt;
 use virtio_bindings::virtio_blk::*;
@@ -325,7 +324,6 @@ struct BlockEpollHandler<T: DiskFile> {
     mem: GuestMemoryMmap,
     disk_image: T,
     disk_nsectors: u64,
-    interrupt_status: Arc<AtomicUsize>,
     interrupt_cb: Arc<VirtioInterrupt>,
     disk_image_id: Vec<u8>,
 }
@@ -376,12 +374,12 @@ impl<T: DiskFile> BlockEpollHandler<T> {
     }
 
     fn signal_used_queue(&self, queue_index: usize) -> result::Result<(), DeviceError> {
-        self.interrupt_status
-            .fetch_or(INTERRUPT_STATUS_USED_RING as usize, Ordering::SeqCst);
-        (self.interrupt_cb)(&self.queues[queue_index]).map_err(|e| {
-            error!("Failed to signal used queue: {:?}", e);
-            DeviceError::FailedSignalingUsedQueue(e)
-        })
+        (self.interrupt_cb)(&VirtioInterruptType::Queue, Some(&self.queues[queue_index])).map_err(
+            |e| {
+                error!("Failed to signal used queue: {:?}", e);
+                DeviceError::FailedSignalingUsedQueue(e)
+            },
+        )
     }
 
     #[allow(dead_code)]
@@ -600,7 +598,6 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         &mut self,
         mem: GuestMemoryMmap,
         interrupt_cb: Arc<VirtioInterrupt>,
-        status: Arc<AtomicUsize>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -644,7 +641,6 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                 mem,
                 disk_image,
                 disk_nsectors: self.disk_nsectors,
-                interrupt_status: status,
                 interrupt_cb,
                 disk_image_id,
             };

@@ -15,7 +15,6 @@ use std::mem;
 use std::net::Ipv4Addr;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::vec::Vec;
@@ -25,7 +24,7 @@ use net_gen;
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    INTERRUPT_STATUS_USED_RING,
+    VirtioInterruptType,
 };
 use crate::VirtioInterrupt;
 use net_util::{MacAddr, Tap, TapError, MAC_ADDR_LEN};
@@ -120,16 +119,13 @@ struct NetEpollHandler {
     tap: Tap,
     rx: RxVirtio,
     tx: TxVirtio,
-    interrupt_status: Arc<AtomicUsize>,
     interrupt_cb: Arc<VirtioInterrupt>,
     kill_evt: EventFd,
 }
 
 impl NetEpollHandler {
     fn signal_used_queue(&self, queue: &Queue) -> result::Result<(), DeviceError> {
-        self.interrupt_status
-            .fetch_or(INTERRUPT_STATUS_USED_RING as usize, Ordering::SeqCst);
-        (self.interrupt_cb)(queue).map_err(|e| {
+        (self.interrupt_cb)(&VirtioInterruptType::Queue, Some(queue)).map_err(|e| {
             error!("Failed to signal used queue: {:?}", e);
             DeviceError::FailedSignalingUsedQueue(e)
         })
@@ -538,7 +534,6 @@ impl VirtioDevice for Net {
         &mut self,
         mem: GuestMemoryMmap,
         interrupt_cb: Arc<VirtioInterrupt>,
-        status: Arc<AtomicUsize>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -571,7 +566,6 @@ impl VirtioDevice for Net {
                 tap,
                 rx: RxVirtio::new(rx_queue, rx_queue_evt),
                 tx: TxVirtio::new(tx_queue, tx_queue_evt),
-                interrupt_status: status,
                 interrupt_cb,
                 kill_evt,
             };

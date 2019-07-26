@@ -10,14 +10,13 @@ use std::io;
 use std::io::Write;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    INTERRUPT_STATUS_USED_RING, VIRTIO_F_VERSION_1,
+    VirtioInterruptType, VIRTIO_F_VERSION_1,
 };
 use crate::VirtioInterrupt;
 use vm_memory::{Bytes, GuestMemoryMmap};
@@ -38,7 +37,6 @@ const KILL_EVENT: DeviceEventT = 3;
 struct ConsoleEpollHandler {
     queues: Vec<Queue>,
     mem: GuestMemoryMmap,
-    interrupt_status: Arc<AtomicUsize>,
     interrupt_cb: Arc<VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
     out: Box<io::Write + Send>,
@@ -128,9 +126,7 @@ impl ConsoleEpollHandler {
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
-        self.interrupt_status
-            .fetch_or(INTERRUPT_STATUS_USED_RING as usize, Ordering::SeqCst);
-        (self.interrupt_cb)(&self.queues[0]).map_err(|e| {
+        (self.interrupt_cb)(&VirtioInterruptType::Queue, Some(&self.queues[0])).map_err(|e| {
             error!("Failed to signal used queue: {:?}", e);
             DeviceError::FailedSignalingUsedQueue(e)
         })
@@ -333,7 +329,6 @@ impl VirtioDevice for Console {
         &mut self,
         mem: GuestMemoryMmap,
         interrupt_cb: Arc<VirtioInterrupt>,
-        status: Arc<AtomicUsize>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -360,7 +355,6 @@ impl VirtioDevice for Console {
             let mut handler = ConsoleEpollHandler {
                 queues,
                 mem,
-                interrupt_status: status,
                 interrupt_cb,
                 in_buffer: self.input.in_buffer.clone(),
                 out,
