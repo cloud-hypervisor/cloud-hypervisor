@@ -125,11 +125,16 @@ impl PciConfigIo {
             return 0xffff_ffff;
         }
 
-        let (bus, device, _function, register) =
+        let (bus, device, function, register) =
             parse_config_address(self.config_address & !0x8000_0000);
 
         // Only support one bus.
         if bus != 0 {
+            return 0xffff_ffff;
+        }
+
+        // Don't support multi-function devices.
+        if function > 0 {
             return 0xffff_ffff;
         }
 
