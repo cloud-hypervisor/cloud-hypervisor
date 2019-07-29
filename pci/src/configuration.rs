@@ -14,8 +14,10 @@ const NUM_CONFIGURATION_REGISTERS: usize = 64;
 const STATUS_REG: usize = 1;
 const STATUS_REG_CAPABILITIES_USED_MASK: u32 = 0x0010_0000;
 const BAR0_REG: usize = 4;
+const ROM_BAR_REG: usize = 12;
 const BAR_IO_ADDR_MASK: u32 = 0xffff_fffc;
 const BAR_MEM_ADDR_MASK: u32 = 0xffff_fff0;
+const ROM_BAR_ADDR_MASK: u32 = 0xffff_f800;
 const NUM_BAR_REGS: usize = 6;
 const CAPABILITY_LIST_HEAD_OFFSET: usize = 0x34;
 const FIRST_CAPABILITY_OFFSET: usize = 0x40;
@@ -249,6 +251,8 @@ pub struct PciConfiguration {
     writable_bits: [u32; NUM_CONFIGURATION_REGISTERS], // writable bits for each register.
     bar_size: [u32; NUM_BAR_REGS],
     bar_used: [bool; NUM_BAR_REGS],
+    rom_bar_size: u32,
+    rom_bar_used: bool,
     // Contains the byte offset and size of the last capability.
     last_capability: Option<(usize, usize)>,
     msix_cap_reg_idx: Option<usize>,
@@ -289,6 +293,10 @@ pub enum Error {
     CapabilityEmpty,
     CapabilityLengthInvalid(usize),
     CapabilitySpaceFull(usize),
+    RomBarAddressInvalid(u64, u64),
+    RomBarInUse(usize),
+    RomBarInvalid(usize),
+    RomBarSizeInvalid(u64),
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -312,6 +320,10 @@ impl Display for Error {
             CapabilityEmpty => write!(f, "empty capabilities are invalid"),
             CapabilityLengthInvalid(l) => write!(f, "Invalid capability length {}", l),
             CapabilitySpaceFull(s) => write!(f, "capability of size {} doesn't fit", s),
+            RomBarAddressInvalid(a, s) => write!(f, "address {} size {} too big", a, s),
+            RomBarInUse(b) => write!(f, "rom bar {} already used", b),
+            RomBarInvalid(b) => write!(f, "rom bar {} invalid, max {}", b, NUM_BAR_REGS - 1),
+            RomBarSizeInvalid(s) => write!(f, "rom bar address {} not a power of two", s),
         }
     }
 }
@@ -362,6 +374,8 @@ impl PciConfiguration {
             writable_bits,
             bar_size,
             bar_used: [false; NUM_BAR_REGS],
+            rom_bar_size: 0,
+            rom_bar_used: false,
             last_capability: None,
             msix_cap_reg_idx: None,
             msix_config,
@@ -376,12 +390,15 @@ impl PciConfiguration {
     /// Writes a 32bit register to `reg_idx` in the register map.
     pub fn write_reg(&mut self, reg_idx: usize, value: u32) {
         let mut mask = self.writable_bits[reg_idx];
-        if reg_idx >= BAR0_REG && reg_idx < BAR0_REG + NUM_BAR_REGS {
+        if reg_idx >= BAR0_REG
+            && reg_idx < BAR0_REG + NUM_BAR_REGS
+            && (value & BAR_MEM_ADDR_MASK) == BAR_MEM_ADDR_MASK
+        {
             // Handle very specific case where the BAR is being written with
             // all 1's to retrieve the BAR size on next BAR reading.
-            if value == 0xffff_ffff {
-                mask = self.bar_size[reg_idx - 4];
-            }
+            mask = self.bar_size[reg_idx - 4];
+        } else if reg_idx == ROM_BAR_REG && (value & ROM_BAR_ADDR_MASK) == ROM_BAR_ADDR_MASK {
+            mask = self.rom_bar_size;
         }
 
         if let Some(r) = self.registers.get_mut(reg_idx) {
@@ -497,6 +514,36 @@ impl PciConfiguration {
         self.writable_bits[bar_idx] = mask;
         self.bar_size[config.reg_idx] = config.size as u32;
         self.bar_used[config.reg_idx] = true;
+        Ok(config.reg_idx)
+    }
+
+    /// Adds rom expansion BAR.
+    pub fn add_pci_rom_bar(&mut self, config: &PciBarConfiguration, active: u32) -> Result<usize> {
+        if self.rom_bar_used {
+            return Err(Error::RomBarInUse(config.reg_idx));
+        }
+
+        if config.size.count_ones() != 1 {
+            return Err(Error::RomBarSizeInvalid(config.size));
+        }
+
+        if config.reg_idx != ROM_BAR_REG {
+            return Err(Error::RomBarInvalid(config.reg_idx));
+        }
+
+        let end_addr = config
+            .addr
+            .checked_add(config.size - 1)
+            .ok_or_else(|| Error::RomBarAddressInvalid(config.addr, config.size))?;
+
+        if end_addr > u64::from(u32::max_value()) {
+            return Err(Error::RomBarAddressInvalid(config.addr, config.size));
+        }
+
+        self.registers[config.reg_idx] = (config.addr as u32) | active;
+        self.writable_bits[config.reg_idx] = ROM_BAR_ADDR_MASK;
+        self.rom_bar_size = config.size as u32;
+        self.rom_bar_used = true;
         Ok(config.reg_idx)
     }
 
