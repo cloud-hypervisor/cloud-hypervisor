@@ -1,0 +1,12 @@
+network:
+  version: 1
+  config:
+    - type: physical
+      name: eth0
+      mac_address: 12:34:56:78:90:ab
+      subnets:
+         - type: static
+           address: 192.168.2.2/24
+           gateway: 192.168.2.1
+           dns_nameservers:
+              - 192.168.2.1
