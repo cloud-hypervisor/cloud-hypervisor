@@ -202,7 +202,6 @@ mod tests {
     struct Guest<'a> {
         tmp_dir: TempDir,
         disk_config: &'a DiskConfig,
-        disks: Vec<String>,
         fw_path: String,
         network: GuestNetworkConfig,
     }
@@ -210,19 +209,31 @@ mod tests {
     // Safe to implement as we know we have no interior mutability
     impl<'a> std::panic::RefUnwindSafe for Guest<'a> {}
 
-    trait DiskConfig {
-        fn prepare_files(
-            &self,
-            tmp_dir: &TempDir,
-            network: &GuestNetworkConfig,
-        ) -> (Vec<String>, String);
-        fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String;
+    enum DiskType {
+        OperatingSystem,
+        RawOperatingSystem,
+        CloudInit,
     }
 
-    struct ClearDiskConfig;
+    trait DiskConfig {
+        fn prepare_files(&mut self, tmp_dir: &TempDir, network: &GuestNetworkConfig);
+        fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String;
+        fn disk(&self, disk_type: DiskType) -> Option<String>;
+    }
+
+    struct ClearDiskConfig {
+        osdisk_path: String,
+        osdisk_raw_path: String,
+        cloudinit_path: String,
+    }
+
     impl ClearDiskConfig {
         fn new() -> Self {
-            ClearDiskConfig {}
+            ClearDiskConfig {
+                osdisk_path: String::new(),
+                osdisk_raw_path: String::new(),
+                cloudinit_path: String::new(),
+            }
         }
     }
 
@@ -289,16 +300,9 @@ mod tests {
             cloudinit_file_path
         }
 
-        fn prepare_files(
-            &self,
-            tmp_dir: &TempDir,
-            network: &GuestNetworkConfig,
-        ) -> (Vec<String>, String) {
+        fn prepare_files(&mut self, tmp_dir: &TempDir, network: &GuestNetworkConfig) {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
-
-            let mut fw_path = workload_path.clone();
-            fw_path.push("hypervisor-fw");
 
             let mut osdisk_base_path = workload_path.clone();
             osdisk_base_path.push("clear-29810-cloud.img");
@@ -316,9 +320,17 @@ mod tests {
             fs::copy(osdisk_raw_base_path, &osdisk_raw_path)
                 .expect("copying of OS source disk raw image failed");
 
-            let disks = vec![osdisk_path, cloudinit_path, osdisk_raw_path];
+            self.cloudinit_path = cloudinit_path;
+            self.osdisk_path = osdisk_path;
+            self.osdisk_raw_path = osdisk_raw_path;
+        }
 
-            (disks, String::from(fw_path.to_str().unwrap()))
+        fn disk(&self, disk_type: DiskType) -> Option<String> {
+            match disk_type {
+                DiskType::OperatingSystem => Some(self.osdisk_path.clone()),
+                DiskType::RawOperatingSystem => Some(self.osdisk_raw_path.clone()),
+                DiskType::CloudInit => Some(self.cloudinit_path.clone()),
+            }
         }
     }
 
@@ -352,31 +364,34 @@ mod tests {
     }
 
     impl<'a> Guest<'a> {
-        fn new_from_ip_range(disk_config: &'a DiskConfig, class: &str, id: u8) -> Self {
+        fn new_from_ip_range(disk_config: &'a mut DiskConfig, class: &str, id: u8) -> Self {
             let tmp_dir = TempDir::new("ch").unwrap();
 
-            let guest = Guest {
-                tmp_dir,
-                disk_config,
-                disks: Vec::new(),
-                fw_path: String::new(),
-                network: GuestNetworkConfig {
-                    guest_ip: format!("{}.{}.2", class, id),
-                    l2_guest_ip: format!("{}.{}.3", class, id),
-                    host_ip: format!("{}.{}.1", class, id),
-                    guest_mac: format!("12:34:56:78:90:{:02x}", id),
-                    l2_guest_mac: format!("de:ad:be:ef:12:{:02x}", id),
-                },
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut fw_path = workload_path.clone();
+            fw_path.push("hypervisor-fw");
+            let fw_path = String::from(fw_path.to_str().unwrap());
+            let network = GuestNetworkConfig {
+                guest_ip: format!("{}.{}.2", class, id),
+                l2_guest_ip: format!("{}.{}.3", class, id),
+                host_ip: format!("{}.{}.1", class, id),
+                guest_mac: format!("12:34:56:78:90:{:02x}", id),
+                l2_guest_mac: format!("de:ad:be:ef:12:{:02x}", id),
             };
 
-            guest
-                .disk_config
-                .prepare_files(&guest.tmp_dir, &guest.network);
+            disk_config.prepare_files(&tmp_dir, &network);
 
-            guest
+            Guest {
+                tmp_dir,
+                disk_config,
+                fw_path,
+                network,
+            }
         }
 
-        fn new(disk_config: &'a DiskConfig) -> Self {
+        fn new(disk_config: &'a mut DiskConfig) -> Self {
             let mut guard = NEXT_VM_ID.lock().unwrap();
             let id = *guard;
             *guard = id + 1;
@@ -524,14 +539,26 @@ mod tests {
     #[test]
     fn test_simple_launch() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
                 .unwrap();
@@ -555,13 +582,25 @@ mod tests {
     #[test]
     fn test_multi_cpu() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "2"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
                 .unwrap();
@@ -581,13 +620,25 @@ mod tests {
     #[test]
     fn test_large_memory() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=5120M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
                 .unwrap();
@@ -607,13 +658,25 @@ mod tests {
     #[test]
     fn test_pci_msi() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
                 .unwrap();
@@ -641,8 +704,8 @@ mod tests {
     #[test]
     fn test_vmlinux_boot() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -653,7 +716,19 @@ mod tests {
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
@@ -685,8 +760,8 @@ mod tests {
     #[test]
     fn test_bzimage_boot() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -697,7 +772,19 @@ mod tests {
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
@@ -729,14 +816,26 @@ mod tests {
     #[test]
     fn test_split_irqchip() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
                 .unwrap();
@@ -773,8 +872,8 @@ mod tests {
     #[test]
     fn test_virtio_fs() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
             let (mut daemon_child, virtiofsd_socket_path) = prepare_virtiofsd(&guest.tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -786,7 +885,19 @@ mod tests {
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
                     "--fs",
@@ -830,8 +941,8 @@ mod tests {
     #[test]
     fn test_virtio_pmem() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -858,7 +969,19 @@ mod tests {
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
                     "--pmem",
@@ -912,8 +1035,8 @@ mod tests {
     #[test]
     fn test_boot_from_virtio_pmem() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -924,14 +1047,14 @@ mod tests {
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk", guest.disks[1].as_str()])
+                .args(&["--disk", guest.disk_config.disk(DiskType::CloudInit).unwrap().as_str()])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
                     "--pmem",
                     format!(
                         "file={},size={}",
-                        guest.disks[2],
-                        fs::metadata(&guest.disks[2]).unwrap().len()
+                        guest.disk_config.disk(DiskType::RawOperatingSystem).unwrap(),
+                        fs::metadata(&guest.disk_config.disk(DiskType::RawOperatingSystem).unwrap()).unwrap().len()
                     )
                     .as_str(),
                 ])
@@ -955,13 +1078,25 @@ mod tests {
     #[test]
     fn test_multiple_network_interfaces() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&[
                     "--net",
                     guest.default_net_string().as_str(),
@@ -995,13 +1130,25 @@ mod tests {
     #[test]
     fn test_serial_disable() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--serial", "off"])
                 .spawn()
@@ -1042,15 +1189,27 @@ mod tests {
     #[test]
     fn test_serial_file() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
 
             let serial_path = guest.tmp_dir.path().join("/tmp/serial-output");
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
                     "--serial",
@@ -1092,14 +1251,26 @@ mod tests {
     #[test]
     fn test_virtio_console() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--console", "tty"])
                 .stdout(Stdio::piped())
@@ -1134,15 +1305,27 @@ mod tests {
     #[test]
     fn test_console_file() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new(&clear);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
 
             let console_path = guest.tmp_dir.path().join("/tmp/console-output");
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&["--disk", guest.disks[0].as_str(), guest.disks[1].as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
                     "--console",
@@ -1187,8 +1370,8 @@ mod tests {
     // command line for that puspose).
     fn test_vfio() {
         test_block!(tb, "", {
-            let clear = ClearDiskConfig::new();
-            let guest = Guest::new_from_ip_range(&clear, "172.16", 0);
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new_from_ip_range(&mut clear, "172.16", 0);
 
             let home = dirs::home_dir().unwrap();
             let mut cloud_init_vfio_base_path = home.clone();
@@ -1198,8 +1381,11 @@ mod tests {
 
             // We copy our cloudinit into the vfio mount point, for the nested
             // cloud-hypervisor guest to use.
-            fs::copy(&guest.disks[1], &cloud_init_vfio_base_path)
-                .expect("copying of cloud-init disk failed");
+            fs::copy(
+                &guest.disk_config.disk(DiskType::CloudInit).unwrap(),
+                &cloud_init_vfio_base_path,
+            )
+            .expect("copying of cloud-init disk failed");
 
             let vfio_9p_path = format!(
                 "local,id=shared,path={}/workloads/vfio/,security_model=none",
@@ -1207,8 +1393,22 @@ mod tests {
             );
 
             let ovmf_path = format!("{}/workloads/OVMF.fd", home.to_str().unwrap());
-            let os_disk = format!("file={},format=qcow2", guest.disks[0].as_str());
-            let cloud_init_disk = format!("file={},format=raw", guest.disks[1].as_str());
+            let os_disk = format!(
+                "file={},format=qcow2",
+                guest
+                    .disk_config
+                    .disk(DiskType::OperatingSystem)
+                    .unwrap()
+                    .as_str()
+            );
+            let cloud_init_disk = format!(
+                "file={},format=raw",
+                guest
+                    .disk_config
+                    .disk(DiskType::CloudInit)
+                    .unwrap()
+                    .as_str()
+            );
 
             let vfio_tap0 = "vfio-tap0";
             let vfio_tap1 = "vfio-tap1";
