@@ -728,14 +728,18 @@ impl PciDevice for VfioPciDevice {
         // We're not saving the BAR address to restore it, because we
         // are going to allocate a guest address for each BAR and write
         // that new address back.
-        while bar_id < VFIO_PCI_ROM_REGION_INDEX {
+        while bar_id < VFIO_PCI_CONFIG_REGION_INDEX {
             let mut lsb_size: u32 = 0xffff_ffff;
             let mut msb_size = 0;
             let mut region_size: u64;
             let bar_addr: GuestAddress;
 
             // Read the BAR size (Starts by all 1s to the BAR)
-            let bar_offset = PCI_CONFIG_BAR_OFFSET + bar_id * 4;
+            let bar_offset = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
+                (PCI_ROM_EXP_BAR_INDEX * 4) as u32
+            } else {
+                PCI_CONFIG_BAR_OFFSET + bar_id * 4
+            };
 
             self.vfio_pci_configuration
                 .write_config_dword(lsb_size, bar_offset);
@@ -750,15 +754,23 @@ impl PciDevice for VfioPciDevice {
             }
 
             // Is this an IO BAR?
-            let io_bar = match lsb_flag & PCI_CONFIG_IO_BAR {
-                PCI_CONFIG_IO_BAR => true,
-                _ => false,
+            let io_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
+                match lsb_flag & PCI_CONFIG_IO_BAR {
+                    PCI_CONFIG_IO_BAR => true,
+                    _ => false,
+                }
+            } else {
+                false
             };
 
             // Is this a 64-bit BAR?
-            let is_64bit_bar = match lsb_flag & PCI_CONFIG_MEMORY_BAR_64BIT {
-                PCI_CONFIG_MEMORY_BAR_64BIT => true,
-                _ => false,
+            let is_64bit_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
+                match lsb_flag & PCI_CONFIG_MEMORY_BAR_64BIT {
+                    PCI_CONFIG_MEMORY_BAR_64BIT => true,
+                    _ => false,
+                }
+            } else {
+                false
             };
 
             // By default, the region type is 32 bits memory BAR.
@@ -810,14 +822,15 @@ impl PciDevice for VfioPciDevice {
                 // In case the BAR is mappable directly, this means it might be
                 // set as KVM user memory region, which expects to deal with 4K
                 // pages. Therefore, the aligment has to be set accordingly.
-                let bar_alignment =
-                    if self.device.get_region_flags(bar_id) & VFIO_REGION_INFO_FLAG_MMAP != 0 {
-                        // 4K alignment
-                        0x1000
-                    } else {
-                        // Default 16 bytes alignment
-                        0x10
-                    };
+                let bar_alignment = if (bar_id == VFIO_PCI_ROM_REGION_INDEX)
+                    || (self.device.get_region_flags(bar_id) & VFIO_REGION_INFO_FLAG_MMAP != 0)
+                {
+                    // 4K alignment
+                    0x1000
+                } else {
+                    // Default 16 bytes alignment
+                    0x10
+                };
                 if is_64bit_bar {
                     bar_addr = allocator
                         .allocate_mmio_addresses(None, region_size, Some(bar_alignment))
@@ -829,16 +842,28 @@ impl PciDevice for VfioPciDevice {
                 }
             }
 
+            let reg_idx = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
+                PCI_ROM_EXP_BAR_INDEX
+            } else {
+                bar_id as usize
+            };
+
             // We can now build our BAR configuration block.
             let config = PciBarConfiguration::default()
-                .set_register_index(bar_id as usize)
+                .set_register_index(reg_idx)
                 .set_address(bar_addr.raw_value())
                 .set_size(region_size)
                 .set_region_type(region_type);
 
-            self.configuration
-                .add_pci_bar(&config)
-                .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
+            if bar_id == VFIO_PCI_ROM_REGION_INDEX {
+                self.configuration
+                    .add_pci_rom_bar(&config, lsb_flag & 0x1)
+                    .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
+            } else {
+                self.configuration
+                    .add_pci_bar(&config)
+                    .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
+            }
 
             ranges.push((bar_addr, region_size, region_type));
             self.mmio_regions.push(MmioRegion {
@@ -864,7 +889,9 @@ impl PciDevice for VfioPciDevice {
         // When the guest wants to write to a BAR, we trap it into
         // our local configuration space. We're not reprogramming
         // VFIO device.
-        if reg_idx >= PCI_CONFIG_BAR0_INDEX && reg_idx < PCI_CONFIG_BAR0_INDEX + BAR_NUMS {
+        if (reg_idx >= PCI_CONFIG_BAR0_INDEX && reg_idx < PCI_CONFIG_BAR0_INDEX + BAR_NUMS)
+            || reg_idx == PCI_ROM_EXP_BAR_INDEX
+        {
             // We keep our local cache updated with the BARs.
             // We'll read it back from there when the guest is asking
             // for BARs (see read_config_register()).
@@ -902,14 +929,10 @@ impl PciDevice for VfioPciDevice {
         // from our local configuration space. We want the guest to
         // use that and not the VFIO device BARs as it does not map
         // with the guest address space.
-        if reg_idx >= PCI_CONFIG_BAR0_INDEX && reg_idx < PCI_CONFIG_BAR0_INDEX + BAR_NUMS {
+        if (reg_idx >= PCI_CONFIG_BAR0_INDEX && reg_idx < PCI_CONFIG_BAR0_INDEX + BAR_NUMS)
+            || reg_idx == PCI_ROM_EXP_BAR_INDEX
+        {
             return self.configuration.read_reg(reg_idx);
-        }
-
-        // Since the ROM expansion BAR is not yet handled by the code, it is
-        // more proper to expose it to the guest as being disabled.
-        if reg_idx == PCI_ROM_EXP_BAR_INDEX {
-            return 0;
         }
 
         // Since we don't support INTx (only MSI and MSI-X), we should not
