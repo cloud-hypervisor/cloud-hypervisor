@@ -263,7 +263,12 @@ mod tests {
             let cloudinit_file_path =
                 String::from(self.tmp_dir.path().join("cloudinit").to_str().unwrap());
 
-            let cloud_init_directory = self.tmp_dir.path().join("cloud-init").join("openstack");
+            let cloud_init_directory = self
+                .tmp_dir
+                .path()
+                .join("cloud-init")
+                .join("clear")
+                .join("openstack");
 
             fs::create_dir_all(&cloud_init_directory.join("latest"))
                 .expect("Expect creating cloud-init directory to succeed");
@@ -272,6 +277,7 @@ mod tests {
                 .unwrap()
                 .join("test_data")
                 .join("cloud-init")
+                .join("clear")
                 .join("openstack")
                 .join("latest");
 
@@ -370,7 +376,7 @@ mod tests {
                     let mut sess = Session::new().unwrap();
                     sess.handshake(&tcp).map_err(|_| Error::Connection)?;
 
-                    sess.userauth_password("admin", "cloud123")
+                    sess.userauth_password("cloud", "cloud123")
                         .map_err(|_| Error::Authentication)?;
                     assert!(sess.authenticated());
 
