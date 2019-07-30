@@ -191,15 +191,135 @@ mod tests {
         static ref NEXT_VM_ID: Mutex<u8> = Mutex::new(1);
     }
 
-    struct Guest {
-        tmp_dir: TempDir,
-        disks: Vec<String>,
-        fw_path: String,
+    struct GuestNetworkConfig {
         guest_ip: String,
         l2_guest_ip: String,
         host_ip: String,
         guest_mac: String,
         l2_guest_mac: String,
+    }
+
+    struct Guest<'a> {
+        tmp_dir: TempDir,
+        disk_config: &'a DiskConfig,
+        disks: Vec<String>,
+        fw_path: String,
+        network: GuestNetworkConfig,
+    }
+
+    // Safe to implement as we know we have no interior mutability
+    impl<'a> std::panic::RefUnwindSafe for Guest<'a> {}
+
+    trait DiskConfig {
+        fn prepare_files(
+            &self,
+            tmp_dir: &TempDir,
+            network: &GuestNetworkConfig,
+        ) -> (Vec<String>, String);
+        fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String;
+    }
+
+    struct ClearDiskConfig;
+    impl ClearDiskConfig {
+        fn new() -> Self {
+            ClearDiskConfig {}
+        }
+    }
+
+    impl DiskConfig for ClearDiskConfig {
+        fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
+            let cloudinit_file_path =
+                String::from(tmp_dir.path().join("cloudinit").to_str().unwrap());
+
+            let cloud_init_directory = tmp_dir
+                .path()
+                .join("cloud-init")
+                .join("clear")
+                .join("openstack");
+
+            fs::create_dir_all(&cloud_init_directory.join("latest"))
+                .expect("Expect creating cloud-init directory to succeed");
+
+            let source_file_dir = std::env::current_dir()
+                .unwrap()
+                .join("test_data")
+                .join("cloud-init")
+                .join("clear")
+                .join("openstack")
+                .join("latest");
+
+            fs::copy(
+                source_file_dir.join("meta_data.json"),
+                cloud_init_directory.join("latest").join("meta_data.json"),
+            )
+            .expect("Expect copying cloud-init meta_data.json to succeed");
+
+            let mut user_data_string = String::new();
+
+            fs::File::open(source_file_dir.join("user_data"))
+                .unwrap()
+                .read_to_string(&mut user_data_string)
+                .expect("Expected reading user_data file in to succeed");
+
+            user_data_string = user_data_string.replace("192.168.2.1", &network.host_ip);
+            user_data_string = user_data_string.replace("192.168.2.2", &network.guest_ip);
+            user_data_string = user_data_string.replace("192.168.2.3", &network.l2_guest_ip);
+            user_data_string = user_data_string.replace("12:34:56:78:90:ab", &network.guest_mac);
+            user_data_string = user_data_string.replace("de:ad:be:ef:12:34", &network.l2_guest_mac);
+
+            fs::File::create(cloud_init_directory.join("latest").join("user_data"))
+                .unwrap()
+                .write_all(&user_data_string.as_bytes())
+                .expect("Expected writing out user_data to succeed");
+
+            std::process::Command::new("mkdosfs")
+                .args(&["-n", "config-2"])
+                .args(&["-C", cloudinit_file_path.as_str()])
+                .arg("8192")
+                .output()
+                .expect("Expect creating disk image to succeed");
+
+            std::process::Command::new("mcopy")
+                .arg("-o")
+                .args(&["-i", cloudinit_file_path.as_str()])
+                .args(&["-s", cloud_init_directory.to_str().unwrap(), "::"])
+                .output()
+                .expect("Expect copying files to disk image to succeed");
+
+            cloudinit_file_path
+        }
+
+        fn prepare_files(
+            &self,
+            tmp_dir: &TempDir,
+            network: &GuestNetworkConfig,
+        ) -> (Vec<String>, String) {
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut fw_path = workload_path.clone();
+            fw_path.push("hypervisor-fw");
+
+            let mut osdisk_base_path = workload_path.clone();
+            osdisk_base_path.push("clear-29810-cloud.img");
+
+            let mut osdisk_raw_base_path = workload_path.clone();
+            osdisk_raw_base_path.push("clear-29810-cloud-raw.img");
+
+            let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
+            let osdisk_raw_path =
+                String::from(tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
+            let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
+
+            fs::copy(osdisk_base_path, &osdisk_path)
+                .expect("copying of OS source disk image failed");
+            fs::copy(osdisk_raw_base_path, &osdisk_raw_path)
+                .expect("copying of OS source disk raw image failed");
+
+            let disks = vec![osdisk_path, cloudinit_path, osdisk_raw_path];
+
+            (disks, String::from(fw_path.to_str().unwrap()))
+        }
     }
 
     fn prepare_virtiofsd(tmp_dir: &TempDir) -> (std::process::Child, String) {
@@ -231,131 +351,43 @@ mod tests {
         (child, virtiofsd_socket_path)
     }
 
-    impl Guest {
-        fn new_from_ip_range(class: &str, id: u8) -> Self {
+    impl<'a> Guest<'a> {
+        fn new_from_ip_range(disk_config: &'a DiskConfig, class: &str, id: u8) -> Self {
             let tmp_dir = TempDir::new("ch").unwrap();
 
-            let mut guest = Guest {
+            let guest = Guest {
                 tmp_dir,
+                disk_config,
                 disks: Vec::new(),
                 fw_path: String::new(),
-                guest_ip: format!("{}.{}.2", class, id),
-                l2_guest_ip: format!("{}.{}.3", class, id),
-                host_ip: format!("{}.{}.1", class, id),
-                guest_mac: format!("12:34:56:78:90:{:02x}", id),
-                l2_guest_mac: format!("de:ad:be:ef:12:{:02x}", id),
+                network: GuestNetworkConfig {
+                    guest_ip: format!("{}.{}.2", class, id),
+                    l2_guest_ip: format!("{}.{}.3", class, id),
+                    host_ip: format!("{}.{}.1", class, id),
+                    guest_mac: format!("12:34:56:78:90:{:02x}", id),
+                    l2_guest_mac: format!("de:ad:be:ef:12:{:02x}", id),
+                },
             };
 
-            guest.prepare_files();
+            guest
+                .disk_config
+                .prepare_files(&guest.tmp_dir, &guest.network);
 
             guest
         }
 
-        fn new() -> Self {
+        fn new(disk_config: &'a DiskConfig) -> Self {
             let mut guard = NEXT_VM_ID.lock().unwrap();
             let id = *guard;
             *guard = id + 1;
 
-            Self::new_from_ip_range("192.168", id)
-        }
-
-        fn prepare_cloudinit(&self) -> String {
-            let cloudinit_file_path =
-                String::from(self.tmp_dir.path().join("cloudinit").to_str().unwrap());
-
-            let cloud_init_directory = self
-                .tmp_dir
-                .path()
-                .join("cloud-init")
-                .join("clear")
-                .join("openstack");
-
-            fs::create_dir_all(&cloud_init_directory.join("latest"))
-                .expect("Expect creating cloud-init directory to succeed");
-
-            let source_file_dir = std::env::current_dir()
-                .unwrap()
-                .join("test_data")
-                .join("cloud-init")
-                .join("clear")
-                .join("openstack")
-                .join("latest");
-
-            fs::copy(
-                source_file_dir.join("meta_data.json"),
-                cloud_init_directory.join("latest").join("meta_data.json"),
-            )
-            .expect("Expect copying cloud-init meta_data.json to succeed");
-
-            let mut user_data_string = String::new();
-
-            fs::File::open(source_file_dir.join("user_data"))
-                .unwrap()
-                .read_to_string(&mut user_data_string)
-                .expect("Expected reading user_data file in to succeed");
-
-            user_data_string = user_data_string.replace("192.168.2.1", &self.host_ip);
-            user_data_string = user_data_string.replace("192.168.2.2", &self.guest_ip);
-            user_data_string = user_data_string.replace("192.168.2.3", &self.l2_guest_ip);
-            user_data_string = user_data_string.replace("12:34:56:78:90:ab", &self.guest_mac);
-            user_data_string = user_data_string.replace("de:ad:be:ef:12:34", &self.l2_guest_mac);
-
-            fs::File::create(cloud_init_directory.join("latest").join("user_data"))
-                .unwrap()
-                .write_all(&user_data_string.as_bytes())
-                .expect("Expected writing out user_data to succeed");
-
-            std::process::Command::new("mkdosfs")
-                .args(&["-n", "config-2"])
-                .args(&["-C", cloudinit_file_path.as_str()])
-                .arg("8192")
-                .output()
-                .expect("Expect creating disk image to succeed");
-
-            std::process::Command::new("mcopy")
-                .arg("-o")
-                .args(&["-i", cloudinit_file_path.as_str()])
-                .args(&["-s", cloud_init_directory.to_str().unwrap(), "::"])
-                .output()
-                .expect("Expect copying files to disk image to succeed");
-
-            cloudinit_file_path
-        }
-
-        fn prepare_files(&mut self) {
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut fw_path = workload_path.clone();
-            fw_path.push("hypervisor-fw");
-
-            let mut osdisk_base_path = workload_path.clone();
-            osdisk_base_path.push("clear-29810-cloud.img");
-
-            let mut osdisk_raw_base_path = workload_path.clone();
-            osdisk_raw_base_path.push("clear-29810-cloud-raw.img");
-
-            let osdisk_path =
-                String::from(self.tmp_dir.path().join("osdisk.img").to_str().unwrap());
-            let osdisk_raw_path =
-                String::from(self.tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
-            let cloudinit_path = self.prepare_cloudinit();
-
-            fs::copy(osdisk_base_path, &osdisk_path)
-                .expect("copying of OS source disk image failed");
-            fs::copy(osdisk_raw_base_path, &osdisk_raw_path)
-                .expect("copying of OS source disk raw image failed");
-
-            let disks = vec![osdisk_path, cloudinit_path, osdisk_raw_path];
-
-            self.disks = disks;
-            self.fw_path = String::from(fw_path.to_str().unwrap());
+            Self::new_from_ip_range(disk_config, "192.168", id)
         }
 
         fn default_net_string(&self) -> String {
             format!(
                 "tap=,mac={},ip={},mask=255.255.255.0",
-                self.guest_mac, self.host_ip
+                self.network.guest_mac, self.network.host_ip
             )
         }
 
@@ -404,15 +436,15 @@ mod tests {
         }
 
         fn ssh_command(&self, command: &str) -> String {
-            self.ssh_command_ip(command, &self.guest_ip)
+            self.ssh_command_ip(command, &self.network.guest_ip)
         }
 
         fn ssh_command_l1(&self, command: &str) -> String {
-            self.ssh_command_ip(command, &self.guest_ip)
+            self.ssh_command_ip(command, &self.network.guest_ip)
         }
 
         fn ssh_command_l2(&self, command: &str) -> String {
-            self.ssh_command_ip(command, &self.l2_guest_ip)
+            self.ssh_command_ip(command, &self.network.l2_guest_ip)
         }
 
         fn get_cpu_count(&self) -> u32 {
@@ -492,7 +524,8 @@ mod tests {
     #[test]
     fn test_simple_launch() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
@@ -522,7 +555,8 @@ mod tests {
     #[test]
     fn test_multi_cpu() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "2"])
                 .args(&["--memory", "size=512M"])
@@ -547,7 +581,8 @@ mod tests {
     #[test]
     fn test_large_memory() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=5120M"])
@@ -572,7 +607,8 @@ mod tests {
     #[test]
     fn test_pci_msi() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
@@ -605,7 +641,8 @@ mod tests {
     #[test]
     fn test_vmlinux_boot() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -648,7 +685,8 @@ mod tests {
     #[test]
     fn test_bzimage_boot() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -691,7 +729,9 @@ mod tests {
     #[test]
     fn test_split_irqchip() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
+
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
@@ -733,7 +773,8 @@ mod tests {
     #[test]
     fn test_virtio_fs() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
             let (mut daemon_child, virtiofsd_socket_path) = prepare_virtiofsd(&guest.tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -789,7 +830,9 @@ mod tests {
     #[test]
     fn test_virtio_pmem() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
+
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -869,7 +912,8 @@ mod tests {
     #[test]
     fn test_boot_from_virtio_pmem() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -911,7 +955,8 @@ mod tests {
     #[test]
     fn test_multiple_network_interfaces() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
@@ -950,7 +995,8 @@ mod tests {
     #[test]
     fn test_serial_disable() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
@@ -996,7 +1042,8 @@ mod tests {
     #[test]
     fn test_serial_file() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
 
             let serial_path = guest.tmp_dir.path().join("/tmp/serial-output");
             let mut child = Command::new("target/debug/cloud-hypervisor")
@@ -1045,7 +1092,9 @@ mod tests {
     #[test]
     fn test_virtio_console() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
+
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
@@ -1085,7 +1134,8 @@ mod tests {
     #[test]
     fn test_console_file() {
         test_block!(tb, "", {
-            let guest = Guest::new();
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new(&clear);
 
             let console_path = guest.tmp_dir.path().join("/tmp/console-output");
             let mut child = Command::new("target/debug/cloud-hypervisor")
@@ -1137,7 +1187,8 @@ mod tests {
     // command line for that puspose).
     fn test_vfio() {
         test_block!(tb, "", {
-            let guest = Guest::new_from_ip_range("172.16", 0);
+            let clear = ClearDiskConfig::new();
+            let guest = Guest::new_from_ip_range(&clear, "172.16", 0);
 
             let home = dirs::home_dir().unwrap();
             let mut cloud_init_vfio_base_path = home.clone();
@@ -1171,7 +1222,7 @@ mod tests {
             );
             let netdev_ssh_device = format!(
                 "virtio-net-pci,netdev={},disable-legacy=on,iommu_platform=on,ats=on,mac={}",
-                ssh_net, guest.guest_mac
+                ssh_net, guest.network.guest_mac
             );
 
             let netdev_vfio = format!(
@@ -1180,7 +1231,7 @@ mod tests {
             );
             let netdev_vfio_device = format!(
                 "virtio-net-pci,netdev={},disable-legacy=on,iommu_platform=on,ats=on,mac={}",
-                vfio_net, guest.l2_guest_mac
+                vfio_net, guest.network.l2_guest_mac
             );
 
             let mut qemu_child = Command::new("qemu-system-x86_64")
