@@ -694,8 +694,6 @@ impl BusDevice for VfioPciDevice {
 
 // First BAR offset in the PCI config space.
 const PCI_CONFIG_BAR_OFFSET: u32 = 0x10;
-// First BAR register index
-const PCI_CONFIG_BAR0_INDEX: usize = 4;
 // Capability register offset in the PCI config space.
 const PCI_CONFIG_CAPABILITY_OFFSET: u32 = 0x34;
 // IO BAR when first BAR bit is 1.
@@ -708,6 +706,10 @@ const PCI_CONFIG_MEMORY_BAR_64BIT: u32 = 0x4;
 const PCI_CONFIG_REGISTER_SIZE: usize = 4;
 // Number of BARs for a PCI device
 const BAR_NUMS: usize = 6;
+// PCI Header Type register index
+const PCI_HEADER_TYPE_REG_INDEX: usize = 3;
+// First BAR register index
+const PCI_CONFIG_BAR0_INDEX: usize = 4;
 // PCI ROM expansion BAR register index
 const PCI_ROM_EXP_BAR_INDEX: usize = 12;
 // PCI interrupt pin and line register index
@@ -915,8 +917,14 @@ impl PciDevice for VfioPciDevice {
         // mask in case the register being read correspond to the interrupt
         // register, this code makes sure to always expose an Interrupt Pin
         // value of 0, which stands for no interrupt pin support.
+        //
+        // Since we don't support passing multi-functions devices, we should
+        // mask the multi-function bit, bit 7 of the Header Type byte on the
+        // register 3.
         let mask = if reg_idx == PCI_INTX_REG_INDEX {
             0xffff_00ff
+        } else if reg_idx == PCI_HEADER_TYPE_REG_INDEX {
+            0xff7f_ffff
         } else {
             0xffff_ffff
         };
