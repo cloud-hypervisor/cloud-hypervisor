@@ -22,21 +22,38 @@ if [ ! -f "$OVMF" ]; then
     popd
 fi
 
-OS_IMAGE_NAME="clear-29810-cloud.img"
-OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$OS_IMAGE_NAME.xz"
-OS_IMAGE="$WORKLOADS_DIR/$OS_IMAGE_NAME"
-if [ ! -f "$OS_IMAGE" ]; then
+CLEAR_OS_IMAGE_NAME="clear-29810-cloud.img"
+CLEAR_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$CLEAR_OS_IMAGE_NAME.xz"
+CLEAR_OS_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_IMAGE_NAME"
+if [ ! -f "$CLEAR_OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
-    wget --quiet $OS_IMAGE_URL
-    unxz $OS_IMAGE_NAME.xz
+    wget --quiet $CLEAR_OS_IMAGE_URL
+    unxz $CLEAR_OS_IMAGE_NAME.xz
     popd
 fi
 
-OS_RAW_IMAGE_NAME="clear-29810-cloud-raw.img"
-OS_RAW_IMAGE="$WORKLOADS_DIR/$OS_RAW_IMAGE_NAME"
-if [ ! -f "$OS_RAW_IMAGE" ]; then
+CLEAR_OS_RAW_IMAGE_NAME="clear-29810-cloud-raw.img"
+CLEAR_OS_RAW_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_RAW_IMAGE_NAME"
+if [ ! -f "$CLEAR_OS_RAW_IMAGE" ]; then
     pushd $WORKLOADS_DIR
-    qemu-img convert -p -f qcow2 -O raw $OS_IMAGE_NAME $OS_RAW_IMAGE_NAME
+    qemu-img convert -p -f qcow2 -O raw $CLEAR_OS_IMAGE_NAME $CLEAR_OS_RAW_IMAGE_NAME
+    popd
+fi
+
+BIONIC_OS_IMAGE_NAME="bionic-server-cloudimg-amd64.img"
+BIONIC_OS_IMAGE_URL="https://cloud-images.ubuntu.com/bionic/current/$BIONIC_OS_IMAGE_NAME"
+BIONIC_OS_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_IMAGE_NAME"
+if [ ! -f "$BIONIC_OS_IMAGE" ]; then
+    pushd $WORKLOADS_DIR
+    wget --quiet $BIONIC_OS_IMAGE_URL
+    popd
+fi
+
+BIONIC_OS_RAW_IMAGE_NAME="bionic-server-cloudimg-amd64-raw.img"
+BIONIC_OS_RAW_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_RAW_IMAGE_NAME"
+if [ ! -f "$BIONIC_OS_RAW_IMAGE" ]; then
+    pushd $WORKLOADS_DIR
+    qemu-img convert -p -f qcow2 -O raw $BIONIC_OS_IMAGE_NAME $BIONIC_OS_RAW_IMAGE_NAME
     popd
 fi
 
@@ -81,7 +98,7 @@ fi
 VFIO_DIR="$WORKLOADS_DIR/vfio"
 if [ ! -d "$VFIO_DIR" ]; then
     mkdir -p $VFIO_DIR
-    cp $OS_IMAGE $VFIO_DIR
+    cp $CLEAR_OS_IMAGE $VFIO_DIR
     cp $FW $VFIO_DIR
     cp $VMLINUX_IMAGE $VFIO_DIR
 fi
