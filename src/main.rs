@@ -237,6 +237,20 @@ mod tests {
         }
     }
 
+    struct BionicDiskConfig {
+        osdisk_raw_path: String,
+        cloudinit_path: String,
+    }
+
+    impl BionicDiskConfig {
+        fn new() -> Self {
+            BionicDiskConfig {
+                osdisk_raw_path: String::new(),
+                cloudinit_path: String::new(),
+            }
+        }
+    }
+
     impl DiskConfig for ClearDiskConfig {
         fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
             let cloudinit_file_path =
@@ -329,6 +343,93 @@ mod tests {
             match disk_type {
                 DiskType::OperatingSystem => Some(self.osdisk_path.clone()),
                 DiskType::RawOperatingSystem => Some(self.osdisk_raw_path.clone()),
+                DiskType::CloudInit => Some(self.cloudinit_path.clone()),
+            }
+        }
+    }
+
+    impl DiskConfig for BionicDiskConfig {
+        fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
+            let cloudinit_file_path =
+                String::from(tmp_dir.path().join("cloudinit").to_str().unwrap());
+
+            let cloud_init_directory = tmp_dir.path().join("cloud-init").join("ubuntu");
+
+            fs::create_dir_all(&cloud_init_directory)
+                .expect("Expect creating cloud-init directory to succeed");
+
+            let source_file_dir = std::env::current_dir()
+                .unwrap()
+                .join("test_data")
+                .join("cloud-init")
+                .join("ubuntu");
+
+            vec!["meta-data", "user-data"].iter().for_each(|x| {
+                fs::copy(source_file_dir.join(x), cloud_init_directory.join(x))
+                    .expect("Expect copying cloud-init meta-data to succeed");
+            });
+
+            let mut network_config_string = String::new();
+
+            fs::File::open(source_file_dir.join("network-config"))
+                .unwrap()
+                .read_to_string(&mut network_config_string)
+                .expect("Expected reading network-config file in to succeed");
+
+            network_config_string = network_config_string.replace("192.168.2.1", &network.host_ip);
+            network_config_string = network_config_string.replace("192.168.2.2", &network.guest_ip);
+            network_config_string =
+                network_config_string.replace("12:34:56:78:90:ab", &network.guest_mac);
+
+            fs::File::create(cloud_init_directory.join("network-config"))
+                .unwrap()
+                .write_all(&network_config_string.as_bytes())
+                .expect("Expected writing out network-config to succeed");
+
+            std::process::Command::new("mkdosfs")
+                .args(&["-n", "cidata"])
+                .args(&["-C", cloudinit_file_path.as_str()])
+                .arg("8192")
+                .output()
+                .expect("Expect creating disk image to succeed");
+
+            vec!["user-data", "meta-data", "network-config"]
+                .iter()
+                .for_each(|x| {
+                    std::process::Command::new("mcopy")
+                        .arg("-o")
+                        .args(&["-i", cloudinit_file_path.as_str()])
+                        .args(&["-s", cloud_init_directory.join(x).to_str().unwrap(), "::"])
+                        .output()
+                        .expect("Expect copying files to disk image to succeed");
+                });
+
+            cloudinit_file_path
+        }
+
+        fn prepare_files(&mut self, tmp_dir: &TempDir, network: &GuestNetworkConfig) {
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut osdisk_raw_base_path = workload_path.clone();
+            osdisk_raw_base_path.push("bionic-server-cloudimg-amd64-raw.img");
+
+            let osdisk_raw_path =
+                String::from(tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
+            let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
+
+            fs::copy(osdisk_raw_base_path, &osdisk_raw_path)
+                .expect("copying of OS source disk raw image failed");
+
+            self.cloudinit_path = cloudinit_path;
+            self.osdisk_raw_path = osdisk_raw_path;
+        }
+
+        fn disk(&self, disk_type: DiskType) -> Option<String> {
+            match disk_type {
+                DiskType::OperatingSystem | DiskType::RawOperatingSystem => {
+                    Some(self.osdisk_raw_path.clone())
+                }
                 DiskType::CloudInit => Some(self.cloudinit_path.clone()),
             }
         }
@@ -540,41 +641,51 @@ mod tests {
     fn test_simple_launch() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut bionic = BionicDiskConfig::new();
 
-            let mut child = Command::new("target/debug/cloud-hypervisor")
-                .args(&["--cpus", "1"])
-                .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&[
-                    "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
-                ])
-                .args(&["--net", guest.default_net_string().as_str()])
-                .spawn()
-                .unwrap();
+            vec![
+                &mut clear as &mut DiskConfig,
+                &mut bionic as &mut DiskConfig,
+            ]
+            .iter_mut()
+            .for_each(|disk_config| {
+                let guest = Guest::new(*disk_config);
 
-            thread::sleep(std::time::Duration::new(20, 0));
+                let mut child = Command::new("target/debug/cloud-hypervisor")
+                    .args(&["--cpus", "1"])
+                    .args(&["--memory", "size=512M"])
+                    .args(&["--kernel", guest.fw_path.as_str()])
+                    .args(&[
+                        "--disk",
+                        guest
+                            .disk_config
+                            .disk(DiskType::OperatingSystem)
+                            .unwrap()
+                            .as_str(),
+                        guest
+                            .disk_config
+                            .disk(DiskType::CloudInit)
+                            .unwrap()
+                            .as_str(),
+                    ])
+                    .args(&["--net", guest.default_net_string().as_str()])
+                    .args(&["--serial", "tty", "--console", "off"])
+                    .spawn()
+                    .unwrap();
 
-            aver_eq!(tb, guest.get_cpu_count(), 1);
-            aver_eq!(tb, guest.get_initial_apicid(), 0);
-            aver!(tb, guest.get_total_memory() > 496_000);
-            aver!(tb, guest.get_entropy() >= 900);
-            aver_eq!(tb, guest.get_pci_bridge_class(), "0x060000");
+                thread::sleep(std::time::Duration::new(20, 0));
 
-            guest.ssh_command("sudo reboot");
-            thread::sleep(std::time::Duration::new(10, 0));
-            let _ = child.kill();
-            let _ = child.wait();
+                aver_eq!(tb, guest.get_cpu_count(), 1);
+                aver_eq!(tb, guest.get_initial_apicid(), 0);
+                aver!(tb, guest.get_total_memory() > 490_000);
+                aver!(tb, guest.get_entropy() >= 900);
+                aver_eq!(tb, guest.get_pci_bridge_class(), "0x060000");
+
+                guest.ssh_command("sudo reboot");
+                thread::sleep(std::time::Duration::new(10, 0));
+                let _ = child.kill();
+                let _ = child.wait();
+            });
             Ok(())
         });
     }
