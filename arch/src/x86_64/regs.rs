@@ -18,6 +18,10 @@ const PML4_START: GuestAddress = GuestAddress(0x9000);
 const PDPTE_START: GuestAddress = GuestAddress(0xa000);
 const PDE_START: GuestAddress = GuestAddress(0xb000);
 
+// MTRR constants
+const MTRR_ENABLE: u64 = 0x800; // IA32_MTRR_DEF_TYPE MSR: E (MTRRs enabled) flag, bit 11
+const MTRR_MEM_TYPE_WB: u64 = 0x6;
+
 #[derive(Debug)]
 pub enum Error {
     /// Failed to get SREGs for this CPU.
@@ -267,6 +271,11 @@ fn create_msr_entries() -> Vec<kvm_msr_entry> {
     entries.push(kvm_msr_entry {
         index: msr_index::MSR_IA32_MISC_ENABLE,
         data: msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64,
+        ..Default::default()
+    });
+    entries.push(kvm_msr_entry {
+        index: msr_index::MSR_MTRRdefType,
+        data: MTRR_ENABLE | MTRR_MEM_TYPE_WB,
         ..Default::default()
     });
 
