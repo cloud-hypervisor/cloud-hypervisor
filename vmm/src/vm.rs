@@ -527,7 +527,7 @@ impl DeviceManager {
         vm_cfg: &VmConfig,
         msi_capable: bool,
         userspace_ioapic: bool,
-        mem_slots: u32,
+        mut mem_slots: u32,
     ) -> DeviceManagerResult<Self> {
         let mut io_bus = devices::Bus::new();
         let mut mmio_bus = devices::Bus::new();
@@ -621,6 +621,7 @@ impl DeviceManager {
             &mut pci,
             &mut buses,
             &interrupt_info,
+            &mut mem_slots,
         )?;
 
         DeviceManager::add_vfio_devices(
@@ -655,6 +656,7 @@ impl DeviceManager {
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
+        mut mem_slots: &mut u32,
     ) -> DeviceManagerResult<()> {
         // Add virtio-blk if required
         DeviceManager::add_virtio_block_devices(
@@ -709,6 +711,7 @@ impl DeviceManager {
             pci,
             buses,
             &interrupt_info,
+            &mut mem_slots,
         )?;
 
         Ok(())
@@ -879,6 +882,7 @@ impl DeviceManager {
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
+        mem_slots: &mut u32,
     ) -> DeviceManagerResult<()> {
         // Add virtio-pmem if required
         if let Some(pmem_list_cfg) = &vm_cfg.pmem {
@@ -921,7 +925,7 @@ impl DeviceManager {
                 };
 
                 let mem_region = kvm_userspace_memory_region {
-                    slot: memory.num_regions() as u32,
+                    slot: *mem_slots as u32,
                     guest_phys_addr: pmem_guest_addr.raw_value(),
                     memory_size: size,
                     userspace_addr: addr as u64,
@@ -929,6 +933,9 @@ impl DeviceManager {
                 };
                 // Safe because the guest regions are guaranteed not to overlap.
                 let _ = unsafe { vm_fd.set_user_memory_region(mem_region) };
+
+                // Increment the KVM slot number
+                *mem_slots += 1;
 
                 let virtio_pmem_device =
                     vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize)
