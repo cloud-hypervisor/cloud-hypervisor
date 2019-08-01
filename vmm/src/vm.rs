@@ -448,6 +448,12 @@ impl Vcpu {
     }
 }
 
+struct VmInfo<'a> {
+    memory: GuestMemoryMmap,
+    vm_fd: &'a Arc<VmFd>,
+    vm_cfg: &'a VmConfig<'a>,
+}
+
 struct BusInfo<'a> {
     io: &'a mut devices::Bus,
     mmio: &'a mut devices::Bus,
@@ -521,10 +527,8 @@ struct DeviceManager {
 
 impl DeviceManager {
     fn new(
-        memory: GuestMemoryMmap,
+        vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        vm_fd: &Arc<VmFd>,
-        vm_cfg: &VmConfig,
         msi_capable: bool,
         userspace_ioapic: bool,
         mut mem_slots: u32,
@@ -539,7 +543,9 @@ impl DeviceManager {
 
         let ioapic = if userspace_ioapic {
             // Create IOAPIC
-            Some(Arc::new(Mutex::new(ioapic::Ioapic::new(vm_fd.clone()))))
+            Some(Arc::new(Mutex::new(ioapic::Ioapic::new(
+                vm_info.vm_fd.clone(),
+            ))))
         } else {
             None
         };
@@ -549,9 +555,9 @@ impl DeviceManager {
             ioapic: &ioapic,
         };
 
-        let serial_writer: Option<Box<io::Write + Send>> = match vm_cfg.serial.mode {
+        let serial_writer: Option<Box<io::Write + Send>> = match vm_info.vm_cfg.serial.mode {
             ConsoleOutputMode::File => Some(Box::new(
-                File::create(vm_cfg.serial.file.unwrap())
+                File::create(vm_info.vm_cfg.serial.file.unwrap())
                     .map_err(DeviceManagerError::SerialOutputFileOpen)?,
             )),
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
@@ -564,7 +570,8 @@ impl DeviceManager {
                 Box::new(UserIoapicIrq::new(ioapic.clone(), serial_irq))
             } else {
                 let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-                vm_fd
+                vm_info
+                    .vm_fd
                     .register_irqfd(serial_evt.as_raw_fd(), serial_irq as u32)
                     .map_err(DeviceManagerError::Irq)?;
 
@@ -588,9 +595,9 @@ impl DeviceManager {
         let pci_root = PciRoot::new(None);
         let mut pci = PciConfigIo::new(pci_root);
 
-        let console_writer: Option<Box<io::Write + Send>> = match vm_cfg.console.mode {
+        let console_writer: Option<Box<io::Write + Send>> = match vm_info.vm_cfg.console.mode {
             ConsoleOutputMode::File => Some(Box::new(
-                File::create(vm_cfg.console.file.unwrap())
+                File::create(vm_info.vm_cfg.console.file.unwrap())
                     .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
             )),
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
@@ -601,9 +608,9 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::CreateVirtioConsole)?;
             DeviceManager::add_virtio_pci_device(
                 Box::new(virtio_console_device),
-                memory.clone(),
+                vm_info.memory.clone(),
                 allocator,
-                vm_fd,
+                vm_info.vm_fd,
                 &mut pci,
                 &mut buses,
                 &interrupt_info,
@@ -614,25 +621,15 @@ impl DeviceManager {
         };
 
         DeviceManager::add_virtio_devices(
-            memory.clone(),
+            vm_info,
             allocator,
-            vm_fd,
-            &vm_cfg,
             &mut pci,
             &mut buses,
             &interrupt_info,
             &mut mem_slots,
         )?;
 
-        DeviceManager::add_vfio_devices(
-            memory.clone(),
-            allocator,
-            vm_fd,
-            &vm_cfg,
-            &mut pci,
-            &mut buses,
-            mem_slots,
-        )?;
+        DeviceManager::add_vfio_devices(vm_info, allocator, &mut pci, &mut buses, mem_slots)?;
 
         let pci = Arc::new(Mutex::new(pci));
 
@@ -649,65 +646,29 @@ impl DeviceManager {
     }
 
     fn add_virtio_devices(
-        memory: GuestMemoryMmap,
+        vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        vm_fd: &Arc<VmFd>,
-        vm_cfg: &VmConfig,
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
         mut mem_slots: &mut u32,
     ) -> DeviceManagerResult<()> {
         // Add virtio-blk if required
-        DeviceManager::add_virtio_block_devices(
-            memory.clone(),
-            allocator,
-            vm_fd,
-            &vm_cfg,
-            pci,
-            buses,
-            &interrupt_info,
-        )?;
+        DeviceManager::add_virtio_block_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
 
         // Add virtio-net if required
-        DeviceManager::add_virtio_net_devices(
-            memory.clone(),
-            allocator,
-            vm_fd,
-            &vm_cfg,
-            pci,
-            buses,
-            &interrupt_info,
-        )?;
+        DeviceManager::add_virtio_net_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
 
         // Add virtio-rng if required
-        DeviceManager::add_virtio_rng_devices(
-            memory.clone(),
-            allocator,
-            vm_fd,
-            &vm_cfg,
-            pci,
-            buses,
-            &interrupt_info,
-        )?;
+        DeviceManager::add_virtio_rng_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
 
         // Add virtio-fs if required
-        DeviceManager::add_virtio_fs_devices(
-            memory.clone(),
-            allocator,
-            vm_fd,
-            &vm_cfg,
-            pci,
-            buses,
-            &interrupt_info,
-        )?;
+        DeviceManager::add_virtio_fs_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
 
         // Add virtio-pmem if required
         DeviceManager::add_virtio_pmem_devices(
-            memory.clone(),
+            vm_info,
             allocator,
-            vm_fd,
-            &vm_cfg,
             pci,
             buses,
             &interrupt_info,
@@ -718,15 +679,13 @@ impl DeviceManager {
     }
 
     fn add_virtio_block_devices(
-        memory: GuestMemoryMmap,
+        vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        vm_fd: &Arc<VmFd>,
-        vm_cfg: &VmConfig,
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
-        if let Some(disk_list_cfg) = &vm_cfg.disks {
+        if let Some(disk_list_cfg) = &vm_info.vm_cfg.disks {
             for disk_cfg in disk_list_cfg.iter() {
                 // Open block device path
                 let raw_img: File = OpenOptions::new()
@@ -757,9 +716,9 @@ impl DeviceManager {
 
                 DeviceManager::add_virtio_pci_device(
                     block,
-                    memory.clone(),
+                    vm_info.memory.clone(),
                     allocator,
-                    vm_fd,
+                    vm_info.vm_fd,
                     pci,
                     buses,
                     &interrupt_info,
@@ -771,16 +730,14 @@ impl DeviceManager {
     }
 
     fn add_virtio_net_devices(
-        memory: GuestMemoryMmap,
+        vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        vm_fd: &Arc<VmFd>,
-        vm_cfg: &VmConfig,
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
         // Add virtio-net if required
-        if let Some(net_list_cfg) = &vm_cfg.net {
+        if let Some(net_list_cfg) = &vm_info.vm_cfg.net {
             for net_cfg in net_list_cfg.iter() {
                 let mut virtio_net_device: vm_virtio::Net;
 
@@ -796,9 +753,9 @@ impl DeviceManager {
 
                 DeviceManager::add_virtio_pci_device(
                     Box::new(virtio_net_device),
-                    memory.clone(),
+                    vm_info.memory.clone(),
                     allocator,
-                    vm_fd,
+                    vm_info.vm_fd,
                     pci,
                     buses,
                     &interrupt_info,
@@ -810,24 +767,22 @@ impl DeviceManager {
     }
 
     fn add_virtio_rng_devices(
-        memory: GuestMemoryMmap,
+        vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        vm_fd: &Arc<VmFd>,
-        vm_cfg: &VmConfig,
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
         // Add virtio-rng if required
-        if let Some(rng_path) = vm_cfg.rng.src.to_str() {
+        if let Some(rng_path) = vm_info.vm_cfg.rng.src.to_str() {
             let virtio_rng_device =
                 vm_virtio::Rng::new(rng_path).map_err(DeviceManagerError::CreateVirtioRng)?;
 
             DeviceManager::add_virtio_pci_device(
                 Box::new(virtio_rng_device),
-                memory.clone(),
+                vm_info.memory.clone(),
                 allocator,
-                vm_fd,
+                vm_info.vm_fd,
                 pci,
                 buses,
                 &interrupt_info,
@@ -838,16 +793,14 @@ impl DeviceManager {
     }
 
     fn add_virtio_fs_devices(
-        memory: GuestMemoryMmap,
+        vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        vm_fd: &Arc<VmFd>,
-        vm_cfg: &VmConfig,
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
         // Add virtio-fs if required
-        if let Some(fs_list_cfg) = &vm_cfg.fs {
+        if let Some(fs_list_cfg) = &vm_info.vm_cfg.fs {
             for fs_cfg in fs_list_cfg.iter() {
                 if let Some(fs_sock) = fs_cfg.sock.to_str() {
                     let virtio_fs_device = vm_virtio::Fs::new(
@@ -860,9 +813,9 @@ impl DeviceManager {
 
                     DeviceManager::add_virtio_pci_device(
                         Box::new(virtio_fs_device),
-                        memory.clone(),
+                        vm_info.memory.clone(),
                         allocator,
-                        vm_fd,
+                        vm_info.vm_fd,
                         pci,
                         buses,
                         &interrupt_info,
@@ -875,17 +828,15 @@ impl DeviceManager {
     }
 
     fn add_virtio_pmem_devices(
-        memory: GuestMemoryMmap,
+        vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        vm_fd: &Arc<VmFd>,
-        vm_cfg: &VmConfig,
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
         mem_slots: &mut u32,
     ) -> DeviceManagerResult<()> {
         // Add virtio-pmem if required
-        if let Some(pmem_list_cfg) = &vm_cfg.pmem {
+        if let Some(pmem_list_cfg) = &vm_info.vm_cfg.pmem {
             for pmem_cfg in pmem_list_cfg.iter() {
                 let size = pmem_cfg.size;
 
@@ -932,7 +883,7 @@ impl DeviceManager {
                     flags: 0,
                 };
                 // Safe because the guest regions are guaranteed not to overlap.
-                let _ = unsafe { vm_fd.set_user_memory_region(mem_region) };
+                let _ = unsafe { vm_info.vm_fd.set_user_memory_region(mem_region) };
 
                 // Increment the KVM slot number
                 *mem_slots += 1;
@@ -943,9 +894,9 @@ impl DeviceManager {
 
                 DeviceManager::add_virtio_pci_device(
                     Box::new(virtio_pmem_device),
-                    memory.clone(),
+                    vm_info.memory.clone(),
                     allocator,
-                    vm_fd,
+                    vm_info.vm_fd,
                     pci,
                     buses,
                     &interrupt_info,
@@ -968,26 +919,24 @@ impl DeviceManager {
     }
 
     fn add_vfio_devices(
-        memory: GuestMemoryMmap,
+        vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        vm_fd: &Arc<VmFd>,
-        vm_cfg: &VmConfig,
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
         mem_slots: u32,
     ) -> DeviceManagerResult<()> {
         let mut mem_slot = mem_slots;
-        if let Some(device_list_cfg) = &vm_cfg.devices {
+        if let Some(device_list_cfg) = &vm_info.vm_cfg.devices {
             // Create the KVM VFIO device
-            let device_fd = DeviceManager::create_kvm_device(vm_fd)?;
+            let device_fd = DeviceManager::create_kvm_device(vm_info.vm_fd)?;
             let device_fd = Arc::new(device_fd);
 
             for device_cfg in device_list_cfg.iter() {
                 let vfio_device =
-                    VfioDevice::new(device_cfg.path, device_fd.clone(), memory.clone())
+                    VfioDevice::new(device_cfg.path, device_fd.clone(), vm_info.memory.clone())
                         .map_err(DeviceManagerError::VfioCreate)?;
 
-                let mut vfio_pci_device = VfioPciDevice::new(vm_fd, allocator, vfio_device)
+                let mut vfio_pci_device = VfioPciDevice::new(vm_info.vm_fd, allocator, vfio_device)
                     .map_err(DeviceManagerError::VfioPciCreate)?;
 
                 let bars = vfio_pci_device
@@ -995,7 +944,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::AllocateBars)?;
 
                 mem_slot = vfio_pci_device
-                    .map_mmio_regions(vm_fd, mem_slot)
+                    .map_mmio_regions(vm_info.vm_fd, mem_slot)
                     .map_err(DeviceManagerError::VfioMapRegion)?;
 
                 let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
@@ -1382,11 +1331,15 @@ impl<'a> Vm<'a> {
                 .ok_or(Error::MemoryRangeAllocation)?;
         }
 
+        let vm_info = VmInfo {
+            memory: guest_memory.clone(),
+            vm_fd: &fd,
+            vm_cfg: &config,
+        };
+
         let device_manager = DeviceManager::new(
-            guest_memory.clone(),
+            &vm_info,
             &mut allocator,
-            &fd,
-            &config,
             msi_capable,
             userspace_ioapic,
             ram_regions.len() as u32,
