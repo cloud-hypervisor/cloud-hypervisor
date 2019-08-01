@@ -170,8 +170,22 @@ impl ConsoleEpollHandler {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
         'epoll: loop {
-            let num_events =
-                epoll::wait(epoll_fd, -1, &mut events[..]).map_err(DeviceError::EpollWait)?;
+            let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
+                Ok(res) => res,
+                Err(e) => {
+                    if e.kind() == io::ErrorKind::Interrupted {
+                        // It's well defined from the epoll_wait() syscall
+                        // documentation that the epoll loop can be interrupted
+                        // before any of the requested events occurred or the
+                        // timeout expired. In both those cases, epoll_wait()
+                        // returns an error of type EINTR, but this should not
+                        // be considered as a regular error. Instead it is more
+                        // appropriate to retry, by calling into epoll_wait().
+                        continue;
+                    }
+                    return Err(DeviceError::EpollWait(e));
+                }
+            };
 
             for event in events.iter().take(num_events) {
                 let ev_type = event.data as u16;
