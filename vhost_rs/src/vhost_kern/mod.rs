@@ -15,8 +15,8 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::null;
 
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestUsize};
+use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::ioctl::{ioctl, ioctl_with_mut_ref, ioctl_with_ptr, ioctl_with_ref};
-use vmm_sys_util::EventFd;
 
 use super::{
     Error, Result, VhostBackend, VhostUserMemoryRegionInfo, VringConfigData,

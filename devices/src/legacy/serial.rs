@@ -8,7 +8,7 @@
 use crate::{BusDevice, Interrupt};
 use std::collections::VecDeque;
 use std::{io, result};
-use vmm_sys_util::Result;
+use vmm_sys_util::errno::Result;
 
 const LOOP_SIZE: usize = 0x40;
 
@@ -233,7 +233,7 @@ mod tests {
     use super::*;
     use std::io;
     use std::sync::{Arc, Mutex};
-    use vmm_sys_util::EventFd;
+    use vmm_sys_util::eventfd::EventFd;
 
     struct TestInterrupt {
         event_fd: EventFd,

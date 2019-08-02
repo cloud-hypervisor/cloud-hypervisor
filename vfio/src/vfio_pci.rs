@@ -27,7 +27,7 @@ use std::{fmt, io};
 use vfio_bindings::bindings::vfio::*;
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, GuestAddress, GuestUsize};
-use vmm_sys_util::EventFd;
+use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]
 pub enum VfioPciError {

@@ -8,7 +8,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 
-use vmm_sys_util::EventFd;
+use vmm_sys_util::eventfd::EventFd;
 
 use super::connection::Endpoint;
 use super::message::*;

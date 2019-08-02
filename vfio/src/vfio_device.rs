@@ -19,8 +19,8 @@ use std::u32;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::*;
 use vm_memory::{Address, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
+use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::ioctl::*;
-use vmm_sys_util::EventFd;
 
 #[derive(Debug)]
 pub enum VfioError {

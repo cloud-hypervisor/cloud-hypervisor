@@ -11,7 +11,7 @@ use std::fmt::{self, Display};
 use std::sync::Arc;
 use vm_allocator::SystemAllocator;
 use vm_memory::{GuestAddress, GuestUsize};
-use vmm_sys_util::EventFd;
+use vmm_sys_util::eventfd::EventFd;
 
 pub struct InterruptParameters<'a> {
     pub msix: Option<&'a MsixTableEntry>,

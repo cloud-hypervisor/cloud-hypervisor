@@ -257,7 +257,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
     use vm_memory::GuestMemoryMmap;
-    use vmm_sys_util::EventFd;
+    use vmm_sys_util::eventfd::EventFd;
 
     struct DummyDevice(u32);
     const QUEUE_SIZE: u16 = 256;

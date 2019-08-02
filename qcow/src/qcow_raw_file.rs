@@ -7,7 +7,7 @@ use std::io::{self, BufWriter, Seek, SeekFrom};
 use std::mem::size_of;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use vmm_sys_util::WriteZeroes;
+use vmm_sys_util::write_zeroes::WriteZeroes;
 
 /// A qcow file. Allows reading/writing clusters and appending clusters.
 #[derive(Debug)]

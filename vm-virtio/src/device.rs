@@ -10,7 +10,7 @@ use super::*;
 use pci::{PciBarConfiguration, PciCapability};
 use std::sync::Arc;
 use vm_memory::GuestMemoryMmap;
-use vmm_sys_util::EventFd;
+use vmm_sys_util::eventfd::EventFd;
 
 pub enum VirtioInterruptType {
     Config,

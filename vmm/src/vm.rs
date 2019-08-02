@@ -54,9 +54,9 @@ use vm_memory::{
     GuestMemoryRegion, GuestUsize,
 };
 use vm_virtio::transport::VirtioPciDevice;
+use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::register_signal_handler;
 use vmm_sys_util::terminal::Terminal;
-use vmm_sys_util::EventFd;
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
 const X86_64_IRQ_BASE: u32 = 5;
@@ -142,16 +142,16 @@ pub enum Error {
     EpollError(io::Error),
 
     /// Write to the serial console failed.
-    Serial(vmm_sys_util::Error),
+    Serial(vmm_sys_util::errno::Error),
 
     /// Write to the virtio console failed.
-    Console(vmm_sys_util::Error),
+    Console(vmm_sys_util::errno::Error),
 
     /// Cannot setup terminal in raw mode.
-    SetTerminalRaw(vmm_sys_util::Error),
+    SetTerminalRaw(vmm_sys_util::errno::Error),
 
     /// Cannot setup terminal in canonical mode.
-    SetTerminalCanon(vmm_sys_util::Error),
+    SetTerminalCanon(vmm_sys_util::errno::Error),
 
     /// Cannot create the system allocator
     CreateSystemAllocator,
@@ -228,7 +228,7 @@ pub enum DeviceManagerError {
     RegisterIoevent(io::Error),
 
     /// Cannot create virtio device
-    VirtioDevice(vmm_sys_util::Error),
+    VirtioDevice(vmm_sys_util::errno::Error),
 
     /// Cannot add PCI device
     AddPciDevice(pci::PciRootError),

@@ -20,7 +20,7 @@ use super::{
 };
 use crate::VirtioInterrupt;
 use vm_memory::{Bytes, GuestMemoryMmap};
-use vmm_sys_util::EventFd;
+use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
 const NUM_QUEUES: usize = 2;

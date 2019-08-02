@@ -116,10 +116,10 @@ impl Error {
     }
 }
 
-impl std::convert::From<vmm_sys_util::Error> for Error {
+impl std::convert::From<vmm_sys_util::errno::Error> for Error {
     /// Convert raw socket errors into meaningful vhost-user errors.
     ///
-    /// The vmm_sys_util::Error is a simple wrapper over the raw errno, which doesn't means much
+    /// The vmm_sys_util::errno::Error is a simple wrapper over the raw errno, which doesn't means much
     /// to the vhost-user connection manager. So convert it into meaningful errors to simplify
     /// the connection manager logic.
     ///
@@ -128,7 +128,7 @@ impl std::convert::From<vmm_sys_util::Error> for Error {
     /// * - Error::SocketBroken: the underline socket is broken.
     /// * - Error::SocketError: other socket related errors.
     #[allow(unreachable_patterns)] // EWOULDBLOCK equals to EGAIN on linux
-    fn from(err: vmm_sys_util::Error) -> Self {
+    fn from(err: vmm_sys_util::errno::Error) -> Self {
         match err.errno() {
             // The socket is marked nonblocking and the requested operation would block.
             libc::EAGAIN => Error::SocketRetry(IOError::from_raw_os_error(libc::EAGAIN)),
