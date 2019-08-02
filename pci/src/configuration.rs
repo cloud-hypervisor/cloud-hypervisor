@@ -710,8 +710,6 @@ mod tests {
     #[derive(Clone, Copy, Default)]
     #[allow(dead_code)]
     struct TestCap {
-        _vndr: u8,
-        _next: u8,
         len: u8,
         foo: u8,
     }
@@ -730,7 +728,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn add_capability() {
         let mut cfg = PciConfiguration::new(
             0x1234,
@@ -745,18 +742,11 @@ mod tests {
         );
 
         // Add two capabilities with different contents.
-        let cap1 = TestCap {
-            _vndr: 0,
-            _next: 0,
-            len: 4,
-            foo: 0xAA,
-        };
+        let cap1 = TestCap { len: 4, foo: 0xAA };
         let cap1_offset = cfg.add_capability(&cap1).unwrap();
         assert_eq!(cap1_offset % 4, 0);
 
         let cap2 = TestCap {
-            _vndr: 0,
-            _next: 0,
             len: 0x04,
             foo: 0x55,
         };
