@@ -359,11 +359,11 @@ impl MsixCap {
     }
 
     pub fn table_offset(&self) -> u32 {
-        self.table >> 3
+        self.table & 0xffff_fff8
     }
 
     pub fn pba_offset(&self) -> u32 {
-        self.pba >> 3
+        self.pba & 0xffff_fff8
     }
 
     pub fn table_bir(&self) -> u32 {
