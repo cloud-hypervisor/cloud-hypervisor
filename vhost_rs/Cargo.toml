@@ -13,8 +13,8 @@ vhost-user-master = []
 vhost-user-slave = []
 
 [dependencies]
-bitflags = ">=1.0.1"
-libc = ">=0.2.39"
+bitflags = "1.1.0"
+libc = "0.2.60"
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 
 [dependencies.vm-memory]
@@ -22,4 +22,4 @@ git = "https://github.com/rust-vmm/vm-memory"
 optional = true
 
 [dev-dependencies]
-tempfile = "3.0.5"
+tempfile = "3.1.0"
