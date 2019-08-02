@@ -10,7 +10,7 @@ vmm = { path = "vmm" }
 
 [dev-dependencies]
 ssh2 = "=0.3.3"
-dirs = "2.0.0"
+dirs = "2.0.2"
 credibility = "0.1.3"
 tempdir="0.3.7"
 lazy_static=">=1.1.0"
