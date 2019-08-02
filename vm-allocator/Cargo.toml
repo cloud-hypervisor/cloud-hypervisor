@@ -5,5 +5,5 @@ authors = ["The Chromium OS Authors"]
 edition = "2018"
 
 [dependencies]
-libc = "*"
+libc = "0.2.60"
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }

@@ -4,10 +4,10 @@ version = "0.1.0"
 authors = ["The Chromium OS Authors"]
 
 [dependencies]
-byteorder = "=1.2.1"
-kvm-bindings = "0.1"
+byteorder = "1.3.2"
+kvm-bindings = "0.1.1"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
-libc = ">=0.2.39"
+libc = "0.2.60"
 
 arch_gen = { path = "../arch_gen" }
 
@@ -20,4 +20,4 @@ git = "https://github.com/rust-vmm/linux-loader"
 features = ["elf", "bzimage"]
 
 [dev-dependencies]
-rand = ">=0.5.5"
+rand = "0.7.0"

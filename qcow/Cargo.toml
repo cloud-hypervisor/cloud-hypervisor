@@ -9,11 +9,11 @@ license = "BSD-3-Clause"
 path = "src/qcow.rs"
 
 [dependencies]
-byteorder = "*"
-libc = "*"
-log = "*"
-remain = "*"
+byteorder = "1.3.2"
+libc = "0.2.60"
+log = "0.4.8"
+remain = "0.1.3"
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 
 [dev-dependencies]
-tempfile = "*"
+tempfile = "3.1.0"

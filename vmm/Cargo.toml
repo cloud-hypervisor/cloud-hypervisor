@@ -7,11 +7,11 @@ edition = "2018"
 [dependencies]
 arch = { path = "../arch" }
 devices = { path = "../devices" }
-epoll = "=4.0.1"
-kvm-bindings = "0.1"
+epoll = "4.1.0"
+kvm-bindings = "0.1.1"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
-libc = ">=0.2.39"
-log = "*"
+libc = "0.2.60"
+log = "0.4.8"
 net_util = { path = "../net_util" }
 pci = {path = "../pci"}
 qcow = { path = "../qcow" }
