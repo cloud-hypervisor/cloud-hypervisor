@@ -11,7 +11,7 @@
 
 use super::Result;
 use std::os::unix::io::RawFd;
-use vmm_sys_util::EventFd;
+use vmm_sys_util::eventfd::EventFd;
 
 /// Maximum number of memory regions supported.
 pub const VHOST_MAX_MEMORY_REGIONS: usize = 255;

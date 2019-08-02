@@ -28,7 +28,7 @@ use super::{
 use crate::VirtioInterrupt;
 use virtio_bindings::virtio_blk::*;
 use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
-use vmm_sys_util::EventFd;
+use vmm_sys_util::eventfd::EventFd;
 
 const CONFIG_SPACE_SIZE: usize = 8;
 const SECTOR_SHIFT: u8 = 9;

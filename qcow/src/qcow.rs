@@ -12,7 +12,10 @@ mod vec_cache;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use libc::{EINVAL, ENOSPC, ENOTSUP};
 use remain::sorted;
-use vmm_sys_util::{FileSetLen, FileSync, PunchHole, SeekHole, WriteZeroes};
+use vmm_sys_util::{
+    file_traits::FileSetLen, file_traits::FileSync, seek_hole::SeekHole, write_zeroes::PunchHole,
+    write_zeroes::WriteZeroes,
+};
 
 use std::cmp::{max, min};
 use std::fmt::{self, Display};

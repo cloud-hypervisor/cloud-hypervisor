@@ -30,7 +30,7 @@ use crate::VirtioInterrupt;
 use net_util::{MacAddr, Tap, TapError, MAC_ADDR_LEN};
 use virtio_bindings::virtio_net::*;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
-use vmm_sys_util::EventFd;
+use vmm_sys_util::eventfd::EventFd;
 
 /// The maximum buffer size when segmentation offload is enabled. This
 /// includes the 12-byte virtio net header.

@@ -27,7 +27,7 @@ use crate::{VirtioInterrupt, VirtioInterruptType};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap, GuestUsize,
 };
-use vmm_sys_util::EventFd;
+use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
 const NUM_QUEUES: usize = 1;

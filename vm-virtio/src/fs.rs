@@ -17,7 +17,7 @@ use vhost_rs::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFe
 use vhost_rs::vhost_user::{Master, VhostUserMaster};
 use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
-use vmm_sys_util::EventFd;
+use vmm_sys_util::eventfd::EventFd;
 
 const CONFIG_SPACE_TAG_SIZE: usize = 36;
 const CONFIG_SPACE_NUM_QUEUES_SIZE: usize = 4;

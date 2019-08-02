@@ -26,7 +26,7 @@ use pci::{
 };
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
-use vmm_sys_util::{EventFd, Result};
+use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 use super::VirtioPciCommonConfig;
 use crate::{

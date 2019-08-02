@@ -16,7 +16,7 @@ use std::ptr::{copy_nonoverlapping, null_mut, write_unaligned};
 use libc::{
     c_long, c_void, cmsghdr, iovec, msghdr, recvmsg, sendmsg, MSG_NOSIGNAL, SCM_RIGHTS, SOL_SOCKET,
 };
-use vmm_sys_util::{Error, Result};
+use vmm_sys_util::errno::{Error, Result};
 
 // Each of the following macros performs the same function as their C counterparts. They are each
 // macros because they are used to size statically allocated arrays.
@@ -335,7 +335,7 @@ mod tests {
 
     use libc::cmsghdr;
 
-    use vmm_sys_util::EventFd;
+    use vmm_sys_util::eventfd::EventFd;
 
     #[test]
     fn buffer_len() {
