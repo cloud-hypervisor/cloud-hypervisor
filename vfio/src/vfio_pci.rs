@@ -207,12 +207,14 @@ impl Interrupt {
 
     fn msix_write_table(&mut self, offset: u64, data: &[u8]) {
         if let Some(ref mut msix) = &mut self.msix {
+            let offset = offset - u64::from(msix.cap.table_offset());
             msix.bar.write_table(offset, data)
         }
     }
 
     fn msix_read_table(&self, offset: u64, data: &mut [u8]) {
         if let Some(msix) = &self.msix {
+            let offset = offset - u64::from(msix.cap.table_offset());
             msix.bar.read_table(offset, data)
         }
     }
