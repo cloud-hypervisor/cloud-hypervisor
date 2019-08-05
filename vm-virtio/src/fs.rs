@@ -3,7 +3,9 @@
 
 use super::Error as DeviceError;
 use super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
-use crate::{VirtioInterrupt, VirtioInterruptType, VIRTIO_F_VERSION_1_BITMASK};
+use crate::{
+    VirtioInterrupt, VirtioInterruptType, VirtioSharedMemoryList, VIRTIO_F_VERSION_1_BITMASK,
+};
 use epoll;
 use libc::EFD_NONBLOCK;
 use std::cmp;
@@ -183,7 +185,13 @@ pub struct Fs {
 
 impl Fs {
     /// Create a new virtio-fs device.
-    pub fn new(path: &str, tag: &str, req_num_queues: usize, queue_size: u16) -> Result<Fs> {
+    pub fn new(
+        path: &str,
+        tag: &str,
+        req_num_queues: usize,
+        queue_size: u16,
+        _cache_addr: Option<(VirtioSharedMemoryList, u64)>,
+    ) -> Result<Fs> {
         // Calculate the actual number of queues needed.
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
         // Connect to the vhost-user socket.
