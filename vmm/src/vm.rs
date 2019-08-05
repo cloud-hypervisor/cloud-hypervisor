@@ -56,6 +56,7 @@ use vm_memory::{
     GuestMemoryRegion, GuestUsize,
 };
 use vm_virtio::transport::VirtioPciDevice;
+use vm_virtio::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::register_signal_handler;
 use vmm_sys_util::terminal::Terminal;
@@ -244,6 +245,9 @@ pub enum DeviceManagerError {
     /// Cannot find a memory range for persistent memory
     PmemRangeAllocation,
 
+    /// Cannot find a memory range for virtio-fs
+    FsRangeAllocation,
+
     /// Error creating serial output file
     SerialOutputFileOpen(io::Error),
 
@@ -261,6 +265,9 @@ pub enum DeviceManagerError {
 
     /// Failed to create the KVM device.
     CreateKvmDevice(io::Error),
+
+    /// Failed to memory map.
+    Mmap(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -685,7 +692,14 @@ impl DeviceManager {
         DeviceManager::add_virtio_rng_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
 
         // Add virtio-fs if required
-        DeviceManager::add_virtio_fs_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
+        DeviceManager::add_virtio_fs_devices(
+            vm_info,
+            allocator,
+            pci,
+            buses,
+            &interrupt_info,
+            &mut mem_slots,
+        )?;
 
         // Add virtio-pmem if required
         DeviceManager::add_virtio_pmem_devices(
@@ -820,16 +834,72 @@ impl DeviceManager {
         pci: &mut PciConfigIo,
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
+        mem_slots: &mut u32,
     ) -> DeviceManagerResult<()> {
         // Add virtio-fs if required
         if let Some(fs_list_cfg) = &vm_info.vm_cfg.fs {
             for fs_cfg in fs_list_cfg.iter() {
                 if let Some(fs_sock) = fs_cfg.sock.to_str() {
+                    let mut cache: Option<(VirtioSharedMemoryList, u64)> = None;
+                    if let Some(fs_cache) = fs_cfg.cache_size {
+                        // The memory needs to be 2MiB aligned in order to support
+                        // hugepages.
+                        let fs_guest_addr = allocator
+                            .allocate_mmio_addresses(
+                                None,
+                                fs_cache as GuestUsize,
+                                Some(0x0020_0000),
+                            )
+                            .ok_or(DeviceManagerError::FsRangeAllocation)?;
+
+                        let addr = unsafe {
+                            libc::mmap(
+                                null_mut(),
+                                fs_cache as usize,
+                                libc::PROT_READ | libc::PROT_WRITE,
+                                libc::MAP_NORESERVE | libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
+                                -1,
+                                0 as libc::off_t,
+                            )
+                        };
+                        if addr == libc::MAP_FAILED {
+                            return Err(DeviceManagerError::Mmap(io::Error::last_os_error()));
+                        }
+
+                        let mem_region = kvm_userspace_memory_region {
+                            slot: *mem_slots as u32,
+                            guest_phys_addr: fs_guest_addr.raw_value(),
+                            memory_size: fs_cache,
+                            userspace_addr: addr as u64,
+                            flags: 0,
+                        };
+                        // Safe because the guest regions are guaranteed not to overlap.
+                        let _ = unsafe { vm_info.vm_fd.set_user_memory_region(mem_region) };
+
+                        // Increment the KVM slot number
+                        *mem_slots += 1;
+
+                        let mut region_list = Vec::new();
+                        region_list.push(VirtioSharedMemory {
+                            offset: 0,
+                            len: fs_cache,
+                        });
+                        cache = Some((
+                            VirtioSharedMemoryList {
+                                addr: fs_guest_addr,
+                                len: fs_cache as GuestUsize,
+                                region_list,
+                            },
+                            addr as u64,
+                        ));
+                    }
+
                     let virtio_fs_device = vm_virtio::Fs::new(
                         fs_sock,
                         fs_cfg.tag,
                         fs_cfg.num_queues,
                         fs_cfg.queue_size,
+                        cache,
                     )
                     .map_err(DeviceManagerError::CreateVirtioFs)?;
 
