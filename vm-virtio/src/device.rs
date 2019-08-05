@@ -7,7 +7,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use super::*;
-use pci::{PciBarConfiguration, PciCapability};
 use std::sync::Arc;
 use vm_memory::{GuestAddress, GuestMemoryMmap, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
@@ -78,16 +77,6 @@ pub trait VirtioDevice: Send {
     /// event, and queue events.
     fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
         None
-    }
-
-    /// Returns any additional BAR configuration required by the device.
-    fn get_device_bars(&self) -> Vec<PciBarConfiguration> {
-        Vec::new()
-    }
-
-    /// Returns any additional capabilities required by the device.
-    fn get_device_caps(&self) -> Vec<Box<dyn PciCapability>> {
-        Vec::new()
     }
 
     /// Returns the list of shared memory regions required by the device.

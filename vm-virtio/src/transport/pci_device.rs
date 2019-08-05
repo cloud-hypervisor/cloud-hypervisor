@@ -559,22 +559,6 @@ impl PciDevice for VirtioPciDevice {
         // Once the BARs are allocated, the capabilities can be added to the PCI configuration.
         self.add_pci_capabilities(virtio_pci_bar)?;
 
-        // Allocate the device specific BARs.
-        for config in self.device.get_device_bars() {
-            let device_bar_addr = allocator
-                .allocate_mmio_addresses(None, config.get_size(), None)
-                .ok_or_else(|| PciDeviceError::IoAllocationFailed(config.get_size()))?;
-            config.set_address(device_bar_addr.raw_value());
-            let _device_bar = self.configuration.add_pci_bar(&config).map_err(|e| {
-                PciDeviceError::IoRegistrationFailed(device_bar_addr.raw_value(), e)
-            })?;
-            ranges.push((
-                device_bar_addr,
-                config.get_size(),
-                PciBarRegionType::Memory64BitRegion,
-            ));
-        }
-
         Ok(ranges)
     }
 
