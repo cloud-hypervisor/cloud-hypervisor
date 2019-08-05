@@ -119,7 +119,8 @@ fn main() {
                 .help(
                     "virtio-fs parameters \"tag=<tag_name>,\
                      sock=<socket_path>,num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>\"",
+                     queue_size=<size_of_each_queue>,dax=on|off,\
+                     cache_size=<DAX cache size: default 8Gib>\"",
                 )
                 .takes_value(true)
                 .min_values(1),

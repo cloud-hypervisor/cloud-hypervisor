@@ -46,6 +46,10 @@ pub enum Error<'a> {
     ParseFsNumQueuesParam(std::num::ParseIntError),
     /// Failed parsing fs queue size parameter.
     ParseFsQueueSizeParam(std::num::ParseIntError),
+    /// Failed parsing fs dax parameter.
+    ParseFsDax,
+    /// Cannot have dax=off along with cache_size parameter.
+    InvalidCacheSizeWithDaxOff,
     /// Failed parsing persitent memory file parameter.
     ParsePmemFileParam,
     /// Failed parsing size parameter.
@@ -260,6 +264,7 @@ pub struct FsConfig<'a> {
     pub sock: &'a Path,
     pub num_queues: usize,
     pub queue_size: u16,
+    pub cache_size: Option<u64>,
 }
 
 impl<'a> FsConfig<'a> {
@@ -271,6 +276,8 @@ impl<'a> FsConfig<'a> {
         let mut sock: &str = "";
         let mut num_queues_str: &str = "";
         let mut queue_size_str: &str = "";
+        let mut dax_str: &str = "";
+        let mut cache_size_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("tag=") {
@@ -281,11 +288,18 @@ impl<'a> FsConfig<'a> {
                 num_queues_str = &param[11..];
             } else if param.starts_with("queue_size=") {
                 queue_size_str = &param[11..];
+            } else if param.starts_with("dax=") {
+                dax_str = &param[4..];
+            } else if param.starts_with("cache_size=") {
+                cache_size_str = &param[11..];
             }
         }
 
         let mut num_queues: usize = 1;
         let mut queue_size: u16 = 1024;
+        let mut dax: bool = true;
+        // Default cache size set to 8Gib.
+        let mut cache_size: Option<u64> = Some(0x0002_0000_0000);
 
         if tag.is_empty() {
             return Err(Error::ParseFsTagParam);
@@ -303,12 +317,31 @@ impl<'a> FsConfig<'a> {
                 .parse()
                 .map_err(Error::ParseFsQueueSizeParam)?;
         }
+        if !dax_str.is_empty() {
+            match dax_str {
+                "on" => dax = true,
+                "off" => dax = false,
+                _ => return Err(Error::ParseFsDax),
+            }
+        }
+
+        // Take appropriate decision about cache_size based on DAX being
+        // enabled or disabled.
+        if !dax {
+            if !cache_size_str.is_empty() {
+                return Err(Error::InvalidCacheSizeWithDaxOff);
+            }
+            cache_size = None;
+        } else if !cache_size_str.is_empty() {
+            cache_size = Some(parse_size(cache_size_str)?);
+        }
 
         Ok(FsConfig {
             tag,
             sock: Path::new(sock),
             num_queues,
             queue_size,
+            cache_size,
         })
     }
 }
