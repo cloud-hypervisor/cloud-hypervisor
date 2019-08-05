@@ -42,6 +42,7 @@ enum PciCapabilityType {
     IsrConfig = 3,
     DeviceConfig = 4,
     PciConfig = 5,
+    SharedMemoryConfig = 8,
 }
 
 #[allow(dead_code)]
@@ -51,7 +52,8 @@ struct VirtioPciCap {
     cap_len: u8,      // Generic PCI field: capability length
     cfg_type: u8,     // Identifies the structure.
     pci_bar: u8,      // Where to find it.
-    padding: [u8; 3], // Pad to full dword.
+    id: u8,           // Multiple capabilities of the same type
+    padding: [u8; 2], // Pad to full dword.
     offset: Le32,     // Offset within bar.
     length: Le32,     // Length of the structure, in bytes.
 }
@@ -76,7 +78,8 @@ impl VirtioPciCap {
             cap_len: (std::mem::size_of::<VirtioPciCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
             cfg_type: cfg_type as u8,
             pci_bar,
-            padding: [0; 3],
+            id: 0,
+            padding: [0; 2],
             offset: Le32::from(offset),
             length: Le32::from(length),
         }
@@ -117,11 +120,51 @@ impl VirtioPciNotifyCap {
                     + VIRTIO_PCI_CAP_LEN_OFFSET,
                 cfg_type: cfg_type as u8,
                 pci_bar,
-                padding: [0; 3],
+                id: 0,
+                padding: [0; 2],
                 offset: Le32::from(offset),
                 length: Le32::from(length),
             },
             notify_off_multiplier: multiplier,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[repr(packed)]
+#[derive(Clone, Copy, Default)]
+struct VirtioPciCap64 {
+    cap: VirtioPciCap,
+    offset_hi: Le32,
+    length_hi: Le32,
+}
+// It is safe to implement ByteValued. All members are simple numbers and any value is valid.
+unsafe impl ByteValued for VirtioPciCap64 {}
+
+impl PciCapability for VirtioPciCap64 {
+    fn bytes(&self) -> &[u8] {
+        self.as_slice()
+    }
+
+    fn id(&self) -> PciCapabilityID {
+        PciCapabilityID::VendorSpecific
+    }
+}
+
+impl VirtioPciCap64 {
+    pub fn new(cfg_type: PciCapabilityType, pci_bar: u8, id: u8, offset: u64, length: u64) -> Self {
+        VirtioPciCap64 {
+            cap: VirtioPciCap {
+                cap_len: (std::mem::size_of::<VirtioPciCap64>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
+                cfg_type: cfg_type as u8,
+                pci_bar,
+                id,
+                padding: [0; 2],
+                offset: Le32::from(offset as u32),
+                length: Le32::from(length as u32),
+            },
+            offset_hi: Le32::from((offset >> 32) as u32),
+            length_hi: Le32::from((length >> 32) as u32),
         }
     }
 }
@@ -349,6 +392,17 @@ impl VirtioPciDevice {
         let configuration_cap = VirtioPciCap::new(PciCapabilityType::PciConfig, 0, 0, 0);
         self.configuration
             .add_capability(&configuration_cap)
+            .map_err(PciDeviceError::CapabilitiesSetup)?;
+
+        let shm_cap = VirtioPciCap64::new(
+            PciCapabilityType::SharedMemoryConfig,
+            settings_bar,
+            0,
+            0u64,
+            0u64,
+        );
+        self.configuration
+            .add_capability(&shm_cap)
             .map_err(PciDeviceError::CapabilitiesSetup)?;
 
         if self.msix_config.is_some() {
