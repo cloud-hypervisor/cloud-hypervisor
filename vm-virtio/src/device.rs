@@ -9,7 +9,7 @@
 use super::*;
 use pci::{PciBarConfiguration, PciCapability};
 use std::sync::Arc;
-use vm_memory::GuestMemoryMmap;
+use vm_memory::{GuestAddress, GuestMemoryMmap, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
 
 pub enum VirtioInterruptType {
@@ -22,6 +22,19 @@ pub type VirtioInterrupt = Box<
         + Send
         + Sync,
 >;
+
+#[derive(Clone)]
+pub struct VirtioSharedMemory {
+    pub offset: u64,
+    pub len: u64,
+}
+
+#[derive(Clone)]
+pub struct VirtioSharedMemoryList {
+    pub addr: GuestAddress,
+    pub len: GuestUsize,
+    pub region_list: Vec<VirtioSharedMemory>,
+}
 
 /// Trait for virtio devices to be driven by a virtio transport.
 ///
@@ -75,5 +88,10 @@ pub trait VirtioDevice: Send {
     /// Returns any additional capabilities required by the device.
     fn get_device_caps(&self) -> Vec<Box<dyn PciCapability>> {
         Vec::new()
+    }
+
+    /// Returns the list of shared memory regions required by the device.
+    fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
+        None
     }
 }
