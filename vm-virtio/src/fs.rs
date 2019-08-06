@@ -7,16 +7,20 @@ use crate::{
     VirtioInterrupt, VirtioInterruptType, VirtioSharedMemoryList, VIRTIO_F_VERSION_1_BITMASK,
 };
 use epoll;
-use libc::EFD_NONBLOCK;
+use libc::{self, EFD_NONBLOCK};
 use std::cmp;
 use std::io;
 use std::io::Write;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
-use vhost_rs::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost_rs::vhost_user::{Master, VhostUserMaster};
+use vhost_rs::vhost_user::message::{
+    VhostUserFSSlaveMsg, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+};
+use vhost_rs::vhost_user::{
+    HandlerResult, Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
+};
 use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
@@ -76,6 +80,8 @@ pub enum Error {
     VhostUserSetVringCall(vhost_rs::Error),
     /// Set vring kick failed.
     VhostUserSetVringKick(vhost_rs::Error),
+    /// Set slave request fd failed.
+    VhostUserSetSlaveRequestFd(vhost_rs::Error),
 
     /// Invalid features provided from vhost-user backend.
     InvalidFeatures,
@@ -85,16 +91,99 @@ pub enum Error {
 
     /// Failure going through memory regions.
     MemoryRegions(MmapError),
+
+    /// Failed to create the master request handler from slave.
+    MasterReqHandlerCreation(vhost_rs::vhost_user::Error),
 }
 type Result<T> = result::Result<T, Error>;
 
-struct FsEpollHandler {
+struct SlaveReqHandler {
+    cache_size: u64,
+    mmap_cache_addr: u64,
+}
+
+impl VhostUserMasterReqHandler for SlaveReqHandler {
+    fn handle_config_change(&mut self) -> HandlerResult<()> {
+        debug!("handle_config_change");
+        Ok(())
+    }
+
+    fn fs_slave_map(&mut self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<()> {
+        debug!("fs_slave_map");
+
+        let addr = self.mmap_cache_addr + fs.cache_offset[0];
+        let ret = unsafe {
+            libc::mmap(
+                addr as *mut libc::c_void,
+                fs.len[0] as usize,
+                fs.flags[0].bits() as i32,
+                libc::MAP_SHARED | libc::MAP_FIXED,
+                fd,
+                fs.fd_offset[0] as libc::off_t,
+            )
+        };
+        if ret == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+
+        let ret = unsafe { libc::close(fd) };
+        if ret == -1 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(())
+    }
+
+    fn fs_slave_unmap(&mut self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<()> {
+        debug!("fs_slave_unmap");
+
+        let mut len = fs.len[0];
+        // Need to handle a special case where the slave ask for the unmapping
+        // of the entire mapping.
+        if len == 0xffff_ffff_ffff_ffff {
+            len = self.cache_size;
+        }
+
+        let addr = self.mmap_cache_addr + fs.cache_offset[0];
+        let ret = unsafe {
+            libc::mmap(
+                addr as *mut libc::c_void,
+                len as usize,
+                libc::PROT_NONE,
+                libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_FIXED,
+                -1,
+                0 as libc::off_t,
+            )
+        };
+        if ret == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(())
+    }
+
+    fn fs_slave_sync(&mut self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<()> {
+        debug!("fs_slave_sync");
+
+        let addr = self.mmap_cache_addr + fs.cache_offset[0];
+        let ret =
+            unsafe { libc::msync(addr as *mut libc::c_void, fs.len[0] as usize, libc::MS_SYNC) };
+        if ret == -1 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(())
+    }
+}
+
+struct FsEpollHandler<S: VhostUserMasterReqHandler> {
     vu_call_evt_queue_list: Vec<(EventFd, Queue)>,
     interrupt_cb: Arc<VirtioInterrupt>,
     kill_evt: EventFd,
+    slave_req_handler: Option<MasterReqHandler<S>>,
 }
 
-impl FsEpollHandler {
+impl<S: VhostUserMasterReqHandler> FsEpollHandler<S> {
     fn run(&mut self) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
@@ -118,6 +207,21 @@ impl FsEpollHandler {
             epoll::Event::new(epoll::Events::EPOLLIN, kill_evt_index as u64),
         )
         .map_err(DeviceError::EpollCtl)?;
+
+        let slave_evt_index = if let Some(self_req_handler) = &self.slave_req_handler {
+            let index = kill_evt_index + 1;
+            epoll::ctl(
+                epoll_fd,
+                epoll::ControlOptions::EPOLL_CTL_ADD,
+                self_req_handler.as_raw_fd(),
+                epoll::Event::new(epoll::Events::EPOLLIN, index as u64),
+            )
+            .map_err(DeviceError::EpollCtl)?;
+
+            Some(index)
+        } else {
+            None
+        };
 
         const EPOLL_EVENTS_LEN: usize = 100;
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
@@ -163,6 +267,13 @@ impl FsEpollHandler {
                         debug!("KILL_EVENT received, stopping epoll loop");
                         break 'epoll;
                     }
+                    x if (slave_evt_index.is_some() && slave_evt_index.unwrap() == x) => {
+                        if let Some(slave_req_handler) = self.slave_req_handler.as_mut() {
+                            slave_req_handler
+                                .handle_request()
+                                .map_err(DeviceError::VhostUserSlaveRequest)?;
+                        }
+                    }
                     _ => {
                         error!("Unknown event for virtio-fs");
                     }
@@ -181,6 +292,8 @@ pub struct Fs {
     acked_features: u64,
     config_space: Vec<u8>,
     kill_evt: Option<EventFd>,
+    cache: Option<(VirtioSharedMemoryList, u64)>,
+    slave_req_support: bool,
 }
 
 impl Fs {
@@ -190,8 +303,9 @@ impl Fs {
         tag: &str,
         req_num_queues: usize,
         queue_size: u16,
-        _cache_addr: Option<(VirtioSharedMemoryList, u64)>,
+        cache: Option<(VirtioSharedMemoryList, u64)>,
     ) -> Result<Fs> {
+        let mut slave_req_support = false;
         // Calculate the actual number of queues needed.
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
         // Connect to the vhost-user socket.
@@ -215,10 +329,22 @@ impl Fs {
             let mut protocol_features = master
                 .get_protocol_features()
                 .map_err(Error::VhostUserGetProtocolFeatures)?;
-            protocol_features &= VhostUserProtocolFeatures::MQ;
+
+            if cache.is_some() {
+                protocol_features &= VhostUserProtocolFeatures::MQ
+                    | VhostUserProtocolFeatures::REPLY_ACK
+                    | VhostUserProtocolFeatures::SLAVE_REQ
+                    | VhostUserProtocolFeatures::SLAVE_SEND_FD;
+            } else {
+                protocol_features &=
+                    VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::REPLY_ACK;
+            }
+
             master
                 .set_protocol_features(protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
+
+            slave_req_support = true;
         }
         // Create virtio device config space.
         // First by adding the tag.
@@ -232,9 +358,11 @@ impl Fs {
             vu: master,
             queue_sizes: vec![queue_size; num_queues],
             avail_features,
-            acked_features: 0u64,
+            acked_features: avail_features,
             config_space,
             kill_evt: None,
+            cache,
+            slave_req_support,
         })
     }
 
@@ -246,11 +374,6 @@ impl Fs {
     ) -> Result<Vec<(EventFd, Queue)>> {
         // Set vhost-user owner.
         self.vu.set_owner().map_err(Error::VhostUserSetOwner)?;
-
-        // Set backend features.
-        self.vu
-            .set_features(self.acked_features)
-            .map_err(Error::VhostUserSetFeatures)?;
 
         let mut regions: Vec<VhostUserMemoryRegionInfo> = Vec::new();
 
@@ -432,10 +555,35 @@ impl VirtioDevice for Fs {
             .setup_vu(&mem, queues, queue_evts)
             .map_err(ActivateError::VhostUserSetup)?;
 
+        // Initialize slave communication.
+        let slave_req_handler = if self.slave_req_support {
+            if let Some(cache) = self.cache.clone() {
+                let vu_master_req_handler = Arc::new(Mutex::new(SlaveReqHandler {
+                    cache_size: cache.0.len,
+                    mmap_cache_addr: cache.1,
+                }));
+
+                let req_handler = MasterReqHandler::new(vu_master_req_handler).map_err(|e| {
+                    ActivateError::VhostUserSetup(Error::MasterReqHandlerCreation(e))
+                })?;
+                self.vu
+                    .set_slave_request_fd(req_handler.get_tx_raw_fd())
+                    .map_err(|e| {
+                        ActivateError::VhostUserSetup(Error::VhostUserSetSlaveRequestFd(e))
+                    })?;
+                Some(req_handler)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let mut handler = FsEpollHandler {
             vu_call_evt_queue_list,
             interrupt_cb,
             kill_evt,
+            slave_req_handler,
         };
 
         let worker_result = thread::Builder::new()
@@ -448,5 +596,13 @@ impl VirtioDevice for Fs {
         }
 
         Ok(())
+    }
+
+    fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
+        if let Some(cache) = self.cache.clone() {
+            Some(cache.0)
+        } else {
+            None
+        }
     }
 }
