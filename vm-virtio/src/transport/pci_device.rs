@@ -68,12 +68,12 @@ impl PciCapability for VirtioPciCap {
     }
 }
 
-const VIRTIO_PCI_CAPABILITY_BYTES: u8 = 16;
+const VIRTIO_PCI_CAP_LEN_OFFSET: u8 = 2;
 
 impl VirtioPciCap {
     pub fn new(cfg_type: PciCapabilityType, pci_bar: u8, offset: u32, length: u32) -> Self {
         VirtioPciCap {
-            cap_len: VIRTIO_PCI_CAPABILITY_BYTES,
+            cap_len: (std::mem::size_of::<VirtioPciCap>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
             cfg_type: cfg_type as u8,
             pci_bar,
             padding: [0; 3],
@@ -113,7 +113,8 @@ impl VirtioPciNotifyCap {
     ) -> Self {
         VirtioPciNotifyCap {
             cap: VirtioPciCap {
-                cap_len: std::mem::size_of::<VirtioPciNotifyCap>() as u8,
+                cap_len: (std::mem::size_of::<VirtioPciNotifyCap>() as u8)
+                    + VIRTIO_PCI_CAP_LEN_OFFSET,
                 cfg_type: cfg_type as u8,
                 pci_bar,
                 padding: [0; 3],
