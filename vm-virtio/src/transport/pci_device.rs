@@ -394,17 +394,6 @@ impl VirtioPciDevice {
             .add_capability(&configuration_cap)
             .map_err(PciDeviceError::CapabilitiesSetup)?;
 
-        let shm_cap = VirtioPciCap64::new(
-            PciCapabilityType::SharedMemoryConfig,
-            settings_bar,
-            0,
-            0u64,
-            0u64,
-        );
-        self.configuration
-            .add_capability(&shm_cap)
-            .map_err(PciDeviceError::CapabilitiesSetup)?;
-
         if self.msix_config.is_some() {
             let msix_cap = MsixCap::new(
                 settings_bar,
@@ -558,6 +547,31 @@ impl PciDevice for VirtioPciDevice {
 
         // Once the BARs are allocated, the capabilities can be added to the PCI configuration.
         self.add_pci_capabilities(virtio_pci_bar)?;
+
+        // Allocate a dedicated BAR if there are some shared memory regions.
+        if let Some(shm_list) = self.device.get_shm_regions() {
+            let config = PciBarConfiguration::default()
+                .set_register_index(2)
+                .set_address(shm_list.addr.raw_value())
+                .set_size(shm_list.len);
+            let virtio_pci_shm_bar =
+                self.configuration.add_pci_bar(&config).map_err(|e| {
+                    PciDeviceError::IoRegistrationFailed(shm_list.addr.raw_value(), e)
+                })? as u8;
+
+            for (idx, shm) in shm_list.region_list.iter().enumerate() {
+                let shm_cap = VirtioPciCap64::new(
+                    PciCapabilityType::SharedMemoryConfig,
+                    virtio_pci_shm_bar,
+                    idx as u8,
+                    shm.offset,
+                    shm.len,
+                );
+                self.configuration
+                    .add_capability(&shm_cap)
+                    .map_err(PciDeviceError::CapabilitiesSetup)?;
+            }
+        }
 
         Ok(ranges)
     }
