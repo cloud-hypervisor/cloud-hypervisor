@@ -144,4 +144,7 @@ pub enum Error {
     EpollCtl(io::Error),
     EpollWait(io::Error),
     FailedSignalingDriver(io::Error),
+
+    /// Failed to handle vhost-user slave request.
+    VhostUserSlaveRequest(vhost_rs::vhost_user::Error),
 }
