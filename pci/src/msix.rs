@@ -111,7 +111,7 @@ impl MsixConfig {
                     0x0 => self.table_entries[index].msg_addr_lo,
                     0x4 => self.table_entries[index].msg_addr_hi,
                     0x8 => self.table_entries[index].msg_data,
-                    0x10 => self.table_entries[index].vector_ctl,
+                    0xc => self.table_entries[index].vector_ctl,
                     _ => {
                         error!("invalid offset");
                         0
@@ -162,7 +162,7 @@ impl MsixConfig {
                     0x0 => self.table_entries[index].msg_addr_lo = value,
                     0x4 => self.table_entries[index].msg_addr_hi = value,
                     0x8 => self.table_entries[index].msg_data = value,
-                    0x10 => {
+                    0xc => {
                         old_entry = Some(self.table_entries[index].clone());
                         self.table_entries[index].vector_ctl = value;
                     }
