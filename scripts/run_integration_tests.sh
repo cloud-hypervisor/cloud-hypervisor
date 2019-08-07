@@ -129,8 +129,11 @@ sudo adduser $USER kvm
 newgrp kvm << EOF
 cargo test --features "integration_tests"
 EOF
+RES=$?
 
 # Tear VFIO test network down
 sudo ip link del vfio-br0
 sudo ip link del vfio-tap0
 sudo ip link del vfio-tap1
+
+exit $RES
