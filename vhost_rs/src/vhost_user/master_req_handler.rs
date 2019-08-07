@@ -109,14 +109,14 @@ impl<S: VhostUserMasterReqHandler> MasterReqHandler<S> {
             }
         };
 
-        match hdr.get_code() {
+        let res = match hdr.get_code() {
             SlaveReq::CONFIG_CHANGE_MSG => {
                 self.check_msg_size(&hdr, size, 0)?;
                 self.backend
                     .lock()
                     .unwrap()
                     .handle_config_change()
-                    .map_err(Error::ReqHandlerError)?;
+                    .map_err(Error::ReqHandlerError)
             }
             SlaveReq::FS_MAP => {
                 let msg = self.extract_msg_body::<VhostUserFSSlaveMsg>(&hdr, size, &buf)?;
@@ -124,7 +124,7 @@ impl<S: VhostUserMasterReqHandler> MasterReqHandler<S> {
                     .lock()
                     .unwrap()
                     .fs_slave_map(msg, rfds.unwrap()[0])
-                    .map_err(Error::ReqHandlerError)?;
+                    .map_err(Error::ReqHandlerError)
             }
             SlaveReq::FS_UNMAP => {
                 let msg = self.extract_msg_body::<VhostUserFSSlaveMsg>(&hdr, size, &buf)?;
@@ -132,7 +132,7 @@ impl<S: VhostUserMasterReqHandler> MasterReqHandler<S> {
                     .lock()
                     .unwrap()
                     .fs_slave_unmap(msg)
-                    .map_err(Error::ReqHandlerError)?;
+                    .map_err(Error::ReqHandlerError)
             }
             SlaveReq::FS_SYNC => {
                 let msg = self.extract_msg_body::<VhostUserFSSlaveMsg>(&hdr, size, &buf)?;
@@ -140,14 +140,14 @@ impl<S: VhostUserMasterReqHandler> MasterReqHandler<S> {
                     .lock()
                     .unwrap()
                     .fs_slave_sync(msg)
-                    .map_err(Error::ReqHandlerError)?;
+                    .map_err(Error::ReqHandlerError)
             }
-            _ => {
-                return Err(Error::InvalidMessage);
-            }
-        }
+            _ => Err(Error::InvalidMessage),
+        };
 
-        Ok(())
+        self.send_ack_message(&hdr, &res)?;
+
+        res
     }
 
     fn check_state(&self) -> Result<()> {
@@ -216,6 +216,38 @@ impl<S: VhostUserMasterReqHandler> MasterReqHandler<S> {
             return Err(Error::InvalidMessage);
         }
         Ok(msg)
+    }
+
+    fn new_reply_header<T: Sized>(
+        &self,
+        req: &VhostUserMsgHeader<SlaveReq>,
+    ) -> Result<VhostUserMsgHeader<SlaveReq>> {
+        if mem::size_of::<T>() > MAX_MSG_SIZE {
+            return Err(Error::InvalidParam);
+        }
+        self.check_state()?;
+        Ok(VhostUserMsgHeader::new(
+            req.get_code(),
+            VhostUserHeaderFlag::REPLY.bits(),
+            mem::size_of::<T>() as u32,
+        ))
+    }
+
+    fn send_ack_message(
+        &mut self,
+        req: &VhostUserMsgHeader<SlaveReq>,
+        res: &Result<()>,
+    ) -> Result<()> {
+        if req.is_need_reply() {
+            let hdr = self.new_reply_header::<VhostUserU64>(req)?;
+            let val = match res {
+                Ok(_) => 0,
+                Err(_) => 1,
+            };
+            let msg = VhostUserU64::new(val);
+            self.sub_sock.send_message(&hdr, &msg, None)?;
+        }
+        Ok(())
     }
 }
 
