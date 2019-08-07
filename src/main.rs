@@ -9,8 +9,54 @@ extern crate vmm;
 extern crate clap;
 
 use clap::{App, Arg};
+use log::LevelFilter;
 use std::process;
+use std::sync::Mutex;
 use vmm::config;
+
+struct Logger {
+    output: Mutex<Box<std::io::Write + Send>>,
+    start: std::time::Instant,
+}
+
+impl log::Log for Logger {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+
+        let now = std::time::Instant::now();
+        let duration = now.duration_since(self.start);
+
+        if record.file().is_some() && record.line().is_some() {
+            writeln!(
+                *(*(self.output.lock().unwrap())),
+                "cloud-hypervisor: {:?}: {}:{}:{} -- {}",
+                duration,
+                record.level(),
+                record.file().unwrap(),
+                record.line().unwrap(),
+                record.args()
+            )
+            .expect("Failed to write to log file");
+        } else {
+            writeln!(
+                *(*(self.output.lock().unwrap())),
+                "cloud-hypervisor: {:?}: {}:{} -- {}",
+                duration,
+                record.level(),
+                record.target(),
+                record.args()
+            )
+            .expect("Failed to write to log file");
+        }
+    }
+    fn flush(&self) {}
+}
 
 fn main() {
     let cmd_arguments = App::new("cloud-hypervisor")
@@ -107,6 +153,19 @@ fn main() {
                 .takes_value(true)
                 .min_values(1),
         )
+        .arg(
+            Arg::with_name("v")
+                .short("v")
+                .multiple(true)
+                .help("Sets the level of debugging output"),
+        )
+        .arg(
+            Arg::with_name("log-file")
+                .long("log-file")
+                .help("Log file. Standard error is used if not specified")
+                .takes_value(true)
+                .min_values(1),
+        )
         .get_matches();
 
     // These .unwrap()s cannot fail as there is a default value defined
@@ -126,6 +185,30 @@ fn main() {
     let fs: Option<Vec<&str>> = cmd_arguments.values_of("fs").map(|x| x.collect());
     let pmem: Option<Vec<&str>> = cmd_arguments.values_of("pmem").map(|x| x.collect());
     let devices: Option<Vec<&str>> = cmd_arguments.values_of("device").map(|x| x.collect());
+
+    let log_level = match cmd_arguments.occurrences_of("v") {
+        0 => LevelFilter::Error,
+        1 => LevelFilter::Warn,
+        2 => LevelFilter::Info,
+        3 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    };
+
+    let log_file: Box<std::io::Write + Send> =
+        if let Some(file) = cmd_arguments.value_of("log-file") {
+            Box::new(
+                std::fs::File::create(std::path::Path::new(file)).expect("Error creating log file"),
+            )
+        } else {
+            Box::new(std::io::stderr())
+        };
+
+    log::set_boxed_logger(Box::new(Logger {
+        output: Mutex::new(log_file),
+        start: std::time::Instant::now(),
+    }))
+    .map(|()| log::set_max_level(log_level))
+    .expect("Expected to be able to setup logger");
 
     let vm_config = match config::VmConfig::parse(config::VmParams {
         cpus,
