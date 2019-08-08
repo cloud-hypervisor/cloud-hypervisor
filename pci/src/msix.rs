@@ -53,6 +53,7 @@ pub struct MsixConfig {
     pub pba_entries: Vec<u64>,
     interrupt_cb: Option<Arc<InterruptDelivery>>,
     masked: bool,
+    enabled: bool,
 }
 
 impl MsixConfig {
@@ -70,6 +71,7 @@ impl MsixConfig {
             pba_entries,
             interrupt_cb: None,
             masked: false,
+            enabled: false,
         }
     }
 
@@ -81,10 +83,15 @@ impl MsixConfig {
         self.masked
     }
 
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
     pub fn set_msg_ctl(&mut self, reg: u16) {
         let old_masked = self.masked;
 
         self.masked = ((reg >> FUNCTION_MASK_BIT) & 1u16) == 1u16;
+        self.enabled = ((reg >> MSIX_ENABLE_BIT) & 1u16) == 1u16;
 
         // If the Function Mask bit was set, and has just been cleared, it's
         // important to go through the entire PBA to check if there was any
