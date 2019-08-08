@@ -423,6 +423,12 @@ impl PciDevice for VirtioPciDevice {
                     let config = &mut msix_config_clone.lock().unwrap();
                     let entry = &config.table_entries[vector as usize];
 
+                    // If MSI-X interrupts are not enabled for this device, then simply
+                    // ignore the interrupt.
+                    if !config.enabled() {
+                        return Ok(());
+                    }
+
                     // In case the vector control register associated with the entry
                     // has its first bit set, this means the vector is masked and the
                     // device should not inject the interrupt.
