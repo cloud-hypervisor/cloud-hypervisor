@@ -1489,7 +1489,9 @@ impl<'a> Vm<'a> {
                                 .read_raw(&mut out)
                                 .map_err(Error::Serial)?;
 
-                            if self.devices.serial.is_some() {
+                            if self.devices.serial.is_some()
+                                && self.config.serial.mode.input_enabled()
+                            {
                                 self.devices
                                     .serial
                                     .as_ref()
@@ -1500,7 +1502,9 @@ impl<'a> Vm<'a> {
                                     .map_err(Error::Serial)?;
                             }
 
-                            if self.devices.console.is_some() {
+                            if self.devices.console.is_some()
+                                && self.config.console.mode.input_enabled()
+                            {
                                 self.devices
                                     .console
                                     .as_ref()

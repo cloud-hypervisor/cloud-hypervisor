@@ -352,6 +352,15 @@ pub enum ConsoleOutputMode {
     File,
 }
 
+impl ConsoleOutputMode {
+    pub fn input_enabled(&self) -> bool {
+        match self {
+            ConsoleOutputMode::Tty => true,
+            _ => false,
+        }
+    }
+}
+
 pub struct ConsoleConfig<'a> {
     pub file: Option<&'a Path>,
     pub mode: ConsoleOutputMode,
