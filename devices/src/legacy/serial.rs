@@ -67,7 +67,7 @@ pub struct Serial {
 }
 
 impl Serial {
-    fn new(interrupt: Box<Interrupt>, out: Option<Box<io::Write + Send>>) -> Serial {
+    pub fn new(interrupt: Box<Interrupt>, out: Option<Box<io::Write + Send>>) -> Serial {
         Serial {
             interrupt_enable: 0,
             interrupt_identification: DEFAULT_INTERRUPT_IDENTIFICATION,

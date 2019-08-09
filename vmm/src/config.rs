@@ -350,6 +350,7 @@ pub enum ConsoleOutputMode {
     Off,
     Tty,
     File,
+    Null,
 }
 
 impl ConsoleOutputMode {
@@ -382,6 +383,11 @@ impl<'a> ConsoleConfig<'a> {
             Ok(Self {
                 mode: ConsoleOutputMode::File,
                 file: Some(Path::new(&param[5..])),
+            })
+        } else if param.starts_with("null") {
+            Ok(Self {
+                mode: ConsoleOutputMode::Null,
+                file: None,
             })
         } else {
             Err(Error::ParseConsoleParam)

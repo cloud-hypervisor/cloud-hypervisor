@@ -137,13 +137,13 @@ fn main() {
         .arg(
             Arg::with_name("serial")
                 .long("serial")
-                .help("Control serial port: off|tty|file=/path/to/a/file")
-                .default_value("off"),
+                .help("Control serial port: off|null|tty|file=/path/to/a/file")
+                .default_value("null"),
         )
         .arg(
             Arg::with_name("console")
                 .long("console")
-                .help("Control (virtio) console: off|tty|file=/path/to/a/file")
+                .help("Control (virtio) console: off|null|tty|file=/path/to/a/file")
                 .default_value("tty"),
         )
         .arg(
@@ -1322,7 +1322,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serial_disable() {
+    fn test_serial_off() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
@@ -1376,6 +1376,124 @@ mod tests {
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_serial_null() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--serial", "null"])
+                .args(&["--console", "off"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Test that there is a ttyS0
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap(),
+                1
+            );
+
+            guest.ssh_command("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            match child.wait_with_output() {
+                Ok(out) => {
+                    aver!(
+                        tb,
+                        !String::from_utf8_lossy(&out.stdout).contains("cloud login:")
+                    );
+                }
+                Err(_) => aver!(tb, false),
+            }
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_serial_tty() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--serial", "tty"])
+                .args(&["--console", "off"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Test that there is a ttyS0
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap(),
+                1
+            );
+
+            guest.ssh_command("sudo reboot");
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            match child.wait_with_output() {
+                Ok(out) => {
+                    aver!(
+                        tb,
+                        String::from_utf8_lossy(&out.stdout).contains("cloud login:")
+                    );
+                }
+                Err(_) => aver!(tb, false),
+            }
             Ok(())
         });
     }

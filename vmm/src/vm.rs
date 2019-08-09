@@ -40,7 +40,7 @@ use pci::{
 use qcow::{self, ImageType, QcowFile};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
-use std::io::{self, stdout};
+use std::io::{self, sink, stdout};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::null_mut;
@@ -561,9 +561,9 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::SerialOutputFileOpen)?,
             )),
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
-            ConsoleOutputMode::Off => None,
+            ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
         };
-        let serial = if serial_writer.is_some() {
+        let serial = if vm_info.vm_cfg.serial.mode != ConsoleOutputMode::Off {
             // Serial is tied to IRQ #4
             let serial_irq = 4;
             let interrupt: Box<devices::Interrupt> = if let Some(ioapic) = &ioapic {
@@ -578,9 +578,9 @@ impl DeviceManager {
                 Box::new(KernelIoapicIrq::new(serial_evt))
             };
 
-            Some(Arc::new(Mutex::new(devices::legacy::Serial::new_out(
+            Some(Arc::new(Mutex::new(devices::legacy::Serial::new(
                 interrupt,
-                serial_writer.unwrap(),
+                serial_writer,
             ))))
         } else {
             None
@@ -601,6 +601,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
             )),
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
+            ConsoleOutputMode::Null => Some(Box::new(sink())),
             ConsoleOutputMode::Off => None,
         };
         let console = if console_writer.is_some() {
