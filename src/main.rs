@@ -541,7 +541,7 @@ mod tests {
                 format!("vhost_user_socket={}", virtiofsd_socket_path).as_str(),
             ])
             .args(&["-o", format!("source={}", shared_dir_path).as_str()])
-            .args(&["-o", "cache=none"])
+            .args(&["-o", "cache=always"])
             .spawn()
             .unwrap();
 
@@ -718,6 +718,45 @@ mod tests {
             }
 
             false
+        }
+
+        fn valid_virtio_fs_cache_size(&self, dax: bool, cache_size: Option<u64>) -> bool {
+            let shm_region = self
+                .ssh_command("sudo -E bash -c 'cat /proc/iomem' | grep virtio-pci-shm")
+                .trim()
+                .to_string();
+
+            if shm_region.is_empty() {
+                return !dax;
+            }
+
+            // From this point, the region is not empty, hence it is an error
+            // if DAX is off.
+            if !dax {
+                return false;
+            }
+
+            let cache = if let Some(cache) = cache_size {
+                cache
+            } else {
+                // 8Gib by default
+                0x0002_0000_0000
+            };
+
+            let args: Vec<&str> = shm_region.split(':').collect();
+            if args.is_empty() {
+                return false;
+            }
+
+            let args: Vec<&str> = args[0].trim().split('-').collect();
+            if args.len() != 2 {
+                return false;
+            }
+
+            let start_addr = u64::from_str_radix(args[0], 16).unwrap();
+            let end_addr = u64::from_str_radix(args[1], 16).unwrap();
+
+            cache == (end_addr - start_addr + 1)
         }
     }
 
@@ -1064,8 +1103,7 @@ mod tests {
         });
     }
 
-    #[test]
-    fn test_virtio_fs() {
+    fn test_virtio_fs(dax: bool, cache_size: Option<u64>) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
@@ -1075,6 +1113,13 @@ mod tests {
 
             let mut kernel_path = workload_path.clone();
             kernel_path.push("vmlinux");
+
+            let (dax_vmm_param, dax_mount_param) = if dax { ("on", ",dax") } else { ("off", "") };
+            let cache_size_vmm_param = if let Some(cache) = cache_size {
+                format!(",cache_size={}", cache)
+            } else {
+                "".to_string()
+            };
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
@@ -1097,24 +1142,35 @@ mod tests {
                 .args(&[
                     "--fs",
                     format!(
-                        "tag=virtiofs,sock={},num_queues=1,queue_size=1024",
-                        virtiofsd_socket_path
+                        "tag=virtiofs,sock={},num_queues=1,queue_size=1024,dax={}{}",
+                        virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
                     )
                     .as_str(),
                 ])
-                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&[
+                    "--cmdline",
+                    "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a \
+                     console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
+                     init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
+                     no_timer_check noreplace-smp cryptomgr.notests \
+                     rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw",
+                ])
                 .spawn()
                 .unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
 
             // Mount shared directory through virtio_fs filesystem
-            aver_eq!(
-                tb,
-                guest.ssh_command("mkdir -p mount_dir && sudo mount -t virtio_fs virtiofs mount_dir/ -o rootmode=040000,user_id=1001,group_id=1001 && echo ok")
-                    .trim(),
-                "ok"
+            let mount_cmd = format!(
+                "mkdir -p mount_dir && \
+                 sudo mount -t virtio_fs virtiofs mount_dir/ -o \
+                 rootmode=040000,user_id=1001,group_id=1001{} && \
+                 echo ok",
+                dax_mount_param
             );
+            aver_eq!(tb, guest.ssh_command(&mount_cmd).trim(), "ok");
+            // Check the cache size is the expected one
+            aver_eq!(tb, guest.valid_virtio_fs_cache_size(dax, cache_size), true);
             // Check file1 exists and its content is "foo"
             aver_eq!(tb, guest.ssh_command("cat mount_dir/file1").trim(), "foo");
             // Check file2 does not exist
@@ -1131,6 +1187,21 @@ mod tests {
             let _ = daemon_child.wait();
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_virtio_fs_dax_on_default_cache_size() {
+        test_virtio_fs(true, None)
+    }
+
+    #[test]
+    fn test_virtio_fs_dax_on_cache_size_1_gib() {
+        test_virtio_fs(true, Some(0x4000_0000))
+    }
+
+    #[test]
+    fn test_virtio_fs_dax_off() {
+        test_virtio_fs(false, None)
     }
 
     #[test]
