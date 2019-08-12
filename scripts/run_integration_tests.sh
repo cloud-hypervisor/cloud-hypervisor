@@ -78,12 +78,17 @@ if [ ! -f "$VMLINUX_IMAGE" ]; then
     popd
 fi
 
-VIRTIOFSD_URL="$(curl --silent https://api.github.com/repos/intel/nemu/releases/latest | grep "browser_download_url" | grep "virtiofsd-x86_64" | grep -o 'https://.*[^ "]')"
 VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
+VIRTIOFSD_DIR="virtiofsd_build"
 if [ ! -f "$VIRTIOFSD" ]; then
     pushd $WORKLOADS_DIR
-    wget --quiet $VIRTIOFSD_URL -O "virtiofsd"
-    chmod +x "virtiofsd"
+    git clone --depth 1 "https://github.com/sboeuf/qemu.git" -b "virtio-fs" $VIRTIOFSD_DIR
+    pushd $VIRTIOFSD_DIR
+    ./configure --prefix=$PWD --target-list=x86_64-softmmu
+    make virtiofsd -j `nproc`
+    cp virtiofsd $VIRTIOFSD
+    popd
+    rm -r $VIRTIOFSD_DIR
     sudo setcap cap_sys_admin+epi "virtiofsd"
     popd
 fi
