@@ -268,7 +268,8 @@ impl NetEpollHandler {
                 );
                 match read_result {
                     Ok(_) => {
-                        read_count += limit;
+                        // Increment by number of bytes actually read
+                        read_count += limit - read_count;
                     }
                     Err(e) => {
                         error!("Failed to read slice: {:?}", e);
