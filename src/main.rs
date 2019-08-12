@@ -1110,7 +1110,7 @@ mod tests {
             // Mount shared directory through virtio_fs filesystem
             aver_eq!(
                 tb,
-                guest.ssh_command("mkdir -p mount_dir && sudo mount -t virtio_fs /dev/null mount_dir/ -o tag=virtiofs,rootmode=040000,user_id=1001,group_id=1001 && echo ok")
+                guest.ssh_command("mkdir -p mount_dir && sudo mount -t virtio_fs virtiofs mount_dir/ -o rootmode=040000,user_id=1001,group_id=1001 && echo ok")
                     .trim(),
                 "ok"
             );
