@@ -262,7 +262,7 @@ extern crate lazy_static;
 #[cfg(feature = "integration_tests")]
 mod tests {
     use ssh2::Session;
-    use std::fs::{self, read, OpenOptions};
+    use std::fs;
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::process::{Command, Stdio};
@@ -1216,21 +1216,6 @@ mod tests {
             let mut kernel_path = workload_path.clone();
             kernel_path.push("vmlinux");
 
-            let pmem_backend_path = guest.tmp_dir.path().join("/tmp/pmem-file");
-            let mut pmem_backend_file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(&pmem_backend_path)
-                .unwrap();
-
-            let pmem_backend_content = "foo";
-            pmem_backend_file
-                .write_all(pmem_backend_content.as_bytes())
-                .unwrap();
-            let pmem_backend_file_size = 0x1000;
-            pmem_backend_file.set_len(pmem_backend_file_size).unwrap();
-
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
@@ -1253,8 +1238,8 @@ mod tests {
                     "--pmem",
                     format!(
                         "file={},size={}",
-                        pmem_backend_path.to_str().unwrap(),
-                        pmem_backend_file_size
+                        guest.disk_config.disk(DiskType::RawOperatingSystem).unwrap(),
+                        fs::metadata(&guest.disk_config.disk(DiskType::RawOperatingSystem).unwrap()).unwrap().len()
                     )
                     .as_str(),
                 ])
@@ -1266,30 +1251,6 @@ mod tests {
 
             // Check for the presence of /dev/pmem0
             aver_eq!(tb, guest.ssh_command("ls /dev/pmem0").trim(), "/dev/pmem0");
-            // Check content
-            aver_eq!(
-                tb,
-                &guest.ssh_command("sudo cat /dev/pmem0").trim()[..pmem_backend_content.len()],
-                pmem_backend_content
-            );
-            // Modify content
-            let new_content = "bar";
-            guest.ssh_command(
-                format!(
-                    "sudo bash -c 'echo {} > /dev/pmem0' && sudo sync /dev/pmem0",
-                    new_content
-                )
-                .as_str(),
-            );
-
-            // Check content from host
-            aver_eq!(
-                tb,
-                &String::from_utf8(read(pmem_backend_path).unwrap())
-                    .unwrap()
-                    .as_str()[..new_content.len()],
-                new_content
-            );
 
             guest.ssh_command("sudo reboot");
             let _ = child.wait();
