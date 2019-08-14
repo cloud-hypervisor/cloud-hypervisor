@@ -12,11 +12,13 @@ mod mptable;
 pub mod regs;
 
 use crate::RegionType;
-use linux_loader::loader::bootparam::{boot_params, setup_header, E820_RAM};
+use linux_loader::loader::bootparam::{boot_params, setup_header};
 use std::mem;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestUsize,
 };
+
+const E820_RAM: u32 = 1;
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `DataInit`) where:
@@ -198,13 +200,13 @@ fn add_e820_entry(
     size: u64,
     mem_type: u32,
 ) -> Result<(), Error> {
-    if params.e820_entries >= params.e820_map.len() as u8 {
+    if params.e820_entries >= params.e820_table.len() as u8 {
         return Err(Error::E820Configuration);
     }
 
-    params.e820_map[params.e820_entries as usize].addr = addr;
-    params.e820_map[params.e820_entries as usize].size = size;
-    params.e820_map[params.e820_entries as usize].type_ = mem_type;
+    params.e820_table[params.e820_entries as usize].addr = addr;
+    params.e820_table[params.e820_entries as usize].size = size;
+    params.e820_table[params.e820_entries as usize].type_ = mem_type;
     params.e820_entries += 1;
 
     Ok(())
@@ -213,7 +215,7 @@ fn add_e820_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_loader::loader::bootparam::e820entry;
+    use linux_loader::loader::bootparam::boot_e820_entry;
 
     #[test]
     fn regions_lt_4gb() {
@@ -290,14 +292,14 @@ mod tests {
 
     #[test]
     fn test_add_e820_entry() {
-        let e820_map = [(e820entry {
+        let e820_table = [(boot_e820_entry {
             addr: 0x1,
             size: 4,
             type_: 1,
         }); 128];
 
         let expected_params = boot_params {
-            e820_map,
+            e820_table,
             e820_entries: 1,
             ..Default::default()
         };
@@ -305,25 +307,25 @@ mod tests {
         let mut params: boot_params = Default::default();
         add_e820_entry(
             &mut params,
-            e820_map[0].addr,
-            e820_map[0].size,
-            e820_map[0].type_,
+            e820_table[0].addr,
+            e820_table[0].size,
+            e820_table[0].type_,
         )
         .unwrap();
         assert_eq!(
-            format!("{:?}", params.e820_map[0]),
-            format!("{:?}", expected_params.e820_map[0])
+            format!("{:?}", params.e820_table[0]),
+            format!("{:?}", expected_params.e820_table[0])
         );
         assert_eq!(params.e820_entries, expected_params.e820_entries);
 
         // Exercise the scenario where the field storing the length of the e820 entry table is
         // is bigger than the allocated memory.
-        params.e820_entries = params.e820_map.len() as u8 + 1;
+        params.e820_entries = params.e820_table.len() as u8 + 1;
         assert!(add_e820_entry(
             &mut params,
-            e820_map[0].addr,
-            e820_map[0].size,
-            e820_map[0].type_
+            e820_table[0].addr,
+            e820_table[0].size,
+            e820_table[0].type_
         )
         .is_err());
     }
