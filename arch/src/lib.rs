@@ -13,6 +13,7 @@ extern crate byteorder;
 extern crate kvm_bindings;
 extern crate libc;
 
+extern crate acpi_tables;
 extern crate arch_gen;
 extern crate kvm_ioctls;
 extern crate linux_loader;

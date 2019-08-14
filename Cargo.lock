@@ -32,6 +32,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "arch"
 version = "0.1.0"
 dependencies = [
+ "acpi_tables 0.1.0",
  "arch_gen 0.1.0",
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-bindings 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
