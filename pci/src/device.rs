@@ -70,11 +70,6 @@ pub trait PciDevice: BusDevice {
         Ok(Vec::new())
     }
 
-    /// Register any capabilties specified by the device.
-    fn register_device_capabilities(&mut self) -> Result<()> {
-        Ok(())
-    }
-
     /// Gets a list of ioeventfds that should be registered with the running VM. The list is
     /// returned as a Vec of (eventfd, addr, datamatch) tuples.
     fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
@@ -95,6 +90,4 @@ pub trait PciDevice: BusDevice {
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - The data to write.
     fn write_bar(&mut self, _base: u64, _offset: u64, _data: &[u8]) {}
-    /// Invoked when the device is sandboxed.
-    fn on_device_sandboxed(&mut self) {}
 }
