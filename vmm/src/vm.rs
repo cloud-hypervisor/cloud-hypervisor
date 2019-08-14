@@ -47,7 +47,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
-use std::{result, str, thread};
+use std::{fmt, result, str, thread};
 use vfio::{VfioDevice, VfioPciDevice, VfioPciError};
 use vm_allocator::{GsiApic, SystemAllocator};
 use vm_memory::guest_memory::FileOffset;
@@ -75,6 +75,48 @@ const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
 // IOAPIC address range
 const IOAPIC_RANGE_ADDR: u64 = 0xfec0_0000;
 const IOAPIC_RANGE_SIZE: u64 = 0x20;
+
+// Debug I/O port
+#[cfg(target_arch = "x86_64")]
+const DEBUG_IOPORT: u16 = 0x80;
+const DEBUG_IOPORT_PREFIX: &str = "Debug I/O port";
+
+/// Debug I/O port, see:
+/// https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html
+///
+/// Since we're not a physical platform, we can freely assign code ranges for
+/// debugging specific parts of our virtual platform.
+pub enum DebugIoPortRange {
+    Firmware,
+    Bootloader,
+    Kernel,
+    Userspace,
+    Custom,
+}
+
+impl DebugIoPortRange {
+    fn from_u8(value: u8) -> DebugIoPortRange {
+        match value {
+            0x00...0x1f => DebugIoPortRange::Firmware,
+            0x20...0x3f => DebugIoPortRange::Bootloader,
+            0x40...0x5f => DebugIoPortRange::Kernel,
+            0x60...0x7f => DebugIoPortRange::Userspace,
+            _ => DebugIoPortRange::Custom,
+        }
+    }
+}
+
+impl fmt::Display for DebugIoPortRange {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DebugIoPortRange::Firmware => write!(f, "{}: Firmware", DEBUG_IOPORT_PREFIX),
+            DebugIoPortRange::Bootloader => write!(f, "{}: Bootloader", DEBUG_IOPORT_PREFIX),
+            DebugIoPortRange::Kernel => write!(f, "{}: Kernel", DEBUG_IOPORT_PREFIX),
+            DebugIoPortRange::Userspace => write!(f, "{}: Userspace", DEBUG_IOPORT_PREFIX),
+            DebugIoPortRange::Custom => write!(f, "{}: Custom", DEBUG_IOPORT_PREFIX),
+        }
+    }
+}
 
 /// Errors associated with VM management
 #[derive(Debug)]
@@ -423,6 +465,9 @@ impl Vcpu {
                     Ok(())
                 }
                 VcpuExit::IoOut(addr, data) => {
+                    if addr == DEBUG_IOPORT && data.len() == 1 {
+                        self.log_debug_ioport(data[0]);
+                    }
                     self.io_bus.write(u64::from(addr), data);
                     Ok(())
                 }
@@ -454,6 +499,11 @@ impl Vcpu {
                 }
             },
         }
+    }
+
+    // Log debug io port codes.
+    fn log_debug_ioport(&self, code: u8) {
+        debug!("{} (code 0x{:x})", DebugIoPortRange::from_u8(code), code);
     }
 }
 
