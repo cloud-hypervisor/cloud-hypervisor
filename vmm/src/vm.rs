@@ -396,6 +396,7 @@ pub struct Vcpu {
     io_bus: devices::Bus,
     mmio_bus: devices::Bus,
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
+    vm_ts: std::time::Instant,
 }
 
 impl Vcpu {
@@ -420,6 +421,7 @@ impl Vcpu {
             io_bus,
             mmio_bus,
             ioapic,
+            vm_ts: vm.creation_ts,
         })
     }
 
@@ -503,7 +505,15 @@ impl Vcpu {
 
     // Log debug io port codes.
     fn log_debug_ioport(&self, code: u8) {
-        debug!("{} (code 0x{:x})", DebugIoPortRange::from_u8(code), code);
+        let ts = self.vm_ts.elapsed();
+
+        debug!(
+            "[{} code 0x{:x}] {}.{:>06} seconds",
+            DebugIoPortRange::from_u8(code),
+            code,
+            ts.as_secs(),
+            ts.as_micros()
+        );
     }
 }
 
@@ -1314,6 +1324,7 @@ pub struct Vm<'a> {
     config: VmConfig<'a>,
     epoll: EpollContext,
     on_tty: bool,
+    creation_ts: std::time::Instant,
 }
 
 impl<'a> Vm<'a> {
@@ -1321,6 +1332,7 @@ impl<'a> Vm<'a> {
         let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
         let fd = Arc::new(fd);
+        let creation_ts = std::time::Instant::now();
 
         // Init guest memory
         let arch_mem_regions = arch::arch_memory_regions(config.memory.size);
@@ -1513,6 +1525,7 @@ impl<'a> Vm<'a> {
             config,
             epoll,
             on_tty,
+            creation_ts,
         })
     }
 
