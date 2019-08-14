@@ -9,6 +9,7 @@ kvm-bindings = "0.1.1"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
 libc = "0.2.60"
 
+acpi_tables = { path ="../acpi_tables" }
 arch_gen = { path = "../arch_gen" }
 
 [dependencies.vm-memory]
