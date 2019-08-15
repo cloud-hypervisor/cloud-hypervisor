@@ -192,8 +192,8 @@ impl BusDevice for PciConfigIo {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         // `offset` is relative to 0xcf8
         let value = match offset {
-            0...3 => self.config_address,
-            4...7 => self.config_space_read(),
+            0..=3 => self.config_address,
+            4..=7 => self.config_space_read(),
             _ => 0xffff_ffff,
         };
 
@@ -214,8 +214,8 @@ impl BusDevice for PciConfigIo {
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
         // `offset` is relative to 0xcf8
         match offset {
-            o @ 0...3 => self.set_config_address(o, data),
-            o @ 4...7 => self.config_space_write(o - 4, data),
+            o @ 0..=3 => self.set_config_address(o, data),
+            o @ 4..=7 => self.config_space_write(o - 4, data),
             _ => (),
         };
     }

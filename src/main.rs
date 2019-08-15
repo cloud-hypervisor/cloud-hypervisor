@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use vmm::config;
 
 struct Logger {
-    output: Mutex<Box<std::io::Write + Send>>,
+    output: Mutex<Box<dyn std::io::Write + Send>>,
     start: std::time::Instant,
 }
 
@@ -195,7 +195,7 @@ fn main() {
         _ => LevelFilter::Trace,
     };
 
-    let log_file: Box<std::io::Write + Send> =
+    let log_file: Box<dyn std::io::Write + Send> =
         if let Some(file) = cmd_arguments.value_of("log-file") {
             Box::new(
                 std::fs::File::create(std::path::Path::new(file)).expect("Error creating log file"),
@@ -285,7 +285,7 @@ mod tests {
 
     struct Guest<'a> {
         tmp_dir: TempDir,
-        disk_config: &'a DiskConfig,
+        disk_config: &'a dyn DiskConfig,
         fw_path: String,
         network: GuestNetworkConfig,
     }
@@ -549,7 +549,7 @@ mod tests {
     }
 
     impl<'a> Guest<'a> {
-        fn new_from_ip_range(disk_config: &'a mut DiskConfig, class: &str, id: u8) -> Self {
+        fn new_from_ip_range(disk_config: &'a mut dyn DiskConfig, class: &str, id: u8) -> Self {
             let tmp_dir = TempDir::new("ch").unwrap();
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -576,7 +576,7 @@ mod tests {
             }
         }
 
-        fn new(disk_config: &'a mut DiskConfig) -> Self {
+        fn new(disk_config: &'a mut dyn DiskConfig) -> Self {
             let mut guard = NEXT_VM_ID.lock().unwrap();
             let id = *guard;
             *guard = id + 1;
@@ -767,8 +767,8 @@ mod tests {
             let mut bionic = BionicDiskConfig::new();
 
             vec![
-                &mut clear as &mut DiskConfig,
-                &mut bionic as &mut DiskConfig,
+                &mut clear as &mut dyn DiskConfig,
+                &mut bionic as &mut dyn DiskConfig,
             ]
             .iter_mut()
             .for_each(|disk_config| {

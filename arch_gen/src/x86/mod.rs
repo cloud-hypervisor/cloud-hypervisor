@@ -10,7 +10,7 @@
 #[allow(non_snake_case)]
 #[allow(
     clippy::unreadable_literal,
-    clippy::const_static_lifetime,
+    clippy::redundant_static_lifetimes,
     clippy::trivially_copy_pass_by_ref,
     clippy::useless_transmute,
     clippy::should_implement_trait,
@@ -19,8 +19,8 @@
 pub mod bootparam;
 #[allow(non_camel_case_types)]
 #[allow(non_upper_case_globals)]
-#[allow(clippy::unreadable_literal, clippy::const_static_lifetime)]
+#[allow(clippy::unreadable_literal, clippy::redundant_static_lifetimes)]
 pub mod mpspec;
 #[allow(non_upper_case_globals)]
-#[allow(clippy::unreadable_literal, clippy::const_static_lifetime)]
+#[allow(clippy::unreadable_literal, clippy::redundant_static_lifetimes)]
 pub mod msr_index;

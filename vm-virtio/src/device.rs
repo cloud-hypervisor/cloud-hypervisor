@@ -17,7 +17,7 @@ pub enum VirtioInterruptType {
 }
 
 pub type VirtioInterrupt = Box<
-    Fn(&VirtioInterruptType, Option<&Queue>) -> std::result::Result<(), std::io::Error>
+    dyn Fn(&VirtioInterruptType, Option<&Queue>) -> std::result::Result<(), std::io::Error>
         + Send
         + Sync,
 >;

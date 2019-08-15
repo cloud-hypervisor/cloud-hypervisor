@@ -97,10 +97,10 @@ pub enum DebugIoPortRange {
 impl DebugIoPortRange {
     fn from_u8(value: u8) -> DebugIoPortRange {
         match value {
-            0x00...0x1f => DebugIoPortRange::Firmware,
-            0x20...0x3f => DebugIoPortRange::Bootloader,
-            0x40...0x5f => DebugIoPortRange::Kernel,
-            0x60...0x7f => DebugIoPortRange::Userspace,
+            0x00..=0x1f => DebugIoPortRange::Firmware,
+            0x20..=0x3f => DebugIoPortRange::Bootloader,
+            0x40..=0x5f => DebugIoPortRange::Kernel,
+            0x60..=0x7f => DebugIoPortRange::Userspace,
             _ => DebugIoPortRange::Custom,
         }
     }
@@ -641,7 +641,7 @@ impl DeviceManager {
             ioapic: &ioapic,
         };
 
-        let serial_writer: Option<Box<io::Write + Send>> = match vm_info.vm_cfg.serial.mode {
+        let serial_writer: Option<Box<dyn io::Write + Send>> = match vm_info.vm_cfg.serial.mode {
             ConsoleOutputMode::File => Some(Box::new(
                 File::create(vm_info.vm_cfg.serial.file.unwrap())
                     .map_err(DeviceManagerError::SerialOutputFileOpen)?,
@@ -652,7 +652,7 @@ impl DeviceManager {
         let serial = if vm_info.vm_cfg.serial.mode != ConsoleOutputMode::Off {
             // Serial is tied to IRQ #4
             let serial_irq = 4;
-            let interrupt: Box<devices::Interrupt> = if let Some(ioapic) = &ioapic {
+            let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = &ioapic {
                 Box::new(UserIoapicIrq::new(ioapic.clone(), serial_irq))
             } else {
                 let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
@@ -681,7 +681,7 @@ impl DeviceManager {
         let pci_root = PciRoot::new(None);
         let mut pci = PciConfigIo::new(pci_root);
 
-        let console_writer: Option<Box<io::Write + Send>> = match vm_info.vm_cfg.console.mode {
+        let console_writer: Option<Box<dyn io::Write + Send>> = match vm_info.vm_cfg.console.mode {
             ConsoleOutputMode::File => Some(Box::new(
                 File::create(vm_info.vm_cfg.console.file.unwrap())
                     .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
@@ -798,7 +798,7 @@ impl DeviceManager {
                         let dev =
                             vm_virtio::Block::new(raw_img, disk_cfg.path.to_path_buf(), false)
                                 .map_err(DeviceManagerError::CreateVirtioBlock)?;
-                        Box::new(dev) as Box<vm_virtio::VirtioDevice>
+                        Box::new(dev) as Box<dyn vm_virtio::VirtioDevice>
                     }
                     ImageType::Qcow2 => {
                         let qcow_img = QcowFile::from(raw_img)
@@ -806,7 +806,7 @@ impl DeviceManager {
                         let dev =
                             vm_virtio::Block::new(qcow_img, disk_cfg.path.to_path_buf(), false)
                                 .map_err(DeviceManagerError::CreateVirtioBlock)?;
-                        Box::new(dev) as Box<vm_virtio::VirtioDevice>
+                        Box::new(dev) as Box<dyn vm_virtio::VirtioDevice>
                     }
                 };
 
@@ -835,7 +835,7 @@ impl DeviceManager {
         // Add virtio-net if required
         if let Some(net_list_cfg) = &vm_info.vm_cfg.net {
             for net_cfg in net_list_cfg.iter() {
-                let mut virtio_net_device: vm_virtio::Net;
+                let virtio_net_device: vm_virtio::Net;
 
                 if let Some(tap_if_name) = net_cfg.tap {
                     let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
@@ -1112,7 +1112,7 @@ impl DeviceManager {
     }
 
     fn add_virtio_pci_device(
-        virtio_device: Box<vm_virtio::VirtioDevice>,
+        virtio_device: Box<dyn vm_virtio::VirtioDevice>,
         memory: GuestMemoryMmap,
         allocator: &mut SystemAllocator,
         vm_fd: &Arc<VmFd>,
