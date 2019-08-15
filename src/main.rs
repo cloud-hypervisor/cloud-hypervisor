@@ -519,7 +519,7 @@ mod tests {
         }
     }
 
-    fn prepare_virtiofsd(tmp_dir: &TempDir) -> (std::process::Child, String) {
+    fn prepare_virtiofsd(tmp_dir: &TempDir, cache: &str) -> (std::process::Child, String) {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
@@ -541,7 +541,7 @@ mod tests {
                 format!("vhost_user_socket={}", virtiofsd_socket_path).as_str(),
             ])
             .args(&["-o", format!("source={}", shared_dir_path).as_str()])
-            .args(&["-o", "cache=always"])
+            .args(&["-o", format!("cache={}", cache).as_str()])
             .spawn()
             .unwrap();
 
@@ -1103,11 +1103,12 @@ mod tests {
         });
     }
 
-    fn test_virtio_fs(dax: bool, cache_size: Option<u64>) {
+    fn test_virtio_fs(dax: bool, cache_size: Option<u64>, virtiofsd_cache: &str) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
-            let (mut daemon_child, virtiofsd_socket_path) = prepare_virtiofsd(&guest.tmp_dir);
+            let (mut daemon_child, virtiofsd_socket_path) =
+                prepare_virtiofsd(&guest.tmp_dir, virtiofsd_cache);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -1191,17 +1192,17 @@ mod tests {
 
     #[test]
     fn test_virtio_fs_dax_on_default_cache_size() {
-        test_virtio_fs(true, None)
+        test_virtio_fs(true, None, "always")
     }
 
     #[test]
     fn test_virtio_fs_dax_on_cache_size_1_gib() {
-        test_virtio_fs(true, Some(0x4000_0000))
+        test_virtio_fs(true, Some(0x4000_0000), "always")
     }
 
     #[test]
     fn test_virtio_fs_dax_off() {
-        test_virtio_fs(false, None)
+        test_virtio_fs(false, None, "none")
     }
 
     #[test]
