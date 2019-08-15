@@ -55,7 +55,7 @@ const DEFAULT_BAUD_DIVISOR: u16 = 12; // 9600 bps
 pub struct Serial {
     interrupt_enable: u8,
     interrupt_identification: u8,
-    interrupt: Box<Interrupt>,
+    interrupt: Box<dyn Interrupt>,
     line_control: u8,
     line_status: u8,
     modem_control: u8,
@@ -63,11 +63,11 @@ pub struct Serial {
     scratch: u8,
     baud_divisor: u16,
     in_buffer: VecDeque<u8>,
-    out: Option<Box<io::Write + Send>>,
+    out: Option<Box<dyn io::Write + Send>>,
 }
 
 impl Serial {
-    pub fn new(interrupt: Box<Interrupt>, out: Option<Box<io::Write + Send>>) -> Serial {
+    pub fn new(interrupt: Box<dyn Interrupt>, out: Option<Box<dyn io::Write + Send>>) -> Serial {
         Serial {
             interrupt_enable: 0,
             interrupt_identification: DEFAULT_INTERRUPT_IDENTIFICATION,
@@ -84,12 +84,12 @@ impl Serial {
     }
 
     /// Constructs a Serial port ready for output.
-    pub fn new_out(interrupt: Box<Interrupt>, out: Box<io::Write + Send>) -> Serial {
+    pub fn new_out(interrupt: Box<dyn Interrupt>, out: Box<dyn io::Write + Send>) -> Serial {
         Self::new(interrupt, Some(out))
     }
 
     /// Constructs a Serial port with no connected output.
-    pub fn new_sink(interrupt: Box<Interrupt>) -> Serial {
+    pub fn new_sink(interrupt: Box<dyn Interrupt>) -> Serial {
         Self::new(interrupt, None)
     }
 

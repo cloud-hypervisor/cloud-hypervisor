@@ -223,7 +223,7 @@ pub struct VirtioPciDevice {
     msix_num: u16,
 
     // Virtio device reference and status
-    device: Box<VirtioDevice>,
+    device: Box<dyn VirtioDevice>,
     device_activated: bool,
 
     // PCI interrupts.
@@ -243,7 +243,11 @@ pub struct VirtioPciDevice {
 
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
-    pub fn new(memory: GuestMemoryMmap, device: Box<VirtioDevice>, msix_num: u16) -> Result<Self> {
+    pub fn new(
+        memory: GuestMemoryMmap,
+        device: Box<dyn VirtioDevice>,
+        msix_num: u16,
+    ) -> Result<Self> {
         let mut queue_evts = Vec::new();
         for _ in device.queue_max_sizes().iter() {
             queue_evts.push(EventFd::new(EFD_NONBLOCK)?)
@@ -267,15 +271,15 @@ impl VirtioPciDevice {
         let (class, subclass) = match VirtioDeviceType::from(device.device_type()) {
             VirtioDeviceType::TYPE_NET => (
                 PciClassCode::NetworkController,
-                &PciNetworkControllerSubclass::EthernetController as &PciSubclass,
+                &PciNetworkControllerSubclass::EthernetController as &dyn PciSubclass,
             ),
             VirtioDeviceType::TYPE_BLOCK => (
                 PciClassCode::MassStorage,
-                &PciMassStorageSubclass::MassStorage as &PciSubclass,
+                &PciMassStorageSubclass::MassStorage as &dyn PciSubclass,
             ),
             _ => (
                 PciClassCode::Other,
-                &PciVirtioSubclass::NonTransitionalBase as &PciSubclass,
+                &PciVirtioSubclass::NonTransitionalBase as &dyn PciSubclass,
             ),
         };
 

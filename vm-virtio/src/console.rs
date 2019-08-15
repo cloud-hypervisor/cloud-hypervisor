@@ -57,7 +57,7 @@ struct ConsoleEpollHandler {
     mem: GuestMemoryMmap,
     interrupt_cb: Arc<VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
-    out: Box<io::Write + Send>,
+    out: Box<dyn io::Write + Send>,
     input_queue_evt: EventFd,
     output_queue_evt: EventFd,
     input_evt: EventFd,
@@ -321,13 +321,13 @@ pub struct Console {
     acked_features: u64,
     config: Arc<Mutex<VirtioConsoleConfig>>,
     input: Arc<ConsoleInput>,
-    out: Option<Box<io::Write + Send>>,
+    out: Option<Box<dyn io::Write + Send>>,
 }
 
 impl Console {
     /// Create a new virtio console device that gets random data from /dev/urandom.
     pub fn new(
-        out: Option<Box<io::Write + Send>>,
+        out: Option<Box<dyn io::Write + Send>>,
         cols: u16,
         rows: u16,
     ) -> io::Result<(Console, Arc<ConsoleInput>)> {

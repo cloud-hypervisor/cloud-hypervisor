@@ -3,7 +3,7 @@
 
 #![allow(
     clippy::unreadable_literal,
-    clippy::const_static_lifetime,
+    clippy::redundant_static_lifetimes,
     clippy::cast_lossless,
     clippy::transmute_ptr_to_ptr,
     clippy::cast_ptr_alignment

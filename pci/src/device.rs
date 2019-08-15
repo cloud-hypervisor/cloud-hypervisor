@@ -18,7 +18,7 @@ pub struct InterruptParameters<'a> {
 }
 
 pub type InterruptDelivery =
-    Box<Fn(InterruptParameters) -> std::result::Result<(), std::io::Error> + Send + Sync>;
+    Box<dyn Fn(InterruptParameters) -> std::result::Result<(), std::io::Error> + Send + Sync>;
 
 #[derive(Debug)]
 pub enum Error {

@@ -1087,10 +1087,10 @@ impl QcowFile {
 
         let max_valid_cluster_offset = self.refcounts.max_valid_cluster_offset();
         if let Some(new_cluster) = self.raw_file.add_cluster_end(max_valid_cluster_offset)? {
-            return Ok(new_cluster);
+            Ok(new_cluster)
         } else {
             error!("No free clusters in get_new_cluster()");
-            return Err(std::io::Error::from_raw_os_error(ENOSPC));
+            Err(std::io::Error::from_raw_os_error(ENOSPC))
         }
     }
 

@@ -188,7 +188,6 @@ impl BusDevice for Ioapic {
             IOWIN_OFF => self.ioapic_write(value),
             _ => {
                 error!("IOAPIC: failed writing at offset {}", offset);
-                return;
             }
         }
     }
