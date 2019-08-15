@@ -548,6 +548,22 @@ mod tests {
         (child, virtiofsd_socket_path)
     }
 
+    #[derive(Debug)]
+    enum Error {
+        Connection,
+        Authentication,
+        Command,
+        Parsing,
+    }
+
+    impl std::error::Error for Error {}
+
+    impl std::fmt::Display for Error {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{:?}", self)
+        }
+    }
+
     impl<'a> Guest<'a> {
         fn new_from_ip_range(disk_config: &'a mut dyn DiskConfig, class: &str, id: u8) -> Self {
             let tmp_dir = TempDir::new("ch").unwrap();
@@ -591,14 +607,8 @@ mod tests {
             )
         }
 
-        fn ssh_command_ip(&self, command: &str, ip: &str) -> String {
+        fn ssh_command_ip(&self, command: &str, ip: &str) -> Result<String, Error> {
             let mut s = String::new();
-            #[derive(Debug)]
-            enum Error {
-                Connection,
-                Authentication,
-                Command,
-            };
 
             let mut counter = 0;
             loop {
@@ -626,114 +636,130 @@ mod tests {
                     Err(e) => {
                         counter += 1;
                         if counter >= 6 {
-                            panic!("Took too many attempts to run command. Last error: {:?}", e);
+                            return Err(e);
                         }
                     }
                 };
                 thread::sleep(std::time::Duration::new(10 * counter, 0));
             }
-            s
+            Ok(s)
         }
 
-        fn ssh_command(&self, command: &str) -> String {
+        fn ssh_command(&self, command: &str) -> Result<String, Error> {
             self.ssh_command_ip(command, &self.network.guest_ip)
         }
 
-        fn ssh_command_l1(&self, command: &str) -> String {
+        fn ssh_command_l1(&self, command: &str) -> Result<String, Error> {
             self.ssh_command_ip(command, &self.network.guest_ip)
         }
 
-        fn ssh_command_l2(&self, command: &str) -> String {
+        fn ssh_command_l2(&self, command: &str) -> Result<String, Error> {
             self.ssh_command_ip(command, &self.network.l2_guest_ip)
         }
 
-        fn get_cpu_count(&self) -> u32 {
-            self.ssh_command("grep -c processor /proc/cpuinfo")
+        fn get_cpu_count(&self) -> Result<u32, Error> {
+            Ok(self
+                .ssh_command("grep -c processor /proc/cpuinfo")?
                 .trim()
                 .parse()
-                .unwrap()
+                .map_err(|_| Error::Parsing)?)
         }
 
-        fn get_initial_apicid(&self) -> u32 {
-            self.ssh_command("grep \"initial apicid\" /proc/cpuinfo | grep -o \"[0-9]*\"")
+        fn get_initial_apicid(&self) -> Result<u32, Error> {
+            Ok(self
+                .ssh_command("grep \"initial apicid\" /proc/cpuinfo | grep -o \"[0-9]*\"")?
                 .trim()
                 .parse()
-                .unwrap()
+                .map_err(|_| Error::Parsing)?)
         }
 
-        fn get_total_memory(&self) -> u32 {
-            self.ssh_command("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")
+        fn get_total_memory(&self) -> Result<u32, Error> {
+            Ok(self
+                .ssh_command("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")?
                 .trim()
-                .parse::<u32>()
-                .unwrap()
+                .parse()
+                .map_err(|_| Error::Parsing)?)
         }
 
-        fn get_entropy(&self) -> u32 {
-            self.ssh_command("cat /proc/sys/kernel/random/entropy_avail")
+        fn get_entropy(&self) -> Result<u32, Error> {
+            Ok(self
+                .ssh_command("cat /proc/sys/kernel/random/entropy_avail")?
                 .trim()
-                .parse::<u32>()
-                .unwrap()
+                .parse()
+                .map_err(|_| Error::Parsing)?)
         }
 
-        fn get_pci_bridge_class(&self) -> String {
-            self.ssh_command("cat /sys/bus/pci/devices/0000:00:00.0/class")
+        fn get_pci_bridge_class(&self) -> Result<String, Error> {
+            Ok(self
+                .ssh_command("cat /sys/bus/pci/devices/0000:00:00.0/class")?
+                .trim()
+                .to_string())
+        }
+
+        fn get_pci_device_ids(&self) -> Result<String, Error> {
+            Ok(self
+                .ssh_command("cat /sys/bus/pci/devices/*/device")?
+                .trim()
+                .to_string())
+        }
+
+        fn get_pci_vendor_ids(&self) -> Result<String, Error> {
+            Ok(self
+                .ssh_command("cat /sys/bus/pci/devices/*/vendor")?
+                .trim()
+                .to_string())
+        }
+
+        fn is_console_detected(&self) -> Result<bool, Error> {
+            Ok(!(self
+                .ssh_command("dmesg | grep \"hvc0] enabled\"")?
                 .trim()
                 .to_string()
-        }
-        fn get_pci_device_ids(&self) -> String {
-            self.ssh_command("cat /sys/bus/pci/devices/*/device")
-                .trim()
-                .to_string()
+                .is_empty()))
         }
 
-        fn get_pci_vendor_ids(&self) -> String {
-            self.ssh_command("cat /sys/bus/pci/devices/*/vendor")
-                .trim()
-                .to_string()
-        }
-
-        fn is_console_detected(&self) -> bool {
-            !(self
-                .ssh_command("dmesg | grep \"hvc0] enabled\"")
-                .trim()
-                .to_string()
-                .is_empty())
-        }
-
-        fn does_device_vendor_pair_match(&self, device_id: &str, vendor_id: &str) -> bool {
+        fn does_device_vendor_pair_match(
+            &self,
+            device_id: &str,
+            vendor_id: &str,
+        ) -> Result<bool, Error> {
             // We are checking if console device's device id and vendor id pair matches
-            let devices = self.get_pci_device_ids();
+            let devices = self.get_pci_device_ids()?;
             let devices: Vec<&str> = devices.split('\n').collect();
-            let vendors = self.get_pci_vendor_ids();
+            let vendors = self.get_pci_vendor_ids()?;
             let vendors: Vec<&str> = vendors.split('\n').collect();
 
             for (index, d_id) in devices.iter().enumerate() {
                 if *d_id == device_id {
                     if let Some(v_id) = vendors.get(index) {
                         if *v_id == vendor_id {
-                            return true;
+                            return Ok(true);
                         }
                     }
                 }
             }
 
-            false
+            Ok(false)
         }
 
-        fn valid_virtio_fs_cache_size(&self, dax: bool, cache_size: Option<u64>) -> bool {
+        fn valid_virtio_fs_cache_size(
+            &self,
+            dax: bool,
+            cache_size: Option<u64>,
+        ) -> Result<bool, Error> {
             let shm_region = self
-                .ssh_command("sudo -E bash -c 'cat /proc/iomem' | grep virtio-pci-shm")
+                .ssh_command("sudo -E bash -c 'cat /proc/iomem' | grep virtio-pci-shm")?
                 .trim()
                 .to_string();
 
             if shm_region.is_empty() {
-                return !dax;
+                return Ok(!dax);
             }
 
             // From this point, the region is not empty, hence it is an error
             // if DAX is off.
             if !dax {
-                return false;
+                return Ok(false);
             }
 
             let cache = if let Some(cache) = cache_size {
@@ -745,18 +771,18 @@ mod tests {
 
             let args: Vec<&str> = shm_region.split(':').collect();
             if args.is_empty() {
-                return false;
+                return Ok(false);
             }
 
             let args: Vec<&str> = args[0].trim().split('-').collect();
             if args.len() != 2 {
-                return false;
+                return Ok(false);
             }
 
-            let start_addr = u64::from_str_radix(args[0], 16).unwrap();
-            let end_addr = u64::from_str_radix(args[1], 16).unwrap();
+            let start_addr = u64::from_str_radix(args[0], 16).map_err(|_| Error::Parsing)?;
+            let end_addr = u64::from_str_radix(args[1], 16).map_err(|_| Error::Parsing)?;
 
-            cache == (end_addr - start_addr + 1)
+            Ok(cache == (end_addr - start_addr + 1))
         }
     }
 
@@ -798,13 +824,17 @@ mod tests {
 
                 thread::sleep(std::time::Duration::new(20, 0));
 
-                aver_eq!(tb, guest.get_cpu_count(), 1);
-                aver_eq!(tb, guest.get_initial_apicid(), 0);
-                aver!(tb, guest.get_total_memory() > 490_000);
-                aver!(tb, guest.get_entropy() >= 900);
-                aver_eq!(tb, guest.get_pci_bridge_class(), "0x060000");
+                aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
+                aver_eq!(tb, guest.get_initial_apicid().unwrap_or(1), 0);
+                aver!(tb, guest.get_total_memory().unwrap_or_default() > 490_000);
+                aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
+                aver_eq!(
+                    tb,
+                    guest.get_pci_bridge_class().unwrap_or_default(),
+                    "0x060000"
+                );
 
-                guest.ssh_command("sudo reboot");
+                guest.ssh_command("sudo reboot").unwrap_or_default();
                 thread::sleep(std::time::Duration::new(10, 0));
                 let _ = child.kill();
                 let _ = child.wait();
@@ -841,9 +871,9 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
-            aver_eq!(tb, guest.get_cpu_count(), 2);
+            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 2);
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -879,9 +909,9 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
-            aver!(tb, guest.get_total_memory() > 5_063_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 5_063_000);
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -921,13 +951,14 @@ mod tests {
                 tb,
                 guest
                     .ssh_command("grep -c PCI-MSI /proc/interrupts")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or_default(),
                 10
             );
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -970,20 +1001,21 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
-            aver_eq!(tb, guest.get_cpu_count(), 1);
-            aver!(tb, guest.get_total_memory() > 496_000);
-            aver!(tb, guest.get_entropy() >= 900);
+            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
+            aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
             aver_eq!(
                 tb,
                 guest
                     .ssh_command("grep -c PCI-MSI /proc/interrupts")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or_default(),
                 10
             );
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1026,20 +1058,21 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
-            aver_eq!(tb, guest.get_cpu_count(), 1);
-            aver!(tb, guest.get_total_memory() > 496_000);
-            aver!(tb, guest.get_entropy() >= 900);
+            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
+            aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
             aver_eq!(
                 tb,
                 guest
                     .ssh_command("grep -c PCI-MSI /proc/interrupts")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or_default(),
                 10
             );
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1080,22 +1113,24 @@ mod tests {
                 tb,
                 guest
                     .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'timer'")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or(1),
                 0
             );
             aver_eq!(
                 tb,
                 guest
                     .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'cascade'")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or(1),
                 0
             );
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1168,21 +1203,48 @@ mod tests {
                  echo ok",
                 dax_mount_param
             );
-            aver_eq!(tb, guest.ssh_command(&mount_cmd).trim(), "ok");
+            aver_eq!(
+                tb,
+                guest.ssh_command(&mount_cmd).unwrap_or_default().trim(),
+                "ok"
+            );
             // Check the cache size is the expected one
-            aver_eq!(tb, guest.valid_virtio_fs_cache_size(dax, cache_size), true);
+            aver_eq!(
+                tb,
+                guest
+                    .valid_virtio_fs_cache_size(dax, cache_size)
+                    .unwrap_or_default(),
+                true
+            );
             // Check file1 exists and its content is "foo"
-            aver_eq!(tb, guest.ssh_command("cat mount_dir/file1").trim(), "foo");
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("cat mount_dir/file1")
+                    .unwrap_or_default()
+                    .trim(),
+                "foo"
+            );
             // Check file2 does not exist
             aver_ne!(
                 tb,
-                guest.ssh_command("ls mount_dir/file2").trim(),
+                guest
+                    .ssh_command("ls mount_dir/file2")
+                    .unwrap_or_default()
+                    .trim(),
                 "mount_dir/file2"
             );
             // Check file3 exists and its content is "bar"
-            aver_eq!(tb, guest.ssh_command("cat mount_dir/file3").trim(), "bar");
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("cat mount_dir/file3")
+                    .unwrap_or_default()
+                    .trim(),
+                "bar"
+            );
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             let _ = child.wait();
             let _ = daemon_child.wait();
             Ok(())
@@ -1250,9 +1312,16 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             // Check for the presence of /dev/pmem0
-            aver_eq!(tb, guest.ssh_command("ls /dev/pmem0").trim(), "/dev/pmem0");
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ls /dev/pmem0")
+                    .unwrap_or_default()
+                    .trim(),
+                "/dev/pmem0"
+            );
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             let _ = child.wait();
 
             Ok(())
@@ -1292,10 +1361,10 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             // Simple checks to validate the VM booted properly
-            aver_eq!(tb, guest.get_cpu_count(), 1);
-            aver!(tb, guest.get_total_memory() > 496_000);
+            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             let _ = child.wait();
 
             Ok(())
@@ -1340,13 +1409,14 @@ mod tests {
                 tb,
                 guest
                     .ssh_command("ip -o link | wc -l")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or_default(),
                 4
             );
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1388,9 +1458,10 @@ mod tests {
                 tb,
                 guest
                     .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or(1),
                 0
             );
 
@@ -1399,13 +1470,14 @@ mod tests {
                 tb,
                 guest
                     .ssh_command("cat /proc/interrupts | grep -c 'IO-APIC'")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or(1),
                 0
             );
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1450,13 +1522,14 @@ mod tests {
                 tb,
                 guest
                     .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or_default(),
                 1
             );
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             match child.wait_with_output() {
@@ -1509,13 +1582,14 @@ mod tests {
                 tb,
                 guest
                     .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or_default(),
                 1
             );
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             match child.wait_with_output() {
@@ -1570,20 +1644,21 @@ mod tests {
                 tb,
                 guest
                     .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or_default(),
                 1
             );
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Do this check after shutdown of the VM as an easy way to ensure
             // all writes are flushed to disk
-            let mut f = std::fs::File::open(serial_path).unwrap();
+            let mut f = std::fs::File::open(serial_path)?;
             let mut buf = String::new();
-            f.read_to_string(&mut buf).unwrap();
+            f.read_to_string(&mut buf)?;
             aver!(tb, buf.contains("cloud login:"));
 
             let _ = child.kill();
@@ -1625,14 +1700,19 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
-            aver!(tb, guest.does_device_vendor_pair_match("0x1043", "0x1af4"));
-            aver!(tb, guest.is_console_detected());
+            aver!(
+                tb,
+                guest
+                    .does_device_vendor_pair_match("0x1043", "0x1af4")
+                    .unwrap_or_default()
+            );
+            aver!(tb, guest.is_console_detected().unwrap_or_default());
 
             let text = String::from("On a branch floating down river a cricket, singing.");
             let cmd = format!("sudo -E bash -c 'echo {} > /dev/hvc0'", text);
-            guest.ssh_command(&cmd);
+            guest.ssh_command(&cmd)?;
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
 
@@ -1682,16 +1762,16 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             // Test that there is a ttyS0
-            aver!(tb, guest.is_console_detected());
+            aver!(tb, guest.is_console_detected().unwrap_or_default());
 
-            guest.ssh_command("sudo reboot");
+            guest.ssh_command("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Do this check after shutdown of the VM as an easy way to ensure
             // all writes are flushed to disk
-            let mut f = std::fs::File::open(console_path).unwrap();
+            let mut f = std::fs::File::open(console_path)?;
             let mut buf = String::new();
-            f.read_to_string(&mut buf).unwrap();
+            f.read_to_string(&mut buf)?;
             aver!(tb, buf.contains("cloud login:"));
 
             let _ = child.kill();
@@ -1808,7 +1888,7 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(30, 0));
 
-            guest.ssh_command_l1("sudo systemctl start vfio");
+            guest.ssh_command_l1("sudo systemctl start vfio")?;
             thread::sleep(std::time::Duration::new(30, 0));
 
             // We booted our cloud hypervisor L2 guest with a "VFIOTAG" tag
@@ -1820,16 +1900,17 @@ mod tests {
                 tb,
                 guest
                     .ssh_command_l2("cat /proc/cmdline | grep -c 'VFIOTAG'")
+                    .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
-                    .unwrap(),
+                    .unwrap_or_default(),
                 1
             );
 
-            guest.ssh_command_l2("sudo reboot");
+            guest.ssh_command_l2("sudo reboot")?;
             thread::sleep(std::time::Duration::new(10, 0));
 
-            guest.ssh_command_l1("sudo shutdown -h now");
+            guest.ssh_command_l1("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
 
             let _ = qemu_child.kill();
