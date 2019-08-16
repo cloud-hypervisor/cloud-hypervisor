@@ -79,16 +79,16 @@ if [ ! -f "$VMLINUX_IMAGE" ]; then
 fi
 
 VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
-VIRTIOFSD_DIR="virtiofsd_build"
+QEMU_DIR="qemu_build"
 if [ ! -f "$VIRTIOFSD" ]; then
     pushd $WORKLOADS_DIR
-    git clone --depth 1 "https://github.com/sboeuf/qemu.git" -b "virtio-fs" $VIRTIOFSD_DIR
-    pushd $VIRTIOFSD_DIR
+    git clone --depth 1 "https://github.com/sboeuf/qemu.git" -b "virtio-fs" $QEMU_DIR
+    pushd $QEMU_DIR
     ./configure --prefix=$PWD --target-list=x86_64-softmmu
     make virtiofsd -j `nproc`
     cp virtiofsd $VIRTIOFSD
     popd
-    rm -rf $VIRTIOFSD_DIR
+    rm -rf $QEMU_DIR
     sudo setcap cap_sys_admin+epi "virtiofsd"
     popd
 fi
