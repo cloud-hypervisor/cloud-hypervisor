@@ -17,6 +17,7 @@ sudo adduser $USER kvm
 newgrp kvm << EOF || exit 1
 for f in \$(find . -name Cargo.toml -printf '%h\n' | sort -u); do
   pushd \$f > /dev/null;
+  export RUST_BACKTRACE=1
   cargo test || exit 1;
   popd > /dev/null;
 done
