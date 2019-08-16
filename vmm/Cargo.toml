@@ -10,7 +10,7 @@ devices = { path = "../devices" }
 epoll = "4.1.0"
 kvm-bindings = "0.1.1"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
-libc = "0.2.61"
+libc = "0.2.62"
 log = "0.4.8"
 net_util = { path = "../net_util" }
 pci = {path = "../pci"}
