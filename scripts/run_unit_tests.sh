@@ -13,8 +13,11 @@ pushd target/debug
 ls  | grep net_util | grep -v "\.d" | xargs -n 1 sudo setcap cap_net_admin,cap_net_raw+ep
 popd
 
-for f in $(find . -name Cargo.toml -printf '%h\n' | sort -u); do
-  pushd $f > /dev/null;
+sudo adduser $USER kvm
+newgrp kvm << EOF || exit 1
+for f in \$(find . -name Cargo.toml -printf '%h\n' | sort -u); do
+  pushd \$f > /dev/null;
   cargo test || exit 1;
   popd > /dev/null;
 done
+EOF
