@@ -74,7 +74,7 @@ if [ ! -f "$VMLINUX_IMAGE" ]; then
     cp vmlinux $VMLINUX_IMAGE
     cp arch/x86/boot/bzImage $BZIMAGE_IMAGE
     popd
-    rm -r $LINUX_CUSTOM_DIR
+    rm -rf $LINUX_CUSTOM_DIR
     popd
 fi
 
@@ -88,7 +88,7 @@ if [ ! -f "$VIRTIOFSD" ]; then
     make virtiofsd -j `nproc`
     cp virtiofsd $VIRTIOFSD
     popd
-    rm -r $VIRTIOFSD_DIR
+    rm -rf $VIRTIOFSD_DIR
     sudo setcap cap_sys_admin+epi "virtiofsd"
     popd
 fi
