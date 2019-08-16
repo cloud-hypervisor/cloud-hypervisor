@@ -132,6 +132,7 @@ sudo setcap cap_net_admin+ep /usr/bin/qemu-system-x86_64
 
 sudo adduser $USER kvm
 newgrp kvm << EOF
+export RUST_BACKTRACE=1
 cargo test --features "integration_tests"
 EOF
 RES=$?
