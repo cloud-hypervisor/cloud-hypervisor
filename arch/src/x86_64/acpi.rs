@@ -7,7 +7,27 @@ use vm_memory::{GuestAddress, GuestMemoryMmap};
 
 use vm_memory::{Address, ByteValued, Bytes};
 
-pub fn create_acpi_tables(guest_mem: &GuestMemoryMmap) -> GuestAddress {
+#[repr(packed)]
+struct LocalAPIC {
+    pub r#type: u8,
+    pub length: u8,
+    pub processor_id: u8,
+    pub apic_id: u8,
+    pub flags: u32,
+}
+
+#[repr(packed)]
+#[derive(Default)]
+struct IOAPIC {
+    pub r#type: u8,
+    pub length: u8,
+    pub ioapic_id: u8,
+    _reserved: u8,
+    pub apic_address: u32,
+    pub gsi_base: u32,
+}
+
+pub fn create_acpi_tables(guest_mem: &GuestMemoryMmap, num_cpus: u8) -> GuestAddress {
     // RSDP is at the EBDA
     let rsdp_offset = super::EBDA_START;
     let mut tables: Vec<u64> = Vec::new();
@@ -43,19 +63,44 @@ pub fn create_acpi_tables(guest_mem: &GuestMemoryMmap) -> GuestAddress {
         .expect("Error writing FACP table");
     tables.push(facp_offset.0);
 
+    // MADT
+    let mut madt = SDT::new(*b"APIC", 44, 5, *b"CLOUDH", *b"CHMADT  ", 1);
+    madt.write(36, super::mptable::APIC_DEFAULT_PHYS_BASE);
+
+    for cpu in 0..num_cpus {
+        let lapic = LocalAPIC {
+            r#type: 0,
+            length: 8,
+            processor_id: cpu,
+            apic_id: cpu,
+            flags: 1,
+        };
+        madt.append(lapic);
+    }
+
+    madt.append(IOAPIC {
+        r#type: 1,
+        length: 12,
+        ioapic_id: 0,
+        apic_address: super::mptable::IO_APIC_DEFAULT_PHYS_BASE,
+        gsi_base: 0,
+        ..Default::default()
+    });
+
+    let madt_offset = facp_offset.checked_add(facp.len() as u64).unwrap();
+    guest_mem
+        .write_slice(madt.as_slice(), madt_offset)
+        .expect("Error writing MADT table");
+    tables.push(madt_offset.0);
+
     // XSDT
-    let mut xsdt = SDT::new(
-        *b"XSDT",
-        36 + 8 * tables.len() as u32,
-        1,
-        *b"CLOUDH",
-        *b"CHXSDT  ",
-        1,
-    );
-    xsdt.write(36, tables[0]);
+    let mut xsdt = SDT::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
+    for table in tables {
+        xsdt.append(table);
+    }
     xsdt.update_checksum();
 
-    let xsdt_offset = facp_offset.checked_add(facp.len() as u64).unwrap();
+    let xsdt_offset = madt_offset.checked_add(madt.len() as u64).unwrap();
     guest_mem
         .write_slice(xsdt.as_slice(), xsdt_offset)
         .expect("Error writing XSDT table");
