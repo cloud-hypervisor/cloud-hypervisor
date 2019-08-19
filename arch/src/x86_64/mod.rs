@@ -46,7 +46,7 @@ impl From<Error> for super::Error {
 }
 
 // Where BIOS/VGA magic would live on a real PC.
-const EBDA_START: GuestAddress = GuestAddress(0x9fc00);
+const EBDA_START: GuestAddress = GuestAddress(0xa0000);
 const FIRST_ADDR_PAST_32BITS: GuestAddress = GuestAddress(1 << 32);
 
 // Our 32-bit memory gap starts at 3G.
