@@ -1781,6 +1781,7 @@ impl<'a> Vm<'a> {
 
             let vcpu_thread_barrier = vcpu_thread_barrier.clone();
 
+            let exit_evt = self.devices.exit_evt.try_clone().unwrap();
             self.vcpus.push(
                 thread::Builder::new()
                     .name(format!("cloud-hypervisor_vcpu{}", vcpu.id))
@@ -1802,6 +1803,7 @@ impl<'a> Vm<'a> {
                         vcpu_thread_barrier.wait();
 
                         while vcpu.run().is_ok() {}
+                        exit_evt.write(1).unwrap();
                     })
                     .map_err(Error::VcpuSpawn)?,
             );
