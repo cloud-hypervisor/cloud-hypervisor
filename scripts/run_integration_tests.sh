@@ -89,7 +89,7 @@ if [ ! -f "$VIRTIOFSD" ]; then
     cp virtiofsd $VIRTIOFSD
     popd
     rm -rf $QEMU_DIR
-    sudo setcap cap_sys_admin+epi "virtiofsd"
+    sudo setcap cap_dac_override,cap_sys_admin+epi "virtiofsd"
     popd
 fi
 
