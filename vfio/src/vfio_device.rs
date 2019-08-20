@@ -513,14 +513,18 @@ pub struct VfioDevice {
     group: VfioGroup,
     regions: Vec<VfioRegion>,
     irqs: HashMap<u32, VfioIrq>,
-    mem: GuestMemoryMmap,
+    mem: Arc<GuestMemoryMmap>,
 }
 
 impl VfioDevice {
     /// Create a new vfio device, then guest read/write on this device could be
     /// transfered into kernel vfio.
     /// sysfspath specify the vfio device path in sys file system.
-    pub fn new(sysfspath: &Path, device_fd: Arc<DeviceFd>, mem: GuestMemoryMmap) -> Result<Self> {
+    pub fn new(
+        sysfspath: &Path,
+        device_fd: Arc<DeviceFd>,
+        mem: Arc<GuestMemoryMmap>,
+    ) -> Result<Self> {
         let uuid_path: PathBuf = [sysfspath, Path::new("iommu_group")].iter().collect();
         let group_path = uuid_path.read_link().map_err(|_| VfioError::InvalidPath)?;
         let group_osstr = group_path.file_name().ok_or(VfioError::InvalidPath)?;

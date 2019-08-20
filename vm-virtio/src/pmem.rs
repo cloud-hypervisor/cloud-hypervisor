@@ -154,7 +154,7 @@ impl Request {
 
 struct PmemEpollHandler {
     queue: Queue,
-    mem: GuestMemoryMmap,
+    mem: Arc<GuestMemoryMmap>,
     disk: File,
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evt: EventFd,
@@ -382,7 +382,7 @@ impl VirtioDevice for Pmem {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryMmap,
+        mem: Arc<GuestMemoryMmap>,
         interrupt_cb: Arc<VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

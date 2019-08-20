@@ -115,7 +115,7 @@ fn vnet_hdr_len() -> usize {
 }
 
 struct NetEpollHandler {
-    mem: GuestMemoryMmap,
+    mem: Arc<GuestMemoryMmap>,
     tap: Tap,
     rx: RxVirtio,
     tx: TxVirtio,
@@ -572,7 +572,7 @@ impl VirtioDevice for Net {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryMmap,
+        mem: Arc<GuestMemoryMmap>,
         interrupt_cb: Arc<VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

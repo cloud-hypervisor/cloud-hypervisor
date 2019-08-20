@@ -518,7 +518,7 @@ impl Vcpu {
 }
 
 struct VmInfo<'a> {
-    memory: GuestMemoryMmap,
+    memory: &'a Arc<GuestMemoryMmap>,
     vm_fd: &'a Arc<VmFd>,
     vm_cfg: &'a VmConfig<'a>,
 }
@@ -697,7 +697,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::CreateVirtioConsole)?;
             DeviceManager::add_virtio_pci_device(
                 Box::new(virtio_console_device),
-                vm_info.memory.clone(),
+                vm_info.memory,
                 allocator,
                 vm_info.vm_fd,
                 &mut pci,
@@ -812,7 +812,7 @@ impl DeviceManager {
 
                 DeviceManager::add_virtio_pci_device(
                     block,
-                    vm_info.memory.clone(),
+                    vm_info.memory,
                     allocator,
                     vm_info.vm_fd,
                     pci,
@@ -849,7 +849,7 @@ impl DeviceManager {
 
                 DeviceManager::add_virtio_pci_device(
                     Box::new(virtio_net_device),
-                    vm_info.memory.clone(),
+                    vm_info.memory,
                     allocator,
                     vm_info.vm_fd,
                     pci,
@@ -876,7 +876,7 @@ impl DeviceManager {
 
             DeviceManager::add_virtio_pci_device(
                 Box::new(virtio_rng_device),
-                vm_info.memory.clone(),
+                vm_info.memory,
                 allocator,
                 vm_info.vm_fd,
                 pci,
@@ -965,7 +965,7 @@ impl DeviceManager {
 
                     DeviceManager::add_virtio_pci_device(
                         Box::new(virtio_fs_device),
-                        vm_info.memory.clone(),
+                        vm_info.memory,
                         allocator,
                         vm_info.vm_fd,
                         pci,
@@ -1046,7 +1046,7 @@ impl DeviceManager {
 
                 DeviceManager::add_virtio_pci_device(
                     Box::new(virtio_pmem_device),
-                    vm_info.memory.clone(),
+                    vm_info.memory,
                     allocator,
                     vm_info.vm_fd,
                     pci,
@@ -1113,7 +1113,7 @@ impl DeviceManager {
 
     fn add_virtio_pci_device(
         virtio_device: Box<dyn vm_virtio::VirtioDevice>,
-        memory: GuestMemoryMmap,
+        memory: &Arc<GuestMemoryMmap>,
         allocator: &mut SystemAllocator,
         vm_fd: &Arc<VmFd>,
         pci: &mut PciConfigIo,
@@ -1126,7 +1126,7 @@ impl DeviceManager {
             0
         };
 
-        let mut virtio_pci_device = VirtioPciDevice::new(memory, virtio_device, msix_num)
+        let mut virtio_pci_device = VirtioPciDevice::new(memory.clone(), virtio_device, msix_num)
             .map_err(DeviceManagerError::VirtioDevice)?;
 
         let bars = virtio_pci_device
@@ -1317,7 +1317,7 @@ impl AsRawFd for EpollContext {
 pub struct Vm<'a> {
     fd: Arc<VmFd>,
     kernel: File,
-    memory: GuestMemoryMmap,
+    memory: Arc<GuestMemoryMmap>,
     vcpus: Vec<thread::JoinHandle<()>>,
     devices: DeviceManager,
     cpuid: CpuId,
@@ -1485,8 +1485,12 @@ impl<'a> Vm<'a> {
                 .ok_or(Error::MemoryRangeAllocation)?;
         }
 
+        // Convert the guest memory into an Arc. The point being able to use it
+        // anywhere in the code, no matter which thread might use it.
+        let guest_memory = Arc::new(guest_memory);
+
         let vm_info = VmInfo {
-            memory: guest_memory.clone(),
+            memory: &guest_memory,
             vm_fd: &fd,
             vm_cfg: &config,
         };
@@ -1533,7 +1537,7 @@ impl<'a> Vm<'a> {
         let cmdline_cstring =
             CString::new(self.config.cmdline.args.clone()).map_err(|_| Error::CmdLine)?;
         let entry_addr = match linux_loader::loader::Elf::load(
-            &self.memory,
+            self.memory.as_ref(),
             None,
             &mut self.kernel,
             Some(arch::HIMEM_START),
@@ -1541,7 +1545,7 @@ impl<'a> Vm<'a> {
             Ok(entry_addr) => entry_addr,
             Err(linux_loader::loader::Error::InvalidElfMagicNumber) => {
                 linux_loader::loader::BzImage::load(
-                    &self.memory,
+                    self.memory.as_ref(),
                     None,
                     &mut self.kernel,
                     Some(arch::HIMEM_START),
@@ -1552,7 +1556,7 @@ impl<'a> Vm<'a> {
         };
 
         linux_loader::loader::load_cmdline(
-            &self.memory,
+            self.memory.as_ref(),
             self.config.cmdline.offset,
             &cmdline_cstring,
         )

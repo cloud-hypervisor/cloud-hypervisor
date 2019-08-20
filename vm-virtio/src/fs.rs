@@ -368,7 +368,7 @@ impl Fs {
 
     fn setup_vu(
         &mut self,
-        mem: &GuestMemoryMmap,
+        mem: &Arc<GuestMemoryMmap>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> Result<Vec<(EventFd, Queue)>> {
@@ -527,7 +527,7 @@ impl VirtioDevice for Fs {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryMmap,
+        mem: Arc<GuestMemoryMmap>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
