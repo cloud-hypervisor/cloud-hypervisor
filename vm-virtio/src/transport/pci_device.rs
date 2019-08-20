@@ -235,7 +235,7 @@ pub struct VirtioPciDevice {
     queue_evts: Vec<EventFd>,
 
     // Guest memory
-    memory: Option<GuestMemoryMmap>,
+    memory: Option<Arc<GuestMemoryMmap>>,
 
     // Setting PCI BAR
     settings_bar: u8,
@@ -244,7 +244,7 @@ pub struct VirtioPciDevice {
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
     pub fn new(
-        memory: GuestMemoryMmap,
+        memory: Arc<GuestMemoryMmap>,
         device: Box<dyn VirtioDevice>,
         msix_num: u16,
     ) -> Result<Self> {

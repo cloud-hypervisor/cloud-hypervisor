@@ -32,7 +32,7 @@ const KILL_EVENT: DeviceEventT = 1;
 
 struct RngEpollHandler {
     queues: Vec<Queue>,
-    mem: GuestMemoryMmap,
+    mem: Arc<GuestMemoryMmap>,
     random_file: File,
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evt: EventFd,
@@ -237,7 +237,7 @@ impl VirtioDevice for Rng {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryMmap,
+        mem: Arc<GuestMemoryMmap>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

@@ -67,7 +67,7 @@ pub trait VirtioDevice: Send {
     /// Activates this device for real usage.
     fn activate(
         &mut self,
-        mem: GuestMemoryMmap,
+        mem: Arc<GuestMemoryMmap>,
         interrupt_evt: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,

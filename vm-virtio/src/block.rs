@@ -321,7 +321,7 @@ impl Request {
 
 struct BlockEpollHandler<T: DiskFile> {
     queues: Vec<Queue>,
-    mem: GuestMemoryMmap,
+    mem: Arc<GuestMemoryMmap>,
     disk_image: T,
     disk_nsectors: u64,
     interrupt_cb: Arc<VirtioInterrupt>,
@@ -610,7 +610,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryMmap,
+        mem: Arc<GuestMemoryMmap>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

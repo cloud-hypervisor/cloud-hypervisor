@@ -271,7 +271,7 @@ mod tests {
         }
         fn activate(
             &mut self,
-            _mem: GuestMemoryMmap,
+            _mem: Arc<GuestMemoryMmap>,
             _interrupt_evt: Arc<VirtioInterrupt>,
             _queues: Vec<Queue>,
             _queue_evts: Vec<EventFd>,

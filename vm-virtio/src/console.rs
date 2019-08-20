@@ -54,7 +54,7 @@ unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {
     queues: Vec<Queue>,
-    mem: GuestMemoryMmap,
+    mem: Arc<GuestMemoryMmap>,
     interrupt_cb: Arc<VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
     out: Box<dyn io::Write + Send>,
@@ -432,7 +432,7 @@ impl VirtioDevice for Console {
 
     fn activate(
         &mut self,
-        mem: GuestMemoryMmap,
+        mem: Arc<GuestMemoryMmap>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
