@@ -51,7 +51,7 @@ const EBDA_START: GuestAddress = GuestAddress(0xa0000);
 const FIRST_ADDR_PAST_32BITS: GuestAddress = GuestAddress(1 << 32);
 
 // Our 32-bit memory gap starts at 3G.
-const MEM_32BIT_GAP_START: GuestAddress = GuestAddress(0xc000_0000);
+pub const MEM_32BIT_GAP_START: GuestAddress = GuestAddress(0xc000_0000);
 
 // Our 32-bit memory gap size is 1GB.
 const MEM_32BIT_GAP_SIZE: GuestUsize = (1024 << 20);
