@@ -27,6 +27,16 @@ struct IOAPIC {
     pub gsi_base: u32,
 }
 
+#[repr(packed)]
+#[derive(Default)]
+struct PCIRangeEntry {
+    pub base_address: u64,
+    pub segment: u16,
+    pub start: u8,
+    pub end: u8,
+    _reserved: u32
+}
+
 pub fn create_acpi_tables(guest_mem: &GuestMemoryMmap, num_cpus: u8) -> GuestAddress {
     // RSDP is at the EBDA
     let rsdp_offset = super::EBDA_START;
@@ -93,6 +103,24 @@ pub fn create_acpi_tables(guest_mem: &GuestMemoryMmap, num_cpus: u8) -> GuestAdd
         .expect("Error writing MADT table");
     tables.push(madt_offset.0);
 
+    // MCFG
+    let mut mcfg = SDT::new(*b"MCFG", 60, 1, *b"CLOUDH", *b"CHMCFG  ", 1);
+
+    // 32-bit PCI enhanced configuration mechanism
+    mcfg.append(PCIRangeEntry {
+        base_address: super::MEM_32BIT_DEVICES_GAP_SIZE,
+        segment: 0,
+        start: 0,
+        end: 0xff,
+        ..Default::default()
+    });
+
+    let mcfg_offset = madt_offset.checked_add(madt.len() as u64).unwrap();
+    guest_mem
+        .write_slice(mcfg.as_slice(), mcfg_offset)
+        .expect("Error writing MCFG table");
+    tables.push(mcfg_offset.0);
+
     // XSDT
     let mut xsdt = SDT::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
     for table in tables {
@@ -100,7 +128,7 @@ pub fn create_acpi_tables(guest_mem: &GuestMemoryMmap, num_cpus: u8) -> GuestAdd
     }
     xsdt.update_checksum();
 
-    let xsdt_offset = madt_offset.checked_add(madt.len() as u64).unwrap();
+    let xsdt_offset = mcfg_offset.checked_add(mcfg.len() as u64).unwrap();
     guest_mem
         .write_slice(xsdt.as_slice(), xsdt_offset)
         .expect("Error writing XSDT table");
