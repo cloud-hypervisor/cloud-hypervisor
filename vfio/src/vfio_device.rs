@@ -14,7 +14,7 @@ use std::mem;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::prelude::FileExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::u32;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::*;
@@ -513,7 +513,7 @@ pub struct VfioDevice {
     group: VfioGroup,
     regions: Vec<VfioRegion>,
     irqs: HashMap<u32, VfioIrq>,
-    mem: Arc<GuestMemoryMmap>,
+    mem: Arc<RwLock<GuestMemoryMmap>>,
 }
 
 impl VfioDevice {
@@ -523,7 +523,7 @@ impl VfioDevice {
     pub fn new(
         sysfspath: &Path,
         device_fd: Arc<DeviceFd>,
-        mem: Arc<GuestMemoryMmap>,
+        mem: Arc<RwLock<GuestMemoryMmap>>,
     ) -> Result<Self> {
         let uuid_path: PathBuf = [sysfspath, Path::new("iommu_group")].iter().collect();
         let group_path = uuid_path.read_link().map_err(|_| VfioError::InvalidPath)?;
@@ -773,7 +773,7 @@ impl VfioDevice {
     /// Add all guest memory regions into vfio container's iommu table,
     /// then vfio kernel driver could access guest memory from gfn
     pub fn setup_dma_map(&self) -> Result<()> {
-        self.mem.with_regions(|_index, region| {
+        self.mem.read().unwrap().with_regions(|_index, region| {
             self.vfio_dma_map(
                 region.start_addr().raw_value(),
                 region.len() as u64,
@@ -786,7 +786,7 @@ impl VfioDevice {
     /// remove all guest memory regions from vfio containers iommu table
     /// then vfio kernel driver couldn't access this guest memory
     pub fn unset_dma_map(&self) -> Result<()> {
-        self.mem.with_regions(|_index, region| {
+        self.mem.read().unwrap().with_regions(|_index, region| {
             self.vfio_dma_unmap(region.start_addr().raw_value(), region.len() as u64)
         })?;
         Ok(())

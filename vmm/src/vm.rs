@@ -43,10 +43,11 @@ use signal_hook::{iterator::Signals, SIGWINCH};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
+use std::ops::Deref;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr::null_mut;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::{fmt, result, str, thread};
 use vfio::{VfioDevice, VfioPciDevice, VfioPciError};
 use vm_allocator::{GsiApic, SystemAllocator};
@@ -450,7 +451,8 @@ impl Vcpu {
         )
         .map_err(Error::REGSConfiguration)?;
         arch::x86_64::regs::setup_fpu(&self.fd).map_err(Error::FPUConfiguration)?;
-        arch::x86_64::regs::setup_sregs(vm_memory, &self.fd).map_err(Error::SREGSConfiguration)?;
+        arch::x86_64::regs::setup_sregs(&vm_memory.read().unwrap(), &self.fd)
+            .map_err(Error::SREGSConfiguration)?;
         arch::x86_64::interrupts::set_lint(&self.fd).map_err(Error::LocalIntConfiguration)?;
         Ok(())
     }
@@ -518,7 +520,7 @@ impl Vcpu {
 }
 
 struct VmInfo<'a> {
-    memory: &'a Arc<GuestMemoryMmap>,
+    memory: &'a Arc<RwLock<GuestMemoryMmap>>,
     vm_fd: &'a Arc<VmFd>,
     vm_cfg: &'a VmConfig<'a>,
 }
@@ -1113,7 +1115,7 @@ impl DeviceManager {
 
     fn add_virtio_pci_device(
         virtio_device: Box<dyn vm_virtio::VirtioDevice>,
-        memory: &Arc<GuestMemoryMmap>,
+        memory: &Arc<RwLock<GuestMemoryMmap>>,
         allocator: &mut SystemAllocator,
         vm_fd: &Arc<VmFd>,
         pci: &mut PciConfigIo,
@@ -1317,7 +1319,7 @@ impl AsRawFd for EpollContext {
 pub struct Vm<'a> {
     fd: Arc<VmFd>,
     kernel: File,
-    memory: Arc<GuestMemoryMmap>,
+    memory: Arc<RwLock<GuestMemoryMmap>>,
     vcpus: Vec<thread::JoinHandle<()>>,
     devices: DeviceManager,
     cpuid: CpuId,
@@ -1487,7 +1489,9 @@ impl<'a> Vm<'a> {
 
         // Convert the guest memory into an Arc. The point being able to use it
         // anywhere in the code, no matter which thread might use it.
-        let guest_memory = Arc::new(guest_memory);
+        // Add the RwLock aspect to guest memory as we might want to perform
+        // additions to the memory during runtime.
+        let guest_memory = Arc::new(RwLock::new(guest_memory));
 
         let vm_info = VmInfo {
             memory: &guest_memory,
@@ -1536,8 +1540,9 @@ impl<'a> Vm<'a> {
     pub fn load_kernel(&mut self) -> Result<GuestAddress> {
         let cmdline_cstring =
             CString::new(self.config.cmdline.args.clone()).map_err(|_| Error::CmdLine)?;
+        let mem = self.memory.read().unwrap();
         let entry_addr = match linux_loader::loader::Elf::load(
-            self.memory.as_ref(),
+            mem.deref(),
             None,
             &mut self.kernel,
             Some(arch::HIMEM_START),
@@ -1545,7 +1550,7 @@ impl<'a> Vm<'a> {
             Ok(entry_addr) => entry_addr,
             Err(linux_loader::loader::Error::InvalidElfMagicNumber) => {
                 linux_loader::loader::BzImage::load(
-                    self.memory.as_ref(),
+                    mem.deref(),
                     None,
                     &mut self.kernel,
                     Some(arch::HIMEM_START),
@@ -1556,7 +1561,7 @@ impl<'a> Vm<'a> {
         };
 
         linux_loader::loader::load_cmdline(
-            self.memory.as_ref(),
+            mem.deref(),
             self.config.cmdline.offset,
             &cmdline_cstring,
         )
@@ -1567,7 +1572,7 @@ impl<'a> Vm<'a> {
         match entry_addr.setup_header {
             Some(hdr) => {
                 arch::configure_system(
-                    &self.memory,
+                    &mem,
                     self.config.cmdline.offset,
                     cmdline_cstring.to_bytes().len() + 1,
                     vcpu_count,
@@ -1585,7 +1590,7 @@ impl<'a> Vm<'a> {
             }
             None => {
                 arch::configure_system(
-                    &self.memory,
+                    &mem,
                     self.config.cmdline.offset,
                     cmdline_cstring.to_bytes().len() + 1,
                     vcpu_count,
@@ -1763,12 +1768,9 @@ impl<'a> Vm<'a> {
         Ok(())
     }
 
-    /// Gets a reference to the guest memory owned by this VM.
-    ///
-    /// Note that `GuestMemory` does not include any device memory that may have been added after
-    /// this VM was constructed.
-    pub fn get_memory(&self) -> &GuestMemoryMmap {
-        &self.memory
+    /// Gets an Arc to the guest memory owned by this VM.
+    pub fn get_memory(&self) -> Arc<RwLock<GuestMemoryMmap>> {
+        self.memory.clone()
     }
 }
 

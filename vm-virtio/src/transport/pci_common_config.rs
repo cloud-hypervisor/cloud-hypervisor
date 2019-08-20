@@ -254,7 +254,7 @@ mod tests {
     use super::*;
     use crate::{ActivateResult, VirtioInterrupt};
 
-    use std::sync::Arc;
+    use std::sync::{Arc, RwLock};
     use vm_memory::GuestMemoryMmap;
     use vmm_sys_util::eventfd::EventFd;
 
@@ -271,7 +271,7 @@ mod tests {
         }
         fn activate(
             &mut self,
-            _mem: Arc<GuestMemoryMmap>,
+            _mem: Arc<RwLock<GuestMemoryMmap>>,
             _interrupt_evt: Arc<VirtioInterrupt>,
             _queues: Vec<Queue>,
             _queue_evts: Vec<EventFd>,

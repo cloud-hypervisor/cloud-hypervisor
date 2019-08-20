@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 use super::Error as DeviceError;
@@ -32,7 +32,7 @@ const KILL_EVENT: DeviceEventT = 1;
 
 struct RngEpollHandler {
     queues: Vec<Queue>,
-    mem: Arc<GuestMemoryMmap>,
+    mem: Arc<RwLock<GuestMemoryMmap>>,
     random_file: File,
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evt: EventFd,
@@ -45,14 +45,14 @@ impl RngEpollHandler {
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        for avail_desc in queue.iter(&self.mem) {
+        let mem = self.mem.read().unwrap();
+        for avail_desc in queue.iter(&mem) {
             let mut len = 0;
 
             // Drivers can only read from the random device.
             if avail_desc.is_write_only() {
                 // Fill the read with data from the random device on the host.
-                if self
-                    .mem
+                if mem
                     .read_from(
                         avail_desc.addr,
                         &mut self.random_file,
@@ -69,7 +69,7 @@ impl RngEpollHandler {
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            queue.add_used(&self.mem, desc_index, len);
+            queue.add_used(&mem, desc_index, len);
         }
         used_count > 0
     }
@@ -237,7 +237,7 @@ impl VirtioDevice for Rng {
 
     fn activate(
         &mut self,
-        mem: Arc<GuestMemoryMmap>,
+        mem: Arc<RwLock<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

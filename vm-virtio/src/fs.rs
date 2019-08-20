@@ -13,7 +13,7 @@ use std::io;
 use std::io::Write;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use vhost_rs::vhost_user::message::{
     VhostUserFSSlaveMsg, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
@@ -368,7 +368,7 @@ impl Fs {
 
     fn setup_vu(
         &mut self,
-        mem: &Arc<GuestMemoryMmap>,
+        mem: &GuestMemoryMmap,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> Result<Vec<(EventFd, Queue)>> {
@@ -527,7 +527,7 @@ impl VirtioDevice for Fs {
 
     fn activate(
         &mut self,
-        mem: Arc<GuestMemoryMmap>,
+        mem: Arc<RwLock<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
@@ -552,7 +552,7 @@ impl VirtioDevice for Fs {
         self.kill_evt = Some(self_kill_evt);
 
         let vu_call_evt_queue_list = self
-            .setup_vu(&mem, queues, queue_evts)
+            .setup_vu(&mem.read().unwrap(), queues, queue_evts)
             .map_err(ActivateError::VhostUserSetup)?;
 
         // Initialize slave communication.

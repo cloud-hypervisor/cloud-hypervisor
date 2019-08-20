@@ -7,7 +7,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use super::*;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use vm_memory::{GuestAddress, GuestMemoryMmap, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -67,7 +67,7 @@ pub trait VirtioDevice: Send {
     /// Activates this device for real usage.
     fn activate(
         &mut self,
-        mem: Arc<GuestMemoryMmap>,
+        mem: Arc<RwLock<GuestMemoryMmap>>,
         interrupt_evt: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,

@@ -15,7 +15,7 @@ use std::mem;
 use std::net::Ipv4Addr;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::vec::Vec;
 
@@ -115,7 +115,7 @@ fn vnet_hdr_len() -> usize {
 }
 
 struct NetEpollHandler {
-    mem: Arc<GuestMemoryMmap>,
+    mem: Arc<RwLock<GuestMemoryMmap>>,
     tap: Tap,
     rx: RxVirtio,
     tx: TxVirtio,
@@ -137,7 +137,8 @@ impl NetEpollHandler {
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
     fn rx_single_frame(&mut self) -> bool {
-        let mut next_desc = self.rx.queue.iter(&self.mem).next();
+        let mem = self.mem.read().unwrap();
+        let mut next_desc = self.rx.queue.iter(&mem).next();
 
         if next_desc.is_none() {
             // Queue has no available descriptors
@@ -160,7 +161,7 @@ impl NetEpollHandler {
                     }
                     let limit = cmp::min(write_count + desc.len as usize, self.rx.bytes_read);
                     let source_slice = &self.rx.frame_buf[write_count..limit];
-                    let write_result = self.mem.write_slice(source_slice, desc.addr);
+                    let write_result = mem.write_slice(source_slice, desc.addr);
 
                     match write_result {
                         Ok(_) => {
@@ -184,9 +185,7 @@ impl NetEpollHandler {
             }
         }
 
-        self.rx
-            .queue
-            .add_used(&self.mem, head_index, write_count as u32);
+        self.rx.queue.add_used(&mem, head_index, write_count as u32);
 
         // Mark that we have at least one pending packet and we need to interrupt the guest.
         self.rx.deferred_irqs = true;
@@ -246,7 +245,8 @@ impl NetEpollHandler {
     }
 
     fn process_tx(&mut self) -> result::Result<(), DeviceError> {
-        while let Some(avail_desc) = self.tx.queue.iter(&self.mem).next() {
+        let mem = self.mem.read().unwrap();
+        while let Some(avail_desc) = self.tx.queue.iter(&mem).next() {
             let head_index = avail_desc.index;
             let mut read_count = 0;
             let mut next_desc = Some(avail_desc);
@@ -268,7 +268,7 @@ impl NetEpollHandler {
             for (desc_addr, desc_len) in self.tx.iovec.drain(..) {
                 let limit = cmp::min((read_count + desc_len) as usize, self.tx.frame_buf.len());
 
-                let read_result = self.mem.read_slice(
+                let read_result = mem.read_slice(
                     &mut self.tx.frame_buf[read_count..limit as usize],
                     desc_addr,
                 );
@@ -292,7 +292,7 @@ impl NetEpollHandler {
                 }
             };
 
-            self.tx.queue.add_used(&self.mem, head_index, 0);
+            self.tx.queue.add_used(&mem, head_index, 0);
         }
 
         Ok(())
@@ -572,7 +572,7 @@ impl VirtioDevice for Net {
 
     fn activate(
         &mut self,
-        mem: Arc<GuestMemoryMmap>,
+        mem: Arc<RwLock<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

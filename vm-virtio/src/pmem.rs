@@ -15,7 +15,7 @@ use std::io::{self, Write};
 use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 use super::Error as DeviceError;
@@ -154,7 +154,7 @@ impl Request {
 
 struct PmemEpollHandler {
     queue: Queue,
-    mem: Arc<GuestMemoryMmap>,
+    mem: Arc<RwLock<GuestMemoryMmap>>,
     disk: File,
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evt: EventFd,
@@ -165,8 +165,9 @@ impl PmemEpollHandler {
     fn process_queue(&mut self) -> bool {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        for avail_desc in self.queue.iter(&self.mem) {
-            let len = match Request::parse(&avail_desc, &self.mem) {
+        let mem = self.mem.read().unwrap();
+        for avail_desc in self.queue.iter(&mem) {
+            let len = match Request::parse(&avail_desc, &mem) {
                 Ok(ref req) if (req.type_ == RequestType::Flush) => {
                     let status_code = match self.disk.sync_all() {
                         Ok(()) => VIRTIO_PMEM_RESP_TYPE_OK,
@@ -177,7 +178,7 @@ impl PmemEpollHandler {
                     };
 
                     let resp = VirtioPmemResp { ret: status_code };
-                    match self.mem.write_obj(resp, req.status_addr) {
+                    match mem.write_obj(resp, req.status_addr) {
                         Ok(_) => size_of::<VirtioPmemResp>() as u32,
                         Err(e) => {
                             error!("bad guest memory address: {}", e);
@@ -201,7 +202,7 @@ impl PmemEpollHandler {
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            self.queue.add_used(&self.mem, desc_index, len);
+            self.queue.add_used(&mem, desc_index, len);
         }
         used_count > 0
     }
@@ -382,7 +383,7 @@ impl VirtioDevice for Pmem {
 
     fn activate(
         &mut self,
-        mem: Arc<GuestMemoryMmap>,
+        mem: Arc<RwLock<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

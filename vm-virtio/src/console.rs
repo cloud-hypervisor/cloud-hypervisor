@@ -10,7 +10,7 @@ use std::io;
 use std::io::Write;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
 use super::Error as DeviceError;
@@ -54,7 +54,7 @@ unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {
     queues: Vec<Queue>,
-    mem: Arc<GuestMemoryMmap>,
+    mem: Arc<RwLock<GuestMemoryMmap>>,
     interrupt_cb: Arc<VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
     out: Box<dyn io::Write + Send>,
@@ -80,14 +80,15 @@ impl ConsoleEpollHandler {
         let mut used_count = 0;
         let mut write_count = 0;
 
-        for avail_desc in recv_queue.iter(&self.mem) {
+        let mem = self.mem.read().unwrap();
+        for avail_desc in recv_queue.iter(&mem) {
             let len;
 
             let limit = cmp::min(write_count + avail_desc.len as u32, count as u32);
             let source_slice = in_buffer
                 .drain(write_count as usize..limit as usize)
                 .collect::<Vec<u8>>();
-            let write_result = self.mem.write_slice(&source_slice[..], avail_desc.addr);
+            let write_result = mem.write_slice(&source_slice[..], avail_desc.addr);
 
             match write_result {
                 Ok(_) => {
@@ -109,7 +110,7 @@ impl ConsoleEpollHandler {
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            recv_queue.add_used(&self.mem, desc_index, len);
+            recv_queue.add_used(&mem, desc_index, len);
         }
         used_count > 0
     }
@@ -126,11 +127,10 @@ impl ConsoleEpollHandler {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
 
-        for avail_desc in trans_queue.iter(&self.mem) {
+        let mem = self.mem.read().unwrap();
+        for avail_desc in trans_queue.iter(&mem) {
             let len;
-            let _ = self
-                .mem
-                .write_to(avail_desc.addr, &mut self.out, avail_desc.len as usize);
+            let _ = mem.write_to(avail_desc.addr, &mut self.out, avail_desc.len as usize);
             let _ = self.out.flush();
 
             len = avail_desc.len;
@@ -139,7 +139,7 @@ impl ConsoleEpollHandler {
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            trans_queue.add_used(&self.mem, desc_index, len);
+            trans_queue.add_used(&mem, desc_index, len);
         }
         used_count > 0
     }
@@ -432,7 +432,7 @@ impl VirtioDevice for Console {
 
     fn activate(
         &mut self,
-        mem: Arc<GuestMemoryMmap>,
+        mem: Arc<RwLock<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
