@@ -14,8 +14,7 @@ extern crate vmm_sys_util;
 
 use libc::EFD_NONBLOCK;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, RwLock};
 
 use devices::BusDevice;
 use pci::{
@@ -235,7 +234,7 @@ pub struct VirtioPciDevice {
     queue_evts: Vec<EventFd>,
 
     // Guest memory
-    memory: Option<Arc<GuestMemoryMmap>>,
+    memory: Option<Arc<RwLock<GuestMemoryMmap>>>,
 
     // Setting PCI BAR
     settings_bar: u8,
@@ -244,7 +243,7 @@ pub struct VirtioPciDevice {
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
     pub fn new(
-        memory: Arc<GuestMemoryMmap>,
+        memory: Arc<RwLock<GuestMemoryMmap>>,
         device: Box<dyn VirtioDevice>,
         msix_num: u16,
     ) -> Result<Self> {
@@ -339,7 +338,7 @@ impl VirtioPciDevice {
 
     fn are_queues_valid(&self) -> bool {
         if let Some(mem) = self.memory.as_ref() {
-            self.queues.iter().all(|q| q.is_valid(mem))
+            self.queues.iter().all(|q| q.is_valid(&mem.read().unwrap()))
         } else {
             false
         }

@@ -17,7 +17,7 @@ use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 use super::Error as DeviceError;
@@ -321,7 +321,7 @@ impl Request {
 
 struct BlockEpollHandler<T: DiskFile> {
     queues: Vec<Queue>,
-    mem: Arc<GuestMemoryMmap>,
+    mem: Arc<RwLock<GuestMemoryMmap>>,
     disk_image: T,
     disk_nsectors: u64,
     interrupt_cb: Arc<VirtioInterrupt>,
@@ -334,14 +334,15 @@ impl<T: DiskFile> BlockEpollHandler<T> {
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        for avail_desc in queue.iter(&self.mem) {
+        let mem = self.mem.read().unwrap();
+        for avail_desc in queue.iter(&mem) {
             let len;
-            match Request::parse(&avail_desc, &self.mem) {
+            match Request::parse(&avail_desc, &mem) {
                 Ok(request) => {
                     let status = match request.execute(
                         &mut self.disk_image,
                         self.disk_nsectors,
-                        &self.mem,
+                        &mem,
                         &self.disk_image_id,
                     ) {
                         Ok(l) => {
@@ -356,7 +357,7 @@ impl<T: DiskFile> BlockEpollHandler<T> {
                     };
                     // We use unwrap because the request parsing process already checked that the
                     // status_addr was valid.
-                    self.mem.write_obj(status, request.status_addr).unwrap();
+                    mem.write_obj(status, request.status_addr).unwrap();
                 }
                 Err(e) => {
                     error!("Failed to parse available descriptor chain: {:?}", e);
@@ -368,7 +369,7 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         }
 
         for &(desc_index, len) in &used_desc_heads[..used_count] {
-            queue.add_used(&self.mem, desc_index, len);
+            queue.add_used(&mem, desc_index, len);
         }
         used_count > 0
     }
@@ -610,7 +611,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 
     fn activate(
         &mut self,
-        mem: Arc<GuestMemoryMmap>,
+        mem: Arc<RwLock<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
