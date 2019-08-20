@@ -545,6 +545,8 @@ mod tests {
             .spawn()
             .unwrap();
 
+        thread::sleep(std::time::Duration::new(10, 0));
+
         (child, virtiofsd_socket_path)
     }
 
@@ -1246,6 +1248,9 @@ mod tests {
             );
 
             guest.ssh_command("sudo reboot")?;
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = daemon_child.kill();
             let _ = child.wait();
             let _ = daemon_child.wait();
             Ok(())
@@ -1323,6 +1328,8 @@ mod tests {
             );
 
             guest.ssh_command("sudo reboot")?;
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
             let _ = child.wait();
 
             Ok(())
@@ -1366,6 +1373,8 @@ mod tests {
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
 
             guest.ssh_command("sudo reboot")?;
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
             let _ = child.wait();
 
             Ok(())
