@@ -13,7 +13,7 @@ use std::io::Read;
 use std::io::{self, Write};
 use std::mem;
 use std::net::Ipv4Addr;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::Arc;
 use std::thread;
@@ -121,6 +121,8 @@ struct NetEpollHandler {
     tx: TxVirtio,
     interrupt_cb: Arc<VirtioInterrupt>,
     kill_evt: EventFd,
+    epoll_fd: RawFd,
+    rx_tap_listening: bool,
 }
 
 impl NetEpollHandler {
@@ -138,6 +140,10 @@ impl NetEpollHandler {
         let mut next_desc = self.rx.queue.iter(&self.mem).next();
 
         if next_desc.is_none() {
+            // Queue has no available descriptors
+            if self.rx_tap_listening {
+                self.unregister_tap_rx_listener().unwrap();
+            }
             return false;
         }
 
@@ -296,34 +302,50 @@ impl NetEpollHandler {
         self.tap.read(&mut self.rx.frame_buf)
     }
 
+    fn register_tap_rx_listener(&mut self) -> std::result::Result<(), std::io::Error> {
+        epoll::ctl(
+            self.epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.tap.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(RX_TAP_EVENT)),
+        )?;
+        self.rx_tap_listening = true;
+        Ok(())
+    }
+
+    fn unregister_tap_rx_listener(&mut self) -> std::result::Result<(), std::io::Error> {
+        epoll::ctl(
+            self.epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_DEL,
+            self.tap.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(RX_TAP_EVENT)),
+        )?;
+        self.rx_tap_listening = false;
+        Ok(())
+    }
+
     fn run(&mut self) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
-        let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
-
+        self.epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
         // Add events
         epoll::ctl(
-            epoll_fd,
+            self.epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.rx.queue_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(RX_QUEUE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
         epoll::ctl(
-            epoll_fd,
+            self.epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.tx.queue_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(TX_QUEUE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
+        self.register_tap_rx_listener()
+            .map_err(DeviceError::EpollCtl)?;
         epoll::ctl(
-            epoll_fd,
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.tap.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(RX_TAP_EVENT)),
-        )
-        .map_err(DeviceError::EpollCtl)?;
-        epoll::ctl(
-            epoll_fd,
+            self.epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
@@ -334,7 +356,7 @@ impl NetEpollHandler {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
         'epoll: loop {
-            let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
+            let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
                 Ok(res) => res,
                 Err(e) => {
                     if e.kind() == io::ErrorKind::Interrupted {
@@ -363,6 +385,9 @@ impl NetEpollHandler {
                         }
 
                         self.resume_rx().unwrap();
+                        if !self.rx_tap_listening {
+                            self.register_tap_rx_listener().unwrap();
+                        }
                     }
                     TX_QUEUE_EVENT => {
                         debug!("TX_QUEUE_EVENT received");
@@ -583,6 +608,8 @@ impl VirtioDevice for Net {
                 tx: TxVirtio::new(tx_queue, tx_queue_evt),
                 interrupt_cb,
                 kill_evt,
+                epoll_fd: 0,
+                rx_tap_listening: false,
             };
 
             let worker_result = thread::Builder::new()
