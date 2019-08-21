@@ -144,6 +144,7 @@ impl NetEpollHandler {
             // Queue has no available descriptors
             if self.rx_tap_listening {
                 self.unregister_tap_rx_listener().unwrap();
+                self.rx_tap_listening = false;
             }
             return false;
         }
@@ -302,25 +303,23 @@ impl NetEpollHandler {
         self.tap.read(&mut self.rx.frame_buf)
     }
 
-    fn register_tap_rx_listener(&mut self) -> std::result::Result<(), std::io::Error> {
+    fn register_tap_rx_listener(&self) -> std::result::Result<(), std::io::Error> {
         epoll::ctl(
             self.epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.tap.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(RX_TAP_EVENT)),
         )?;
-        self.rx_tap_listening = true;
         Ok(())
     }
 
-    fn unregister_tap_rx_listener(&mut self) -> std::result::Result<(), std::io::Error> {
+    fn unregister_tap_rx_listener(&self) -> std::result::Result<(), std::io::Error> {
         epoll::ctl(
             self.epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_DEL,
             self.tap.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(RX_TAP_EVENT)),
         )?;
-        self.rx_tap_listening = false;
         Ok(())
     }
 
@@ -344,6 +343,7 @@ impl NetEpollHandler {
         .map_err(DeviceError::EpollCtl)?;
         self.register_tap_rx_listener()
             .map_err(DeviceError::EpollCtl)?;
+        self.rx_tap_listening = true;
         epoll::ctl(
             self.epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
@@ -387,6 +387,7 @@ impl NetEpollHandler {
                         self.resume_rx().unwrap();
                         if !self.rx_tap_listening {
                             self.register_tap_rx_listener().unwrap();
+                            self.rx_tap_listening = true;
                         }
                     }
                     TX_QUEUE_EVENT => {
