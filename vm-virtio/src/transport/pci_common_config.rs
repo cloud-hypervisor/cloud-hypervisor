@@ -254,7 +254,6 @@ mod tests {
     use super::*;
     use crate::{ActivateResult, VirtioInterrupt};
 
-    use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
     use vm_memory::GuestMemoryMmap;
     use vmm_sys_util::eventfd::EventFd;
