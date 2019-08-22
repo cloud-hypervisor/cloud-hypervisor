@@ -37,7 +37,7 @@ struct PCIRangeEntry {
     _reserved: u32
 }
 
-pub fn create_dsdt_table() -> SDT {
+pub fn create_dsdt_table(serial_enabled: bool) -> SDT {
     /*
         The hex tables in this file are generated from the ASL below with:
         "iasl -tc <dsdt.asl>"
@@ -142,18 +142,23 @@ pub fn create_dsdt_table() -> SDT {
     // DSDT
     let mut dsdt = SDT::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
     dsdt.append(pci_dsdt_data);
-    dsdt.append(com1_dsdt_data);
+    if serial_enabled {
+        dsdt.append(com1_dsdt_data);
+    }
 
     dsdt
 }
-
-pub fn create_acpi_tables(guest_mem: &GuestMemoryMmap, num_cpus: u8) -> GuestAddress {
+pub fn create_acpi_tables(
+    guest_mem: &GuestMemoryMmap,
+    num_cpus: u8,
+    serial_enabled: bool,
+) -> GuestAddress {
     // RSDP is at the EBDA
     let rsdp_offset = super::EBDA_START;
     let mut tables: Vec<u64> = Vec::new();
 
     // DSDT
-    let dsdt = create_dsdt_table();
+    let dsdt = create_dsdt_table(serial_enabled);
     let dsdt_offset = rsdp_offset.checked_add(RSDP::len() as u64).unwrap();
     guest_mem
         .write_slice(dsdt.as_slice(), dsdt_offset)

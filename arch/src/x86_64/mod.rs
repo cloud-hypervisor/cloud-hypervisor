@@ -127,6 +127,7 @@ pub fn configure_system(
     cmdline_size: usize,
     num_cpus: u8,
     setup_hdr: Option<setup_header>,
+    serial_enabled: bool,
 ) -> super::Result<()> {
     const KERNEL_BOOT_FLAG_MAGIC: u16 = 0xaa55;
     const KERNEL_HDR_MAGIC: u32 = 0x53726448;
@@ -182,7 +183,7 @@ pub fn configure_system(
         }
     }
 
-    let rsdp_addr = acpi::create_acpi_tables(guest_mem, num_cpus);
+    let rsdp_addr = acpi::create_acpi_tables(guest_mem, num_cpus, serial_enabled);
     params.0.acpi_rsdp_addr = rsdp_addr.0;
 
     let zero_page_addr = layout::ZERO_PAGE_START;
@@ -251,7 +252,7 @@ mod tests {
     fn test_system_configuration() {
         let no_vcpus = 4;
         let gm = GuestMemoryMmap::new(&vec![(GuestAddress(0), 0x10000)]).unwrap();
-        let config_err = configure_system(&gm, GuestAddress(0), 0, 1, None);
+        let config_err = configure_system(&gm, GuestAddress(0), 0, 1, None, false);
         assert!(config_err.is_err());
         assert_eq!(
             config_err.unwrap_err(),
@@ -269,7 +270,7 @@ mod tests {
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None, false).unwrap();
 
         // Now assigning some memory that is equal to the start of the 32bit memory hole.
         let mem_size = 3328 << 20;
@@ -280,7 +281,7 @@ mod tests {
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None, false).unwrap();
 
         // Now assigning some memory that falls after the 32bit memory hole.
         let mem_size = 3330 << 20;
@@ -291,7 +292,7 @@ mod tests {
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
-        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None).unwrap();
+        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None, false).unwrap();
     }
 
     #[test]
