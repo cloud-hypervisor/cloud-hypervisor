@@ -1634,6 +1634,7 @@ impl<'a> Vm<'a> {
                     cmdline_cstring.to_bytes().len() + 1,
                     vcpu_count,
                     Some(hdr),
+                    self.config.serial.mode != ConsoleOutputMode::Off,
                 )
                 .map_err(|_| Error::CmdLine)?;
 
@@ -1652,6 +1653,7 @@ impl<'a> Vm<'a> {
                     cmdline_cstring.to_bytes().len() + 1,
                     vcpu_count,
                     None,
+                    self.config.serial.mode != ConsoleOutputMode::Off,
                 )
                 .map_err(|_| Error::CmdLine)?;
 
