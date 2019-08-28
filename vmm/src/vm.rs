@@ -234,6 +234,9 @@ pub enum DeviceManagerError {
     /// Cannot open disk path
     Disk(io::Error),
 
+    /// Cannot create vhost-user-net device
+    CreateVhostUserNet(vm_virtio::vhost_user::Error),
+
     /// Cannot create virtio-blk device
     CreateVirtioBlock(io::Error),
 
@@ -773,6 +776,15 @@ impl DeviceManager {
             &mut mem_slots,
         )?;
 
+        // Add virtio-vhost-user-net if required
+        DeviceManager::add_virtio_vhost_user_net_devices(
+            vm_info,
+            allocator,
+            pci,
+            buses,
+            &interrupt_info,
+        )?;
+
         Ok(())
     }
 
@@ -1048,6 +1060,37 @@ impl DeviceManager {
 
                 DeviceManager::add_virtio_pci_device(
                     Box::new(virtio_pmem_device),
+                    vm_info.memory,
+                    allocator,
+                    vm_info.vm_fd,
+                    pci,
+                    buses,
+                    &interrupt_info,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn add_virtio_vhost_user_net_devices(
+        vm_info: &VmInfo,
+        allocator: &mut SystemAllocator,
+        pci: &mut PciConfigIo,
+        buses: &mut BusInfo,
+        interrupt_info: &InterruptInfo,
+    ) -> DeviceManagerResult<()> {
+        // Add vhost-user-net if required
+        if let Some(vhost_user_net_list_cfg) = &vm_info.vm_cfg.vhost_user_net {
+            for vhost_user_net_cfg in vhost_user_net_list_cfg.iter() {
+                let vhost_user_net_device = vm_virtio::vhost_user::Net::new(
+                    vhost_user_net_cfg.mac,
+                    vhost_user_net_cfg.vu_cfg,
+                )
+                .map_err(DeviceManagerError::CreateVhostUserNet)?;
+
+                DeviceManager::add_virtio_pci_device(
+                    Box::new(vhost_user_net_device),
                     vm_info.memory,
                     allocator,
                     vm_info.vm_fd,
