@@ -1046,7 +1046,7 @@ dependencies = [
 [[package]]
 name = "vmm-sys-util"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vmm-sys-util#7222869ed3de260bb147781c4334d6f89f55eb0a"
+source = "git+https://github.com/rust-vmm/vmm-sys-util#2177381ed649e9631ad6f432e6cf947cc7b7f669"
 dependencies = [
  "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
