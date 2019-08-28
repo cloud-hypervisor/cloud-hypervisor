@@ -1098,6 +1098,72 @@ mod tests {
     }
 
     #[test]
+    fn test_vhost_user_net() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut vubridge_path = workload_path.clone();
+            vubridge_path.push("vubridge");
+            let vubridge_path = String::from(vubridge_path.to_str().unwrap());
+
+            // Start the daemon
+            let mut daemon_child = Command::new(vubridge_path.as_str()).spawn().unwrap();
+
+            let mut cloud_child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "4"])
+                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
+                .args(&[
+                    "--vhost-user-net",
+                    "mac=52:54:00:02:d9:01,sock=/tmp/vubr.sock",
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .spawn()
+                .unwrap();
+
+            // 2 network interfaces + default localhost ==> 3 interfaces
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ip -o link | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                3
+            );
+
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = daemon_child.kill();
+            let _ = daemon_child.wait();
+
+            guest.ssh_command("sudo reboot")?;
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = cloud_child.kill();
+            let _ = cloud_child.wait();
+
+            Ok(())
+        });
+    }
+
+    #[test]
     fn test_split_irqchip() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
