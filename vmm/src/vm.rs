@@ -45,7 +45,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
 use std::ops::Deref;
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::{fmt, result, str, thread};
@@ -1364,17 +1364,31 @@ impl<'a> Vm<'a> {
             Some(file) => {
                 let mut mem_regions = Vec::<(GuestAddress, usize, Option<FileOffset>)>::new();
                 for region in ram_regions.iter() {
-                    let file = OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .custom_flags(O_TMPFILE)
-                        .open(file)
-                        .map_err(Error::SharedFileCreate)?;
+                    if file.is_file() {
+                        let file = OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .open(file)
+                            .map_err(Error::SharedFileCreate)?;
 
-                    file.set_len(region.1 as u64)
-                        .map_err(Error::SharedFileSetLen)?;
+                        file.set_len(region.1 as u64)
+                            .map_err(Error::SharedFileSetLen)?;
 
-                    mem_regions.push((region.0, region.1, Some(FileOffset::new(file, 0))));
+                        mem_regions.push((region.0, region.1, Some(FileOffset::new(file, 0))));
+                    } else if file.is_dir() {
+                        let fs_str = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
+                        let fs = std::ffi::CString::new(fs_str).unwrap();
+                        let mut path = fs.as_bytes_with_nul().to_owned();
+                        let path_ptr = path.as_mut_ptr() as *mut _;
+                        let fd = unsafe { libc::mkstemp(path_ptr) };
+                        unsafe { libc::unlink(path_ptr) };
+
+                        let f = unsafe { File::from_raw_fd(fd) };
+                        f.set_len(region.1 as u64)
+                            .map_err(Error::SharedFileSetLen)?;
+
+                        mem_regions.push((region.0, region.1, Some(FileOffset::new(f, 0))));
+                    }
                 }
 
                 GuestMemoryMmap::with_files(&mem_regions).map_err(Error::GuestMemory)?
