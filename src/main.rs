@@ -155,6 +155,17 @@ fn main() {
                 .min_values(1),
         )
         .arg(
+            Arg::with_name("vhost-user-net")
+                .long("vhost-user-net")
+                .help(
+                    "Network parameters \"mac=<mac_addr>,\
+                     sock=<socket_path>, num_queues=<number_of_queues>,\
+                     queue_size=<size_of_each_queue>\"",
+                )
+                .takes_value(true)
+                .min_values(1),
+        )
+        .arg(
             Arg::with_name("v")
                 .short("v")
                 .multiple(true)
@@ -186,6 +197,9 @@ fn main() {
     let fs: Option<Vec<&str>> = cmd_arguments.values_of("fs").map(|x| x.collect());
     let pmem: Option<Vec<&str>> = cmd_arguments.values_of("pmem").map(|x| x.collect());
     let devices: Option<Vec<&str>> = cmd_arguments.values_of("device").map(|x| x.collect());
+    let vhost_user_net: Option<Vec<&str>> = cmd_arguments
+        .values_of("vhost-user-net")
+        .map(|x| x.collect());
 
     let log_level = match cmd_arguments.occurrences_of("v") {
         0 => LevelFilter::Error,
@@ -224,6 +238,7 @@ fn main() {
         serial,
         console,
         devices,
+        vhost_user_net,
     }) {
         Ok(config) => config,
         Err(e) => {
