@@ -15,7 +15,7 @@ pub mod config;
 pub mod vm;
 
 use self::config::VmConfig;
-use self::vm::Vm;
+use self::vm::{ExitBehaviour, Vm};
 
 /// Errors associated with VM management
 #[derive(Debug)]
@@ -55,11 +55,15 @@ impl Vmm {
 }
 
 pub fn boot_kernel(config: VmConfig) -> Result<()> {
-    let vmm = Vmm::new()?;
-    let mut vm = Vm::new(&vmm.kvm, config).map_err(Error::VmNew)?;
+    loop {
+        let vmm = Vmm::new()?;
+        let mut vm = Vm::new(&vmm.kvm, &config).map_err(Error::VmNew)?;
 
-    let entry = vm.load_kernel().map_err(Error::LoadKernel)?;
-    vm.start(entry).map_err(Error::VmStart)?;
+        let entry = vm.load_kernel().map_err(Error::LoadKernel)?;
+        if vm.start(entry).map_err(Error::VmStart)? == ExitBehaviour::Shutdown {
+            break;
+        }
+    }
 
     Ok(())
 }
