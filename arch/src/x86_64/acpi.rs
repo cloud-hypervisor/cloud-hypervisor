@@ -2,7 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use acpi_tables::{rsdp::RSDP, sdt::SDT};
+use acpi_tables::{
+    rsdp::RSDP,
+    sdt::{GenericAddress, SDT},
+};
 use vm_memory::{GuestAddress, GuestMemoryMmap};
 
 use vm_memory::{Address, ByteValued, Bytes};
@@ -169,12 +172,21 @@ pub fn create_dsdt_table(serial_enabled: bool) -> SDT {
         0x00, 0x47, 0x01, 0xF8, 0x03, 0xF8, 0x03, 0x00, 0x08, 0x79, 0x00,
     ];
 
+    /*
+    Name (\_S5, Package (0x01)  // _S5_: S5 System State
+    {
+        0x05
+    })
+    */
+    let s5_sleep_data = [0x08u8, 0x5F, 0x53, 0x35, 0x5F, 0x12, 0x04, 0x01, 0x0A, 0x05];
+
     // DSDT
     let mut dsdt = SDT::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
     dsdt.append(pci_dsdt_data);
     if serial_enabled {
         dsdt.append(com1_dsdt_data);
     }
+    dsdt.append(s5_sleep_data);
 
     dsdt
 }
@@ -198,15 +210,22 @@ pub fn create_acpi_tables(
     // Revision 6 of the ACPI FADT table is 276 bytes long
     let mut facp = SDT::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
 
-    let fadt_flags: u32 = 1 << 20; // HW_REDUCED_ACPI
+    // HW_REDUCED_ACPI and RESET_REG_SUP
+    let fadt_flags: u32 = 1 << 20 | 1 << 10;
     facp.write(112, fadt_flags);
 
-    // TODO: RESET_REG/RESET_VALUE @ offset 116/128
+    // RESET_REG
+    facp.write(116, GenericAddress::io_port_address(0x3c0));
+    // RESET_VALUE
+    facp.write(128, 1u8);
 
     facp.write(131, 3u8); // FADT minor version
     facp.write(140, dsdt_offset.0); // X_DSDT
 
-    // TODO: SLEEP_CONTROL_REG/SLEEP_STATUS_REG @ offset 244/256
+    // SLEEP_CONTROL_REG
+    facp.write(244, GenericAddress::io_port_address(0x3c0));
+    // SLEEP_STATUS_REG
+    facp.write(256, GenericAddress::io_port_address(0x3c0));
 
     facp.write(268, b"CLOUDHYP"); // Hypervisor Vendor Identity
 

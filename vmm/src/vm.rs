@@ -608,6 +608,9 @@ struct DeviceManager {
     // i8042 device for i8042 reset
     i8042: Arc<Mutex<devices::legacy::I8042Device>>,
 
+    // ACPI device for reboot/shutdwon
+    acpi_device: Arc<Mutex<devices::AcpiShutdownDevice>>,
+
     // Shutdown (exit) and reboot (reset) control
     exit_evt: EventFd,
     reset_evt: EventFd,
@@ -686,6 +689,10 @@ impl DeviceManager {
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
             exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
+        let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
+            exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+        )));
 
         let pci_root = PciRoot::new(None);
         let mut pci = PciConfigIo::new(pci_root);
@@ -737,6 +744,7 @@ impl DeviceManager {
             serial,
             console_input: console,
             i8042,
+            acpi_device,
             exit_evt,
             reset_evt,
             ioapic,
@@ -1282,6 +1290,10 @@ impl DeviceManager {
         // Insert i8042 device
         self.io_bus
             .insert(self.i8042.clone(), 0x61, 0x4)
+            .map_err(Error::BusError)?;
+
+        self.io_bus
+            .insert(self.acpi_device.clone(), 0x3c0, 0x4)
             .map_err(Error::BusError)?;
 
         // Insert the PCI root configuration space.
