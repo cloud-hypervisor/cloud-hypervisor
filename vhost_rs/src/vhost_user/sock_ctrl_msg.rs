@@ -176,7 +176,7 @@ fn raw_recvmsg(fd: RawFd, iovecs: &mut [iovec], in_fds: &mut [RawFd]) -> Result<
 
     // Safe because the msghdr was properly constructed from valid (or null) pointers of the
     // indicated length and we check the return value.
-    let total_read = unsafe { recvmsg(fd, &mut msg, 0) };
+    let total_read = unsafe { recvmsg(fd, &mut msg, libc::MSG_WAITALL) };
 
     if total_read == -1 {
         return Err(Error::last());
