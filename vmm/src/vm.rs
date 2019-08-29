@@ -464,33 +464,37 @@ impl Vcpu {
     ///
     /// Note that the state of the VCPU and associated VM must be setup first for this to do
     /// anything useful.
-    pub fn run(&self) -> Result<()> {
+    pub fn run(&self) -> Result<bool> {
         match self.fd.run() {
             Ok(run) => match run {
                 VcpuExit::IoIn(addr, data) => {
                     self.io_bus.read(u64::from(addr), data);
-                    Ok(())
+                    Ok(true)
                 }
                 VcpuExit::IoOut(addr, data) => {
                     if addr == DEBUG_IOPORT && data.len() == 1 {
                         self.log_debug_ioport(data[0]);
                     }
                     self.io_bus.write(u64::from(addr), data);
-                    Ok(())
+                    Ok(true)
                 }
                 VcpuExit::MmioRead(addr, data) => {
                     self.mmio_bus.read(addr as u64, data);
-                    Ok(())
+                    Ok(true)
                 }
                 VcpuExit::MmioWrite(addr, data) => {
                     self.mmio_bus.write(addr as u64, data);
-                    Ok(())
+                    Ok(true)
                 }
                 VcpuExit::IoapicEoi(vector) => {
                     if let Some(ioapic) = &self.ioapic {
                         ioapic.lock().unwrap().end_of_interrupt(vector);
                     }
-                    Ok(())
+                    Ok(true)
+                }
+                VcpuExit::Shutdown => {
+                    // Triple fault to trigger a reboot
+                    Ok(false)
                 }
                 r => {
                     error!("Unexpected exit reason on vcpu run: {:?}", r);
@@ -499,7 +503,7 @@ impl Vcpu {
             },
 
             Err(ref e) => match e.raw_os_error().unwrap() {
-                libc::EAGAIN | libc::EINTR => Ok(()),
+                libc::EAGAIN | libc::EINTR => Ok(true),
                 _ => {
                     error!("VCPU {:?} error {:?}", self.id, e);
                     Err(Error::VcpuUnhandledKvmExit)
@@ -687,7 +691,7 @@ impl DeviceManager {
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
-            exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
         let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
             exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
@@ -1820,7 +1824,7 @@ impl<'a> Vm<'a> {
 
             let vcpu_thread_barrier = vcpu_thread_barrier.clone();
 
-            let exit_evt = self.devices.exit_evt.try_clone().unwrap();
+            let reset_evt = self.devices.reset_evt.try_clone().unwrap();
             self.vcpus.push(
                 thread::Builder::new()
                     .name(format!("cloud-hypervisor_vcpu{}", vcpu.id))
@@ -1841,8 +1845,19 @@ impl<'a> Vm<'a> {
                         // Block until all CPUs are ready.
                         vcpu_thread_barrier.wait();
 
-                        while vcpu.run().is_ok() {}
-                        exit_evt.write(1).unwrap();
+                        loop {
+                            // vcpu.run() returns false on a KVM_EXIT_SHUTDOWN (triple-fault) so trigger a reset
+                            match vcpu.run() {
+                                Err(e) => {
+                                    error!("VCPU generated error: {:?}", e);
+                                }
+                                Ok(true) => {}
+                                Ok(false) => {
+                                    reset_evt.write(1).unwrap();
+                                    break;
+                                }
+                            }
+                        }
                     })
                     .map_err(Error::VcpuSpawn)?,
             );
