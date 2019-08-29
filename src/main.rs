@@ -851,7 +851,9 @@ mod tests {
                     "0x060000"
                 );
 
-                guest.ssh_command("sudo reboot").unwrap_or_default();
+                guest
+                    .ssh_command("sudo shutdown -h now")
+                    .unwrap_or_default();
                 thread::sleep(std::time::Duration::new(10, 0));
                 let _ = child.kill();
                 let _ = child.wait();
@@ -890,7 +892,7 @@ mod tests {
 
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 2);
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -928,7 +930,7 @@ mod tests {
 
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 5_063_000);
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -975,7 +977,7 @@ mod tests {
                 10
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1032,7 +1034,7 @@ mod tests {
                 10
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1089,7 +1091,7 @@ mod tests {
                 10
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1154,7 +1156,7 @@ mod tests {
             let _ = daemon_child.kill();
             let _ = daemon_child.wait();
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(5, 0));
             let _ = cloud_child.kill();
             let _ = cloud_child.wait();
@@ -1213,7 +1215,7 @@ mod tests {
                 0
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1328,7 +1330,7 @@ mod tests {
                 "bar"
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = daemon_child.kill();
@@ -1408,7 +1410,7 @@ mod tests {
                 "/dev/pmem0"
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1453,7 +1455,7 @@ mod tests {
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1507,7 +1509,7 @@ mod tests {
                 4
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1568,7 +1570,7 @@ mod tests {
                 0
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1620,7 +1622,8 @@ mod tests {
                 1
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
+
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             match child.wait_with_output() {
@@ -1680,7 +1683,8 @@ mod tests {
                 1
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
+
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             match child.wait_with_output() {
@@ -1742,7 +1746,8 @@ mod tests {
                 1
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
+
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Do this check after shutdown of the VM as an easy way to ensure
@@ -1803,7 +1808,7 @@ mod tests {
             let cmd = format!("sudo -E bash -c 'echo {} > /dev/hvc0'", text);
             guest.ssh_command(&cmd)?;
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
 
@@ -1855,7 +1860,7 @@ mod tests {
             // Test that there is a ttyS0
             aver!(tb, guest.is_console_detected().unwrap_or_default());
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Do this check after shutdown of the VM as an easy way to ensure
@@ -1998,7 +2003,7 @@ mod tests {
                 1
             );
 
-            guest.ssh_command_l2("sudo reboot")?;
+            guest.ssh_command_l2("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
 
             guest.ssh_command_l1("sudo shutdown -h now")?;
