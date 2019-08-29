@@ -605,9 +605,12 @@ struct DeviceManager {
     serial: Option<Arc<Mutex<devices::legacy::Serial>>>,
     console_input: Option<Arc<vm_virtio::ConsoleInput>>,
 
-    // i8042 device for exit
+    // i8042 device for i8042 reset
     i8042: Arc<Mutex<devices::legacy::I8042Device>>,
+
+    // Shutdown (exit) and reboot (reset) control
     exit_evt: EventFd,
+    reset_evt: EventFd,
 
     // IOAPIC
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
@@ -679,6 +682,7 @@ impl DeviceManager {
 
         // Add a shutdown device (i8042)
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+        let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
             exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
@@ -734,6 +738,7 @@ impl DeviceManager {
             console_input: console,
             i8042,
             exit_evt,
+            reset_evt,
             ioapic,
             pci,
         })
@@ -1298,6 +1303,7 @@ impl DeviceManager {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum EpollDispatch {
     Exit,
+    Reset,
     Stdin,
 }
 
@@ -1313,7 +1319,7 @@ impl EpollContext {
         // Initial capacity needs to be large enough to hold:
         // * 1 exit event
         // * 1 stdin event
-        let mut dispatch_table = Vec::with_capacity(3);
+        let mut dispatch_table = Vec::with_capacity(4);
         dispatch_table.push(None);
 
         Ok(EpollContext {
@@ -1359,6 +1365,12 @@ impl AsRawFd for EpollContext {
     }
 }
 
+#[derive(PartialEq)]
+pub enum ExitBehaviour {
+    Shutdown = 1,
+    Reset = 2,
+}
+
 pub struct Vm<'a> {
     fd: Arc<VmFd>,
     kernel: File,
@@ -1366,14 +1378,14 @@ pub struct Vm<'a> {
     vcpus: Vec<thread::JoinHandle<()>>,
     devices: DeviceManager,
     cpuid: CpuId,
-    config: VmConfig<'a>,
+    config: &'a VmConfig<'a>,
     epoll: EpollContext,
     on_tty: bool,
     creation_ts: std::time::Instant,
 }
 
 impl<'a> Vm<'a> {
-    pub fn new(kvm: &Kvm, config: VmConfig<'a>) -> Result<Self> {
+    pub fn new(kvm: &Kvm, config: &'a VmConfig<'a>) -> Result<Self> {
         let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
         let fd = Arc::new(fd);
@@ -1553,7 +1565,7 @@ impl<'a> Vm<'a> {
         let vm_info = VmInfo {
             memory: &guest_memory,
             vm_fd: &fd,
-            vm_cfg: &config,
+            vm_cfg: config,
         };
 
         let device_manager = DeviceManager::new(
@@ -1576,6 +1588,9 @@ impl<'a> Vm<'a> {
         // Let's add an exit event.
         epoll
             .add_event(&device_manager.exit_evt, EpollDispatch::Exit)
+            .map_err(Error::EpollError)?;
+        epoll
+            .add_event(&device_manager.reset_evt, EpollDispatch::Reset)
             .map_err(Error::EpollError)?;
 
         let vcpus = Vec::with_capacity(u8::from(&config.cpus) as usize);
@@ -1662,7 +1677,7 @@ impl<'a> Vm<'a> {
         }
     }
 
-    pub fn control_loop(&mut self) -> Result<()> {
+    pub fn control_loop(&mut self) -> Result<ExitBehaviour> {
         // Let's start the STDIN polling thread.
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -1675,6 +1690,8 @@ impl<'a> Vm<'a> {
                 .set_raw_mode()
                 .map_err(Error::SetTerminalRaw)?;
         }
+
+        let exit_behaviour;
 
         'outer: loop {
             let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
@@ -1702,6 +1719,14 @@ impl<'a> Vm<'a> {
                         EpollDispatch::Exit => {
                             // Consume the event.
                             self.devices.exit_evt.read().map_err(Error::EventFd)?;
+                            exit_behaviour = ExitBehaviour::Shutdown;
+
+                            break 'outer;
+                        }
+                        EpollDispatch::Reset => {
+                            // Consume the event.
+                            self.devices.reset_evt.read().map_err(Error::EventFd)?;
+                            exit_behaviour = ExitBehaviour::Reset;
 
                             break 'outer;
                         }
@@ -1749,7 +1774,7 @@ impl<'a> Vm<'a> {
                 .map_err(Error::SetTerminalCanon)?;
         }
 
-        Ok(())
+        Ok(exit_behaviour)
     }
 
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<vm_virtio::ConsoleInput>) {
@@ -1761,7 +1786,7 @@ impl<'a> Vm<'a> {
         }
     }
 
-    pub fn start(&mut self, entry_addr: GuestAddress) -> Result<()> {
+    pub fn start(&mut self, entry_addr: GuestAddress) -> Result<ExitBehaviour> {
         self.devices.register_devices()?;
 
         let vcpu_count = u8::from(&self.config.cpus);
@@ -1824,9 +1849,7 @@ impl<'a> Vm<'a> {
                 Err(e) => error!("Signal not found {}", e),
             }
         }
-        self.control_loop()?;
-
-        Ok(())
+        self.control_loop()
     }
 
     /// Gets an Arc to the guest memory owned by this VM.
