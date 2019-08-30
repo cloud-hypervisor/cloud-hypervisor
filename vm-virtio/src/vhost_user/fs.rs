@@ -3,17 +3,16 @@
 
 use super::vu_common_ctrl::setup_vhost_user;
 use super::{Error, Result};
+use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::{
     ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
-    VirtioInterruptType, VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
+    VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
 };
-use epoll;
 use libc::{self, EFD_NONBLOCK};
 use std::cmp;
 use std::io;
 use std::io::Write;
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::result;
+use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use vhost_rs::vhost_user::message::{
@@ -104,115 +103,6 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             unsafe { libc::msync(addr as *mut libc::c_void, fs.len[0] as usize, libc::MS_SYNC) };
         if ret == -1 {
             return Err(io::Error::last_os_error());
-        }
-
-        Ok(())
-    }
-}
-
-struct FsEpollHandler<S: VhostUserMasterReqHandler> {
-    vu_call_evt_queue_list: Vec<(EventFd, Queue)>,
-    interrupt_cb: Arc<VirtioInterrupt>,
-    kill_evt: EventFd,
-    slave_req_handler: Option<MasterReqHandler<S>>,
-}
-
-impl<S: VhostUserMasterReqHandler> FsEpollHandler<S> {
-    fn run(&mut self) -> result::Result<(), Error> {
-        // Create the epoll file descriptor
-        let epoll_fd = epoll::create(true).map_err(Error::EpollCreateFd)?;
-
-        for (evt_index, vu_call_evt_queue) in self.vu_call_evt_queue_list.iter().enumerate() {
-            // Add events
-            epoll::ctl(
-                epoll_fd,
-                epoll::ControlOptions::EPOLL_CTL_ADD,
-                vu_call_evt_queue.0.as_raw_fd(),
-                epoll::Event::new(epoll::Events::EPOLLIN, evt_index as u64),
-            )
-            .map_err(Error::EpollCtl)?;
-        }
-
-        let kill_evt_index = self.vu_call_evt_queue_list.len();
-        epoll::ctl(
-            epoll_fd,
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.kill_evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, kill_evt_index as u64),
-        )
-        .map_err(Error::EpollCtl)?;
-
-        let slave_evt_index = if let Some(self_req_handler) = &self.slave_req_handler {
-            let index = kill_evt_index + 1;
-            epoll::ctl(
-                epoll_fd,
-                epoll::ControlOptions::EPOLL_CTL_ADD,
-                self_req_handler.as_raw_fd(),
-                epoll::Event::new(epoll::Events::EPOLLIN, index as u64),
-            )
-            .map_err(Error::EpollCtl)?;
-
-            Some(index)
-        } else {
-            None
-        };
-
-        const EPOLL_EVENTS_LEN: usize = 100;
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
-
-        'epoll: loop {
-            let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
-                Ok(res) => res,
-                Err(e) => {
-                    if e.kind() == io::ErrorKind::Interrupted {
-                        // It's well defined from the epoll_wait() syscall
-                        // documentation that the epoll loop can be interrupted
-                        // before any of the requested events occurred or the
-                        // timeout expired. In both those cases, epoll_wait()
-                        // returns an error of type EINTR, but this should not
-                        // be considered as a regular error. Instead it is more
-                        // appropriate to retry, by calling into epoll_wait().
-                        continue;
-                    }
-                    return Err(Error::EpollWait(e));
-                }
-            };
-
-            for event in events.iter().take(num_events) {
-                let ev_type = event.data as usize;
-
-                match ev_type {
-                    x if (x < kill_evt_index) => {
-                        if let Err(e) = self.vu_call_evt_queue_list[x].0.read() {
-                            error!("Failed to get queue event: {:?}", e);
-                            break 'epoll;
-                        } else if let Err(e) = (self.interrupt_cb)(
-                            &VirtioInterruptType::Queue,
-                            Some(&self.vu_call_evt_queue_list[x].1),
-                        ) {
-                            error!(
-                                "Failed to signal used queue: {:?}",
-                                Error::FailedSignalingUsedQueue(e)
-                            );
-                            break 'epoll;
-                        }
-                    }
-                    x if (x == kill_evt_index) => {
-                        debug!("KILL_EVENT received, stopping epoll loop");
-                        break 'epoll;
-                    }
-                    x if (slave_evt_index.is_some() && slave_evt_index.unwrap() == x) => {
-                        if let Some(slave_req_handler) = self.slave_req_handler.as_mut() {
-                            slave_req_handler
-                                .handle_request()
-                                .map_err(Error::VhostUserSlaveRequest)?;
-                        }
-                    }
-                    _ => {
-                        error!("Unknown event for virtio-fs");
-                    }
-                }
-            }
         }
 
         Ok(())
@@ -448,19 +338,23 @@ impl VirtioDevice for Fs {
             None
         };
 
-        let mut handler = FsEpollHandler {
-            vu_call_evt_queue_list,
+        let mut handler = VhostUserEpollHandler::new(VhostUserEpollConfig {
+            vu_interrupt_list: vu_call_evt_queue_list,
             interrupt_cb,
             kill_evt,
             slave_req_handler,
-        };
+        });
 
         let worker_result = thread::Builder::new()
             .name("virtio_fs".to_string())
-            .spawn(move || handler.run());
+            .spawn(move || {
+                if let Err(e) = handler.run() {
+                    error!("net worker thread exited with error {:?}!", e);
+                }
+            });
 
         if let Err(e) = worker_result {
-            error!("failed to spawn virtio_blk worker: {}", e);
+            error!("failed to spawn virtio-fs worker: {}", e);
             return Err(ActivateError::BadActivate);
         }
 

@@ -20,10 +20,13 @@ use super::handler::*;
 use super::vu_common_ctrl::*;
 use super::{Error, Result};
 use vhost_rs::vhost_user::message::VhostUserVirtioFeatures;
-use vhost_rs::vhost_user::{Master, VhostUserMaster};
+use vhost_rs::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost_rs::VhostBackend;
 use virtio_bindings::virtio_net;
 use virtio_bindings::virtio_ring;
+
+struct SlaveReqHandler {}
+impl VhostUserMasterReqHandler for SlaveReqHandler {}
 
 pub struct Net {
     vhost_user_net: Master,
@@ -200,23 +203,22 @@ impl VirtioDevice for Net {
         )
         .map_err(ActivateError::VhostUserNetSetup)?;
 
-        let vu_epoll_cfg = VhostUserEpollConfig {
+        let mut handler = VhostUserEpollHandler::<SlaveReqHandler>::new(VhostUserEpollConfig {
             interrupt_cb,
             kill_evt: handler_kill_evt,
             vu_interrupt_list,
-        };
+            slave_req_handler: None,
+        });
 
-        let _handler_result = thread::Builder::new()
+        let handler_result = thread::Builder::new()
             .name("vhost_user_net".to_string())
             .spawn(move || {
-                let mut handler = VhostUserEpollHandler::new(vu_epoll_cfg);
-                let result = handler.run();
-                if let Err(_e) = result {
-                    error!("net worker thread exited with error {:?}!", _e);
+                if let Err(e) = handler.run() {
+                    error!("net worker thread exited with error {:?}!", e);
                 }
             });
-        if let Err(_e) = _handler_result {
-            error!("vhost-user net thread create failed with error {:?}", _e);
+        if let Err(e) = handler_result {
+            error!("vhost-user net thread create failed with error {:?}", e);
         }
         Ok(())
     }
