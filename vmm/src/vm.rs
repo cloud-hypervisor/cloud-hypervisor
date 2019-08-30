@@ -222,6 +222,9 @@ pub enum Error {
 
     /// Failed to allocate the IOAPIC memory range.
     IoapicRangeAllocation,
+
+    /// Cannot spawn a signal handler thread
+    SignalHandlerSpawn(io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1827,7 +1830,7 @@ impl<'a> Vm<'a> {
             let reset_evt = self.devices.reset_evt.try_clone().unwrap();
             self.vcpus.push(
                 thread::Builder::new()
-                    .name(format!("cloud-hypervisor_vcpu{}", vcpu.id))
+                    .name(format!("vcpu{}", vcpu.id))
                     .spawn(move || {
                         unsafe {
                             extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {
@@ -1850,6 +1853,7 @@ impl<'a> Vm<'a> {
                             match vcpu.run() {
                                 Err(e) => {
                                     error!("VCPU generated error: {:?}", e);
+                                    break;
                                 }
                                 Ok(true) => {}
                                 Ok(false) => {
@@ -1871,7 +1875,11 @@ impl<'a> Vm<'a> {
             let signals = Signals::new(&[SIGWINCH]);
             match signals {
                 Ok(sig) => {
-                    thread::spawn(move || Vm::os_signal_handler(sig, console_input_clone));
+                    thread::Builder::new()
+                        .name("signal_handler".to_string())
+                        .spawn(move || Vm::os_signal_handler(sig, console_input_clone))
+                        .map_err(Error::SignalHandlerSpawn)?;
+;
                 }
                 Err(e) => error!("Signal not found {}", e),
             }
