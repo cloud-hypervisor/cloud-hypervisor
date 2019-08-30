@@ -16,6 +16,7 @@ use crate::VirtioInterrupt;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
+use vhost_rs::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 
 /// Collection of common parameters required by vhost-user devices while
 /// call Epoll handler.
@@ -24,17 +25,18 @@ use std::sync::Arc;
 /// * `interrupt_cb` interrupt for virtqueue change.
 /// * `kill_evt` - EventFd used to kill the vhost-user device.
 /// * `vu_interrupt_list` - virtqueue and EventFd to signal when buffer used.
-pub struct VhostUserEpollConfig {
+pub struct VhostUserEpollConfig<S: VhostUserMasterReqHandler> {
     pub interrupt_cb: Arc<VirtioInterrupt>,
     pub kill_evt: EventFd,
     pub vu_interrupt_list: Vec<(EventFd, Queue)>,
+    pub slave_req_handler: Option<MasterReqHandler<S>>,
 }
 
-pub struct VhostUserEpollHandler {
-    pub vu_epoll_cfg: VhostUserEpollConfig,
+pub struct VhostUserEpollHandler<S: VhostUserMasterReqHandler> {
+    vu_epoll_cfg: VhostUserEpollConfig<S>,
 }
 
-impl VhostUserEpollHandler {
+impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
     /// Construct a new event handler for vhost-user based devices.
     ///
     /// # Arguments
@@ -42,21 +44,22 @@ impl VhostUserEpollHandler {
     ///
     /// # Return
     /// * `VhostUserEpollHandler` - epoll handler for vhost-user based devices
-    pub fn new(vu_epoll_cfg: VhostUserEpollConfig) -> VhostUserEpollHandler {
+    pub fn new(vu_epoll_cfg: VhostUserEpollConfig<S>) -> VhostUserEpollHandler<S> {
         VhostUserEpollHandler { vu_epoll_cfg }
     }
 
     fn signal_used_queue(&self, queue: &Queue) -> Result<()> {
         (self.vu_epoll_cfg.interrupt_cb)(&VirtioInterruptType::Queue, Some(queue))
-            .map_err(Error::FailedSignalingUsedQueue)?;
-        Ok(())
+            .map_err(Error::FailedSignalingUsedQueue)
     }
 
     pub fn run(&mut self) -> Result<()> {
+        // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(Error::EpollCreateFd)?;
 
         for (index, vhost_user_interrupt) in self.vu_epoll_cfg.vu_interrupt_list.iter().enumerate()
         {
+            // Add events
             epoll::ctl(
                 epoll_fd,
                 epoll::ControlOptions::EPOLL_CTL_ADD,
@@ -75,6 +78,21 @@ impl VhostUserEpollHandler {
             epoll::Event::new(epoll::Events::EPOLLIN, kill_evt_index as u64),
         )
         .map_err(Error::EpollCtl)?;
+
+        let slave_evt_index = if let Some(self_req_handler) = &self.vu_epoll_cfg.slave_req_handler {
+            let index = kill_evt_index + 1;
+            epoll::ctl(
+                epoll_fd,
+                epoll::ControlOptions::EPOLL_CTL_ADD,
+                self_req_handler.as_raw_fd(),
+                epoll::Event::new(epoll::Events::EPOLLIN, index as u64),
+            )
+            .map_err(Error::EpollCtl)?;
+
+            Some(index)
+        } else {
+            None
+        };
 
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); kill_evt_index + 1];
 
@@ -101,21 +119,32 @@ impl VhostUserEpollHandler {
 
                 match ev_type {
                     x if x < kill_evt_index => {
-                        let vhost_user_interrupt = &self.vu_epoll_cfg.vu_interrupt_list[x].0;
-                        vhost_user_interrupt
+                        self.vu_epoll_cfg.vu_interrupt_list[x]
+                            .0
                             .read()
                             .map_err(Error::FailedReadingQueue)?;
-                        let result =
-                            self.signal_used_queue(&self.vu_epoll_cfg.vu_interrupt_list[x].1);
-                        if let Err(_e) = result {
-                            error!("failed to signal used queue");
+                        if let Err(e) =
+                            self.signal_used_queue(&self.vu_epoll_cfg.vu_interrupt_list[x].1)
+                        {
+                            error!("Failed to signal used queue: {:?}", e);
+                            break 'poll;
                         }
                     }
                     x if kill_evt_index == x => {
+                        debug!("KILL_EVENT received, stopping epoll loop");
                         break 'poll;
                     }
+                    x if (slave_evt_index.is_some() && slave_evt_index.unwrap() == x) => {
+                        if let Some(slave_req_handler) =
+                            self.vu_epoll_cfg.slave_req_handler.as_mut()
+                        {
+                            slave_req_handler
+                                .handle_request()
+                                .map_err(Error::VhostUserSlaveRequest)?;
+                        }
+                    }
                     _ => {
-                        error!("Unknown event for vhost-user-net");
+                        error!("Unknown event for vhost-user");
                     }
                 }
             }
