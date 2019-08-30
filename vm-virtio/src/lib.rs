@@ -23,7 +23,6 @@ use std::io;
 mod block;
 mod console;
 mod device;
-pub mod fs;
 pub mod net;
 mod pmem;
 mod queue;
@@ -35,7 +34,6 @@ pub mod vhost_user;
 pub use self::block::*;
 pub use self::console::*;
 pub use self::device::*;
-pub use self::fs::*;
 pub use self::net::*;
 pub use self::pmem::*;
 pub use self::queue::*;
@@ -126,7 +124,7 @@ pub enum ActivateError {
     /// Failed to create Vhost-user interrupt eventfd
     VhostIrqCreate,
     /// Failed to setup vhost-user daemon.
-    VhostUserSetup(fs::Error),
+    VhostUserSetup(vhost_user::fs::Error),
     /// Failed to setup vhost-user daemon.
     VhostUserNetSetup(vhost_user::Error),
 }
@@ -153,7 +151,4 @@ pub enum Error {
     EpollCtl(io::Error),
     EpollWait(io::Error),
     FailedSignalingDriver(io::Error),
-
-    /// Failed to handle vhost-user slave request.
-    VhostUserSlaveRequest(vhost_rs::vhost_user::Error),
 }

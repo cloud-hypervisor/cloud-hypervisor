@@ -12,10 +12,12 @@ use std::io;
 use vhost_rs::Error as VhostError;
 use vm_memory::Error as MmapError;
 
+pub mod fs;
 mod handler;
 pub mod net;
 pub mod vu_common_ctrl;
 
+pub use self::fs::*;
 pub use self::net::Net;
 pub use self::vu_common_ctrl::VhostUserConfig;
 
@@ -81,6 +83,8 @@ pub enum Error {
     VhostIrqRead(io::Error),
     /// Failed to read vhost eventfd.
     VhostUserMemoryRegion(MmapError),
+    /// Failed to handle vhost-user slave request.
+    VhostUserSlaveRequest(vhost_rs::vhost_user::Error),
     /// Invalid used address.
     UsedAddress,
 }

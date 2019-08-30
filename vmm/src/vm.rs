@@ -250,7 +250,7 @@ pub enum DeviceManagerError {
     CreateVirtioRng(io::Error),
 
     /// Cannot create virtio-fs device
-    CreateVirtioFs(vm_virtio::fs::Error),
+    CreateVirtioFs(vm_virtio::vhost_user::fs::Error),
 
     /// Cannot create virtio-pmem device
     CreateVirtioPmem(io::Error),
@@ -968,7 +968,7 @@ impl DeviceManager {
                         ));
                     }
 
-                    let virtio_fs_device = vm_virtio::Fs::new(
+                    let virtio_fs_device = vm_virtio::vhost_user::Fs::new(
                         fs_sock,
                         fs_cfg.tag,
                         fs_cfg.num_queues,
