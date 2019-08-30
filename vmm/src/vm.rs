@@ -250,7 +250,7 @@ pub enum DeviceManagerError {
     CreateVirtioRng(io::Error),
 
     /// Cannot create virtio-fs device
-    CreateVirtioFs(vm_virtio::vhost_user::fs::Error),
+    CreateVirtioFs(vm_virtio::vhost_user::Error),
 
     /// Cannot create virtio-pmem device
     CreateVirtioPmem(io::Error),

@@ -49,6 +49,8 @@ pub enum Error {
     VhostUserCreateMaster(VhostError),
     /// Failed to open vhost device.
     VhostUserOpen(VhostError),
+    /// Connection to socket failed.
+    VhostUserConnect(vhost_rs::Error),
     /// Get features failed.
     VhostUserGetFeatures(VhostError),
     /// Get protocol features failed.
@@ -85,6 +87,10 @@ pub enum Error {
     VhostUserMemoryRegion(MmapError),
     /// Failed to handle vhost-user slave request.
     VhostUserSlaveRequest(vhost_rs::vhost_user::Error),
+    /// Failed to create the master request handler from slave.
+    MasterReqHandlerCreation(vhost_rs::vhost_user::Error),
+    /// Set slave request fd failed.
+    VhostUserSetSlaveRequestFd(vhost_rs::Error),
     /// Invalid used address.
     UsedAddress,
 }

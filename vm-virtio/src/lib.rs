@@ -47,7 +47,6 @@ const DEVICE_FEATURES_OK: u32 = 0x08;
 const DEVICE_FAILED: u32 = 0x80;
 
 const VIRTIO_F_VERSION_1: u32 = 32;
-const VIRTIO_F_VERSION_1_BITMASK: u64 = 1 << VIRTIO_F_VERSION_1;
 
 // Types taken from linux/virtio_ids.h
 #[derive(Copy, Clone)]
@@ -124,7 +123,7 @@ pub enum ActivateError {
     /// Failed to create Vhost-user interrupt eventfd
     VhostIrqCreate,
     /// Failed to setup vhost-user daemon.
-    VhostUserSetup(vhost_user::fs::Error),
+    VhostUserSetup(vhost_user::Error),
     /// Failed to setup vhost-user daemon.
     VhostUserNetSetup(vhost_user::Error),
 }
