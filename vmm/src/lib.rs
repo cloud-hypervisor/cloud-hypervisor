@@ -55,6 +55,7 @@ impl Vmm {
 }
 
 pub fn boot_kernel(config: VmConfig) -> Result<()> {
+    #[allow(clippy::never_loop)]
     loop {
         let vmm = Vmm::new()?;
         let mut vm = Vm::new(&vmm.kvm, &config).map_err(Error::VmNew)?;
@@ -63,6 +64,8 @@ pub fn boot_kernel(config: VmConfig) -> Result<()> {
         if vm.start(entry).map_err(Error::VmStart)? == ExitBehaviour::Shutdown {
             break;
         }
+        error!("Shutting down rather than rebooting due to known resource leaks: https://github.com/intel/cloud-hypervisor/issues/223");
+        break;
     }
 
     Ok(())
