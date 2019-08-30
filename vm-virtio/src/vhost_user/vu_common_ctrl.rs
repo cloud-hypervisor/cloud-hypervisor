@@ -100,8 +100,8 @@ pub fn setup_vhost_user(
     queue_evts: Vec<EventFd>,
     acked_features: u64,
 ) -> Result<Vec<(EventFd, Queue)>> {
-    let backend_features = vu.get_features().unwrap();
-    vu.set_features(acked_features & backend_features)
+    // Set features based on the acked features from the guest driver.
+    vu.set_features(acked_features)
         .map_err(Error::VhostUserSetFeatures)?;
 
     setup_vhost_user_vring(vu, mem, queues, queue_evts)
