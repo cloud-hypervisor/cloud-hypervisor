@@ -2017,6 +2017,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_reboot() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -2085,6 +2086,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_bzimage_reboot() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
