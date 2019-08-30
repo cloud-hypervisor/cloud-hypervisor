@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::Error as DeviceError;
-use super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
 use crate::{
-    VirtioInterrupt, VirtioInterruptType, VirtioSharedMemoryList, VIRTIO_F_VERSION_1_BITMASK,
+    ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType,
+    VirtioInterrupt, VirtioInterruptType, VirtioSharedMemoryList,
+    VIRTIO_F_VERSION_1_BITMASK,
 };
 use epoll;
 use libc::{self, EFD_NONBLOCK};
