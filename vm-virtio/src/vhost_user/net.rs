@@ -73,7 +73,7 @@ impl<'a> Net {
         // Set features back is required by the vhost crate mechanism, since the
         // later vhost call will check if features is filled in master before execution.
         vhost_user_net
-            .set_features(backend_features)
+            .set_features(avail_features)
             .map_err(Error::VhostUserSetFeatures)?;
 
         let mut acked_features = 0;
