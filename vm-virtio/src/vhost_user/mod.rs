@@ -77,8 +77,6 @@ pub enum Error {
     VhostUserSetVringKick(VhostError),
     /// Set vring enable failed.
     VhostUserSetVringEnable(VhostError),
-    /// Vhost-user setup vring failed.
-    VhostUserSetupVringFailed,
     /// Failed to create vhost eventfd.
     VhostIrqCreate(io::Error),
     /// Failed to read vhost eventfd.

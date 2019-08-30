@@ -85,6 +85,9 @@ pub fn setup_vhost_user_vring(
 
         vu.set_vring_kick(queue_index, &queue_evts[queue_index])
             .map_err(Error::VhostUserSetVringKick)?;
+
+        vu.set_vring_enable(queue_index, true)
+            .map_err(Error::VhostUserSetVringEnable)?;
     }
 
     Ok(vu_interrupt_list)
@@ -97,17 +100,9 @@ pub fn setup_vhost_user(
     queue_evts: Vec<EventFd>,
     acked_features: u64,
 ) -> Result<Vec<(EventFd, Queue)>> {
-    for i in 0..queues.len() {
-        vu.set_vring_enable(i, true)
-            .map_err(Error::VhostUserSetVringEnable)?;
-    }
-
     let backend_features = vu.get_features().unwrap();
     vu.set_features(acked_features & backend_features)
         .map_err(Error::VhostUserSetFeatures)?;
 
-    match setup_vhost_user_vring(vu, mem, queues, queue_evts) {
-        Ok(vu_interrupt_list) => Ok(vu_interrupt_list),
-        Err(_) => Err(Error::VhostUserSetupVringFailed),
-    }
+    setup_vhost_user_vring(vu, mem, queues, queue_evts)
 }
