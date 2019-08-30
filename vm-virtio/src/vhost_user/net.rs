@@ -68,7 +68,9 @@ impl<'a> Net {
 
         // Get features from backend, do negotiation to get a feature collection which
         // both VMM and backend support.
-        let backend_features = vhost_user_net.get_features().unwrap();
+        let backend_features = vhost_user_net
+            .get_features()
+            .map_err(Error::VhostUserGetFeatures)?;
         avail_features &= backend_features;
         // Set features back is required by the vhost crate mechanism, since the
         // later vhost call will check if features is filled in master before execution.
