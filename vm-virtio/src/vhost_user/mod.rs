@@ -12,11 +12,13 @@ use std::io;
 use vhost_rs::Error as VhostError;
 use vm_memory::Error as MmapError;
 
+pub mod blk;
 pub mod fs;
 mod handler;
 pub mod net;
 pub mod vu_common_ctrl;
 
+pub use self::blk::Blk;
 pub use self::fs::*;
 pub use self::net::Net;
 pub use self::vu_common_ctrl::VhostUserConfig;
@@ -91,5 +93,7 @@ pub enum Error {
     VhostUserSetSlaveRequestFd(vhost_rs::Error),
     /// Invalid used address.
     UsedAddress,
+    /// Invalid features provided from vhost-user backend
+    InvalidFeatures,
 }
 type Result<T> = std::result::Result<T, Error>;
