@@ -9,6 +9,7 @@ extern crate byteorder;
 extern crate devices;
 extern crate kvm_bindings;
 extern crate kvm_ioctls;
+#[macro_use]
 extern crate log;
 extern crate pci;
 extern crate vfio_bindings;
