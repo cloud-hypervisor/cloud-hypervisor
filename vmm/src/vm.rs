@@ -47,6 +47,7 @@ use std::ops::Deref;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::ptr::null_mut;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::{fmt, result, str, thread};
 use vfio::{VfioDevice, VfioPciDevice, VfioPciError};
@@ -59,7 +60,7 @@ use vm_memory::{
 use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::signal::register_signal_handler;
+use vmm_sys_util::signal::{register_signal_handler, validate_signal_num};
 use vmm_sys_util::terminal::Terminal;
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
@@ -225,6 +226,9 @@ pub enum Error {
 
     /// Cannot spawn a signal handler thread
     SignalHandlerSpawn(io::Error),
+
+    /// Failed to join on vCPU threads
+    ThreadCleanup,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1401,6 +1405,7 @@ pub struct Vm<'a> {
     epoll: EpollContext,
     on_tty: bool,
     creation_ts: std::time::Instant,
+    vcpus_kill_signalled: Arc<AtomicBool>,
 }
 
 impl<'a> Vm<'a> {
@@ -1625,6 +1630,7 @@ impl<'a> Vm<'a> {
             epoll,
             on_tty,
             creation_ts,
+            vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -1793,6 +1799,24 @@ impl<'a> Vm<'a> {
                 .map_err(Error::SetTerminalCanon)?;
         }
 
+        // Tell the vCPUs to stop themselves next time they go through the loop
+        self.vcpus_kill_signalled.store(true, Ordering::SeqCst);
+
+        // Signal to the vCPU threads. This will interrupt the KVM_RUN ioctl() allowing
+        // the loop to check the boolean set above.
+        for vcpu in self.vcpus.iter() {
+            let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
+            unsafe {
+                use std::os::unix::thread::JoinHandleExt;
+                libc::pthread_kill(vcpu.as_pthread_t(), signum);
+            }
+        }
+
+        // Wait for all the vCPU threads to finish
+        for vcpu in self.vcpus.drain(..) {
+            vcpu.join().map_err(|_| Error::ThreadCleanup)?
+        }
+
         Ok(exit_behaviour)
     }
 
@@ -1828,6 +1852,7 @@ impl<'a> Vm<'a> {
             let vcpu_thread_barrier = vcpu_thread_barrier.clone();
 
             let reset_evt = self.devices.reset_evt.try_clone().unwrap();
+            let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
             self.vcpus.push(
                 thread::Builder::new()
                     .name(format!("vcpu{}", vcpu.id))
@@ -1860,6 +1885,11 @@ impl<'a> Vm<'a> {
                                     reset_evt.write(1).unwrap();
                                     break;
                                 }
+                            }
+
+                            // We've been told to terminate
+                            if vcpu_kill_signalled.load(Ordering::SeqCst) {
+                                break;
                             }
                         }
                     })
