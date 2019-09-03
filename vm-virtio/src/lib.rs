@@ -27,6 +27,7 @@ pub mod net;
 mod pmem;
 mod queue;
 mod rng;
+mod vsock;
 
 pub mod transport;
 pub mod vhost_user;
@@ -38,6 +39,7 @@ pub use self::net::*;
 pub use self::pmem::*;
 pub use self::queue::*;
 pub use self::rng::*;
+pub use self::vsock::*;
 
 const DEVICE_INIT: u32 = 0x00;
 const DEVICE_ACKNOWLEDGE: u32 = 0x01;
