@@ -619,6 +619,7 @@ struct DeviceManager {
     // i8042 device for i8042 reset
     i8042: Arc<Mutex<devices::legacy::I8042Device>>,
 
+    #[cfg(feature = "acpi")]
     // ACPI device for reboot/shutdwon
     acpi_device: Arc<Mutex<devices::AcpiShutdownDevice>>,
 
@@ -700,6 +701,8 @@ impl DeviceManager {
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
+
+        #[cfg(feature = "acpi")]
         let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
             exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
@@ -755,6 +758,7 @@ impl DeviceManager {
             serial,
             console_input: console,
             i8042,
+            #[cfg(feature = "acpi")]
             acpi_device,
             exit_evt,
             reset_evt,
@@ -1303,6 +1307,7 @@ impl DeviceManager {
             .insert(self.i8042.clone(), 0x61, 0x4)
             .map_err(Error::BusError)?;
 
+        #[cfg(feature = "acpi")]
         self.io_bus
             .insert(self.acpi_device.clone(), 0x3c0, 0x4)
             .map_err(Error::BusError)?;

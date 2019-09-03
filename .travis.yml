@@ -9,6 +9,7 @@ before_script:
 
 script:
   - cargo build --release
+  - cargo build --release --no-default-features
   - cargo test
   - cargo clippy --all-targets --all-features -- -D warnings
   - find . -name "*.rs" | xargs rustfmt --check
