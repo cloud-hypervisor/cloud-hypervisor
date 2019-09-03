@@ -19,11 +19,13 @@ extern crate vmm_sys_util;
 use std::fs::File;
 use std::{io, result};
 
+#[cfg(feature = "acpi")]
 mod acpi;
 mod bus;
 pub mod ioapic;
 pub mod legacy;
 
+#[cfg(feature = "acpi")]
 pub use self::acpi::AcpiShutdownDevice;
 pub use self::bus::{Bus, BusDevice, Error as BusError};
 

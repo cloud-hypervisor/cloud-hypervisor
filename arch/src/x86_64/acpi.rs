@@ -48,7 +48,7 @@ struct PCIRangeEntry {
     pub segment: u16,
     pub start: u8,
     pub end: u8,
-    _reserved: u32
+    _reserved: u32,
 }
 
 pub fn create_dsdt_table(serial_enabled: bool) -> SDT {

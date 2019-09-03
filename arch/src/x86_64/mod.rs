@@ -183,8 +183,11 @@ pub fn configure_system(
         }
     }
 
-    let rsdp_addr = acpi::create_acpi_tables(guest_mem, num_cpus, serial_enabled);
-    params.0.acpi_rsdp_addr = rsdp_addr.0;
+    #[cfg(feature = "acpi")]
+    {
+        let rsdp_addr = acpi::create_acpi_tables(guest_mem, num_cpus, serial_enabled);
+        params.0.acpi_rsdp_addr = rsdp_addr.0;
+    }
 
     let zero_page_addr = layout::ZERO_PAGE_START;
     guest_mem
