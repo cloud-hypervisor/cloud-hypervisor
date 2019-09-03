@@ -388,9 +388,11 @@ impl VfioPciDevice {
                 ..Default::default()
             };
 
-            entry.u.msi.address_lo = route.msi_vector.msg_addr_lo;
-            entry.u.msi.address_hi = route.msi_vector.msg_addr_hi;
-            entry.u.msi.data = route.msi_vector.msg_data;
+            unsafe {
+                entry.u.msi.address_lo = route.msi_vector.msg_addr_lo;
+                entry.u.msi.address_hi = route.msi_vector.msg_addr_hi;
+                entry.u.msi.data = route.msi_vector.msg_data;
+            }
 
             entry_vec.push(entry);
         }
