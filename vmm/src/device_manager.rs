@@ -210,8 +210,8 @@ pub fn get_win_size() -> (u16, u16) {
 }
 
 pub struct DeviceManager {
-    pub io_bus: devices::Bus,
-    pub mmio_bus: devices::Bus,
+    io_bus: devices::Bus,
+    mmio_bus: devices::Bus,
 
     // Serial port on 0x3f8
     pub serial: Option<Arc<Mutex<devices::legacy::Serial>>>,
@@ -229,7 +229,7 @@ pub struct DeviceManager {
     pub reset_evt: EventFd,
 
     // IOAPIC
-    pub ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
+    ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
 
     // PCI root
     pci: Arc<Mutex<PciConfigIo>>,
@@ -942,6 +942,18 @@ impl DeviceManager {
         }
 
         Ok(())
+    }
+
+    pub fn io_bus(&self) -> &devices::Bus{
+        &self.io_bus
+    }
+
+    pub fn mmio_bus(&self) ->&devices::Bus {
+        &self.mmio_bus
+    }
+
+    pub fn ioapic(&self) -> &Option<Arc<Mutex<ioapic::Ioapic>>> {
+        &self.ioapic
     }
 }
 

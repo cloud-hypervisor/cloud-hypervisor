@@ -956,9 +956,9 @@ impl<'a> Vm<'a> {
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
 
         for cpu_id in 0..vcpu_count {
-            let io_bus = self.devices.io_bus.clone();
-            let mmio_bus = self.devices.mmio_bus.clone();
-            let ioapic = if let Some(ioapic) = &self.devices.ioapic {
+            let io_bus = self.devices.io_bus().clone();
+            let mmio_bus = self.devices.mmio_bus().clone();
+            let ioapic = if let Some(ioapic) = &self.devices.ioapic() {
                 Some(ioapic.clone())
             } else {
                 None
