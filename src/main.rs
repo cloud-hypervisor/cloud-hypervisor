@@ -166,6 +166,16 @@ fn main() {
                 .min_values(1),
         )
         .arg(
+            Arg::with_name("vsock")
+                .long("vsock")
+                .help(
+                    "Virtio VSOCK parameters \"cid=<context_id>,\
+                     sock=<socket_path>\"",
+                )
+                .takes_value(true)
+                .min_values(1),
+        )
+        .arg(
             Arg::with_name("v")
                 .short("v")
                 .multiple(true)
@@ -200,6 +210,7 @@ fn main() {
     let vhost_user_net: Option<Vec<&str>> = cmd_arguments
         .values_of("vhost-user-net")
         .map(|x| x.collect());
+    let vsock: Option<Vec<&str>> = cmd_arguments.values_of("vsock").map(|x| x.collect());
 
     let log_level = match cmd_arguments.occurrences_of("v") {
         0 => LevelFilter::Error,
@@ -239,6 +250,7 @@ fn main() {
         console,
         devices,
         vhost_user_net,
+        vsock,
     }) {
         Ok(config) => config,
         Err(e) => {

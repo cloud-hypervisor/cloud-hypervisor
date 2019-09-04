@@ -71,6 +71,10 @@ pub enum Error<'a> {
     ParseVuNetQueueSizeParam(std::num::ParseIntError),
     /// Failed parsing vhost-user-net server parameter.
     ParseVuNetServerParam(std::num::ParseIntError),
+    /// Failed parsing vsock context ID parameter.
+    ParseVsockCidParam(std::num::ParseIntError),
+    /// Failed parsing vsock socket path parameter.
+    ParseVsockSockParam,
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -88,6 +92,7 @@ pub struct VmParams<'a> {
     pub console: &'a str,
     pub devices: Option<Vec<&'a str>>,
     pub vhost_user_net: Option<Vec<&'a str>>,
+    pub vsock: Option<Vec<&'a str>>,
 }
 
 fn parse_size(size: &str) -> Result<u64> {
@@ -513,6 +518,38 @@ impl<'a> VhostUserNetConfig<'a> {
     }
 }
 
+pub struct VsockConfig<'a> {
+    pub cid: u64,
+    pub sock: &'a Path,
+}
+
+impl<'a> VsockConfig<'a> {
+    pub fn parse(vsock: &'a str) -> Result<Self> {
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = vsock.split(',').collect();
+
+        let mut cid_str: &str = "";
+        let mut sock_str: &str = "";
+
+        for param in params_list.iter() {
+            if param.starts_with("cid=") {
+                cid_str = &param[4..];
+            } else if param.starts_with("sock=") {
+                sock_str = &param[5..];
+            }
+        }
+
+        if sock_str.is_empty() {
+            return Err(Error::ParseVsockSockParam);
+        }
+
+        Ok(VsockConfig {
+            cid: cid_str.parse::<u64>().map_err(Error::ParseVsockCidParam)?,
+            sock: Path::new(sock_str),
+        })
+    }
+}
+
 pub struct VmConfig<'a> {
     pub cpus: CpusConfig,
     pub memory: MemoryConfig<'a>,
@@ -527,6 +564,7 @@ pub struct VmConfig<'a> {
     pub console: ConsoleConfig<'a>,
     pub devices: Option<Vec<DeviceConfig<'a>>>,
     pub vhost_user_net: Option<Vec<VhostUserNetConfig<'a>>>,
+    pub vsock: Option<Vec<VsockConfig<'a>>>,
 }
 
 impl<'a> VmConfig<'a> {
@@ -591,6 +629,15 @@ impl<'a> VmConfig<'a> {
             vhost_user_net = Some(vhost_user_net_config_list);
         }
 
+        let mut vsock: Option<Vec<VsockConfig>> = None;
+        if let Some(vsock_list) = &vm_params.vsock {
+            let mut vsock_config_list = Vec::new();
+            for item in vsock_list.iter() {
+                vsock_config_list.push(VsockConfig::parse(item)?);
+            }
+            vsock = Some(vsock_config_list);
+        }
+
         Ok(VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
@@ -605,6 +652,7 @@ impl<'a> VmConfig<'a> {
             console,
             devices,
             vhost_user_net,
+            vsock,
         })
     }
 }
