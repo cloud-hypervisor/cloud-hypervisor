@@ -41,10 +41,12 @@ unsafe impl ByteValued for Descriptor {}
 
 /// A virtio descriptor chain.
 pub struct DescriptorChain<'a> {
-    mem: &'a GuestMemoryMmap,
     desc_table: GuestAddress,
     queue_size: u16,
     ttl: u16, // used to prevent infinite chain cycles
+
+    /// Reference to guest memory
+    pub mem: &'a GuestMemoryMmap,
 
     /// Index into the descriptor table
     pub index: u16,
