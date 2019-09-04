@@ -12,6 +12,7 @@ use std::fmt::{self, Display};
 use std::result;
 
 pub mod config;
+pub mod device_manager;
 pub mod vm;
 
 use self::config::VmConfig;
