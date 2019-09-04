@@ -11,6 +11,7 @@
 mod csm;
 mod device;
 mod packet;
+mod unix;
 
 pub use self::device::Vsock;
 
