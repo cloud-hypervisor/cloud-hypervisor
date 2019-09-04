@@ -36,12 +36,12 @@ use std::result;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
-use super::Error as DeviceError;
-use super::{
+use crate::Error as DeviceError;
+use crate::VirtioInterrupt;
+use crate::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
     VIRTIO_F_VERSION_1,
 };
-use crate::VirtioInterrupt;
 use byteorder::{ByteOrder, LittleEndian};
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::eventfd::EventFd;
