@@ -46,6 +46,7 @@ use std::io::{self, sink, stdout};
 use std::ops::Deref;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::thread::JoinHandleExt;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -1403,7 +1404,7 @@ pub struct Vm<'a> {
     fd: Arc<VmFd>,
     kernel: File,
     memory: Arc<RwLock<GuestMemoryMmap>>,
-    vcpus: Vec<thread::JoinHandle<()>>,
+    threads: Vec<thread::JoinHandle<()>>,
     devices: DeviceManager,
     cpuid: CpuId,
     config: &'a VmConfig<'a>,
@@ -1622,13 +1623,13 @@ impl<'a> Vm<'a> {
             .add_event(&device_manager.reset_evt, EpollDispatch::Reset)
             .map_err(Error::EpollError)?;
 
-        let vcpus = Vec::with_capacity(u8::from(&config.cpus) as usize);
+        let threads = Vec::with_capacity(u8::from(&config.cpus) as usize + 1);
 
         Ok(Vm {
             fd,
             kernel,
             memory: guest_memory,
-            vcpus,
+            threads,
             devices: device_manager,
             cpuid,
             config,
@@ -1807,29 +1808,37 @@ impl<'a> Vm<'a> {
         // Tell the vCPUs to stop themselves next time they go through the loop
         self.vcpus_kill_signalled.store(true, Ordering::SeqCst);
 
-        // Signal to the vCPU threads. This will interrupt the KVM_RUN ioctl() allowing
-        // the loop to check the boolean set above.
-        for vcpu in self.vcpus.iter() {
+        // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
+        // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
+        // above.
+        for thread in self.threads.iter() {
             let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
             unsafe {
-                use std::os::unix::thread::JoinHandleExt;
-                libc::pthread_kill(vcpu.as_pthread_t(), signum);
+                libc::pthread_kill(thread.as_pthread_t(), signum);
             }
         }
 
-        // Wait for all the vCPU threads to finish
-        for vcpu in self.vcpus.drain(..) {
-            vcpu.join().map_err(|_| Error::ThreadCleanup)?
+        // Wait for all the threads to finish
+        for thread in self.threads.drain(..) {
+            thread.join().map_err(|_| Error::ThreadCleanup)?
         }
 
         Ok(exit_behaviour)
     }
 
-    fn os_signal_handler(signals: Signals, console_input_clone: Arc<vm_virtio::ConsoleInput>) {
+    fn os_signal_handler(
+        signals: Signals,
+        console_input_clone: Arc<vm_virtio::ConsoleInput>,
+        quit_signum: i32,
+    ) {
         for signal in signals.forever() {
             if signal == SIGWINCH {
                 let (col, row) = get_win_size();
                 console_input_clone.update_console_size(col, row);
+            }
+
+            if signal == quit_signum {
+                break;
             }
         }
     }
@@ -1858,7 +1867,7 @@ impl<'a> Vm<'a> {
 
             let reset_evt = self.devices.reset_evt.try_clone().unwrap();
             let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
-            self.vcpus.push(
+            self.threads.push(
                 thread::Builder::new()
                     .name(format!("vcpu{}", vcpu.id))
                     .spawn(move || {
@@ -1907,13 +1916,18 @@ impl<'a> Vm<'a> {
 
         if let Some(console_input) = &self.devices.console_input {
             let console_input_clone = console_input.clone();
-            let signals = Signals::new(&[SIGWINCH]);
+            let quit_signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
+            let signals = Signals::new(&[SIGWINCH, quit_signum]);
             match signals {
                 Ok(sig) => {
-                    thread::Builder::new()
-                        .name("signal_handler".to_string())
-                        .spawn(move || Vm::os_signal_handler(sig, console_input_clone))
-                        .map_err(Error::SignalHandlerSpawn)?;
+                    self.threads.push(
+                        thread::Builder::new()
+                            .name("signal_handler".to_string())
+                            .spawn(move || {
+                                Vm::os_signal_handler(sig, console_input_clone, quit_signum)
+                            })
+                            .map_err(Error::SignalHandlerSpawn)?,
+                    );
 ;
                 }
                 Err(e) => error!("Signal not found {}", e),
