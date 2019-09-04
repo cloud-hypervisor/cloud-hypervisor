@@ -224,10 +224,6 @@ pub struct DeviceManager {
     // ACPI device for reboot/shutdwon
     acpi_device: Arc<Mutex<devices::AcpiShutdownDevice>>,
 
-    // Shutdown (exit) and reboot (reset) control
-    pub exit_evt: EventFd,
-    pub reset_evt: EventFd,
-
     // IOAPIC
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
 
@@ -245,6 +241,8 @@ impl DeviceManager {
         msi_capable: bool,
         userspace_ioapic: bool,
         mut mem_slots: u32,
+        exit_evt: &EventFd,
+        reset_evt: &EventFd,
     ) -> DeviceManagerResult<Self> {
         let mut io_bus = devices::Bus::new();
         let mut mmio_bus = devices::Bus::new();
@@ -300,8 +298,6 @@ impl DeviceManager {
         };
 
         // Add a shutdown device (i8042)
-        let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-        let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
@@ -367,8 +363,6 @@ impl DeviceManager {
             i8042,
             #[cfg(feature = "acpi")]
             acpi_device,
-            exit_evt,
-            reset_evt,
             ioapic,
             pci,
             mmap_regions,
@@ -944,11 +938,11 @@ impl DeviceManager {
         Ok(())
     }
 
-    pub fn io_bus(&self) -> &devices::Bus{
+    pub fn io_bus(&self) -> &devices::Bus {
         &self.io_bus
     }
 
-    pub fn mmio_bus(&self) ->&devices::Bus {
+    pub fn mmio_bus(&self) -> &devices::Bus {
         &self.mmio_bus
     }
 
