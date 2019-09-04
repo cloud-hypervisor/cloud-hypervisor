@@ -73,6 +73,9 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-pmem device
     CreateVirtioPmem(io::Error),
 
+    /// Cannot create virtio-vsock device
+    CreateVirtioVsock(io::Error),
+
     /// Failed parsing disk image format
     DetectImageType(qcow::Error),
 
@@ -460,6 +463,9 @@ impl DeviceManager {
             &interrupt_info,
         )?;
 
+        // Add virtio-vsock if required
+        DeviceManager::add_virtio_vsock_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
+
         Ok(())
     }
 
@@ -772,6 +778,34 @@ impl DeviceManager {
 
                 DeviceManager::add_virtio_pci_device(
                     Box::new(vhost_user_net_device),
+                    vm_info.memory,
+                    allocator,
+                    vm_info.vm_fd,
+                    pci,
+                    buses,
+                    &interrupt_info,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn add_virtio_vsock_devices(
+        vm_info: &VmInfo,
+        allocator: &mut SystemAllocator,
+        pci: &mut PciConfigIo,
+        buses: &mut BusInfo,
+        interrupt_info: &InterruptInfo,
+    ) -> DeviceManagerResult<()> {
+        // Add vsock if required
+        if let Some(vsock_list_cfg) = &vm_info.vm_cfg.vsock {
+            for vsock_cfg in vsock_list_cfg.iter() {
+                let vsock_device = vm_virtio::Vsock::new(vsock_cfg.cid)
+                    .map_err(DeviceManagerError::CreateVirtioVsock)?;
+
+                DeviceManager::add_virtio_pci_device(
+                    Box::new(vsock_device),
                     vm_info.memory,
                     allocator,
                     vm_info.vm_fd,
