@@ -13,6 +13,7 @@ mod muxer_killq;
 mod muxer_rxq;
 
 pub use muxer::VsockMuxer as VsockUnixBackend;
+pub use Error as VsockUnixError;
 
 mod defs {
     /// Maximum number of established connections that we can handle.

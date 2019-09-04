@@ -76,6 +76,12 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-vsock device
     CreateVirtioVsock(io::Error),
 
+    /// Failed converting Path to &str for the virtio-vsock device.
+    CreateVsockConvertPath,
+
+    /// Cannot create virtio-vsock backend
+    CreateVsockBackend(vm_virtio::vsock::VsockUnixError),
+
     /// Failed parsing disk image format
     DetectImageType(qcow::Error),
 
@@ -801,7 +807,15 @@ impl DeviceManager {
         // Add vsock if required
         if let Some(vsock_list_cfg) = &vm_info.vm_cfg.vsock {
             for vsock_cfg in vsock_list_cfg.iter() {
-                let vsock_device = vm_virtio::Vsock::new(vsock_cfg.cid)
+                let socket_path = vsock_cfg
+                    .sock
+                    .to_str()
+                    .ok_or(DeviceManagerError::CreateVsockConvertPath)?;
+                let backend =
+                    vm_virtio::vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
+                        .map_err(DeviceManagerError::CreateVsockBackend)?;
+
+                let vsock_device = vm_virtio::Vsock::new(vsock_cfg.cid, backend)
                     .map_err(DeviceManagerError::CreateVirtioVsock)?;
 
                 DeviceManager::add_virtio_pci_device(
