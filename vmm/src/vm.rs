@@ -32,6 +32,7 @@ use kvm_bindings::{
     KVM_PIT_SPEAKER_DUMMY,
 };
 use kvm_ioctls::*;
+use libc::EFD_NONBLOCK;
 use libc::{c_void, siginfo_t};
 use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGWINCH};
@@ -50,6 +51,7 @@ use vm_memory::{
     Address, Bytes, Error as MmapError, GuestAddress, GuestMemory, GuestMemoryMmap,
     GuestMemoryRegion, GuestUsize,
 };
+use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, validate_signal_num};
 use vmm_sys_util::terminal::Terminal;
 
@@ -512,6 +514,9 @@ pub struct Vm<'a> {
     on_tty: bool,
     creation_ts: std::time::Instant,
     vcpus_kill_signalled: Arc<AtomicBool>,
+    // Shutdown (exit) and reboot (reset) control
+    exit_evt: EventFd,
+    reset_evt: EventFd,
 }
 
 impl<'a> Vm<'a> {
@@ -698,12 +703,17 @@ impl<'a> Vm<'a> {
             vm_cfg: config,
         };
 
+        let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+        let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+
         let device_manager = DeviceManager::new(
             &vm_info,
             &mut allocator,
             msi_capable,
             userspace_ioapic,
             ram_regions.len() as u32,
+            &exit_evt,
+            &reset_evt,
         )
         .map_err(Error::DeviceManager)?;
 
@@ -717,10 +727,10 @@ impl<'a> Vm<'a> {
 
         // Let's add an exit event.
         epoll
-            .add_event(&device_manager.exit_evt, EpollDispatch::Exit)
+            .add_event(&exit_evt, EpollDispatch::Exit)
             .map_err(Error::EpollError)?;
         epoll
-            .add_event(&device_manager.reset_evt, EpollDispatch::Reset)
+            .add_event(&reset_evt, EpollDispatch::Reset)
             .map_err(Error::EpollError)?;
 
         let threads = Vec::with_capacity(u8::from(&config.cpus) as usize + 1);
@@ -737,6 +747,8 @@ impl<'a> Vm<'a> {
             on_tty,
             creation_ts,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
+            exit_evt,
+            reset_evt,
         })
     }
 
@@ -849,14 +861,14 @@ impl<'a> Vm<'a> {
                     match dispatch_type {
                         EpollDispatch::Exit => {
                             // Consume the event.
-                            self.devices.exit_evt.read().map_err(Error::EventFd)?;
+                            self.exit_evt.read().map_err(Error::EventFd)?;
                             exit_behaviour = ExitBehaviour::Shutdown;
 
                             break 'outer;
                         }
                         EpollDispatch::Reset => {
                             // Consume the event.
-                            self.devices.reset_evt.read().map_err(Error::EventFd)?;
+                            self.reset_evt.read().map_err(Error::EventFd)?;
                             exit_behaviour = ExitBehaviour::Reset;
 
                             break 'outer;
@@ -969,7 +981,7 @@ impl<'a> Vm<'a> {
 
             let vcpu_thread_barrier = vcpu_thread_barrier.clone();
 
-            let reset_evt = self.devices.reset_evt.try_clone().unwrap();
+            let reset_evt = self.reset_evt.try_clone().unwrap();
             let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
             self.threads.push(
                 thread::Builder::new()
