@@ -36,11 +36,12 @@ use std::result;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
+use super::VsockBackend;
 use crate::Error as DeviceError;
 use crate::VirtioInterrupt;
 use crate::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    VIRTIO_F_VERSION_1,
+    VIRTIO_F_IN_ORDER, VIRTIO_F_VERSION_1,
 };
 use byteorder::{ByteOrder, LittleEndian};
 use vm_memory::GuestMemoryMmap;
@@ -167,19 +168,26 @@ impl VsockEpollHandler {
 }
 
 /// Virtio device exposing virtual socket to the guest.
-pub struct Vsock {
+pub struct Vsock<B: VsockBackend> {
     cid: u64,
+    _backend: Option<B>,
     kill_evt: Option<EventFd>,
     avail_features: u64,
     acked_features: u64,
 }
 
-impl Vsock {
-    pub fn new(cid: u64) -> io::Result<Vsock> {
-        let avail_features = 1u64 << VIRTIO_F_VERSION_1;
+impl<B> Vsock<B>
+where
+    B: VsockBackend,
+{
+    /// Create a new virtio-vsock device with the given VM CID and vsock
+    /// backend.
+    pub fn new(cid: u64, backend: B) -> io::Result<Vsock<B>> {
+        let avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_F_IN_ORDER;
 
         Ok(Vsock {
             cid,
+            _backend: Some(backend),
             kill_evt: None,
             avail_features,
             acked_features: 0u64,
@@ -187,7 +195,10 @@ impl Vsock {
     }
 }
 
-impl Drop for Vsock {
+impl<B> Drop for Vsock<B>
+where
+    B: VsockBackend,
+{
     fn drop(&mut self) {
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
@@ -196,7 +207,10 @@ impl Drop for Vsock {
     }
 }
 
-impl VirtioDevice for Vsock {
+impl<B> VirtioDevice for Vsock<B>
+where
+    B: VsockBackend,
+{
     fn device_type(&self) -> u32 {
         VirtioDeviceType::TYPE_VSOCK as u32
     }

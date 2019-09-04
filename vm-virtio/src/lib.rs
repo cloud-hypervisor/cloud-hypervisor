@@ -27,7 +27,7 @@ pub mod net;
 mod pmem;
 mod queue;
 mod rng;
-mod vsock;
+pub mod vsock;
 
 pub mod transport;
 pub mod vhost_user;
@@ -49,6 +49,7 @@ const DEVICE_FEATURES_OK: u32 = 0x08;
 const DEVICE_FAILED: u32 = 0x80;
 
 const VIRTIO_F_VERSION_1: u32 = 32;
+const VIRTIO_F_IN_ORDER: u32 = 35;
 
 // Types taken from linux/virtio_ids.h
 #[derive(Copy, Clone)]
