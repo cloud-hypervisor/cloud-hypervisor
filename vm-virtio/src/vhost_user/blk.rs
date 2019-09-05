@@ -61,6 +61,10 @@ impl<'a> Blk {
             | 1 << VIRTIO_F_VERSION_1
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
+        if wce {
+            avail_features |= 1 << VIRTIO_BLK_F_CONFIG_WCE;
+        }
+
         // Set vhost-user owner.
         vhost_user_blk
             .set_owner()
@@ -190,8 +194,15 @@ impl VirtioDevice for Blk {
             error!("Failed to write config space");
             return;
         }
-        let (_, right) = self.config_space.split_at_mut(offset as usize);
-        right.copy_from_slice(&data[..]);
+        // In fact, write_config() only handle wce value in vhost-user-blk.
+        // so, we can only set wce value here.
+        if self.config_space[offset as usize] == data[0] {
+            return;
+        }
+        self.vhost_user_blk
+            .set_config(offset as u32, VhostUserConfigFlags::WRITABLE, data)
+            .expect("Failed to set config");
+        self.config_space[offset as usize] = data[0];
     }
 
     fn activate(
