@@ -5,7 +5,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+#[cfg(feature = "acpi")]
 mod acpi;
+
 mod gdt;
 pub mod interrupts;
 pub mod layout;
@@ -127,7 +129,7 @@ pub fn configure_system(
     cmdline_size: usize,
     num_cpus: u8,
     setup_hdr: Option<setup_header>,
-    serial_enabled: bool,
+    _serial_enabled: bool,
 ) -> super::Result<()> {
     const KERNEL_BOOT_FLAG_MAGIC: u16 = 0xaa55;
     const KERNEL_HDR_MAGIC: u32 = 0x53726448;
@@ -185,7 +187,7 @@ pub fn configure_system(
 
     #[cfg(feature = "acpi")]
     {
-        let rsdp_addr = acpi::create_acpi_tables(guest_mem, num_cpus, serial_enabled);
+        let rsdp_addr = acpi::create_acpi_tables(guest_mem, num_cpus, _serial_enabled);
         params.0.acpi_rsdp_addr = rsdp_addr.0;
     }
 

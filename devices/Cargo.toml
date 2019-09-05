@@ -17,5 +17,5 @@ vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 tempfile = "3.1.0"
 
 [features]
-default = ["acpi"]
+default = []
 acpi = []
