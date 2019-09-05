@@ -1,3 +1,20 @@
+- [v0.2.0](#v020)
+	- [Network device offloading](#network-device-offloading)
+	- [Minimal hardware-reduced ACPI](#minimal-hardware-reduced-acpi)
+	- [Debug I/O port](#debug-io-port)
+	- [Improved direct device assignment](#improved-direct-device-assignment)
+	- [Improved shared filesystem](#improved-shared-filesystem)
+	- [Ubuntu bionic based CI](#ubuntu-bionic-based-ci)
+- [v0.1.0](#v010)
+	- [Shared filesystem](#shared-filesystem)
+	- [Initial direct device assignment support](#initial-direct-device-assignment-support)
+	- [Userspace IOAPIC](#userspace-ioapic)
+	- [Virtual persistent memory](#virtual-persistent-memory)
+	- [Linux kernel bzImage](#linux-kernel-bzimage)
+	- [Console over virtio](#console-over-virtio)
+	- [Unit testing](#unit-testing)
+	- [Integration tests parallelization](#integration-tests-parallelization)
+
 # v0.2.0
 
 This release has been tracked through the [0.2.0 project](https://github.com/intel/cloud-hypervisor/projects/2).
