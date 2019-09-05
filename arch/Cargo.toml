@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["The Chromium OS Authors"]
 
 [features]
-default = ["acpi"]
+default = []
 acpi = ["acpi_tables"]
 
 [dependencies]
