@@ -633,6 +633,9 @@ struct DeviceManager {
 
     // PCI root
     pci: Arc<Mutex<PciConfigIo>>,
+
+    // mmap()ed region to unmap on drop
+    mmap_regions: Vec<(*mut libc::c_void, usize)>,
 }
 
 impl DeviceManager {
@@ -740,6 +743,8 @@ impl DeviceManager {
             None
         };
 
+        let mut mmap_regions = Vec::new();
+
         DeviceManager::add_virtio_devices(
             vm_info,
             allocator,
@@ -747,6 +752,7 @@ impl DeviceManager {
             &mut buses,
             &interrupt_info,
             &mut mem_slots,
+            &mut mmap_regions,
         )?;
 
         DeviceManager::add_vfio_devices(vm_info, allocator, &mut pci, &mut buses, mem_slots)?;
@@ -765,6 +771,7 @@ impl DeviceManager {
             reset_evt,
             ioapic,
             pci,
+            mmap_regions,
         })
     }
 
@@ -775,6 +782,7 @@ impl DeviceManager {
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
         mut mem_slots: &mut u32,
+        mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
     ) -> DeviceManagerResult<()> {
         // Add virtio-blk if required
         DeviceManager::add_virtio_block_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
@@ -793,6 +801,7 @@ impl DeviceManager {
             buses,
             &interrupt_info,
             &mut mem_slots,
+            mmap_regions,
         )?;
 
         // Add virtio-pmem if required
@@ -803,6 +812,7 @@ impl DeviceManager {
             buses,
             &interrupt_info,
             &mut mem_slots,
+            mmap_regions,
         )?;
 
         // Add virtio-vhost-user-net if required
@@ -938,6 +948,7 @@ impl DeviceManager {
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
         mem_slots: &mut u32,
+        mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
     ) -> DeviceManagerResult<()> {
         // Add virtio-fs if required
         if let Some(fs_list_cfg) = &vm_info.vm_cfg.fs {
@@ -968,6 +979,7 @@ impl DeviceManager {
                         if addr == libc::MAP_FAILED {
                             return Err(DeviceManagerError::Mmap(io::Error::last_os_error()));
                         }
+                        mmap_regions.push((addr, fs_cache as usize));
 
                         let mem_region = kvm_userspace_memory_region {
                             slot: *mem_slots as u32,
@@ -1029,6 +1041,7 @@ impl DeviceManager {
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
         mem_slots: &mut u32,
+        mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
     ) -> DeviceManagerResult<()> {
         // Add virtio-pmem if required
         if let Some(pmem_list_cfg) = &vm_info.vm_cfg.pmem {
@@ -1067,8 +1080,10 @@ impl DeviceManager {
                         libc::MAP_NORESERVE | libc::MAP_SHARED,
                         file.as_raw_fd(),
                         0 as libc::off_t,
-                    ) as *mut u8
+                    )
                 };
+
+                mmap_regions.push((addr, size as usize));
 
                 let mem_region = kvm_userspace_memory_region {
                     slot: *mem_slots as u32,
@@ -1326,6 +1341,16 @@ impl DeviceManager {
         }
 
         Ok(())
+    }
+}
+
+impl Drop for DeviceManager {
+    fn drop(&mut self) {
+        for (addr, size) in self.mmap_regions.drain(..) {
+            unsafe {
+                libc::munmap(addr, size);
+            }
+        }
     }
 }
 
