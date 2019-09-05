@@ -39,8 +39,6 @@ use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vmm_sys_util::eventfd::EventFd;
 
-const DEFAULT_MSIX_VEC_NUM: u16 = 2;
-
 // IOAPIC address range
 const IOAPIC_RANGE_ADDR: u64 = 0xfec0_0000;
 const IOAPIC_RANGE_SIZE: u64 = 0x20;
@@ -849,7 +847,10 @@ impl DeviceManager {
         interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
         let msix_num = if interrupt_info.msi_capable {
-            DEFAULT_MSIX_VEC_NUM
+            // Allows support for one MSI-X vector per queue. It also adds 1
+            // as we need to take into account the dedicated vector to notify
+            // about a virtio config change.
+            (virtio_device.queue_max_sizes().len() + 1) as u16
         } else {
             0
         };

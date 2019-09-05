@@ -974,7 +974,7 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                10
+                12
             );
 
             guest.ssh_command("sudo shutdown -h now")?;
@@ -1031,7 +1031,7 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                10
+                12
             );
 
             guest.ssh_command("sudo shutdown -h now")?;
@@ -1088,7 +1088,7 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                10
+                12
             );
 
             guest.ssh_command("sudo shutdown -h now")?;
@@ -2062,7 +2062,7 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                10
+                12
             );
 
             guest.ssh_command("sudo shutdown -h now")?;
