@@ -577,6 +577,44 @@ mod tests {
         (child, virtiofsd_socket_path)
     }
 
+    fn ssh_command_ip(command: &str, ip: &str) -> Result<String, Error> {
+        let mut s = String::new();
+
+        let mut counter = 0;
+        loop {
+            match (|| -> Result<(), Error> {
+                let tcp =
+                    TcpStream::connect(format!("{}:22", ip)).map_err(|_| Error::Connection)?;
+                let mut sess = Session::new().unwrap();
+                sess.handshake(&tcp).map_err(|_| Error::Connection)?;
+
+                sess.userauth_password("cloud", "cloud123")
+                    .map_err(|_| Error::Authentication)?;
+                assert!(sess.authenticated());
+
+                let mut channel = sess.channel_session().map_err(|_| Error::Command)?;
+                channel.exec(command).map_err(|_| Error::Command)?;
+
+                // Intentionally ignore these results here as their failure
+                // does not precipitate a repeat
+                let _ = channel.read_to_string(&mut s);
+                let _ = channel.close();
+                let _ = channel.wait_close();
+                Ok(())
+            })() {
+                Ok(_) => break,
+                Err(e) => {
+                    counter += 1;
+                    if counter >= 6 {
+                        return Err(e);
+                    }
+                }
+            };
+            thread::sleep(std::time::Duration::new(10 * counter, 0));
+        }
+        Ok(s)
+    }
+
     #[derive(Debug)]
     enum Error {
         Connection,
@@ -636,54 +674,16 @@ mod tests {
             )
         }
 
-        fn ssh_command_ip(&self, command: &str, ip: &str) -> Result<String, Error> {
-            let mut s = String::new();
-
-            let mut counter = 0;
-            loop {
-                match (|| -> Result<(), Error> {
-                    let tcp =
-                        TcpStream::connect(format!("{}:22", ip)).map_err(|_| Error::Connection)?;
-                    let mut sess = Session::new().unwrap();
-                    sess.handshake(&tcp).map_err(|_| Error::Connection)?;
-
-                    sess.userauth_password("cloud", "cloud123")
-                        .map_err(|_| Error::Authentication)?;
-                    assert!(sess.authenticated());
-
-                    let mut channel = sess.channel_session().map_err(|_| Error::Command)?;
-                    channel.exec(command).map_err(|_| Error::Command)?;
-
-                    // Intentionally ignore these results here as their failure
-                    // does not precipitate a repeat
-                    let _ = channel.read_to_string(&mut s);
-                    let _ = channel.close();
-                    let _ = channel.wait_close();
-                    Ok(())
-                })() {
-                    Ok(_) => break,
-                    Err(e) => {
-                        counter += 1;
-                        if counter >= 6 {
-                            return Err(e);
-                        }
-                    }
-                };
-                thread::sleep(std::time::Duration::new(10 * counter, 0));
-            }
-            Ok(s)
-        }
-
         fn ssh_command(&self, command: &str) -> Result<String, Error> {
-            self.ssh_command_ip(command, &self.network.guest_ip)
+            ssh_command_ip(command, &self.network.guest_ip)
         }
 
         fn ssh_command_l1(&self, command: &str) -> Result<String, Error> {
-            self.ssh_command_ip(command, &self.network.guest_ip)
+            ssh_command_ip(command, &self.network.guest_ip)
         }
 
         fn ssh_command_l2(&self, command: &str) -> Result<String, Error> {
-            self.ssh_command_ip(command, &self.network.l2_guest_ip)
+            ssh_command_ip(command, &self.network.l2_guest_ip)
         }
 
         fn get_cpu_count(&self) -> Result<u32, Error> {
@@ -2225,5 +2225,4 @@ mod tests {
             Ok(())
         });
     }
-
 }
