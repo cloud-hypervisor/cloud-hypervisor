@@ -209,13 +209,51 @@ pub fn get_win_size() -> (u16, u16) {
     (ws.cols, ws.rows)
 }
 
+pub struct Console {
+    // Serial port on 0x3f8
+    serial: Option<Arc<Mutex<devices::legacy::Serial>>>,
+    console_input: Option<Arc<vm_virtio::ConsoleInput>>,
+    input_enabled: bool,
+}
+
+impl Console {
+    pub fn queue_input_bytes(&self, out: &[u8]) -> vmm_sys_util::errno::Result<()> {
+        if self.serial.is_some() {
+            self.serial
+                .as_ref()
+                .unwrap()
+                .lock()
+                .expect("Failed to process stdin event due to poisoned lock")
+                .queue_input_bytes(out)?;
+        }
+
+        if self.console_input.is_some() {
+            self.console_input.as_ref().unwrap().queue_input_bytes(out);
+        }
+
+        Ok(())
+    }
+
+    pub fn update_console_size(&self, cols: u16, rows: u16) {
+        if self.console_input.is_some() {
+            self.console_input
+                .as_ref()
+                .unwrap()
+                .update_console_size(cols, rows)
+        }
+    }
+
+    pub fn input_enabled(&self) -> bool {
+        self.input_enabled
+    }
+}
+
 pub struct DeviceManager {
     io_bus: devices::Bus,
     mmio_bus: devices::Bus,
 
-    // Serial port on 0x3f8
-    pub serial: Option<Arc<Mutex<devices::legacy::Serial>>>,
-    pub console_input: Option<Arc<vm_virtio::ConsoleInput>>,
+    // Console abstraction
+    console: Arc<Console>,
 
     // i8042 device for i8042 reset
     i8042: Arc<Mutex<devices::legacy::I8042Device>>,
@@ -321,7 +359,7 @@ impl DeviceManager {
             ConsoleOutputMode::Off => None,
         };
         let (col, row) = get_win_size();
-        let console = if console_writer.is_some() {
+        let console_input = if console_writer.is_some() {
             let (virtio_console_device, console_input) =
                 vm_virtio::Console::new(console_writer, col, row)
                     .map_err(DeviceManagerError::CreateVirtioConsole)?;
@@ -338,6 +376,13 @@ impl DeviceManager {
         } else {
             None
         };
+
+        let console = Arc::new(Console {
+            serial,
+            console_input,
+            input_enabled: vm_info.vm_cfg.serial.mode.input_enabled()
+                || vm_info.vm_cfg.console.mode.input_enabled(),
+        });
 
         let mut mmap_regions = Vec::new();
 
@@ -358,8 +403,7 @@ impl DeviceManager {
         Ok(DeviceManager {
             io_bus,
             mmio_bus,
-            serial,
-            console_input: console,
+            console,
             i8042,
             #[cfg(feature = "acpi")]
             acpi_device,
@@ -906,10 +950,10 @@ impl DeviceManager {
     }
 
     pub fn register_devices(&mut self) -> DeviceManagerResult<()> {
-        if self.serial.is_some() {
+        if self.console.serial.is_some() {
             // Insert serial device
             self.io_bus
-                .insert(self.serial.as_ref().unwrap().clone(), 0x3f8, 0x8)
+                .insert(self.console.serial.as_ref().unwrap().clone(), 0x3f8, 0x8)
                 .map_err(DeviceManagerError::BusError)?;
         }
 
@@ -948,6 +992,10 @@ impl DeviceManager {
 
     pub fn ioapic(&self) -> &Option<Arc<Mutex<ioapic::Ioapic>>> {
         &self.ioapic
+    }
+
+    pub fn console(&self) -> &Arc<Console> {
+        &self.console
     }
 }
 

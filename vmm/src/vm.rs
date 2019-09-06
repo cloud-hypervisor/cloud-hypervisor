@@ -24,7 +24,7 @@ extern crate vm_virtio;
 extern crate vmm_sys_util;
 
 use crate::config::{ConsoleOutputMode, VmConfig};
-use crate::device_manager::{get_win_size, DeviceManager, DeviceManagerError};
+use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use arch::RegionType;
 use devices::ioapic;
 use kvm_bindings::{
@@ -172,10 +172,7 @@ pub enum Error {
     /// Cannot create epoll context.
     EpollError(io::Error),
 
-    /// Write to the serial console failed.
-    Serial(vmm_sys_util::errno::Error),
-
-    /// Write to the virtio console failed.
+    /// Write to the console failed.
     Console(vmm_sys_util::errno::Error),
 
     /// Cannot setup terminal in raw mode.
@@ -827,7 +824,7 @@ impl<'a> Vm<'a> {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
         let epoll_fd = self.epoll.as_raw_fd();
 
-        if (self.devices.serial.is_some() || self.devices.console_input.is_some()) && self.on_tty {
+        if self.devices.console().input_enabled() && self.on_tty {
             io::stdin()
                 .lock()
                 .set_raw_mode()
@@ -878,29 +875,13 @@ impl<'a> Vm<'a> {
                             let count = io::stdin()
                                 .lock()
                                 .read_raw(&mut out)
-                                .map_err(Error::Serial)?;
+                                .map_err(Error::Console)?;
 
-                            if self.devices.serial.is_some()
-                                && self.config.serial.mode.input_enabled()
-                            {
+                            if self.devices.console().input_enabled() {
                                 self.devices
-                                    .serial
-                                    .as_ref()
-                                    .unwrap()
-                                    .lock()
-                                    .expect("Failed to process stdin event due to poisoned lock")
+                                    .console()
                                     .queue_input_bytes(&out[..count])
-                                    .map_err(Error::Serial)?;
-                            }
-
-                            if self.devices.console_input.is_some()
-                                && self.config.console.mode.input_enabled()
-                            {
-                                self.devices
-                                    .console_input
-                                    .as_ref()
-                                    .unwrap()
-                                    .queue_input_bytes(&out[..count]);
+                                    .map_err(Error::Console)?;
                             }
                         }
                     }
@@ -938,11 +919,7 @@ impl<'a> Vm<'a> {
         Ok(exit_behaviour)
     }
 
-    fn os_signal_handler(
-        signals: Signals,
-        console_input_clone: Arc<vm_virtio::ConsoleInput>,
-        quit_signum: i32,
-    ) {
+    fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>, quit_signum: i32) {
         for signal in signals.forever() {
             match signal {
                 SIGWINCH => {
@@ -1030,8 +1007,8 @@ impl<'a> Vm<'a> {
         // Unblock all CPU threads.
         vcpu_thread_barrier.wait();
 
-        if let Some(console_input) = &self.devices.console_input {
-            let console_input_clone = console_input.clone();
+        if self.devices.console().input_enabled() {
+            let console = self.devices.console().clone();
             let quit_signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
             let signals = Signals::new(&[SIGWINCH, quit_signum]);
             match signals {
@@ -1039,9 +1016,7 @@ impl<'a> Vm<'a> {
                     self.threads.push(
                         thread::Builder::new()
                             .name("signal_handler".to_string())
-                            .spawn(move || {
-                                Vm::os_signal_handler(sig, console_input_clone, quit_signum)
-                            })
+                            .spawn(move || Vm::os_signal_handler(sig, console, quit_signum))
                             .map_err(Error::SignalHandlerSpawn)?,
                     );
 ;
