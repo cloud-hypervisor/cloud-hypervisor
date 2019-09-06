@@ -5,7 +5,7 @@ stage ("Builds") {
 		}
 		stage ('Install system packages') {
 			sh "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq build-essential mtools libssl-dev pkg-config"
-			sh "sudo apt-get install -yq flex bison libelf-dev qemu-utils qemu-system libglib2.0-dev libpixman-1-dev libseccomp-dev"
+			sh "sudo apt-get install -yq flex bison libelf-dev qemu-utils qemu-system libglib2.0-dev libpixman-1-dev libseccomp-dev socat"
 		}
 		stage ('Install Rust') {
 			sh "nohup curl https://sh.rustup.rs -sSf | sh -s -- -y"
