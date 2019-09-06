@@ -577,6 +577,10 @@ mod tests {
         (child, virtiofsd_socket_path)
     }
 
+    fn temp_vsock_path(tmp_dir: &TempDir) -> String {
+        String::from(tmp_dir.path().join("vsock").to_str().unwrap())
+    }
+
     fn ssh_command_ip(command: &str, ip: &str) -> Result<String, Error> {
         let mut s = String::new();
 
@@ -2210,6 +2214,83 @@ mod tests {
             }
             let _ = child.kill();
             let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_virtio_vsock() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path.clone();
+            kernel_path.push("vmlinux");
+
+            let sock = temp_vsock_path(&guest.tmp_dir);
+
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--vsock", format!("cid=3,sock={}", sock).as_str()])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Listen from guest on vsock CID=3 PORT=16
+            // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
+            let guest_ip = guest.network.guest_ip.clone();
+            let listen_socat = thread::spawn(move || {
+                ssh_command_ip("sudo socat - SOCKET-LISTEN:40:0:x00x00x10x00x00x00x03x00x00x00x00x00x00x00 > vsock_log", &guest_ip).unwrap();
+            });
+
+            // Make sure socat is listening, which might take a few second on slow systems
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Write something to vsock from the host
+            Command::new("bash")
+                .arg("-c")
+                .arg(
+                    format!(
+                        "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{}",
+                        sock
+                    )
+                    .as_str(),
+                )
+                .output()
+                .unwrap();
+
+            // Wait for the thread to terminate.
+            listen_socat.join().unwrap();
+
+            assert_eq!(
+                guest.ssh_command("cat vsock_log").unwrap().trim(),
+                "HelloWorld!"
+            );
+
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+
             Ok(())
         });
     }
