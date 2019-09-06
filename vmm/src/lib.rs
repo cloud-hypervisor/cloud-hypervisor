@@ -61,9 +61,13 @@ pub fn boot_kernel(config: VmConfig) -> Result<()> {
         let mut vm = Vm::new(&vmm.kvm, &config).map_err(Error::VmNew)?;
 
         let entry = vm.load_kernel().map_err(Error::LoadKernel)?;
+
         if vm.start(entry).map_err(Error::VmStart)? == ExitBehaviour::Shutdown {
             break;
         }
+
+        #[cfg(not(feature = "acpi"))]
+        break;
     }
 
     Ok(())
