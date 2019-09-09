@@ -104,7 +104,7 @@ We need to get the latest `rust-hypervisor-firmware` release and also a working 
 $ pushd $CLOUDH
 $ wget https://download.clearlinux.org/releases/29160/clear/clear-29160-kvm.img.xz
 $ unxz clear-29160-kvm.img.xz
-$ wget https://github.com/intel/rust-hypervisor-firmware/releases/download/0.1.0/hypervisor-fw
+$ wget https://github.com/intel/rust-hypervisor-firmware/releases/download/0.2.0/hypervisor-fw
 $ popd
 ```
 
