@@ -514,6 +514,7 @@ pub struct Vm<'a> {
     // Shutdown (exit) and reboot (reset) control
     exit_evt: EventFd,
     reset_evt: EventFd,
+    signals: Option<Signals>,
 }
 
 impl<'a> Vm<'a> {
@@ -746,6 +747,7 @@ impl<'a> Vm<'a> {
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             exit_evt,
             reset_evt,
+            signals: None,
         })
     }
 
@@ -898,12 +900,17 @@ impl<'a> Vm<'a> {
                 .map_err(Error::SetTerminalCanon)?;
         }
 
+        // Trigger the termination of the signal_handler thread
+        if let Some(signals) = self.signals.take() {
+            signals.close();
+        }
+
         // Tell the vCPUs to stop themselves next time they go through the loop
         self.vcpus_kill_signalled.store(true, Ordering::SeqCst);
 
         // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
         // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
-        // above.
+        // above. The signal handler thread will ignore this signal
         for thread in self.threads.iter() {
             let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
             unsafe {
@@ -919,17 +926,11 @@ impl<'a> Vm<'a> {
         Ok(exit_behaviour)
     }
 
-    fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>, quit_signum: i32) {
+    fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>) {
         for signal in signals.forever() {
-            match signal {
-                SIGWINCH => {
-                    let (col, row) = get_win_size();
-                    console_input_clone.update_console_size(col, row);
-                }
-                s if s == quit_signum => {
-                    break;
-                }
-                _ => {}
+            if signal == SIGWINCH {
+                let (col, row) = get_win_size();
+                console_input_clone.update_console_size(col, row);
             }
         }
     }
@@ -1009,17 +1010,17 @@ impl<'a> Vm<'a> {
 
         if self.devices.console().input_enabled() {
             let console = self.devices.console().clone();
-            let quit_signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
-            let signals = Signals::new(&[SIGWINCH, quit_signum]);
+            let signals = Signals::new(&[SIGWINCH]);
             match signals {
-                Ok(sig) => {
+                Ok(signals) => {
+                    self.signals = Some(signals.clone());
+
                     self.threads.push(
                         thread::Builder::new()
                             .name("signal_handler".to_string())
-                            .spawn(move || Vm::os_signal_handler(sig, console, quit_signum))
+                            .spawn(move || Vm::os_signal_handler(signals, console))
                             .map_err(Error::SignalHandlerSpawn)?,
                     );
-;
                 }
                 Err(e) => error!("Signal not found {}", e),
             }
