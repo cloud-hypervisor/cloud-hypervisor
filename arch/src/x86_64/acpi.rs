@@ -10,6 +10,8 @@ use vm_memory::{GuestAddress, GuestMemoryMmap};
 
 use vm_memory::{Address, ByteValued, Bytes};
 
+use MEM_32BIT_DEVICES_GAP_SIZE;
+
 #[repr(packed)]
 struct LocalAPIC {
     pub r#type: u8,
@@ -280,7 +282,7 @@ pub fn create_acpi_tables(
 
     // 32-bit PCI enhanced configuration mechanism
     mcfg.append(PCIRangeEntry {
-        base_address: super::MEM_32BIT_DEVICES_GAP_SIZE,
+        base_address: MEM_32BIT_DEVICES_GAP_SIZE,
         segment: 0,
         start: 0,
         end: 0xff,

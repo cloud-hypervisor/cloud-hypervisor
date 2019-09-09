@@ -26,6 +26,7 @@ extern crate vmm_sys_util;
 use crate::config::{ConsoleOutputMode, VmConfig};
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use arch::RegionType;
+use arch::{MEM_32BIT_GAP_START, MEM_32BIT_DEVICES_GAP_SIZE};
 use devices::ioapic;
 use kvm_bindings::{
     kvm_enable_cap, kvm_pit_config, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP,
@@ -674,20 +675,13 @@ impl<'a> Vm<'a> {
         let mut allocator = SystemAllocator::new(
             GuestAddress(0),
             1 << 16 as GuestUsize,
-            GuestAddress(0),
-            1 << 36 as GuestUsize,
+            MEM_32BIT_GAP_START,
+            MEM_32BIT_DEVICES_GAP_SIZE,
             mem_hole.0,
             mem_hole.1 as GuestUsize,
             vec![ioapic],
         )
         .ok_or(Error::CreateSystemAllocator)?;
-
-        // Allocate RAM and Reserved address ranges.
-        for region in arch_mem_regions.iter() {
-            allocator
-                .allocate_mmio_addresses(Some(region.0), region.1 as GuestUsize, None)
-                .ok_or(Error::MemoryRangeAllocation)?;
-        }
 
         // Convert the guest memory into an Arc. The point being able to use it
         // anywhere in the code, no matter which thread might use it.

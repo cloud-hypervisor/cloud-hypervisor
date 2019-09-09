@@ -21,7 +21,8 @@ extern crate linux_loader;
 extern crate vm_memory;
 
 use std::result;
-use vm_memory::GuestAddress;
+
+use vm_memory::{GuestAddress, GuestUsize,};
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -55,6 +56,12 @@ pub enum RegionType {
 
 // 1MB.  We don't put anything above here except the kernel itself.
 pub const HIMEM_START: GuestAddress = GuestAddress(0x100000);
+
+// Our 32-bit memory gap starts at 3G.
+pub const MEM_32BIT_GAP_START: GuestAddress = GuestAddress(0xc000_0000);
+
+// We reserve 768MB in our memory gap for 32-bit devices (e.g. 32-bit PCI BARs).
+pub const MEM_32BIT_DEVICES_GAP_SIZE: GuestUsize = (768 << 20);
 
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
