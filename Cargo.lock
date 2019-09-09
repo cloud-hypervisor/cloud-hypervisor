@@ -354,7 +354,7 @@ dependencies = [
  "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
  "libz-sys 1.0.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "openssl-sys 0.9.49 (registry+https://github.com/rust-lang/crates.io-index)",
- "pkg-config 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
+ "pkg-config 0.3.16 (registry+https://github.com/rust-lang/crates.io-index)",
  "vcpkg 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -365,7 +365,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "cc 1.0.45 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
- "pkg-config 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
+ "pkg-config 0.3.16 (registry+https://github.com/rust-lang/crates.io-index)",
  "vcpkg 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -432,7 +432,7 @@ dependencies = [
  "autocfg 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "cc 1.0.45 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
- "pkg-config 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
+ "pkg-config 0.3.16 (registry+https://github.com/rust-lang/crates.io-index)",
  "vcpkg 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "pkg-config"
-version = "0.3.15"
+version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -1151,7 +1151,7 @@ dependencies = [
 "checksum memchr 2.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "88579771288728879b57485cc7d6b07d648c9f0141eb955f8ab7f9d45394468e"
 "checksum nodrop 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)" = "2f9667ddcc6cc8a43afc9b7917599d7216aa09c463919ea32c59ed6cac8bc945"
 "checksum openssl-sys 0.9.49 (registry+https://github.com/rust-lang/crates.io-index)" = "f4fad9e54bd23bd4cbbe48fdc08a1b8091707ac869ef8508edea2fec77dcc884"
-"checksum pkg-config 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)" = "a7c1d2cfa5a714db3b5f24f0915e74fcdf91d09d496ba61329705dda7774d2af"
+"checksum pkg-config 0.3.16 (registry+https://github.com/rust-lang/crates.io-index)" = "72d5370d90f49f70bd033c3d75e87fc529fbfff9d6f7cccef07d6170079d91ea"
 "checksum pnet 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)" = "63d693c84430248366146e3181ff9d330243464fa9e6146c372b2f3eb2e2d8e7"
 "checksum pnet_base 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)" = "4df28acf2fcc77436dd2b91a9a0c2bb617f9ca5f2acefee1a4135058b9f9801f"
 "checksum pnet_datalink 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)" = "7b34f8ca857599d05b6b082e9baff8d27c54cb9c26568cf3c0993a5755816966"
