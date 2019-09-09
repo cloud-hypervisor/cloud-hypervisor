@@ -2146,6 +2146,12 @@ mod tests {
                     .ssh_command("sudo shutdown -h now")
                     .unwrap_or_default();
 
+                thread::sleep(std::time::Duration::new(20, 0));
+
+                // Check that the cloud-hypervisor binary actually terminated
+                if let Ok(status) = child.wait() {
+                    aver_eq!(tb, status.success(), true);
+                }
                 let _ = child.kill();
                 let _ = child.wait();
             });
@@ -2208,7 +2214,12 @@ mod tests {
             aver_eq!(tb, reboot_count, 1);
 
             guest.ssh_command("sudo shutdown -h now")?;
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Check that the cloud-hypervisor binary actually terminated
+            if let Ok(status) = child.wait() {
+                aver_eq!(tb, status.success(), true);
+            }
             let _ = child.kill();
             let _ = child.wait();
             Ok(())
