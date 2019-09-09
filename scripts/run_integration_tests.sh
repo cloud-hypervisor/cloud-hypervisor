@@ -22,7 +22,7 @@ if [ ! -f "$OVMF" ]; then
     popd
 fi
 
-CLEAR_OS_IMAGE_NAME="clear-29810-cloud.img"
+CLEAR_OS_IMAGE_NAME="clear-cloudguest.img"
 CLEAR_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$CLEAR_OS_IMAGE_NAME.xz"
 CLEAR_OS_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_IMAGE_NAME"
 if [ ! -f "$CLEAR_OS_IMAGE" ]; then
@@ -32,7 +32,7 @@ if [ ! -f "$CLEAR_OS_IMAGE" ]; then
     popd
 fi
 
-CLEAR_OS_RAW_IMAGE_NAME="clear-29810-cloud-raw.img"
+CLEAR_OS_RAW_IMAGE_NAME="clear-cloudguest-raw.img"
 CLEAR_OS_RAW_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_RAW_IMAGE_NAME"
 if [ ! -f "$CLEAR_OS_RAW_IMAGE" ]; then
     pushd $WORKLOADS_DIR

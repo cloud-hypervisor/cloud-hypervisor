@@ -430,10 +430,10 @@ mod tests {
             workload_path.push("workloads");
 
             let mut osdisk_base_path = workload_path.clone();
-            osdisk_base_path.push("clear-29810-cloud.img");
+            osdisk_base_path.push("clear-cloudguest.img");
 
             let mut osdisk_raw_base_path = workload_path.clone();
-            osdisk_raw_base_path.push("clear-29810-cloud-raw.img");
+            osdisk_raw_base_path.push("clear-cloudguest-raw.img");
 
             let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
             let osdisk_raw_path =
@@ -739,14 +739,6 @@ mod tests {
                 .to_string())
         }
 
-        fn is_console_detected(&self) -> Result<bool, Error> {
-            Ok(!(self
-                .ssh_command("dmesg | grep \"hvc0] enabled\"")?
-                .trim()
-                .to_string()
-                .is_empty()))
-        }
-
         fn does_device_vendor_pair_match(
             &self,
             device_id: &str,
@@ -940,7 +932,7 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 5_063_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 5_000_000);
 
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
@@ -1026,7 +1018,7 @@ mod tests {
                         .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
-                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
@@ -1083,7 +1075,7 @@ mod tests {
                         .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
-                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
@@ -1282,7 +1274,7 @@ mod tests {
                 ])
                 .args(&[
                     "--cmdline",
-                    "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a \
+                    "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b \
                      console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
                      init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
                      no_timer_check noreplace-smp cryptomgr.notests \
@@ -1406,7 +1398,7 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
@@ -1457,7 +1449,7 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
@@ -1814,7 +1806,6 @@ mod tests {
                     .does_device_vendor_pair_match("0x1043", "0x1af4")
                     .unwrap_or_default()
             );
-            aver!(tb, guest.is_console_detected().unwrap_or_default());
 
             let text = String::from("On a branch floating down river a cricket, singing.");
             let cmd = format!("sudo -E bash -c 'echo {} > /dev/hvc0'", text);
@@ -1868,9 +1859,6 @@ mod tests {
                 .unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
-
-            // Test that there is a ttyS0
-            aver!(tb, guest.is_console_detected().unwrap_or_default());
 
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
@@ -2057,7 +2045,7 @@ mod tests {
                         .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
-                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw acpi=off"])
+                .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw acpi=off"])
                 .spawn()
                 .unwrap();
 
@@ -2188,7 +2176,7 @@ mod tests {
                         .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
-                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
