@@ -33,6 +33,7 @@ pub struct Net {
     kill_evt: EventFd,
     avail_features: u64,
     acked_features: u64,
+    backend_features: u64,
     config_space: Vec<u8>,
     queue_sizes: Vec<u16>,
 }
@@ -79,7 +80,7 @@ impl<'a> Net {
             .map_err(Error::VhostUserSetFeatures)?;
 
         let mut acked_features = 0;
-        if backend_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
+        if avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
             acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
             vhost_user_net
                 .get_protocol_features()
@@ -106,6 +107,7 @@ impl<'a> Net {
             kill_evt,
             avail_features,
             acked_features,
+            backend_features,
             config_space,
             queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
         })
@@ -201,7 +203,7 @@ impl VirtioDevice for Net {
             &mem.read().unwrap(),
             queues,
             queue_evts,
-            self.acked_features,
+            self.acked_features & self.backend_features,
         )
         .map_err(ActivateError::VhostUserNetSetup)?;
 

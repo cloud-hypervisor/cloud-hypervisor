@@ -166,6 +166,16 @@ fn main() {
                 .min_values(1),
         )
         .arg(
+            Arg::with_name("vsock")
+                .long("vsock")
+                .help(
+                    "Virtio VSOCK parameters \"cid=<context_id>,\
+                     sock=<socket_path>\"",
+                )
+                .takes_value(true)
+                .min_values(1),
+        )
+        .arg(
             Arg::with_name("v")
                 .short("v")
                 .multiple(true)
@@ -200,6 +210,7 @@ fn main() {
     let vhost_user_net: Option<Vec<&str>> = cmd_arguments
         .values_of("vhost-user-net")
         .map(|x| x.collect());
+    let vsock: Option<Vec<&str>> = cmd_arguments.values_of("vsock").map(|x| x.collect());
 
     let log_level = match cmd_arguments.occurrences_of("v") {
         0 => LevelFilter::Error,
@@ -239,6 +250,7 @@ fn main() {
         console,
         devices,
         vhost_user_net,
+        vsock,
     }) {
         Ok(config) => config,
         Err(e) => {
@@ -851,7 +863,9 @@ mod tests {
                     "0x060000"
                 );
 
-                guest.ssh_command("sudo reboot").unwrap_or_default();
+                guest
+                    .ssh_command("sudo shutdown -h now")
+                    .unwrap_or_default();
                 thread::sleep(std::time::Duration::new(10, 0));
                 let _ = child.kill();
                 let _ = child.wait();
@@ -890,7 +904,7 @@ mod tests {
 
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 2);
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -928,7 +942,7 @@ mod tests {
 
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 5_063_000);
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -972,10 +986,10 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                10
+                12
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1029,10 +1043,10 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                10
+                12
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1086,10 +1100,10 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                10
+                12
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1154,7 +1168,7 @@ mod tests {
             let _ = daemon_child.kill();
             let _ = daemon_child.wait();
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(5, 0));
             let _ = cloud_child.kill();
             let _ = cloud_child.wait();
@@ -1213,7 +1227,7 @@ mod tests {
                 0
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1328,7 +1342,7 @@ mod tests {
                 "bar"
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = daemon_child.kill();
@@ -1408,7 +1422,7 @@ mod tests {
                 "/dev/pmem0"
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1453,7 +1467,7 @@ mod tests {
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1507,7 +1521,7 @@ mod tests {
                 4
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1568,7 +1582,7 @@ mod tests {
                 0
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
@@ -1620,7 +1634,8 @@ mod tests {
                 1
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
+
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             match child.wait_with_output() {
@@ -1680,7 +1695,8 @@ mod tests {
                 1
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
+
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             match child.wait_with_output() {
@@ -1742,7 +1758,8 @@ mod tests {
                 1
             );
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
+
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Do this check after shutdown of the VM as an easy way to ensure
@@ -1803,7 +1820,7 @@ mod tests {
             let cmd = format!("sudo -E bash -c 'echo {} > /dev/hvc0'", text);
             guest.ssh_command(&cmd)?;
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
 
@@ -1855,7 +1872,7 @@ mod tests {
             // Test that there is a ttyS0
             aver!(tb, guest.is_console_detected().unwrap_or_default());
 
-            guest.ssh_command("sudo reboot")?;
+            guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Do this check after shutdown of the VM as an easy way to ensure
@@ -1998,7 +2015,7 @@ mod tests {
                 1
             );
 
-            guest.ssh_command_l2("sudo reboot")?;
+            guest.ssh_command_l2("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
 
             guest.ssh_command_l1("sudo shutdown -h now")?;
@@ -2010,4 +2027,203 @@ mod tests {
             Ok(())
         });
     }
+
+    #[test]
+    fn test_vmlinux_boot_noacpi() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path.clone();
+            kernel_path.push("vmlinux");
+
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw acpi=off"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
+            aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("grep -c PCI-MSI /proc/interrupts")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                12
+            );
+
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_reboot() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let mut bionic = BionicDiskConfig::new();
+
+            vec![
+                &mut clear as &mut dyn DiskConfig,
+                &mut bionic as &mut dyn DiskConfig,
+            ]
+            .iter_mut()
+            .for_each(|disk_config| {
+                let guest = Guest::new(*disk_config);
+
+                let mut child = Command::new("target/debug/cloud-hypervisor")
+                    .args(&["--cpus", "1"])
+                    .args(&["--memory", "size=512M"])
+                    .args(&["--kernel", guest.fw_path.as_str()])
+                    .args(&[
+                        "--disk",
+                        guest
+                            .disk_config
+                            .disk(DiskType::OperatingSystem)
+                            .unwrap()
+                            .as_str(),
+                        guest
+                            .disk_config
+                            .disk(DiskType::CloudInit)
+                            .unwrap()
+                            .as_str(),
+                    ])
+                    .args(&["--net", guest.default_net_string().as_str()])
+                    .args(&["--serial", "tty", "--console", "off"])
+                    .spawn()
+                    .unwrap();
+
+                thread::sleep(std::time::Duration::new(20, 0));
+
+                let reboot_count = guest
+                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1);
+
+                aver_eq!(tb, reboot_count, 0);
+                guest.ssh_command("sudo reboot").unwrap_or_default();
+
+                thread::sleep(std::time::Duration::new(20, 0));
+                let reboot_count = guest
+                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default();
+                aver_eq!(tb, reboot_count, 1);
+
+                guest
+                    .ssh_command("sudo shutdown -h now")
+                    .unwrap_or_default();
+
+                thread::sleep(std::time::Duration::new(20, 0));
+
+                // Check that the cloud-hypervisor binary actually terminated
+                if let Ok(status) = child.wait() {
+                    aver_eq!(tb, status.success(), true);
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+            });
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_bzimage_reboot() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path.clone();
+            kernel_path.push("bzImage");
+
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--cmdline", "root=PARTUUID=3cb0e0a5-925d-405e-bc55-edf0cec8f10a console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            let reboot_count = guest
+                .ssh_command("journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1);
+
+            aver_eq!(tb, reboot_count, 0);
+            guest.ssh_command("sudo reboot")?;
+
+            thread::sleep(std::time::Duration::new(20, 0));
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            aver_eq!(tb, reboot_count, 1);
+
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Check that the cloud-hypervisor binary actually terminated
+            if let Ok(status) = child.wait() {
+                aver_eq!(tb, status.success(), true);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
+
 }

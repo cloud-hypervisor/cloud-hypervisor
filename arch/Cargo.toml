@@ -3,12 +3,17 @@ name = "arch"
 version = "0.1.0"
 authors = ["The Chromium OS Authors"]
 
+[features]
+default = []
+acpi = ["acpi_tables"]
+
 [dependencies]
 byteorder = "1.3.2"
 kvm-bindings = "0.1.1"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
 libc = "0.2.60"
 
+acpi_tables = { path = "../acpi_tables", optional = true }
 arch_gen = { path = "../arch_gen" }
 
 [dependencies.vm-memory]

@@ -540,12 +540,10 @@ impl VhostUserMsgValidator for VhostUserVringAddr {
 bitflags! {
     /// Flags for the device configuration message.
     pub struct VhostUserConfigFlags: u32 {
-        /// TODO: seems the vhost-user spec has refined the definition, EMPTY is removed.
-        const EMPTY = 0x0;
-        /// Vhost master messages used for writable fields
-        const WRITABLE = 0x1;
-        /// Mark that message is part of an ongoing live-migration operation.
-        const LIVE_MIGRATION = 0x2;
+        /// Vhost master messages used for writeable fields.
+        const WRITABLE = 0x0;
+        /// Vhost master messages used for live migration.
+        const LIVE_MIGRATION = 0x1;
     }
 }
 
@@ -577,10 +575,9 @@ impl VhostUserMsgValidator for VhostUserConfig {
     fn is_valid(&self) -> bool {
         if (self.flags & !VhostUserConfigFlags::all().bits()) != 0 {
             return false;
-        } else if self.offset < VHOST_USER_CONFIG_OFFSET
-            || self.offset >= VHOST_USER_CONFIG_SIZE
+        } else if self.offset >= VHOST_USER_CONFIG_SIZE
             || self.size == 0
-            || self.size > (VHOST_USER_CONFIG_SIZE - VHOST_USER_CONFIG_OFFSET)
+            || self.size > VHOST_USER_CONFIG_SIZE
             || self.size + self.offset > VHOST_USER_CONFIG_SIZE
         {
             return false;
@@ -787,7 +784,7 @@ mod tests {
         let mut msg = VhostUserConfig::new(
             VHOST_USER_CONFIG_OFFSET,
             VHOST_USER_CONFIG_SIZE - VHOST_USER_CONFIG_OFFSET,
-            VhostUserConfigFlags::EMPTY,
+            VhostUserConfigFlags::WRITABLE,
         );
 
         assert!(msg.is_valid());
@@ -804,7 +801,7 @@ mod tests {
         msg.size = 2;
         assert!(!msg.is_valid());
         msg.size = 1;
-        msg.flags |= VhostUserConfigFlags::WRITABLE.bits();
+        msg.flags |= VhostUserConfigFlags::LIVE_MIGRATION.bits();
         assert!(msg.is_valid());
         msg.flags |= 0x4;
         assert!(!msg.is_valid());

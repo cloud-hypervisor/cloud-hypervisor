@@ -352,7 +352,7 @@ impl VhostUserMaster for Master {
 
         let mut node = self.node.lock().unwrap();
         // depends on VhostUserProtocolFeatures::CONFIG
-        if node.acked_virtio_features & VhostUserProtocolFeatures::CONFIG.bits() == 0 {
+        if node.acked_protocol_features & VhostUserProtocolFeatures::CONFIG.bits() == 0 {
             return error_code(VhostUserError::InvalidOperation);
         }
 
@@ -360,7 +360,7 @@ impl VhostUserMaster for Master {
         // "Master payload: virtio device config space"
         // But what content should the payload contains for a get_config() request?
         // So current implementation doesn't conform to the spec.
-        let hdr = node.send_request_with_body(MasterReq::GET_CONFIG, &body, None)?;
+        let hdr = node.send_request_with_config_body(MasterReq::GET_CONFIG, &body, None)?;
         let (reply, buf, rfds) = node.recv_reply_with_payload::<VhostUserConfig>(&hdr)?;
         if rfds.is_some() {
             Endpoint::<MasterReq>::close_rfds(rfds);
@@ -384,11 +384,11 @@ impl VhostUserMaster for Master {
 
         let mut node = self.node.lock().unwrap();
         // depends on VhostUserProtocolFeatures::CONFIG
-        if node.acked_virtio_features & VhostUserProtocolFeatures::CONFIG.bits() == 0 {
+        if node.acked_protocol_features & VhostUserProtocolFeatures::CONFIG.bits() == 0 {
             return error_code(VhostUserError::InvalidOperation);
         }
 
-        let hdr = node.send_request_with_payload(MasterReq::GET_CONFIG, &body, buf, None)?;
+        let hdr = node.send_request_with_payload(MasterReq::SET_CONFIG, &body, buf, None)?;
         node.wait_for_ack(&hdr).map_err(|e| e.into())
     }
 
@@ -480,6 +480,27 @@ impl MasterInternal {
         Ok(hdr)
     }
 
+    fn send_request_with_config_body(
+        &mut self,
+        code: MasterReq,
+        user_config: &VhostUserConfig,
+        fds: Option<&[RawFd]>,
+    ) -> VhostUserResult<VhostUserMsgHeader<MasterReq>> {
+        if mem::size_of::<VhostUserConfig>() + user_config.size as usize > MAX_MSG_SIZE {
+            return Err(VhostUserError::InvalidParam);
+        }
+        self.check_state()?;
+
+        let hdr = Self::new_request_header(
+            code,
+            mem::size_of::<VhostUserConfig>() as u32 + user_config.size,
+        );
+        let mut buf = vec![0; user_config.size as usize];
+        self.main_sock
+            .send_config_message(&hdr, user_config, &mut buf, fds)?;
+        Ok(hdr)
+    }
+
     fn send_request_with_payload<T: Sized, P: Sized>(
         &mut self,
         code: MasterReq,
@@ -555,7 +576,7 @@ impl MasterInternal {
         if !reply.is_reply_for(hdr)
             || reply.get_size() as usize != mem::size_of::<T>() + bytes
             || rfds.is_some()
-            || body.is_valid()
+            || !body.is_valid()
         {
             Endpoint::<MasterReq>::close_rfds(rfds);
             return Err(VhostUserError::InvalidMessage);
@@ -603,7 +624,7 @@ impl MasterInternal {
     #[inline]
     fn new_request_header(request: MasterReq, size: u32) -> VhostUserMsgHeader<MasterReq> {
         // TODO: handle NEED_REPLY flag
-        VhostUserMsgHeader::new(request, 0, size)
+        VhostUserMsgHeader::new(request, 0x1, size)
     }
 }
 

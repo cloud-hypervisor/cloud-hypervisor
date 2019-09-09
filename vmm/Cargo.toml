@@ -4,7 +4,12 @@ version = "0.1.0"
 authors = ["The Cloud Hypervisor Authors"]
 edition = "2018"
 
+[features]
+default = []
+acpi = ["acpi_tables","devices/acpi", "arch/acpi"]
+
 [dependencies]
+acpi_tables = { path = "../acpi_tables", optional = true }
 arch = { path = "../arch" }
 devices = { path = "../devices" }
 epoll = "4.1.0"

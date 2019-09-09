@@ -24,47 +24,39 @@ extern crate vm_virtio;
 extern crate vmm_sys_util;
 
 use crate::config::{ConsoleOutputMode, VmConfig};
+use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use arch::RegionType;
 use devices::ioapic;
 use kvm_bindings::{
-    kvm_enable_cap, kvm_msi, kvm_pit_config, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP,
+    kvm_enable_cap, kvm_pit_config, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP,
     KVM_PIT_SPEAKER_DUMMY,
 };
 use kvm_ioctls::*;
-use libc::O_TMPFILE;
-use libc::{c_void, siginfo_t, EFD_NONBLOCK, TIOCGWINSZ};
+use libc::EFD_NONBLOCK;
+use libc::{c_void, siginfo_t};
 use linux_loader::loader::KernelLoader;
-use net_util::Tap;
-use pci::{
-    InterruptDelivery, InterruptParameters, PciConfigIo, PciDevice, PciInterruptPin, PciRoot,
-};
-use qcow::{self, ImageType, QcowFile};
 use signal_hook::{iterator::Signals, SIGWINCH};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
-use std::io::{self, sink, stdout};
+use std::io;
 use std::ops::Deref;
-use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::ptr::null_mut;
+use std::os::unix::thread::JoinHandleExt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::{fmt, result, str, thread};
-use vfio::{VfioDevice, VfioPciDevice, VfioPciError};
 use vm_allocator::{GsiApic, SystemAllocator};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     Address, Bytes, Error as MmapError, GuestAddress, GuestMemory, GuestMemoryMmap,
     GuestMemoryRegion, GuestUsize,
 };
-use vm_virtio::transport::VirtioPciDevice;
-use vm_virtio::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::signal::register_signal_handler;
+use vmm_sys_util::signal::{register_signal_handler, validate_signal_num};
 use vmm_sys_util::terminal::Terminal;
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
 const X86_64_IRQ_BASE: u32 = 5;
-const DEFAULT_MSIX_VEC_NUM: u16 = 2;
 
 // CPUID feature bits
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
@@ -72,10 +64,6 @@ const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 
 // 64 bit direct boot entry offset for bzImage
 const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
-
-// IOAPIC address range
-const IOAPIC_RANGE_ADDR: u64 = 0xfec0_0000;
-const IOAPIC_RANGE_SIZE: u64 = 0x20;
 
 // Debug I/O port
 #[cfg(target_arch = "x86_64")]
@@ -181,16 +169,10 @@ pub enum Error {
     /// Cannot create EventFd.
     EventFd(io::Error),
 
-    /// Cannot add legacy device to Bus.
-    BusError(devices::BusError),
-
     /// Cannot create epoll context.
     EpollError(io::Error),
 
-    /// Write to the serial console failed.
-    Serial(vmm_sys_util::errno::Error),
-
-    /// Write to the virtio console failed.
+    /// Write to the console failed.
     Console(vmm_sys_util::errno::Error),
 
     /// Cannot setup terminal in raw mode.
@@ -222,100 +204,14 @@ pub enum Error {
 
     /// Failed to allocate the IOAPIC memory range.
     IoapicRangeAllocation,
+
+    /// Cannot spawn a signal handler thread
+    SignalHandlerSpawn(io::Error),
+
+    /// Failed to join on vCPU threads
+    ThreadCleanup,
 }
 pub type Result<T> = result::Result<T, Error>;
-
-/// Errors associated with device manager
-#[derive(Debug)]
-pub enum DeviceManagerError {
-    /// Cannot create EventFd.
-    EventFd(io::Error),
-
-    /// Cannot open disk path
-    Disk(io::Error),
-
-    /// Cannot create vhost-user-net device
-    CreateVhostUserNet(vm_virtio::vhost_user::Error),
-
-    /// Cannot create virtio-blk device
-    CreateVirtioBlock(io::Error),
-
-    /// Cannot create virtio-net device
-    CreateVirtioNet(vm_virtio::net::Error),
-
-    /// Cannot create virtio-console device
-    CreateVirtioConsole(io::Error),
-
-    /// Cannot create virtio-rng device
-    CreateVirtioRng(io::Error),
-
-    /// Cannot create virtio-fs device
-    CreateVirtioFs(vm_virtio::vhost_user::Error),
-
-    /// Cannot create virtio-pmem device
-    CreateVirtioPmem(io::Error),
-
-    /// Failed parsing disk image format
-    DetectImageType(qcow::Error),
-
-    /// Cannot open qcow disk path
-    QcowDeviceCreate(qcow::Error),
-
-    /// Cannot open tap interface
-    OpenTap(net_util::TapError),
-
-    /// Cannot allocate IRQ.
-    AllocateIrq,
-
-    /// Cannot configure the IRQ.
-    Irq(io::Error),
-
-    /// Cannot allocate PCI BARs
-    AllocateBars(pci::PciDeviceError),
-
-    /// Cannot register ioevent.
-    RegisterIoevent(io::Error),
-
-    /// Cannot create virtio device
-    VirtioDevice(vmm_sys_util::errno::Error),
-
-    /// Cannot add PCI device
-    AddPciDevice(pci::PciRootError),
-
-    /// Cannot open persistent memory file
-    PmemFileOpen(io::Error),
-
-    /// Cannot set persistent memory file size
-    PmemFileSetLen(io::Error),
-
-    /// Cannot find a memory range for persistent memory
-    PmemRangeAllocation,
-
-    /// Cannot find a memory range for virtio-fs
-    FsRangeAllocation,
-
-    /// Error creating serial output file
-    SerialOutputFileOpen(io::Error),
-
-    /// Error creating console output file
-    ConsoleOutputFileOpen(io::Error),
-
-    /// Cannot create a VFIO device
-    VfioCreate(vfio::VfioError),
-
-    /// Cannot create a VFIO PCI device
-    VfioPciCreate(vfio::VfioPciError),
-
-    /// Failed to map VFIO MMIO region.
-    VfioMapRegion(VfioPciError),
-
-    /// Failed to create the KVM device.
-    CreateKvmDevice(io::Error),
-
-    /// Failed to memory map.
-    Mmap(io::Error),
-}
-pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
@@ -464,33 +360,37 @@ impl Vcpu {
     ///
     /// Note that the state of the VCPU and associated VM must be setup first for this to do
     /// anything useful.
-    pub fn run(&self) -> Result<()> {
+    pub fn run(&self) -> Result<bool> {
         match self.fd.run() {
             Ok(run) => match run {
                 VcpuExit::IoIn(addr, data) => {
                     self.io_bus.read(u64::from(addr), data);
-                    Ok(())
+                    Ok(true)
                 }
                 VcpuExit::IoOut(addr, data) => {
                     if addr == DEBUG_IOPORT && data.len() == 1 {
                         self.log_debug_ioport(data[0]);
                     }
                     self.io_bus.write(u64::from(addr), data);
-                    Ok(())
+                    Ok(true)
                 }
                 VcpuExit::MmioRead(addr, data) => {
                     self.mmio_bus.read(addr as u64, data);
-                    Ok(())
+                    Ok(true)
                 }
                 VcpuExit::MmioWrite(addr, data) => {
                     self.mmio_bus.write(addr as u64, data);
-                    Ok(())
+                    Ok(true)
                 }
                 VcpuExit::IoapicEoi(vector) => {
                     if let Some(ioapic) = &self.ioapic {
                         ioapic.lock().unwrap().end_of_interrupt(vector);
                     }
-                    Ok(())
+                    Ok(true)
+                }
+                VcpuExit::Shutdown => {
+                    // Triple fault to trigger a reboot
+                    Ok(false)
                 }
                 r => {
                     error!("Unexpected exit reason on vcpu run: {:?}", r);
@@ -499,7 +399,7 @@ impl Vcpu {
             },
 
             Err(ref e) => match e.raw_os_error().unwrap() {
-                libc::EAGAIN | libc::EINTR => Ok(()),
+                libc::EAGAIN | libc::EINTR => Ok(true),
                 _ => {
                     error!("VCPU {:?} error {:?}", self.id, e);
                     Err(Error::VcpuUnhandledKvmExit)
@@ -522,782 +422,16 @@ impl Vcpu {
     }
 }
 
-struct VmInfo<'a> {
-    memory: &'a Arc<RwLock<GuestMemoryMmap>>,
-    vm_fd: &'a Arc<VmFd>,
-    vm_cfg: &'a VmConfig<'a>,
-}
-
-struct BusInfo<'a> {
-    io: &'a mut devices::Bus,
-    mmio: &'a mut devices::Bus,
-}
-
-struct InterruptInfo<'a> {
-    msi_capable: bool,
-    ioapic: &'a Option<Arc<Mutex<ioapic::Ioapic>>>,
-}
-
-struct KernelIoapicIrq {
-    evt: EventFd,
-}
-
-impl KernelIoapicIrq {
-    fn new(evt: EventFd) -> Self {
-        KernelIoapicIrq { evt }
-    }
-}
-
-impl devices::Interrupt for KernelIoapicIrq {
-    fn deliver(&self) -> result::Result<(), io::Error> {
-        self.evt.write(1)
-    }
-}
-
-struct UserIoapicIrq {
-    ioapic: Arc<Mutex<ioapic::Ioapic>>,
-    irq: usize,
-}
-
-impl UserIoapicIrq {
-    fn new(ioapic: Arc<Mutex<ioapic::Ioapic>>, irq: usize) -> Self {
-        UserIoapicIrq { ioapic, irq }
-    }
-}
-
-pub fn get_win_size() -> (u16, u16) {
-    #[repr(C)]
-    struct WS {
-        rows: u16,
-        cols: u16,
-    };
-    let ws: WS = WS {
-        rows: 0u16,
-        cols: 0u16,
-    };
-    unsafe {
-        libc::ioctl(0, TIOCGWINSZ, &ws);
-    }
-
-    (ws.cols, ws.rows)
-}
-
-impl devices::Interrupt for UserIoapicIrq {
-    fn deliver(&self) -> result::Result<(), io::Error> {
-        self.ioapic
-            .lock()
-            .unwrap()
-            .service_irq(self.irq)
-            .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("failed to inject IRQ #{}: {:?}", self.irq, e),
-                )
-            })
-    }
-}
-
-struct DeviceManager {
-    io_bus: devices::Bus,
-    mmio_bus: devices::Bus,
-
-    // Serial port on 0x3f8
-    serial: Option<Arc<Mutex<devices::legacy::Serial>>>,
-    console_input: Option<Arc<vm_virtio::ConsoleInput>>,
-
-    // i8042 device for exit
-    i8042: Arc<Mutex<devices::legacy::I8042Device>>,
-    exit_evt: EventFd,
-
-    // IOAPIC
-    ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
-
-    // PCI root
-    pci: Arc<Mutex<PciConfigIo>>,
-}
-
-impl DeviceManager {
-    fn new(
-        vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        msi_capable: bool,
-        userspace_ioapic: bool,
-        mut mem_slots: u32,
-    ) -> DeviceManagerResult<Self> {
-        let mut io_bus = devices::Bus::new();
-        let mut mmio_bus = devices::Bus::new();
-
-        let mut buses = BusInfo {
-            io: &mut io_bus,
-            mmio: &mut mmio_bus,
-        };
-
-        let ioapic = if userspace_ioapic {
-            // Create IOAPIC
-            Some(Arc::new(Mutex::new(ioapic::Ioapic::new(
-                vm_info.vm_fd.clone(),
-            ))))
-        } else {
-            None
-        };
-
-        let interrupt_info = InterruptInfo {
-            msi_capable,
-            ioapic: &ioapic,
-        };
-
-        let serial_writer: Option<Box<dyn io::Write + Send>> = match vm_info.vm_cfg.serial.mode {
-            ConsoleOutputMode::File => Some(Box::new(
-                File::create(vm_info.vm_cfg.serial.file.unwrap())
-                    .map_err(DeviceManagerError::SerialOutputFileOpen)?,
-            )),
-            ConsoleOutputMode::Tty => Some(Box::new(stdout())),
-            ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
-        };
-        let serial = if vm_info.vm_cfg.serial.mode != ConsoleOutputMode::Off {
-            // Serial is tied to IRQ #4
-            let serial_irq = 4;
-            let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = &ioapic {
-                Box::new(UserIoapicIrq::new(ioapic.clone(), serial_irq))
-            } else {
-                let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-                vm_info
-                    .vm_fd
-                    .register_irqfd(serial_evt.as_raw_fd(), serial_irq as u32)
-                    .map_err(DeviceManagerError::Irq)?;
-
-                Box::new(KernelIoapicIrq::new(serial_evt))
-            };
-
-            Some(Arc::new(Mutex::new(devices::legacy::Serial::new(
-                interrupt,
-                serial_writer,
-            ))))
-        } else {
-            None
-        };
-
-        // Add a shutdown device (i8042)
-        let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-        let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
-            exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-        )));
-
-        let pci_root = PciRoot::new(None);
-        let mut pci = PciConfigIo::new(pci_root);
-
-        let console_writer: Option<Box<dyn io::Write + Send>> = match vm_info.vm_cfg.console.mode {
-            ConsoleOutputMode::File => Some(Box::new(
-                File::create(vm_info.vm_cfg.console.file.unwrap())
-                    .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
-            )),
-            ConsoleOutputMode::Tty => Some(Box::new(stdout())),
-            ConsoleOutputMode::Null => Some(Box::new(sink())),
-            ConsoleOutputMode::Off => None,
-        };
-        let (col, row) = get_win_size();
-        let console = if console_writer.is_some() {
-            let (virtio_console_device, console_input) =
-                vm_virtio::Console::new(console_writer, col, row)
-                    .map_err(DeviceManagerError::CreateVirtioConsole)?;
-            DeviceManager::add_virtio_pci_device(
-                Box::new(virtio_console_device),
-                vm_info.memory,
-                allocator,
-                vm_info.vm_fd,
-                &mut pci,
-                &mut buses,
-                &interrupt_info,
-            )?;
-            Some(console_input)
-        } else {
-            None
-        };
-
-        DeviceManager::add_virtio_devices(
-            vm_info,
-            allocator,
-            &mut pci,
-            &mut buses,
-            &interrupt_info,
-            &mut mem_slots,
-        )?;
-
-        DeviceManager::add_vfio_devices(vm_info, allocator, &mut pci, &mut buses, mem_slots)?;
-
-        let pci = Arc::new(Mutex::new(pci));
-
-        Ok(DeviceManager {
-            io_bus,
-            mmio_bus,
-            serial,
-            console_input: console,
-            i8042,
-            exit_evt,
-            ioapic,
-            pci,
-        })
-    }
-
-    fn add_virtio_devices(
-        vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-        mut mem_slots: &mut u32,
-    ) -> DeviceManagerResult<()> {
-        // Add virtio-blk if required
-        DeviceManager::add_virtio_block_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
-
-        // Add virtio-net if required
-        DeviceManager::add_virtio_net_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
-
-        // Add virtio-rng if required
-        DeviceManager::add_virtio_rng_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
-
-        // Add virtio-fs if required
-        DeviceManager::add_virtio_fs_devices(
-            vm_info,
-            allocator,
-            pci,
-            buses,
-            &interrupt_info,
-            &mut mem_slots,
-        )?;
-
-        // Add virtio-pmem if required
-        DeviceManager::add_virtio_pmem_devices(
-            vm_info,
-            allocator,
-            pci,
-            buses,
-            &interrupt_info,
-            &mut mem_slots,
-        )?;
-
-        // Add virtio-vhost-user-net if required
-        DeviceManager::add_virtio_vhost_user_net_devices(
-            vm_info,
-            allocator,
-            pci,
-            buses,
-            &interrupt_info,
-        )?;
-
-        Ok(())
-    }
-
-    fn add_virtio_block_devices(
-        vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-    ) -> DeviceManagerResult<()> {
-        if let Some(disk_list_cfg) = &vm_info.vm_cfg.disks {
-            for disk_cfg in disk_list_cfg.iter() {
-                // Open block device path
-                let raw_img: File = OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open(disk_cfg.path)
-                    .map_err(DeviceManagerError::Disk)?;
-
-                let image_type = qcow::detect_image_type(&raw_img)
-                    .map_err(DeviceManagerError::DetectImageType)?;
-                let block = match image_type {
-                    ImageType::Raw => {
-                        let raw_img = vm_virtio::RawFile::new(raw_img);
-                        let dev =
-                            vm_virtio::Block::new(raw_img, disk_cfg.path.to_path_buf(), false)
-                                .map_err(DeviceManagerError::CreateVirtioBlock)?;
-                        Box::new(dev) as Box<dyn vm_virtio::VirtioDevice>
-                    }
-                    ImageType::Qcow2 => {
-                        let qcow_img = QcowFile::from(raw_img)
-                            .map_err(DeviceManagerError::QcowDeviceCreate)?;
-                        let dev =
-                            vm_virtio::Block::new(qcow_img, disk_cfg.path.to_path_buf(), false)
-                                .map_err(DeviceManagerError::CreateVirtioBlock)?;
-                        Box::new(dev) as Box<dyn vm_virtio::VirtioDevice>
-                    }
-                };
-
-                DeviceManager::add_virtio_pci_device(
-                    block,
-                    vm_info.memory,
-                    allocator,
-                    vm_info.vm_fd,
-                    pci,
-                    buses,
-                    &interrupt_info,
-                )?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn add_virtio_net_devices(
-        vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-    ) -> DeviceManagerResult<()> {
-        // Add virtio-net if required
-        if let Some(net_list_cfg) = &vm_info.vm_cfg.net {
-            for net_cfg in net_list_cfg.iter() {
-                let virtio_net_device: vm_virtio::Net;
-
-                if let Some(tap_if_name) = net_cfg.tap {
-                    let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
-                    virtio_net_device = vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac))
-                        .map_err(DeviceManagerError::CreateVirtioNet)?;
-                } else {
-                    virtio_net_device =
-                        vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac))
-                            .map_err(DeviceManagerError::CreateVirtioNet)?;
-                }
-
-                DeviceManager::add_virtio_pci_device(
-                    Box::new(virtio_net_device),
-                    vm_info.memory,
-                    allocator,
-                    vm_info.vm_fd,
-                    pci,
-                    buses,
-                    &interrupt_info,
-                )?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn add_virtio_rng_devices(
-        vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-    ) -> DeviceManagerResult<()> {
-        // Add virtio-rng if required
-        if let Some(rng_path) = vm_info.vm_cfg.rng.src.to_str() {
-            let virtio_rng_device =
-                vm_virtio::Rng::new(rng_path).map_err(DeviceManagerError::CreateVirtioRng)?;
-
-            DeviceManager::add_virtio_pci_device(
-                Box::new(virtio_rng_device),
-                vm_info.memory,
-                allocator,
-                vm_info.vm_fd,
-                pci,
-                buses,
-                &interrupt_info,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    fn add_virtio_fs_devices(
-        vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-        mem_slots: &mut u32,
-    ) -> DeviceManagerResult<()> {
-        // Add virtio-fs if required
-        if let Some(fs_list_cfg) = &vm_info.vm_cfg.fs {
-            for fs_cfg in fs_list_cfg.iter() {
-                if let Some(fs_sock) = fs_cfg.sock.to_str() {
-                    let mut cache: Option<(VirtioSharedMemoryList, u64)> = None;
-                    if let Some(fs_cache) = fs_cfg.cache_size {
-                        // The memory needs to be 2MiB aligned in order to support
-                        // hugepages.
-                        let fs_guest_addr = allocator
-                            .allocate_mmio_addresses(
-                                None,
-                                fs_cache as GuestUsize,
-                                Some(0x0020_0000),
-                            )
-                            .ok_or(DeviceManagerError::FsRangeAllocation)?;
-
-                        let addr = unsafe {
-                            libc::mmap(
-                                null_mut(),
-                                fs_cache as usize,
-                                libc::PROT_READ | libc::PROT_WRITE,
-                                libc::MAP_NORESERVE | libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
-                                -1,
-                                0 as libc::off_t,
-                            )
-                        };
-                        if addr == libc::MAP_FAILED {
-                            return Err(DeviceManagerError::Mmap(io::Error::last_os_error()));
-                        }
-
-                        let mem_region = kvm_userspace_memory_region {
-                            slot: *mem_slots as u32,
-                            guest_phys_addr: fs_guest_addr.raw_value(),
-                            memory_size: fs_cache,
-                            userspace_addr: addr as u64,
-                            flags: 0,
-                        };
-                        // Safe because the guest regions are guaranteed not to overlap.
-                        let _ = unsafe { vm_info.vm_fd.set_user_memory_region(mem_region) };
-
-                        // Increment the KVM slot number
-                        *mem_slots += 1;
-
-                        let mut region_list = Vec::new();
-                        region_list.push(VirtioSharedMemory {
-                            offset: 0,
-                            len: fs_cache,
-                        });
-                        cache = Some((
-                            VirtioSharedMemoryList {
-                                addr: fs_guest_addr,
-                                len: fs_cache as GuestUsize,
-                                region_list,
-                            },
-                            addr as u64,
-                        ));
-                    }
-
-                    let virtio_fs_device = vm_virtio::vhost_user::Fs::new(
-                        fs_sock,
-                        fs_cfg.tag,
-                        fs_cfg.num_queues,
-                        fs_cfg.queue_size,
-                        cache,
-                    )
-                    .map_err(DeviceManagerError::CreateVirtioFs)?;
-
-                    DeviceManager::add_virtio_pci_device(
-                        Box::new(virtio_fs_device),
-                        vm_info.memory,
-                        allocator,
-                        vm_info.vm_fd,
-                        pci,
-                        buses,
-                        &interrupt_info,
-                    )?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn add_virtio_pmem_devices(
-        vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-        mem_slots: &mut u32,
-    ) -> DeviceManagerResult<()> {
-        // Add virtio-pmem if required
-        if let Some(pmem_list_cfg) = &vm_info.vm_cfg.pmem {
-            for pmem_cfg in pmem_list_cfg.iter() {
-                let size = pmem_cfg.size;
-
-                // The memory needs to be 2MiB aligned in order to support
-                // hugepages.
-                let pmem_guest_addr = allocator
-                    .allocate_mmio_addresses(None, size as GuestUsize, Some(0x0020_0000))
-                    .ok_or(DeviceManagerError::PmemRangeAllocation)?;
-
-                let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
-                    (O_TMPFILE, true)
-                } else {
-                    (0, false)
-                };
-
-                let file = OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .custom_flags(custom_flags)
-                    .open(pmem_cfg.file)
-                    .map_err(DeviceManagerError::PmemFileOpen)?;
-
-                if set_len {
-                    file.set_len(size)
-                        .map_err(DeviceManagerError::PmemFileSetLen)?;
-                }
-
-                let addr = unsafe {
-                    libc::mmap(
-                        null_mut(),
-                        size as usize,
-                        libc::PROT_READ | libc::PROT_WRITE,
-                        libc::MAP_NORESERVE | libc::MAP_SHARED,
-                        file.as_raw_fd(),
-                        0 as libc::off_t,
-                    ) as *mut u8
-                };
-
-                let mem_region = kvm_userspace_memory_region {
-                    slot: *mem_slots as u32,
-                    guest_phys_addr: pmem_guest_addr.raw_value(),
-                    memory_size: size,
-                    userspace_addr: addr as u64,
-                    flags: 0,
-                };
-                // Safe because the guest regions are guaranteed not to overlap.
-                let _ = unsafe { vm_info.vm_fd.set_user_memory_region(mem_region) };
-
-                // Increment the KVM slot number
-                *mem_slots += 1;
-
-                let virtio_pmem_device =
-                    vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize)
-                        .map_err(DeviceManagerError::CreateVirtioPmem)?;
-
-                DeviceManager::add_virtio_pci_device(
-                    Box::new(virtio_pmem_device),
-                    vm_info.memory,
-                    allocator,
-                    vm_info.vm_fd,
-                    pci,
-                    buses,
-                    &interrupt_info,
-                )?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn add_virtio_vhost_user_net_devices(
-        vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-    ) -> DeviceManagerResult<()> {
-        // Add vhost-user-net if required
-        if let Some(vhost_user_net_list_cfg) = &vm_info.vm_cfg.vhost_user_net {
-            for vhost_user_net_cfg in vhost_user_net_list_cfg.iter() {
-                let vhost_user_net_device = vm_virtio::vhost_user::Net::new(
-                    vhost_user_net_cfg.mac,
-                    vhost_user_net_cfg.vu_cfg,
-                )
-                .map_err(DeviceManagerError::CreateVhostUserNet)?;
-
-                DeviceManager::add_virtio_pci_device(
-                    Box::new(vhost_user_net_device),
-                    vm_info.memory,
-                    allocator,
-                    vm_info.vm_fd,
-                    pci,
-                    buses,
-                    &interrupt_info,
-                )?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn create_kvm_device(vm: &Arc<VmFd>) -> DeviceManagerResult<DeviceFd> {
-        let mut vfio_dev = kvm_bindings::kvm_create_device {
-            type_: kvm_bindings::kvm_device_type_KVM_DEV_TYPE_VFIO,
-            fd: 0,
-            flags: 0,
-        };
-
-        vm.create_device(&mut vfio_dev)
-            .map_err(DeviceManagerError::CreateKvmDevice)
-    }
-
-    fn add_vfio_devices(
-        vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        mem_slots: u32,
-    ) -> DeviceManagerResult<()> {
-        let mut mem_slot = mem_slots;
-        if let Some(device_list_cfg) = &vm_info.vm_cfg.devices {
-            // Create the KVM VFIO device
-            let device_fd = DeviceManager::create_kvm_device(vm_info.vm_fd)?;
-            let device_fd = Arc::new(device_fd);
-
-            for device_cfg in device_list_cfg.iter() {
-                let vfio_device =
-                    VfioDevice::new(device_cfg.path, device_fd.clone(), vm_info.memory.clone())
-                        .map_err(DeviceManagerError::VfioCreate)?;
-
-                let mut vfio_pci_device = VfioPciDevice::new(vm_info.vm_fd, allocator, vfio_device)
-                    .map_err(DeviceManagerError::VfioPciCreate)?;
-
-                let bars = vfio_pci_device
-                    .allocate_bars(allocator)
-                    .map_err(DeviceManagerError::AllocateBars)?;
-
-                mem_slot = vfio_pci_device
-                    .map_mmio_regions(vm_info.vm_fd, mem_slot)
-                    .map_err(DeviceManagerError::VfioMapRegion)?;
-
-                let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
-
-                pci.add_device(vfio_pci_device.clone())
-                    .map_err(DeviceManagerError::AddPciDevice)?;
-
-                pci.register_mapping(vfio_pci_device.clone(), buses.io, buses.mmio, bars)
-                    .map_err(DeviceManagerError::AddPciDevice)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn add_virtio_pci_device(
-        virtio_device: Box<dyn vm_virtio::VirtioDevice>,
-        memory: &Arc<RwLock<GuestMemoryMmap>>,
-        allocator: &mut SystemAllocator,
-        vm_fd: &Arc<VmFd>,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-    ) -> DeviceManagerResult<()> {
-        let msix_num = if interrupt_info.msi_capable {
-            DEFAULT_MSIX_VEC_NUM
-        } else {
-            0
-        };
-
-        let mut virtio_pci_device = VirtioPciDevice::new(memory.clone(), virtio_device, msix_num)
-            .map_err(DeviceManagerError::VirtioDevice)?;
-
-        let bars = virtio_pci_device
-            .allocate_bars(allocator)
-            .map_err(DeviceManagerError::AllocateBars)?;
-
-        for (event, addr, _) in virtio_pci_device.ioeventfds() {
-            let io_addr = IoEventAddress::Mmio(addr);
-            vm_fd
-                .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)
-                .map_err(DeviceManagerError::RegisterIoevent)?;
-        }
-
-        if interrupt_info.msi_capable {
-            let vm_fd_clone = vm_fd.clone();
-
-            let msi_cb = Arc::new(Box::new(move |p: InterruptParameters| {
-                if let Some(entry) = p.msix {
-                    let msi_queue = kvm_msi {
-                        address_lo: entry.msg_addr_lo,
-                        address_hi: entry.msg_addr_hi,
-                        data: entry.msg_data,
-                        flags: 0u32,
-                        devid: 0u32,
-                        pad: [0u8; 12],
-                    };
-
-                    return vm_fd_clone.signal_msi(msi_queue).map(|ret| {
-                        if ret > 0 {
-                            debug!("MSI message successfully delivered");
-                        } else if ret == 0 {
-                            warn!("failed to deliver MSI message, blocked by guest");
-                        }
-                    });
-                }
-
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "missing MSI-X entry",
-                ))
-            }) as InterruptDelivery);
-
-            virtio_pci_device.assign_msix(msi_cb);
-        } else {
-            let irq_num = allocator
-                .allocate_irq()
-                .ok_or(DeviceManagerError::AllocateIrq)?;
-
-            let irq_cb = if let Some(ioapic) = interrupt_info.ioapic {
-                let ioapic_clone = ioapic.clone();
-                Box::new(move |_p: InterruptParameters| {
-                    ioapic_clone
-                        .lock()
-                        .unwrap()
-                        .service_irq(irq_num as usize)
-                        .map_err(|e| {
-                            std::io::Error::new(
-                                std::io::ErrorKind::Other,
-                                format!("failed to inject IRQ #{}: {:?}", irq_num, e),
-                            )
-                        })
-                }) as InterruptDelivery
-            } else {
-                let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-                vm_fd
-                    .register_irqfd(irqfd.as_raw_fd(), irq_num)
-                    .map_err(DeviceManagerError::Irq)?;
-
-                Box::new(move |_p: InterruptParameters| irqfd.write(1)) as InterruptDelivery
-            };
-
-            virtio_pci_device.assign_pin_irq(
-                Arc::new(irq_cb),
-                irq_num as u32,
-                PciInterruptPin::IntA,
-            );
-        }
-
-        let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
-
-        pci.add_device(virtio_pci_device.clone())
-            .map_err(DeviceManagerError::AddPciDevice)?;
-
-        pci.register_mapping(
-            virtio_pci_device.clone(),
-            &mut buses.io,
-            &mut buses.mmio,
-            bars,
-        )
-        .map_err(DeviceManagerError::AddPciDevice)?;
-
-        Ok(())
-    }
-
-    pub fn register_devices(&mut self) -> Result<()> {
-        if self.serial.is_some() {
-            // Insert serial device
-            self.io_bus
-                .insert(self.serial.as_ref().unwrap().clone(), 0x3f8, 0x8)
-                .map_err(Error::BusError)?;
-        }
-
-        // Insert i8042 device
-        self.io_bus
-            .insert(self.i8042.clone(), 0x61, 0x4)
-            .map_err(Error::BusError)?;
-
-        // Insert the PCI root configuration space.
-        self.io_bus
-            .insert(self.pci.clone(), 0xcf8, 0x8)
-            .map_err(Error::BusError)?;
-
-        if let Some(ioapic) = &self.ioapic {
-            // Insert IOAPIC
-            self.mmio_bus
-                .insert(ioapic.clone(), IOAPIC_RANGE_ADDR, IOAPIC_RANGE_SIZE)
-                .map_err(Error::BusError)?;
-        }
-
-        Ok(())
-    }
+pub struct VmInfo<'a> {
+    pub memory: &'a Arc<RwLock<GuestMemoryMmap>>,
+    pub vm_fd: &'a Arc<VmFd>,
+    pub vm_cfg: &'a VmConfig<'a>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum EpollDispatch {
     Exit,
+    Reset,
     Stdin,
 }
 
@@ -1313,7 +447,7 @@ impl EpollContext {
         // Initial capacity needs to be large enough to hold:
         // * 1 exit event
         // * 1 stdin event
-        let mut dispatch_table = Vec::with_capacity(3);
+        let mut dispatch_table = Vec::with_capacity(4);
         dispatch_table.push(None);
 
         Ok(EpollContext {
@@ -1359,21 +493,32 @@ impl AsRawFd for EpollContext {
     }
 }
 
+#[derive(PartialEq)]
+pub enum ExitBehaviour {
+    Shutdown = 1,
+    Reset = 2,
+}
+
 pub struct Vm<'a> {
     fd: Arc<VmFd>,
     kernel: File,
     memory: Arc<RwLock<GuestMemoryMmap>>,
-    vcpus: Vec<thread::JoinHandle<()>>,
+    threads: Vec<thread::JoinHandle<()>>,
     devices: DeviceManager,
     cpuid: CpuId,
-    config: VmConfig<'a>,
+    config: &'a VmConfig<'a>,
     epoll: EpollContext,
     on_tty: bool,
     creation_ts: std::time::Instant,
+    vcpus_kill_signalled: Arc<AtomicBool>,
+    // Shutdown (exit) and reboot (reset) control
+    exit_evt: EventFd,
+    reset_evt: EventFd,
+    signals: Option<Signals>,
 }
 
 impl<'a> Vm<'a> {
-    pub fn new(kvm: &Kvm, config: VmConfig<'a>) -> Result<Self> {
+    pub fn new(kvm: &Kvm, config: &'a VmConfig<'a>) -> Result<Self> {
         let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
         let fd = Arc::new(fd);
@@ -1553,8 +698,11 @@ impl<'a> Vm<'a> {
         let vm_info = VmInfo {
             memory: &guest_memory,
             vm_fd: &fd,
-            vm_cfg: &config,
+            vm_cfg: config,
         };
+
+        let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+        let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
 
         let device_manager = DeviceManager::new(
             &vm_info,
@@ -1562,6 +710,8 @@ impl<'a> Vm<'a> {
             msi_capable,
             userspace_ioapic,
             ram_regions.len() as u32,
+            &exit_evt,
+            &reset_evt,
         )
         .map_err(Error::DeviceManager)?;
 
@@ -1575,22 +725,29 @@ impl<'a> Vm<'a> {
 
         // Let's add an exit event.
         epoll
-            .add_event(&device_manager.exit_evt, EpollDispatch::Exit)
+            .add_event(&exit_evt, EpollDispatch::Exit)
+            .map_err(Error::EpollError)?;
+        epoll
+            .add_event(&reset_evt, EpollDispatch::Reset)
             .map_err(Error::EpollError)?;
 
-        let vcpus = Vec::with_capacity(u8::from(&config.cpus) as usize);
+        let threads = Vec::with_capacity(u8::from(&config.cpus) as usize + 1);
 
         Ok(Vm {
             fd,
             kernel,
             memory: guest_memory,
-            vcpus,
+            threads,
             devices: device_manager,
             cpuid,
             config,
             epoll,
             on_tty,
             creation_ts,
+            vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
+            exit_evt,
+            reset_evt,
+            signals: None,
         })
     }
 
@@ -1634,6 +791,7 @@ impl<'a> Vm<'a> {
                     cmdline_cstring.to_bytes().len() + 1,
                     vcpu_count,
                     Some(hdr),
+                    self.config.serial.mode != ConsoleOutputMode::Off,
                 )
                 .map_err(|_| Error::CmdLine)?;
 
@@ -1652,6 +810,7 @@ impl<'a> Vm<'a> {
                     cmdline_cstring.to_bytes().len() + 1,
                     vcpu_count,
                     None,
+                    self.config.serial.mode != ConsoleOutputMode::Off,
                 )
                 .map_err(|_| Error::CmdLine)?;
 
@@ -1660,19 +819,21 @@ impl<'a> Vm<'a> {
         }
     }
 
-    pub fn control_loop(&mut self) -> Result<()> {
+    pub fn control_loop(&mut self) -> Result<ExitBehaviour> {
         // Let's start the STDIN polling thread.
         const EPOLL_EVENTS_LEN: usize = 100;
 
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
         let epoll_fd = self.epoll.as_raw_fd();
 
-        if (self.devices.serial.is_some() || self.devices.console_input.is_some()) && self.on_tty {
+        if self.devices.console().input_enabled() && self.on_tty {
             io::stdin()
                 .lock()
                 .set_raw_mode()
                 .map_err(Error::SetTerminalRaw)?;
         }
+
+        let exit_behaviour;
 
         'outer: loop {
             let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
@@ -1699,7 +860,15 @@ impl<'a> Vm<'a> {
                     match dispatch_type {
                         EpollDispatch::Exit => {
                             // Consume the event.
-                            self.devices.exit_evt.read().map_err(Error::EventFd)?;
+                            self.exit_evt.read().map_err(Error::EventFd)?;
+                            exit_behaviour = ExitBehaviour::Shutdown;
+
+                            break 'outer;
+                        }
+                        EpollDispatch::Reset => {
+                            // Consume the event.
+                            self.reset_evt.read().map_err(Error::EventFd)?;
+                            exit_behaviour = ExitBehaviour::Reset;
 
                             break 'outer;
                         }
@@ -1708,29 +877,13 @@ impl<'a> Vm<'a> {
                             let count = io::stdin()
                                 .lock()
                                 .read_raw(&mut out)
-                                .map_err(Error::Serial)?;
+                                .map_err(Error::Console)?;
 
-                            if self.devices.serial.is_some()
-                                && self.config.serial.mode.input_enabled()
-                            {
+                            if self.devices.console().input_enabled() {
                                 self.devices
-                                    .serial
-                                    .as_ref()
-                                    .unwrap()
-                                    .lock()
-                                    .expect("Failed to process stdin event due to poisoned lock")
+                                    .console()
                                     .queue_input_bytes(&out[..count])
-                                    .map_err(Error::Serial)?;
-                            }
-
-                            if self.devices.console_input.is_some()
-                                && self.config.console.mode.input_enabled()
-                            {
-                                self.devices
-                                    .console_input
-                                    .as_ref()
-                                    .unwrap()
-                                    .queue_input_bytes(&out[..count]);
+                                    .map_err(Error::Console)?;
                             }
                         }
                     }
@@ -1747,10 +900,33 @@ impl<'a> Vm<'a> {
                 .map_err(Error::SetTerminalCanon)?;
         }
 
-        Ok(())
+        // Trigger the termination of the signal_handler thread
+        if let Some(signals) = self.signals.take() {
+            signals.close();
+        }
+
+        // Tell the vCPUs to stop themselves next time they go through the loop
+        self.vcpus_kill_signalled.store(true, Ordering::SeqCst);
+
+        // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
+        // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
+        // above. The signal handler thread will ignore this signal
+        for thread in self.threads.iter() {
+            let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
+            unsafe {
+                libc::pthread_kill(thread.as_pthread_t(), signum);
+            }
+        }
+
+        // Wait for all the threads to finish
+        for thread in self.threads.drain(..) {
+            thread.join().map_err(|_| Error::ThreadCleanup)?
+        }
+
+        Ok(exit_behaviour)
     }
 
-    fn os_signal_handler(signals: Signals, console_input_clone: Arc<vm_virtio::ConsoleInput>) {
+    fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>) {
         for signal in signals.forever() {
             if signal == SIGWINCH {
                 let (col, row) = get_win_size();
@@ -1759,8 +935,10 @@ impl<'a> Vm<'a> {
         }
     }
 
-    pub fn start(&mut self, entry_addr: GuestAddress) -> Result<()> {
-        self.devices.register_devices()?;
+    pub fn start(&mut self, entry_addr: GuestAddress) -> Result<ExitBehaviour> {
+        self.devices
+            .register_devices()
+            .map_err(Error::DeviceManager)?;
 
         let vcpu_count = u8::from(&self.config.cpus);
 
@@ -1768,9 +946,9 @@ impl<'a> Vm<'a> {
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
 
         for cpu_id in 0..vcpu_count {
-            let io_bus = self.devices.io_bus.clone();
-            let mmio_bus = self.devices.mmio_bus.clone();
-            let ioapic = if let Some(ioapic) = &self.devices.ioapic {
+            let io_bus = self.devices.io_bus().clone();
+            let mmio_bus = self.devices.mmio_bus().clone();
+            let ioapic = if let Some(ioapic) = &self.devices.ioapic() {
                 Some(ioapic.clone())
             } else {
                 None
@@ -1781,9 +959,11 @@ impl<'a> Vm<'a> {
 
             let vcpu_thread_barrier = vcpu_thread_barrier.clone();
 
-            self.vcpus.push(
+            let reset_evt = self.reset_evt.try_clone().unwrap();
+            let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
+            self.threads.push(
                 thread::Builder::new()
-                    .name(format!("cloud-hypervisor_vcpu{}", vcpu.id))
+                    .name(format!("vcpu{}", vcpu.id))
                     .spawn(move || {
                         unsafe {
                             extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {
@@ -1801,7 +981,25 @@ impl<'a> Vm<'a> {
                         // Block until all CPUs are ready.
                         vcpu_thread_barrier.wait();
 
-                        while vcpu.run().is_ok() {}
+                        loop {
+                            // vcpu.run() returns false on a KVM_EXIT_SHUTDOWN (triple-fault) so trigger a reset
+                            match vcpu.run() {
+                                Err(e) => {
+                                    error!("VCPU generated error: {:?}", e);
+                                    break;
+                                }
+                                Ok(true) => {}
+                                Ok(false) => {
+                                    reset_evt.write(1).unwrap();
+                                    break;
+                                }
+                            }
+
+                            // We've been told to terminate
+                            if vcpu_kill_signalled.load(Ordering::SeqCst) {
+                                break;
+                            }
+                        }
                     })
                     .map_err(Error::VcpuSpawn)?,
             );
@@ -1810,19 +1008,24 @@ impl<'a> Vm<'a> {
         // Unblock all CPU threads.
         vcpu_thread_barrier.wait();
 
-        if let Some(console_input) = &self.devices.console_input {
-            let console_input_clone = console_input.clone();
+        if self.devices.console().input_enabled() {
+            let console = self.devices.console().clone();
             let signals = Signals::new(&[SIGWINCH]);
             match signals {
-                Ok(sig) => {
-                    thread::spawn(move || Vm::os_signal_handler(sig, console_input_clone));
+                Ok(signals) => {
+                    self.signals = Some(signals.clone());
+
+                    self.threads.push(
+                        thread::Builder::new()
+                            .name("signal_handler".to_string())
+                            .spawn(move || Vm::os_signal_handler(signals, console))
+                            .map_err(Error::SignalHandlerSpawn)?,
+                    );
                 }
                 Err(e) => error!("Signal not found {}", e),
             }
         }
-        self.control_loop()?;
-
-        Ok(())
+        self.control_loop()
     }
 
     /// Gets an Arc to the guest memory owned by this VM.

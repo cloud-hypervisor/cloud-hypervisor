@@ -18,7 +18,8 @@ tempdir= "0.3.7"
 lazy_static= "1.4.0"
 
 [features]
-default = []
+default = ["acpi"]
+acpi = ["vmm/acpi"]
 
 # Integration tests require a special environment to run in
 integration_tests = []

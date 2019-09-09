@@ -13,6 +13,8 @@ extern crate byteorder;
 extern crate kvm_bindings;
 extern crate libc;
 
+#[cfg(feature = "acpi")]
+extern crate acpi_tables;
 extern crate arch_gen;
 extern crate kvm_ioctls;
 extern crate linux_loader;

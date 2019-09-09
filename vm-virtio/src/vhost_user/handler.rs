@@ -79,8 +79,10 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
         )
         .map_err(Error::EpollCtl)?;
 
+        let mut index = kill_evt_index;
+
         let slave_evt_index = if let Some(self_req_handler) = &self.vu_epoll_cfg.slave_req_handler {
-            let index = kill_evt_index + 1;
+            index = kill_evt_index + 1;
             epoll::ctl(
                 epoll_fd,
                 epoll::ControlOptions::EPOLL_CTL_ADD,
@@ -94,7 +96,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
             None
         };
 
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); kill_evt_index + 1];
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); index + 1];
 
         'poll: loop {
             let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
