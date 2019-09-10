@@ -176,6 +176,18 @@ fn main() {
                 .min_values(1),
         )
         .arg(
+            Arg::with_name("vhost-user-blk")
+                .long("vhost-user-blk")
+                .help(
+                    "Vhost user Block parameters \"sock=<socket_path>,\
+                     num_queues=<number_of_queues>,\
+                     queue_size=<size_of_each_queue>, \
+                     wce=<true|false, default true>\"",
+                )
+                .takes_value(true)
+                .min_values(1),
+        )
+        .arg(
             Arg::with_name("v")
                 .short("v")
                 .multiple(true)
@@ -209,6 +221,9 @@ fn main() {
     let devices: Option<Vec<&str>> = cmd_arguments.values_of("device").map(|x| x.collect());
     let vhost_user_net: Option<Vec<&str>> = cmd_arguments
         .values_of("vhost-user-net")
+        .map(|x| x.collect());
+    let vhost_user_blk: Option<Vec<&str>> = cmd_arguments
+        .values_of("vhost-user-blk")
         .map(|x| x.collect());
     let vsock: Option<Vec<&str>> = cmd_arguments.values_of("vsock").map(|x| x.collect());
 
@@ -250,6 +265,7 @@ fn main() {
         console,
         devices,
         vhost_user_net,
+        vhost_user_blk,
         vsock,
     }) {
         Ok(config) => config,
