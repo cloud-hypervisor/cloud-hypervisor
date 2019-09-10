@@ -411,7 +411,7 @@ impl DeviceManager {
 
         let pci = Arc::new(Mutex::new(pci));
 
-        Ok(DeviceManager {
+        let mut dm = DeviceManager {
             io_bus,
             mmio_bus,
             console,
@@ -421,7 +421,11 @@ impl DeviceManager {
             ioapic,
             pci,
             mmap_regions,
-        })
+        };
+
+        dm.register_devices()?;
+
+        Ok(dm)
     }
 
     fn make_virtio_devices(
@@ -911,7 +915,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    pub fn register_devices(&mut self) -> DeviceManagerResult<()> {
+    fn register_devices(&mut self) -> DeviceManagerResult<()> {
         if self.console.serial.is_some() {
             // Insert serial device
             self.io_bus

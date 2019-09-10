@@ -936,10 +936,6 @@ impl<'a> Vm<'a> {
     }
 
     pub fn start(&mut self, entry_addr: GuestAddress) -> Result<ExitBehaviour> {
-        self.devices
-            .register_devices()
-            .map_err(Error::DeviceManager)?;
-
         let vcpu_count = u8::from(&self.config.cpus);
 
         //        let vcpus: Vec<thread::JoinHandle<()>> = Vec::with_capacity(vcpu_count as usize);
