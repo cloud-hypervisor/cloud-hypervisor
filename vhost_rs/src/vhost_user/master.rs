@@ -40,11 +40,12 @@ pub trait VhostUserMaster: VhostBackend {
         offset: u32,
         size: u32,
         flags: VhostUserConfigFlags,
-    ) -> Result<Vec<u8>>;
+        buf: &[u8],
+    ) -> Result<(VhostUserConfig, VhostUserConfigPayload)>;
 
     /// Change the virtio device configuration space. It also can be used for live migration on the
     /// destination host to set readonly configuration space fields.
-    fn set_config(&mut self, offset: u32, buf: &[u8], flags: VhostUserConfigFlags) -> Result<()>;
+    fn set_config(&mut self, offset: u32, flags: VhostUserConfigFlags, buf: &[u8]) -> Result<()>;
 
     /// Setup slave communication channel.
     fn set_slave_request_fd(&mut self, fd: RawFd) -> Result<()>;
@@ -344,7 +345,8 @@ impl VhostUserMaster for Master {
         offset: u32,
         size: u32,
         flags: VhostUserConfigFlags,
-    ) -> Result<Vec<u8>> {
+        buf: &[u8],
+    ) -> Result<(VhostUserConfig, VhostUserConfigPayload)> {
         let body = VhostUserConfig::new(offset, size, flags);
         if !body.is_valid() {
             return error_code(VhostUserError::InvalidParam);
@@ -356,24 +358,24 @@ impl VhostUserMaster for Master {
             return error_code(VhostUserError::InvalidOperation);
         }
 
-        // TODO: vhost-user spec states that:
+        // vhost-user spec states that:
         // "Master payload: virtio device config space"
-        // But what content should the payload contains for a get_config() request?
-        // So current implementation doesn't conform to the spec.
-        let hdr = node.send_request_with_body(MasterReq::GET_CONFIG, &body, None)?;
-        let (reply, buf, rfds) = node.recv_reply_with_payload::<VhostUserConfig>(&hdr)?;
+        // "Slave payload: virtio device config space"
+        let hdr = node.send_request_with_payload(MasterReq::GET_CONFIG, &body, buf, None)?;
+        let (body_reply, buf_reply, rfds) =
+            node.recv_reply_with_payload::<VhostUserConfig>(&hdr)?;
         if rfds.is_some() {
             Endpoint::<MasterReq>::close_rfds(rfds);
             return error_code(VhostUserError::InvalidMessage);
-        } else if reply.size == 0 {
+        } else if body_reply.size == 0 {
             return error_code(VhostUserError::SlaveInternalError);
-        } else if reply.size != body.size || reply.size as usize != buf.len() {
+        } else if body_reply.size != body.size || body_reply.size as usize != buf.len() {
             return error_code(VhostUserError::InvalidMessage);
         }
-        Ok(buf)
+        Ok((body_reply, buf_reply))
     }
 
-    fn set_config(&mut self, offset: u32, buf: &[u8], flags: VhostUserConfigFlags) -> Result<()> {
+    fn set_config(&mut self, offset: u32, flags: VhostUserConfigFlags, buf: &[u8]) -> Result<()> {
         if buf.len() > MAX_MSG_SIZE {
             return error_code(VhostUserError::InvalidParam);
         }
@@ -550,12 +552,12 @@ impl MasterInternal {
         }
         self.check_state()?;
 
-        let mut buf = vec![0; MAX_MSG_SIZE - mem::size_of::<T>()];
+        let mut buf: Vec<u8> = vec![0; hdr.get_size() as usize - mem::size_of::<T>()];
         let (reply, body, bytes, rfds) = self.main_sock.recv_payload_into_buf::<T>(&mut buf)?;
         if !reply.is_reply_for(hdr)
             || reply.get_size() as usize != mem::size_of::<T>() + bytes
             || rfds.is_some()
-            || body.is_valid()
+            || !body.is_valid()
         {
             Endpoint::<MasterReq>::close_rfds(rfds);
             return Err(VhostUserError::InvalidMessage);
