@@ -63,12 +63,12 @@ pub enum Error<'a> {
     ParseTTYParam,
     /// Failed parsing vhost-user-net mac parameter.
     ParseVuNetMacParam(&'a str),
-    /// Failed parsing vhost-user-net sock parameter.
-    ParseVuNetSockParam,
-    /// Failed parsing vhost-user-net queue number parameter.
-    ParseVuNetNumQueuesParam(std::num::ParseIntError),
-    /// Failed parsing vhost-user-net queue size parameter.
-    ParseVuNetQueueSizeParam(std::num::ParseIntError),
+    /// Failed parsing vhost-user sock parameter.
+    ParseVuSockParam,
+    /// Failed parsing vhost-user queue number parameter.
+    ParseVuNumQueuesParam(std::num::ParseIntError),
+    /// Failed parsing vhost-user queue size parameter.
+    ParseVuQueueSizeParam(std::num::ParseIntError),
     /// Failed parsing vhost-user-net server parameter.
     ParseVuNetServerParam(std::num::ParseIntError),
     /// Failed parsing vsock context ID parameter.
@@ -495,17 +495,17 @@ impl<'a> VhostUserNetConfig<'a> {
             mac = MacAddr::parse_str(mac_str).map_err(Error::ParseVuNetMacParam)?;
         }
         if sock.is_empty() {
-            return Err(Error::ParseVuNetSockParam);
+            return Err(Error::ParseVuSockParam);
         }
         if !num_queues_str.is_empty() {
             num_queues = num_queues_str
                 .parse()
-                .map_err(Error::ParseVuNetNumQueuesParam)?;
+                .map_err(Error::ParseVuNumQueuesParam)?;
         }
         if !queue_size_str.is_empty() {
             queue_size = queue_size_str
                 .parse()
-                .map_err(Error::ParseVuNetQueueSizeParam)?;
+                .map_err(Error::ParseVuQueueSizeParam)?;
         }
 
         let vu_cfg = VhostUserConfig {
