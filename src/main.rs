@@ -2300,21 +2300,27 @@ mod tests {
             );
 
             let nics = guest.get_net_interfaces()?;
-            let nic_eth0 = "eth0";
             let nic_lo = "lo";
-            let nic_f = nics.split('\n').filter(|s| s != &nic_eth0 && s != &nic_lo);
+            let nic_f = nics.split('\n').filter(|s| s != &nic_lo);
             let nic_v: Vec<&str> = nic_f.collect();
+
+            let mut vhost_user_net_nic = String::new();
+            for (_, nic) in nic_v.into_iter().enumerate() {
+                let nic_cmd = format!("ifconfig {} | grep 'inet addr' ", nic.to_string());
+                let nic_ip = guest.ssh_command(&nic_cmd)?.trim().to_string();
+                thread::sleep(std::time::Duration::new(10, 0));
+                if nic_ip.is_empty() {
+                    vhost_user_net_nic = nic.to_string();
+                    break;
+                }
+            }
 
             let ip = guest.network.guest_ip.clone();
             let ip_v: Vec<i32> = ip.split('.').map(|s| s.parse().unwrap()).collect();
             let dest_ip = format!("{}.{}.{}.{}", ip_v[0], ip_v[1], ip_v[2], ip_v[3] + 5);
             let src_ip = format!("{}.{}.{}.{}", ip_v[0], ip_v[1], ip_v[2], ip_v[3] + 6);
 
-            let ip_set_cmd = format!(
-                "sudo ip addr add {}/24 dev {}",
-                dest_ip,
-                nic_v[0].to_string()
-            );
+            let ip_set_cmd = format!("sudo ip addr add {}/24 dev {}", dest_ip, vhost_user_net_nic,);
             guest.ssh_command(&ip_set_cmd)?;
             thread::sleep(std::time::Duration::new(10, 0));
 
