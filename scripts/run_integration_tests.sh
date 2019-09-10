@@ -23,12 +23,11 @@ if [ ! -f "$OVMF" ]; then
 fi
 
 CLEAR_OS_IMAGE_NAME="clear-cloudguest.img"
-CLEAR_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$CLEAR_OS_IMAGE_NAME.xz"
+CLEAR_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$CLEAR_OS_IMAGE_NAME"
 CLEAR_OS_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_IMAGE_NAME"
 if [ ! -f "$CLEAR_OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
     wget --quiet $CLEAR_OS_IMAGE_URL
-    unxz $CLEAR_OS_IMAGE_NAME.xz
     popd
 fi
 
