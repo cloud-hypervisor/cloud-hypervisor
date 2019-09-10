@@ -288,10 +288,19 @@ extern crate lazy_static;
 #[cfg(test)]
 #[cfg(feature = "integration_tests")]
 mod tests {
+    extern crate packet_builder;
+    extern crate pnet;
+    extern crate pnet_base;
+
+    use packet_builder::payload::PayloadData;
+    use packet_builder::*;
+    use pnet::packet::Packet;
+    use pnet_base::MacAddr;
+
     use ssh2::Session;
     use std::fs;
     use std::io::{Read, Write};
-    use std::net::TcpStream;
+    use std::net::{TcpStream, UdpSocket};
     use std::process::{Command, Stdio};
     use std::string::String;
     use std::sync::Mutex;
@@ -809,6 +818,13 @@ mod tests {
 
             Ok(cache == (end_addr - start_addr + 1))
         }
+
+        fn get_net_interfaces(&self) -> Result<String, Error> {
+            Ok(self
+                .ssh_command("ls /sys/class/net/ | cat")?
+                .trim()
+                .to_string())
+        }
     }
 
     #[test]
@@ -1103,72 +1119,6 @@ mod tests {
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
             let _ = child.wait();
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_vhost_user_net() {
-        test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
-
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut vubridge_path = workload_path.clone();
-            vubridge_path.push("vubridge");
-            let vubridge_path = String::from(vubridge_path.to_str().unwrap());
-
-            // Start the daemon
-            let mut daemon_child = Command::new(vubridge_path.as_str()).spawn().unwrap();
-
-            let mut cloud_child = Command::new("target/debug/cloud-hypervisor")
-                .args(&["--cpus", "4"])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
-                .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&[
-                    "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
-                ])
-                .args(&[
-                    "--vhost-user-net",
-                    "mac=52:54:00:02:d9:01,sock=/tmp/vubr.sock",
-                ])
-                .args(&["--net", guest.default_net_string().as_str()])
-                .spawn()
-                .unwrap();
-
-            // 2 network interfaces + default localhost ==> 3 interfaces
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("ip -o link | wc -l")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                3
-            );
-
-            thread::sleep(std::time::Duration::new(5, 0));
-            let _ = daemon_child.kill();
-            let _ = daemon_child.wait();
-
-            guest.ssh_command("sudo shutdown -h now")?;
-            thread::sleep(std::time::Duration::new(5, 0));
-            let _ = cloud_child.kill();
-            let _ = cloud_child.wait();
-
             Ok(())
         });
     }
@@ -2294,4 +2244,129 @@ mod tests {
             Ok(())
         });
     }
+
+    #[test]
+    fn test_vhost_user_net_guest_host() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut vubridge_path = workload_path.clone();
+            vubridge_path.push("vubridge");
+            let vubridge_path = String::from(vubridge_path.to_str().unwrap());
+
+            // Start the daemon
+            let mut daemon_child = Command::new(vubridge_path.as_str()).spawn().unwrap();
+
+            let vhost_user_net_mac = "52:54:00:02:d9:01";
+            let mut cloud_child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "4"])
+                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
+                .args(&[
+                    "--vhost-user-net",
+                    format!("mac={},sock=/tmp/vubr.sock", vhost_user_net_mac).as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .spawn()
+                .unwrap();
+
+            // 2 network interfaces + default localhost ==> 3 interfaces
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ip -o link | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                3
+            );
+
+            let nics = guest.get_net_interfaces()?;
+            let nic_eth0 = "eth0";
+            let nic_lo = "lo";
+            let nic_f = nics.split('\n').filter(|s| s != &nic_eth0 && s != &nic_lo);
+            let nic_v: Vec<&str> = nic_f.collect();
+
+            let ip = guest.network.guest_ip.clone();
+            let ip_v: Vec<i32> = ip.split('.').map(|s| s.parse().unwrap()).collect();
+            let dest_ip = format!("{}.{}.{}.{}", ip_v[0], ip_v[1], ip_v[2], ip_v[3] + 5);
+            let src_ip = format!("{}.{}.{}.{}", ip_v[0], ip_v[1], ip_v[2], ip_v[3] + 6);
+
+            let ip_set_cmd = format!(
+                "sudo ip addr add {}/24 dev {}",
+                dest_ip,
+                nic_v[0].to_string()
+            );
+            guest.ssh_command(&ip_set_cmd)?;
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            let nc_cmd = format!("nc -u -l {} 4444 > net.log", dest_ip);
+            let nc_handle = thread::spawn(move || ssh_command_ip(&nc_cmd, &ip).unwrap());
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            let mac_v: Vec<u8> = vhost_user_net_mac
+                .split(':')
+                .map(|s| u8::from_str_radix(&s, 16).unwrap())
+                .collect();
+
+            let dest_mac = MacAddr::new(mac_v[0], mac_v[1], mac_v[2], mac_v[3], mac_v[4], mac_v[5]);
+
+            // Generate a UDP packet with data
+            let mut pkt_buf = [0u8; 1500];
+            let pkt = packet_builder!(
+                 pkt_buf,
+                 ether({set_destination => dest_mac, set_source => MacAddr(10,1,1,1,1,2)}) /
+                 ipv4({set_destination=> ipv4addr!(dest_ip), set_source=> ipv4addr!(src_ip) }) /
+                 udp({set_source => 4444, set_destination => 4444}) /
+                 payload({"Hello World through vhost-user-net!\n".to_string().into_bytes()})
+            );
+            let socket = UdpSocket::bind("127.0.0.1:23456").expect("couldn't bind to address");
+            socket
+                .send_to(&pkt.packet(), "127.0.0.1:4444")
+                .expect("couldn't send data");
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            guest.ssh_command("killall -9 nc")?;
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            nc_handle.join().unwrap();
+
+            aver_eq!(
+                tb,
+                guest.ssh_command("cat net.log").unwrap_or_default().trim(),
+                "Hello World through vhost-user-net!"
+            );
+
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = daemon_child.kill();
+            let _ = daemon_child.wait();
+
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = cloud_child.kill();
+            let _ = cloud_child.wait();
+
+            Ok(())
+        });
+    }
+
 }
