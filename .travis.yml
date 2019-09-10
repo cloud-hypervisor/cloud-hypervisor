@@ -12,7 +12,7 @@ script:
   - cargo build --release --no-default-features
   - cargo test
   - cargo clippy --all-targets --all-features -- -D warnings
-  - find . -name "*.rs" | xargs rustfmt --check
+  - find . -name "*.rs" | grep -v "target/" | xargs rustfmt --check
 
 deploy:
   provider: releases
