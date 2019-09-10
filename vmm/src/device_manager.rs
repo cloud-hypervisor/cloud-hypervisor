@@ -353,8 +353,7 @@ impl DeviceManager {
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
 
-        let pci_root = PciRoot::new(None);
-        let mut pci = PciConfigIo::new(pci_root);
+        let mut virtio_devices: Vec<Box<dyn vm_virtio::VirtioDevice>> = Vec::new();
 
         let console_writer: Option<Box<dyn io::Write + Send>> = match vm_info.vm_cfg.console.mode {
             ConsoleOutputMode::File => Some(Box::new(
@@ -370,15 +369,8 @@ impl DeviceManager {
             let (virtio_console_device, console_input) =
                 vm_virtio::Console::new(console_writer, col, row)
                     .map_err(DeviceManagerError::CreateVirtioConsole)?;
-            DeviceManager::add_virtio_pci_device(
-                Box::new(virtio_console_device),
-                vm_info.memory,
-                allocator,
-                vm_info.vm_fd,
-                &mut pci,
-                &mut buses,
-                &interrupt_info,
-            )?;
+            virtio_devices
+                .push(Box::new(virtio_console_device) as Box<dyn vm_virtio::VirtioDevice>);
             Some(console_input)
         } else {
             None
@@ -393,15 +385,27 @@ impl DeviceManager {
 
         let mut mmap_regions = Vec::new();
 
-        DeviceManager::add_virtio_devices(
+        virtio_devices.append(&mut DeviceManager::make_virtio_devices(
             vm_info,
             allocator,
-            &mut pci,
-            &mut buses,
-            &interrupt_info,
             &mut mem_slots,
             &mut mmap_regions,
-        )?;
+        )?);
+
+        let pci_root = PciRoot::new(None);
+        let mut pci = PciConfigIo::new(pci_root);
+
+        for device in virtio_devices {
+            DeviceManager::add_virtio_pci_device(
+                device,
+                vm_info.memory,
+                allocator,
+                vm_info.vm_fd,
+                &mut pci,
+                &mut buses,
+                &interrupt_info,
+            )?;
+        }
 
         DeviceManager::add_vfio_devices(vm_info, allocator, &mut pci, &mut buses, mem_slots)?;
 
@@ -420,68 +424,51 @@ impl DeviceManager {
         })
     }
 
-    fn add_virtio_devices(
+    fn make_virtio_devices(
         vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
         mut mem_slots: &mut u32,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
-    ) -> DeviceManagerResult<()> {
-        // Add virtio-blk if required
-        DeviceManager::add_virtio_block_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
+    ) -> DeviceManagerResult<Vec<Box<dyn vm_virtio::VirtioDevice>>> {
+        let mut devices: Vec<Box<dyn vm_virtio::VirtioDevice>> = Vec::new();
 
-        // Add virtio-net if required
-        DeviceManager::add_virtio_net_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
-
-        // Add virtio-rng if required
-        DeviceManager::add_virtio_rng_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
+        // Create "standard" virtio devices (net/block/rng)
+        devices.append(&mut DeviceManager::make_virtio_block_devices(vm_info)?);
+        devices.append(&mut DeviceManager::make_virtio_net_devices(vm_info)?);
+        devices.append(&mut DeviceManager::make_virtio_rng_devices(vm_info)?);
 
         // Add virtio-fs if required
-        DeviceManager::add_virtio_fs_devices(
+        devices.append(&mut DeviceManager::make_virtio_fs_devices(
             vm_info,
             allocator,
-            pci,
-            buses,
-            &interrupt_info,
             &mut mem_slots,
             mmap_regions,
-        )?;
+        )?);
 
         // Add virtio-pmem if required
-        DeviceManager::add_virtio_pmem_devices(
+        devices.append(&mut DeviceManager::make_virtio_pmem_devices(
             vm_info,
             allocator,
-            pci,
-            buses,
-            &interrupt_info,
             &mut mem_slots,
             mmap_regions,
-        )?;
+        )?);
 
         // Add virtio-vhost-user-net if required
-        DeviceManager::add_virtio_vhost_user_net_devices(
+        devices.append(&mut DeviceManager::make_virtio_vhost_user_net_devices(
             vm_info,
-            allocator,
-            pci,
-            buses,
-            &interrupt_info,
-        )?;
+        )?);
 
         // Add virtio-vsock if required
-        DeviceManager::add_virtio_vsock_devices(vm_info, allocator, pci, buses, &interrupt_info)?;
+        devices.append(&mut DeviceManager::make_virtio_vsock_devices(vm_info)?);
 
-        Ok(())
+        Ok(devices)
     }
 
-    fn add_virtio_block_devices(
+    fn make_virtio_block_devices(
         vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-    ) -> DeviceManagerResult<()> {
+    ) -> DeviceManagerResult<Vec<Box<dyn vm_virtio::VirtioDevice>>> {
+        let mut devices = Vec::new();
+
         if let Some(disk_list_cfg) = &vm_info.vm_cfg.disks {
             for disk_cfg in disk_list_cfg.iter() {
                 // Open block device path
@@ -511,93 +498,59 @@ impl DeviceManager {
                     }
                 };
 
-                DeviceManager::add_virtio_pci_device(
-                    block,
-                    vm_info.memory,
-                    allocator,
-                    vm_info.vm_fd,
-                    pci,
-                    buses,
-                    &interrupt_info,
-                )?;
+                devices.push(block);
             }
         }
 
-        Ok(())
+        Ok(devices)
     }
 
-    fn add_virtio_net_devices(
+    fn make_virtio_net_devices(
         vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-    ) -> DeviceManagerResult<()> {
+    ) -> DeviceManagerResult<Vec<Box<dyn vm_virtio::VirtioDevice>>> {
+        let mut devices = Vec::new();
+
         // Add virtio-net if required
         if let Some(net_list_cfg) = &vm_info.vm_cfg.net {
             for net_cfg in net_list_cfg.iter() {
-                let virtio_net_device: vm_virtio::Net;
-
-                if let Some(tap_if_name) = net_cfg.tap {
+                let virtio_net_device = if let Some(tap_if_name) = net_cfg.tap {
                     let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
-                    virtio_net_device = vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac))
-                        .map_err(DeviceManagerError::CreateVirtioNet)?;
+                    vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac))
+                        .map_err(DeviceManagerError::CreateVirtioNet)?
                 } else {
-                    virtio_net_device =
-                        vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac))
-                            .map_err(DeviceManagerError::CreateVirtioNet)?;
-                }
+                    vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac))
+                        .map_err(DeviceManagerError::CreateVirtioNet)?
+                };
 
-                DeviceManager::add_virtio_pci_device(
-                    Box::new(virtio_net_device),
-                    vm_info.memory,
-                    allocator,
-                    vm_info.vm_fd,
-                    pci,
-                    buses,
-                    &interrupt_info,
-                )?;
+                devices.push(Box::new(virtio_net_device) as Box<dyn vm_virtio::VirtioDevice>);
             }
         }
 
-        Ok(())
+        Ok(devices)
     }
 
-    fn add_virtio_rng_devices(
+    fn make_virtio_rng_devices(
         vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-    ) -> DeviceManagerResult<()> {
+    ) -> DeviceManagerResult<Vec<Box<dyn vm_virtio::VirtioDevice>>> {
+        let mut devices = Vec::new();
+
         // Add virtio-rng if required
         if let Some(rng_path) = vm_info.vm_cfg.rng.src.to_str() {
             let virtio_rng_device =
                 vm_virtio::Rng::new(rng_path).map_err(DeviceManagerError::CreateVirtioRng)?;
-
-            DeviceManager::add_virtio_pci_device(
-                Box::new(virtio_rng_device),
-                vm_info.memory,
-                allocator,
-                vm_info.vm_fd,
-                pci,
-                buses,
-                &interrupt_info,
-            )?;
+            devices.push(Box::new(virtio_rng_device) as Box<dyn vm_virtio::VirtioDevice>);
         }
 
-        Ok(())
+        Ok(devices)
     }
 
-    fn add_virtio_fs_devices(
+    fn make_virtio_fs_devices(
         vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
         mem_slots: &mut u32,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
-    ) -> DeviceManagerResult<()> {
+    ) -> DeviceManagerResult<Vec<Box<dyn vm_virtio::VirtioDevice>>> {
+        let mut devices = Vec::new();
         // Add virtio-fs if required
         if let Some(fs_list_cfg) = &vm_info.vm_cfg.fs {
             for fs_cfg in fs_list_cfg.iter() {
@@ -667,31 +620,21 @@ impl DeviceManager {
                     )
                     .map_err(DeviceManagerError::CreateVirtioFs)?;
 
-                    DeviceManager::add_virtio_pci_device(
-                        Box::new(virtio_fs_device),
-                        vm_info.memory,
-                        allocator,
-                        vm_info.vm_fd,
-                        pci,
-                        buses,
-                        &interrupt_info,
-                    )?;
+                    devices.push(Box::new(virtio_fs_device) as Box<dyn vm_virtio::VirtioDevice>);
                 }
             }
         }
 
-        Ok(())
+        Ok(devices)
     }
 
-    fn add_virtio_pmem_devices(
+    fn make_virtio_pmem_devices(
         vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
         mem_slots: &mut u32,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
-    ) -> DeviceManagerResult<()> {
+    ) -> DeviceManagerResult<Vec<Box<dyn vm_virtio::VirtioDevice>>> {
+        let mut devices = Vec::new();
         // Add virtio-pmem if required
         if let Some(pmem_list_cfg) = &vm_info.vm_cfg.pmem {
             for pmem_cfg in pmem_list_cfg.iter() {
@@ -751,28 +694,17 @@ impl DeviceManager {
                     vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize)
                         .map_err(DeviceManagerError::CreateVirtioPmem)?;
 
-                DeviceManager::add_virtio_pci_device(
-                    Box::new(virtio_pmem_device),
-                    vm_info.memory,
-                    allocator,
-                    vm_info.vm_fd,
-                    pci,
-                    buses,
-                    &interrupt_info,
-                )?;
+                devices.push(Box::new(virtio_pmem_device) as Box<dyn vm_virtio::VirtioDevice>);
             }
         }
 
-        Ok(())
+        Ok(devices)
     }
 
-    fn add_virtio_vhost_user_net_devices(
+    fn make_virtio_vhost_user_net_devices(
         vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-    ) -> DeviceManagerResult<()> {
+    ) -> DeviceManagerResult<Vec<Box<dyn vm_virtio::VirtioDevice>>> {
+        let mut devices = Vec::new();
         // Add vhost-user-net if required
         if let Some(vhost_user_net_list_cfg) = &vm_info.vm_cfg.vhost_user_net {
             for vhost_user_net_cfg in vhost_user_net_list_cfg.iter() {
@@ -782,28 +714,17 @@ impl DeviceManager {
                 )
                 .map_err(DeviceManagerError::CreateVhostUserNet)?;
 
-                DeviceManager::add_virtio_pci_device(
-                    Box::new(vhost_user_net_device),
-                    vm_info.memory,
-                    allocator,
-                    vm_info.vm_fd,
-                    pci,
-                    buses,
-                    &interrupt_info,
-                )?;
+                devices.push(Box::new(vhost_user_net_device) as Box<dyn vm_virtio::VirtioDevice>);
             }
         }
 
-        Ok(())
+        Ok(devices)
     }
 
-    fn add_virtio_vsock_devices(
+    fn make_virtio_vsock_devices(
         vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
-        buses: &mut BusInfo,
-        interrupt_info: &InterruptInfo,
-    ) -> DeviceManagerResult<()> {
+    ) -> DeviceManagerResult<Vec<Box<dyn vm_virtio::VirtioDevice>>> {
+        let mut devices = Vec::new();
         // Add vsock if required
         if let Some(vsock_list_cfg) = &vm_info.vm_cfg.vsock {
             for vsock_cfg in vsock_list_cfg.iter() {
@@ -818,19 +739,11 @@ impl DeviceManager {
                 let vsock_device = vm_virtio::Vsock::new(vsock_cfg.cid, backend)
                     .map_err(DeviceManagerError::CreateVirtioVsock)?;
 
-                DeviceManager::add_virtio_pci_device(
-                    Box::new(vsock_device),
-                    vm_info.memory,
-                    allocator,
-                    vm_info.vm_fd,
-                    pci,
-                    buses,
-                    &interrupt_info,
-                )?;
+                devices.push(Box::new(vsock_device) as Box<dyn vm_virtio::VirtioDevice>);
             }
         }
 
-        Ok(())
+        Ok(devices)
     }
 
     fn create_kvm_device(vm: &Arc<VmFd>) -> DeviceManagerResult<DeviceFd> {
