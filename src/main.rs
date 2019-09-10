@@ -2318,7 +2318,7 @@ mod tests {
             guest.ssh_command(&ip_set_cmd)?;
             thread::sleep(std::time::Duration::new(10, 0));
 
-            let nc_cmd = format!("nc -u -l {} 4444 > net.log", dest_ip);
+            let nc_cmd = format!("nc -u -l {} 4444 > net.log &", dest_ip);
             let nc_handle = thread::spawn(move || ssh_command_ip(&nc_cmd, &ip).unwrap());
             thread::sleep(std::time::Duration::new(10, 0));
 
