@@ -2320,12 +2320,12 @@ mod tests {
             let dest_ip = format!("{}.{}.{}.{}", ip_v[0], ip_v[1], ip_v[2], ip_v[3] + 5);
             let src_ip = format!("{}.{}.{}.{}", ip_v[0], ip_v[1], ip_v[2], ip_v[3] + 6);
 
-            let ip_set_cmd = format!("sudo ip addr add {}/24 dev {}", dest_ip, vhost_user_net_nic,);
+            let ip_set_cmd = format!("sudo ip addr add {}/24 dev {}", dest_ip, vhost_user_net_nic);
             guest.ssh_command(&ip_set_cmd)?;
             thread::sleep(std::time::Duration::new(10, 0));
 
-            let nc_cmd = format!("nc -u -l {} 4444 > net.log &", dest_ip);
-            let nc_handle = thread::spawn(move || ssh_command_ip(&nc_cmd, &ip).unwrap());
+            let tcpdump_cmd = format!("tcpdump -i {} -w net.pcap &", vhost_user_net_nic);
+            let nc_handle = thread::spawn(move || ssh_command_ip(&tcpdump_cmd, &ip).unwrap());
             thread::sleep(std::time::Duration::new(10, 0));
 
             let mac_v: Vec<u8> = vhost_user_net_mac
@@ -2354,15 +2354,20 @@ mod tests {
             thread::sleep(std::time::Duration::new(10, 0));
             udp_handle.join().unwrap();
 
-            guest.ssh_command("killall -9 nc")?;
+            guest.ssh_command("killall -9 tcpdump")?;
             thread::sleep(std::time::Duration::new(10, 0));
 
             nc_handle.join().unwrap();
 
-            aver_eq!(
+            aver!(
                 tb,
-                guest.ssh_command("cat net.log").unwrap_or_default().trim(),
-                "Hello World through vhost-user-net!"
+                guest
+                    .ssh_command("ls -l net.pcap | awk '{print $5}'")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default()
+                    > 0
             );
 
             thread::sleep(std::time::Duration::new(5, 0));
