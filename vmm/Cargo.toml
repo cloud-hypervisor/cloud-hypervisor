@@ -8,6 +8,7 @@ edition = "2018"
 default = []
 acpi = ["acpi_tables","devices/acpi", "arch/acpi"]
 pci_support = ["pci", "vfio", "vm-virtio/pci_support"]
+mmio_support = ["vm-virtio/mmio_support"]
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables", optional = true }
