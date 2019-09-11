@@ -2304,6 +2304,7 @@ mod tests {
             let nic_f = nics.split('\n').filter(|s| s != &nic_lo);
             let nic_v: Vec<&str> = nic_f.collect();
 
+            //let mut count = 0;
             let mut vhost_user_net_nic = String::new();
             for (_, nic) in nic_v.into_iter().enumerate() {
                 let nic_cmd = format!("ifconfig {} | grep 'inet addr' ", nic.to_string());
@@ -2311,9 +2312,10 @@ mod tests {
                 thread::sleep(std::time::Duration::new(10, 0));
                 if nic_ip.is_empty() {
                     vhost_user_net_nic = nic.to_string();
-                    break;
+                    //count += 1;
                 }
             }
+            //aver_eq!(tb, count, 1);
 
             let ip = guest.network.guest_ip.clone();
             let ip_v: Vec<i32> = ip.split('.').map(|s| s.parse().unwrap()).collect();
