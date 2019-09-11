@@ -2336,23 +2336,22 @@ mod tests {
             let dest_mac = MacAddr::new(mac_v[0], mac_v[1], mac_v[2], mac_v[3], mac_v[4], mac_v[5]);
 
             // Generate a UDP packet with data
-            let udp_handle = thread::spawn(move || {
-                let mut pkt_buf = [0u8; 1500];
-                let pkt = packet_builder!(
-                     pkt_buf,
-                     ether({set_destination => dest_mac, set_source => MacAddr(10,1,1,1,1,2)}) /
-                     ipv4({set_destination=> ipv4addr!(dest_ip), set_source=> ipv4addr!(src_ip) }) /
-                     udp({set_source => 4444, set_destination => 4444}) /
-                     payload({"Hello World through vhost-user-net!\n".to_string().into_bytes()})
-                );
-                let socket = UdpSocket::bind("127.0.0.1:23456").expect("couldn't bind to address");
-                socket
-                    .send_to(&pkt.packet(), "127.0.0.1:4444")
-                    .expect("couldn't send data");
-            });
+            let mut pkt_buf = [0u8; 1500];
+            let pkt = packet_builder!(
+                 pkt_buf,
+                 ether({set_destination => dest_mac, set_source => MacAddr(10,1,1,1,1,2)}) /
+                 ipv4({set_destination=> ipv4addr!(dest_ip), set_source=> ipv4addr!(src_ip) }) /
+                 udp({set_source => 4444, set_destination => 4444}) /
+                 payload({"Hello World through vhost-user-net!\n".to_string().into_bytes()})
+            );
+            let socket = UdpSocket::bind("127.0.0.1:23456").expect("couldn't bind to address");
+            let count = socket
+                .send_to(&pkt.packet(), "127.0.0.1:4444")
+                .expect("couldn't send data");
 
             thread::sleep(std::time::Duration::new(10, 0));
-            udp_handle.join().unwrap();
+            aver!(tb, count > 0);
+            aver_eq!(tb, count, 78);
 
             guest.ssh_command("killall -9 tcpdump")?;
             thread::sleep(std::time::Duration::new(10, 0));
