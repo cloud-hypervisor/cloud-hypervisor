@@ -78,6 +78,9 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-fs device
     CreateVirtioFs(vm_virtio::vhost_user::Error),
 
+    /// Cannot create vhost-user-blk device
+    CreateVhostUserBlk(vm_virtio::vhost_user::Error),
+
     /// Cannot create virtio-pmem device
     CreateVirtioPmem(io::Error),
 
@@ -515,6 +518,11 @@ impl DeviceManager {
             vm_info,
         )?);
 
+        // Add virtio-vhost-user-blk if required
+        devices.append(&mut DeviceManager::make_virtio_vhost_user_blk_devices(
+            vm_info,
+        )?);
+
         // Add virtio-vsock if required
         devices.append(&mut DeviceManager::make_virtio_vsock_devices(vm_info)?);
 
@@ -772,6 +780,26 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::CreateVhostUserNet)?;
 
                 devices.push(Box::new(vhost_user_net_device) as Box<dyn vm_virtio::VirtioDevice>);
+            }
+        }
+
+        Ok(devices)
+    }
+
+    fn make_virtio_vhost_user_blk_devices(
+        vm_info: &VmInfo,
+    ) -> DeviceManagerResult<Vec<Box<dyn vm_virtio::VirtioDevice>>> {
+        let mut devices = Vec::new();
+        // Add vhost-user-blk if required
+        if let Some(vhost_user_blk_list_cfg) = &vm_info.vm_cfg.vhost_user_blk {
+            for vhost_user_blk_cfg in vhost_user_blk_list_cfg.iter() {
+                let vhost_user_blk_device = vm_virtio::vhost_user::Blk::new(
+                    vhost_user_blk_cfg.wce,
+                    vhost_user_blk_cfg.vu_cfg,
+                )
+                .map_err(DeviceManagerError::CreateVhostUserBlk)?;
+
+                devices.push(Box::new(vhost_user_blk_device) as Box<dyn vm_virtio::VirtioDevice>);
             }
         }
 

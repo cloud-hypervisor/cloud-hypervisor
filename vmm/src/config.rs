@@ -71,6 +71,8 @@ pub enum Error<'a> {
     ParseVuQueueSizeParam(std::num::ParseIntError),
     /// Failed parsing vhost-user-net server parameter.
     ParseVuNetServerParam(std::num::ParseIntError),
+    /// Failed parsing vhost-user-blk wce parameter.
+    ParseVuBlkWceParam(std::str::ParseBoolError),
     /// Failed parsing vsock context ID parameter.
     ParseVsockCidParam(std::num::ParseIntError),
     /// Failed parsing vsock socket path parameter.
@@ -92,6 +94,7 @@ pub struct VmParams<'a> {
     pub console: &'a str,
     pub devices: Option<Vec<&'a str>>,
     pub vhost_user_net: Option<Vec<&'a str>>,
+    pub vhost_user_blk: Option<Vec<&'a str>>,
     pub vsock: Option<Vec<&'a str>>,
 }
 
@@ -550,6 +553,61 @@ impl<'a> VsockConfig<'a> {
     }
 }
 
+pub struct VhostUserBlkConfig<'a> {
+    pub wce: bool,
+    pub vu_cfg: VhostUserConfig<'a>,
+}
+
+impl<'a> VhostUserBlkConfig<'a> {
+    pub fn parse(vhost_user_blk: &'a str) -> Result<Self> {
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = vhost_user_blk.split(',').collect();
+
+        let mut sock: &str = "";
+        let mut num_queues_str: &str = "";
+        let mut queue_size_str: &str = "";
+        let mut wce_str: &str = "";
+
+        for param in params_list.iter() {
+            if param.starts_with("sock=") {
+                sock = &param[5..];
+            } else if param.starts_with("num_queues=") {
+                num_queues_str = &param[11..];
+            } else if param.starts_with("queue_size=") {
+                queue_size_str = &param[11..];
+            } else if param.starts_with("wce=") {
+                wce_str = &param[4..];
+            }
+        }
+
+        let mut num_queues: usize = 1;
+        let mut queue_size: u16 = 128;
+        let mut wce: bool = true;
+
+        if !num_queues_str.is_empty() {
+            num_queues = num_queues_str
+                .parse()
+                .map_err(Error::ParseVuNumQueuesParam)?;
+        }
+        if !queue_size_str.is_empty() {
+            queue_size = queue_size_str
+                .parse()
+                .map_err(Error::ParseVuQueueSizeParam)?;
+        }
+        if !wce_str.is_empty() {
+            wce = wce_str.parse().map_err(Error::ParseVuBlkWceParam)?;
+        }
+
+        let vu_cfg = VhostUserConfig {
+            sock,
+            num_queues,
+            queue_size,
+        };
+
+        Ok(VhostUserBlkConfig { wce, vu_cfg })
+    }
+}
+
 pub struct VmConfig<'a> {
     pub cpus: CpusConfig,
     pub memory: MemoryConfig<'a>,
@@ -564,6 +622,7 @@ pub struct VmConfig<'a> {
     pub console: ConsoleConfig<'a>,
     pub devices: Option<Vec<DeviceConfig<'a>>>,
     pub vhost_user_net: Option<Vec<VhostUserNetConfig<'a>>>,
+    pub vhost_user_blk: Option<Vec<VhostUserBlkConfig<'a>>>,
     pub vsock: Option<Vec<VsockConfig<'a>>>,
 }
 
@@ -638,6 +697,15 @@ impl<'a> VmConfig<'a> {
             vsock = Some(vsock_config_list);
         }
 
+        let mut vhost_user_blk: Option<Vec<VhostUserBlkConfig>> = None;
+        if let Some(vhost_user_blk_list) = &vm_params.vhost_user_blk {
+            let mut vhost_user_blk_config_list = Vec::new();
+            for item in vhost_user_blk_list.iter() {
+                vhost_user_blk_config_list.push(VhostUserBlkConfig::parse(item)?);
+            }
+            vhost_user_blk = Some(vhost_user_blk_config_list);
+        }
+
         Ok(VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
@@ -652,6 +720,7 @@ impl<'a> VmConfig<'a> {
             console,
             devices,
             vhost_user_net,
+            vhost_user_blk,
             vsock,
         })
     }
