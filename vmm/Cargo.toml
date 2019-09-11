@@ -7,6 +7,7 @@ edition = "2018"
 [features]
 default = []
 acpi = ["acpi_tables","devices/acpi", "arch/acpi"]
+pci_support = ["pci", "vfio", "vm-virtio/pci_support"]
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables", optional = true }
@@ -18,9 +19,9 @@ kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master"
 libc = "0.2.62"
 log = "0.4.8"
 net_util = { path = "../net_util" }
-pci = {path = "../pci"}
+pci = {path = "../pci", optional = true}
 qcow = { path = "../qcow" }
-vfio = { path = "../vfio" }
+vfio = { path = "../vfio", optional = true }
 vm-virtio = { path = "../vm-virtio" }
 vm-allocator = { path = "../vm-allocator" }
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }

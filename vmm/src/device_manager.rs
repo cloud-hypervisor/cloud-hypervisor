@@ -19,6 +19,7 @@ use libc::O_TMPFILE;
 use libc::{EFD_NONBLOCK, TIOCGWINSZ};
 
 use net_util::Tap;
+#[cfg(feature = "pci_support")]
 use pci::{
     InterruptDelivery, InterruptParameters, PciConfigIo, PciDevice, PciInterruptPin, PciRoot,
 };
@@ -32,9 +33,11 @@ use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::result;
 use std::sync::{Arc, Mutex, RwLock};
+#[cfg(feature = "pci_support")]
 use vfio::{VfioDevice, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
+#[cfg(feature = "pci_support")]
 use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vmm_sys_util::eventfd::EventFd;
@@ -98,6 +101,7 @@ pub enum DeviceManagerError {
     Irq(io::Error),
 
     /// Cannot allocate PCI BARs
+    #[cfg(feature = "pci_support")]
     AllocateBars(pci::PciDeviceError),
 
     /// Cannot register ioevent.
@@ -107,6 +111,7 @@ pub enum DeviceManagerError {
     VirtioDevice(vmm_sys_util::errno::Error),
 
     /// Cannot add PCI device
+    #[cfg(feature = "pci_support")]
     AddPciDevice(pci::PciRootError),
 
     /// Cannot open persistent memory file
@@ -128,12 +133,15 @@ pub enum DeviceManagerError {
     ConsoleOutputFileOpen(io::Error),
 
     /// Cannot create a VFIO device
+    #[cfg(feature = "pci_support")]
     VfioCreate(vfio::VfioError),
 
     /// Cannot create a VFIO PCI device
+    #[cfg(feature = "pci_support")]
     VfioPciCreate(vfio::VfioPciError),
 
     /// Failed to map VFIO MMIO region.
+    #[cfg(feature = "pci_support")]
     VfioMapRegion(VfioPciError),
 
     /// Failed to create the KVM device.
@@ -272,9 +280,6 @@ pub struct DeviceManager {
     // IOAPIC
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
 
-    // PCI root
-    pci: Arc<Mutex<PciConfigIo>>,
-
     // mmap()ed region to unmap on drop
     mmap_regions: Vec<(*mut libc::c_void, usize)>,
 
@@ -395,26 +400,33 @@ impl DeviceManager {
             &mut mmap_regions,
         )?);
 
+        #[allow(unused_mut)]
         let mut cmdline_additions = Vec::new();
 
-        let pci_root = PciRoot::new(None);
-        let mut pci = PciConfigIo::new(pci_root);
+        #[cfg(feature = "pci_support")]
+        {
+            let pci_root = PciRoot::new(None);
+            let mut pci = PciConfigIo::new(pci_root);
 
-        for device in virtio_devices {
-            DeviceManager::add_virtio_pci_device(
-                device,
-                vm_info.memory,
-                allocator,
-                vm_info.vm_fd,
-                &mut pci,
-                &mut buses,
-                &interrupt_info,
-            )?;
+            for device in virtio_devices {
+                DeviceManager::add_virtio_pci_device(
+                    device,
+                    vm_info.memory,
+                    allocator,
+                    vm_info.vm_fd,
+                    &mut pci,
+                    &mut buses,
+                    &interrupt_info,
+                )?;
+            }
+
+            DeviceManager::add_vfio_devices(vm_info, allocator, &mut pci, &mut buses, mem_slots)?;
+            let pci = Arc::new(Mutex::new(pci));
+            io_bus
+                .insert(pci, 0xcf8, 0x8)
+                .map_err(DeviceManagerError::BusError)?;
         }
 
-        DeviceManager::add_vfio_devices(vm_info, allocator, &mut pci, &mut buses, mem_slots)?;
-
-        let pci = Arc::new(Mutex::new(pci));
 
         let mut dm = DeviceManager {
             io_bus,
@@ -424,7 +436,6 @@ impl DeviceManager {
             #[cfg(feature = "acpi")]
             acpi_device,
             ioapic,
-            pci,
             mmap_regions,
             cmdline_additions,
         };
@@ -767,6 +778,7 @@ impl DeviceManager {
             .map_err(DeviceManagerError::CreateKvmDevice)
     }
 
+    #[cfg(feature = "pci_support")]
     fn add_vfio_devices(
         vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
@@ -808,6 +820,7 @@ impl DeviceManager {
         Ok(())
     }
 
+    #[cfg(feature = "pci_support")]
     fn add_virtio_pci_device(
         virtio_device: Box<dyn vm_virtio::VirtioDevice>,
         memory: &Arc<RwLock<GuestMemoryMmap>>,
@@ -937,11 +950,6 @@ impl DeviceManager {
         #[cfg(feature = "acpi")]
         self.io_bus
             .insert(self.acpi_device.clone(), 0x3c0, 0x4)
-            .map_err(DeviceManagerError::BusError)?;
-
-        // Insert the PCI root configuration space.
-        self.io_bus
-            .insert(self.pci.clone(), 0xcf8, 0x8)
             .map_err(DeviceManagerError::BusError)?;
 
         if let Some(ioapic) = &self.ioapic {
