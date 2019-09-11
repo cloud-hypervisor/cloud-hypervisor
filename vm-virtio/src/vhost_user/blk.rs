@@ -94,11 +94,22 @@ impl<'a> Blk {
         }
 
         let config_len = mem::size_of::<virtio_blk_config>();
-        let mut config_space: Vec<u8> = vec![0u8; config_len as usize];
+        let config_space: Vec<u8> = vec![0u8; config_len as usize];
+
+        let (_, mut config_space) = vhost_user_blk
+            .get_config(
+                0,
+                config_len as u32,
+                VhostUserConfigFlags::WRITABLE,
+                config_space.as_slice(),
+            )
+            .unwrap();
 
         let queue_num_offset = offset_of!(virtio_blk_config, num_queues);
-        // only setnum_queues value.
-        config_space[queue_num_offset] = vu_cfg.num_queues as u8;
+        // Only set num_queues value(u16).
+        let num_queues_slice = (vu_cfg.num_queues as u16).to_le_bytes();
+        config_space[queue_num_offset..queue_num_offset + mem::size_of::<u16>()]
+            .copy_from_slice(&num_queues_slice);
 
         Ok(Blk {
             vhost_user_blk,
