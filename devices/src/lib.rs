@@ -67,6 +67,6 @@ pub enum Error {
     IoError(io::Error),
 }
 
-pub trait Interrupt: Send {
+pub trait Interrupt: Send + Sync {
     fn deliver(&self) -> result::Result<(), std::io::Error>;
 }
