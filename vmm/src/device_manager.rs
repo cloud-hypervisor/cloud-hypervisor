@@ -277,6 +277,9 @@ pub struct DeviceManager {
 
     // mmap()ed region to unmap on drop
     mmap_regions: Vec<(*mut libc::c_void, usize)>,
+
+    // Things to be added to the commandline (i.e. for virtio-mmio)
+    cmdline_additions: Vec<String>,
 }
 
 impl DeviceManager {
@@ -392,6 +395,8 @@ impl DeviceManager {
             &mut mmap_regions,
         )?);
 
+        let mut cmdline_additions = Vec::new();
+
         let pci_root = PciRoot::new(None);
         let mut pci = PciConfigIo::new(pci_root);
 
@@ -421,6 +426,7 @@ impl DeviceManager {
             ioapic,
             pci,
             mmap_regions,
+            cmdline_additions,
         };
 
         dm.register_devices()?;
@@ -962,6 +968,10 @@ impl DeviceManager {
 
     pub fn console(&self) -> &Arc<Console> {
         &self.console
+    }
+
+    pub fn cmdline_additions(&self) -> &[String] {
+        self.cmdline_additions.as_slice()
     }
 }
 

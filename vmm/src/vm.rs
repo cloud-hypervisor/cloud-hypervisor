@@ -752,8 +752,12 @@ impl<'a> Vm<'a> {
     }
 
     pub fn load_kernel(&mut self) -> Result<GuestAddress> {
-        let cmdline_cstring =
-            CString::new(self.config.cmdline.args.clone()).map_err(|_| Error::CmdLine)?;
+        let mut cmdline = self.config.cmdline.args.clone();
+        for entry in self.devices.cmdline_additions() {
+            cmdline.insert_str(entry).map_err(|_| Error::CmdLine)?;
+        }
+
+        let cmdline_cstring = CString::new(cmdline).map_err(|_| Error::CmdLine)?;
         let mem = self.memory.read().unwrap();
         let entry_addr = match linux_loader::loader::Elf::load(
             mem.deref(),
