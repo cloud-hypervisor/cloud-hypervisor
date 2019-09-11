@@ -7,6 +7,7 @@ edition = "2018"
 [features]
 default = []
 pci_support = ["pci"]
+mmio_support = []
 
 [dependencies]
 byteorder = "1.3.2"
