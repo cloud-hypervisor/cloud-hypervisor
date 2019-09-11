@@ -36,6 +36,8 @@ use std::sync::{Arc, Mutex, RwLock};
 #[cfg(feature = "pci_support")]
 use vfio::{VfioDevice, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
+#[cfg(feature = "mmio_support")]
+use vm_memory::GuestAddress;
 use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
 #[cfg(feature = "pci_support")]
 use vm_virtio::transport::VirtioPciDevice;
@@ -45,6 +47,9 @@ use vmm_sys_util::eventfd::EventFd;
 // IOAPIC address range
 const IOAPIC_RANGE_ADDR: u64 = 0xfec0_0000;
 const IOAPIC_RANGE_SIZE: u64 = 0x20;
+
+#[cfg(feature = "mmio_support")]
+const MMIO_LEN: u64 = 0x1000;
 
 /// Errors associated with device manager
 #[derive(Debug)]
@@ -403,30 +408,55 @@ impl DeviceManager {
         #[allow(unused_mut)]
         let mut cmdline_additions = Vec::new();
 
-        #[cfg(feature = "pci_support")]
-        {
-            let pci_root = PciRoot::new(None);
-            let mut pci = PciConfigIo::new(pci_root);
+        if cfg!(feature = "pci_support") {
+            #[cfg(feature = "pci_support")]
+            {
+                let pci_root = PciRoot::new(None);
+                let mut pci = PciConfigIo::new(pci_root);
 
-            for device in virtio_devices {
-                DeviceManager::add_virtio_pci_device(
-                    device,
-                    vm_info.memory,
-                    allocator,
-                    vm_info.vm_fd,
-                    &mut pci,
-                    &mut buses,
-                    &interrupt_info,
+                for device in virtio_devices {
+                    DeviceManager::add_virtio_pci_device(
+                        device,
+                        vm_info.memory,
+                        allocator,
+                        vm_info.vm_fd,
+                        &mut pci,
+                        &mut buses,
+                        &interrupt_info,
+                    )?;
+                }
+
+                DeviceManager::add_vfio_devices(
+                    vm_info, allocator, &mut pci, &mut buses, mem_slots,
                 )?;
+                let pci = Arc::new(Mutex::new(pci));
+                io_bus
+                    .insert(pci, 0xcf8, 0x8)
+                    .map_err(DeviceManagerError::BusError)?;
             }
-
-            DeviceManager::add_vfio_devices(vm_info, allocator, &mut pci, &mut buses, mem_slots)?;
-            let pci = Arc::new(Mutex::new(pci));
-            io_bus
-                .insert(pci, 0xcf8, 0x8)
-                .map_err(DeviceManagerError::BusError)?;
+        } else if cfg!(feature = "mmio_support") {
+            #[cfg(feature = "mmio_support")]
+            {
+                for device in virtio_devices {
+                    if let Some(addr) =
+                        allocator.allocate_mmio_addresses(None, MMIO_LEN, Some(MMIO_LEN))
+                    {
+                        DeviceManager::add_virtio_mmio_device(
+                            device,
+                            vm_info.memory,
+                            allocator,
+                            vm_info.vm_fd,
+                            &mut buses,
+                            &interrupt_info,
+                            addr,
+                            &mut cmdline_additions,
+                        )?;
+                    } else {
+                        error!("Unable to allocate MMIO address!");
+                    }
+                }
+            }
         }
-
 
         let mut dm = DeviceManager {
             io_bus,
@@ -930,6 +960,63 @@ impl DeviceManager {
             bars,
         )
         .map_err(DeviceManagerError::AddPciDevice)?;
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[cfg(feature = "mmio_support")]
+    fn add_virtio_mmio_device(
+        virtio_device: Box<dyn vm_virtio::VirtioDevice>,
+        memory: &Arc<RwLock<GuestMemoryMmap>>,
+        allocator: &mut SystemAllocator,
+        vm_fd: &Arc<VmFd>,
+        buses: &mut BusInfo,
+        interrupt_info: &InterruptInfo,
+        mmio_base: GuestAddress,
+        cmdline_additions: &mut Vec<String>,
+    ) -> DeviceManagerResult<()> {
+        let mut mmio_device = vm_virtio::transport::MmioDevice::new(memory.clone(), virtio_device)
+            .map_err(DeviceManagerError::VirtioDevice)?;
+
+        for (i, queue_evt) in mmio_device.queue_evts().iter().enumerate() {
+            let io_addr = IoEventAddress::Mmio(
+                mmio_base.0 + u64::from(vm_virtio::transport::NOTIFY_REG_OFFSET),
+            );
+            vm_fd
+                .register_ioevent(queue_evt.as_raw_fd(), &io_addr, i as u32)
+                .map_err(DeviceManagerError::RegisterIoevent)?;
+        }
+
+        let irq_num = allocator
+            .allocate_irq()
+            .ok_or(DeviceManagerError::AllocateIrq)?;
+
+        let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = interrupt_info.ioapic {
+            Box::new(UserIoapicIrq::new(ioapic.clone(), irq_num as usize))
+        } else {
+            let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+
+            vm_fd
+                .register_irqfd(irqfd.as_raw_fd(), irq_num as u32)
+                .map_err(DeviceManagerError::Irq)?;
+
+            Box::new(KernelIoapicIrq::new(irqfd))
+        };
+
+        mmio_device.assign_interrupt(interrupt);
+
+        buses
+            .mmio
+            .insert(Arc::new(Mutex::new(mmio_device)), mmio_base.0, MMIO_LEN)
+            .map_err(DeviceManagerError::BusError)?;
+
+        cmdline_additions.push(format!(
+            "virtio_mmio.device={}K@0x{:08x}:{}",
+            MMIO_LEN / 1024,
+            mmio_base.0,
+            irq_num
+        ));
 
         Ok(())
     }
