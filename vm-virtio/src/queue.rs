@@ -232,8 +232,8 @@ pub struct Queue {
     /// Guest physical address of the used ring
     pub used_ring: GuestAddress,
 
-    next_avail: Wrapping<u16>,
-    next_used: Wrapping<u16>,
+    pub next_avail: Wrapping<u16>,
+    pub next_used: Wrapping<u16>,
 }
 
 impl Queue {
