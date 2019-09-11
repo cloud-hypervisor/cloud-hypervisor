@@ -12,6 +12,7 @@
 extern crate epoll;
 #[macro_use]
 extern crate log;
+#[cfg(feature = "pci_support")]
 extern crate pci;
 extern crate vhost_rs;
 extern crate virtio_bindings;

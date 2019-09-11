@@ -17,6 +17,7 @@ extern crate libc;
 extern crate linux_loader;
 extern crate net_util;
 extern crate signal_hook;
+#[cfg(feature = "pci_support")]
 extern crate vfio;
 extern crate vm_allocator;
 extern crate vm_memory;
