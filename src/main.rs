@@ -2226,9 +2226,6 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path.clone();
-            kernel_path.push("vmlinux");
-
             let sock = temp_vsock_path(&guest.tmp_dir);
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
