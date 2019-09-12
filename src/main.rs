@@ -288,6 +288,7 @@ extern crate lazy_static;
 #[cfg(test)]
 #[cfg(feature = "integration_tests")]
 mod tests {
+    #![allow(dead_code)]
     use ssh2::Session;
     use std::fs;
     use std::io::{Read, Write};
@@ -811,7 +812,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_simple_launch() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -870,7 +871,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_multi_cpu() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -908,7 +909,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_large_memory() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -946,7 +947,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_pci_msi() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1031,6 +1032,8 @@ mod tests {
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
+
+            #[cfg(not(feature = "mmio"))]
             aver_eq!(
                 tb,
                 guest
@@ -1088,6 +1091,8 @@ mod tests {
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
+
+            #[cfg(not(feature = "mmio"))]
             aver_eq!(
                 tb,
                 guest
@@ -1107,7 +1112,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_vhost_user_net() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1173,7 +1178,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_split_irqchip() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1348,17 +1353,17 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_on_default_cache_size() {
         test_virtio_fs(true, None, "always")
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_on_cache_size_1_gib() {
         test_virtio_fs(true, Some(0x4000_0000), "always")
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_off() {
         test_virtio_fs(false, None, "none")
     }
@@ -1472,7 +1477,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_multiple_network_interfaces() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1525,7 +1530,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_serial_off() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1586,7 +1591,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_serial_null() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1647,7 +1652,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_serial_tty() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1708,7 +1713,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_serial_file() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1772,7 +1777,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_console() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1804,6 +1809,7 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
+            #[cfg(not(feature = "mmio"))]
             aver!(
                 tb,
                 guest
@@ -1830,7 +1836,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_console_file() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1881,7 +1887,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     // The VFIO integration test starts a qemu guest and then direct assigns
     // one of the virtio-PCI device to a cloud-hypervisor nested guest. The
     // test assigns one of the 2 virtio-pci networking interface, and thus
@@ -2020,7 +2026,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_vmlinux_boot_noacpi() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -2077,7 +2083,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_reboot() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -2151,7 +2157,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_bzimage_reboot() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -2218,7 +2224,7 @@ mod tests {
         });
     }
 
-    #[test]
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_vsock() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
