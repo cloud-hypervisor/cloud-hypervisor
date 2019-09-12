@@ -138,6 +138,19 @@ cargo test --features "integration_tests" -- --nocapture
 EOF
 RES=$?
 
+if [ $RES -eq 0 ]; then
+    # virtio-mmio based testing
+    cargo build --no-default-features --features "mmio"
+    sudo setcap cap_net_admin+ep target/debug/cloud-hypervisor
+
+    newgrp kvm << EOF
+export RUST_BACKTRACE=1
+cargo test --features "integration_tests,mmio" -- --nocapture
+EOF
+
+    RES=$?
+fi
+
 # Tear VFIO test network down
 sudo ip link del vfio-br0
 sudo ip link del vfio-tap0
