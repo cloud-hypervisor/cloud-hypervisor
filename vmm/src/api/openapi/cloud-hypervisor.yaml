@@ -1,0 +1,348 @@
+openapi: 3.0.1
+info:
+  title: Cloud Hypervisor API
+  description: Local HTTP based API for managing and inspecting a cloud-hypervisor virtual machine.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  version: 0.3.0
+
+servers:
+- url: http://localhost/api/v1
+
+paths:
+
+  /vmm.info:
+    get:
+      summary: Returns general information about the cloud-hypervisor Virtual Machine Monitor (VMM).
+      responses:
+        200:
+          description: The VMM information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VmmInfo'
+
+  /vm.info:
+    get:
+      summary: Returns general information about the cloud-hypervisor Virtual Machine (VM) instance.
+      responses:
+        200:
+          description: The VM information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VmInfo'
+
+  /vm.create:
+    put:
+      summary: Create the cloud-hypervisor Virtual Machine (VM) instance. The instance is not booted, only created.
+      operationId: createVM
+      requestBody:
+        description: The VM configuration
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VmConfig'
+        required: true
+      responses:
+        201:
+          description: The VM instance was successfully created.
+          content: {}
+
+  /vm.delete:
+    put:
+      summary: Delete the cloud-hypervisor Virtual Machine (VM) instance.
+      operationId: deleteVM
+      responses:
+        201:
+          description: The VM instance was successfully deleted.
+          content: {}
+
+  /vm.boot:
+    put:
+      summary: Boot the previously created VM instance.
+      operationId: bootVM
+      responses:
+        201:
+          description: The VM instance successfully booted.
+          content: {}
+        404:
+          description: The VM instance could not boot because it is not created yet
+          content: {}
+
+  /vm.shutdown:
+    put:
+      summary: Shut the VM instance down.
+      operationId: shutdownVM
+      responses:
+        201:
+          description: The VM instance successfully shut down.
+          content: {}
+        404:
+          description: The VM instance could not shut down because is not created.
+          content: {}
+        405:
+          description: The VM instance could not shut down because it is not started.
+          content: {}
+
+  /vm.reboot:
+    put:
+      summary: Reboot the VM instance.
+      operationId: rebootVM
+      responses:
+        201:
+          description: The VM instance successfully rebooted.
+          content: {}
+        404:
+          description: The VM instance could not reboot because it is not created.
+          content: {}
+        405:
+          description: The VM instance could not reboot because it is not booted.
+          content: {}
+
+components:
+  schemas:
+
+    VmmInfo:
+      required:
+      - version
+      type: object
+      properties:
+        version:
+          type: string
+      description: Virtual Machine Monitor information
+
+    VmInfo:
+      required:
+      - config
+      - state
+      type: object
+      properties:
+        version:
+          type: '#/components/schemas/VmConfig'
+        state:
+          type: string
+          enum: [Created, Booted, Shutdown]
+      description: Virtual Machine information
+
+    VmConfig:
+      required:
+      - kernel
+      - cmdline
+      type: object
+      properties:
+        cpus:
+          $ref: '#/components/schemas/CpuConfig'
+        memory:
+          $ref: '#/components/schemas/MemoryConfig'
+        kernel:
+          $ref: '#/components/schemas/KernelConfig'
+        cmdline:
+          $ref: '#/components/schemas/CmdLineConfig'
+        disks:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiskConfig'
+        net:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetConfig'
+        rng:
+          $ref: '#/components/schemas/RngConfig'
+        fs:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsConfig'
+        pmem:
+          type: array
+          items:
+            $ref: '#/components/schemas/PmemConfig'
+        serial:
+          $ref: '#/components/schemas/ConsoleConfig'
+        console:
+          $ref: '#/components/schemas/ConsoleConfig'
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceConfig'
+        vhost_user_net:
+          type: array
+          items:
+            $ref: '#/components/schemas/VhostUserNetConfig'
+        vhost_user_blk:
+          type: array
+          items:
+            $ref: '#/components/schemas/VhostUserBlkConfig'
+        vsock:
+          $ref: '#/components/schemas/VsockConfig'
+      description: Virtual machine configuration
+
+    CpuConfig:
+      required:
+      - cpu_count
+      type: object
+      properties:
+        cpu_count:
+          minimum: 1
+          default: 1
+          type: integer
+
+    MemoryConfig:
+      required:
+      - size
+      type: object
+      properties:
+        size:
+          type: integer
+          default: 512 MB
+        file:
+          type: string
+
+    KernelConfig:
+      required:
+      - path
+      type: object
+      properties:
+        path:
+          type: string
+
+    CmdLineConfig:
+      required:
+      - args
+      type: object
+      properties:
+        args:
+          type: string
+
+    DiskConfig:
+      required:
+      - path
+      type: object
+      properties:
+        path:
+          type: string
+
+    NetConfig:
+      required:
+      - ip
+      - mask
+      - mac
+      type: object
+      properties:
+        tap:
+          type: string
+        ip:
+          type: string
+        mask:
+          type: string
+        mac:
+          type: string
+
+    RngConfig:
+      required:
+      - src
+      type: object
+      properties:
+        src:
+          type: string
+          default: "/dev/urandom"
+
+    FsConfig:
+      required:
+      - tag
+      - sock
+      - num_queues
+      - queue_size
+      type: object
+      properties:
+        tag:
+          type: string
+        sock:
+          type: string
+        num_queues:
+          type: integer
+        queue_size:
+          type: integer
+        cache_size:
+          type: integer
+
+    PmemConfig:
+      required:
+      - file
+      - size
+      type: object
+      properties:
+        file:
+          type: string
+        size:
+          type: integer
+
+    ConsoleConfig:
+      required:
+      - mode
+      type: object
+      properties:
+        file:
+          type: string
+        mode:
+          type: string
+          enum: [Off, Tty, File, Null]
+
+    DeviceConfig:
+      required:
+      - path
+      type: object
+      properties:
+        path:
+          type: string
+
+    VhostUserConfig:
+      required:
+      - sock
+      - num_queues
+      - queue_size
+      type: object
+      properties:
+        sock:
+          type: string
+        num_queues:
+          type: integer
+        queue:size:
+          type: integer
+
+    VhostUserNetConfig:
+      required:
+      - mac
+      - vu_cfg
+      type: object
+      properties:
+        mac:
+          type: string
+        vu_cfg:
+          $ref: '#/components/schemas/VhostUserConfig'
+
+    VhostUserBlkConfig:
+      required:
+      - wce
+      - vu_cfg
+      type: object
+      properties:
+        wce:
+          type: boolean
+        vu_cfg:
+          $ref: '#/components/schemas/VhostUserConfig'
+
+    VsockConfig:
+      required:
+      - cid
+      - sock
+      type: object
+      properties:
+        cid:
+          type: integer
+          minimum: 3
+          description: Guest Vsock CID
+        sock:
+          type: string
+          description: Path to UNIX domain socket, used to proxy vsock connections.
