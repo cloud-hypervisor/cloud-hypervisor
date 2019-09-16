@@ -8,8 +8,10 @@ before_script:
   - rustup component add rustfmt
 
 script:
-  - cargo build --release
-  - cargo build --release --no-default-features
+  - cargo rustc -- -D warnings
+  - cargo rustc --no-default-features --features "pci"  -- -D warnings
+  - cargo rustc --no-default-features --features "pci,acpi"  -- -D warnings
+  - cargo rustc --no-default-features --features "mmio"  -- -D warnings
   - cargo test
   - cargo clippy --all-targets --all-features -- -D warnings
   - find . -name "*.rs" | xargs rustfmt --check
