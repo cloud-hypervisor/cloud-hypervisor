@@ -66,12 +66,12 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// listeners onto specific file descriptors. The library can handle
     /// virtqueues on its own, but does not know what to do with events
     /// happening on custom listeners.
-    fn handle_event(&self, device_event: u16, evset: epoll::Events) -> Result<bool>;
+    fn handle_event(&mut self, device_event: u16, evset: epoll::Events) -> Result<bool>;
 
     /// This function is responsible for the actual processing that needs to
     /// happen when one of the virtqueues is available.
     fn process_queue(
-        &self,
+        &mut self,
         q_idx: u16,
         avail_desc: &DescriptorChain,
         mem: &GuestMemoryMmap,
@@ -81,7 +81,7 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8>;
 
     /// Set virtio device configuration.
-    fn set_config(&self, offset: u32, buf: &[u8]);
+    fn set_config(&mut self, offset: u32, buf: &[u8]);
 }
 
 /// This structure is the public API the backend is allowed to interact with
@@ -225,7 +225,7 @@ impl Vring {
 }
 
 struct VringEpollHandler<S: VhostUserBackend> {
-    backend: Arc<S>,
+    backend: Arc<RwLock<S>>,
     vrings: Vec<Arc<RwLock<Vring>>>,
     mem: Option<GuestMemoryMmap>,
     epoll_fd: RawFd,
@@ -244,6 +244,8 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
             for avail_desc in vring.queue.iter(&mem) {
                 let used_len = self
                     .backend
+                    .write()
+                    .unwrap()
                     .process_queue(q_idx, &avail_desc, &mem)
                     .unwrap();
 
@@ -277,7 +279,11 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
 
                 Ok(false)
             }
-            _ => self.backend.handle_event(device_event, evset),
+            _ => self
+                .backend
+                .write()
+                .unwrap()
+                .handle_event(device_event, evset),
         }
     }
 
@@ -376,7 +382,7 @@ impl<S: VhostUserBackend> VringWorker<S> {
 }
 
 struct VhostUserHandler<S: VhostUserBackend> {
-    backend: Arc<S>,
+    backend: Arc<RwLock<S>>,
     vring_handler: Arc<RwLock<VringEpollHandler<S>>>,
     owned: bool,
     features_acked: bool,
@@ -393,7 +399,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
         let num_queues = backend.num_queues();
         let max_queue_size = backend.max_queue_size();
 
-        let arc_backend = Arc::new(backend);
+        let arc_backend = Arc::new(RwLock::new(backend));
         let vrings = vec![Arc::new(RwLock::new(Vring::new(max_queue_size as u16))); num_queues];
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).unwrap();
@@ -462,13 +468,13 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
     }
 
     fn get_features(&mut self) -> VhostUserResult<u64> {
-        Ok(self.backend.features())
+        Ok(self.backend.read().unwrap().features())
     }
 
     fn set_features(&mut self, features: u64) -> VhostUserResult<()> {
         if !self.owned || self.features_acked {
             return Err(VhostUserError::InvalidOperation);
-        } else if (features & !self.backend.features()) != 0 {
+        } else if (features & !self.backend.read().unwrap().features()) != 0 {
             return Err(VhostUserError::InvalidParam);
         }
 
@@ -635,7 +641,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             };
         }
         self.vrings[index as usize].write().unwrap().kick =
-            Some(unsafe { EventFd::from_raw_fd(fd.unwrap()) });;
+            Some(unsafe { EventFd::from_raw_fd(fd.unwrap()) });
 
         // Quotation from vhost-user spec:
         // Client must start ring upon receiving a kick (that is, detecting
@@ -738,7 +744,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             return Err(VhostUserError::InvalidParam);
         }
 
-        Ok(self.backend.get_config(offset, size))
+        Ok(self.backend.read().unwrap().get_config(offset, size))
     }
 
     fn set_config(
@@ -758,7 +764,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             return Err(VhostUserError::InvalidParam);
         }
 
-        self.backend.set_config(offset, buf);
+        self.backend.write().unwrap().set_config(offset, buf);
         Ok(())
     }
 }
