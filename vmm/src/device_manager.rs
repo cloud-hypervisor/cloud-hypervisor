@@ -13,7 +13,7 @@ use crate::config::ConsoleOutputMode;
 use crate::vm::VmInfo;
 
 use devices::ioapic;
-use kvm_bindings::{kvm_msi, kvm_userspace_memory_region};
+use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::*;
 use libc::O_TMPFILE;
 use libc::{EFD_NONBLOCK, TIOCGWINSZ};
@@ -166,7 +166,7 @@ struct BusInfo<'a> {
 }
 
 struct InterruptInfo<'a> {
-    msi_capable: bool,
+    _msi_capable: bool,
     ioapic: &'a Option<Arc<Mutex<ioapic::Ioapic>>>,
 }
 
@@ -289,7 +289,7 @@ impl DeviceManager {
     pub fn new(
         vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        msi_capable: bool,
+        _msi_capable: bool,
         userspace_ioapic: bool,
         mut mem_slots: u32,
         _exit_evt: &EventFd,
@@ -316,7 +316,7 @@ impl DeviceManager {
         };
 
         let interrupt_info = InterruptInfo {
-            msi_capable,
+            _msi_capable,
             ioapic: &ioapic,
         };
 
@@ -803,6 +803,7 @@ impl DeviceManager {
         Ok(devices)
     }
 
+    #[cfg(feature = "pci_support")]
     fn create_kvm_device(vm: &Arc<VmFd>) -> DeviceManagerResult<DeviceFd> {
         let mut vfio_dev = kvm_bindings::kvm_create_device {
             type_: kvm_bindings::kvm_device_type_KVM_DEV_TYPE_VFIO,
@@ -866,7 +867,7 @@ impl DeviceManager {
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
-        let msix_num = if interrupt_info.msi_capable {
+        let msix_num = if interrupt_info._msi_capable {
             // Allows support for one MSI-X vector per queue. It also adds 1
             // as we need to take into account the dedicated vector to notify
             // about a virtio config change.
@@ -889,11 +890,12 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
-        if interrupt_info.msi_capable {
+        if interrupt_info._msi_capable {
             let vm_fd_clone = vm_fd.clone();
 
             let msi_cb = Arc::new(Box::new(move |p: InterruptParameters| {
                 if let Some(entry) = p.msix {
+                    use kvm_bindings::kvm_msi;
                     let msi_queue = kvm_msi {
                         address_lo: entry.msg_addr_lo,
                         address_hi: entry.msg_addr_hi,
