@@ -276,7 +276,10 @@ pub fn create_acpi_tables(
     tables.push(madt_offset.0);
 
     // MCFG
-    let mut mcfg = SDT::new(*b"MCFG", 60, 1, *b"CLOUDH", *b"CHMCFG  ", 1);
+    let mut mcfg = SDT::new(*b"MCFG", 36, 1, *b"CLOUDH", *b"CHMCFG  ", 1);
+
+    // MCFG reserved 8 bytes
+    mcfg.append(0u64);
 
     // 32-bit PCI enhanced configuration mechanism
     mcfg.append(PCIRangeEntry {
