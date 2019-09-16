@@ -299,7 +299,7 @@ impl DeviceManager {
         msi_capable: bool,
         userspace_ioapic: bool,
         mut mem_slots: u32,
-        exit_evt: &EventFd,
+        _exit_evt: &EventFd,
         reset_evt: &EventFd,
     ) -> DeviceManagerResult<Self> {
         let mut io_bus = devices::Bus::new();
@@ -362,7 +362,7 @@ impl DeviceManager {
 
         #[cfg(feature = "acpi")]
         let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
-            exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
 
