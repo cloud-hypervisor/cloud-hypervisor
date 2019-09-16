@@ -10,8 +10,8 @@ use libc::EFD_NONBLOCK;
 
 use crate::{
     Queue, VirtioDevice, VirtioInterrupt, VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER,
-    DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK, INTERRUPT_STATUS_CONFIG_CHANGED,
-    INTERRUPT_STATUS_USED_RING,
+    DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT,
+    INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
 };
 use devices::{BusDevice, Interrupt};
 use vm_memory::{GuestAddress, GuestMemoryMmap};
@@ -75,8 +75,7 @@ impl MmioDevice {
             queue_select: 0,
             interrupt_status: Arc::new(AtomicUsize::new(0)),
             interrupt_cb: None,
-
-            driver_status: 0,
+            driver_status: DEVICE_INIT,
             config_generation: 0,
             queues,
             queue_evts,
