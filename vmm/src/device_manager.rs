@@ -275,13 +275,6 @@ pub struct DeviceManager {
     // Console abstraction
     console: Arc<Console>,
 
-    // i8042 device for i8042 reset
-    i8042: Arc<Mutex<devices::legacy::I8042Device>>,
-
-    #[cfg(feature = "acpi")]
-    // ACPI device for reboot/shutdwon
-    acpi_device: Arc<Mutex<devices::AcpiShutdownDevice>>,
-
     // IOAPIC
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
 
@@ -312,9 +305,12 @@ impl DeviceManager {
 
         let ioapic = if userspace_ioapic {
             // Create IOAPIC
-            Some(Arc::new(Mutex::new(ioapic::Ioapic::new(
-                vm_info.vm_fd.clone(),
-            ))))
+            let ioapic = Arc::new(Mutex::new(ioapic::Ioapic::new(vm_info.vm_fd.clone())));
+            buses
+                .mmio
+                .insert(ioapic.clone(), IOAPIC_RANGE_ADDR, IOAPIC_RANGE_SIZE)
+                .map_err(DeviceManagerError::BusError)?;
+            Some(ioapic)
         } else {
             None
         };
@@ -347,10 +343,17 @@ impl DeviceManager {
                 Box::new(KernelIoapicIrq::new(serial_evt))
             };
 
-            Some(Arc::new(Mutex::new(devices::legacy::Serial::new(
+            let serial = Arc::new(Mutex::new(devices::legacy::Serial::new(
                 interrupt,
                 serial_writer,
-            ))))
+            )));
+
+            buses
+                .io
+                .insert(serial.clone(), 0x3f8, 0x8)
+                .map_err(DeviceManagerError::BusError)?;
+
+            Some(serial)
         } else {
             None
         };
@@ -359,12 +362,22 @@ impl DeviceManager {
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
+        buses
+            .io
+            .insert(i8042.clone(), 0x61, 0x4)
+            .map_err(DeviceManagerError::BusError)?;
 
         #[cfg(feature = "acpi")]
-        let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
-            _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-            reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-        )));
+        {
+            let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
+                _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+                reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            )));
+            buses
+                .io
+                .insert(acpi_device.clone(), 0x3c0, 0x4)
+                .map_err(DeviceManagerError::BusError)?;
+        }
 
         let mut virtio_devices: Vec<Box<dyn vm_virtio::VirtioDevice>> = Vec::new();
 
@@ -458,21 +471,14 @@ impl DeviceManager {
             }
         }
 
-        let mut dm = DeviceManager {
+        Ok(DeviceManager {
             io_bus,
             mmio_bus,
             console,
-            i8042,
-            #[cfg(feature = "acpi")]
-            acpi_device,
             ioapic,
             mmap_regions,
             cmdline_additions,
-        };
-
-        dm.register_devices()?;
-
-        Ok(dm)
+        })
     }
 
     fn make_virtio_devices(
@@ -1017,34 +1023,6 @@ impl DeviceManager {
             mmio_base.0,
             irq_num
         ));
-
-        Ok(())
-    }
-
-    fn register_devices(&mut self) -> DeviceManagerResult<()> {
-        if self.console.serial.is_some() {
-            // Insert serial device
-            self.io_bus
-                .insert(self.console.serial.as_ref().unwrap().clone(), 0x3f8, 0x8)
-                .map_err(DeviceManagerError::BusError)?;
-        }
-
-        // Insert i8042 device
-        self.io_bus
-            .insert(self.i8042.clone(), 0x61, 0x4)
-            .map_err(DeviceManagerError::BusError)?;
-
-        #[cfg(feature = "acpi")]
-        self.io_bus
-            .insert(self.acpi_device.clone(), 0x3c0, 0x4)
-            .map_err(DeviceManagerError::BusError)?;
-
-        if let Some(ioapic) = &self.ioapic {
-            // Insert IOAPIC
-            self.mmio_bus
-                .insert(ioapic.clone(), IOAPIC_RANGE_ADDR, IOAPIC_RANGE_SIZE)
-                .map_err(DeviceManagerError::BusError)?;
-        }
 
         Ok(())
     }
