@@ -591,7 +591,8 @@ mod tests {
                 let tcp =
                     TcpStream::connect(format!("{}:22", ip)).map_err(|_| Error::Connection)?;
                 let mut sess = Session::new().unwrap();
-                sess.handshake(&tcp).map_err(|_| Error::Connection)?;
+                sess.set_tcp_stream(tcp);
+                sess.handshake().map_err(|_| Error::Connection)?;
 
                 sess.userauth_password("cloud", "cloud123")
                     .map_err(|_| Error::Authentication)?;
