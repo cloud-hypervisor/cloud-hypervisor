@@ -4,6 +4,7 @@
 // Copyright 2019 Alibaba Cloud Computing. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::error;
 use std::fs::File;
 use std::io;
 use std::num::Wrapping;
@@ -27,6 +28,8 @@ use vmm_sys_util::eventfd::EventFd;
 #[derive(Debug)]
 /// Errors related to vhost-user daemon.
 pub enum Error {
+    /// Failed to create a new vhost-user handler.
+    NewVhostUserHandler(VhostUserHandlerError),
     /// Failed creating vhost-user slave handler.
     CreateSlaveReqHandler(VhostUserError),
     /// Failed starting daemon thread.
@@ -35,20 +38,18 @@ pub enum Error {
     WaitDaemon(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
     /// Failed handling a vhost-user request.
     HandleRequest(VhostUserError),
-    /// Could not find the mapping from memory regions.
-    MissingMemoryMapping,
-    /// Failed to create epoll file descriptor.
-    EpollCreateFd(io::Error),
-    /// Failed to add a file descriptor to the epoll handler.
-    EpollCtl(io::Error),
-    /// Failed while waiting for events.
-    EpollWait(io::Error),
-    /// Failed to signal used queue.
-    SignalUsedQueue(io::Error),
+    /// Failed to handle the event.
+    HandleEvent(io::Error),
+    /// Failed to process queue.
+    ProcessQueue(VringEpollHandlerError),
+    /// Failed to register listener.
+    RegisterListener(io::Error),
+    /// Failed to unregister listener.
+    UnregisterListener(io::Error),
 }
 
 /// Result of vhost-user daemon operations.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 /// This trait must be implemented by the caller in order to provide backend
 /// specific implementation.
@@ -66,7 +67,11 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// listeners onto specific file descriptors. The library can handle
     /// virtqueues on its own, but does not know what to do with events
     /// happening on custom listeners.
-    fn handle_event(&mut self, device_event: u16, evset: epoll::Events) -> Result<bool>;
+    fn handle_event(
+        &mut self,
+        device_event: u16,
+        evset: epoll::Events,
+    ) -> result::Result<bool, io::Error>;
 
     /// This function is responsible for the actual processing that needs to
     /// happen when one of the virtqueues is available.
@@ -75,13 +80,13 @@ pub trait VhostUserBackend: Send + Sync + 'static {
         q_idx: u16,
         avail_desc: &DescriptorChain,
         mem: &GuestMemoryMmap,
-    ) -> Result<u32>;
+    ) -> result::Result<u32, io::Error>;
 
     /// Get virtio device configuration.
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8>;
 
     /// Set virtio device configuration.
-    fn set_config(&mut self, offset: u32, buf: &[u8]);
+    fn set_config(&mut self, offset: u32, buf: &[u8]) -> result::Result<(), io::Error>;
 }
 
 /// This structure is the public API the backend is allowed to interact with
@@ -102,7 +107,9 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
     /// custom events from the backend, but they get to be registered later
     /// during the sequence.
     pub fn new(name: String, sock_path: String, backend: S) -> Result<Self> {
-        let handler = Arc::new(Mutex::new(VhostUserHandler::new(backend)));
+        let handler = Arc::new(Mutex::new(
+            VhostUserHandler::new(backend).map_err(Error::NewVhostUserHandler)?,
+        ));
         let vring_handler = handler.lock().unwrap().get_vring_handler();
 
         Ok(VhostUserDaemon {
@@ -151,31 +158,23 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
     /// This lets entire control to the caller about what needs to be done for
     /// this special event, without forcing it to run its own dedicated epoll
     /// loop for it.
-    pub fn register_listener(
-        &self,
-        fd: RawFd,
-        ev_type: epoll::Events,
-        data: u64,
-    ) -> result::Result<(), io::Error> {
+    pub fn register_listener(&self, fd: RawFd, ev_type: epoll::Events, data: u64) -> Result<()> {
         self.vring_handler
             .read()
             .unwrap()
             .register_listener(fd, ev_type, data)
+            .map_err(Error::RegisterListener)
     }
 
     /// Unregister a custom event. If the custom event is triggered after this
     /// function has been called, nothing will happen as it will be removed
     /// from the list of file descriptors the epoll loop is listening to.
-    pub fn unregister_listener(
-        &self,
-        fd: RawFd,
-        ev_type: epoll::Events,
-        data: u64,
-    ) -> result::Result<(), io::Error> {
+    pub fn unregister_listener(&self, fd: RawFd, ev_type: epoll::Events, data: u64) -> Result<()> {
         self.vring_handler
             .read()
             .unwrap()
             .unregister_listener(fd, ev_type, data)
+            .map_err(Error::RegisterListener)
     }
 
     /// Trigger the processing of a virtqueue. This function is meant to be
@@ -189,7 +188,11 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
     /// of `process_queue`. With this twisted trick, all common parts related
     /// to the virtqueues can remain part of the library.
     pub fn process_queue(&self, q_idx: u16) -> Result<()> {
-        self.vring_handler.write().unwrap().process_queue(q_idx)
+        self.vring_handler
+            .write()
+            .unwrap()
+            .process_queue(q_idx)
+            .map_err(Error::ProcessQueue)
     }
 }
 
@@ -224,6 +227,53 @@ impl Vring {
     }
 }
 
+#[derive(Debug)]
+/// Errors related to vring epoll handler.
+pub enum VringEpollHandlerError {
+    /// Failed to process the queue from the backend.
+    ProcessQueueBackendProcessing(io::Error),
+    /// Failed to signal used queue.
+    SignalUsedQueue(io::Error),
+    /// Failed to read the event from kick EventFd.
+    HandleEventReadKick(io::Error),
+    /// Failed to handle the event from the backend.
+    HandleEventBackendHandling(io::Error),
+    /// Failed to register vring listener.
+    RegisterVringListener(io::Error),
+    /// Failed to unregister vring listener.
+    UnregisterVringListener(io::Error),
+}
+
+impl std::fmt::Display for VringEpollHandlerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            VringEpollHandlerError::ProcessQueueBackendProcessing(e) => {
+                write!(f, "failed processing queue from backend: {}", e)
+            }
+            VringEpollHandlerError::SignalUsedQueue(e) => {
+                write!(f, "failed signalling used queue: {}", e)
+            }
+            VringEpollHandlerError::HandleEventReadKick(e) => {
+                write!(f, "failed reading from kick eventfd: {}", e)
+            }
+            VringEpollHandlerError::HandleEventBackendHandling(e) => {
+                write!(f, "failed handling event from backend: {}", e)
+            }
+            VringEpollHandlerError::RegisterVringListener(e) => {
+                write!(f, "failed registering vring listener: {}", e)
+            }
+            VringEpollHandlerError::UnregisterVringListener(e) => {
+                write!(f, "failed unregistering vring listener: {}", e)
+            }
+        }
+    }
+}
+
+impl error::Error for VringEpollHandlerError {}
+
+/// Result of vring epoll handler operations.
+type VringEpollHandlerResult<T> = std::result::Result<T, VringEpollHandlerError>;
+
 struct VringEpollHandler<S: VhostUserBackend> {
     backend: Arc<RwLock<S>>,
     vrings: Vec<Arc<RwLock<Vring>>>,
@@ -236,7 +286,7 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
         self.mem = mem;
     }
 
-    fn process_queue(&mut self, q_idx: u16) -> Result<()> {
+    fn process_queue(&mut self, q_idx: u16) -> VringEpollHandlerResult<()> {
         let vring = &mut self.vrings[q_idx as usize].write().unwrap();
         let mut used_desc_heads = vec![(0, 0); vring.queue.size as usize];
         let mut used_count = 0;
@@ -247,7 +297,7 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
                     .write()
                     .unwrap()
                     .process_queue(q_idx, &avail_desc, &mem)
-                    .unwrap();
+                    .map_err(VringEpollHandlerError::ProcessQueueBackendProcessing)?;
 
                 used_desc_heads[used_count] = (avail_desc.index, used_len);
                 used_count += 1;
@@ -260,44 +310,52 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
 
         if used_count > 0 {
             if let Some(call) = &vring.call {
-                return call.write(1).map_err(Error::SignalUsedQueue);
+                call.write(1)
+                    .map_err(VringEpollHandlerError::SignalUsedQueue)?;
             }
         }
 
         Ok(())
     }
 
-    fn handle_event(&mut self, device_event: u16, evset: epoll::Events) -> Result<bool> {
+    fn handle_event(
+        &mut self,
+        device_event: u16,
+        evset: epoll::Events,
+    ) -> VringEpollHandlerResult<bool> {
         let num_queues = self.vrings.len();
         match device_event as usize {
             x if x < num_queues => {
                 if let Some(kick) = &self.vrings[device_event as usize].read().unwrap().kick {
-                    kick.read().unwrap();
+                    kick.read()
+                        .map_err(VringEpollHandlerError::HandleEventReadKick)?;
                 }
 
-                self.process_queue(device_event).unwrap();
-
+                self.process_queue(device_event)?;
                 Ok(false)
             }
             _ => self
                 .backend
                 .write()
                 .unwrap()
-                .handle_event(device_event, evset),
+                .handle_event(device_event, evset)
+                .map_err(VringEpollHandlerError::HandleEventBackendHandling),
         }
     }
 
-    fn register_vring_listener(&self, q_idx: usize) -> result::Result<(), io::Error> {
+    fn register_vring_listener(&self, q_idx: usize) -> VringEpollHandlerResult<()> {
         if let Some(fd) = &self.vrings[q_idx].read().unwrap().kick {
             self.register_listener(fd.as_raw_fd(), epoll::Events::EPOLLIN, q_idx as u64)
+                .map_err(VringEpollHandlerError::RegisterVringListener)
         } else {
             Ok(())
         }
     }
 
-    fn unregister_vring_listener(&self, q_idx: usize) -> result::Result<(), io::Error> {
+    fn unregister_vring_listener(&self, q_idx: usize) -> VringEpollHandlerResult<()> {
         if let Some(fd) = &self.vrings[q_idx].read().unwrap().kick {
             self.unregister_listener(fd.as_raw_fd(), epoll::Events::EPOLLIN, q_idx as u64)
+                .map_err(VringEpollHandlerError::UnregisterVringListener)
         } else {
             Ok(())
         }
@@ -332,12 +390,24 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
     }
 }
 
+#[derive(Debug)]
+/// Errors related to vring worker.
+enum VringWorkerError {
+    /// Failed while waiting for events.
+    EpollWait(io::Error),
+    /// Failed to handle event.
+    HandleEvent(VringEpollHandlerError),
+}
+
+/// Result of vring worker operations.
+type VringWorkerResult<T> = std::result::Result<T, VringWorkerError>;
+
 struct VringWorker<S: VhostUserBackend> {
     handler: Arc<RwLock<VringEpollHandler<S>>>,
 }
 
 impl<S: VhostUserBackend> VringWorker<S> {
-    fn run(&self, epoll_fd: RawFd) -> Result<()> {
+    fn run(&self, epoll_fd: RawFd) -> VringWorkerResult<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
@@ -355,7 +425,7 @@ impl<S: VhostUserBackend> VringWorker<S> {
                         // appropriate to retry, by calling into epoll_wait().
                         continue;
                     }
-                    return Err(Error::EpollWait(e));
+                    return Err(VringWorkerError::EpollWait(e));
                 }
             };
 
@@ -371,7 +441,13 @@ impl<S: VhostUserBackend> VringWorker<S> {
 
                 let ev_type = event.data as u16;
 
-                if self.handler.write().unwrap().handle_event(ev_type, evset)? {
+                if self
+                    .handler
+                    .write()
+                    .unwrap()
+                    .handle_event(ev_type, evset)
+                    .map_err(VringWorkerError::HandleEvent)?
+                {
                     break 'epoll;
                 }
             }
@@ -380,6 +456,34 @@ impl<S: VhostUserBackend> VringWorker<S> {
         Ok(())
     }
 }
+
+#[derive(Debug)]
+/// Errors related to vhost-user handler.
+pub enum VhostUserHandlerError {
+    /// Failed to create epoll file descriptor.
+    EpollCreateFd(io::Error),
+    /// Failed to spawn vring worker.
+    SpawnVringWorker(io::Error),
+    /// Could not find the mapping from memory regions.
+    MissingMemoryMapping,
+}
+
+impl std::fmt::Display for VhostUserHandlerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            VhostUserHandlerError::EpollCreateFd(e) => write!(f, "failed creating epoll fd: {}", e),
+            VhostUserHandlerError::SpawnVringWorker(e) => {
+                write!(f, "failed spawning the vring worker: {}", e)
+            }
+            VhostUserHandlerError::MissingMemoryMapping => write!(f, "Missing memory mapping"),
+        }
+    }
+}
+
+impl error::Error for VhostUserHandlerError {}
+
+/// Result of vhost-user handler operations.
+type VhostUserHandlerResult<T> = std::result::Result<T, VhostUserHandlerError>;
 
 struct VhostUserHandler<S: VhostUserBackend> {
     backend: Arc<RwLock<S>>,
@@ -395,14 +499,14 @@ struct VhostUserHandler<S: VhostUserBackend> {
 }
 
 impl<S: VhostUserBackend> VhostUserHandler<S> {
-    fn new(backend: S) -> Self {
+    fn new(backend: S) -> VhostUserHandlerResult<Self> {
         let num_queues = backend.num_queues();
         let max_queue_size = backend.max_queue_size();
 
         let arc_backend = Arc::new(RwLock::new(backend));
         let vrings = vec![Arc::new(RwLock::new(Vring::new(max_queue_size as u16))); num_queues];
         // Create the epoll file descriptor
-        let epoll_fd = epoll::create(true).unwrap();
+        let epoll_fd = epoll::create(true).map_err(VhostUserHandlerError::EpollCreateFd)?;
 
         let vring_handler = Arc::new(RwLock::new(VringEpollHandler {
             backend: arc_backend.clone(),
@@ -415,11 +519,11 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
         };
 
         thread::Builder::new()
-            .name("vring_epoll_handler".to_string())
+            .name("vring_worker".to_string())
             .spawn(move || worker.run(epoll_fd))
-            .unwrap();
+            .map_err(VhostUserHandlerError::SpawnVringWorker)?;
 
-        VhostUserHandler {
+        Ok(VhostUserHandler {
             backend: arc_backend,
             vring_handler,
             owned: false,
@@ -430,14 +534,14 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
             max_queue_size,
             memory: None,
             vrings,
-        }
+        })
     }
 
     fn get_vring_handler(&self) -> Arc<RwLock<VringEpollHandler<S>>> {
         self.vring_handler.clone()
     }
 
-    fn vmm_va_to_gpa(&self, vmm_va: u64) -> Result<u64> {
+    fn vmm_va_to_gpa(&self, vmm_va: u64) -> VhostUserHandlerResult<u64> {
         if let Some(memory) = &self.memory {
             for mapping in memory.mappings.iter() {
                 if vmm_va >= mapping.vmm_addr && vmm_va < mapping.vmm_addr + mapping.size {
@@ -446,7 +550,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
             }
         }
 
-        Err(Error::MissingMemoryMapping)
+        Err(VhostUserHandlerError::MissingMemoryMapping)
     }
 }
 
@@ -532,7 +636,9 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             });
         }
 
-        let mem = GuestMemoryMmap::with_files(regions).unwrap();
+        let mem = GuestMemoryMmap::with_files(regions).map_err(|e| {
+            VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
+        })?;
         self.vring_handler.write().unwrap().update_memory(Some(mem));
         self.memory = Some(Memory { mappings });
 
@@ -565,9 +671,15 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
         }
 
         if self.memory.is_some() {
-            let desc_table = self.vmm_va_to_gpa(descriptor).unwrap();
-            let avail_ring = self.vmm_va_to_gpa(available).unwrap();
-            let used_ring = self.vmm_va_to_gpa(used).unwrap();
+            let desc_table = self.vmm_va_to_gpa(descriptor).map_err(|e| {
+                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
+            })?;
+            let avail_ring = self.vmm_va_to_gpa(available).map_err(|e| {
+                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
+            })?;
+            let used_ring = self.vmm_va_to_gpa(used).map_err(|e| {
+                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
+            })?;
             self.vrings[index as usize]
                 .write()
                 .unwrap()
@@ -609,7 +721,9 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             .read()
             .unwrap()
             .unregister_vring_listener(index as usize)
-            .unwrap();
+            .map_err(|e| {
+                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
+            })?;
 
         let next_avail = self.vrings[index as usize]
             .read()
@@ -626,22 +740,12 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             return Err(VhostUserError::InvalidParam);
         }
 
-        if self.vrings[index as usize].read().unwrap().kick.is_some() {
+        if let Some(kick) = self.vrings[index as usize].write().unwrap().kick.take() {
             // Close file descriptor set by previous operations.
-            let _ = unsafe {
-                libc::close(
-                    self.vrings[index as usize]
-                        .write()
-                        .unwrap()
-                        .kick
-                        .take()
-                        .unwrap()
-                        .as_raw_fd(),
-                )
-            };
+            let _ = unsafe { libc::close(kick.as_raw_fd()) };
         }
         self.vrings[index as usize].write().unwrap().kick =
-            Some(unsafe { EventFd::from_raw_fd(fd.unwrap()) });
+            fd.map(|x| unsafe { EventFd::from_raw_fd(x) });
 
         // Quotation from vhost-user spec:
         // Client must start ring upon receiving a kick (that is, detecting
@@ -655,7 +759,9 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             .read()
             .unwrap()
             .register_vring_listener(index as usize)
-            .unwrap();
+            .map_err(|e| {
+                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
+            })?;
 
         Ok(())
     }
@@ -665,22 +771,12 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             return Err(VhostUserError::InvalidParam);
         }
 
-        if self.vrings[index as usize].write().unwrap().call.is_some() {
+        if let Some(call) = self.vrings[index as usize].write().unwrap().call.take() {
             // Close file descriptor set by previous operations.
-            let _ = unsafe {
-                libc::close(
-                    self.vrings[index as usize]
-                        .write()
-                        .unwrap()
-                        .call
-                        .take()
-                        .unwrap()
-                        .as_raw_fd(),
-                )
-            };
+            let _ = unsafe { libc::close(call.as_raw_fd()) };
         }
         self.vrings[index as usize].write().unwrap().call =
-            Some(unsafe { EventFd::from_raw_fd(fd.unwrap()) });
+            fd.map(|x| unsafe { EventFd::from_raw_fd(x) });
 
         Ok(())
     }
@@ -690,22 +786,12 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             return Err(VhostUserError::InvalidParam);
         }
 
-        if self.vrings[index as usize].read().unwrap().err.is_some() {
+        if let Some(err) = self.vrings[index as usize].write().unwrap().err.take() {
             // Close file descriptor set by previous operations.
-            let _ = unsafe {
-                libc::close(
-                    self.vrings[index as usize]
-                        .write()
-                        .unwrap()
-                        .err
-                        .take()
-                        .unwrap()
-                        .as_raw_fd(),
-                )
-            };
+            let _ = unsafe { libc::close(err.as_raw_fd()) };
         }
         self.vrings[index as usize].write().unwrap().err =
-            Some(unsafe { EventFd::from_raw_fd(fd.unwrap()) });
+            fd.map(|x| unsafe { EventFd::from_raw_fd(x) });
 
         Ok(())
     }
@@ -764,7 +850,10 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             return Err(VhostUserError::InvalidParam);
         }
 
-        self.backend.write().unwrap().set_config(offset, buf);
-        Ok(())
+        self.backend
+            .write()
+            .unwrap()
+            .set_config(offset, buf)
+            .map_err(VhostUserError::ReqHandlerError)
     }
 }
