@@ -24,6 +24,7 @@ use std::io;
 mod block;
 mod console;
 mod device;
+mod iommu;
 pub mod net;
 mod pmem;
 mod queue;
@@ -36,6 +37,7 @@ pub mod vhost_user;
 pub use self::block::*;
 pub use self::console::*;
 pub use self::device::*;
+pub use self::iommu::*;
 pub use self::net::*;
 pub use self::pmem::*;
 pub use self::queue::*;
@@ -68,6 +70,7 @@ enum VirtioDeviceType {
     TYPE_GPU = 16,
     TYPE_INPUT = 18,
     TYPE_VSOCK = 19,
+    TYPE_IOMMU = 23,
     TYPE_FS = 26,
     TYPE_PMEM = 27,
     TYPE_UNKNOWN = 0xFF,
@@ -84,6 +87,7 @@ impl From<u32> for VirtioDeviceType {
             16 => VirtioDeviceType::TYPE_GPU,
             18 => VirtioDeviceType::TYPE_INPUT,
             19 => VirtioDeviceType::TYPE_VSOCK,
+            23 => VirtioDeviceType::TYPE_IOMMU,
             26 => VirtioDeviceType::TYPE_FS,
             27 => VirtioDeviceType::TYPE_PMEM,
             _ => VirtioDeviceType::TYPE_UNKNOWN,
