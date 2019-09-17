@@ -210,7 +210,6 @@ struct Vring {
     kick: Option<EventFd>,
     call: Option<EventFd>,
     err: Option<EventFd>,
-    started: bool,
     enabled: bool,
 }
 
@@ -221,7 +220,6 @@ impl Vring {
             kick: None,
             call: None,
             err: None,
-            started: false,
             enabled: false,
         }
     }
@@ -711,12 +709,12 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
         if index as usize >= self.num_queues {
             return Err(VhostUserError::InvalidParam);
         }
-        // Quotation from vhost-user spec:
+        // Quote from vhost-user specification:
         // Client must start ring upon receiving a kick (that is, detecting
         // that file descriptor is readable) on the descriptor specified by
         // VHOST_USER_SET_VRING_KICK, and stop ring upon receiving
         // VHOST_USER_GET_VRING_BASE.
-        self.vrings[index as usize].write().unwrap().started = false;
+        self.vrings[index as usize].write().unwrap().queue.ready = false;
         self.vring_handler
             .read()
             .unwrap()
@@ -747,14 +745,12 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
         self.vrings[index as usize].write().unwrap().kick =
             fd.map(|x| unsafe { EventFd::from_raw_fd(x) });
 
-        // Quotation from vhost-user spec:
+        // Quote from vhost-user specification:
         // Client must start ring upon receiving a kick (that is, detecting
         // that file descriptor is readable) on the descriptor specified by
         // VHOST_USER_SET_VRING_KICK, and stop ring upon receiving
         // VHOST_USER_GET_VRING_BASE.
-        //
-        // So we should add fd to event monitor(select, poll, epoll) here.
-        self.vrings[index as usize].write().unwrap().started = true;
+        self.vrings[index as usize].write().unwrap().queue.ready = true;
         self.vring_handler
             .read()
             .unwrap()
