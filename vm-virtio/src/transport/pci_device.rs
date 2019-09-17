@@ -239,6 +239,9 @@ pub struct VirtioPciDevice {
 
     // Setting PCI BAR
     settings_bar: u8,
+
+    // Whether to use 64-bit bar location or 32-bit
+    use_64bit_bar: bool,
 }
 
 impl VirtioPciDevice {
@@ -268,15 +271,22 @@ impl VirtioPciDevice {
             (None, None)
         };
 
+        // All device types *except* virtio block devices should be allocated a 64-bit bar
+        // The block devices should be given a 32-bit BAR so that they are easily accessible
+        // to firmware without requiring excessive identity mapping.
+        let mut use_64bit_bar = true;
         let (class, subclass) = match VirtioDeviceType::from(device.device_type()) {
             VirtioDeviceType::TYPE_NET => (
                 PciClassCode::NetworkController,
                 &PciNetworkControllerSubclass::EthernetController as &dyn PciSubclass,
             ),
-            VirtioDeviceType::TYPE_BLOCK => (
-                PciClassCode::MassStorage,
-                &PciMassStorageSubclass::MassStorage as &dyn PciSubclass,
-            ),
+            VirtioDeviceType::TYPE_BLOCK => {
+                use_64bit_bar = false;
+                (
+                    PciClassCode::MassStorage,
+                    &PciMassStorageSubclass::MassStorage as &dyn PciSubclass,
+                )
+            }
             _ => (
                 PciClassCode::Other,
                 &PciVirtioSubclass::NonTransitionalBase as &dyn PciSubclass,
@@ -315,6 +325,7 @@ impl VirtioPciDevice {
             queue_evts,
             memory: Some(memory),
             settings_bar: 0,
+            use_64bit_bar,
         })
     }
 
@@ -531,9 +542,28 @@ impl PciDevice for VirtioPciDevice {
 
         // Allocate the virtio-pci capability BAR.
         // See http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-740004
-        let virtio_pci_bar_addr = allocator
-            .allocate_mmio_addresses(None, CAPABILITY_BAR_SIZE, None)
-            .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
+        let virtio_pci_bar_addr = if self.use_64bit_bar {
+            let addr = allocator
+                .allocate_mmio_addresses(None, CAPABILITY_BAR_SIZE, None)
+                .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
+            ranges.push((
+                addr,
+                CAPABILITY_BAR_SIZE,
+                PciBarRegionType::Memory64BitRegion,
+            ));
+            addr
+        } else {
+            let addr = allocator
+                .allocate_mmio_hole_addresses(None, CAPABILITY_BAR_SIZE, None)
+                .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
+            ranges.push((
+                addr,
+                CAPABILITY_BAR_SIZE,
+                PciBarRegionType::Memory32BitRegion,
+            ));
+            addr
+        };
+
         let config = PciBarConfiguration::default()
             .set_register_index(0)
             .set_address(virtio_pci_bar_addr.raw_value())
@@ -542,12 +572,6 @@ impl PciDevice for VirtioPciDevice {
             self.configuration.add_pci_bar(&config).map_err(|e| {
                 PciDeviceError::IoRegistrationFailed(virtio_pci_bar_addr.raw_value(), e)
             })? as u8;
-
-        ranges.push((
-            virtio_pci_bar_addr,
-            CAPABILITY_BAR_SIZE,
-            PciBarRegionType::Memory64BitRegion,
-        ));
 
         // Once the BARs are allocated, the capabilities can be added to the PCI configuration.
         self.add_pci_capabilities(virtio_pci_bar)?;
