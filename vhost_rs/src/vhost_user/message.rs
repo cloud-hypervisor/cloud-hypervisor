@@ -346,6 +346,8 @@ bitflags! {
         const SLAVE_SEND_FD = 0x0000_0400;
         /// Allow the slave to register a host notifier.
         const HOST_NOTIFIER = 0x0000_0800;
+        /// Support inflight shmfd.
+        const INFLIGHT_SHMFD = 0x0000_1000;
     }
 }
 
