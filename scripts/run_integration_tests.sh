@@ -79,19 +79,28 @@ fi
 
 VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
 VUBRIDGE="$WORKLOADS_DIR/vubridge"
+VUBD="$WORKLOADS_DIR/vubd"
 QEMU_DIR="qemu_build"
-if [ ! -f "$VIRTIOFSD" ] || [ ! -f "$VUBRIDGE" ]; then
+if [ ! -f "$VIRTIOFSD" ] || [ ! -f "$VUBRIDGE" ] || [ ! -f "$VUBD" ]; then
     pushd $WORKLOADS_DIR
     git clone --depth 1 "https://github.com/sboeuf/qemu.git" -b "virtio-fs" $QEMU_DIR
     pushd $QEMU_DIR
     ./configure --prefix=$PWD --target-list=x86_64-softmmu
-    make virtiofsd tests/vhost-user-bridge -j `nproc`
+    make virtiofsd tests/vhost-user-bridge vhost-user-blk -j `nproc`
     cp virtiofsd $VIRTIOFSD
     cp tests/vhost-user-bridge $VUBRIDGE
+    cp vhost-user-blk $VUBD
     popd
     rm -rf $QEMU_DIR
     sudo setcap cap_dac_override,cap_sys_admin+epi "virtiofsd"
     popd
+fi
+
+BLKFILE="$WORKLOADS_DIR/blk"
+if [ ! -f "$BLKFILE" ]; then
+   pushd $WORKLOADS_DIR
+   dd if=/dev/zero of=$BLKFILE bs=1M count=64
+   popd
 fi
 
 SHARED_DIR="$WORKLOADS_DIR/shared_dir"
