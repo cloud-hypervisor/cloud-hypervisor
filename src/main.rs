@@ -603,7 +603,7 @@ mod tests {
         let vubd_path = String::from(vubd_path.to_str().unwrap());
 
         let mut blk_file_path = workload_path.clone();
-        blk_file_path.push("blk");
+        blk_file_path.push("blk.img");
         let blk_file_path = String::from(blk_file_path.to_str().unwrap());
 
         let vubd_socket_path = String::from(tmp_dir.path().join("vub.sock").to_str().unwrap());
@@ -1301,17 +1301,36 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
-            // Check both if /dev/vdc exists and if the block size is 64M.
+            // Check both if /dev/vdc exists and if the block size is 16M.
             aver_eq!(
                 tb,
                 guest
-                    .ssh_command("lsblk | grep vdc | grep -c 64M")
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
                     .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
                 1
             );
+
+            // Mount the device
+            guest.ssh_command("mkdir mount_image")?;
+            guest.ssh_command("sudo mount -t ext4 /dev/vdc mount_image/")?;
+
+            // Check the content of the block device. The file "foo" should
+            // contain "bar".
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("cat mount_image/foo")
+                    .unwrap_or_default()
+                    .trim(),
+                "bar"
+            );
+
+            // Unmount the device
+            guest.ssh_command("sudo umount /dev/vdc")?;
+            guest.ssh_command("rm -r mount_image")?;
 
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(5, 0));
