@@ -518,6 +518,20 @@ pub struct Vm<'a> {
     signals: Option<Signals>,
 }
 
+fn get_host_cpu_phys_bits() -> u8 {
+    use core::arch::x86_64;
+    unsafe {
+        let leaf = x86_64::__cpuid(0x8000_0000);
+
+        if leaf.eax >= 0x8000_0008 {
+            let leaf = x86_64::__cpuid(0x8000_0008);
+            (leaf.eax & 0xff) as u8
+        } else {
+            36
+        }
+    }
+}
+
 impl<'a> Vm<'a> {
     pub fn new(kvm: &Kvm, config: &'a VmConfig<'a>) -> Result<Self> {
         let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
@@ -676,7 +690,7 @@ impl<'a> Vm<'a> {
             GuestAddress(0),
             1 << 16 as GuestUsize,
             GuestAddress(0),
-            1 << 36 as GuestUsize,
+            1 << get_host_cpu_phys_bits(),
             mem_hole.0,
             mem_hole.1 as GuestUsize,
             vec![ioapic],
@@ -787,7 +801,7 @@ impl<'a> Vm<'a> {
         .map_err(|_| Error::CmdLine)?;
 
         let vcpu_count = u8::from(&self.config.cpus);
-        let end_of_range = GuestAddress((1 << 36) - 1);
+        let end_of_range = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
         match entry_addr.setup_header {
             Some(hdr) => {
                 arch::configure_system(
