@@ -166,7 +166,7 @@ pub fn configure_system(
         add_e820_entry(
             &mut params.0,
             himem_start.raw_value(),
-            mem_end.unchecked_offset_from(himem_start),
+            mem_end.unchecked_offset_from(himem_start) + 1,
             E820_RAM,
         )?;
     } else {
@@ -180,7 +180,7 @@ pub fn configure_system(
             add_e820_entry(
                 &mut params.0,
                 first_addr_past_32bits.raw_value(),
-                mem_end.unchecked_offset_from(first_addr_past_32bits),
+                mem_end.unchecked_offset_from(first_addr_past_32bits) + 1,
                 E820_RAM,
             )?;
         }
