@@ -787,7 +787,7 @@ impl<'a> Vm<'a> {
         .map_err(|_| Error::CmdLine)?;
 
         let vcpu_count = u8::from(&self.config.cpus);
-
+        let end_of_range = GuestAddress((1 << 36) - 1);
         match entry_addr.setup_header {
             Some(hdr) => {
                 arch::configure_system(
@@ -797,6 +797,7 @@ impl<'a> Vm<'a> {
                     vcpu_count,
                     Some(hdr),
                     self.config.serial.mode != ConsoleOutputMode::Off,
+                    end_of_range,
                 )
                 .map_err(|_| Error::CmdLine)?;
 
@@ -816,6 +817,7 @@ impl<'a> Vm<'a> {
                     vcpu_count,
                     None,
                     self.config.serial.mode != ConsoleOutputMode::Off,
+                    end_of_range,
                 )
                 .map_err(|_| Error::CmdLine)?;
 
