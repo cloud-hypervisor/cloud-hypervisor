@@ -4,6 +4,9 @@
 //
 
 #[macro_use]
+extern crate lazy_static;
+
+#[macro_use]
 extern crate log;
 extern crate vmm_sys_util;
 
@@ -47,6 +50,9 @@ pub enum Error {
     /// Cannot start a VM from the API
     ApiVmStart(ApiError),
 
+    /// Cannot bind to the UNIX domain socket path
+    Bind(io::Error),
+
     /// Cannot clone EventFd.
     EventFdClone(io::Error),
 
@@ -61,6 +67,9 @@ pub enum Error {
 
     /// Cannot create epoll context.
     Epoll(io::Error),
+
+    /// Cannot create HTTP thread
+    HttpThreadSpawn(io::Error),
 
     /// Cannot handle the VM STDIN stream
     Stdin(VmError),

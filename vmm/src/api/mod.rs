@@ -28,6 +28,12 @@
 //!    response channel Receiver.
 //! 5. The thread handles the response and forwards potential errors.
 
+extern crate micro_http;
+
+pub use self::http::start_http_thread;
+
+pub mod http;
+
 use crate::config::VmConfig;
 use crate::vm::Error;
 use std::sync::mpsc::Sender;
