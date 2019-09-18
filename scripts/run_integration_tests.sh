@@ -96,10 +96,17 @@ if [ ! -f "$VIRTIOFSD" ] || [ ! -f "$VUBRIDGE" ] || [ ! -f "$VUBD" ]; then
     popd
 fi
 
-BLKFILE="$WORKLOADS_DIR/blk"
-if [ ! -f "$BLKFILE" ]; then
+BLK_IMAGE="$WORKLOADS_DIR/blk.img"
+MNT_DIR="mount_image"
+if [ ! -f "$BLK_IMAGE" ]; then
    pushd $WORKLOADS_DIR
-   dd if=/dev/zero of=$BLKFILE bs=1M count=64
+   fallocate -l 16M $BLK_IMAGE
+   mkfs.ext4 -j $BLK_IMAGE
+   mkdir $MNT_DIR
+   sudo mount -t ext4 $BLK_IMAGE $MNT_DIR
+   sudo bash -c "echo bar > $MNT_DIR/foo"
+   sudo umount $BLK_IMAGE
+   rm -r $MNT_DIR
    popd
 fi
 
