@@ -51,7 +51,11 @@ struct PCIRangeEntry {
     _reserved: u32,
 }
 
-pub fn create_dsdt_table(serial_enabled: bool) -> SDT {
+pub fn create_dsdt_table(
+    serial_enabled: bool,
+    start_of_device_area: GuestAddress,
+    end_of_device_area: GuestAddress,
+) -> SDT {
     /*
         The hex tables in this file are generated from the ASL below with:
         "iasl -tc <dsdt.asl>"
@@ -126,7 +130,7 @@ pub fn create_dsdt_table(serial_enabled: bool) -> SDT {
             })
         }
     */
-    let pci_dsdt_data = [
+    let mut pci_dsdt_data = [
         0x5Bu8, 0x82, 0x36, 0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x50, 0x43, 0x49, 0x30, 0x08, 0x5F, 0x48,
         0x49, 0x44, 0x0C, 0x41, 0xD0, 0x0A, 0x08, 0x08, 0x5F, 0x43, 0x49, 0x44, 0x0C, 0x41, 0xD0,
         0x0A, 0x03, 0x08, 0x5F, 0x41, 0x44, 0x52, 0x00, 0x08, 0x5F, 0x53, 0x45, 0x47, 0x00, 0x08,
@@ -144,6 +148,13 @@ pub fn create_dsdt_table(serial_enabled: bool) -> SDT {
         0xFF, 0xFF, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x79, 0x00,
     ];
+
+    // Patch the Range Minimum/Range Maximum/Length for the the 64-bit device area
+    pci_dsdt_data[200..208].copy_from_slice(&(start_of_device_area.0).to_le_bytes());
+    pci_dsdt_data[208..216].copy_from_slice(&end_of_device_area.0.to_le_bytes());
+    pci_dsdt_data[224..232].copy_from_slice(
+        &(end_of_device_area.unchecked_offset_from(start_of_device_area)).to_le_bytes(),
+    );
 
     /*
     Device (_SB.COM1)
@@ -194,13 +205,15 @@ pub fn create_acpi_tables(
     guest_mem: &GuestMemoryMmap,
     num_cpus: u8,
     serial_enabled: bool,
+    start_of_device_area: GuestAddress,
+    end_of_device_area: GuestAddress,
 ) -> GuestAddress {
     // RSDP is at the EBDA
     let rsdp_offset = super::EBDA_START;
     let mut tables: Vec<u64> = Vec::new();
 
     // DSDT
-    let dsdt = create_dsdt_table(serial_enabled);
+    let dsdt = create_dsdt_table(serial_enabled, start_of_device_area, end_of_device_area);
     let dsdt_offset = rsdp_offset.checked_add(RSDP::len() as u64).unwrap();
     guest_mem
         .write_slice(dsdt.as_slice(), dsdt_offset)
