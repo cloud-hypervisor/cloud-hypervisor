@@ -669,6 +669,8 @@ pub struct VmConfig {
     pub vhost_user_net: Option<Vec<VhostUserNetConfig>>,
     pub vhost_user_blk: Option<Vec<VhostUserBlkConfig>>,
     pub vsock: Option<Vec<VsockConfig>>,
+    #[serde(default)]
+    pub iommu: bool,
 }
 
 impl VmConfig {
@@ -677,6 +679,8 @@ impl VmConfig {
     }
 
     pub fn parse(vm_params: VmParams) -> Result<Self> {
+        let iommu = false;
+
         let mut disks: Option<Vec<DiskConfig>> = None;
         if let Some(disk_list) = &vm_params.disks {
             let mut disk_config_list = Vec::new();
@@ -778,6 +782,7 @@ impl VmConfig {
             vhost_user_net,
             vhost_user_blk,
             vsock,
+            iommu,
         })
     }
 }

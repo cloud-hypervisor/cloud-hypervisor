@@ -176,6 +176,9 @@ components:
             $ref: '#/components/schemas/VhostUserBlkConfig'
         vsock:
           $ref: '#/components/schemas/VsockConfig'
+        iommu:
+          type: boolean
+          default: false
       description: Virtual machine configuration
 
     CpuConfig:
