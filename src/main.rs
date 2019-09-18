@@ -594,6 +594,32 @@ mod tests {
         (child, virtiofsd_socket_path)
     }
 
+    fn prepare_vubd(tmp_dir: &TempDir) -> (std::process::Child, String) {
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
+
+        let mut vubd_path = workload_path.clone();
+        vubd_path.push("vubd");
+        let vubd_path = String::from(vubd_path.to_str().unwrap());
+
+        let mut blk_file_path = workload_path.clone();
+        blk_file_path.push("blk");
+        let blk_file_path = String::from(blk_file_path.to_str().unwrap());
+
+        let vubd_socket_path = String::from(tmp_dir.path().join("vub.sock").to_str().unwrap());
+
+        // Start the daemon
+        let child = Command::new(vubd_path.as_str())
+            .args(&["-b", blk_file_path.as_str()])
+            .args(&["-s", vubd_socket_path.as_str()])
+            .spawn()
+            .unwrap();
+
+        thread::sleep(std::time::Duration::new(10, 0));
+
+        (child, vubd_socket_path)
+    }
+
     fn temp_vsock_path(tmp_dir: &TempDir) -> String {
         String::from(tmp_dir.path().join("vsock").to_str().unwrap())
     }
@@ -1187,7 +1213,7 @@ mod tests {
             let mut daemon_child = Command::new(vubridge_path.as_str()).spawn().unwrap();
 
             let mut cloud_child = Command::new("target/debug/cloud-hypervisor")
-                .args(&["--cpus", "4"])
+                .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
@@ -1223,14 +1249,78 @@ mod tests {
                 3
             );
 
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = cloud_child.kill();
+            let _ = cloud_child.wait();
+
             thread::sleep(std::time::Duration::new(5, 0));
             let _ = daemon_child.kill();
             let _ = daemon_child.wait();
+
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_vhost_user_blk() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let (mut daemon_child, vubd_socket_path) = prepare_vubd(&guest.tmp_dir);
+
+            let mut cloud_child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&[
+                    "--vhost-user-blk",
+                    format!(
+                        "sock={},num_queues=1,queue_size=128,wce=true",
+                        vubd_socket_path
+                    )
+                    .as_str(),
+                ])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Check both if /dev/vdc exists and if the block size is 64M.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 64M")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
 
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(5, 0));
             let _ = cloud_child.kill();
             let _ = cloud_child.wait();
+
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = daemon_child.kill();
+            let _ = daemon_child.wait();
 
             Ok(())
         });
