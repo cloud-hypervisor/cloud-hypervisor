@@ -291,6 +291,19 @@ fn main() {
         }
     };
 
+    let api_socket_path = cmd_arguments.value_of("api-socket");
+
+    let vmm_config = config::VmmConfig::parse(config::VmmParams {
+        // These .unwrap() cannot fail as there is a default value defined
+        api_socket_path: api_socket_path.unwrap(),
+        log_level,
+        log_file: cmd_arguments.value_of("log-file"),
+    })
+    .map_err(|e| {
+        println!("Failed parsing parameters {:?}", e);
+        process::exit(1);
+    });
+
     println!(
         "Cloud Hypervisor Guest\n\tvCPUs: {}\n\tMemory: {} MB\
          \n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",

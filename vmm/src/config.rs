@@ -6,6 +6,7 @@
 extern crate vm_virtio;
 
 use linux_loader::cmdline::Cmdline;
+use log::LevelFilter;
 use net_util::MacAddr;
 use std::convert::From;
 use std::net::AddrParseError;
@@ -657,5 +658,43 @@ impl<'a> VmConfig<'a> {
             vhost_user_net,
             vsock,
         })
+    }
+}
+
+/// VMM specific parameters.
+pub struct VmmParams<'a> {
+    /// The VMM HTTP API server socket path.
+    pub api_socket_path: &'a str,
+
+    /// The VMM debugging output level
+    pub log_level: LevelFilter,
+
+    /// Optional VMM log file
+    pub log_file: Option<&'a str>,
+}
+
+/// HTTP API server configuration for the VMM
+pub struct ApiServerConfig<'a> {
+    /// Unix domain socket path.
+    pub socket_path: &'a str,
+}
+
+impl<'a> ApiServerConfig<'a> {
+    pub fn parse(socket_path: &'a str) -> Result<Self> {
+        Ok(ApiServerConfig { socket_path })
+    }
+}
+
+/// VMM specific configuration.
+pub struct VmmConfig<'a> {
+    /// The VMM HTTP API server configuration.
+    pub api_server: ApiServerConfig<'a>,
+}
+
+impl<'a> VmmConfig<'a> {
+    pub fn parse(vmm_params: VmmParams<'a>) -> Result<Self> {
+        let api_server = ApiServerConfig::parse(vmm_params.api_socket_path)?;
+
+        Ok(VmmConfig { api_server })
     }
 }
