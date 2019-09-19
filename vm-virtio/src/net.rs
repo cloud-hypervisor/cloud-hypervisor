@@ -28,7 +28,7 @@ use super::{
 };
 use crate::VirtioInterrupt;
 use net_util::{MacAddr, Tap, TapError, MAC_ADDR_LEN};
-use virtio_bindings::virtio_net::*;
+use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 

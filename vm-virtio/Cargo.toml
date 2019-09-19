@@ -19,7 +19,7 @@ net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
 pci = { path = "../pci", optional = true }
 tempfile = "3.1.0"
-virtio-bindings = { path = "../virtio-bindings" }
+virtio-bindings = { git = "https://github.com/rust-vmm/virtio-bindings", version = "0.1", features = ["virtio-v5_0_0"]}
 vm-allocator = { path = "../vm-allocator" }
 vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 

@@ -26,7 +26,7 @@ use super::{
     VirtioDeviceType, VirtioInterruptType,
 };
 use crate::VirtioInterrupt;
-use virtio_bindings::virtio_blk::*;
+use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
