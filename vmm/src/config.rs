@@ -75,13 +75,15 @@ pub enum Error<'a> {
     ParseVsockCidParam(std::num::ParseIntError),
     /// Failed parsing vsock socket path parameter.
     ParseVsockSockParam,
+    /// Missing kernel configuration
+    ValidateMissingKernelConfig,
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
 pub struct VmParams<'a> {
     pub cpus: &'a str,
     pub memory: &'a str,
-    pub kernel: &'a str,
+    pub kernel: Option<&'a str>,
     pub cmdline: Option<&'a str>,
     pub disks: Option<Vec<&'a str>>,
     pub net: Option<Vec<&'a str>>,
@@ -175,14 +177,6 @@ impl MemoryConfig {
 #[derive(Clone, Debug)]
 pub struct KernelConfig {
     pub path: PathBuf,
-}
-
-impl KernelConfig {
-    pub fn parse(kernel: &str) -> Result<Self> {
-        Ok(KernelConfig {
-            path: PathBuf::from(kernel),
-        })
-    }
 }
 
 #[derive(Clone)]
@@ -617,7 +611,7 @@ impl VhostUserBlkConfig {
 pub struct VmConfig {
     pub cpus: CpusConfig,
     pub memory: MemoryConfig,
-    pub kernel: KernelConfig,
+    pub kernel: Option<KernelConfig>,
     pub cmdline: CmdlineConfig,
     pub disks: Option<Vec<DiskConfig>>,
     pub net: Option<Vec<NetConfig>>,
@@ -633,6 +627,10 @@ pub struct VmConfig {
 }
 
 impl VmConfig {
+    pub fn valid(&self) -> bool {
+        self.kernel.is_some()
+    }
+
     pub fn parse(vm_params: VmParams) -> Result<Self> {
         let mut disks: Option<Vec<DiskConfig>> = None;
         if let Some(disk_list) = &vm_params.disks {
@@ -712,10 +710,17 @@ impl VmConfig {
             vhost_user_blk = Some(vhost_user_blk_config_list);
         }
 
+        let mut kernel: Option<KernelConfig> = None;
+        if let Some(k) = vm_params.kernel {
+            kernel = Some(KernelConfig {
+                path: PathBuf::from(k),
+            });
+        }
+
         Ok(VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
-            kernel: KernelConfig::parse(vm_params.kernel)?,
+            kernel,
             cmdline: CmdlineConfig::parse(vm_params.cmdline)?,
             disks,
             net,
