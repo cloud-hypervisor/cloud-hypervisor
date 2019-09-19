@@ -463,7 +463,8 @@ fn get_host_cpu_phys_bits() -> u8 {
 impl Vm {
     pub fn new(config: Arc<VmConfig>, exit_evt: EventFd, reset_evt: EventFd) -> Result<Self> {
         let kvm = Kvm::new().map_err(Error::KvmNew)?;
-        let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
+        let kernel =
+            File::open(&config.kernel.as_ref().unwrap().path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
         let fd = Arc::new(fd);
         let creation_ts = std::time::Instant::now();

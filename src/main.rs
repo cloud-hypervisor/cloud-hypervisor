@@ -255,9 +255,7 @@ fn main() {
     let rng = cmd_arguments.value_of("rng").unwrap();
     let serial = cmd_arguments.value_of("serial").unwrap();
 
-    let kernel = cmd_arguments
-        .value_of("kernel")
-        .expect("Missing argument: kernel");
+    let kernel = cmd_arguments.value_of("kernel");
     let cmdline = cmd_arguments.value_of("cmdline");
 
     let disks: Option<Vec<&str>> = cmd_arguments.values_of("disk").map(|x| x.collect());
@@ -332,7 +330,7 @@ fn main() {
         api_socket_path,
         u8::from(&vm_config.cpus),
         vm_config.memory.size >> 20,
-        vm_config.kernel.path,
+        vm_config.kernel,
         vm_config.cmdline.args.as_str(),
         vm_config.disks,
     );
@@ -349,15 +347,17 @@ fn main() {
         }
     };
 
-    // Create and start the VM based off the VM config we just built.
-    let sender = api_request_sender.clone();
-    vmm::vm_create(
-        api_evt.try_clone().unwrap(),
-        api_request_sender,
-        Arc::new(vm_config),
-    )
-    .expect("Could not create the VM");
-    vmm::vm_start(api_evt.try_clone().unwrap(), sender).expect("Could not start the VM");
+    if cmd_arguments.is_present("vm-config") && vm_config.valid() {
+        // Create and start the VM based off the VM config we just built.
+        let sender = api_request_sender.clone();
+        vmm::vm_create(
+            api_evt.try_clone().unwrap(),
+            api_request_sender,
+            Arc::new(vm_config),
+        )
+        .expect("Could not create the VM");
+        vmm::vm_start(api_evt.try_clone().unwrap(), sender).expect("Could not start the VM");
+    }
 
     match vmm_thread.join() {
         Ok(res) => match res {
