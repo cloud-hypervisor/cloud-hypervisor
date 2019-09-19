@@ -76,6 +76,8 @@ pub enum Error<'a> {
     ParseVsockCidParam(std::num::ParseIntError),
     /// Failed parsing vsock socket path parameter.
     ParseVsockSockParam,
+    /// Missing kernel confuguration
+    ValidateMissingKernelConfig,
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -83,7 +85,7 @@ pub struct VmParams<'a> {
     pub user_defined: bool,
     pub cpus: &'a str,
     pub memory: &'a str,
-    pub kernel: &'a str,
+    pub kernel: Option<&'a str>,
     pub cmdline: Option<&'a str>,
     pub disks: Option<Vec<&'a str>>,
     pub net: Option<Vec<&'a str>>,
@@ -171,16 +173,9 @@ impl<'a> MemoryConfig<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct KernelConfig<'a> {
     pub path: &'a Path,
-}
-
-impl<'a> KernelConfig<'a> {
-    pub fn parse(kernel: &'a str) -> Result<Self> {
-        Ok(KernelConfig {
-            path: Path::new(kernel),
-        })
-    }
 }
 
 pub struct CmdlineConfig {
@@ -556,7 +551,7 @@ pub struct VmConfig<'a> {
     pub user_defined: bool,
     pub cpus: CpusConfig,
     pub memory: MemoryConfig<'a>,
-    pub kernel: KernelConfig<'a>,
+    pub kernel: Option<KernelConfig<'a>>,
     pub cmdline: CmdlineConfig,
     pub disks: Option<Vec<DiskConfig<'a>>>,
     pub net: Option<Vec<NetConfig<'a>>>,
@@ -571,6 +566,14 @@ pub struct VmConfig<'a> {
 }
 
 impl<'a> VmConfig<'a> {
+    pub fn valid(&self) -> bool {
+        if self.kernel.is_none() {
+            return false;
+        }
+
+        true
+    }
+
     pub fn parse(vm_params: VmParams<'a>) -> Result<Self> {
         let mut disks: Option<Vec<DiskConfig>> = None;
         if let Some(disk_list) = &vm_params.disks {
@@ -641,11 +644,16 @@ impl<'a> VmConfig<'a> {
             vsock = Some(vsock_config_list);
         }
 
+        let mut kernel: Option<KernelConfig> = None;
+        if let Some(k) = vm_params.kernel {
+            kernel = Some(KernelConfig { path: Path::new(k) });
+        }
+
         Ok(VmConfig {
             user_defined: vm_params.user_defined,
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
-            kernel: KernelConfig::parse(vm_params.kernel)?,
+            kernel,
             cmdline: CmdlineConfig::parse(vm_params.cmdline)?,
             disks,
             net,

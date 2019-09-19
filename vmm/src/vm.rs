@@ -534,7 +534,8 @@ fn get_host_cpu_phys_bits() -> u8 {
 
 impl<'a> Vm<'a> {
     pub fn new(kvm: &Kvm, config: &'a VmConfig<'a>) -> Result<Self> {
-        let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
+        let kernel =
+            File::open(&config.kernel.as_ref().unwrap().path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
         let fd = Arc::new(fd);
         let creation_ts = std::time::Instant::now();

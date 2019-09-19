@@ -227,9 +227,7 @@ fn main() {
     let rng = cmd_arguments.value_of("rng").unwrap();
     let serial = cmd_arguments.value_of("serial").unwrap();
 
-    let kernel = cmd_arguments
-        .value_of("kernel")
-        .expect("Missing argument: kernel");
+    let kernel = cmd_arguments.value_of("kernel");
     let cmdline = cmd_arguments.value_of("cmdline");
 
     let disks: Option<Vec<&str>> = cmd_arguments.values_of("disk").map(|x| x.collect());
@@ -309,7 +307,7 @@ fn main() {
          \n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
         u8::from(&vm_config.cpus),
         vm_config.memory.size >> 20,
-        vm_config.kernel.path,
+        vm_config.kernel,
         vm_config.cmdline.args.as_str(),
         vm_config.disks,
     );
