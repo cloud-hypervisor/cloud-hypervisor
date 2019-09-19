@@ -12,9 +12,9 @@ extern crate clap;
 use clap::{App, Arg, ArgGroup};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
-use std::process;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
+use std::{env, process};
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -63,6 +63,22 @@ impl log::Log for Logger {
 }
 
 fn main() {
+    let pid = unsafe { libc::getpid() };
+    let uid = unsafe { libc::getuid() };
+
+    let mut api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", uid, pid};
+    if uid == 0 {
+        // If we're running as root, we try to get the real user ID if we've been sudo'ed
+        // or else create our socket directly under /run.
+        let key = "SUDO_UID";
+        match env::var(key) {
+            Ok(sudo_uid) => {
+                api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", sudo_uid, pid}
+            }
+            Err(_) => api_server_path = format! {"/run/cloud-hypervisor.{}", pid},
+        }
+    }
+
     let cmd_arguments = App::new("cloud-hypervisor")
         .version(crate_version!())
         .author(crate_authors!())
@@ -222,6 +238,15 @@ fn main() {
                 .min_values(1)
                 .group("vmm-config"),
         )
+        .arg(
+            Arg::with_name("api-socket")
+                .long("api-socket")
+                .help("HTTP API socket path (UNIX domain socket).")
+                .takes_value(true)
+                .min_values(1)
+                .default_value(&api_server_path)
+                .group("vmm-config"),
+        )
         .get_matches();
 
     // These .unwrap()s cannot fail as there is a default value defined
@@ -297,9 +322,14 @@ fn main() {
         }
     };
 
+    let api_socket_path = cmd_arguments
+        .value_of("api-socket")
+        .expect("Missing argument: api-socket");
+
     println!(
-        "Cloud Hypervisor Guest\n\tvCPUs: {}\n\tMemory: {} MB\
+        "Cloud Hypervisor Guest\n\tAPI server: {}\n\tvCPUs: {}\n\tMemory: {} MB\
          \n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
+        api_socket_path,
         u8::from(&vm_config.cpus),
         vm_config.memory.size >> 20,
         vm_config.kernel.path,
