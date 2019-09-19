@@ -37,11 +37,13 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {}
 
 pub struct Blk {
     vhost_user_blk: Master,
-    kill_evt: EventFd,
+    kill_evt: Option<EventFd>,
     avail_features: u64,
     acked_features: u64,
     config_space: Vec<u8>,
     queue_sizes: Vec<u16>,
+    queue_evts: Option<Vec<EventFd>>,
+    interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
 impl<'a> Blk {
@@ -49,8 +51,6 @@ impl<'a> Blk {
     pub fn new(wce: bool, vu_cfg: VhostUserConfig<'a>) -> Result<Blk> {
         let mut vhost_user_blk = Master::connect(vu_cfg.sock, vu_cfg.num_queues as u64)
             .map_err(Error::VhostUserCreateMaster)?;
-
-        let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?;
 
         // Filling device and vring features VMM supports.
         let mut avail_features = 1 << VIRTIO_BLK_F_SEG_MAX
@@ -117,19 +117,23 @@ impl<'a> Blk {
 
         Ok(Blk {
             vhost_user_blk,
-            kill_evt,
+            kill_evt: None,
             avail_features,
             acked_features,
             config_space,
             queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
+            queue_evts: None,
+            interrupt_cb: None,
         })
     }
 }
 
 impl Drop for Blk {
     fn drop(&mut self) {
-        if let Err(_e) = self.kill_evt.write(1) {
-            error!("failed to kill vhost-user-blk with error {}", _e);
+        if let Some(kill_evt) = self.kill_evt.take() {
+            if let Err(e) = kill_evt.write(1) {
+                error!("failed to kill vhost-user-blk: {:?}", e);
+            }
         }
     }
 }
@@ -212,10 +216,30 @@ impl VirtioDevice for Blk {
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
-        let handler_kill_evt = self
-            .kill_evt
-            .try_clone()
-            .map_err(|_| ActivateError::CloneKillEventFd)?;
+        let (self_kill_evt, kill_evt) =
+            match EventFd::new(EFD_NONBLOCK).and_then(|e| Ok((e.try_clone()?, e))) {
+                Ok(v) => v,
+                Err(e) => {
+                    error!("failed creating kill EventFd pair: {}", e);
+                    return Err(ActivateError::BadActivate);
+                }
+            };
+        self.kill_evt = Some(self_kill_evt);
+
+        // Save the interrupt EventFD as we need to return it on reset
+        // but clone it to pass into the thread.
+        self.interrupt_cb = Some(interrupt_cb.clone());
+
+        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
+        for queue_evt in queue_evts.iter() {
+            // Save the queue EventFD as we need to return it on reset
+            // but clone it to pass into the thread.
+            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                ActivateError::BadActivate
+            })?);
+        }
+        self.queue_evts = Some(tmp_queue_evts);
 
         let vu_interrupt_list = setup_vhost_user(
             &mut self.vhost_user_blk,
@@ -228,7 +252,7 @@ impl VirtioDevice for Blk {
 
         let mut handler = VhostUserEpollHandler::<SlaveReqHandler>::new(VhostUserEpollConfig {
             interrupt_cb,
-            kill_evt: handler_kill_evt,
+            kill_evt,
             vu_interrupt_list,
             slave_req_handler: None,
         });
@@ -244,5 +268,23 @@ impl VirtioDevice for Blk {
             error!("vhost-user blk thread create failed with error {:?}", e);
         }
         Ok(())
+    }
+
+    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        if let Err(e) = reset_vhost_user(&mut self.vhost_user_blk, self.queue_sizes.len()) {
+            error!("Failed to reset vhost-user daemon: {:?}", e);
+            return None;
+        }
+
+        if let Some(kill_evt) = self.kill_evt.take() {
+            // Ignore the result because there is nothing we can do about it.
+            let _ = kill_evt.write(1);
+        }
+
+        // Return the interrupt and queue EventFDs
+        Some((
+            self.interrupt_cb.take().unwrap(),
+            self.queue_evts.take().unwrap(),
+        ))
     }
 }

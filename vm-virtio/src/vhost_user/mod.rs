@@ -61,6 +61,8 @@ pub enum Error {
     VhostUserProtocolNotSupport,
     /// Set owner failed.
     VhostUserSetOwner(VhostError),
+    /// Reset owner failed.
+    VhostUserResetOwner(VhostError),
     /// Set features failed.
     VhostUserSetFeatures(VhostError),
     /// Set protocol features failed.

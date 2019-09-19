@@ -132,6 +132,8 @@ pub enum ActivateError {
     VhostUserNetSetup(vhost_user::Error),
     /// Failed to setup vhost-user daemon.
     VhostUserBlkSetup(vhost_user::Error),
+    /// Failed to reset vhost-user daemon.
+    VhostUserReset(vhost_user::Error),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;
