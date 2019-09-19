@@ -949,6 +949,47 @@ mod tests {
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_huge_memory() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=128G"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::OperatingSystem)
+                        .unwrap()
+                        .as_str(),
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            aver!(
+                tb,
+                guest.get_total_memory().unwrap_or_default() > 128_000_000
+            );
+
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_pci_msi() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
