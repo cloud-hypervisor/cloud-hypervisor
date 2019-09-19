@@ -9,7 +9,7 @@ extern crate vmm_sys_util;
 #[macro_use(crate_version, crate_authors)]
 extern crate clap;
 
-use clap::{App, Arg};
+use clap::{App, Arg, ArgGroup};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use std::process;
@@ -67,11 +67,14 @@ fn main() {
         .version(crate_version!())
         .author(crate_authors!())
         .about("Launch a cloud-hypervisor VMM.")
+        .group(ArgGroup::with_name("vm-config").multiple(true))
+        .group(ArgGroup::with_name("vmm-config").multiple(true))
         .arg(
             Arg::with_name("cpus")
                 .long("cpus")
                 .help("Number of virtual CPUs")
-                .default_value(config::DEFAULT_VCPUS),
+                .default_value(config::DEFAULT_VCPUS)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("memory")
@@ -80,26 +83,30 @@ fn main() {
                     "Memory parameters \"size=<guest_memory_size>,\
                      file=<backing_file_path>\"",
                 )
-                .default_value(config::DEFAULT_MEMORY),
+                .default_value(config::DEFAULT_MEMORY)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("kernel")
                 .long("kernel")
                 .help("Path to kernel image (vmlinux)")
-                .takes_value(true),
+                .takes_value(true)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("cmdline")
                 .long("cmdline")
                 .help("Kernel command line")
-                .takes_value(true),
+                .takes_value(true)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("disk")
                 .long("disk")
                 .help("Path to VM disk image")
                 .takes_value(true)
-                .min_values(1),
+                .min_values(1)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("net")
@@ -109,13 +116,15 @@ fn main() {
                      ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>\"",
                 )
                 .takes_value(true)
-                .min_values(1),
+                .min_values(1)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("rng")
                 .long("rng")
                 .help("Path to entropy source")
-                .default_value(config::DEFAULT_RNG_SOURCE),
+                .default_value(config::DEFAULT_RNG_SOURCE)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("fs")
@@ -127,7 +136,8 @@ fn main() {
                      cache_size=<DAX cache size: default 8Gib>\"",
                 )
                 .takes_value(true)
-                .min_values(1),
+                .min_values(1)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("pmem")
@@ -137,26 +147,30 @@ fn main() {
                      size=<persistent_memory_size>\"",
                 )
                 .takes_value(true)
-                .min_values(1),
+                .min_values(1)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("serial")
                 .long("serial")
                 .help("Control serial port: off|null|tty|file=/path/to/a/file")
-                .default_value("null"),
+                .default_value("null")
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("console")
                 .long("console")
                 .help("Control (virtio) console: off|null|tty|file=/path/to/a/file")
-                .default_value("tty"),
+                .default_value("tty")
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("device")
                 .long("device")
                 .help("Direct device assignment parameter")
                 .takes_value(true)
-                .min_values(1),
+                .min_values(1)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("vhost-user-net")
@@ -167,7 +181,8 @@ fn main() {
                      queue_size=<size_of_each_queue>\"",
                 )
                 .takes_value(true)
-                .min_values(1),
+                .min_values(1)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("vsock")
@@ -177,7 +192,8 @@ fn main() {
                      sock=<socket_path>\"",
                 )
                 .takes_value(true)
-                .min_values(1),
+                .min_values(1)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("vhost-user-blk")
@@ -195,14 +211,16 @@ fn main() {
             Arg::with_name("v")
                 .short("v")
                 .multiple(true)
-                .help("Sets the level of debugging output"),
+                .help("Sets the level of debugging output")
+                .group("vmm-config"),
         )
         .arg(
             Arg::with_name("log-file")
                 .long("log-file")
                 .help("Log file. Standard error is used if not specified")
                 .takes_value(true)
-                .min_values(1),
+                .min_values(1)
+                .group("vmm-config"),
         )
         .get_matches();
 
