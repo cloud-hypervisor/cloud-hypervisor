@@ -22,8 +22,8 @@ use super::{Error, Result};
 use vhost_rs::vhost_user::message::VhostUserVirtioFeatures;
 use vhost_rs::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost_rs::VhostBackend;
-use virtio_bindings::virtio_net;
-use virtio_bindings::virtio_ring;
+use virtio_bindings::bindings::virtio_net;
+use virtio_bindings::bindings::virtio_ring;
 
 struct SlaveReqHandler {}
 impl VhostUserMasterReqHandler for SlaveReqHandler {}
