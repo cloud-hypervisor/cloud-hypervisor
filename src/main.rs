@@ -594,7 +594,7 @@ mod tests {
         (child, virtiofsd_socket_path)
     }
 
-    fn prepare_vubd(tmp_dir: &TempDir) -> (std::process::Child, String) {
+    fn prepare_vubd(tmp_dir: &TempDir, blk_img: &str) -> (std::process::Child, String) {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
@@ -603,7 +603,7 @@ mod tests {
         let vubd_path = String::from(vubd_path.to_str().unwrap());
 
         let mut blk_file_path = workload_path.clone();
-        blk_file_path.push("blk.img");
+        blk_file_path.push(blk_img);
         let blk_file_path = String::from(blk_file_path.to_str().unwrap());
 
         let vubd_socket_path = String::from(tmp_dir.path().join("vub.sock").to_str().unwrap());
@@ -1268,7 +1268,7 @@ mod tests {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
-            let (mut daemon_child, vubd_socket_path) = prepare_vubd(&guest.tmp_dir);
+            let (mut daemon_child, vubd_socket_path) = prepare_vubd(&guest.tmp_dir, "blk.img");
 
             let mut cloud_child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
@@ -1331,6 +1331,71 @@ mod tests {
             // Unmount the device
             guest.ssh_command("sudo umount /dev/vdc")?;
             guest.ssh_command("rm -r mount_image")?;
+
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = cloud_child.kill();
+            let _ = cloud_child.wait();
+
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = daemon_child.kill();
+            let _ = daemon_child.wait();
+
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_boot_from_vhost_user_blk() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path.clone();
+            kernel_path.push("vmlinux");
+
+            let (mut daemon_child, vubd_socket_path) = prepare_vubd(
+                &guest.tmp_dir,
+                guest
+                    .disk_config
+                    .disk(DiskType::RawOperatingSystem)
+                    .unwrap()
+                    .as_str(),
+            );
+
+            let mut cloud_child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&[
+                    "--disk",
+                    guest
+                        .disk_config
+                        .disk(DiskType::CloudInit)
+                        .unwrap()
+                        .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&[
+                    "--vhost-user-blk",
+                    format!(
+                        "sock={},num_queues=1,queue_size=128,wce=true",
+                        vubd_socket_path
+                    )
+                    .as_str(),
+                ])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Just check the VM booted correctly.
+            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
+            aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(5, 0));
