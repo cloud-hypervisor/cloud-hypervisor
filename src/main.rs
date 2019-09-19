@@ -59,6 +59,10 @@ impl log::Log for Logger {
 }
 
 fn main() {
+    let uid = unsafe { libc::getuid() };
+    let pid = unsafe { libc::getpid() };
+    let api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", uid, pid};
+
     let cmd_arguments = App::new("cloud-hypervisor")
         .version(crate_version!())
         .author(crate_authors!())
@@ -204,6 +208,15 @@ fn main() {
                 .help("Log file. Standard error is used if not specified")
                 .takes_value(true)
                 .min_values(1)
+                .group("vmm-config"),
+        )
+        .arg(
+            Arg::with_name("api-socket")
+                .long("api-socket")
+                .help("HTTP API socket path (UNIX domain socket).")
+                .takes_value(true)
+                .min_values(1)
+                .default_value(&api_server_path)
                 .group("vmm-config"),
         )
         .get_matches();
