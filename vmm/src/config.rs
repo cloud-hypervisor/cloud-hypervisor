@@ -79,6 +79,7 @@ pub enum Error<'a> {
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
 pub struct VmParams<'a> {
+    pub user_defined: bool,
     pub cpus: &'a str,
     pub memory: &'a str,
     pub kernel: &'a str,
@@ -551,6 +552,7 @@ impl<'a> VsockConfig<'a> {
 }
 
 pub struct VmConfig<'a> {
+    pub user_defined: bool,
     pub cpus: CpusConfig,
     pub memory: MemoryConfig<'a>,
     pub kernel: KernelConfig<'a>,
@@ -639,6 +641,7 @@ impl<'a> VmConfig<'a> {
         }
 
         Ok(VmConfig {
+            user_defined: vm_params.user_defined,
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
             kernel: KernelConfig::parse(vm_params.kernel)?,

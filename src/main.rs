@@ -268,6 +268,7 @@ fn main() {
     .expect("Expected to be able to setup logger");
 
     let vm_config = match config::VmConfig::parse(config::VmParams {
+        user_defined: cmd_arguments.is_present("vm-config"),
         cpus,
         memory,
         kernel,
