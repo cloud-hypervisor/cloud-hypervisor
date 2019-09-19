@@ -12,7 +12,7 @@ use clap::{App, Arg, ArgGroup};
 use log::LevelFilter;
 use std::process;
 use std::sync::Mutex;
-use vmm::config;
+use vmm::{config, Vmm};
 
 struct Logger {
     output: Mutex<Box<dyn std::io::Write + Send>>,
@@ -300,7 +300,8 @@ fn main() {
     .map_err(|e| {
         println!("Failed parsing parameters {:?}", e);
         process::exit(1);
-    });
+    })
+    .unwrap();
 
     println!(
         "Cloud Hypervisor Guest\n\tvCPUs: {}\n\tMemory: {} MB\
@@ -312,8 +313,16 @@ fn main() {
         vm_config.disks,
     );
 
-    if let Err(e) = vmm::boot_kernel(vm_config) {
-        println!("Guest boot failed: {}", e);
+    let vmm = match Vmm::new() {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Failed to create VMM {}", e);
+            process::exit(1);
+        }
+    };
+
+    if let Err(e) = vmm.run(vmm_config, vm_config) {
+        println!("Failed to start VMM {}", e);
         process::exit(1);
     }
 }

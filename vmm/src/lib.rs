@@ -15,7 +15,7 @@ pub mod config;
 pub mod device_manager;
 pub mod vm;
 
-use self::config::VmConfig;
+use self::config::{VmConfig, VmmConfig};
 use self::vm::{ExitBehaviour, Vm};
 
 /// Errors associated with VM management
@@ -44,31 +44,29 @@ impl Display for Error {
     }
 }
 
-struct Vmm {
+pub struct Vmm {
     kvm: Kvm,
 }
 
 impl Vmm {
-    fn new() -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let kvm = Kvm::new().expect("new KVM instance creation failed");
         Ok(Vmm { kvm })
     }
-}
 
-pub fn boot_kernel(config: VmConfig) -> Result<()> {
-    loop {
-        let vmm = Vmm::new()?;
-        let mut vm = Vm::new(&vmm.kvm, &config).map_err(Error::VmNew)?;
+    pub fn run(&self, vmm_config: VmmConfig, vm_config: VmConfig) -> Result<()> {
+        loop {
+            let mut vm = Vm::new(&self.kvm, &vm_config).map_err(Error::VmNew)?;
 
-        let entry = vm.load_kernel().map_err(Error::LoadKernel)?;
+            let entry = vm.load_kernel().map_err(Error::LoadKernel)?;
 
-        if vm.start(entry).map_err(Error::VmStart)? == ExitBehaviour::Shutdown {
+            if vm.start(entry).map_err(Error::VmStart)? == ExitBehaviour::Shutdown {
+                break;
+            }
+
+            #[cfg(not(feature = "acpi"))]
             break;
         }
-
-        #[cfg(not(feature = "acpi"))]
-        break;
+        Ok(())
     }
-
-    Ok(())
 }
