@@ -1350,11 +1350,6 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut kernel_path = workload_path.clone();
-            kernel_path.push("vmlinux");
 
             let (mut daemon_child, vubd_socket_path) = prepare_vubd(
                 &guest.tmp_dir,
@@ -1368,7 +1363,7 @@ mod tests {
             let mut cloud_child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
                     guest
@@ -1378,7 +1373,6 @@ mod tests {
                         .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
-                .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .args(&[
                     "--vhost-user-blk",
                     format!(
@@ -1394,7 +1388,7 @@ mod tests {
 
             // Just check the VM booted correctly.
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 492_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             guest.ssh_command("sudo shutdown -h now")?;
