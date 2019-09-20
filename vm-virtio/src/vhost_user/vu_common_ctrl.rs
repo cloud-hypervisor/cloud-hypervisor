@@ -54,7 +54,7 @@ pub fn setup_vhost_user_vring(
     let mut vu_interrupt_list = Vec::new();
 
     for (queue_index, queue) in queues.into_iter().enumerate() {
-        vu.set_vring_num(queue_index, queue.get_max_size())
+        vu.set_vring_num(queue_index, queue.actual_size())
             .map_err(Error::VhostUserSetVringNum)?;
 
         let config_data = VringConfigData {
