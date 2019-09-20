@@ -49,6 +49,15 @@ impl PartialEq for Tap {
     }
 }
 
+impl std::clone::Clone for Tap {
+    fn clone(&self) -> Self {
+        Tap {
+            tap_file: self.tap_file.try_clone().unwrap(),
+            if_name: self.if_name,
+        }
+    }
+}
+
 // Returns a byte vector representing the contents of a null terminated C string which
 // contains if_name.
 fn build_terminated_if_name(if_name: &str) -> Result<Vec<u8>> {

@@ -8,10 +8,14 @@ before_script:
   - rustup component add rustfmt
 
 script:
-  - cargo rustc -- -D warnings
-  - cargo rustc --no-default-features --features "pci"  -- -D warnings
-  - cargo rustc --no-default-features --features "pci,acpi"  -- -D warnings
-  - cargo rustc --no-default-features --features "mmio"  -- -D warnings
+  - cargo rustc --bin cloud-hypervisor -- -D warnings
+  - cargo rustc --bin cloud-hypervisor --no-default-features --features "pci"  -- -D warnings
+  - cargo rustc --bin cloud-hypervisor --no-default-features --features "pci,acpi"  -- -D warnings
+  - cargo rustc --bin cloud-hypervisor --no-default-features --features "mmio"  -- -D warnings
+  - cargo rustc --bin vhost_user_net -- -D warnings
+  - cargo rustc --bin vhost_user_net --no-default-features --features "pci"  -- -D warnings
+  - cargo rustc --bin vhost_user_net --no-default-features --features "pci,acpi"  -- -D warnings
+  - cargo rustc --bin vhost_user_net --no-default-features --features "mmio"  -- -D warnings
   - cargo test
   - cargo clippy --all-targets --all-features -- -D warnings
   - find . -name "*.rs" | xargs rustfmt --check
