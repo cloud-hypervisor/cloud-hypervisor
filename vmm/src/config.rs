@@ -116,6 +116,7 @@ fn parse_size(size: &str) -> Result<u64> {
     Ok(res << shift)
 }
 
+#[derive(Clone, Debug)]
 pub struct CpusConfig(pub u8);
 
 impl CpusConfig {
@@ -132,6 +133,7 @@ impl From<&CpusConfig> for u8 {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct MemoryConfig {
     pub size: u64,
     pub file: Option<PathBuf>,
@@ -172,6 +174,7 @@ impl MemoryConfig {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct KernelConfig {
     pub path: PathBuf,
 }
@@ -184,6 +187,7 @@ impl KernelConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct CmdlineConfig {
     pub args: Cmdline,
     pub offset: GuestAddress,
@@ -204,7 +208,7 @@ impl CmdlineConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DiskConfig {
     pub path: PathBuf,
 }
@@ -217,6 +221,7 @@ impl DiskConfig {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct NetConfig {
     pub tap: Option<String>,
     pub ip: Ipv4Addr,
@@ -268,6 +273,7 @@ impl NetConfig {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct RngConfig {
     pub src: PathBuf,
 }
@@ -280,7 +286,7 @@ impl RngConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FsConfig {
     pub tag: String,
     pub sock: PathBuf,
@@ -368,6 +374,7 @@ impl FsConfig {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct PmemConfig {
     pub file: PathBuf,
     pub size: u64,
@@ -400,7 +407,7 @@ impl PmemConfig {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum ConsoleOutputMode {
     Off,
     Tty,
@@ -417,6 +424,7 @@ impl ConsoleOutputMode {
     }
 }
 
+#[derive(Clone)]
 pub struct ConsoleConfig {
     pub file: Option<PathBuf>,
     pub mode: ConsoleOutputMode,
@@ -450,7 +458,7 @@ impl ConsoleConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DeviceConfig {
     pub path: PathBuf,
 }
@@ -463,6 +471,7 @@ impl DeviceConfig {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct VhostUserNetConfig {
     pub mac: MacAddr,
     pub vu_cfg: VhostUserConfig,
@@ -521,6 +530,7 @@ impl VhostUserNetConfig {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct VsockConfig {
     pub cid: u64,
     pub sock: PathBuf,
@@ -553,6 +563,7 @@ impl VsockConfig {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct VhostUserBlkConfig {
     pub wce: bool,
     pub vu_cfg: VhostUserConfig,
@@ -608,6 +619,7 @@ impl VhostUserBlkConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct VmConfig {
     pub cpus: CpusConfig,
     pub memory: MemoryConfig,
