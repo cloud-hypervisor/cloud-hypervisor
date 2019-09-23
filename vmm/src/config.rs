@@ -205,14 +205,14 @@ impl CmdlineConfig {
 }
 
 #[derive(Debug)]
-pub struct DiskConfig<'a> {
-    pub path: &'a Path,
+pub struct DiskConfig {
+    pub path: PathBuf,
 }
 
-impl<'a> DiskConfig<'a> {
-    pub fn parse(disk: &'a str) -> Result<Self> {
+impl DiskConfig {
+    pub fn parse(disk: &str) -> Result<Self> {
         Ok(DiskConfig {
-            path: Path::new(disk),
+            path: PathBuf::from(disk),
         })
     }
 }
@@ -613,7 +613,7 @@ pub struct VmConfig<'a> {
     pub memory: MemoryConfig,
     pub kernel: KernelConfig,
     pub cmdline: CmdlineConfig,
-    pub disks: Option<Vec<DiskConfig<'a>>>,
+    pub disks: Option<Vec<DiskConfig>>,
     pub net: Option<Vec<NetConfig<'a>>>,
     pub rng: RngConfig<'a>,
     pub fs: Option<Vec<FsConfig<'a>>>,
