@@ -217,15 +217,15 @@ impl DiskConfig {
     }
 }
 
-pub struct NetConfig<'a> {
-    pub tap: Option<&'a str>,
+pub struct NetConfig {
+    pub tap: Option<String>,
     pub ip: Ipv4Addr,
     pub mask: Ipv4Addr,
     pub mac: MacAddr,
 }
 
-impl<'a> NetConfig<'a> {
-    pub fn parse(net: &'a str) -> Result<Self> {
+impl NetConfig {
+    pub fn parse(net: &str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = net.split(',').collect();
 
@@ -246,13 +246,13 @@ impl<'a> NetConfig<'a> {
             }
         }
 
-        let mut tap: Option<&str> = None;
+        let mut tap: Option<String> = None;
         let mut ip: Ipv4Addr = Ipv4Addr::new(192, 168, 249, 1);
         let mut mask: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);;
         let mut mac: MacAddr = MacAddr::local_random();
 
         if !tap_str.is_empty() {
-            tap = Some(tap_str);
+            tap = Some(tap_str.to_string());
         }
         if !ip_str.is_empty() {
             ip = ip_str.parse().map_err(Error::ParseNetIpParam)?;
@@ -614,7 +614,7 @@ pub struct VmConfig<'a> {
     pub kernel: KernelConfig,
     pub cmdline: CmdlineConfig,
     pub disks: Option<Vec<DiskConfig>>,
-    pub net: Option<Vec<NetConfig<'a>>>,
+    pub net: Option<Vec<NetConfig>>,
     pub rng: RngConfig<'a>,
     pub fs: Option<Vec<FsConfig<'a>>>,
     pub pmem: Option<Vec<PmemConfig<'a>>>,
