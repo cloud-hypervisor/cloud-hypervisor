@@ -857,7 +857,7 @@ impl DeviceManager {
 
             for device_cfg in device_list_cfg.iter() {
                 let vfio_device =
-                    VfioDevice::new(device_cfg.path, device_fd.clone(), vm_info.memory.clone())
+                    VfioDevice::new(&device_cfg.path, device_fd.clone(), vm_info.memory.clone())
                         .map_err(DeviceManagerError::VfioCreate)?;
 
                 let mut vfio_pci_device = VfioPciDevice::new(vm_info.vm_fd, allocator, vfio_device)

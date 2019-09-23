@@ -451,14 +451,14 @@ impl ConsoleConfig {
 }
 
 #[derive(Debug)]
-pub struct DeviceConfig<'a> {
-    pub path: &'a Path,
+pub struct DeviceConfig {
+    pub path: PathBuf,
 }
 
-impl<'a> DeviceConfig<'a> {
-    pub fn parse(device: &'a str) -> Result<Self> {
+impl DeviceConfig {
+    pub fn parse(device: &str) -> Result<Self> {
         Ok(DeviceConfig {
-            path: Path::new(device),
+            path: PathBuf::from(device),
         })
     }
 }
@@ -620,7 +620,7 @@ pub struct VmConfig<'a> {
     pub pmem: Option<Vec<PmemConfig>>,
     pub serial: ConsoleConfig,
     pub console: ConsoleConfig,
-    pub devices: Option<Vec<DeviceConfig<'a>>>,
+    pub devices: Option<Vec<DeviceConfig>>,
     pub vhost_user_net: Option<Vec<VhostUserNetConfig<'a>>>,
     pub vhost_user_blk: Option<Vec<VhostUserBlkConfig<'a>>>,
     pub vsock: Option<Vec<VsockConfig<'a>>>,
