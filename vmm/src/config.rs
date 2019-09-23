@@ -281,16 +281,16 @@ impl RngConfig {
 }
 
 #[derive(Debug)]
-pub struct FsConfig<'a> {
-    pub tag: &'a str,
-    pub sock: &'a Path,
+pub struct FsConfig {
+    pub tag: String,
+    pub sock: PathBuf,
     pub num_queues: usize,
     pub queue_size: u16,
     pub cache_size: Option<u64>,
 }
 
-impl<'a> FsConfig<'a> {
-    pub fn parse(fs: &'a str) -> Result<Self> {
+impl FsConfig {
+    pub fn parse(fs: &str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = fs.split(',').collect();
 
@@ -359,8 +359,8 @@ impl<'a> FsConfig<'a> {
         }
 
         Ok(FsConfig {
-            tag,
-            sock: Path::new(sock),
+            tag: tag.to_string(),
+            sock: PathBuf::from(sock),
             num_queues,
             queue_size,
             cache_size,
@@ -616,7 +616,7 @@ pub struct VmConfig<'a> {
     pub disks: Option<Vec<DiskConfig>>,
     pub net: Option<Vec<NetConfig>>,
     pub rng: RngConfig,
-    pub fs: Option<Vec<FsConfig<'a>>>,
+    pub fs: Option<Vec<FsConfig>>,
     pub pmem: Option<Vec<PmemConfig<'a>>>,
     pub serial: ConsoleConfig<'a>,
     pub console: ConsoleConfig<'a>,
