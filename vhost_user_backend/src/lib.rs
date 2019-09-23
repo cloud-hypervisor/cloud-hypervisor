@@ -115,7 +115,7 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
     /// listening onto registered event. Those events can be vring events or
     /// custom events from the backend, but they get to be registered later
     /// during the sequence.
-    pub fn new(name: String, sock_path: String, backend: S) -> Result<Self> {
+    pub fn new(name: String, sock_path: String, backend: Arc<RwLock<S>>) -> Result<Self> {
         let handler = Arc::new(Mutex::new(
             VhostUserHandler::new(backend).map_err(Error::NewVhostUserHandler)?,
         ));
@@ -497,17 +497,16 @@ struct VhostUserHandler<S: VhostUserBackend> {
 }
 
 impl<S: VhostUserBackend> VhostUserHandler<S> {
-    fn new(backend: S) -> VhostUserHandlerResult<Self> {
-        let num_queues = backend.num_queues();
-        let max_queue_size = backend.max_queue_size();
+    fn new(backend: Arc<RwLock<S>>) -> VhostUserHandlerResult<Self> {
+        let num_queues = backend.read().unwrap().num_queues();
+        let max_queue_size = backend.read().unwrap().max_queue_size();
 
-        let arc_backend = Arc::new(RwLock::new(backend));
         let vrings = vec![Arc::new(RwLock::new(Vring::new(max_queue_size as u16))); num_queues];
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(VhostUserHandlerError::EpollCreateFd)?;
 
         let vring_handler = Arc::new(RwLock::new(VringEpollHandler {
-            backend: arc_backend.clone(),
+            backend: backend.clone(),
             vrings: vrings.clone(),
             mem: None,
             epoll_fd,
@@ -522,7 +521,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
             .map_err(VhostUserHandlerError::SpawnVringWorker)?;
 
         Ok(VhostUserHandler {
-            backend: arc_backend,
+            backend,
             vring_handler,
             owned: false,
             features_acked: false,
