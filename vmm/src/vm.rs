@@ -426,7 +426,7 @@ impl Vcpu {
 pub struct VmInfo<'a> {
     pub memory: &'a Arc<RwLock<GuestMemoryMmap>>,
     pub vm_fd: &'a Arc<VmFd>,
-    pub vm_cfg: &'a VmConfig<'a>,
+    pub vm_cfg: &'a VmConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -507,7 +507,7 @@ pub struct Vm<'a> {
     threads: Vec<thread::JoinHandle<()>>,
     devices: DeviceManager,
     cpuid: CpuId,
-    config: &'a VmConfig<'a>,
+    config: &'a VmConfig,
     epoll: EpollContext,
     on_tty: bool,
     creation_ts: std::time::Instant,
@@ -533,7 +533,7 @@ fn get_host_cpu_phys_bits() -> u8 {
 }
 
 impl<'a> Vm<'a> {
-    pub fn new(kvm: &Kvm, config: &'a VmConfig<'a>) -> Result<Self> {
+    pub fn new(kvm: &Kvm, config: &'a VmConfig) -> Result<Self> {
         let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
         let fd = Arc::new(fd);
