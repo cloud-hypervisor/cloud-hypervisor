@@ -10,7 +10,7 @@ use net_util::MacAddr;
 use std::convert::From;
 use std::net::AddrParseError;
 use std::net::Ipv4Addr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::result;
 use vm_memory::GuestAddress;
 use vm_virtio::vhost_user::VhostUserConfig;
@@ -521,13 +521,13 @@ impl VhostUserNetConfig {
     }
 }
 
-pub struct VsockConfig<'a> {
+pub struct VsockConfig {
     pub cid: u64,
-    pub sock: &'a Path,
+    pub sock: PathBuf,
 }
 
-impl<'a> VsockConfig<'a> {
-    pub fn parse(vsock: &'a str) -> Result<Self> {
+impl VsockConfig {
+    pub fn parse(vsock: &str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = vsock.split(',').collect();
 
@@ -548,7 +548,7 @@ impl<'a> VsockConfig<'a> {
 
         Ok(VsockConfig {
             cid: cid_str.parse::<u64>().map_err(Error::ParseVsockCidParam)?,
-            sock: Path::new(sock_str),
+            sock: PathBuf::from(sock_str),
         })
     }
 }
@@ -608,7 +608,7 @@ impl VhostUserBlkConfig {
     }
 }
 
-pub struct VmConfig<'a> {
+pub struct VmConfig {
     pub cpus: CpusConfig,
     pub memory: MemoryConfig,
     pub kernel: KernelConfig,
@@ -623,11 +623,11 @@ pub struct VmConfig<'a> {
     pub devices: Option<Vec<DeviceConfig>>,
     pub vhost_user_net: Option<Vec<VhostUserNetConfig>>,
     pub vhost_user_blk: Option<Vec<VhostUserBlkConfig>>,
-    pub vsock: Option<Vec<VsockConfig<'a>>>,
+    pub vsock: Option<Vec<VsockConfig>>,
 }
 
-impl<'a> VmConfig<'a> {
-    pub fn parse(vm_params: VmParams<'a>) -> Result<Self> {
+impl VmConfig {
+    pub fn parse(vm_params: VmParams) -> Result<Self> {
         let mut disks: Option<Vec<DiskConfig>> = None;
         if let Some(disk_list) = &vm_params.disks {
             let mut disk_config_list = Vec::new();
