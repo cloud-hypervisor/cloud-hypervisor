@@ -368,13 +368,13 @@ impl FsConfig {
     }
 }
 
-pub struct PmemConfig<'a> {
-    pub file: &'a Path,
+pub struct PmemConfig {
+    pub file: PathBuf,
     pub size: u64,
 }
 
-impl<'a> PmemConfig<'a> {
-    pub fn parse(pmem: &'a str) -> Result<Self> {
+impl PmemConfig {
+    pub fn parse(pmem: &str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = pmem.split(',').collect();
 
@@ -394,7 +394,7 @@ impl<'a> PmemConfig<'a> {
         }
 
         Ok(PmemConfig {
-            file: Path::new(file_str),
+            file: PathBuf::from(file_str),
             size: parse_size(size_str)?,
         })
     }
@@ -617,7 +617,7 @@ pub struct VmConfig<'a> {
     pub net: Option<Vec<NetConfig>>,
     pub rng: RngConfig,
     pub fs: Option<Vec<FsConfig>>,
-    pub pmem: Option<Vec<PmemConfig<'a>>>,
+    pub pmem: Option<Vec<PmemConfig>>,
     pub serial: ConsoleConfig<'a>,
     pub console: ConsoleConfig<'a>,
     pub devices: Option<Vec<DeviceConfig<'a>>>,

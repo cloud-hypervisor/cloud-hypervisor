@@ -719,7 +719,7 @@ impl DeviceManager {
                     .read(true)
                     .write(true)
                     .custom_flags(custom_flags)
-                    .open(pmem_cfg.file)
+                    .open(&pmem_cfg.file)
                     .map_err(DeviceManagerError::PmemFileOpen)?;
 
                 if set_len {
