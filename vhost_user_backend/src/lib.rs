@@ -85,10 +85,18 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     ) -> result::Result<u32, io::Error>;
 
     /// Get virtio device configuration.
-    fn get_config(&self, offset: u32, size: u32) -> Vec<u8>;
+    /// A default implementation is provided as we cannot expect all backends
+    /// to implement this function.
+    fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        Vec::new()
+    }
 
     /// Set virtio device configuration.
-    fn set_config(&mut self, offset: u32, buf: &[u8]) -> result::Result<(), io::Error>;
+    /// A default implementation is provided as we cannot expect all backends
+    /// to implement this function.
+    fn set_config(&mut self, offset: u32, buf: &[u8]) -> result::Result<(), io::Error> {
+        Ok(())
+    }
 }
 
 /// This structure is the public API the backend is allowed to interact with
