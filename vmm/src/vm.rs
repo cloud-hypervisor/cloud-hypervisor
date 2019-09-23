@@ -564,7 +564,7 @@ impl<'a> Vm<'a> {
         }
 
         let guest_memory = match config.memory.file {
-            Some(file) => {
+            Some(ref file) => {
                 let mut mem_regions = Vec::<(GuestAddress, usize, Option<FileOffset>)>::new();
                 for region in ram_regions.iter() {
                     if file.is_file() {
