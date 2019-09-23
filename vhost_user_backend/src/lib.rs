@@ -105,7 +105,6 @@ pub struct VhostUserDaemon<S: VhostUserBackend> {
     name: String,
     sock_path: String,
     handler: Arc<Mutex<VhostUserHandler<S>>>,
-    vring_handler: Arc<RwLock<VringEpollHandler<S>>>,
     main_thread: Option<thread::JoinHandle<Result<()>>>,
 }
 
@@ -120,13 +119,11 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
         let handler = Arc::new(Mutex::new(
             VhostUserHandler::new(backend).map_err(Error::NewVhostUserHandler)?,
         ));
-        let vring_handler = handler.lock().unwrap().get_vring_handler();
 
         Ok(VhostUserDaemon {
             name,
             sock_path,
             handler,
-            vring_handler,
             main_thread: None,
         })
     }
@@ -166,47 +163,11 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
         Ok(())
     }
 
-    /// Register a custom event only meaningful to the caller. When this event
-    /// is later triggered, and because only the caller knows what to do about
-    /// it, the backend implementation of `handle_event` will be called.
-    /// This lets entire control to the caller about what needs to be done for
-    /// this special event, without forcing it to run its own dedicated epoll
-    /// loop for it.
-    pub fn register_listener(&self, fd: RawFd, ev_type: epoll::Events, data: u64) -> Result<()> {
-        self.vring_handler
-            .read()
-            .unwrap()
-            .register_listener(fd, ev_type, data)
-            .map_err(Error::RegisterListener)
-    }
-
-    /// Unregister a custom event. If the custom event is triggered after this
-    /// function has been called, nothing will happen as it will be removed
-    /// from the list of file descriptors the epoll loop is listening to.
-    pub fn unregister_listener(&self, fd: RawFd, ev_type: epoll::Events, data: u64) -> Result<()> {
-        self.vring_handler
-            .read()
-            .unwrap()
-            .unregister_listener(fd, ev_type, data)
-            .map_err(Error::RegisterListener)
-    }
-
-    /// Trigger the processing of a virtqueue. This function is meant to be
-    /// used by the caller whenever it might need some available queues to
-    /// send data back to the guest.
-    /// A concrete example is a backend registering one extra listener for
-    /// data that needs to be sent to the guest. When the associated event
-    /// is triggered, the backend will be invoked through its `handle_event`
-    /// implementation. And in this case, the way to handle the event is to
-    /// call into `process_queue` to let it invoke the backend implementation
-    /// of `process_queue`. With this twisted trick, all common parts related
-    /// to the virtqueues can remain part of the library.
-    pub fn process_queue(&self, q_idx: u16) -> Result<()> {
-        self.vring_handler
-            .write()
-            .unwrap()
-            .process_queue(q_idx)
-            .map_err(Error::ProcessQueue)
+    /// Retrieve the vring handler. This is necessary to perform further
+    /// actions like registering and unregistering some extra event file
+    /// descriptors, as well as forcing some vring to be processed.
+    pub fn get_vring_handler(&self) -> Arc<RwLock<VringEpollHandler<S>>> {
+        self.handler.lock().unwrap().get_vring_handler()
     }
 }
 
@@ -286,7 +247,7 @@ impl error::Error for VringEpollHandlerError {}
 /// Result of vring epoll handler operations.
 type VringEpollHandlerResult<T> = std::result::Result<T, VringEpollHandlerError>;
 
-struct VringEpollHandler<S: VhostUserBackend> {
+pub struct VringEpollHandler<S: VhostUserBackend> {
     backend: Arc<RwLock<S>>,
     vrings: Vec<Arc<RwLock<Vring>>>,
     mem: Option<GuestMemoryMmap>,
@@ -298,7 +259,17 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
         self.mem = mem;
     }
 
-    fn process_queue(&mut self, q_idx: u16) -> VringEpollHandlerResult<()> {
+    /// Trigger the processing of a virtqueue. This function is meant to be
+    /// used by the caller whenever it might need some available queues to
+    /// send data back to the guest.
+    /// A concrete example is a backend registering one extra listener for
+    /// data that needs to be sent to the guest. When the associated event
+    /// is triggered, the backend will be invoked through its `handle_event`
+    /// implementation. And in this case, the way to handle the event is to
+    /// call into `process_queue` to let it invoke the backend implementation
+    /// of `process_queue`. With this twisted trick, all common parts related
+    /// to the virtqueues can remain part of the library.
+    pub fn process_queue(&mut self, q_idx: u16) -> VringEpollHandlerResult<()> {
         let vring = &mut self.vrings[q_idx as usize].write().unwrap();
         let mut used_desc_heads = vec![(0, 0); vring.queue.size as usize];
         let mut used_count = 0;
@@ -379,7 +350,13 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
         }
     }
 
-    fn register_listener(
+    /// Register a custom event only meaningful to the caller. When this event
+    /// is later triggered, and because only the caller knows what to do about
+    /// it, the backend implementation of `handle_event` will be called.
+    /// This lets entire control to the caller about what needs to be done for
+    /// this special event, without forcing it to run its own dedicated epoll
+    /// loop for it.
+    pub fn register_listener(
         &self,
         fd: RawFd,
         ev_type: epoll::Events,
@@ -393,7 +370,10 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
         )
     }
 
-    fn unregister_listener(
+    /// Unregister a custom event. If the custom event is triggered after this
+    /// function has been called, nothing will happen as it will be removed
+    /// from the list of file descriptors the epoll loop is listening to.
+    pub fn unregister_listener(
         &self,
         fd: RawFd,
         ev_type: epoll::Events,
