@@ -417,13 +417,13 @@ impl ConsoleOutputMode {
     }
 }
 
-pub struct ConsoleConfig<'a> {
-    pub file: Option<&'a Path>,
+pub struct ConsoleConfig {
+    pub file: Option<PathBuf>,
     pub mode: ConsoleOutputMode,
 }
 
-impl<'a> ConsoleConfig<'a> {
-    pub fn parse(param: &'a str) -> Result<Self> {
+impl ConsoleConfig {
+    pub fn parse(param: &str) -> Result<Self> {
         if param == "off" {
             Ok(Self {
                 mode: ConsoleOutputMode::Off,
@@ -437,7 +437,7 @@ impl<'a> ConsoleConfig<'a> {
         } else if param.starts_with("file=") {
             Ok(Self {
                 mode: ConsoleOutputMode::File,
-                file: Some(Path::new(&param[5..])),
+                file: Some(PathBuf::from(&param[5..])),
             })
         } else if param.starts_with("null") {
             Ok(Self {
@@ -618,8 +618,8 @@ pub struct VmConfig<'a> {
     pub rng: RngConfig,
     pub fs: Option<Vec<FsConfig>>,
     pub pmem: Option<Vec<PmemConfig>>,
-    pub serial: ConsoleConfig<'a>,
-    pub console: ConsoleConfig<'a>,
+    pub serial: ConsoleConfig,
+    pub console: ConsoleConfig,
     pub devices: Option<Vec<DeviceConfig<'a>>>,
     pub vhost_user_net: Option<Vec<VhostUserNetConfig<'a>>>,
     pub vhost_user_blk: Option<Vec<VhostUserBlkConfig<'a>>>,
