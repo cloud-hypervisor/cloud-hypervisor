@@ -676,7 +676,7 @@ impl DeviceManager {
 
                     let virtio_fs_device = vm_virtio::vhost_user::Fs::new(
                         fs_sock,
-                        fs_cfg.tag,
+                        &fs_cfg.tag,
                         fs_cfg.num_queues,
                         fs_cfg.queue_size,
                         cache,
