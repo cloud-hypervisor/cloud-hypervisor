@@ -19,7 +19,7 @@ use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDev
 use super::handler::*;
 use super::vu_common_ctrl::*;
 use super::{Error, Result};
-use vhost_rs::vhost_user::message::VhostUserVirtioFeatures;
+use vhost_rs::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_rs::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost_rs::VhostBackend;
 use virtio_bindings::bindings::virtio_net;
@@ -82,9 +82,13 @@ impl Net {
         let mut acked_features = 0;
         if avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
             acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
-            vhost_user_net
+            let mut protocol_features = vhost_user_net
                 .get_protocol_features()
                 .map_err(Error::VhostUserGetProtocolFeatures)?;
+            protocol_features &= VhostUserProtocolFeatures::MQ;
+            vhost_user_net
+                .set_protocol_features(protocol_features)
+                .map_err(Error::VhostUserSetProtocolFeatures)?;
         } else {
             return Err(Error::VhostUserProtocolNotSupport);
         }
