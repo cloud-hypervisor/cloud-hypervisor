@@ -285,7 +285,7 @@ fn main() {
         vm_config.disks,
     );
 
-    if let Err(e) = vmm::boot_kernel(vm_config) {
+    if let Err(e) = vmm::start_vm_loop(vm_config) {
         println!("Guest boot failed: {}", e);
         process::exit(1);
     }

@@ -3,11 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-extern crate kvm_ioctls;
 #[macro_use]
 extern crate log;
 
-use kvm_ioctls::*;
 use std::fmt::{self, Display};
 use std::result;
 
@@ -40,21 +38,9 @@ impl Display for Error {
     }
 }
 
-struct Vmm {
-    kvm: Kvm,
-}
-
-impl Vmm {
-    fn new() -> Result<Self> {
-        let kvm = Kvm::new().expect("new KVM instance creation failed");
-        Ok(Vmm { kvm })
-    }
-}
-
-pub fn boot_kernel(config: VmConfig) -> Result<()> {
+pub fn start_vm_loop(config: VmConfig) -> Result<()> {
     loop {
-        let vmm = Vmm::new()?;
-        let mut vm = Vm::new(&vmm.kvm, &config).map_err(Error::VmNew)?;
+        let mut vm = Vm::new(&config).map_err(Error::VmNew)?;
 
         if vm.start().map_err(Error::VmStart)? == ExitBehaviour::Shutdown {
             break;

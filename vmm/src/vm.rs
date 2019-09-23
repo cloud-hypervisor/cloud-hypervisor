@@ -211,6 +211,9 @@ pub enum Error {
 
     /// Failed to join on vCPU threads
     ThreadCleanup,
+
+    /// Failed to create a new KVM instance
+    KvmNew(io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -533,7 +536,8 @@ fn get_host_cpu_phys_bits() -> u8 {
 }
 
 impl<'a> Vm<'a> {
-    pub fn new(kvm: &Kvm, config: &'a VmConfig) -> Result<Self> {
+    pub fn new(config: &'a VmConfig) -> Result<Self> {
+        let kvm = Kvm::new().map_err(Error::KvmNew)?;
         let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
         let fd = Arc::new(fd);
