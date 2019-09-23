@@ -18,7 +18,7 @@ use vhost_rs::vhost_user::message::{
     VHOST_USER_CONFIG_OFFSET, VHOST_USER_CONFIG_SIZE,
 };
 use vhost_rs::vhost_user::{
-    Error as VhostUserError, Result as VhostUserResult, SlaveReqHandler, VhostUserSlaveReqHandler,
+    Error as VhostUserError, Result as VhostUserResult, SlaveListener, VhostUserSlaveReqHandler,
 };
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{GuestAddress, GuestMemoryMmap};
@@ -30,6 +30,8 @@ use vmm_sys_util::eventfd::EventFd;
 pub enum Error {
     /// Failed to create a new vhost-user handler.
     NewVhostUserHandler(VhostUserHandlerError),
+    /// Failed creating vhost-user slave listener.
+    CreateSlaveListener(VhostUserError),
     /// Failed creating vhost-user slave handler.
     CreateSlaveReqHandler(VhostUserError),
     /// Failed starting daemon thread.
@@ -126,9 +128,13 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
     /// that should be terminating once the other end of the socket (the VMM)
     /// disconnects.
     pub fn start(&mut self) -> Result<()> {
-        let mut slave_handler =
-            SlaveReqHandler::connect(self.sock_path.as_str(), self.handler.clone())
-                .map_err(Error::CreateSlaveReqHandler)?;
+        let mut slave_listener =
+            SlaveListener::new(self.sock_path.as_str(), false, self.handler.clone())
+                .map_err(Error::CreateSlaveListener)?;
+        let mut slave_handler = slave_listener
+            .accept()
+            .map_err(Error::CreateSlaveReqHandler)?
+            .unwrap();
         let handle = thread::Builder::new()
             .name(self.name.clone())
             .spawn(move || loop {
