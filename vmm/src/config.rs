@@ -172,14 +172,14 @@ impl MemoryConfig {
     }
 }
 
-pub struct KernelConfig<'a> {
-    pub path: &'a Path,
+pub struct KernelConfig {
+    pub path: PathBuf,
 }
 
-impl<'a> KernelConfig<'a> {
-    pub fn parse(kernel: &'a str) -> Result<Self> {
+impl KernelConfig {
+    pub fn parse(kernel: &str) -> Result<Self> {
         Ok(KernelConfig {
-            path: Path::new(kernel),
+            path: PathBuf::from(kernel),
         })
     }
 }
@@ -611,7 +611,7 @@ impl<'a> VhostUserBlkConfig<'a> {
 pub struct VmConfig<'a> {
     pub cpus: CpusConfig,
     pub memory: MemoryConfig,
-    pub kernel: KernelConfig<'a>,
+    pub kernel: KernelConfig,
     pub cmdline: CmdlineConfig,
     pub disks: Option<Vec<DiskConfig<'a>>>,
     pub net: Option<Vec<NetConfig<'a>>>,
