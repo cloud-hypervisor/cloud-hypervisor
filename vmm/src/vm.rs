@@ -766,7 +766,7 @@ impl<'a> Vm<'a> {
         })
     }
 
-    pub fn load_kernel(&mut self) -> Result<GuestAddress> {
+    fn load_kernel(&mut self) -> Result<GuestAddress> {
         let mut cmdline = self.config.cmdline.args.clone();
         for entry in self.devices.cmdline_additions() {
             cmdline.insert_str(entry).map_err(|_| Error::CmdLine)?;
@@ -956,10 +956,9 @@ impl<'a> Vm<'a> {
         }
     }
 
-    pub fn start(&mut self, entry_addr: GuestAddress) -> Result<ExitBehaviour> {
+    pub fn start(&mut self) -> Result<ExitBehaviour> {
+        let entry_addr = self.load_kernel()?;
         let vcpu_count = u8::from(&self.config.cpus);
-
-        //        let vcpus: Vec<thread::JoinHandle<()>> = Vec::with_capacity(vcpu_count as usize);
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
 
         for cpu_id in 0..vcpu_count {
