@@ -46,10 +46,10 @@ pub struct Blk {
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
-impl<'a> Blk {
+impl Blk {
     /// Create a new vhost-user-blk device
-    pub fn new(wce: bool, vu_cfg: VhostUserConfig<'a>) -> Result<Blk> {
-        let mut vhost_user_blk = Master::connect(vu_cfg.sock, vu_cfg.num_queues as u64)
+    pub fn new(wce: bool, vu_cfg: VhostUserConfig) -> Result<Blk> {
+        let mut vhost_user_blk = Master::connect(&vu_cfg.sock, vu_cfg.num_queues as u64)
             .map_err(Error::VhostUserCreateMaster)?;
 
         // Filling device and vring features VMM supports.

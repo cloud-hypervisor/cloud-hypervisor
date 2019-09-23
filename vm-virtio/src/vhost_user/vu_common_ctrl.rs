@@ -14,9 +14,9 @@ use super::{Error, Result};
 use vhost_rs::vhost_user::{Master, VhostUserMaster};
 use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 
-#[derive(Debug, Copy, Clone)]
-pub struct VhostUserConfig<'a> {
-    pub sock: &'a str,
+#[derive(Debug, Clone)]
+pub struct VhostUserConfig {
+    pub sock: String,
     pub num_queues: usize,
     pub queue_size: u16,
 }

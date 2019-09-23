@@ -773,7 +773,7 @@ impl DeviceManager {
             for vhost_user_net_cfg in vhost_user_net_list_cfg.iter() {
                 let vhost_user_net_device = vm_virtio::vhost_user::Net::new(
                     vhost_user_net_cfg.mac,
-                    vhost_user_net_cfg.vu_cfg,
+                    vhost_user_net_cfg.vu_cfg.clone(),
                 )
                 .map_err(DeviceManagerError::CreateVhostUserNet)?;
 
@@ -793,7 +793,7 @@ impl DeviceManager {
             for vhost_user_blk_cfg in vhost_user_blk_list_cfg.iter() {
                 let vhost_user_blk_device = vm_virtio::vhost_user::Blk::new(
                     vhost_user_blk_cfg.wce,
-                    vhost_user_blk_cfg.vu_cfg,
+                    vhost_user_blk_cfg.vu_cfg.clone(),
                 )
                 .map_err(DeviceManagerError::CreateVhostUserBlk)?;
 

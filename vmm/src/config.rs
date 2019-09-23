@@ -463,13 +463,13 @@ impl DeviceConfig {
     }
 }
 
-pub struct VhostUserNetConfig<'a> {
+pub struct VhostUserNetConfig {
     pub mac: MacAddr,
-    pub vu_cfg: VhostUserConfig<'a>,
+    pub vu_cfg: VhostUserConfig,
 }
 
-impl<'a> VhostUserNetConfig<'a> {
-    pub fn parse(vhost_user_net: &'a str) -> Result<Self> {
+impl VhostUserNetConfig {
+    pub fn parse(vhost_user_net: &str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = vhost_user_net.split(',').collect();
 
@@ -512,7 +512,7 @@ impl<'a> VhostUserNetConfig<'a> {
         }
 
         let vu_cfg = VhostUserConfig {
-            sock,
+            sock: sock.to_string(),
             num_queues,
             queue_size,
         };
@@ -553,13 +553,13 @@ impl<'a> VsockConfig<'a> {
     }
 }
 
-pub struct VhostUserBlkConfig<'a> {
+pub struct VhostUserBlkConfig {
     pub wce: bool,
-    pub vu_cfg: VhostUserConfig<'a>,
+    pub vu_cfg: VhostUserConfig,
 }
 
-impl<'a> VhostUserBlkConfig<'a> {
-    pub fn parse(vhost_user_blk: &'a str) -> Result<Self> {
+impl VhostUserBlkConfig {
+    pub fn parse(vhost_user_blk: &str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = vhost_user_blk.split(',').collect();
 
@@ -599,7 +599,7 @@ impl<'a> VhostUserBlkConfig<'a> {
         }
 
         let vu_cfg = VhostUserConfig {
-            sock,
+            sock: sock.to_string(),
             num_queues,
             queue_size,
         };
@@ -621,8 +621,8 @@ pub struct VmConfig<'a> {
     pub serial: ConsoleConfig,
     pub console: ConsoleConfig,
     pub devices: Option<Vec<DeviceConfig>>,
-    pub vhost_user_net: Option<Vec<VhostUserNetConfig<'a>>>,
-    pub vhost_user_blk: Option<Vec<VhostUserBlkConfig<'a>>>,
+    pub vhost_user_net: Option<Vec<VhostUserNetConfig>>,
+    pub vhost_user_blk: Option<Vec<VhostUserBlkConfig>>,
     pub vsock: Option<Vec<VsockConfig<'a>>>,
 }
 
