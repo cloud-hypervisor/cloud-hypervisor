@@ -325,7 +325,7 @@ impl DeviceManager {
 
         let serial_writer: Option<Box<dyn io::Write + Send>> = match vm_info.vm_cfg.serial.mode {
             ConsoleOutputMode::File => Some(Box::new(
-                File::create(vm_info.vm_cfg.serial.file.unwrap())
+                File::create(vm_info.vm_cfg.serial.file.as_ref().unwrap())
                     .map_err(DeviceManagerError::SerialOutputFileOpen)?,
             )),
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
@@ -386,7 +386,7 @@ impl DeviceManager {
 
         let console_writer: Option<Box<dyn io::Write + Send>> = match vm_info.vm_cfg.console.mode {
             ConsoleOutputMode::File => Some(Box::new(
-                File::create(vm_info.vm_cfg.console.file.unwrap())
+                File::create(vm_info.vm_cfg.console.file.as_ref().unwrap())
                     .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
             )),
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
