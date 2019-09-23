@@ -10,7 +10,7 @@ use net_util::MacAddr;
 use std::convert::From;
 use std::net::AddrParseError;
 use std::net::Ipv4Addr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::result;
 use vm_memory::GuestAddress;
 use vm_virtio::vhost_user::VhostUserConfig;
@@ -132,13 +132,13 @@ impl From<&CpusConfig> for u8 {
     }
 }
 
-pub struct MemoryConfig<'a> {
+pub struct MemoryConfig {
     pub size: u64,
-    pub file: Option<&'a Path>,
+    pub file: Option<PathBuf>,
 }
 
-impl<'a> MemoryConfig<'a> {
-    pub fn parse(memory: &'a str) -> Result<Self> {
+impl MemoryConfig {
+    pub fn parse(memory: &str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = memory.split(',').collect();
 
@@ -160,7 +160,7 @@ impl<'a> MemoryConfig<'a> {
                 return Err(Error::ParseMemoryFileParam);
             }
 
-            Some(Path::new(file_str))
+            Some(PathBuf::from(file_str))
         } else {
             None
         };
@@ -610,7 +610,7 @@ impl<'a> VhostUserBlkConfig<'a> {
 
 pub struct VmConfig<'a> {
     pub cpus: CpusConfig,
-    pub memory: MemoryConfig<'a>,
+    pub memory: MemoryConfig,
     pub kernel: KernelConfig<'a>,
     pub cmdline: CmdlineConfig,
     pub disks: Option<Vec<DiskConfig<'a>>>,
