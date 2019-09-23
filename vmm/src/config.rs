@@ -268,14 +268,14 @@ impl NetConfig {
     }
 }
 
-pub struct RngConfig<'a> {
-    pub src: &'a Path,
+pub struct RngConfig {
+    pub src: PathBuf,
 }
 
-impl<'a> RngConfig<'a> {
-    pub fn parse(rng: &'a str) -> Result<Self> {
+impl RngConfig {
+    pub fn parse(rng: &str) -> Result<Self> {
         Ok(RngConfig {
-            src: Path::new(rng),
+            src: PathBuf::from(rng),
         })
     }
 }
@@ -615,7 +615,7 @@ pub struct VmConfig<'a> {
     pub cmdline: CmdlineConfig,
     pub disks: Option<Vec<DiskConfig>>,
     pub net: Option<Vec<NetConfig>>,
-    pub rng: RngConfig<'a>,
+    pub rng: RngConfig,
     pub fs: Option<Vec<FsConfig<'a>>>,
     pub pmem: Option<Vec<PmemConfig<'a>>>,
     pub serial: ConsoleConfig<'a>,
