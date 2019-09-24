@@ -503,14 +503,14 @@ pub enum ExitBehaviour {
     Reset = 2,
 }
 
-pub struct Vm<'a> {
+pub struct Vm {
     fd: Arc<VmFd>,
     kernel: File,
     memory: Arc<RwLock<GuestMemoryMmap>>,
     threads: Vec<thread::JoinHandle<()>>,
     devices: DeviceManager,
     cpuid: CpuId,
-    config: &'a VmConfig,
+    config: Arc<VmConfig>,
     epoll: EpollContext,
     on_tty: bool,
     creation_ts: std::time::Instant,
@@ -535,8 +535,8 @@ fn get_host_cpu_phys_bits() -> u8 {
     }
 }
 
-impl<'a> Vm<'a> {
-    pub fn new(config: &'a VmConfig) -> Result<Self> {
+impl Vm {
+    pub fn new(config: Arc<VmConfig>) -> Result<Self> {
         let kvm = Kvm::new().map_err(Error::KvmNew)?;
         let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
@@ -717,7 +717,7 @@ impl<'a> Vm<'a> {
         let vm_info = VmInfo {
             memory: &guest_memory,
             vm_fd: &fd,
-            vm_cfg: config,
+            vm_cfg: &config,
         };
 
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;

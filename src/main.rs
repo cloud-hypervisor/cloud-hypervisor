@@ -11,7 +11,7 @@ extern crate clap;
 use clap::{App, Arg};
 use log::LevelFilter;
 use std::process;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use vmm::config;
 
 struct Logger {
@@ -285,7 +285,7 @@ fn main() {
         vm_config.disks,
     );
 
-    if let Err(e) = vmm::start_vm_loop(vm_config) {
+    if let Err(e) = vmm::start_vm_loop(Arc::new(vm_config)) {
         println!("Guest boot failed: {}", e);
         process::exit(1);
     }

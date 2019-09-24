@@ -8,6 +8,7 @@ extern crate log;
 
 use std::fmt::{self, Display};
 use std::result;
+use std::sync::Arc;
 
 pub mod config;
 pub mod device_manager;
@@ -38,9 +39,9 @@ impl Display for Error {
     }
 }
 
-pub fn start_vm_loop(config: VmConfig) -> Result<()> {
+pub fn start_vm_loop(config: Arc<VmConfig>) -> Result<()> {
     loop {
-        let mut vm = Vm::new(&config).map_err(Error::VmNew)?;
+        let mut vm = Vm::new(config.clone()).map_err(Error::VmNew)?;
 
         if vm.start().map_err(Error::VmStart)? == ExitBehaviour::Shutdown {
             break;
