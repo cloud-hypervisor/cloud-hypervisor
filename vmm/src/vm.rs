@@ -909,6 +909,10 @@ impl Vm {
             }
         }
 
+        Ok(exit_behaviour)
+    }
+
+    pub fn stop(&mut self) -> Result<()> {
         if self.on_tty {
             // Don't forget to set the terminal in canonical mode
             // before to exit.
@@ -941,7 +945,7 @@ impl Vm {
             thread.join().map_err(|_| Error::ThreadCleanup)?
         }
 
-        Ok(exit_behaviour)
+        Ok(())
     }
 
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>) {
