@@ -890,20 +890,7 @@ impl Vm {
 
                             break 'outer;
                         }
-                        EpollDispatch::Stdin => {
-                            let mut out = [0u8; 64];
-                            let count = io::stdin()
-                                .lock()
-                                .read_raw(&mut out)
-                                .map_err(Error::Console)?;
-
-                            if self.devices.console().input_enabled() {
-                                self.devices
-                                    .console()
-                                    .queue_input_bytes(&out[..count])
-                                    .map_err(Error::Console)?;
-                            }
-                        }
+                        EpollDispatch::Stdin => self.handle_stdin()?,
                     }
                 }
             }
@@ -1056,6 +1043,23 @@ impl Vm {
     /// Gets an Arc to the guest memory owned by this VM.
     pub fn get_memory(&self) -> Arc<RwLock<GuestMemoryMmap>> {
         self.memory.clone()
+    }
+
+    pub fn handle_stdin(&self) -> Result<()> {
+        let mut out = [0u8; 64];
+        let count = io::stdin()
+            .lock()
+            .read_raw(&mut out)
+            .map_err(Error::Console)?;
+
+        if self.devices.console().input_enabled() {
+            self.devices
+                .console()
+                .queue_input_bytes(&out[..count])
+                .map_err(Error::Console)?;
+        }
+
+        Ok(())
     }
 }
 
