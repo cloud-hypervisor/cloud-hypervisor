@@ -851,13 +851,6 @@ impl Vm {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
         let epoll_fd = self.epoll.as_raw_fd();
 
-        if self.devices.console().input_enabled() && self.on_tty {
-            io::stdin()
-                .lock()
-                .set_raw_mode()
-                .map_err(Error::SetTerminalRaw)?;
-        }
-
         let exit_behaviour;
 
         'outer: loop {
@@ -1044,7 +1037,15 @@ impl Vm {
                 }
                 Err(e) => error!("Signal not found {}", e),
             }
+
+            if self.on_tty {
+                io::stdin()
+                    .lock()
+                    .set_raw_mode()
+                    .map_err(Error::SetTerminalRaw)?;
+            }
         }
+
         self.control_loop()
     }
 
