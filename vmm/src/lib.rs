@@ -25,6 +25,9 @@ pub enum Error {
 
     /// Cannot start a VM.
     VmStart(vm::Error),
+
+    /// Cannot stop a VM.
+    VmStop(vm::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -35,6 +38,7 @@ impl Display for Error {
         match self {
             VmNew(e) => write!(f, "Can not create a new virtual machine: {:?}", e),
             VmStart(e) => write!(f, "Can not start a new virtual machine: {:?}", e),
+            VmStop(e) => write!(f, "Can not stop a virtual machine: {:?}", e),
         }
     }
 }
@@ -44,8 +48,11 @@ pub fn start_vm_loop(config: Arc<VmConfig>) -> Result<()> {
         let mut vm = Vm::new(config.clone()).map_err(Error::VmNew)?;
 
         if vm.start().map_err(Error::VmStart)? == ExitBehaviour::Shutdown {
+            vm.stop().map_err(Error::VmStop)?;
             break;
         }
+
+        vm.stop().map_err(Error::VmStop)?;
 
         #[cfg(not(feature = "acpi"))]
         break;
