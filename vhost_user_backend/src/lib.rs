@@ -172,6 +172,7 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
 struct AddrMapping {
     vmm_addr: u64,
     size: u64,
+    offset: u64,
 }
 
 struct Memory {
@@ -538,7 +539,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
         if let Some(memory) = &self.memory {
             for mapping in memory.mappings.iter() {
                 if vmm_va >= mapping.vmm_addr && vmm_va < mapping.vmm_addr + mapping.size {
-                    return Ok(vmm_va - mapping.vmm_addr);
+                    return Ok(vmm_va - mapping.vmm_addr + mapping.offset);
                 }
             }
         }
@@ -625,7 +626,8 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             regions.push((g_addr, len, Some(f_off)));
             mappings.push(AddrMapping {
                 vmm_addr: region.user_addr,
-                size: region.memory_size + region.mmap_offset,
+                size: region.memory_size,
+                offset: region.mmap_offset,
             });
         }
 
