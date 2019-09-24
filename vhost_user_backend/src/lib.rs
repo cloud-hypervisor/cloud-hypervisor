@@ -40,8 +40,6 @@ pub enum Error {
     WaitDaemon(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
     /// Failed handling a vhost-user request.
     HandleRequest(VhostUserError),
-    /// Failed to handle the event.
-    HandleEvent(io::Error),
     /// Failed to process queue.
     ProcessQueue(VringEpollHandlerError),
     /// Failed to register listener.
@@ -439,13 +437,11 @@ impl<S: VhostUserBackend> VringWorker<S> {
 
                 let ev_type = event.data as u16;
 
-                if self
-                    .handler
-                    .write()
-                    .unwrap()
-                    .handle_event(ev_type, evset)
-                    .map_err(VringWorkerError::HandleEvent)?
-                {
+                if let Err(e) = self.handler.write().unwrap().handle_event(ev_type, evset) {
+                    println!(
+                        "vring handler handle event {} with error {:?}\n",
+                        ev_type, e
+                    );
                     break 'epoll;
                 }
             }
