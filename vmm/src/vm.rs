@@ -25,7 +25,6 @@ extern crate vm_virtio;
 
 use crate::config::{ConsoleOutputMode, VmConfig};
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
-use crate::{EpollContext, EpollDispatch};
 use arch::RegionType;
 use devices::ioapic;
 use kvm_bindings::{
@@ -40,7 +39,7 @@ use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::ops::Deref;
-use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::io::FromRawFd;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -165,12 +164,6 @@ pub enum Error {
 
     /// Cannot create a device manager.
     DeviceManager(DeviceManagerError),
-
-    /// Cannot create EventFd.
-    EventFd(io::Error),
-
-    /// Cannot create epoll context.
-    EpollError(io::Error),
 
     /// Write to the console failed.
     Console(vmm_sys_util::errno::Error),
@@ -445,12 +438,10 @@ pub struct Vm {
     devices: DeviceManager,
     cpuid: CpuId,
     config: Arc<VmConfig>,
-    epoll: EpollContext,
     on_tty: bool,
     creation_ts: std::time::Instant,
     vcpus_kill_signalled: Arc<AtomicBool>,
-    // Shutdown (exit) and reboot (reset) control
-    exit_evt: EventFd,
+    // Reboot (reset) control
     reset_evt: EventFd,
     signals: Option<Signals>,
 }
@@ -665,22 +656,7 @@ impl Vm {
         )
         .map_err(Error::DeviceManager)?;
 
-        // Let's add our STDIN fd.
-        let mut epoll = EpollContext::new().map_err(Error::EpollError)?;
-
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
-        if on_tty {
-            epoll.add_stdin().map_err(Error::EpollError)?;
-        }
-
-        // Let's add an exit event.
-        epoll
-            .add_event(&exit_evt, EpollDispatch::Exit)
-            .map_err(Error::EpollError)?;
-        epoll
-            .add_event(&reset_evt, EpollDispatch::Reset)
-            .map_err(Error::EpollError)?;
-
         let threads = Vec::with_capacity(u8::from(&config.cpus) as usize + 1);
 
         Ok(Vm {
@@ -691,11 +667,9 @@ impl Vm {
             devices: device_manager,
             cpuid,
             config,
-            epoll,
             on_tty,
             creation_ts,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
-            exit_evt,
             reset_evt,
             signals: None,
         })
@@ -775,62 +749,6 @@ impl Vm {
         }
     }
 
-    pub fn control_loop(&mut self) -> Result<ExitBehaviour> {
-        // Let's start the STDIN polling thread.
-        const EPOLL_EVENTS_LEN: usize = 100;
-
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
-        let epoll_fd = self.epoll.as_raw_fd();
-
-        let exit_behaviour;
-
-        'outer: loop {
-            let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
-                Ok(res) => res,
-                Err(e) => {
-                    if e.kind() == io::ErrorKind::Interrupted {
-                        // It's well defined from the epoll_wait() syscall
-                        // documentation that the epoll loop can be interrupted
-                        // before any of the requested events occurred or the
-                        // timeout expired. In both those cases, epoll_wait()
-                        // returns an error of type EINTR, but this should not
-                        // be considered as a regular error. Instead it is more
-                        // appropriate to retry, by calling into epoll_wait().
-                        continue;
-                    }
-                    return Err(Error::EpollError(e));
-                }
-            };
-
-            for event in events.iter().take(num_events) {
-                let dispatch_idx = event.data as usize;
-
-                if let Some(dispatch_type) = self.epoll.dispatch_table[dispatch_idx] {
-                    match dispatch_type {
-                        EpollDispatch::Exit => {
-                            // Consume the event.
-                            self.exit_evt.read().map_err(Error::EventFd)?;
-                            exit_behaviour = ExitBehaviour::Shutdown;
-
-                            break 'outer;
-                        }
-                        EpollDispatch::Reset => {
-                            // Consume the event.
-                            self.reset_evt.read().map_err(Error::EventFd)?;
-                            exit_behaviour = ExitBehaviour::Reset;
-
-                            break 'outer;
-                        }
-                        EpollDispatch::Stdin => self.handle_stdin()?,
-                        EpollDispatch::Api => {}
-                    }
-                }
-            }
-        }
-
-        Ok(exit_behaviour)
-    }
-
     pub fn stop(&mut self) -> Result<()> {
         if self.on_tty {
             // Don't forget to set the terminal in canonical mode
@@ -876,7 +794,7 @@ impl Vm {
         }
     }
 
-    pub fn start(&mut self) -> Result<ExitBehaviour> {
+    pub fn start(&mut self) -> Result<()> {
         let entry_addr = self.load_kernel()?;
         let vcpu_count = u8::from(&self.config.cpus);
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
@@ -969,7 +887,7 @@ impl Vm {
             }
         }
 
-        self.control_loop()
+        Ok(())
     }
 
     /// Gets an Arc to the guest memory owned by this VM.
