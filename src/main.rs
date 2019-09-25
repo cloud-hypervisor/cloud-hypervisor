@@ -286,7 +286,7 @@ fn main() {
     );
 
     if let Err(e) = vmm::start_vm_loop(Arc::new(vm_config)) {
-        println!("Guest boot failed: {}", e);
+        println!("Guest boot failed: {:?}", e);
         process::exit(1);
     }
 }
