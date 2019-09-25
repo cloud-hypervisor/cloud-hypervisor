@@ -383,29 +383,3 @@ impl Vmm {
         Ok(exit_behaviour)
     }
 }
-
-pub fn start_vm_loop(config: Arc<VmConfig>) -> Result<()> {
-    let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
-    let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
-
-    loop {
-        let mut vm = Vm::new(
-            config.clone(),
-            exit_evt.try_clone().unwrap(),
-            reset_evt.try_clone().unwrap(),
-        )
-        .expect("Could not create VM");
-
-        if vm.start().expect("Could not start VM") == ExitBehaviour::Shutdown {
-            vm.stop().expect("Could not stop VM");
-            break;
-        }
-
-        vm.stop().expect("Could not stop VM");
-
-        #[cfg(not(feature = "acpi"))]
-        break;
-    }
-
-    Ok(())
-}

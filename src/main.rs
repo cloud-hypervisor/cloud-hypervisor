@@ -4,15 +4,19 @@
 //
 
 extern crate vmm;
+extern crate vmm_sys_util;
 
 #[macro_use(crate_version, crate_authors)]
 extern crate clap;
 
 use clap::{App, Arg};
+use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use std::process;
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use vmm::config;
+use vmm_sys_util::eventfd::EventFd;
 
 struct Logger {
     output: Mutex<Box<dyn std::io::Write + Send>>,
@@ -285,9 +289,40 @@ fn main() {
         vm_config.disks,
     );
 
-    if let Err(e) = vmm::start_vm_loop(Arc::new(vm_config)) {
-        println!("Guest boot failed: {:?}", e);
-        process::exit(1);
+    let (api_request_sender, api_request_receiver) = channel();
+    let api_evt = EventFd::new(EFD_NONBLOCK).expect("Cannot create API EventFd");
+
+    let vmm_thread = match vmm::start_vmm_thread(api_evt.try_clone().unwrap(), api_request_receiver)
+    {
+        Ok(t) => t,
+        Err(e) => {
+            println!("Failed spawning the VMM thread {:?}", e);
+            process::exit(1);
+        }
+    };
+
+    // Create and start the VM based off the VM config we just built.
+    let sender = api_request_sender.clone();
+    vmm::vm_create(
+        api_evt.try_clone().unwrap(),
+        api_request_sender,
+        Arc::new(vm_config),
+    )
+    .expect("Could not create the VM");
+    vmm::vm_start(api_evt.try_clone().unwrap(), sender).expect("Could not start the VM");
+
+    match vmm_thread.join() {
+        Ok(res) => match res {
+            Ok(_) => (),
+            Err(e) => {
+                println!("VMM thread failed {:?}", e);
+                process::exit(1);
+            }
+        },
+        Err(e) => {
+            println!("Could not joing VMM thread {:?}", e);
+            process::exit(1);
+        }
     }
 }
 
