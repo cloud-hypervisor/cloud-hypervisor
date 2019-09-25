@@ -22,7 +22,6 @@ extern crate vfio;
 extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
-extern crate vmm_sys_util;
 
 use crate::config::{ConsoleOutputMode, VmConfig};
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
@@ -33,7 +32,6 @@ use kvm_bindings::{
     KVM_PIT_SPEAKER_DUMMY,
 };
 use kvm_ioctls::*;
-use libc::EFD_NONBLOCK;
 use libc::{c_void, siginfo_t};
 use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGWINCH};
@@ -536,7 +534,7 @@ fn get_host_cpu_phys_bits() -> u8 {
 }
 
 impl Vm {
-    pub fn new(config: Arc<VmConfig>) -> Result<Self> {
+    pub fn new(config: Arc<VmConfig>, exit_evt: EventFd, reset_evt: EventFd) -> Result<Self> {
         let kvm = Kvm::new().map_err(Error::KvmNew)?;
         let kernel = File::open(&config.kernel.path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
@@ -719,9 +717,6 @@ impl Vm {
             vm_fd: &fd,
             vm_cfg: &config,
         };
-
-        let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
-        let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
 
         let device_manager = DeviceManager::new(
             &vm_info,
