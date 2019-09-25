@@ -1061,6 +1061,11 @@ impl Vm {
 
         Ok(())
     }
+
+    /// Gets a thread-safe reference counted pointer to the VM configuration.
+    pub fn get_config(&self) -> Arc<VmConfig> {
+        Arc::clone(&self.config)
+    }
 }
 
 #[allow(unused)]
