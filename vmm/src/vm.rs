@@ -25,6 +25,7 @@ extern crate vm_virtio;
 
 use crate::config::{ConsoleOutputMode, VmConfig};
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
+use crate::{EpollContext, EpollDispatch};
 use arch::RegionType;
 use devices::ioapic;
 use kvm_bindings::{
@@ -39,7 +40,7 @@ use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::ops::Deref;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
@@ -428,71 +429,6 @@ pub struct VmInfo<'a> {
     pub memory: &'a Arc<RwLock<GuestMemoryMmap>>,
     pub vm_fd: &'a Arc<VmFd>,
     pub vm_cfg: &'a VmConfig,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum EpollDispatch {
-    Exit,
-    Reset,
-    Stdin,
-}
-
-pub struct EpollContext {
-    raw_fd: RawFd,
-    dispatch_table: Vec<Option<EpollDispatch>>,
-}
-
-impl EpollContext {
-    pub fn new() -> result::Result<EpollContext, io::Error> {
-        let raw_fd = epoll::create(true)?;
-
-        // Initial capacity needs to be large enough to hold:
-        // * 1 exit event
-        // * 1 stdin event
-        let mut dispatch_table = Vec::with_capacity(4);
-        dispatch_table.push(None);
-
-        Ok(EpollContext {
-            raw_fd,
-            dispatch_table,
-        })
-    }
-
-    pub fn add_stdin(&mut self) -> result::Result<(), io::Error> {
-        let dispatch_index = self.dispatch_table.len() as u64;
-        epoll::ctl(
-            self.raw_fd,
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            libc::STDIN_FILENO,
-            epoll::Event::new(epoll::Events::EPOLLIN, dispatch_index),
-        )?;
-
-        self.dispatch_table.push(Some(EpollDispatch::Stdin));
-
-        Ok(())
-    }
-
-    fn add_event<T>(&mut self, fd: &T, token: EpollDispatch) -> result::Result<(), io::Error>
-    where
-        T: AsRawFd,
-    {
-        let dispatch_index = self.dispatch_table.len() as u64;
-        epoll::ctl(
-            self.raw_fd,
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            fd.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, dispatch_index),
-        )?;
-        self.dispatch_table.push(Some(token));
-
-        Ok(())
-    }
-}
-
-impl AsRawFd for EpollContext {
-    fn as_raw_fd(&self) -> RawFd {
-        self.raw_fd
-    }
 }
 
 #[derive(PartialEq)]
@@ -886,6 +822,7 @@ impl Vm {
                             break 'outer;
                         }
                         EpollDispatch::Stdin => self.handle_stdin()?,
+                        EpollDispatch::Api => {}
                     }
                 }
             }
