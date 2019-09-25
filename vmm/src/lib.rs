@@ -213,6 +213,44 @@ pub fn start_vmm_thread(
         .map_err(Error::VmmThreadSpawn)
 }
 
+pub fn vm_create(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    config: Arc<VmConfig>,
+) -> Result<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM creation request.
+    api_sender
+        .send(ApiRequest::VmCreate(config, response_sender))
+        .map_err(Error::ApiRequestSend)?;
+    api_evt.write(1).map_err(Error::EventFdWrite)?;
+
+    response_receiver
+        .recv()
+        .map_err(Error::ApiResponseRecv)?
+        .map_err(Error::ApiVmCreate)?;
+
+    Ok(())
+}
+
+pub fn vm_start(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM start request.
+    api_sender
+        .send(ApiRequest::VmStart(response_sender))
+        .map_err(Error::ApiRequestSend)?;
+    api_evt.write(1).map_err(Error::EventFdWrite)?;
+
+    response_receiver
+        .recv()
+        .map_err(Error::ApiResponseRecv)?
+        .map_err(Error::ApiVmStart)?;
+
+    Ok(())
+}
+
 pub struct Vmm {
     epoll: EpollContext,
     exit_evt: EventFd,
