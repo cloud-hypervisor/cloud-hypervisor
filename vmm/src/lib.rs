@@ -73,6 +73,9 @@ pub enum Error {
 
     /// Cannot stop a VM
     VmStop(VmError),
+
+    /// Cannot create VMM thread
+    VmmThreadSpawn(io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -142,6 +145,72 @@ impl AsRawFd for EpollContext {
     fn as_raw_fd(&self) -> RawFd {
         self.raw_fd
     }
+}
+
+pub fn start_vmm_thread(
+    api_event: EventFd,
+    api_receiver: Receiver<ApiRequest>,
+) -> Result<thread::JoinHandle<Result<()>>> {
+    thread::Builder::new()
+        .name("vmm".to_string())
+        .spawn(move || {
+            let mut vmm = Vmm::new(api_event)?;
+
+            let receiver = Arc::new(api_receiver);
+            'outer: loop {
+                match vmm.control_loop(Arc::clone(&receiver)) {
+                    Ok(ExitBehaviour::Reset) => {
+                        // The VMM control loop exites with a reset behaviour.
+                        // We have to reboot the VM, i.e. we create a new VM
+                        // based on the same VM config, start it and restart
+                        // the control loop.
+
+                        // Without ACPI, a reset is equivalent to a shutdown
+                        #[cfg(not(feature = "acpi"))]
+                        {
+                            if let Some(ref mut vm) = vmm.vm {
+                                vm.stop().map_err(Error::VmStop)?;
+                                break 'outer;
+                            }
+                        }
+
+                        // First we stop the current VM and create a new one.
+                        if let Some(ref mut vm) = vmm.vm {
+                            let config = vm.get_config();
+                            vm.stop().map_err(Error::VmStop)?;
+
+                            let exit_evt = vmm.exit_evt.try_clone().map_err(Error::EventFdClone)?;
+                            let reset_evt =
+                                vmm.reset_evt.try_clone().map_err(Error::EventFdClone)?;
+
+                            vmm.vm = Some(
+                                Vm::new(config, exit_evt, reset_evt).map_err(Error::VmCreate)?,
+                            );
+                        }
+
+                        // Then we start the new VM.
+                        if let Some(ref mut vm) = vmm.vm {
+                            vm.start().map_err(Error::VmStart)?;
+                        }
+
+                        // Continue and restart the VMM control loop
+                        continue 'outer;
+                    }
+                    Ok(ExitBehaviour::Shutdown) => {
+                        // The VMM control loop exites with a shutdown behaviour.
+                        // We have to stop the VM and we exit thr thread.
+                        if let Some(ref mut vm) = vmm.vm {
+                            vm.stop().map_err(Error::VmStop)?;
+                        }
+                        break 'outer;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+
+            Ok(())
+        })
+        .map_err(Error::VmmThreadSpawn)
 }
 
 pub struct Vmm {
