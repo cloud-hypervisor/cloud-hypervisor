@@ -14,6 +14,7 @@ use std::result;
 use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
 
+pub mod api;
 pub mod config;
 pub mod device_manager;
 pub mod vm;
