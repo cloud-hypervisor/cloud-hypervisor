@@ -255,7 +255,7 @@ etc, are all equal and welcome means of contribution. See the [CONTRIBUTING](CON
 
 ## Join us
 
-Get an [invite to our Slack channel](https://join.slack.com/t/cloud-hypervisor/shared_invite/enQtNjY3MTE3MDkwNDQ4LTc0YzlmYzQxZDkxNDVhYzZjZjA5MTkxMGY3NTI3YzMzYTFkM2IyY2E0YTIxMzkyYTEwYzdlMzBhMWYxYzVmNDI)
+Get an [invite to our Slack channel](https://join.slack.com/t/cloud-hypervisor/shared_invite/enQtNjY3MTE3MDkwNDQ4LWQ1MTA1ZDVmODkwMWQ1MTRhYzk4ZGNlN2UwNTI3ZmFlODU0OTcwOWZjMTkwZDExYWE3YjFmNzgzY2FmNDAyMjI)
 and [join us on Slack](https://cloud-hypervisor.slack.com/).
 
 # 6. Security
