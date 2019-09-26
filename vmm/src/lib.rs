@@ -19,7 +19,7 @@ use crate::vm::{Error as VmError, ExitBehaviour, Vm};
 use libc::EFD_NONBLOCK;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::mpsc::{channel, Receiver, RecvError, SendError, Sender};
+use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::Arc;
 use std::{result, thread};
 use vmm_sys_util::eventfd::EventFd;
@@ -28,9 +28,6 @@ pub mod api;
 pub mod config;
 pub mod device_manager;
 pub mod vm;
-
-use self::config::VmConfig;
-//use self::vm::{ExitBehaviour, Vm};
 
 /// Errors associated with VMM management
 #[derive(Debug)]
@@ -234,44 +231,6 @@ pub fn start_vmm_thread(
     api::start_http_thread(http_path, http_api_event, api_sender)?;
 
     Ok(thread)
-}
-
-pub fn vm_create(
-    api_evt: EventFd,
-    api_sender: Sender<ApiRequest>,
-    config: Arc<VmConfig>,
-) -> Result<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM creation request.
-    api_sender
-        .send(ApiRequest::VmCreate(config, response_sender))
-        .map_err(Error::ApiRequestSend)?;
-    api_evt.write(1).map_err(Error::EventFdWrite)?;
-
-    response_receiver
-        .recv()
-        .map_err(Error::ApiResponseRecv)?
-        .map_err(Error::ApiVmCreate)?;
-
-    Ok(())
-}
-
-pub fn vm_start(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM start request.
-    api_sender
-        .send(ApiRequest::VmStart(response_sender))
-        .map_err(Error::ApiRequestSend)?;
-    api_evt.write(1).map_err(Error::EventFdWrite)?;
-
-    response_receiver
-        .recv()
-        .map_err(Error::ApiResponseRecv)?
-        .map_err(Error::ApiVmStart)?;
-
-    Ok(())
 }
 
 pub struct Vmm {
