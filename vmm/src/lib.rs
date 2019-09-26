@@ -157,12 +157,17 @@ impl AsRawFd for EpollContext {
 }
 
 pub fn start_vmm_thread(
+    http_path: &str,
     api_event: EventFd,
+    api_sender: Sender<ApiRequest>,
     api_receiver: Receiver<ApiRequest>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
-    thread::Builder::new()
+    let http_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
+
+    let thread = thread::Builder::new()
         .name("vmm".to_string())
         .spawn(move || {
+            //   let vmm_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
             let mut vmm = Vmm::new(api_event)?;
 
             let receiver = Arc::new(api_receiver);
@@ -219,7 +224,12 @@ pub fn start_vmm_thread(
 
             Ok(())
         })
-        .map_err(Error::VmmThreadSpawn)
+        .map_err(Error::VmmThreadSpawn)?;
+
+    // The VMM thread is started, we can start serving HTTP requests
+    api::start_http_thread(http_path, http_api_event, api_sender)?;
+
+    Ok(thread)
 }
 
 pub fn vm_create(
