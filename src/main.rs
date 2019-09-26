@@ -338,8 +338,13 @@ fn main() {
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).expect("Cannot create API EventFd");
 
-    let vmm_thread = match vmm::start_vmm_thread(api_evt.try_clone().unwrap(), api_request_receiver)
-    {
+    let http_sender = api_request_sender.clone();
+    let vmm_thread = match vmm::start_vmm_thread(
+        api_socket_path,
+        api_evt.try_clone().unwrap(),
+        http_sender,
+        api_request_receiver,
+    ) {
         Ok(t) => t,
         Err(e) => {
             println!("Failed spawning the VMM thread {:?}", e);
