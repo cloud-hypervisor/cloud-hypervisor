@@ -358,13 +358,13 @@ fn main() {
     if cmd_arguments.is_present("vm-config") && vm_config.valid() {
         // Create and start the VM based off the VM config we just built.
         let sender = api_request_sender.clone();
-        vmm::vm_create(
+        vmm::api::vm_create(
             api_evt.try_clone().unwrap(),
             api_request_sender,
             Arc::new(vm_config),
         )
         .expect("Could not create the VM");
-        vmm::vm_start(api_evt.try_clone().unwrap(), sender).expect("Could not start the VM");
+        vmm::api::vm_start(api_evt.try_clone().unwrap(), sender).expect("Could not start the VM");
     }
 
     match vmm_thread.join() {

@@ -29,24 +29,27 @@
 //! 5. The thread handles the response and forwards potential errors.
 
 extern crate micro_http;
+extern crate vmm_sys_util;
 
 pub use self::http::start_http_thread;
 
 pub mod http;
 
 use crate::config::VmConfig;
-use crate::vm::Error;
-use std::sync::mpsc::Sender;
+use crate::vm::Error as VmError;
+use crate::{Error, Result};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
+use vmm_sys_util::eventfd::EventFd;
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
 #[derive(Debug)]
 pub enum ApiError {
     /// The VM could not be created.
-    VmCreate(Error),
+    VmCreate(VmError),
 
     /// The VM could not start.
-    VmStart(Error),
+    VmStart(VmError),
 }
 
 pub enum ApiResponsePayload {
@@ -69,4 +72,42 @@ pub enum ApiRequest {
     /// If the VM was not previously created, the VMM API server will send a
     /// VmStart error back.
     VmStart(Sender<ApiResponse>),
+}
+
+pub fn vm_create(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    config: Arc<VmConfig>,
+) -> Result<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM creation request.
+    api_sender
+        .send(ApiRequest::VmCreate(config, response_sender))
+        .map_err(Error::ApiRequestSend)?;
+    api_evt.write(1).map_err(Error::EventFdWrite)?;
+
+    response_receiver
+        .recv()
+        .map_err(Error::ApiResponseRecv)?
+        .map_err(Error::ApiVmCreate)?;
+
+    Ok(())
+}
+
+pub fn vm_start(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM start request.
+    api_sender
+        .send(ApiRequest::VmStart(response_sender))
+        .map_err(Error::ApiRequestSend)?;
+    api_evt.write(1).map_err(Error::EventFdWrite)?;
+
+    response_receiver
+        .recv()
+        .map_err(Error::ApiResponseRecv)?
+        .map_err(Error::ApiVmStart)?;
+
+    Ok(())
 }
