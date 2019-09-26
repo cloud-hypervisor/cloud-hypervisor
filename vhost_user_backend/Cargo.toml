@@ -20,4 +20,3 @@ vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 path = "../vhost_rs"
 features = ["vhost-user-slave"]
 
-[workspace]

@@ -29,3 +29,6 @@ mmio = ["vmm/mmio_support"]
 integration_tests = []
 
 [workspace]
+members = [
+    "vhost_user_backend",
+]
