@@ -34,6 +34,7 @@ extern crate vmm_sys_util;
 pub use self::http::start_http_thread;
 
 pub mod http;
+pub mod http_endpoint;
 
 use crate::config::VmConfig;
 use crate::vm::Error as VmError;

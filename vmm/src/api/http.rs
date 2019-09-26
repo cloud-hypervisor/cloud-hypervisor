@@ -4,9 +4,9 @@
 //
 
 extern crate threadpool;
-extern crate vmm_sys_util;
 
-use crate::api::ApiRequest;
+use crate::api::http_endpoint::{VmActionHandler, VmCreate};
+use crate::api::{ApiRequest, VmAction};
 use crate::{Error, Result};
 use micro_http::{HttpConnection, Request, Response, StatusCode, Version};
 use std::collections::HashMap;
@@ -50,9 +50,14 @@ macro_rules! endpoint {
 lazy_static! {
     /// HTTP_ROUTES contain all the cloud-hypervisor HTTP routes.
     pub static ref HTTP_ROUTES: HttpRoutes = {
-        let r = HttpRoutes {
+        let mut r = HttpRoutes {
             routes: HashMap::new(),
         };
+
+        r.routes.insert(endpoint!("/vm.create"), Box::new(VmCreate {}));
+        r.routes.insert(endpoint!("/vm.boot"), Box::new(VmActionHandler::new(VmAction::Boot)));
+        r.routes.insert(endpoint!("/vm.shutdown"), Box::new(VmActionHandler::new(VmAction::Shutdown)));
+        r.routes.insert(endpoint!("/vm.reboot"), Box::new(VmActionHandler::new(VmAction::Reboot)));
 
         r
     };
