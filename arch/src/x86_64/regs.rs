@@ -11,8 +11,8 @@ use super::gdt::{gdt_entry, kvm_segment_from_gdt};
 use arch_gen::x86::msr_index;
 use kvm_bindings::{kvm_fpu, kvm_msr_entry, kvm_msrs, kvm_regs, kvm_sregs};
 use kvm_ioctls::VcpuFd;
-use layout::{PDE_START, PDPTE_START, PML4_START};
-use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap};
+use layout::{BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START};
+use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryMmap};
 
 // MTRR constants
 const MTRR_ENABLE: u64 = 0x800; // IA32_MTRR_DEF_TYPE MSR: E (MTRRs enabled) flag, bit 11
@@ -123,9 +123,6 @@ pub fn setup_sregs(mem: &GuestMemoryMmap, vcpu: &VcpuFd) -> Result<()> {
     vcpu.set_sregs(&sregs).map_err(Error::SetStatusRegisters)
 }
 
-const BOOT_GDT_OFFSET: GuestAddress = GuestAddress(0x500);
-const BOOT_IDT_OFFSET: GuestAddress = GuestAddress(0x520);
-
 const BOOT_GDT_MAX: usize = 4;
 
 const EFER_LMA: u64 = 0x400;
@@ -136,7 +133,7 @@ const X86_CR0_PG: u64 = 0x80000000;
 const X86_CR4_PAE: u64 = 0x20;
 
 fn write_gdt_table(table: &[u64], guest_mem: &GuestMemoryMmap) -> Result<()> {
-    let boot_gdt_addr = BOOT_GDT_OFFSET;
+    let boot_gdt_addr = BOOT_GDT_START;
     for (index, entry) in table.iter().enumerate() {
         let addr = guest_mem
             .checked_offset(boot_gdt_addr, index * mem::size_of::<u64>())
@@ -149,7 +146,7 @@ fn write_gdt_table(table: &[u64], guest_mem: &GuestMemoryMmap) -> Result<()> {
 }
 
 fn write_idt_value(val: u64, guest_mem: &GuestMemoryMmap) -> Result<()> {
-    let boot_idt_addr = BOOT_IDT_OFFSET;
+    let boot_idt_addr = BOOT_IDT_START;
     guest_mem
         .write_obj(val, boot_idt_addr)
         .map_err(|_| Error::WriteIDT)
@@ -169,11 +166,11 @@ fn configure_segments_and_sregs(mem: &GuestMemoryMmap, sregs: &mut kvm_sregs) ->
 
     // Write segments
     write_gdt_table(&gdt_table[..], mem)?;
-    sregs.gdt.base = BOOT_GDT_OFFSET.raw_value();
+    sregs.gdt.base = BOOT_GDT_START.raw_value();
     sregs.gdt.limit = mem::size_of_val(&gdt_table) as u16 - 1;
 
     write_idt_value(0, mem)?;
-    sregs.idt.base = BOOT_IDT_OFFSET.raw_value();
+    sregs.idt.base = BOOT_IDT_START.raw_value();
     sregs.idt.limit = mem::size_of::<u64>() as u16 - 1;
 
     sregs.cs = code_seg;
@@ -301,20 +298,20 @@ mod tests {
         let gm = create_guest_mem();
         configure_segments_and_sregs(&gm, &mut sregs).unwrap();
 
-        assert_eq!(0x0, read_u64(&gm, BOOT_GDT_OFFSET));
+        assert_eq!(0x0, read_u64(&gm, BOOT_GDT_START));
         assert_eq!(
             0xaf9b000000ffff,
-            read_u64(&gm, BOOT_GDT_OFFSET.unchecked_add(8))
+            read_u64(&gm, BOOT_GDT_START.unchecked_add(8))
         );
         assert_eq!(
             0xcf93000000ffff,
-            read_u64(&gm, BOOT_GDT_OFFSET.unchecked_add(16))
+            read_u64(&gm, BOOT_GDT_START.unchecked_add(16))
         );
         assert_eq!(
             0x8f8b000000ffff,
-            read_u64(&gm, BOOT_GDT_OFFSET.unchecked_add(24))
+            read_u64(&gm, BOOT_GDT_START.unchecked_add(24))
         );
-        assert_eq!(0x0, read_u64(&gm, BOOT_IDT_OFFSET));
+        assert_eq!(0x0, read_u64(&gm, BOOT_IDT_START));
 
         assert_eq!(0, sregs.cs.base);
         assert_eq!(0xfffff, sregs.ds.limit);
