@@ -51,6 +51,12 @@ pub enum Error {
     /// Cannot boot a VM from the API
     ApiVmBoot(ApiError),
 
+    /// Cannot shut a VM down from the API
+    ApiVmShutdown(ApiError),
+
+    /// Cannot reboot a VM from the API
+    ApiVmReboot(ApiError),
+
     /// Cannot bind to the UNIX domain socket path
     Bind(io::Error),
 
@@ -180,33 +186,7 @@ pub fn start_vmm_thread(
                         // based on the same VM config, boot it and restart
                         // the control loop.
 
-                        // Without ACPI, a reset is equivalent to a shutdown
-                        #[cfg(not(feature = "acpi"))]
-                        {
-                            if let Some(ref mut vm) = vmm.vm {
-                                vm.shtudown().map_err(Error::VmShutdown)?;
-                                break 'outer;
-                            }
-                        }
-
-                        // First we stop the current VM and create a new one.
-                        if let Some(ref mut vm) = vmm.vm {
-                            let config = vm.get_config();
-                            vm.shutdown().map_err(Error::VmShutdown)?;
-
-                            let exit_evt = vmm.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-                            let reset_evt =
-                                vmm.reset_evt.try_clone().map_err(Error::EventFdClone)?;
-
-                            vmm.vm = Some(
-                                Vm::new(config, exit_evt, reset_evt).map_err(Error::VmCreate)?,
-                            );
-                        }
-
-                        // Then we boot the new VM.
-                        if let Some(ref mut vm) = vmm.vm {
-                            vm.boot().map_err(Error::VmBoot)?;
-                        }
+                        vmm.vm_reboot()?;
 
                         // Continue and restart the VMM control loop
                         continue 'outer;
@@ -270,6 +250,35 @@ impl Vmm {
             api_evt,
             vm: None,
         })
+    }
+
+    fn vm_reboot(&mut self) -> Result<()> {
+        // Without ACPI, a reset is equivalent to a shutdown
+        #[cfg(not(feature = "acpi"))]
+        {
+            if let Some(ref mut vm) = self.vm {
+                vm.shutdown().map_err(Error::VmShutdown)?;
+                return Ok(());
+            }
+        }
+
+        // First we stop the current VM and create a new one.
+        if let Some(ref mut vm) = self.vm {
+            let config = vm.get_config();
+            vm.shutdown().map_err(Error::VmShutdown)?;
+
+            let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
+            let reset_evt = self.reset_evt.try_clone().map_err(Error::EventFdClone)?;
+
+            self.vm = Some(Vm::new(config, exit_evt, reset_evt).map_err(Error::VmCreate)?);
+        }
+
+        // Then we start the new VM.
+        if let Some(ref mut vm) = self.vm {
+            vm.boot().map_err(Error::VmBoot)?;
+        }
+
+        Ok(())
     }
 
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<ExitBehaviour> {
@@ -354,6 +363,24 @@ impl Vmm {
 
                                         sender.send(response).map_err(Error::ApiResponseSend)?;
                                     }
+                                }
+                                ApiRequest::VmShutdown(sender) => {
+                                    if let Some(ref mut vm) = self.vm {
+                                        let response = match vm.shutdown() {
+                                            Ok(_) => Ok(ApiResponsePayload::Empty),
+                                            Err(e) => Err(ApiError::VmShutdown(e)),
+                                        };
+
+                                        sender.send(response).map_err(Error::ApiResponseSend)?;
+                                    }
+                                }
+                                ApiRequest::VmReboot(sender) => {
+                                    let response = match self.vm_reboot() {
+                                        Ok(_) => Ok(ApiResponsePayload::Empty),
+                                        Err(_) => Err(ApiError::VmReboot),
+                                    };
+
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                             }
                         }
