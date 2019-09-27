@@ -12,8 +12,8 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::result;
 
-pub const DEFAULT_VCPUS: &str = "1";
-pub const DEFAULT_MEMORY: &str = "size=512M";
+pub const DEFAULT_VCPUS: u8 = 1;
+pub const DEFAULT_MEMORY_MB: u64 = 512;
 pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
 
 /// Errors associated with VM configuration parameters.
@@ -114,7 +114,7 @@ fn parse_size(size: &str) -> Result<u64> {
     Ok(res << shift)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CpusConfig(pub u8);
 
 impl CpusConfig {
@@ -131,7 +131,13 @@ impl From<&CpusConfig> for u8 {
     }
 }
 
-#[derive(Clone, Debug)]
+impl Default for CpusConfig {
+    fn default() -> Self {
+        CpusConfig(DEFAULT_VCPUS)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub size: u64,
     pub file: Option<PathBuf>,
@@ -172,12 +178,21 @@ impl MemoryConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        MemoryConfig {
+            size: DEFAULT_MEMORY_MB << 20,
+            file: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct KernelConfig {
     pub path: PathBuf,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct CmdlineConfig {
     pub args: String,
 }
@@ -192,7 +207,7 @@ impl CmdlineConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: PathBuf,
 }
@@ -205,7 +220,7 @@ impl DiskConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NetConfig {
     pub tap: Option<String>,
     pub ip: Ipv4Addr,
@@ -257,7 +272,7 @@ impl NetConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RngConfig {
     pub src: PathBuf,
 }
@@ -270,7 +285,15 @@ impl RngConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+impl Default for RngConfig {
+    fn default() -> Self {
+        RngConfig {
+            src: PathBuf::from(DEFAULT_RNG_SOURCE),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FsConfig {
     pub tag: String,
     pub sock: PathBuf,
@@ -358,7 +381,7 @@ impl FsConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PmemConfig {
     pub file: PathBuf,
     pub size: u64,
@@ -391,7 +414,7 @@ impl PmemConfig {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Deserialize, Serialize)]
 pub enum ConsoleOutputMode {
     Off,
     Tty,
@@ -408,7 +431,7 @@ impl ConsoleOutputMode {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct ConsoleConfig {
     pub file: Option<PathBuf>,
     pub mode: ConsoleOutputMode,
@@ -440,9 +463,23 @@ impl ConsoleConfig {
             Err(Error::ParseConsoleParam)
         }
     }
+
+    pub fn default_serial() -> Self {
+        ConsoleConfig {
+            file: None,
+            mode: ConsoleOutputMode::Null,
+        }
+    }
+
+    pub fn default_console() -> Self {
+        ConsoleConfig {
+            file: None,
+            mode: ConsoleOutputMode::Tty,
+        }
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DeviceConfig {
     pub path: PathBuf,
 }
@@ -455,14 +492,14 @@ impl DeviceConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VuConfig {
     pub sock: String,
     pub num_queues: usize,
     pub queue_size: u16,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VhostUserNetConfig {
     pub mac: MacAddr,
     pub vu_cfg: VuConfig,
@@ -521,7 +558,7 @@ impl VhostUserNetConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VsockConfig {
     pub cid: u64,
     pub sock: PathBuf,
@@ -554,7 +591,7 @@ impl VsockConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VhostUserBlkConfig {
     pub wce: bool,
     pub vu_cfg: VuConfig,
@@ -610,18 +647,23 @@ impl VhostUserBlkConfig {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct VmConfig {
+    #[serde(default)]
     pub cpus: CpusConfig,
+    #[serde(default)]
     pub memory: MemoryConfig,
     pub kernel: Option<KernelConfig>,
     pub cmdline: CmdlineConfig,
     pub disks: Option<Vec<DiskConfig>>,
     pub net: Option<Vec<NetConfig>>,
+    #[serde(default)]
     pub rng: RngConfig,
     pub fs: Option<Vec<FsConfig>>,
     pub pmem: Option<Vec<PmemConfig>>,
+    #[serde(default = "ConsoleConfig::default_serial")]
     pub serial: ConsoleConfig,
+    #[serde(default = "ConsoleConfig::default_console")]
     pub console: ConsoleConfig,
     pub devices: Option<Vec<DeviceConfig>>,
     pub vhost_user_net: Option<Vec<VhostUserNetConfig>>,
