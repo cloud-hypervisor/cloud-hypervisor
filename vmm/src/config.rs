@@ -12,13 +12,11 @@ use std::net::AddrParseError;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::result;
-use vm_memory::GuestAddress;
 use vm_virtio::vhost_user::VhostUserConfig;
 
 pub const DEFAULT_VCPUS: &str = "1";
 pub const DEFAULT_MEMORY: &str = "size=512M";
 pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
-const CMDLINE_OFFSET: GuestAddress = GuestAddress(0x20000);
 
 /// Errors associated with VM configuration parameters.
 #[derive(Debug)]
@@ -190,7 +188,6 @@ impl KernelConfig {
 #[derive(Clone)]
 pub struct CmdlineConfig {
     pub args: Cmdline,
-    pub offset: GuestAddress,
 }
 
 impl CmdlineConfig {
@@ -201,10 +198,7 @@ impl CmdlineConfig {
         let mut args = Cmdline::new(arch::CMDLINE_MAX_SIZE);
         args.insert_str(cmdline_str).unwrap();
 
-        Ok(CmdlineConfig {
-            args,
-            offset: CMDLINE_OFFSET,
-        })
+        Ok(CmdlineConfig { args })
     }
 }
 

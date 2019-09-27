@@ -704,7 +704,7 @@ impl Vm {
 
         linux_loader::loader::load_cmdline(
             mem.deref(),
-            self.config.cmdline.offset,
+            arch::layout::CMDLINE_START,
             &cmdline_cstring,
         )
         .map_err(|_| Error::CmdLine)?;
@@ -715,7 +715,7 @@ impl Vm {
             Some(hdr) => {
                 arch::configure_system(
                     &mem,
-                    self.config.cmdline.offset,
+                    arch::layout::CMDLINE_START,
                     cmdline_cstring.to_bytes().len() + 1,
                     vcpu_count,
                     Some(hdr),
@@ -735,7 +735,7 @@ impl Vm {
             None => {
                 arch::configure_system(
                     &mem,
-                    self.config.cmdline.offset,
+                    arch::layout::CMDLINE_START,
                     cmdline_cstring.to_bytes().len() + 1,
                     vcpu_count,
                     None,
