@@ -75,6 +75,7 @@ pub const MEM_32BIT_DEVICES_SIZE: GuestUsize = (768 << 20);
 
 // IOAPIC
 pub const IOAPIC_START: GuestAddress = GuestAddress(0xfec0_0000);
+pub const IOAPIC_SIZE: GuestUsize = 0x20;
 
 // APIC
 pub const APIC_START: GuestAddress = GuestAddress(0xfee0_0000);
