@@ -6,6 +6,7 @@
 // found in the THIRD-PARTY file.
 
 use rand::Rng;
+use std::fmt;
 use std::result::Result;
 
 use serde::de::{Deserialize, Deserializer, Error};
@@ -66,14 +67,6 @@ impl MacAddr {
         &self.bytes
     }
 
-    pub fn to_string(self) -> String {
-        let b = &self.bytes;
-        format!(
-            "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-            b[0], b[1], b[2], b[3], b[4], b[5]
-        )
-    }
-
     pub fn local_random() -> MacAddr {
         // Generate a fully random MAC
         let mut random_bytes = rand::thread_rng().gen::<[u8; MAC_ADDR_LEN]>();
@@ -84,6 +77,17 @@ impl MacAddr {
         MacAddr {
             bytes: random_bytes,
         }
+    }
+}
+
+impl fmt::Display for MacAddr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let b = &self.bytes;
+        write!(
+            f,
+            "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+            b[0], b[1], b[2], b[3], b[4], b[5]
+        )
     }
 }
 
