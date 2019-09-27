@@ -79,6 +79,9 @@ fn main() {
         }
     }
 
+    let default_vcpus = format! {"{}", config::DEFAULT_VCPUS};
+    let default_memory = &format! {"size={}M", config::DEFAULT_MEMORY_MB};
+
     let cmd_arguments = App::new("cloud-hypervisor")
         .version(crate_version!())
         .author(crate_authors!())
@@ -89,7 +92,7 @@ fn main() {
             Arg::with_name("cpus")
                 .long("cpus")
                 .help("Number of virtual CPUs")
-                .default_value(config::DEFAULT_VCPUS)
+                .default_value(&default_vcpus)
                 .group("vm-config"),
         )
         .arg(
@@ -99,7 +102,7 @@ fn main() {
                     "Memory parameters \"size=<guest_memory_size>,\
                      file=<backing_file_path>\"",
                 )
-                .default_value(config::DEFAULT_MEMORY)
+                .default_value(&default_memory)
                 .group("vm-config"),
         )
         .arg(
