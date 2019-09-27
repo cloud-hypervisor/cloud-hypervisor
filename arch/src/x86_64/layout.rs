@@ -22,6 +22,10 @@ pub const LOW_RAM_START: GuestAddress = GuestAddress(0x0);
 
 // == Fixed addresses within the "Low RAM" range: ==
 
+// Initial GDT/IDT needed to boot kernel
+pub const BOOT_GDT_START: GuestAddress = GuestAddress(0x500);
+pub const BOOT_IDT_START: GuestAddress = GuestAddress(0x520);
+
 /// The 'zero page', a.k.a linux kernel bootparams.
 pub const ZERO_PAGE_START: GuestAddress = GuestAddress(0x7000);
 
