@@ -11,12 +11,8 @@ use super::gdt::{gdt_entry, kvm_segment_from_gdt};
 use arch_gen::x86::msr_index;
 use kvm_bindings::{kvm_fpu, kvm_msr_entry, kvm_msrs, kvm_regs, kvm_sregs};
 use kvm_ioctls::VcpuFd;
+use layout::{PDE_START, PDPTE_START, PML4_START};
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap};
-
-// Initial pagetables.
-const PML4_START: GuestAddress = GuestAddress(0x9000);
-const PDPTE_START: GuestAddress = GuestAddress(0xa000);
-const PDE_START: GuestAddress = GuestAddress(0xb000);
 
 // MTRR constants
 const MTRR_ENABLE: u64 = 0x800; // IA32_MTRR_DEF_TYPE MSR: E (MTRRs enabled) flag, bit 11
