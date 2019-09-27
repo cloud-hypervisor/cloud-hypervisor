@@ -13,8 +13,8 @@ use std::slice;
 use libc::c_char;
 
 use arch_gen::x86::mpspec;
-use layout::{APIC_START, IOAPIC_START};
-use vm_memory::{Address, GuestAddress, ByteValued, Bytes, GuestMemory, GuestMemoryMmap};
+use layout::{APIC_START, IOAPIC_START, MPTABLE_START};
+use vm_memory::{Address, ByteValued, Bytes, GuestMemory, GuestMemoryMmap};
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `ByteValued`) where:
@@ -44,9 +44,6 @@ unsafe impl ByteValued for MpcIoapicWrapper {}
 unsafe impl ByteValued for MpcTableWrapper {}
 unsafe impl ByteValued for MpcLintsrcWrapper {}
 unsafe impl ByteValued for MpfIntelWrapper {}
-
-// MPTABLE, describing VCPUS.
-const MPTABLE_START: GuestAddress = GuestAddress(0x9fc00);
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -283,7 +280,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vm_memory::GuestUsize;
+    use vm_memory::{GuestAddress, GuestUsize};
 
     fn table_entry_size(type_: u8) -> usize {
         match type_ as u32 {
