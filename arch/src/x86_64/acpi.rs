@@ -10,6 +10,8 @@ use vm_memory::{GuestAddress, GuestMemoryMmap};
 
 use vm_memory::{Address, ByteValued, Bytes};
 
+use super::layout;
+
 #[repr(packed)]
 struct LocalAPIC {
     pub r#type: u8,
@@ -209,7 +211,7 @@ pub fn create_acpi_tables(
     end_of_device_area: GuestAddress,
 ) -> GuestAddress {
     // RSDP is at the EBDA
-    let rsdp_offset = super::EBDA_START;
+    let rsdp_offset = layout::RSDP_POINTER;
     let mut tables: Vec<u64> = Vec::new();
 
     // DSDT
@@ -296,7 +298,7 @@ pub fn create_acpi_tables(
 
     // 32-bit PCI enhanced configuration mechanism
     mcfg.append(PCIRangeEntry {
-        base_address: super::MEM_32BIT_DEVICES_GAP_SIZE,
+        base_address: layout::MEM_32BIT_DEVICES_START.0,
         segment: 0,
         start: 0,
         end: 0xff,

@@ -48,71 +48,51 @@ impl From<Error> for super::Error {
     }
 }
 
-// Where BIOS/VGA magic would live on a real PC.
-const EBDA_START: GuestAddress = GuestAddress(0xa0000);
-const FIRST_ADDR_PAST_32BITS: GuestAddress = GuestAddress(1 << 32);
-
-// Our 32-bit memory gap starts at 3G.
-pub const MEM_32BIT_GAP_START: GuestAddress = GuestAddress(0xc000_0000);
-
-// Our 32-bit memory gap size is 1GB.
-const MEM_32BIT_GAP_SIZE: GuestUsize = (1024 << 20);
-
-// We reserve 768MB in our memory gap for 32-bit devices (e.g. 32-bit PCI BARs).
-const MEM_32BIT_DEVICES_GAP_SIZE: GuestUsize = (768 << 20);
-
 /// Returns a Vec of the valid memory addresses.
 /// These should be used to configure the GuestMemory structure for the platform.
 /// For x86_64 all addresses are valid from the start of the kernel except a
 /// carve out at the end of 32bit address space.
 pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, RegionType)> {
-    let reserved_memory_gap_start = MEM_32BIT_GAP_START
-        .checked_add(MEM_32BIT_DEVICES_GAP_SIZE)
+    let reserved_memory_gap_start = layout::MEM_32BIT_RESERVED_START
+        .checked_add(layout::MEM_32BIT_DEVICES_SIZE)
         .expect("32-bit reserved region is too large");
 
     let requested_memory_size = GuestAddress(size as u64);
     let mut regions = Vec::new();
 
     // case1: guest memory fits before the gap
-    if size as u64 <= MEM_32BIT_GAP_START.raw_value() {
+    if size as u64 <= layout::MEM_32BIT_RESERVED_START.raw_value() {
         regions.push((GuestAddress(0), size as usize, RegionType::Ram));
     // case2: guest memory extends beyond the gap
     } else {
         // push memory before the gap
         regions.push((
             GuestAddress(0),
-            MEM_32BIT_GAP_START.raw_value() as usize,
+            layout::MEM_32BIT_RESERVED_START.raw_value() as usize,
             RegionType::Ram,
         ));
         regions.push((
-            FIRST_ADDR_PAST_32BITS,
-            requested_memory_size.unchecked_offset_from(MEM_32BIT_GAP_START) as usize,
+            layout::RAM_64BIT_START,
+            requested_memory_size.unchecked_offset_from(layout::MEM_32BIT_RESERVED_START) as usize,
             RegionType::Ram,
         ));
     }
 
     // Add the 32-bit device memory hole as a sub region.
     regions.push((
-        MEM_32BIT_GAP_START,
-        MEM_32BIT_DEVICES_GAP_SIZE as usize,
+        layout::MEM_32BIT_RESERVED_START,
+        layout::MEM_32BIT_DEVICES_SIZE as usize,
         RegionType::SubRegion,
     ));
 
     // Add the 32-bit reserved memory hole as a sub region.
     regions.push((
         reserved_memory_gap_start,
-        (MEM_32BIT_GAP_SIZE - MEM_32BIT_DEVICES_GAP_SIZE) as usize,
+        (layout::MEM_32BIT_RESERVED_SIZE - layout::MEM_32BIT_DEVICES_SIZE) as usize,
         RegionType::Reserved,
     ));
 
     regions
-}
-
-/// X86 specific memory hole/memory mapped devices/reserved area.
-pub fn get_32bit_gap_start() -> GuestAddress {
-    FIRST_ADDR_PAST_32BITS
-        .checked_sub(MEM_32BIT_GAP_SIZE)
-        .expect("32-bit hole is too large")
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
@@ -136,10 +116,6 @@ pub fn configure_system(
     const KERNEL_HDR_MAGIC: u32 = 0x53726448;
     const KERNEL_LOADER_OTHER: u8 = 0xff;
     const KERNEL_MIN_ALIGNMENT_BYTES: u32 = 0x1000000; // Must be non-zero.
-    let first_addr_past_32bits = FIRST_ADDR_PAST_32BITS;
-    let end_32bit_gap_start = get_32bit_gap_start();
-
-    let himem_start = super::HIMEM_START;
 
     // Note that this puts the mptable at the last 1k of Linux's 640k base RAM
     mptable::setup_mptable(guest_mem, num_cpus).map_err(Error::MpTableSetup)?;
@@ -159,28 +135,28 @@ pub fn configure_system(
         params.0.hdr.kernel_alignment = KERNEL_MIN_ALIGNMENT_BYTES;
     };
 
-    add_e820_entry(&mut params.0, 0, EBDA_START.raw_value(), E820_RAM)?;
+    add_e820_entry(&mut params.0, 0, layout::EBDA_START.raw_value(), E820_RAM)?;
 
     let mem_end = guest_mem.end_addr();
-    if mem_end < end_32bit_gap_start {
+    if mem_end < layout::MEM_32BIT_RESERVED_START {
         add_e820_entry(
             &mut params.0,
-            himem_start.raw_value(),
-            mem_end.unchecked_offset_from(himem_start) + 1,
+            layout::HIGH_RAM_START.raw_value(),
+            mem_end.unchecked_offset_from(layout::HIGH_RAM_START) + 1,
             E820_RAM,
         )?;
     } else {
         add_e820_entry(
             &mut params.0,
-            himem_start.raw_value(),
-            end_32bit_gap_start.unchecked_offset_from(himem_start),
+            layout::HIGH_RAM_START.raw_value(),
+            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::HIGH_RAM_START),
             E820_RAM,
         )?;
-        if mem_end > first_addr_past_32bits {
+        if mem_end > layout::RAM_64BIT_START {
             add_e820_entry(
                 &mut params.0,
-                first_addr_past_32bits.raw_value(),
-                mem_end.unchecked_offset_from(first_addr_past_32bits) + 1,
+                layout::RAM_64BIT_START.raw_value(),
+                mem_end.unchecked_offset_from(layout::RAM_64BIT_START) + 1,
                 E820_RAM,
             )?;
         }
@@ -188,8 +164,8 @@ pub fn configure_system(
 
     #[cfg(feature = "acpi")]
     {
-        let start_of_device_area = if mem_end < end_32bit_gap_start {
-            first_addr_past_32bits
+        let start_of_device_area = if mem_end < layout::MEM_32BIT_RESERVED_START {
+            layout::RAM_64BIT_START
         } else {
             guest_mem.end_addr().unchecked_add(1)
         };
@@ -253,16 +229,6 @@ mod tests {
         assert_eq!(4, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(GuestAddress(1 << 32), regions[1].0);
-    }
-
-    #[test]
-    fn test_32bit_gap() {
-        assert_eq!(
-            get_32bit_gap_start(),
-            FIRST_ADDR_PAST_32BITS
-                .checked_sub(MEM_32BIT_GAP_SIZE as u64)
-                .expect("32-bit hole is too large")
-        );
     }
 
     #[test]
