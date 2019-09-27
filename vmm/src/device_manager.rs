@@ -28,6 +28,7 @@ use qcow::{self, ImageType, QcowFile};
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
 
+use arch::layout::{IOAPIC_SIZE, IOAPIC_START};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
@@ -43,10 +44,6 @@ use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
 use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vmm_sys_util::eventfd::EventFd;
-
-// IOAPIC address range
-const IOAPIC_RANGE_ADDR: u64 = 0xfec0_0000;
-const IOAPIC_RANGE_SIZE: u64 = 0x20;
 
 #[cfg(feature = "mmio_support")]
 const MMIO_LEN: u64 = 0x1000;
@@ -311,7 +308,7 @@ impl DeviceManager {
             let ioapic = Arc::new(Mutex::new(ioapic::Ioapic::new(vm_info.vm_fd.clone())));
             buses
                 .mmio
-                .insert(ioapic.clone(), IOAPIC_RANGE_ADDR, IOAPIC_RANGE_SIZE)
+                .insert(ioapic.clone(), IOAPIC_START.0, IOAPIC_SIZE)
                 .map_err(DeviceManagerError::BusError)?;
             Some(ioapic)
         } else {
