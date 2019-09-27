@@ -43,6 +43,7 @@ use vm_memory::GuestAddress;
 use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
 #[cfg(feature = "pci_support")]
 use vm_virtio::transport::VirtioPciDevice;
+use vm_virtio::vhost_user::VhostUserConfig;
 use vm_virtio::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -801,11 +802,14 @@ impl DeviceManager {
         // Add vhost-user-net if required
         if let Some(vhost_user_net_list_cfg) = &vm_info.vm_cfg.vhost_user_net {
             for vhost_user_net_cfg in vhost_user_net_list_cfg.iter() {
-                let vhost_user_net_device = vm_virtio::vhost_user::Net::new(
-                    vhost_user_net_cfg.mac,
-                    vhost_user_net_cfg.vu_cfg.clone(),
-                )
-                .map_err(DeviceManagerError::CreateVhostUserNet)?;
+                let vu_cfg = VhostUserConfig {
+                    sock: vhost_user_net_cfg.vu_cfg.sock.clone(),
+                    num_queues: vhost_user_net_cfg.vu_cfg.num_queues,
+                    queue_size: vhost_user_net_cfg.vu_cfg.queue_size,
+                };
+                let vhost_user_net_device =
+                    vm_virtio::vhost_user::Net::new(vhost_user_net_cfg.mac, vu_cfg)
+                        .map_err(DeviceManagerError::CreateVhostUserNet)?;
 
                 devices.push(Box::new(vhost_user_net_device) as Box<dyn vm_virtio::VirtioDevice>);
             }
@@ -821,11 +825,14 @@ impl DeviceManager {
         // Add vhost-user-blk if required
         if let Some(vhost_user_blk_list_cfg) = &vm_info.vm_cfg.vhost_user_blk {
             for vhost_user_blk_cfg in vhost_user_blk_list_cfg.iter() {
-                let vhost_user_blk_device = vm_virtio::vhost_user::Blk::new(
-                    vhost_user_blk_cfg.wce,
-                    vhost_user_blk_cfg.vu_cfg.clone(),
-                )
-                .map_err(DeviceManagerError::CreateVhostUserBlk)?;
+                let vu_cfg = VhostUserConfig {
+                    sock: vhost_user_blk_cfg.vu_cfg.sock.clone(),
+                    num_queues: vhost_user_blk_cfg.vu_cfg.num_queues,
+                    queue_size: vhost_user_blk_cfg.vu_cfg.queue_size,
+                };
+                let vhost_user_blk_device =
+                    vm_virtio::vhost_user::Blk::new(vhost_user_blk_cfg.wce, vu_cfg)
+                        .map_err(DeviceManagerError::CreateVhostUserBlk)?;
 
                 devices.push(Box::new(vhost_user_blk_device) as Box<dyn vm_virtio::VirtioDevice>);
             }

@@ -12,7 +12,6 @@ use std::net::AddrParseError;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::result;
-use vm_virtio::vhost_user::VhostUserConfig;
 
 pub const DEFAULT_VCPUS: &str = "1";
 pub const DEFAULT_MEMORY: &str = "size=512M";
@@ -460,9 +459,16 @@ impl DeviceConfig {
 }
 
 #[derive(Clone, Debug)]
+pub struct VuConfig {
+    pub sock: String,
+    pub num_queues: usize,
+    pub queue_size: u16,
+}
+
+#[derive(Clone, Debug)]
 pub struct VhostUserNetConfig {
     pub mac: MacAddr,
-    pub vu_cfg: VhostUserConfig,
+    pub vu_cfg: VuConfig,
 }
 
 impl VhostUserNetConfig {
@@ -508,7 +514,7 @@ impl VhostUserNetConfig {
                 .map_err(Error::ParseVuQueueSizeParam)?;
         }
 
-        let vu_cfg = VhostUserConfig {
+        let vu_cfg = VuConfig {
             sock: sock.to_string(),
             num_queues,
             queue_size,
@@ -554,7 +560,7 @@ impl VsockConfig {
 #[derive(Clone, Debug)]
 pub struct VhostUserBlkConfig {
     pub wce: bool,
-    pub vu_cfg: VhostUserConfig,
+    pub vu_cfg: VuConfig,
 }
 
 impl VhostUserBlkConfig {
@@ -597,7 +603,7 @@ impl VhostUserBlkConfig {
             wce = wce_str.parse().map_err(Error::ParseVuBlkWceParam)?;
         }
 
-        let vu_cfg = VhostUserConfig {
+        let vu_cfg = VuConfig {
             sock: sock.to_string(),
             num_queues,
             queue_size,
