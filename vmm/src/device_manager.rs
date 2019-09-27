@@ -28,7 +28,7 @@ use qcow::{self, ImageType, QcowFile};
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
 
-use arch::layout::{IOAPIC_SIZE, IOAPIC_START};
+use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
@@ -305,7 +305,10 @@ impl DeviceManager {
 
         let ioapic = if userspace_ioapic {
             // Create IOAPIC
-            let ioapic = Arc::new(Mutex::new(ioapic::Ioapic::new(vm_info.vm_fd.clone())));
+            let ioapic = Arc::new(Mutex::new(ioapic::Ioapic::new(
+                vm_info.vm_fd.clone(),
+                APIC_START,
+            )));
             buses
                 .mmio
                 .insert(ioapic.clone(), IOAPIC_START.0, IOAPIC_SIZE)
