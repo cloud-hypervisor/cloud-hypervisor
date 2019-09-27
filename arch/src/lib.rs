@@ -21,7 +21,6 @@ extern crate linux_loader;
 extern crate vm_memory;
 
 use std::result;
-use vm_memory::GuestAddress;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -53,9 +52,6 @@ pub enum RegionType {
     Reserved,
 }
 
-// 1MB.  We don't put anything above here except the kernel itself.
-pub const HIMEM_START: GuestAddress = GuestAddress(0x100000);
-
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
 
@@ -70,6 +66,5 @@ pub mod x86_64;
 
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    arch_memory_regions, configure_system, get_32bit_gap_start as get_reserved_mem_addr,
-    layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START,
+    arch_memory_regions, configure_system, layout, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START,
 };

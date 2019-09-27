@@ -687,7 +687,7 @@ impl Vm {
             mem.deref(),
             None,
             &mut self.kernel,
-            Some(arch::HIMEM_START),
+            Some(arch::layout::HIGH_RAM_START),
         ) {
             Ok(entry_addr) => entry_addr,
             Err(linux_loader::loader::Error::InvalidElfMagicNumber) => {
@@ -695,7 +695,7 @@ impl Vm {
                     mem.deref(),
                     None,
                     &mut self.kernel,
-                    Some(arch::HIMEM_START),
+                    Some(arch::layout::HIGH_RAM_START),
                 )
                 .map_err(Error::KernelLoad)?
             }
