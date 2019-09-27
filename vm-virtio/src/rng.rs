@@ -277,7 +277,7 @@ impl VirtioDevice for Rng {
 
             if let Err(e) = worker_result {
                 error!("failed to spawn virtio_rng worker: {}", e);
-                return Err(ActivateError::BadActivate);;
+                return Err(ActivateError::BadActivate);
             }
 
             return Ok(());

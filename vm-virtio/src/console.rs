@@ -486,7 +486,7 @@ impl VirtioDevice for Console {
 
             if let Err(e) = worker_result {
                 error!("failed to spawn virtio_console worker: {}", e);
-                return Err(ActivateError::BadActivate);;
+                return Err(ActivateError::BadActivate);
             }
 
             return Ok(());
