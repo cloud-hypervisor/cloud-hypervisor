@@ -146,8 +146,8 @@ pub fn configure_system(
 
     let mut params: BootParamsWrapper = BootParamsWrapper(boot_params::default());
 
-    if setup_hdr.is_some() {
-        params.0.hdr = setup_hdr.unwrap();
+    if let Some(hdr) = setup_hdr {
+        params.0.hdr = hdr;
         params.0.hdr.cmd_line_ptr = cmdline_addr.raw_value() as u32;
         params.0.hdr.cmdline_size = cmdline_size as u32;
     } else {
