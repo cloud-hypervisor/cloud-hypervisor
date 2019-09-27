@@ -13,7 +13,8 @@ use std::slice;
 use libc::c_char;
 
 use arch_gen::x86::mpspec;
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap};
+use layout::{APIC_START, IOAPIC_START};
+use vm_memory::{Address, GuestAddress, ByteValued, Bytes, GuestMemory, GuestMemoryMmap};
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `ByteValued`) where:
@@ -92,8 +93,6 @@ const MPC_SPEC: i8 = 4;
 const MPC_OEM: [c_char; 8] = char_array!(c_char; 'F', 'C', ' ', ' ', ' ', ' ', ' ', ' ');
 const MPC_PRODUCT_ID: [c_char; 12] = ['0' as c_char; 12];
 const BUS_TYPE_ISA: [u8; 6] = char_array!(u8; 'I', 'S', 'A', ' ', ' ', ' ');
-pub const IO_APIC_DEFAULT_PHYS_BASE: u32 = 0xfec00000; // source: linux/arch/x86/include/asm/apicdef.h
-pub const APIC_DEFAULT_PHYS_BASE: u32 = 0xfee00000; // source: linux/arch/x86/include/asm/apicdef.h
 const APIC_VERSION: u8 = 0x14;
 const CPU_STEPPING: u32 = 0x600;
 const CPU_FEATURE_APIC: u32 = 0x200;
@@ -208,7 +207,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
         mpc_ioapic.0.apicid = ioapicid;
         mpc_ioapic.0.apicver = APIC_VERSION;
         mpc_ioapic.0.flags = mpspec::MPC_APIC_USABLE as u8;
-        mpc_ioapic.0.apicaddr = IO_APIC_DEFAULT_PHYS_BASE;
+        mpc_ioapic.0.apicaddr = IOAPIC_START.0 as u32;
         mem.write_obj(mpc_ioapic, base_mp)
             .map_err(|_| Error::WriteMpcIoapic)?;
         base_mp = base_mp.unchecked_add(size as u64);
@@ -271,7 +270,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
         mpc_table.0.spec = MPC_SPEC;
         mpc_table.0.oem = MPC_OEM;
         mpc_table.0.productid = MPC_PRODUCT_ID;
-        mpc_table.0.lapic = APIC_DEFAULT_PHYS_BASE;
+        mpc_table.0.lapic = APIC_START.0 as u32;
         checksum = checksum.wrapping_add(compute_checksum(&mpc_table.0));
         mpc_table.0.checksum = (!checksum).wrapping_add(1) as i8;
         mem.write_obj(mpc_table, table_base)

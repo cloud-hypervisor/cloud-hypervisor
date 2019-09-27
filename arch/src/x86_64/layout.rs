@@ -61,6 +61,12 @@ pub const MEM_32BIT_RESERVED_SIZE: GuestUsize = (1024 << 20);
 pub const MEM_32BIT_DEVICES_START: GuestAddress = MEM_32BIT_RESERVED_START;
 pub const MEM_32BIT_DEVICES_SIZE: GuestUsize = (768 << 20);
 
+// IOAPIC
+pub const IOAPIC_START: GuestAddress = GuestAddress(0xfec0_0000);
+
+// APIC
+pub const APIC_START: GuestAddress = GuestAddress(0xfee0_0000);
+
 /// Address for the TSS setup.
 pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
 

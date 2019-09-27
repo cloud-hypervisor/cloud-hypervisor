@@ -253,7 +253,7 @@ pub fn create_acpi_tables(
 
     // MADT
     let mut madt = SDT::new(*b"APIC", 44, 5, *b"CLOUDH", *b"CHMADT  ", 1);
-    madt.write(36, super::mptable::APIC_DEFAULT_PHYS_BASE);
+    madt.write(36, layout::APIC_START);
 
     for cpu in 0..num_cpus {
         let lapic = LocalAPIC {
@@ -270,7 +270,7 @@ pub fn create_acpi_tables(
         r#type: 1,
         length: 12,
         ioapic_id: 0,
-        apic_address: super::mptable::IO_APIC_DEFAULT_PHYS_BASE,
+        apic_address: layout::IOAPIC_START.0 as u32,
         gsi_base: 0,
         ..Default::default()
     });
