@@ -5,7 +5,6 @@
 
 extern crate vm_virtio;
 
-use linux_loader::cmdline::Cmdline;
 use net_util::MacAddr;
 use std::convert::From;
 use std::net::AddrParseError;
@@ -180,16 +179,14 @@ pub struct KernelConfig {
 
 #[derive(Clone)]
 pub struct CmdlineConfig {
-    pub args: Cmdline,
+    pub args: String,
 }
 
 impl CmdlineConfig {
     pub fn parse(cmdline: Option<&str>) -> Result<Self> {
-        let cmdline_str = cmdline
+        let args = cmdline
             .map(std::string::ToString::to_string)
             .unwrap_or_else(String::new);
-        let mut args = Cmdline::new(arch::CMDLINE_MAX_SIZE);
-        args.insert_str(cmdline_str).unwrap();
 
         Ok(CmdlineConfig { args })
     }

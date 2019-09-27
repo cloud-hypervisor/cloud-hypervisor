@@ -33,6 +33,7 @@ use kvm_bindings::{
 };
 use kvm_ioctls::*;
 use libc::{c_void, siginfo_t};
+use linux_loader::cmdline::Cmdline;
 use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGWINCH};
 use std::ffi::CString;
@@ -677,7 +678,10 @@ impl Vm {
     }
 
     fn load_kernel(&mut self) -> Result<GuestAddress> {
-        let mut cmdline = self.config.cmdline.args.clone();
+        let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE);
+        cmdline
+            .insert_str(self.config.cmdline.args.clone())
+            .map_err(|_| Error::CmdLine)?;
         for entry in self.devices.cmdline_additions() {
             cmdline.insert_str(entry).map_err(|_| Error::CmdLine)?;
         }
@@ -709,7 +713,6 @@ impl Vm {
             &cmdline_cstring,
         )
         .map_err(|_| Error::CmdLine)?;
-
         let vcpu_count = u8::from(&self.config.cpus);
         let end_of_range = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
         match entry_addr.setup_header {
