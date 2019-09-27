@@ -50,6 +50,12 @@ pub enum ApiError {
 
     /// The VM could not boot.
     VmBoot(VmError),
+
+    /// The VM could not shutdown.
+    VmShutdown(VmError),
+
+    /// The VM could not reboot.
+    VmReboot,
 }
 
 pub enum ApiResponsePayload {
@@ -72,6 +78,16 @@ pub enum ApiRequest {
     /// If the VM was not previously created, the VMM API server will send a
     /// VmBoot error back.
     VmBoot(Sender<ApiResponse>),
+
+    /// Shut the previously booted virtual machine down.
+    /// If the VM was not previously booted or created, the VMM API server
+    /// will send a VmShutdown error back.
+    VmShutdown(Sender<ApiResponse>),
+
+    /// Reboot the previously booted virtual machine.
+    /// If the VM was not previously booted or created, the VMM API server
+    /// will send a VmReboot error back.
+    VmReboot(Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -95,19 +111,67 @@ pub fn vm_create(
     Ok(())
 }
 
-pub fn vm_boot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
+/// Represents a VM related action.
+/// This is mostly used to factorize code between VM routines
+/// that only differ by the IPC command they send.
+pub enum VmAction {
+    /// Boot a VM
+    Boot,
+
+    /// Shut a VM down
+    Shutdown,
+
+    /// Reboot a VM
+    Reboot,
+}
+
+fn vm_action(api_evt: EventFd, api_sender: Sender<ApiRequest>, action: VmAction) -> Result<()> {
     let (response_sender, response_receiver) = channel();
 
-    // Send the VM boot request.
-    api_sender
-        .send(ApiRequest::VmBoot(response_sender))
-        .map_err(Error::ApiRequestSend)?;
+    let request = match action {
+        VmAction::Boot => ApiRequest::VmBoot(response_sender),
+        VmAction::Shutdown => ApiRequest::VmShutdown(response_sender),
+        VmAction::Reboot => ApiRequest::VmReboot(response_sender),
+    };
+
+    // Send the VM request.
+    api_sender.send(request).map_err(Error::ApiRequestSend)?;
     api_evt.write(1).map_err(Error::EventFdWrite)?;
 
-    response_receiver
-        .recv()
-        .map_err(Error::ApiResponseRecv)?
-        .map_err(Error::ApiVmBoot)?;
+    match action {
+        VmAction::Boot => {
+            response_receiver
+                .recv()
+                .map_err(Error::ApiResponseRecv)?
+                .map_err(Error::ApiVmBoot)?;
+        }
+
+        VmAction::Shutdown => {
+            response_receiver
+                .recv()
+                .map_err(Error::ApiResponseRecv)?
+                .map_err(Error::ApiVmShutdown)?;
+        }
+
+        VmAction::Reboot => {
+            response_receiver
+                .recv()
+                .map_err(Error::ApiResponseRecv)?
+                .map_err(Error::ApiVmReboot)?;
+        }
+    }
 
     Ok(())
+}
+
+pub fn vm_boot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
+    vm_action(api_evt, api_sender, VmAction::Boot)
+}
+
+pub fn vm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
+    vm_action(api_evt, api_sender, VmAction::Shutdown)
+}
+
+pub fn vm_reboot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
+    vm_action(api_evt, api_sender, VmAction::Reboot)
 }
