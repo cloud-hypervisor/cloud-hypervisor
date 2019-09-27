@@ -15,6 +15,7 @@ use kvm_bindings::kvm_msi;
 use kvm_ioctls::VmFd;
 use std::sync::Arc;
 use std::{io, result};
+use vm_memory::GuestAddress;
 
 #[derive(Debug)]
 pub enum Error {
@@ -156,6 +157,7 @@ pub struct Ioapic {
     reg_sel: u32,
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
     vm_fd: Arc<VmFd>,
+    apic_address: GuestAddress,
 }
 
 impl BusDevice for Ioapic {
@@ -194,12 +196,13 @@ impl BusDevice for Ioapic {
 }
 
 impl Ioapic {
-    pub fn new(vm_fd: Arc<VmFd>) -> Ioapic {
+    pub fn new(vm_fd: Arc<VmFd>, apic_address: GuestAddress) -> Ioapic {
         Ioapic {
             id: 0,
             reg_sel: 0,
             reg_entries: [0; NUM_IOAPIC_PINS],
             vm_fd,
+            apic_address,
         }
     }
 
@@ -239,7 +242,7 @@ impl Ioapic {
         let redirection_hint: u8 = 1;
 
         // Generate MSI message address
-        let address_lo: u32 = 0xfee0_0000
+        let address_lo: u32 = self.apic_address.0 as u32
             | u32::from(destination_id) << 12
             | u32::from(redirection_hint) << 3
             | u32::from(destination_mode) << 2;
