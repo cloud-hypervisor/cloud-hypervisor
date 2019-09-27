@@ -167,9 +167,12 @@ impl VhostBackend for Master {
         node.wait_for_ack(&hdr).map_err(|e| e.into())
     }
 
+    // Clippy doesn't seem to know that if let with && is still experimental
+    #[allow(clippy::unnecessary_unwrap)]
     fn set_log_base(&mut self, base: u64, fd: Option<RawFd>) -> Result<()> {
         let mut node = self.node.lock().unwrap();
         let val = VhostUserU64::new(base);
+
         if node.acked_protocol_features & VhostUserProtocolFeatures::LOG_SHMFD.bits() != 0
             && fd.is_some()
         {
