@@ -496,7 +496,7 @@ where
 
         if let Err(e) = worker_result {
             error!("failed to spawn virtio_vsock worker: {}", e);
-            return Err(ActivateError::BadActivate);;
+            return Err(ActivateError::BadActivate);
         }
 
         Ok(())
