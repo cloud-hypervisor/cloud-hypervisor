@@ -34,6 +34,9 @@ pub const CMDLINE_START: GuestAddress = GuestAddress(0x20000);
 /// Kernel command line start address maximum size.
 pub const CMDLINE_MAX_SIZE: usize = 0x10000;
 
+// MPTABLE, describing VCPUS.
+pub const MPTABLE_START: GuestAddress = GuestAddress(0x9fc00);
+
 // == End of "Low RAM" range. ==
 
 // ** EBDA reserved area (start: 640KiB, length: 384KiB) **
