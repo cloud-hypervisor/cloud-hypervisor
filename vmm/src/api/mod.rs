@@ -48,8 +48,8 @@ pub enum ApiError {
     /// The VM could not be created.
     VmCreate(VmError),
 
-    /// The VM could not start.
-    VmStart(VmError),
+    /// The VM could not boot.
+    VmBoot(VmError),
 }
 
 pub enum ApiResponsePayload {
@@ -68,10 +68,10 @@ pub enum ApiRequest {
     /// error back.
     VmCreate(Arc<VmConfig>, Sender<ApiResponse>),
 
-    /// Start the previously created virtual machine.
+    /// Boot the previously created virtual machine.
     /// If the VM was not previously created, the VMM API server will send a
-    /// VmStart error back.
-    VmStart(Sender<ApiResponse>),
+    /// VmBoot error back.
+    VmBoot(Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -95,19 +95,19 @@ pub fn vm_create(
     Ok(())
 }
 
-pub fn vm_start(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
+pub fn vm_boot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
     let (response_sender, response_receiver) = channel();
 
-    // Send the VM start request.
+    // Send the VM boot request.
     api_sender
-        .send(ApiRequest::VmStart(response_sender))
+        .send(ApiRequest::VmBoot(response_sender))
         .map_err(Error::ApiRequestSend)?;
     api_evt.write(1).map_err(Error::EventFdWrite)?;
 
     response_receiver
         .recv()
         .map_err(Error::ApiResponseRecv)?
-        .map_err(Error::ApiVmStart)?;
+        .map_err(Error::ApiVmBoot)?;
 
     Ok(())
 }

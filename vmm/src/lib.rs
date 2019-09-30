@@ -48,8 +48,8 @@ pub enum Error {
     /// Cannot create a VM from the API
     ApiVmCreate(ApiError),
 
-    /// Cannot start a VM from the API
-    ApiVmStart(ApiError),
+    /// Cannot boot a VM from the API
+    ApiVmBoot(ApiError),
 
     /// Cannot bind to the UNIX domain socket path
     Bind(io::Error),
@@ -78,11 +78,11 @@ pub enum Error {
     /// Cannot create a VM
     VmCreate(VmError),
 
-    /// Cannot start a VM
-    VmStart(VmError),
+    /// Cannot boot a VM
+    VmBoot(VmError),
 
-    /// Cannot stop a VM
-    VmStop(VmError),
+    /// Cannot shut a VM down
+    VmShutdown(VmError),
 
     /// Cannot create VMM thread
     VmmThreadSpawn(io::Error),
@@ -177,14 +177,14 @@ pub fn start_vmm_thread(
                     Ok(ExitBehaviour::Reset) => {
                         // The VMM control loop exites with a reset behaviour.
                         // We have to reboot the VM, i.e. we create a new VM
-                        // based on the same VM config, start it and restart
+                        // based on the same VM config, boot it and restart
                         // the control loop.
 
                         // Without ACPI, a reset is equivalent to a shutdown
                         #[cfg(not(feature = "acpi"))]
                         {
                             if let Some(ref mut vm) = vmm.vm {
-                                vm.stop().map_err(Error::VmStop)?;
+                                vm.shtudown().map_err(Error::VmShutdown)?;
                                 break 'outer;
                             }
                         }
@@ -192,7 +192,7 @@ pub fn start_vmm_thread(
                         // First we stop the current VM and create a new one.
                         if let Some(ref mut vm) = vmm.vm {
                             let config = vm.get_config();
-                            vm.stop().map_err(Error::VmStop)?;
+                            vm.shutdown().map_err(Error::VmShutdown)?;
 
                             let exit_evt = vmm.exit_evt.try_clone().map_err(Error::EventFdClone)?;
                             let reset_evt =
@@ -203,9 +203,9 @@ pub fn start_vmm_thread(
                             );
                         }
 
-                        // Then we start the new VM.
+                        // Then we boot the new VM.
                         if let Some(ref mut vm) = vmm.vm {
-                            vm.start().map_err(Error::VmStart)?;
+                            vm.boot().map_err(Error::VmBoot)?;
                         }
 
                         // Continue and restart the VMM control loop
@@ -215,7 +215,7 @@ pub fn start_vmm_thread(
                         // The VMM control loop exites with a shutdown behaviour.
                         // We have to stop the VM and we exit thr thread.
                         if let Some(ref mut vm) = vmm.vm {
-                            vm.stop().map_err(Error::VmStop)?;
+                            vm.shutdown().map_err(Error::VmShutdown)?;
                         }
                         break 'outer;
                     }
@@ -345,11 +345,11 @@ impl Vmm {
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
-                                ApiRequest::VmStart(sender) => {
+                                ApiRequest::VmBoot(sender) => {
                                     if let Some(ref mut vm) = self.vm {
-                                        let response = match vm.start() {
+                                        let response = match vm.boot() {
                                             Ok(_) => Ok(ApiResponsePayload::Empty),
-                                            Err(e) => Err(ApiError::VmStart(e)),
+                                            Err(e) => Err(ApiError::VmBoot(e)),
                                         };
 
                                         sender.send(response).map_err(Error::ApiResponseSend)?;
