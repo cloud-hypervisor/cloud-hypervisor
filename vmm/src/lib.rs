@@ -88,6 +88,9 @@ pub enum Error {
     /// Cannot boot a VM
     VmBoot(VmError),
 
+    /// The Vm is not created
+    VmNotCreated,
+
     /// Cannot shut a VM down
     VmShutdown(VmError),
 
@@ -279,6 +282,8 @@ impl Vmm {
         // Then we start the new VM.
         if let Some(ref mut vm) = self.vm {
             vm.boot().map_err(Error::VmBoot)?;
+        } else {
+            return Err(Error::VmNotCreated);
         }
 
         Ok(())
@@ -394,28 +399,33 @@ impl Vmm {
                                     }
 
                                     // Now let's boot it.
-                                    if let Some(ref mut vm) = self.vm {
-                                        let response = match vm.boot() {
+                                    let response = if let Some(ref mut vm) = self.vm {
+                                        match vm.boot() {
                                             Ok(_) => Ok(ApiResponsePayload::Empty),
                                             Err(e) => Err(ApiError::VmBoot(e)),
-                                        };
+                                        }
+                                    } else {
+                                        Err(ApiError::VmNotCreated)
+                                    };
 
-                                        sender.send(response).map_err(Error::ApiResponseSend)?;
-                                    }
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmShutdown(sender) => {
-                                    if let Some(ref mut vm) = self.vm {
-                                        let response = match vm.shutdown() {
+                                    let response = if let Some(ref mut vm) = self.vm {
+                                        match vm.shutdown() {
                                             Ok(_) => Ok(ApiResponsePayload::Empty),
                                             Err(e) => Err(ApiError::VmShutdown(e)),
-                                        };
+                                        }
+                                    } else {
+                                        Err(ApiError::VmNotBooted)
+                                    };
 
-                                        sender.send(response).map_err(Error::ApiResponseSend)?;
-                                    }
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmReboot(sender) => {
                                     let response = match self.vm_reboot() {
                                         Ok(_) => Ok(ApiResponsePayload::Empty),
+                                        Err(Error::VmNotCreated) => Err(ApiError::VmNotBooted),
                                         Err(_) => Err(ApiError::VmReboot),
                                     };
 
