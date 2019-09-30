@@ -163,7 +163,7 @@ pub fn create_dsdt_table(
     pci_dsdt_data[200..208].copy_from_slice(&(start_of_device_area.0).to_le_bytes());
     pci_dsdt_data[208..216].copy_from_slice(&end_of_device_area.0.to_le_bytes());
     pci_dsdt_data[224..232].copy_from_slice(
-        &(end_of_device_area.unchecked_offset_from(start_of_device_area)).to_le_bytes(),
+        &(end_of_device_area.unchecked_offset_from(start_of_device_area) + 1).to_le_bytes(),
     );
 
     /*
