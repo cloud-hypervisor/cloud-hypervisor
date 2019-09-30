@@ -15,6 +15,7 @@ extern crate serde_json;
 extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload};
+use crate::config::VmConfig;
 use crate::vm::{Error as VmError, ExitBehaviour, Vm};
 use libc::EFD_NONBLOCK;
 use std::io;
@@ -219,6 +220,7 @@ pub struct Vmm {
     reset_evt: EventFd,
     api_evt: EventFd,
     vm: Option<Vm>,
+    vm_config: Option<Arc<VmConfig>>,
 }
 
 impl Vmm {
@@ -249,6 +251,7 @@ impl Vmm {
             reset_evt,
             api_evt,
             vm: None,
+            vm_config: None,
         })
     }
 
@@ -340,21 +343,57 @@ impl Vmm {
 
                             match api_request {
                                 ApiRequest::VmCreate(config, sender) => {
-                                    let exit_evt =
-                                        self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-                                    let reset_evt =
-                                        self.reset_evt.try_clone().map_err(Error::EventFdClone)?;
-                                    let response = match Vm::new(config, exit_evt, reset_evt) {
-                                        Ok(vm) => {
-                                            self.vm = Some(vm);
-                                            Ok(ApiResponsePayload::Empty)
-                                        }
-                                        Err(e) => Err(ApiError::VmCreate(e)),
+                                    // We only store the passed VM config.
+                                    // The VM will be created when being asked to boot it.
+                                    let response = if self.vm_config.is_none() {
+                                        self.vm_config = Some(config);
+                                        Ok(ApiResponsePayload::Empty)
+                                    } else {
+                                        Err(ApiError::VmAlreadyCreated)
                                     };
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmBoot(sender) => {
+                                    // If we don't have a config, we can not boot a VM.
+                                    if self.vm_config.is_none() {
+                                        sender
+                                            .send(Err(ApiError::VmMissingConfig))
+                                            .map_err(Error::ApiResponseSend)?;
+                                        continue;
+                                    }
+
+                                    // Create a new VM is we don't have one yet.
+                                    if self.vm.is_none() {
+                                        let exit_evt = self
+                                            .exit_evt
+                                            .try_clone()
+                                            .map_err(Error::EventFdClone)?;
+                                        let reset_evt = self
+                                            .reset_evt
+                                            .try_clone()
+                                            .map_err(Error::EventFdClone)?;
+
+                                        if let Some(ref vm_config) = self.vm_config {
+                                            match Vm::new(
+                                                Arc::clone(vm_config),
+                                                exit_evt,
+                                                reset_evt,
+                                            ) {
+                                                Ok(vm) => {
+                                                    self.vm = Some(vm);
+                                                }
+                                                Err(e) => {
+                                                    sender
+                                                        .send(Err(ApiError::VmCreate(e)))
+                                                        .map_err(Error::ApiResponseSend)?;
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Now let's boot it.
                                     if let Some(ref mut vm) = self.vm {
                                         let response = match vm.boot() {
                                             Ok(_) => Ok(ApiResponsePayload::Empty),
