@@ -22,6 +22,7 @@ use vm_memory::{
 };
 
 const E820_RAM: u32 = 1;
+const E820_RESERVED: u32 = 2;
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `DataInit`) where:
@@ -161,6 +162,13 @@ pub fn configure_system(
             )?;
         }
     }
+
+    add_e820_entry(
+        &mut params.0,
+        layout::PCI_MMCONFIG_START.0,
+        layout::PCI_MMCONFIG_SIZE,
+        E820_RESERVED,
+    )?;
 
     #[cfg(feature = "acpi")]
     {
