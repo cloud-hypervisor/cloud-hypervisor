@@ -753,7 +753,7 @@ impl Vm {
         }
     }
 
-    pub fn stop(&mut self) -> Result<()> {
+    pub fn shutdown(&mut self) -> Result<()> {
         if self.on_tty {
             // Don't forget to set the terminal in canonical mode
             // before to exit.
@@ -798,7 +798,7 @@ impl Vm {
         }
     }
 
-    pub fn start(&mut self) -> Result<()> {
+    pub fn boot(&mut self) -> Result<()> {
         let entry_addr = self.load_kernel()?;
         let vcpu_count = u8::from(&self.config.cpus);
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
