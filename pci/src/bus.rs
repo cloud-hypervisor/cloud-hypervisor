@@ -71,23 +71,19 @@ impl PciDevice for PciRoot {
     }
 }
 
-pub struct PciConfigIo {
+pub struct PciBus {
     /// Devices attached to this bus.
     /// Device 0 is host bridge.
     devices: Vec<Arc<Mutex<dyn PciDevice>>>,
-    /// Config space register.
-    config_address: u32,
 }
 
-impl PciConfigIo {
+impl PciBus {
     pub fn new(pci_root: PciRoot) -> Self {
         let mut devices: Vec<Arc<Mutex<dyn PciDevice>>> = Vec::new();
+
         devices.push(Arc::new(Mutex::new(pci_root)));
 
-        PciConfigIo {
-            devices,
-            config_address: 0,
-        }
+        PciBus { devices }
     }
 
     pub fn register_mapping(
@@ -118,6 +114,21 @@ impl PciConfigIo {
         self.devices.push(device);
         Ok(())
     }
+}
+
+pub struct PciConfigIo {
+    /// Config space register.
+    config_address: u32,
+    pci_bus: Arc<Mutex<PciBus>>,
+}
+
+impl PciConfigIo {
+    pub fn new(pci_bus: Arc<Mutex<PciBus>>) -> Self {
+        PciConfigIo {
+            pci_bus,
+            config_address: 0,
+        }
+    }
 
     pub fn config_space_read(&self) -> u32 {
         let enabled = (self.config_address & 0x8000_0000) != 0;
@@ -138,9 +149,14 @@ impl PciConfigIo {
             return 0xffff_ffff;
         }
 
-        self.devices.get(device).map_or(0xffff_ffff, |d| {
-            d.lock().unwrap().read_config_register(register)
-        })
+        self.pci_bus
+            .lock()
+            .unwrap()
+            .devices
+            .get(device)
+            .map_or(0xffff_ffff, |d| {
+                d.lock().unwrap().read_config_register(register)
+            })
     }
 
     pub fn config_space_write(&mut self, offset: u64, data: &[u8]) {
@@ -161,7 +177,7 @@ impl PciConfigIo {
             return;
         }
 
-        if let Some(d) = self.devices.get(device) {
+        if let Some(d) = self.pci_bus.lock().unwrap().devices.get(device) {
             d.lock()
                 .unwrap()
                 .write_config_register(register, offset, data);
@@ -223,17 +239,12 @@ impl BusDevice for PciConfigIo {
 
 /// Emulates PCI memory-mapped configuration access mechanism.
 pub struct PciConfigMmio {
-    /// Devices attached to this bus.
-    /// Device 0 is host bridge.
-    devices: Vec<Arc<Mutex<dyn PciDevice>>>,
+    pci_bus: Arc<Mutex<PciBus>>,
 }
 
 impl PciConfigMmio {
-    pub fn new(pci_root: PciRoot) -> Self {
-        let mut devices: Vec<Arc<Mutex<dyn PciDevice>>> = Vec::new();
-
-        devices.push(Arc::new(Mutex::new(pci_root)));
-        PciConfigMmio { devices }
+    pub fn new(pci_bus: Arc<Mutex<PciBus>>) -> Self {
+        PciConfigMmio { pci_bus }
     }
 
     fn config_space_read(&self, config_address: u32) -> u32 {
@@ -244,9 +255,14 @@ impl PciConfigMmio {
             return 0xffff_ffff;
         }
 
-        self.devices.get(device).map_or(0xffff_ffff, |d| {
-            d.lock().unwrap().read_config_register(register)
-        })
+        self.pci_bus
+            .lock()
+            .unwrap()
+            .devices
+            .get(device)
+            .map_or(0xffff_ffff, |d| {
+                d.lock().unwrap().read_config_register(register)
+            })
     }
 
     fn config_space_write(&mut self, config_address: u32, offset: u64, data: &[u8]) {
@@ -261,7 +277,7 @@ impl PciConfigMmio {
             return;
         }
 
-        if let Some(d) = self.devices.get(device) {
+        if let Some(d) = self.pci_bus.lock().unwrap().devices.get(device) {
             d.lock()
                 .unwrap()
                 .write_config_register(register, offset, data);

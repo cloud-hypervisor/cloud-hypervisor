@@ -16,7 +16,7 @@ mod device;
 mod msi;
 mod msix;
 
-pub use self::bus::{PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
+pub use self::bus::{PciBus, PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
 pub use self::configuration::{
     PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciCapability, PciCapabilityID,
     PciClassCode, PciConfiguration, PciHeaderType, PciMassStorageSubclass,

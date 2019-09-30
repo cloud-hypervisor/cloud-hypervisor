@@ -21,7 +21,8 @@ use libc::{EFD_NONBLOCK, TIOCGWINSZ};
 use net_util::Tap;
 #[cfg(feature = "pci_support")]
 use pci::{
-    InterruptDelivery, InterruptParameters, PciConfigIo, PciDevice, PciInterruptPin, PciRoot,
+    InterruptDelivery, InterruptParameters, PciBus, PciConfigIo, PciConfigMmio, PciDevice,
+    PciInterruptPin, PciRoot,
 };
 use qcow::{self, ImageType, QcowFile};
 
@@ -428,7 +429,7 @@ impl DeviceManager {
             #[cfg(feature = "pci_support")]
             {
                 let pci_root = PciRoot::new(None);
-                let mut pci = PciConfigIo::new(pci_root);
+                let mut pci_bus = PciBus::new(pci_root);
 
                 for device in virtio_devices {
                     DeviceManager::add_virtio_pci_device(
@@ -436,18 +437,32 @@ impl DeviceManager {
                         vm_info.memory,
                         allocator,
                         vm_info.vm_fd,
-                        &mut pci,
+                        &mut pci_bus,
                         &mut buses,
                         &interrupt_info,
                     )?;
                 }
 
                 DeviceManager::add_vfio_devices(
-                    vm_info, allocator, &mut pci, &mut buses, mem_slots,
+                    vm_info,
+                    allocator,
+                    &mut pci_bus,
+                    &mut buses,
+                    mem_slots,
                 )?;
-                let pci = Arc::new(Mutex::new(pci));
+
+                let pci_bus = Arc::new(Mutex::new(pci_bus));
+                let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(pci_bus.clone())));
                 io_bus
-                    .insert(pci, 0xcf8, 0x8)
+                    .insert(pci_config_io, 0xcf8, 0x8)
+                    .map_err(DeviceManagerError::BusError)?;
+                let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(pci_bus)));
+                mmio_bus
+                    .insert(
+                        pci_config_mmio,
+                        arch::layout::PCI_MMCONFIG_START.0,
+                        arch::layout::PCI_MMCONFIG_SIZE,
+                    )
                     .map_err(DeviceManagerError::BusError)?;
             }
         } else if cfg!(feature = "mmio_support") {
@@ -845,7 +860,7 @@ impl DeviceManager {
     fn add_vfio_devices(
         vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        pci: &mut PciConfigIo,
+        pci: &mut PciBus,
         buses: &mut BusInfo,
         mem_slots: u32,
     ) -> DeviceManagerResult<()> {
@@ -889,7 +904,7 @@ impl DeviceManager {
         memory: &Arc<RwLock<GuestMemoryMmap>>,
         allocator: &mut SystemAllocator,
         vm_fd: &Arc<VmFd>,
-        pci: &mut PciConfigIo,
+        pci: &mut PciBus,
         buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
