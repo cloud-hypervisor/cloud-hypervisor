@@ -58,6 +58,12 @@ pub enum ApiError {
     /// The VM config is missing.
     VmMissingConfig,
 
+    /// The VM is not booted.
+    VmNotBooted,
+
+    /// The VM is not created.
+    VmNotCreated,
+
     /// The VM could not shutdown.
     VmShutdown(VmError),
 
