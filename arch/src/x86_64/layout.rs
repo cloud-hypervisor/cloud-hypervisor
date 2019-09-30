@@ -69,9 +69,14 @@ pub const MEM_32BIT_RESERVED_SIZE: GuestUsize = (1024 << 20);
 
 // == Fixed constants within the "32-bit reserved" range ==
 
-// Sub range: 32-bit PCI devices (start: 3GiB, length: 768Mib)
+// Sub range: 32-bit PCI devices (start: 3GiB, length: 640Mib)
 pub const MEM_32BIT_DEVICES_START: GuestAddress = MEM_32BIT_RESERVED_START;
-pub const MEM_32BIT_DEVICES_SIZE: GuestUsize = (768 << 20);
+pub const MEM_32BIT_DEVICES_SIZE: GuestUsize = (640 << 20);
+
+// PCI MMCONFIG space (start: after the device space, length: 256MiB)
+pub const PCI_MMCONFIG_START: GuestAddress =
+    GuestAddress(MEM_32BIT_DEVICES_START.0 + MEM_32BIT_DEVICES_SIZE);
+pub const PCI_MMCONFIG_SIZE: GuestUsize = (256 << 20);
 
 // IOAPIC
 pub const IOAPIC_START: GuestAddress = GuestAddress(0xfec0_0000);
