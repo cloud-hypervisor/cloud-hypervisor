@@ -306,7 +306,7 @@ pub fn create_acpi_tables(
 
     // 32-bit PCI enhanced configuration mechanism
     mcfg.append(PCIRangeEntry {
-        base_address: layout::MEM_32BIT_DEVICES_START.0,
+        base_address: layout::PCI_MMCONFIG_START.0,
         segment: 0,
         start: 0,
         end: 0xff,
