@@ -78,7 +78,6 @@ if [ ! -f "$VMLINUX_IMAGE" ]; then
 fi
 
 VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
-VUBRIDGE="$WORKLOADS_DIR/vubridge"
 VUBD="$WORKLOADS_DIR/vubd"
 QEMU_DIR="qemu_build"
 if [ ! -f "$VIRTIOFSD" ] || [ ! -f "$VUBRIDGE" ] || [ ! -f "$VUBD" ]; then
@@ -86,9 +85,8 @@ if [ ! -f "$VIRTIOFSD" ] || [ ! -f "$VUBRIDGE" ] || [ ! -f "$VUBD" ]; then
     git clone --depth 1 "https://github.com/sboeuf/qemu.git" -b "virtio-fs" $QEMU_DIR
     pushd $QEMU_DIR
     ./configure --prefix=$PWD --target-list=x86_64-softmmu
-    make virtiofsd tests/vhost-user-bridge vhost-user-blk -j `nproc`
+    make virtiofsd vhost-user-blk -j `nproc`
     cp virtiofsd $VIRTIOFSD
-    cp tests/vhost-user-bridge $VUBRIDGE
     cp vhost-user-blk $VUBD
     popd
     rm -rf $QEMU_DIR
@@ -141,6 +139,7 @@ sudo ip link set vfio-tap1 up
 
 cargo build
 sudo setcap cap_net_admin+ep target/debug/cloud-hypervisor
+sudo setcap cap_net_admin+ep target/debug/vhost_user_net
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/debug/cloud-hypervisor $VFIO_DIR
