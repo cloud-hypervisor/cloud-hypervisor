@@ -1237,15 +1237,18 @@ mod tests {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut vubridge_path = workload_path.clone();
-            vubridge_path.push("vubridge");
-            let vubridge_path = String::from(vubridge_path.to_str().unwrap());
-
             // Start the daemon
-            let mut daemon_child = Command::new(vubridge_path.as_str()).spawn().unwrap();
+            let mut daemon_child = Command::new("target/debug/vhost_user_net")
+                .args(&[
+                    "--backend",
+                    format!(
+                        "ip={},mask=255.255.255.0,sock=/tmp/vunet.sock",
+                        guest.network.host_ip
+                    )
+                    .as_str(),
+                ])
+                .spawn()
+                .unwrap();
 
             let mut cloud_child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
@@ -1266,13 +1269,17 @@ mod tests {
                 ])
                 .args(&[
                     "--vhost-user-net",
-                    "mac=52:54:00:02:d9:01,sock=/tmp/vubr.sock",
+                    format!("mac={},sock=/tmp/vunet.sock", guest.network.guest_mac).as_str(),
                 ])
-                .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
                 .unwrap();
 
-            // 2 network interfaces + default localhost ==> 3 interfaces
+            // 1 network interface + default localhost ==> 2 interfaces
+            // It's important to note that this test is fully exercising the
+            // vhost-user-net implementation and the associated backend since
+            // it does not define any --net network interface. That means all
+            // the ssh communication in that test happens through the network
+            // interface backed by vhost-user-net.
             aver_eq!(
                 tb,
                 guest
@@ -1281,7 +1288,7 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                3
+                2
             );
 
             guest.ssh_command("sudo shutdown -h now")?;
