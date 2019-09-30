@@ -74,7 +74,7 @@ pub trait VhostUserBackend: Send + Sync + 'static {
         &mut self,
         device_event: u16,
         evset: epoll::Events,
-        vrings: &Vec<Arc<RwLock<Vring>>>,
+        vrings: &[Arc<RwLock<Vring>>],
     ) -> result::Result<bool, io::Error>;
 
     /// Get virtio device configuration.
@@ -625,7 +625,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
         self.vrings[index as usize].write().unwrap().queue.ready = false;
         if let Some(fd) = self.vrings[index as usize].read().unwrap().kick.as_ref() {
             self.worker
-                .unregister_listener(fd.as_raw_fd(), epoll::Events::EPOLLIN, index as u64)
+                .unregister_listener(fd.as_raw_fd(), epoll::Events::EPOLLIN, u64::from(index))
                 .map_err(VhostUserError::ReqHandlerError)?;
         }
 
@@ -659,7 +659,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
         self.vrings[index as usize].write().unwrap().queue.ready = true;
         if let Some(fd) = self.vrings[index as usize].read().unwrap().kick.as_ref() {
             self.worker
-                .register_listener(fd.as_raw_fd(), epoll::Events::EPOLLIN, index as u64)
+                .register_listener(fd.as_raw_fd(), epoll::Events::EPOLLIN, u64::from(index))
                 .map_err(VhostUserError::ReqHandlerError)?;
         }
 
