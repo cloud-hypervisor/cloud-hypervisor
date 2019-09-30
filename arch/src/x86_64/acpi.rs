@@ -151,6 +151,14 @@ pub fn create_dsdt_table(
         0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x79, 0x00,
     ];
 
+    // Patch Range Minimum/Range Maximum/Length for the the 64-bit device area
+    pci_dsdt_data[170..174].copy_from_slice(&layout::MEM_32BIT_DEVICES_START.0.to_le_bytes()[0..4]);
+    pci_dsdt_data[174..178].copy_from_slice(
+        &(layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE - 1).to_le_bytes()
+            [0..4],
+    );
+    pci_dsdt_data[182..186].copy_from_slice(&layout::MEM_32BIT_DEVICES_SIZE.to_le_bytes()[0..4]);
+
     // Patch the Range Minimum/Range Maximum/Length for the the 64-bit device area
     pci_dsdt_data[200..208].copy_from_slice(&(start_of_device_area.0).to_le_bytes());
     pci_dsdt_data[208..216].copy_from_slice(&end_of_device_area.0.to_le_bytes());
