@@ -62,7 +62,7 @@ pub fn create_dsdt_table(
         The hex tables in this file are generated from the ASL below with:
         "iasl -tc <dsdt.asl>"
 
-        As the output contains a table header that is not required the first 40 bytes
+        As the output contains a table header that is not required the first 36 bytes
         should be disregarded.
     */
 
@@ -167,6 +167,35 @@ pub fn create_dsdt_table(
     );
 
     /*
+    Device (_SB.MBRD)
+    {
+        Name (_HID, EisaId ("PNP0C02") /* PNP Motherboard Resources */)  // _HID: Hardware ID
+        Name (_UID, Zero)  // _UID: Unique ID
+    }
+
+    Scope (_SB.MBRD)
+    {
+        Name (_CRS, ResourceTemplate ()  // _CRS: Current Resource Settings
+        {
+            Memory32Fixed (ReadWrite,
+                0xE8000000,         // Address Base
+                0x10000000,         // Address Length
+                )
+        })
+    }
+    */
+    let mut mbrd_dsdt_data = [
+        0x5Bu8, 0x82, 0x1A, 0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x4D, 0x42, 0x52, 0x44, 0x08, 0x5F, 0x48,
+        0x49, 0x44, 0x0C, 0x41, 0xD0, 0x0C, 0x02, 0x08, 0x5F, 0x55, 0x49, 0x44, 0x00, 0x10, 0x21,
+        0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x4D, 0x42, 0x52, 0x44, 0x08, 0x5F, 0x43, 0x52, 0x53, 0x11,
+        0x11, 0x0A, 0x0E, 0x86, 0x09, 0x00, 0x01, 0x00, 0x00, 0x00, 0xE8, 0x00, 0x00, 0x00, 0x10,
+        0x79, 0x00,
+    ];
+
+    mbrd_dsdt_data[52..56].copy_from_slice(&layout::PCI_MMCONFIG_START.0.to_le_bytes()[0..4]);
+    mbrd_dsdt_data[56..60].copy_from_slice(&layout::PCI_MMCONFIG_SIZE.to_le_bytes()[0..4]);
+
+    /*
     Device (_SB.COM1)
     {
         Name (_HID, EisaId ("PNP0501") /* 16550A-compatible COM Serial Port */)  // _HID: Hardware ID
@@ -204,6 +233,7 @@ pub fn create_dsdt_table(
     // DSDT
     let mut dsdt = SDT::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
     dsdt.append(pci_dsdt_data);
+    dsdt.append(mbrd_dsdt_data);
     if serial_enabled {
         dsdt.append(com1_dsdt_data);
     }
