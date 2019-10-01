@@ -394,10 +394,10 @@ impl Vmm {
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmDelete(sender) => {
-                                    let response = match self.vm_delete() {
-                                        Ok(_) => Ok(ApiResponsePayload::Empty),
-                                        Err(e) => Err(ApiError::VmDelete(e)),
-                                    };
+                                    let response = self
+                                        .vm_delete()
+                                        .map_err(ApiError::VmDelete)
+                                        .map(|_| ApiResponsePayload::Empty);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
@@ -410,34 +410,34 @@ impl Vmm {
                                         continue;
                                     }
 
-                                    let response = match self.vm_boot() {
-                                        Ok(_) => Ok(ApiResponsePayload::Empty),
-                                        Err(e) => Err(ApiError::VmBoot(e)),
-                                    };
+                                    let response = self
+                                        .vm_boot()
+                                        .map_err(ApiError::VmBoot)
+                                        .map(|_| ApiResponsePayload::Empty);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmShutdown(sender) => {
-                                    let response = match self.vm_shutdown() {
-                                        Ok(_) => Ok(ApiResponsePayload::Empty),
-                                        Err(e) => Err(ApiError::VmShutdown(e)),
-                                    };
+                                    let response = self
+                                        .vm_shutdown()
+                                        .map_err(ApiError::VmShutdown)
+                                        .map(|_| ApiResponsePayload::Empty);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmReboot(sender) => {
-                                    let response = match self.vm_reboot() {
-                                        Ok(_) => Ok(ApiResponsePayload::Empty),
-                                        Err(e) => Err(ApiError::VmReboot(e)),
-                                    };
+                                    let response = self
+                                        .vm_reboot()
+                                        .map_err(ApiError::VmReboot)
+                                        .map(|_| ApiResponsePayload::Empty);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmInfo(sender) => {
-                                    let response = match self.vm_info() {
-                                        Ok(info) => Ok(ApiResponsePayload::VmInfo(info)),
-                                        Err(e) => Err(ApiError::VmInfo(e)),
-                                    };
+                                    let response = self
+                                        .vm_info()
+                                        .map_err(ApiError::VmInfo)
+                                        .map(ApiResponsePayload::VmInfo);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
