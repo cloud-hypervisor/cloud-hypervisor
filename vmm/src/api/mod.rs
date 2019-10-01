@@ -67,6 +67,9 @@ pub enum ApiError {
     /// The VM could not be created.
     VmCreate(VmError),
 
+    /// The VM could not be deleted.
+    VmDelete(VmError),
+
     /// The VM info is not available.
     VmInfo(VmError),
 
@@ -117,6 +120,12 @@ pub enum ApiRequest {
     /// VmBoot error back.
     VmBoot(Sender<ApiResponse>),
 
+    /// Delete the previously created virtual machine.
+    /// If the VM was not previously created, the VMM API server will send a
+    /// VmDelete error back.
+    /// If the VM is booted, we shut it down first.
+    VmDelete(Sender<ApiResponse>),
+
     /// Request the VM information.
     VmInfo(Sender<ApiResponse>),
 
@@ -156,6 +165,9 @@ pub enum VmAction {
     /// Boot a VM
     Boot,
 
+    /// Delete a VM
+    Delete,
+
     /// Shut a VM down
     Shutdown,
 
@@ -168,6 +180,7 @@ fn vm_action(api_evt: EventFd, api_sender: Sender<ApiRequest>, action: VmAction)
 
     let request = match action {
         VmAction::Boot => ApiRequest::VmBoot(response_sender),
+        VmAction::Delete => ApiRequest::VmDelete(response_sender),
         VmAction::Shutdown => ApiRequest::VmShutdown(response_sender),
         VmAction::Reboot => ApiRequest::VmReboot(response_sender),
     };
@@ -176,25 +189,17 @@ fn vm_action(api_evt: EventFd, api_sender: Sender<ApiRequest>, action: VmAction)
     api_sender.send(request).map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
-    match action {
-        VmAction::Boot => {
-            response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-        }
-
-        VmAction::Shutdown => {
-            response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-        }
-
-        VmAction::Reboot => {
-            response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-        }
-    }
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
 
     Ok(())
 }
 
 pub fn vm_boot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
     vm_action(api_evt, api_sender, VmAction::Boot)
+}
+
+pub fn vm_delete(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
+    vm_action(api_evt, api_sender, VmAction::Delete)
 }
 
 pub fn vm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
