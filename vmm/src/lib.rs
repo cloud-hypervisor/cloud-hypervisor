@@ -14,9 +14,9 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate vmm_sys_util;
 
-use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload};
+use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo};
 use crate::config::VmConfig;
-use crate::vm::{Error as VmError, ExitBehaviour, Vm};
+use crate::vm::{Error as VmError, ExitBehaviour, Vm, VmState};
 use libc::EFD_NONBLOCK;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -51,6 +51,9 @@ pub enum Error {
 
     /// Cannot boot a VM from the API
     ApiVmBoot(ApiError),
+
+    /// Cannot get the VM info
+    ApiVmInfo,
 
     /// Cannot shut a VM down from the API
     ApiVmShutdown(ApiError),
@@ -87,6 +90,9 @@ pub enum Error {
 
     /// Cannot boot a VM
     VmBoot(VmError),
+
+    /// Cannot fetch the VM information
+    VmInfo,
 
     /// The Vm is not created
     VmNotCreated,
@@ -289,6 +295,23 @@ impl Vmm {
         Ok(())
     }
 
+    fn vm_info(&self) -> Result<VmInfo> {
+        match &self.vm_config {
+            Some(config) => {
+                let state = match &self.vm {
+                    Some(vm) => vm.get_state().unwrap(),
+                    None => VmState::Created,
+                };
+
+                Ok(VmInfo {
+                    config: Arc::clone(config),
+                    state,
+                })
+            }
+            None => Err(Error::VmNotCreated),
+        }
+    }
+
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<ExitBehaviour> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -427,6 +450,14 @@ impl Vmm {
                                         Ok(_) => Ok(ApiResponsePayload::Empty),
                                         Err(Error::VmNotCreated) => Err(ApiError::VmNotBooted),
                                         Err(_) => Err(ApiError::VmReboot),
+                                    };
+
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmInfo(sender) => {
+                                    let response = match self.vm_info() {
+                                        Ok(info) => Ok(ApiResponsePayload::VmInfo(info)),
+                                        Err(_) => Err(ApiError::VmInfo),
                                     };
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;

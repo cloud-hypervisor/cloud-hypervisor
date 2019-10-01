@@ -5,7 +5,7 @@
 
 use crate::api::http::EndpointHandler;
 use crate::api::VmConfig;
-use crate::api::{vm_boot, vm_create, vm_reboot, vm_shutdown, ApiRequest, VmAction};
+use crate::api::{vm_boot, vm_create, vm_info, vm_reboot, vm_shutdown, ApiRequest, VmAction};
 use crate::{Error, Result};
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
@@ -24,6 +24,9 @@ pub enum HttpError {
 
     /// Could not boot a VM
     VmBoot(Error),
+
+    /// Could not get the VM information
+    VmInfo(Error),
 
     /// Could not shut a VM down
     VmShutdown(Error),
@@ -120,6 +123,32 @@ impl EndpointHandler for VmActionHandler {
                     Err(e) => error_response(e, StatusCode::InternalServerError),
                 }
             }
+            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+        }
+    }
+}
+
+// /api/v1/vm.info handler
+pub struct VmInfo {}
+
+impl EndpointHandler for VmInfo {
+    fn handle_request(
+        &self,
+        req: &Request,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+    ) -> Response {
+        match req.method() {
+            Method::Get => match vm_info(api_notifier, api_sender).map_err(HttpError::VmInfo) {
+                Ok(info) => {
+                    let mut response = Response::new(Version::Http11, StatusCode::OK);
+                    let info_serialized = serde_json::to_string(&info).unwrap();
+
+                    response.set_body(Body::new(info_serialized));
+                    response
+                }
+                Err(e) => error_response(e, StatusCode::InternalServerError),
+            },
             _ => Response::new(Version::Http11, StatusCode::BadRequest),
         }
     }
