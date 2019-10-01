@@ -38,16 +38,25 @@ pub mod http_endpoint;
 
 use crate::config::VmConfig;
 use crate::vm::{Error as VmError, VmState};
-use crate::{Error, Result};
-use std::sync::mpsc::{channel, Sender};
+use std::io;
+use std::sync::mpsc::{channel, RecvError, SendError, Sender};
 use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
 #[derive(Debug)]
 pub enum ApiError {
-    /// The VM could not be created.
-    VmCreate(VmError),
+    /// Cannot write to EventFd.
+    EventFdWrite(io::Error),
+
+    /// API request send error
+    RequestSend(SendError<ApiRequest>),
+
+    /// Wrong reponse payload type
+    ResponsePayloadType,
+
+    /// API response receive error
+    ResponseRecv(RecvError),
 
     /// The VM could not boot.
     VmBoot(VmError),
@@ -55,8 +64,11 @@ pub enum ApiError {
     /// The VM is already created.
     VmAlreadyCreated,
 
+    /// The VM could not be created.
+    VmCreate(VmError),
+
     /// The VM info is not available.
-    VmInfo,
+    VmInfo(VmError),
 
     /// The VM config is missing.
     VmMissingConfig,
@@ -71,8 +83,9 @@ pub enum ApiError {
     VmShutdown(VmError),
 
     /// The VM could not reboot.
-    VmReboot,
+    VmReboot(VmError),
 }
+pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct VmInfo {
@@ -122,19 +135,16 @@ pub fn vm_create(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     config: Arc<VmConfig>,
-) -> Result<()> {
+) -> ApiResult<()> {
     let (response_sender, response_receiver) = channel();
 
     // Send the VM creation request.
     api_sender
         .send(ApiRequest::VmCreate(config, response_sender))
-        .map_err(Error::ApiRequestSend)?;
-    api_evt.write(1).map_err(Error::EventFdWrite)?;
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
-    response_receiver
-        .recv()
-        .map_err(Error::ApiResponseRecv)?
-        .map_err(Error::ApiVmCreate)?;
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
 
     Ok(())
 }
@@ -153,7 +163,7 @@ pub enum VmAction {
     Reboot,
 }
 
-fn vm_action(api_evt: EventFd, api_sender: Sender<ApiRequest>, action: VmAction) -> Result<()> {
+fn vm_action(api_evt: EventFd, api_sender: Sender<ApiRequest>, action: VmAction) -> ApiResult<()> {
     let (response_sender, response_receiver) = channel();
 
     let request = match action {
@@ -163,63 +173,51 @@ fn vm_action(api_evt: EventFd, api_sender: Sender<ApiRequest>, action: VmAction)
     };
 
     // Send the VM request.
-    api_sender.send(request).map_err(Error::ApiRequestSend)?;
-    api_evt.write(1).map_err(Error::EventFdWrite)?;
+    api_sender.send(request).map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
     match action {
         VmAction::Boot => {
-            response_receiver
-                .recv()
-                .map_err(Error::ApiResponseRecv)?
-                .map_err(Error::ApiVmBoot)?;
+            response_receiver.recv().map_err(ApiError::ResponseRecv)??;
         }
 
         VmAction::Shutdown => {
-            response_receiver
-                .recv()
-                .map_err(Error::ApiResponseRecv)?
-                .map_err(Error::ApiVmShutdown)?;
+            response_receiver.recv().map_err(ApiError::ResponseRecv)??;
         }
 
         VmAction::Reboot => {
-            response_receiver
-                .recv()
-                .map_err(Error::ApiResponseRecv)?
-                .map_err(Error::ApiVmReboot)?;
+            response_receiver.recv().map_err(ApiError::ResponseRecv)??;
         }
     }
 
     Ok(())
 }
 
-pub fn vm_boot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
+pub fn vm_boot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
     vm_action(api_evt, api_sender, VmAction::Boot)
 }
 
-pub fn vm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
+pub fn vm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
     vm_action(api_evt, api_sender, VmAction::Shutdown)
 }
 
-pub fn vm_reboot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
+pub fn vm_reboot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
     vm_action(api_evt, api_sender, VmAction::Reboot)
 }
 
-pub fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<VmInfo> {
+pub fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<VmInfo> {
     let (response_sender, response_receiver) = channel();
 
     // Send the VM request.
     api_sender
         .send(ApiRequest::VmInfo(response_sender))
-        .map_err(Error::ApiRequestSend)?;
-    api_evt.write(1).map_err(Error::EventFdWrite)?;
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
-    let vm_info = response_receiver
-        .recv()
-        .map_err(Error::ApiResponseRecv)?
-        .map_err(|_| Error::ApiVmInfo)?;
+    let vm_info = response_receiver.recv().map_err(ApiError::ResponseRecv)??;
 
     match vm_info {
         ApiResponsePayload::VmInfo(info) => Ok(info),
-        _ => Err(Error::ApiVmInfo),
+        _ => Err(ApiError::ResponsePayloadType),
     }
 }
