@@ -209,6 +209,12 @@ pub enum Error {
 
     /// Failed to create a new KVM instance
     KvmNew(io::Error),
+
+    /// VM is not created
+    VmNotCreated,
+
+    /// Cannot clone EventFd.
+    EventFdClone(io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 

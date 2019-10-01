@@ -37,29 +37,8 @@ pub enum Error {
     /// API request receive error
     ApiRequestRecv(RecvError),
 
-    /// API response receive error
-    ApiResponseRecv(RecvError),
-
-    /// API request send error
-    ApiRequestSend(SendError<ApiRequest>),
-
     /// API response send error
     ApiResponseSend(SendError<ApiResponse>),
-
-    /// Cannot create a VM from the API
-    ApiVmCreate(ApiError),
-
-    /// Cannot boot a VM from the API
-    ApiVmBoot(ApiError),
-
-    /// Cannot get the VM info
-    ApiVmInfo,
-
-    /// Cannot shut a VM down from the API
-    ApiVmShutdown(ApiError),
-
-    /// Cannot reboot a VM from the API
-    ApiVmReboot(ApiError),
 
     /// Cannot bind to the UNIX domain socket path
     Bind(io::Error),
@@ -73,9 +52,6 @@ pub enum Error {
     /// Cannot read from EventFd.
     EventFdRead(io::Error),
 
-    /// Cannot write to EventFd.
-    EventFdWrite(io::Error),
-
     /// Cannot create epoll context.
     Epoll(io::Error),
 
@@ -85,17 +61,8 @@ pub enum Error {
     /// Cannot handle the VM STDIN stream
     Stdin(VmError),
 
-    /// Cannot create a VM
-    VmCreate(VmError),
-
-    /// Cannot boot a VM
-    VmBoot(VmError),
-
-    /// Cannot fetch the VM information
-    VmInfo,
-
-    /// The Vm is not created
-    VmNotCreated,
+    /// Cannot reboot the VM
+    VmReboot(VmError),
 
     /// Cannot shut a VM down
     VmShutdown(VmError),
@@ -196,7 +163,7 @@ pub fn start_vmm_thread(
                         // based on the same VM config, boot it and restart
                         // the control loop.
 
-                        vmm.vm_reboot()?;
+                        vmm.vm_reboot().map_err(Error::VmReboot)?;
 
                         // Continue and restart the VMM control loop
                         continue 'outer;
@@ -264,12 +231,12 @@ impl Vmm {
         })
     }
 
-    fn vm_reboot(&mut self) -> Result<()> {
+    fn vm_reboot(&mut self) -> result::Result<(), VmError> {
         // Without ACPI, a reset is equivalent to a shutdown
         #[cfg(not(feature = "acpi"))]
         {
             if let Some(ref mut vm) = self.vm {
-                vm.shutdown().map_err(Error::VmShutdown)?;
+                vm.shutdown()?;
                 return Ok(());
             }
         }
@@ -277,29 +244,29 @@ impl Vmm {
         // First we stop the current VM and create a new one.
         if let Some(ref mut vm) = self.vm {
             let config = vm.get_config();
-            vm.shutdown().map_err(Error::VmShutdown)?;
+            vm.shutdown()?;
 
-            let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
-            let reset_evt = self.reset_evt.try_clone().map_err(Error::EventFdClone)?;
+            let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
+            let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
 
-            self.vm = Some(Vm::new(config, exit_evt, reset_evt).map_err(Error::VmCreate)?);
+            self.vm = Some(Vm::new(config, exit_evt, reset_evt)?);
         }
 
         // Then we start the new VM.
         if let Some(ref mut vm) = self.vm {
-            vm.boot().map_err(Error::VmBoot)?;
+            vm.boot()?;
         } else {
-            return Err(Error::VmNotCreated);
+            return Err(VmError::VmNotCreated);
         }
 
         Ok(())
     }
 
-    fn vm_info(&self) -> Result<VmInfo> {
+    fn vm_info(&self) -> result::Result<VmInfo, VmError> {
         match &self.vm_config {
             Some(config) => {
                 let state = match &self.vm {
-                    Some(vm) => vm.get_state().unwrap(),
+                    Some(vm) => vm.get_state()?,
                     None => VmState::Created,
                 };
 
@@ -308,7 +275,7 @@ impl Vmm {
                     state,
                 })
             }
-            None => Err(Error::VmNotCreated),
+            None => Err(VmError::VmNotCreated),
         }
     }
 
@@ -448,8 +415,7 @@ impl Vmm {
                                 ApiRequest::VmReboot(sender) => {
                                     let response = match self.vm_reboot() {
                                         Ok(_) => Ok(ApiResponsePayload::Empty),
-                                        Err(Error::VmNotCreated) => Err(ApiError::VmNotBooted),
-                                        Err(_) => Err(ApiError::VmReboot),
+                                        Err(e) => Err(ApiError::VmReboot(e)),
                                     };
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
@@ -457,7 +423,7 @@ impl Vmm {
                                 ApiRequest::VmInfo(sender) => {
                                     let response = match self.vm_info() {
                                         Ok(info) => Ok(ApiResponsePayload::VmInfo(info)),
-                                        Err(_) => Err(ApiError::VmInfo),
+                                        Err(e) => Err(ApiError::VmInfo(e)),
                                     };
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;

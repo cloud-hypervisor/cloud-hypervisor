@@ -4,9 +4,10 @@
 //
 
 use crate::api::http::EndpointHandler;
-use crate::api::VmConfig;
-use crate::api::{vm_boot, vm_create, vm_info, vm_reboot, vm_shutdown, ApiRequest, VmAction};
-use crate::{Error, Result};
+use crate::api::{
+    vm_boot, vm_create, vm_info, vm_reboot, vm_shutdown, ApiError, ApiRequest, ApiResult, VmAction,
+    VmConfig,
+};
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
 use std::sync::mpsc::Sender;
@@ -20,22 +21,22 @@ pub enum HttpError {
     SerdeJsonDeserialize(SerdeError),
 
     /// Could not create a VM
-    VmCreate(Error),
+    VmCreate(ApiError),
 
     /// Could not boot a VM
-    VmBoot(Error),
+    VmBoot(ApiError),
 
     /// Could not get the VM information
-    VmInfo(Error),
+    VmInfo(ApiError),
 
     /// Could not shut a VM down
-    VmShutdown(Error),
+    VmShutdown(ApiError),
 
     /// Could not reboot a VM
-    VmReboot(Error),
+    VmReboot(ApiError),
 
     /// Could not act on a VM
-    VmAction(Error),
+    VmAction(ApiError),
 }
 
 fn error_response(error: HttpError, status: StatusCode) -> Response {
@@ -90,7 +91,7 @@ pub struct VmActionHandler {
     action_fn: VmActionFn,
 }
 
-type VmActionFn = Box<dyn Fn(EventFd, Sender<ApiRequest>) -> Result<()> + Send + Sync>;
+type VmActionFn = Box<dyn Fn(EventFd, Sender<ApiRequest>) -> ApiResult<()> + Send + Sync>;
 
 impl VmActionHandler {
     pub fn new(action: VmAction) -> Self {
@@ -114,9 +115,9 @@ impl EndpointHandler for VmActionHandler {
         match req.method() {
             Method::Put => {
                 match (self.action_fn)(api_notifier, api_sender).map_err(|e| match e {
-                    Error::ApiVmBoot(_) => HttpError::VmBoot(e),
-                    Error::ApiVmShutdown(_) => HttpError::VmShutdown(e),
-                    Error::ApiVmReboot(_) => HttpError::VmReboot(e),
+                    ApiError::VmBoot(_) => HttpError::VmBoot(e),
+                    ApiError::VmShutdown(_) => HttpError::VmShutdown(e),
+                    ApiError::VmReboot(_) => HttpError::VmReboot(e),
                     _ => HttpError::VmAction(e),
                 }) {
                     Ok(_) => Response::new(Version::Http11, StatusCode::OK),
