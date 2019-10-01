@@ -5,8 +5,8 @@
 
 use crate::api::http::EndpointHandler;
 use crate::api::{
-    vm_boot, vm_create, vm_info, vm_reboot, vm_shutdown, ApiError, ApiRequest, ApiResult, VmAction,
-    VmConfig,
+    vm_boot, vm_create, vm_delete, vm_info, vm_reboot, vm_shutdown, ApiError, ApiRequest,
+    ApiResult, VmAction, VmConfig,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
@@ -97,6 +97,7 @@ impl VmActionHandler {
     pub fn new(action: VmAction) -> Self {
         let action_fn = Box::new(match action {
             VmAction::Boot => vm_boot,
+            VmAction::Delete => vm_delete,
             VmAction::Shutdown => vm_shutdown,
             VmAction::Reboot => vm_reboot,
         });

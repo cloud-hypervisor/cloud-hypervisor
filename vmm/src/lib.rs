@@ -307,6 +307,22 @@ impl Vmm {
         }
     }
 
+    fn vm_delete(&mut self) -> result::Result<(), VmError> {
+        if self.vm_config.is_none() {
+            return Ok(());
+        }
+
+        self.vm_config = None;
+
+        // First we shut the current VM down if necessary.
+        if let Some(ref mut vm) = self.vm {
+            vm.shutdown()?;
+            self.vm = None;
+        }
+
+        Ok(())
+    }
+
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<ExitBehaviour> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -373,6 +389,14 @@ impl Vmm {
                                         Ok(ApiResponsePayload::Empty)
                                     } else {
                                         Err(ApiError::VmAlreadyCreated)
+                                    };
+
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmDelete(sender) => {
+                                    let response = match self.vm_delete() {
+                                        Ok(_) => Ok(ApiResponsePayload::Empty),
+                                        Err(e) => Err(ApiError::VmDelete(e)),
                                     };
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
