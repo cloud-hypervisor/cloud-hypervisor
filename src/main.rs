@@ -400,14 +400,19 @@ mod tests {
         }
     }
 
-    struct BionicDiskConfig {
+    struct UbuntuDiskConfig {
         osdisk_raw_path: String,
         cloudinit_path: String,
+        image_name: String,
     }
 
-    impl BionicDiskConfig {
-        fn new() -> Self {
-            BionicDiskConfig {
+    const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64-raw.img";
+    const EOAN_IMAGE_NAME: &str = "eoan-server-cloudimg-amd64-raw.img";
+
+    impl UbuntuDiskConfig {
+        fn new(image_name: String) -> Self {
+            UbuntuDiskConfig {
+                image_name,
                 osdisk_raw_path: String::new(),
                 cloudinit_path: String::new(),
             }
@@ -511,7 +516,7 @@ mod tests {
         }
     }
 
-    impl DiskConfig for BionicDiskConfig {
+    impl DiskConfig for UbuntuDiskConfig {
         fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
             let cloudinit_file_path =
                 String::from(tmp_dir.path().join("cloudinit").to_str().unwrap());
@@ -575,7 +580,7 @@ mod tests {
             workload_path.push("workloads");
 
             let mut osdisk_raw_base_path = workload_path.clone();
-            osdisk_raw_base_path.push("bionic-server-cloudimg-amd64-raw.img");
+            osdisk_raw_base_path.push(&self.image_name);
 
             let osdisk_raw_path =
                 String::from(tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
@@ -894,11 +899,13 @@ mod tests {
     fn test_simple_launch() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
-            let mut bionic = BionicDiskConfig::new();
+            let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
+            let mut eoan = UbuntuDiskConfig::new(EOAN_IMAGE_NAME.to_string());
 
             vec![
                 &mut clear as &mut dyn DiskConfig,
                 &mut bionic as &mut dyn DiskConfig,
+                &mut eoan as &mut dyn DiskConfig,
             ]
             .iter_mut()
             .for_each(|disk_config| {
@@ -930,7 +937,7 @@ mod tests {
 
                 aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
                 aver_eq!(tb, guest.get_initial_apicid().unwrap_or(1), 0);
-                aver!(tb, guest.get_total_memory().unwrap_or_default() > 490_000);
+                aver!(tb, guest.get_total_memory().unwrap_or_default() > 488_000);
                 aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
                 aver_eq!(
                     tb,
@@ -2355,11 +2362,13 @@ mod tests {
     fn test_reboot() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
-            let mut bionic = BionicDiskConfig::new();
+            let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
+            let mut eoan = UbuntuDiskConfig::new(EOAN_IMAGE_NAME.to_string());
 
             vec![
                 &mut clear as &mut dyn DiskConfig,
                 &mut bionic as &mut dyn DiskConfig,
+                &mut eoan as &mut dyn DiskConfig,
             ]
             .iter_mut()
             .for_each(|disk_config| {

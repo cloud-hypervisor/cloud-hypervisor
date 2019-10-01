@@ -57,6 +57,24 @@ if [ ! -f "$BIONIC_OS_RAW_IMAGE" ]; then
 fi
 
 
+EOAN_OS_IMAGE_NAME="eoan-server-cloudimg-amd64.img"
+EOAN_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$EOAN_OS_IMAGE_NAME"
+EOAN_OS_IMAGE="$WORKLOADS_DIR/$EOAN_OS_IMAGE_NAME"
+if [ ! -f "$EOAN_OS_IMAGE" ]; then
+    pushd $WORKLOADS_DIR
+    wget --quiet $EOAN_OS_IMAGE_URL
+    popd
+fi
+
+EOAN_OS_RAW_IMAGE_NAME="eoan-server-cloudimg-amd64-raw.img"
+EOAN_OS_RAW_IMAGE="$WORKLOADS_DIR/$EOAN_OS_RAW_IMAGE_NAME"
+if [ ! -f "$EOAN_OS_RAW_IMAGE" ]; then
+    pushd $WORKLOADS_DIR
+    qemu-img convert -p -f qcow2 -O raw $EOAN_OS_IMAGE_NAME $EOAN_OS_RAW_IMAGE_NAME
+    popd
+fi
+
+
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
 BZIMAGE_IMAGE="$WORKLOADS_DIR/bzImage"
