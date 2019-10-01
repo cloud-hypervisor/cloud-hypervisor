@@ -5,7 +5,7 @@
 
 extern crate threadpool;
 
-use crate::api::http_endpoint::{VmActionHandler, VmCreate};
+use crate::api::http_endpoint::{VmActionHandler, VmCreate, VmInfo};
 use crate::api::{ApiRequest, VmAction};
 use crate::{Error, Result};
 use micro_http::{HttpConnection, Request, Response, StatusCode, Version};
@@ -56,6 +56,7 @@ lazy_static! {
 
         r.routes.insert(endpoint!("/vm.create"), Box::new(VmCreate {}));
         r.routes.insert(endpoint!("/vm.boot"), Box::new(VmActionHandler::new(VmAction::Boot)));
+        r.routes.insert(endpoint!("/vm.info"), Box::new(VmInfo {}));
         r.routes.insert(endpoint!("/vm.shutdown"), Box::new(VmActionHandler::new(VmAction::Shutdown)));
         r.routes.insert(endpoint!("/vm.reboot"), Box::new(VmActionHandler::new(VmAction::Reboot)));
 

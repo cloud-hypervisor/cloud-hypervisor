@@ -37,7 +37,7 @@ pub mod http;
 pub mod http_endpoint;
 
 use crate::config::VmConfig;
-use crate::vm::Error as VmError;
+use crate::vm::{Error as VmError, VmState};
 use crate::{Error, Result};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
@@ -55,6 +55,9 @@ pub enum ApiError {
     /// The VM is already created.
     VmAlreadyCreated,
 
+    /// The VM info is not available.
+    VmInfo,
+
     /// The VM config is missing.
     VmMissingConfig,
 
@@ -71,9 +74,18 @@ pub enum ApiError {
     VmReboot,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+pub struct VmInfo {
+    pub config: Arc<VmConfig>,
+    pub state: VmState,
+}
+
 pub enum ApiResponsePayload {
     /// No data is sent on the channel.
     Empty,
+
+    /// Virtual machine information
+    VmInfo(VmInfo),
 }
 
 /// This is the response sent by the VMM API server through the mpsc channel.
@@ -91,6 +103,9 @@ pub enum ApiRequest {
     /// If the VM was not previously created, the VMM API server will send a
     /// VmBoot error back.
     VmBoot(Sender<ApiResponse>),
+
+    /// Request the VM information.
+    VmInfo(Sender<ApiResponse>),
 
     /// Shut the previously booted virtual machine down.
     /// If the VM was not previously booted or created, the VMM API server
@@ -187,4 +202,24 @@ pub fn vm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<(
 
 pub fn vm_reboot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<()> {
     vm_action(api_evt, api_sender, VmAction::Reboot)
+}
+
+pub fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<VmInfo> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM request.
+    api_sender
+        .send(ApiRequest::VmInfo(response_sender))
+        .map_err(Error::ApiRequestSend)?;
+    api_evt.write(1).map_err(Error::EventFdWrite)?;
+
+    let vm_info = response_receiver
+        .recv()
+        .map_err(Error::ApiResponseRecv)?
+        .map_err(|_| Error::ApiVmInfo)?;
+
+    match vm_info {
+        ApiResponsePayload::VmInfo(info) => Ok(info),
+        _ => Err(Error::ApiVmInfo),
+    }
 }
