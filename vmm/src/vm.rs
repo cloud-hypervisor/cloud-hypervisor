@@ -213,6 +213,9 @@ pub enum Error {
     /// VM is not created
     VmNotCreated,
 
+    /// VM is not bootted
+    VmNotBooted,
+
     /// Cannot clone EventFd.
     EventFdClone(io::Error),
 }

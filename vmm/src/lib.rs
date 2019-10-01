@@ -231,6 +231,34 @@ impl Vmm {
         })
     }
 
+    fn vm_boot(&mut self) -> result::Result<(), VmError> {
+        // Create a new VM is we don't have one yet.
+        if self.vm.is_none() {
+            let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
+            let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+
+            if let Some(ref vm_config) = self.vm_config {
+                let vm = Vm::new(Arc::clone(vm_config), exit_evt, reset_evt)?;
+                self.vm = Some(vm);
+            }
+        }
+
+        // Now we can boot the VM.
+        if let Some(ref mut vm) = self.vm {
+            vm.boot()
+        } else {
+            Err(VmError::VmNotCreated)
+        }
+    }
+
+    fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            vm.shutdown()
+        } else {
+            Err(VmError::VmNotBooted)
+        }
+    }
+
     fn vm_reboot(&mut self) -> result::Result<(), VmError> {
         // Without ACPI, a reset is equivalent to a shutdown
         #[cfg(not(feature = "acpi"))]
@@ -358,56 +386,17 @@ impl Vmm {
                                         continue;
                                     }
 
-                                    // Create a new VM is we don't have one yet.
-                                    if self.vm.is_none() {
-                                        let exit_evt = self
-                                            .exit_evt
-                                            .try_clone()
-                                            .map_err(Error::EventFdClone)?;
-                                        let reset_evt = self
-                                            .reset_evt
-                                            .try_clone()
-                                            .map_err(Error::EventFdClone)?;
-
-                                        if let Some(ref vm_config) = self.vm_config {
-                                            match Vm::new(
-                                                Arc::clone(vm_config),
-                                                exit_evt,
-                                                reset_evt,
-                                            ) {
-                                                Ok(vm) => {
-                                                    self.vm = Some(vm);
-                                                }
-                                                Err(e) => {
-                                                    sender
-                                                        .send(Err(ApiError::VmCreate(e)))
-                                                        .map_err(Error::ApiResponseSend)?;
-                                                    continue;
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Now let's boot it.
-                                    let response = if let Some(ref mut vm) = self.vm {
-                                        match vm.boot() {
-                                            Ok(_) => Ok(ApiResponsePayload::Empty),
-                                            Err(e) => Err(ApiError::VmBoot(e)),
-                                        }
-                                    } else {
-                                        Err(ApiError::VmNotCreated)
+                                    let response = match self.vm_boot() {
+                                        Ok(_) => Ok(ApiResponsePayload::Empty),
+                                        Err(e) => Err(ApiError::VmBoot(e)),
                                     };
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmShutdown(sender) => {
-                                    let response = if let Some(ref mut vm) = self.vm {
-                                        match vm.shutdown() {
-                                            Ok(_) => Ok(ApiResponsePayload::Empty),
-                                            Err(e) => Err(ApiError::VmShutdown(e)),
-                                        }
-                                    } else {
-                                        Err(ApiError::VmNotBooted)
+                                    let response = match self.vm_shutdown() {
+                                        Ok(_) => Ok(ApiResponsePayload::Empty),
+                                        Err(e) => Err(ApiError::VmShutdown(e)),
                                     };
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
