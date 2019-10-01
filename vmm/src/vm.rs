@@ -148,6 +148,8 @@ pub enum Error {
     /// Error configuring the MSR registers
     MSRSConfiguration(arch::x86_64::regs::Error),
 
+    PoisonedState,
+
     #[cfg(target_arch = "x86_64")]
     /// Error configuring the general purpose registers
     REGSConfiguration(arch::x86_64::regs::Error),
@@ -431,6 +433,13 @@ pub enum ExitBehaviour {
     Reset = 2,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum VmState {
+    Created,
+    Booted,
+    Shutdown,
+}
+
 pub struct Vm {
     fd: Arc<VmFd>,
     kernel: File,
@@ -445,6 +454,7 @@ pub struct Vm {
     // Reboot (reset) control
     reset_evt: EventFd,
     signals: Option<Signals>,
+    state: RwLock<VmState>,
 }
 
 fn get_host_cpu_phys_bits() -> u8 {
@@ -674,6 +684,7 @@ impl Vm {
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             reset_evt,
             signals: None,
+            state: RwLock::new(VmState::Created),
         })
     }
 
@@ -786,6 +797,9 @@ impl Vm {
             thread.join().map_err(|_| Error::ThreadCleanup)?
         }
 
+        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
+        *state = VmState::Shutdown;
+
         Ok(())
     }
 
@@ -891,6 +905,9 @@ impl Vm {
             }
         }
 
+        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
+        *state = VmState::Booted;
+
         Ok(())
     }
 
@@ -919,6 +936,14 @@ impl Vm {
     /// Gets a thread-safe reference counted pointer to the VM configuration.
     pub fn get_config(&self) -> Arc<VmConfig> {
         Arc::clone(&self.config)
+    }
+
+    /// Get the VM state. Returns an error if the state is poisoned.
+    pub fn get_state(&self) -> Result<VmState> {
+        self.state
+            .try_read()
+            .map_err(|_| Error::PoisonedState)
+            .map(|state| state.clone())
     }
 }
 
