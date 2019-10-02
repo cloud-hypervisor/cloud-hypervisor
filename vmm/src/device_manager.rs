@@ -612,10 +612,10 @@ impl DeviceManager {
             for net_cfg in net_list_cfg.iter() {
                 let virtio_net_device = if let Some(ref tap_if_name) = net_cfg.tap {
                     let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
-                    vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac))
+                    vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac), false)
                         .map_err(DeviceManagerError::CreateVirtioNet)?
                 } else {
-                    vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac))
+                    vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac), false)
                         .map_err(DeviceManagerError::CreateVirtioNet)?
                 };
 

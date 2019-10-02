@@ -445,7 +445,7 @@ pub struct Net {
 
 impl Net {
     /// Create a new virtio network device with the given TAP interface.
-    pub fn new_with_tap(tap: Tap, guest_mac: Option<&MacAddr>) -> Result<Self> {
+    pub fn new_with_tap(tap: Tap, guest_mac: Option<&MacAddr>, iommu: bool) -> Result<Self> {
         // Set offload flags to match the virtio features below.
         tap.set_offload(
             net_gen::TUN_F_CSUM | net_gen::TUN_F_UFO | net_gen::TUN_F_TSO4 | net_gen::TUN_F_TSO6,
@@ -463,6 +463,10 @@ impl Net {
             | 1 << VIRTIO_NET_F_HOST_TSO4
             | 1 << VIRTIO_NET_F_HOST_UFO
             | 1 << VIRTIO_F_VERSION_1;
+
+        if iommu {
+            avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+        }
 
         let mut config_space;
         if let Some(mac) = guest_mac {
@@ -490,13 +494,18 @@ impl Net {
 
     /// Create a new virtio network device with the given IP address and
     /// netmask.
-    pub fn new(ip_addr: Ipv4Addr, netmask: Ipv4Addr, guest_mac: Option<&MacAddr>) -> Result<Self> {
+    pub fn new(
+        ip_addr: Ipv4Addr,
+        netmask: Ipv4Addr,
+        guest_mac: Option<&MacAddr>,
+        iommu: bool,
+    ) -> Result<Self> {
         let tap = Tap::new().map_err(Error::TapOpen)?;
         tap.set_ip_addr(ip_addr).map_err(Error::TapSetIp)?;
         tap.set_netmask(netmask).map_err(Error::TapSetNetmask)?;
         tap.enable().map_err(Error::TapEnable)?;
 
-        Self::new_with_tap(tap, guest_mac)
+        Self::new_with_tap(tap, guest_mac, iommu)
     }
 }
 
