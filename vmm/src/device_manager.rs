@@ -580,15 +580,17 @@ impl DeviceManager {
                 let block = match image_type {
                     ImageType::Raw => {
                         let raw_img = vm_virtio::RawFile::new(raw_img);
-                        let dev = vm_virtio::Block::new(raw_img, disk_cfg.path.clone(), false)
-                            .map_err(DeviceManagerError::CreateVirtioBlock)?;
+                        let dev =
+                            vm_virtio::Block::new(raw_img, disk_cfg.path.clone(), false, false)
+                                .map_err(DeviceManagerError::CreateVirtioBlock)?;
                         Box::new(dev) as Box<dyn vm_virtio::VirtioDevice>
                     }
                     ImageType::Qcow2 => {
                         let qcow_img = QcowFile::from(raw_img)
                             .map_err(DeviceManagerError::QcowDeviceCreate)?;
-                        let dev = vm_virtio::Block::new(qcow_img, disk_cfg.path.clone(), false)
-                            .map_err(DeviceManagerError::CreateVirtioBlock)?;
+                        let dev =
+                            vm_virtio::Block::new(qcow_img, disk_cfg.path.clone(), false, false)
+                                .map_err(DeviceManagerError::CreateVirtioBlock)?;
                         Box::new(dev) as Box<dyn vm_virtio::VirtioDevice>
                     }
                 };
