@@ -370,7 +370,22 @@ impl DeviceManager {
             .io
             .insert(i8042.clone(), 0x61, 0x4)
             .map_err(DeviceManagerError::BusError)?;
+        #[cfg(feature = "cmos")]
+        {
+            use vm_memory::GuestMemory;
+            let mem_size = vm_info.memory.as_ref().read().unwrap().end_addr().0 + 1;
+            let mem_below_4g = std::cmp::min(arch::layout::MEM_32BIT_RESERVED_START.0, mem_size);
+            let mem_above_4g = mem_size.saturating_sub(arch::layout::RAM_64BIT_START.0);
 
+            let cmos = Arc::new(Mutex::new(devices::legacy::Cmos::new(
+                mem_below_4g,
+                mem_above_4g,
+            )));
+            buses
+                .io
+                .insert(cmos.clone(), 0x70, 0x2)
+                .map_err(DeviceManagerError::BusError)?;
+        }
         #[cfg(feature = "acpi")]
         {
             let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
