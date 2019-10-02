@@ -53,7 +53,7 @@ Assuming you have `clear-kvm.img` and `custom-vmlinux.bin` on your system, here 
 ./cloud-hypervisor \
     --cpus 4 \
     --memory "size=512,file=/dev/shm" \
-    --disk clear-kvm.img \
+    --disk path=clear-kvm.img \
     --kernel custom-vmlinux.bin \
     --cmdline "console=ttyS0 reboot=k panic=1 nomodules root=/dev/vda3" \ 
     --fs tag=virtiofs,sock=/tmp/virtiofs,num_queues=1,queue_size=512

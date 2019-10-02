@@ -122,7 +122,10 @@ fn main() {
         .arg(
             Arg::with_name("disk")
                 .long("disk")
-                .help("Path to VM disk image")
+                .help(
+                    "Disk parameters \"path=<disk_image_path>,\
+                     iommu=on|off\"",
+                )
                 .takes_value(true)
                 .min_values(1)
                 .group("vm-config"),
@@ -1015,16 +1018,16 @@ mod tests {
                     .args(&["--kernel", guest.fw_path.as_str()])
                     .args(&[
                         "--disk",
-                        guest
-                            .disk_config
-                            .disk(DiskType::OperatingSystem)
-                            .unwrap()
-                            .as_str(),
-                        guest
-                            .disk_config
-                            .disk(DiskType::CloudInit)
-                            .unwrap()
-                            .as_str(),
+                        format!(
+                            "path={}",
+                            guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                        )
+                        .as_str(),
+                        format!(
+                            "path={}",
+                            guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                        )
+                        .as_str(),
                     ])
                     .args(&["--net", guest.default_net_string().as_str()])
                     .args(&["--serial", "tty", "--console", "off"])
@@ -1065,16 +1068,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
@@ -1103,16 +1106,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
@@ -1141,16 +1144,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
@@ -1182,16 +1185,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
@@ -1235,16 +1238,16 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
@@ -1294,16 +1297,16 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
@@ -1361,16 +1364,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&[
                     "--vhost-user-net",
@@ -1423,16 +1426,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
@@ -1513,11 +1516,11 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
@@ -1563,16 +1566,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
@@ -1634,16 +1637,16 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
@@ -1759,16 +1762,16 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
@@ -1820,7 +1823,12 @@ mod tests {
                 .args(&["--cpus", "1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk", guest.disk_config.disk(DiskType::CloudInit).unwrap().as_str()])
+                .args(&["--disk",
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str()])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
                     "--pmem",
@@ -1861,16 +1869,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&[
                     "--net",
@@ -1914,16 +1922,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--serial", "off"])
@@ -1975,16 +1983,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--serial", "null"])
@@ -2036,16 +2044,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--serial", "tty"])
@@ -2099,16 +2107,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
@@ -2162,16 +2170,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--console", "tty"])
@@ -2222,16 +2230,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&[
@@ -2416,16 +2424,16 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw acpi=off"])
@@ -2478,16 +2486,16 @@ mod tests {
                     .args(&["--kernel", guest.fw_path.as_str()])
                     .args(&[
                         "--disk",
-                        guest
-                            .disk_config
-                            .disk(DiskType::OperatingSystem)
-                            .unwrap()
-                            .as_str(),
-                        guest
-                            .disk_config
-                            .disk(DiskType::CloudInit)
-                            .unwrap()
-                            .as_str(),
+                        format!(
+                            "path={}",
+                            guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                        )
+                        .as_str(),
+                        format!(
+                            "path={}",
+                            guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                        )
+                        .as_str(),
                     ])
                     .args(&["--net", guest.default_net_string().as_str()])
                     .args(&["--serial", "tty", "--console", "off"])
@@ -2549,16 +2557,16 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
@@ -2615,16 +2623,16 @@ mod tests {
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
-                    guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                        .as_str(),
-                    guest
-                        .disk_config
-                        .disk(DiskType::CloudInit)
-                        .unwrap()
-                        .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--vsock", format!("cid=3,sock={}", sock).as_str()])

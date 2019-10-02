@@ -75,6 +75,8 @@ pub enum Error<'a> {
     ParseVsockSockParam,
     /// Missing kernel configuration
     ValidateMissingKernelConfig,
+    /// Failed parsing iommu parameter for the device.
+    ParseDeviceIommu,
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -112,6 +114,20 @@ fn parse_size(size: &str) -> Result<u64> {
     let s = s.trim_end_matches(|c| c == 'K' || c == 'M' || c == 'G');
     let res = s.parse::<u64>().map_err(Error::ParseSizeParam)?;
     Ok(res << shift)
+}
+
+fn parse_iommu(iommu: &str) -> Result<bool> {
+    if !iommu.is_empty() {
+        let res = match iommu {
+            "on" => true,
+            "off" => false,
+            _ => return Err(Error::ParseDeviceIommu),
+        };
+
+        Ok(res)
+    } else {
+        Ok(false)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -210,12 +226,29 @@ impl CmdlineConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: PathBuf,
+    #[serde(default)]
+    pub iommu: bool,
 }
 
 impl DiskConfig {
     pub fn parse(disk: &str) -> Result<Self> {
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = disk.split(',').collect();
+
+        let mut path_str: &str = "";
+        let mut iommu_str: &str = "";
+
+        for param in params_list.iter() {
+            if param.starts_with("path=") {
+                path_str = &param[5..];
+            } else if param.starts_with("iommu=") {
+                iommu_str = &param[6..];
+            }
+        }
+
         Ok(DiskConfig {
-            path: PathBuf::from(disk),
+            path: PathBuf::from(path_str),
+            iommu: parse_iommu(iommu_str)?,
         })
     }
 }
@@ -679,13 +712,17 @@ impl VmConfig {
     }
 
     pub fn parse(vm_params: VmParams) -> Result<Self> {
-        let iommu = false;
+        let mut iommu = false;
 
         let mut disks: Option<Vec<DiskConfig>> = None;
         if let Some(disk_list) = &vm_params.disks {
             let mut disk_config_list = Vec::new();
             for item in disk_list.iter() {
-                disk_config_list.push(DiskConfig::parse(item)?);
+                let disk_config = DiskConfig::parse(item)?;
+                if disk_config.iommu {
+                    iommu = true;
+                }
+                disk_config_list.push(disk_config);
             }
             disks = Some(disk_config_list);
         }

@@ -10,7 +10,7 @@ Use one `--net` command-line argument from cloud-hypervisor to specify the emula
 ./cloud-hypervisor \
     --cpus 4 \
     --memory "size=512M" \
-    --disk my-root-disk.img \
+    --disk path=my-root-disk.img \
     --kernel my-vmlinux.bin \
     --cmdline "console=ttyS0 reboot=k panic=1 nomodules root=/dev/vda3" \
     --net tap=ich0,mac=a4:a1:c2:00:00:01,ip=192.168.4.2,mask=255.255.255.0 \
