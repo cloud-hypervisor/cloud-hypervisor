@@ -439,6 +439,8 @@ pub struct Net {
     // The config space will only consist of the MAC address specified by the user,
     // or nothing, if no such address if provided.
     config_space: Vec<u8>,
+    queue_evts: Option<Vec<EventFd>>,
+    interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
 impl Net {
@@ -481,6 +483,8 @@ impl Net {
             avail_features,
             acked_features: 0u64,
             config_space,
+            queue_evts: None,
+            interrupt_cb: None,
         })
     }
 
@@ -597,7 +601,22 @@ impl VirtioDevice for Net {
             };
         self.kill_evt = Some(self_kill_evt);
 
-        if let Some(tap) = self.tap.take() {
+        if let Some(tap) = self.tap.clone() {
+            // Save the interrupt EventFD as we need to return it on reset
+            // but clone it to pass into the thread.
+            self.interrupt_cb = Some(interrupt_cb.clone());
+
+            let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
+            for queue_evt in queue_evts.iter() {
+                // Save the queue EventFD as we need to return it on reset
+                // but clone it to pass into the thread.
+                tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
+                    error!("failed to clone queue EventFd: {}", e);
+                    ActivateError::BadActivate
+                })?);
+            }
+            self.queue_evts = Some(tmp_queue_evts);
+
             let rx_queue = queues.remove(0);
             let tx_queue = queues.remove(0);
             let rx_queue_evt = queue_evts.remove(0);
@@ -625,5 +644,18 @@ impl VirtioDevice for Net {
             return Ok(());
         }
         Err(ActivateError::BadActivate)
+    }
+
+    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        if let Some(kill_evt) = self.kill_evt.take() {
+            // Ignore the result because there is nothing we can do about it.
+            let _ = kill_evt.write(1);
+        }
+
+        // Return the interrupt and queue EventFDs
+        Some((
+            self.interrupt_cb.take().unwrap(),
+            self.queue_evts.take().unwrap(),
+        ))
     }
 }
