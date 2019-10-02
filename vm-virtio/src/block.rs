@@ -503,6 +503,7 @@ impl<T: DiskFile> Block<T> {
         mut disk_image: T,
         disk_path: PathBuf,
         is_disk_read_only: bool,
+        iommu: bool,
     ) -> io::Result<Block<T>> {
         let disk_size = disk_image.seek(SeekFrom::End(0))? as u64;
         if disk_size % SECTOR_SIZE != 0 {
@@ -514,6 +515,10 @@ impl<T: DiskFile> Block<T> {
         }
 
         let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_BLK_F_FLUSH);
+
+        if iommu {
+            avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+        }
 
         if is_disk_read_only {
             avail_features |= 1u64 << VIRTIO_BLK_F_RO;
