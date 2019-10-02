@@ -17,6 +17,7 @@ pub fn configure_system(
     _cmdline_size: usize,
     _num_cpus: u8,
     _serial_enabled: bool,
+    _virt_iommu: Option<(u32, &[u32])>,
 ) -> super::Result<()> {
     Ok(())
 }

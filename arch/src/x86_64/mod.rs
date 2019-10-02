@@ -104,6 +104,7 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
 /// * `cmdline_addr` - Address in `guest_mem` where the kernel command line was loaded.
 /// * `cmdline_size` - Size of the kernel command line in bytes including the null terminator.
 /// * `num_cpus` - Number of virtual CPUs the guest will have.
+#[allow(clippy::too_many_arguments)]
 pub fn configure_system(
     guest_mem: &GuestMemoryMmap,
     cmdline_addr: GuestAddress,
@@ -112,6 +113,7 @@ pub fn configure_system(
     setup_hdr: Option<setup_header>,
     _serial_enabled: bool,
     _end_of_range: GuestAddress,
+    _virt_iommu: Option<(u32, &[u32])>,
 ) -> super::Result<()> {
     const KERNEL_BOOT_FLAG_MAGIC: u16 = 0xaa55;
     const KERNEL_HDR_MAGIC: u32 = 0x53726448;
@@ -183,6 +185,7 @@ pub fn configure_system(
             _serial_enabled,
             start_of_device_area,
             _end_of_range,
+            _virt_iommu,
         );
         params.0.acpi_rsdp_addr = rsdp_addr.0;
     }
@@ -251,6 +254,7 @@ mod tests {
             None,
             false,
             GuestAddress((1 << 36) - 1),
+            None,
         );
         assert!(config_err.is_err());
         assert_eq!(
@@ -277,6 +281,7 @@ mod tests {
             None,
             false,
             GuestAddress((1 << 36) - 1),
+            None,
         )
         .unwrap();
 
@@ -297,6 +302,7 @@ mod tests {
             None,
             false,
             GuestAddress((1 << 36) - 1),
+            None,
         )
         .unwrap();
 
@@ -317,6 +323,7 @@ mod tests {
             None,
             false,
             GuestAddress((1 << 36) - 1),
+            None,
         )
         .unwrap();
     }
