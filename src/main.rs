@@ -135,7 +135,8 @@ fn main() {
                 .long("net")
                 .help(
                     "Network parameters \"tap=<if_name>,\
-                     ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>\"",
+                     ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,\
+                     iommu=on|off\"",
                 )
                 .takes_value(true)
                 .min_values(1)
