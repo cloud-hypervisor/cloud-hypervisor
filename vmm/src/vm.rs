@@ -745,6 +745,7 @@ impl Vm {
                     Some(hdr),
                     self.config.serial.mode != ConsoleOutputMode::Off,
                     end_of_range,
+                    None,
                 )
                 .map_err(|_| Error::CmdLine)?;
 
@@ -765,6 +766,7 @@ impl Vm {
                     None,
                     self.config.serial.mode != ConsoleOutputMode::Off,
                     end_of_range,
+                    None,
                 )
                 .map_err(|_| Error::CmdLine)?;
 
