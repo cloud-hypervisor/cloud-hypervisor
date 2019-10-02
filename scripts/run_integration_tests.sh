@@ -80,7 +80,7 @@ fi
 VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
 VUBD="$WORKLOADS_DIR/vubd"
 QEMU_DIR="qemu_build"
-if [ ! -f "$VIRTIOFSD" ] || [ ! -f "$VUBRIDGE" ] || [ ! -f "$VUBD" ]; then
+if [ ! -f "$VIRTIOFSD" ] || [ ! -f "$VUBD" ]; then
     pushd $WORKLOADS_DIR
     git clone --depth 1 "https://github.com/sboeuf/qemu.git" -b "virtio-fs" $QEMU_DIR
     pushd $QEMU_DIR
