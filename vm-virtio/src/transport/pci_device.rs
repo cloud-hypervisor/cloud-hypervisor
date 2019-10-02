@@ -31,8 +31,8 @@ use vmm_sys_util::{errno::Result, eventfd::EventFd};
 use super::VirtioPciCommonConfig;
 use crate::{
     Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
-    DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
-    DEVICE_INIT, INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
+    VirtioIommuRemapping, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
+    DEVICE_FEATURES_OK, DEVICE_INIT, INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
 };
 
 #[allow(clippy::enum_variant_names)]
@@ -250,6 +250,7 @@ impl VirtioPciDevice {
         memory: Arc<RwLock<GuestMemoryMmap>>,
         device: Box<dyn VirtioDevice>,
         msix_num: u16,
+        iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
     ) -> Result<Self> {
         let mut queue_evts = Vec::new();
         for _ in device.queue_max_sizes().iter() {
@@ -258,7 +259,11 @@ impl VirtioPciDevice {
         let queues = device
             .queue_max_sizes()
             .iter()
-            .map(|&s| Queue::new(s))
+            .map(|&s| {
+                let mut queue = Queue::new(s);
+                queue.iommu_mapping_cb = iommu_mapping_cb.clone();
+                queue
+            })
             .collect();
 
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + device.device_type() as u16;

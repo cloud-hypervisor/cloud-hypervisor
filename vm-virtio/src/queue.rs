@@ -11,7 +11,9 @@
 use std::cmp::min;
 use std::num::Wrapping;
 use std::sync::atomic::{fence, Ordering};
+use std::sync::Arc;
 
+use crate::device::VirtioIommuRemapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestUsize,
 };
@@ -44,6 +46,7 @@ pub struct DescriptorChain<'a> {
     desc_table: GuestAddress,
     queue_size: u16,
     ttl: u16, // used to prevent infinite chain cycles
+    iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
 
     /// Reference to guest memory
     pub mem: &'a GuestMemoryMmap,
@@ -71,6 +74,7 @@ impl<'a> DescriptorChain<'a> {
         desc_table: GuestAddress,
         queue_size: u16,
         index: u16,
+        iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
     ) -> Option<DescriptorChain> {
         if index >= queue_size {
             return None;
@@ -91,16 +95,25 @@ impl<'a> DescriptorChain<'a> {
                 return None;
             }
         };
+
+        // Translate address if necessary
+        let desc_addr = if let Some(iommu_mapping_cb) = &iommu_mapping_cb {
+            (iommu_mapping_cb)(desc.addr).unwrap()
+        } else {
+            desc.addr
+        };
+
         let chain = DescriptorChain {
             mem,
             desc_table,
             queue_size,
             ttl: queue_size,
             index,
-            addr: GuestAddress(desc.addr),
+            addr: GuestAddress(desc_addr),
             len: desc.len,
             flags: desc.flags,
             next: desc.next,
+            iommu_mapping_cb,
         };
 
         if chain.is_valid() {
@@ -137,12 +150,17 @@ impl<'a> DescriptorChain<'a> {
     /// the head of the next _available_ descriptor chain.
     pub fn next_descriptor(&self) -> Option<DescriptorChain<'a>> {
         if self.has_next() {
-            DescriptorChain::checked_new(self.mem, self.desc_table, self.queue_size, self.next).map(
-                |mut c| {
-                    c.ttl = self.ttl - 1;
-                    c
-                },
+            DescriptorChain::checked_new(
+                self.mem,
+                self.desc_table,
+                self.queue_size,
+                self.next,
+                self.iommu_mapping_cb.clone(),
             )
+            .map(|mut c| {
+                c.ttl = self.ttl - 1;
+                c
+            })
         } else {
             None
         }
@@ -158,6 +176,7 @@ pub struct AvailIter<'a, 'b> {
     last_index: Wrapping<u16>,
     queue_size: u16,
     next_avail: &'b mut Wrapping<u16>,
+    iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
 }
 
 impl<'a, 'b> AvailIter<'a, 'b> {
@@ -170,6 +189,7 @@ impl<'a, 'b> AvailIter<'a, 'b> {
             last_index: Wrapping(0),
             queue_size: 0,
             next_avail: q_next_avail,
+            iommu_mapping_cb: None,
         }
     }
 }
@@ -199,8 +219,13 @@ impl<'a, 'b> Iterator for AvailIter<'a, 'b> {
 
         self.next_index += Wrapping(1);
 
-        let ret =
-            DescriptorChain::checked_new(self.mem, self.desc_table, self.queue_size, desc_index);
+        let ret = DescriptorChain::checked_new(
+            self.mem,
+            self.desc_table,
+            self.queue_size,
+            desc_index,
+            self.iommu_mapping_cb.clone(),
+        );
         if ret.is_some() {
             *self.next_avail += Wrapping(1);
         }
@@ -234,6 +259,8 @@ pub struct Queue {
 
     pub next_avail: Wrapping<u16>,
     pub next_used: Wrapping<u16>,
+
+    pub iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
 }
 
 impl Queue {
@@ -249,11 +276,32 @@ impl Queue {
             used_ring: GuestAddress(0),
             next_avail: Wrapping(0),
             next_used: Wrapping(0),
+            iommu_mapping_cb: None,
         }
     }
 
     pub fn get_max_size(&self) -> u16 {
         self.max_size
+    }
+
+    pub fn enable(&mut self, set: bool) {
+        self.ready = set;
+
+        if set {
+            // Translate address of descriptor table and vrings.
+            if let Some(iommu_mapping_cb) = &self.iommu_mapping_cb {
+                self.desc_table =
+                    GuestAddress((iommu_mapping_cb)(self.desc_table.raw_value()).unwrap());
+                self.avail_ring =
+                    GuestAddress((iommu_mapping_cb)(self.avail_ring.raw_value()).unwrap());
+                self.used_ring =
+                    GuestAddress((iommu_mapping_cb)(self.used_ring.raw_value()).unwrap());
+            }
+        } else {
+            self.desc_table = GuestAddress(0);
+            self.avail_ring = GuestAddress(0);
+            self.used_ring = GuestAddress(0);
+        }
     }
 
     /// Return the actual size of the queue, as the driver may not set up a
@@ -354,6 +402,7 @@ impl Queue {
             last_index: Wrapping(last_index),
             queue_size,
             next_avail: &mut self.next_avail,
+            iommu_mapping_cb: self.iommu_mapping_cb.clone(),
         }
     }
 
@@ -647,14 +696,16 @@ pub(crate) mod tests {
         assert!(vq.end().0 < 0x1000);
 
         // index >= queue_size
-        assert!(DescriptorChain::checked_new(m, vq.start(), 16, 16).is_none());
+        assert!(DescriptorChain::checked_new(m, vq.start(), 16, 16, None).is_none());
 
         // desc_table address is way off
-        assert!(DescriptorChain::checked_new(m, GuestAddress(0x00ff_ffff_ffff), 16, 0).is_none());
+        assert!(
+            DescriptorChain::checked_new(m, GuestAddress(0x00ff_ffff_ffff), 16, 0, None).is_none()
+        );
 
         // the addr field of the descriptor is way off
         vq.dtable[0].addr.set(0x0fff_ffff_ffff);
-        assert!(DescriptorChain::checked_new(m, vq.start(), 16, 0).is_none());
+        assert!(DescriptorChain::checked_new(m, vq.start(), 16, 0, None).is_none());
 
         // let's create some invalid chains
 
@@ -663,7 +714,7 @@ pub(crate) mod tests {
             vq.dtable[0].addr.set(0x1000);
             // ...but the length is too large
             vq.dtable[0].len.set(0xffff_ffff);
-            assert!(DescriptorChain::checked_new(m, vq.start(), 16, 0).is_none());
+            assert!(DescriptorChain::checked_new(m, vq.start(), 16, 0, None).is_none());
         }
 
         {
@@ -673,7 +724,7 @@ pub(crate) mod tests {
             //..but the the index of the next descriptor is too large
             vq.dtable[0].next.set(16);
 
-            assert!(DescriptorChain::checked_new(m, vq.start(), 16, 0).is_none());
+            assert!(DescriptorChain::checked_new(m, vq.start(), 16, 0, None).is_none());
         }
 
         // finally, let's test an ok chain
@@ -682,7 +733,7 @@ pub(crate) mod tests {
             vq.dtable[0].next.set(1);
             vq.dtable[1].set(0x2000, 0x1000, 0, 0);
 
-            let c = DescriptorChain::checked_new(m, vq.start(), 16, 0).unwrap();
+            let c = DescriptorChain::checked_new(m, vq.start(), 16, 0, None).unwrap();
 
             assert_eq!(c.mem as *const GuestMemoryMmap, m as *const GuestMemoryMmap);
             assert_eq!(c.desc_table, vq.start());

@@ -22,6 +22,9 @@ pub type VirtioInterrupt = Box<
         + Sync,
 >;
 
+pub type VirtioIommuRemapping =
+    Box<dyn Fn(u64) -> std::result::Result<u64, std::io::Error> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct VirtioSharedMemory {
     pub offset: u64,
@@ -83,4 +86,18 @@ pub trait VirtioDevice: Send {
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
         None
     }
+
+    fn iommu_translate(&self, addr: u64) -> u64 {
+        addr
+    }
+}
+
+/// Trait providing address translation the same way a physical DMA remapping
+/// table would provide translation between an IOVA and a physical address.
+/// The goal of this trait is to be used by virtio devices to perform the
+/// address translation before they try to read from the guest physical address.
+/// On the other side, the implementation itself should be provided by the code
+/// emulating the IOMMU for the guest.
+pub trait DmaRemapping: Send + Sync {
+    fn translate(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error>;
 }

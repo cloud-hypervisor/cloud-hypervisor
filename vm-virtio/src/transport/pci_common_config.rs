@@ -149,7 +149,7 @@ impl VirtioPciCommonConfig {
             0x16 => self.queue_select = value,
             0x18 => self.with_queue_mut(queues, |q| q.size = value),
             0x1a => self.with_queue_mut(queues, |q| q.vector = value),
-            0x1c => self.with_queue_mut(queues, |q| q.ready = value == 1),
+            0x1c => self.with_queue_mut(queues, |q| q.enable(value == 1)),
             _ => {
                 warn!("invalid virtio register word write: 0x{:x}", offset);
             }
