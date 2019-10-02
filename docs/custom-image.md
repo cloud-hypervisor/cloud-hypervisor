@@ -15,7 +15,7 @@ IMG_VERSION=$(curl https://download.clearlinux.org/latest)
 # Get latest clear-kvm image:
 wget -P $HOME/workloads/ https://download.clearlinux.org/current/clear-${IMG_VERSION}-kvm.img.xz
 # Boot cloud-hypervisor VM with the downloaded image
-./cloud-hypervisor -v --kernel $HOME/workloads/vmlinux --disk clear-30970-kvm.img --cmdline "console=ttyS0 console=hvc0 reboot=k panic=1 nomodules root=/dev/vda3" --cpus 1 --memory size=1G --net tap=,mac=
+./cloud-hypervisor -v --kernel $HOME/workloads/vmlinux --disk path=clear-30970-kvm.img --cmdline "console=ttyS0 console=hvc0 reboot=k panic=1 nomodules root=/dev/vda3" --cpus 1 --memory size=1G --net tap=,mac=
 # Setup connectivity
 IFACE=$(ip route | grep default | awk -F 'dev' '{print $2}' | awk -F ' ' '{print $1}')
 GW=$(ip route | grep vmtap0 | awk -F ' ' '{print $1}')

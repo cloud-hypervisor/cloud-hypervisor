@@ -225,6 +225,9 @@ components:
       properties:
         path:
           type: string
+        iommu:
+          type: boolean
+          default: false
 
     NetConfig:
       required:
