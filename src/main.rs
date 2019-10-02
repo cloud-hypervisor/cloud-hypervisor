@@ -720,6 +720,37 @@ mod tests {
         String::from(tmp_dir.path().join("vsock").to_str().unwrap())
     }
 
+    fn temp_api_path(tmp_dir: &TempDir) -> String {
+        String::from(
+            tmp_dir
+                .path()
+                .join("cloud-hypervisor.sock")
+                .to_str()
+                .unwrap(),
+        )
+    }
+
+    fn curl_command(api_socket: &str, method: &str, url: &str, http_body: Option<&str>) {
+        let mut curl_args: Vec<&str> =
+            ["--unix-socket", api_socket, "-i", "-X", method, url].to_vec();
+
+        if let Some(body) = http_body {
+            curl_args.push("-H");
+            curl_args.push("Accept: application/json");
+            curl_args.push("-H");
+            curl_args.push("Content-Type: application/json");
+            curl_args.push("-d");
+            curl_args.push(body);
+        }
+
+        let status = Command::new("curl")
+            .args(curl_args)
+            .status()
+            .expect("Failed to launch curl command");
+
+        assert!(status.success());
+    }
+
     fn ssh_command_ip(command: &str, ip: &str) -> Result<String, Error> {
         let mut s = String::new();
 
@@ -828,6 +859,17 @@ mod tests {
 
         fn ssh_command_l2(&self, command: &str) -> Result<String, Error> {
             ssh_command_ip(command, &self.network.l2_guest_ip)
+        }
+
+        fn api_create_body(&self, cpu_count: u8) -> String {
+            format! {"{{\"cpus\":{},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
+                     cpu_count,
+                     self.fw_path.as_str(),
+                     self.network.host_ip,
+                     self.network.guest_mac,
+                     self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
+                     self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
+            }
         }
 
         fn get_cpu_count(&self) -> Result<u32, Error> {
@@ -2624,6 +2666,60 @@ mod tests {
 
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    // Start cloud-hypervisor with no VM parameters, only the API server running.
+    // From the API: Create a VM, boot it and check that it looks as expected.
+    fn test_api_create_boot() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--api-socket", &api_socket])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(1, 0));
+
+            // Create the VM first
+            let cpu_count: u8 = 4;
+            let http_body = guest.api_create_body(cpu_count);
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.create",
+                Some(&http_body),
+            );
+
+            // Then boot it
+            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+            thread::sleep(std::time::Duration::new(5, 0));
+
+            // Check that the VM booted as expected
+            aver_eq!(
+                tb,
+                guest.get_cpu_count().unwrap_or_default() as u8,
+                cpu_count
+            );
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+            aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
+
+            guest
+                .ssh_command("sudo shutdown -h now")
+                .unwrap_or_default();
+            thread::sleep(std::time::Duration::new(10, 0));
+
             let _ = child.kill();
             let _ = child.wait();
 
