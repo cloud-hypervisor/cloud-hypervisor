@@ -114,6 +114,10 @@ impl PciBus {
         self.devices.push(device);
         Ok(())
     }
+
+    pub fn next_device_id(&self) -> u32 {
+        self.devices.len() as u32
+    }
 }
 
 pub struct PciConfigIo {
