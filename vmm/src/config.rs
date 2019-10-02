@@ -259,6 +259,8 @@ pub struct NetConfig {
     pub ip: Ipv4Addr,
     pub mask: Ipv4Addr,
     pub mac: MacAddr,
+    #[serde(default)]
+    pub iommu: bool,
 }
 
 impl NetConfig {
@@ -270,6 +272,7 @@ impl NetConfig {
         let mut ip_str: &str = "";
         let mut mask_str: &str = "";
         let mut mac_str: &str = "";
+        let mut iommu_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("tap=") {
@@ -280,6 +283,8 @@ impl NetConfig {
                 mask_str = &param[5..];
             } else if param.starts_with("mac=") {
                 mac_str = &param[4..];
+            } else if param.starts_with("iommu=") {
+                iommu_str = &param[6..];
             }
         }
 
@@ -287,6 +292,7 @@ impl NetConfig {
         let mut ip: Ipv4Addr = Ipv4Addr::new(192, 168, 249, 1);
         let mut mask: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);;
         let mut mac: MacAddr = MacAddr::local_random();
+        let iommu = parse_iommu(iommu_str)?;
 
         if !tap_str.is_empty() {
             tap = Some(tap_str.to_string());
@@ -301,7 +307,13 @@ impl NetConfig {
             mac = MacAddr::parse_str(mac_str).map_err(Error::ParseNetMacParam)?;
         }
 
-        Ok(NetConfig { tap, ip, mask, mac })
+        Ok(NetConfig {
+            tap,
+            ip,
+            mask,
+            mac,
+            iommu,
+        })
     }
 }
 
@@ -731,7 +743,11 @@ impl VmConfig {
         if let Some(net_list) = &vm_params.net {
             let mut net_config_list = Vec::new();
             for item in net_list.iter() {
-                net_config_list.push(NetConfig::parse(item)?);
+                let net_config = NetConfig::parse(item)?;
+                if net_config.iommu {
+                    iommu = true;
+                }
+                net_config_list.push(net_config);
             }
             net = Some(net_config_list);
         }

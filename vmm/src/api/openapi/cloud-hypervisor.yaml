@@ -244,6 +244,9 @@ components:
           type: string
         mac:
           type: string
+        iommu:
+          type: boolean
+          default: false
 
     RngConfig:
       required:
