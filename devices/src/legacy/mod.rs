@@ -5,8 +5,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+#[cfg(feature = "cmos")]
+mod cmos;
 mod i8042;
 mod serial;
 
+#[cfg(feature = "cmos")]
+pub use self::cmos::Cmos;
 pub use self::i8042::I8042Device;
 pub use self::serial::Serial;

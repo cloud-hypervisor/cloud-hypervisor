@@ -31,10 +31,11 @@ path = "vhost_rs"
 features = ["vhost-user-slave"]
 
 [features]
-default = ["acpi", "pci"]
+default = ["acpi", "pci", "cmos"]
 acpi = ["vmm/acpi"]
 pci = ["vmm/pci_support"]
 mmio = ["vmm/mmio_support"]
+cmos = ["vmm/cmos"]
 
 # Integration tests require a special environment to run in
 integration_tests = []
