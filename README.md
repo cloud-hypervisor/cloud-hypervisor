@@ -121,7 +121,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 $ popd
 ```
 
-Multiple arguments can be given to the `--disk` parameter, currently the firmware requires that the bootable image is on the first disk.
+Multiple arguments can be given to the `--disk` parameter.
 
 ### Custom kernel and disk image
 
