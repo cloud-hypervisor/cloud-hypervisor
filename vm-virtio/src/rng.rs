@@ -158,6 +158,8 @@ pub struct Rng {
     random_file: Option<File>,
     avail_features: u64,
     acked_features: u64,
+    queue_evts: Option<Vec<EventFd>>,
+    interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
 impl Rng {
@@ -171,6 +173,8 @@ impl Rng {
             random_file: Some(random_file),
             avail_features,
             acked_features: 0u64,
+            queue_evts: None,
+            interrupt_cb: None,
         })
     }
 }
@@ -261,7 +265,26 @@ impl VirtioDevice for Rng {
             };
         self.kill_evt = Some(self_kill_evt);
 
-        if let Some(random_file) = self.random_file.take() {
+        // Save the interrupt EventFD as we need to return it on reset
+        // but clone it to pass into the thread.
+        self.interrupt_cb = Some(interrupt_cb.clone());
+
+        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
+        for queue_evt in queue_evts.iter() {
+            // Save the queue EventFD as we need to return it on reset
+            // but clone it to pass into the thread.
+            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                ActivateError::BadActivate
+            })?);
+        }
+        self.queue_evts = Some(tmp_queue_evts);
+
+        if let Some(file) = self.random_file.as_ref() {
+            let random_file = file.try_clone().map_err(|e| {
+                error!("failed cloning rng source: {}", e);
+                ActivateError::BadActivate
+            })?;
             let mut handler = RngEpollHandler {
                 queues,
                 mem,
@@ -283,5 +306,18 @@ impl VirtioDevice for Rng {
             return Ok(());
         }
         Err(ActivateError::BadActivate)
+    }
+
+    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        if let Some(kill_evt) = self.kill_evt.take() {
+            // Ignore the result because there is nothing we can do about it.
+            let _ = kill_evt.write(1);
+        }
+
+        // Return the interrupt and queue EventFDs
+        Some((
+            self.interrupt_cb.take().unwrap(),
+            self.queue_evts.take().unwrap(),
+        ))
     }
 }
