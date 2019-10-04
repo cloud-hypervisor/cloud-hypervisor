@@ -21,7 +21,7 @@ kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master"
 lazy_static = "1.4.0"
 libc = "0.2.62"
 log = "0.4.8"
-micro_http = { path = "../micro_http" }
+micro_http = { git = "https://github.com/firecracker-microvm/firecracker", branch = "master" }
 net_util = { path = "../net_util" }
 pci = {path = "../pci", optional = true}
 qcow = { path = "../qcow" }
