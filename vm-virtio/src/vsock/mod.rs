@@ -307,7 +307,7 @@ mod tests {
                     queue_evts,
                     kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
                     interrupt_cb,
-                    backend: TestBackend::new(),
+                    backend: Arc::new(RwLock::new(TestBackend::new())),
                 },
             }
         }
