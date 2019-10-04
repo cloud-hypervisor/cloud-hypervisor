@@ -364,3 +364,6 @@ components:
         sock:
           type: string
           description: Path to UNIX domain socket, used to proxy vsock connections.
+        iommu:
+          type: boolean
+          default: false

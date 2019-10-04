@@ -652,6 +652,8 @@ impl VhostUserNetConfig {
 pub struct VsockConfig {
     pub cid: u64,
     pub sock: PathBuf,
+    #[serde(default)]
+    pub iommu: bool,
 }
 
 impl VsockConfig {
@@ -661,12 +663,15 @@ impl VsockConfig {
 
         let mut cid_str: &str = "";
         let mut sock_str: &str = "";
+        let mut iommu_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("cid=") {
                 cid_str = &param[4..];
             } else if param.starts_with("sock=") {
                 sock_str = &param[5..];
+            } else if param.starts_with("iommu=") {
+                iommu_str = &param[6..];
             }
         }
 
@@ -677,6 +682,7 @@ impl VsockConfig {
         Ok(VsockConfig {
             cid: cid_str.parse::<u64>().map_err(Error::ParseVsockCidParam)?,
             sock: PathBuf::from(sock_str),
+            iommu: parse_iommu(iommu_str)?,
         })
     }
 }
@@ -855,7 +861,11 @@ impl VmConfig {
         if let Some(vsock_list) = &vm_params.vsock {
             let mut vsock_config_list = Vec::new();
             for item in vsock_list.iter() {
-                vsock_config_list.push(VsockConfig::parse(item)?);
+                let vsock_config = VsockConfig::parse(item)?;
+                if vsock_config.iommu {
+                    iommu = true;
+                }
+                vsock_config_list.push(vsock_config);
             }
             vsock = Some(vsock_config_list);
         }
