@@ -634,8 +634,8 @@ impl DeviceManager {
 
         // Add virtio-rng if required
         if let Some(rng_path) = vm_info.vm_cfg.rng.src.to_str() {
-            let virtio_rng_device =
-                vm_virtio::Rng::new(rng_path).map_err(DeviceManagerError::CreateVirtioRng)?;
+            let virtio_rng_device = vm_virtio::Rng::new(rng_path, false)
+                .map_err(DeviceManagerError::CreateVirtioRng)?;
             devices.push(Box::new(virtio_rng_device) as Box<dyn vm_virtio::VirtioDevice>);
         }
 

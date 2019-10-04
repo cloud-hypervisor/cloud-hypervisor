@@ -15,7 +15,7 @@ use std::thread;
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    VIRTIO_F_VERSION_1,
+    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use vm_memory::{Bytes, GuestMemoryMmap};
@@ -164,9 +164,13 @@ pub struct Rng {
 
 impl Rng {
     /// Create a new virtio rng device that gets random data from /dev/urandom.
-    pub fn new(path: &str) -> io::Result<Rng> {
+    pub fn new(path: &str, iommu: bool) -> io::Result<Rng> {
         let random_file = File::open(path)?;
-        let avail_features = 1u64 << VIRTIO_F_VERSION_1;
+        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
+
+        if iommu {
+            avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+        }
 
         Ok(Rng {
             kill_evt: None,
