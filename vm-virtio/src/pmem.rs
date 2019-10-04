@@ -291,6 +291,8 @@ pub struct Pmem {
     avail_features: u64,
     acked_features: u64,
     config: VirtioPmemConfig,
+    queue_evts: Option<Vec<EventFd>>,
+    interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
 impl Pmem {
@@ -306,6 +308,8 @@ impl Pmem {
             avail_features: 1u64 << VIRTIO_F_VERSION_1,
             acked_features: 0u64,
             config,
+            queue_evts: None,
+            interrupt_cb: None,
         })
     }
 }
@@ -407,7 +411,26 @@ impl VirtioDevice for Pmem {
             };
         self.kill_evt = Some(self_kill_evt);
 
-        if let Some(disk) = self.disk.take() {
+        // Save the interrupt EventFD as we need to return it on reset
+        // but clone it to pass into the thread.
+        self.interrupt_cb = Some(interrupt_cb.clone());
+
+        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
+        for queue_evt in queue_evts.iter() {
+            // Save the queue EventFD as we need to return it on reset
+            // but clone it to pass into the thread.
+            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                ActivateError::BadActivate
+            })?);
+        }
+        self.queue_evts = Some(tmp_queue_evts);
+
+        if let Some(disk) = self.disk.as_ref() {
+            let disk = disk.try_clone().map_err(|e| {
+                error!("failed cloning pmem disk: {}", e);
+                ActivateError::BadActivate
+            })?;
             let mut handler = PmemEpollHandler {
                 queue: queues.remove(0),
                 mem,
@@ -429,5 +452,18 @@ impl VirtioDevice for Pmem {
             return Ok(());
         }
         Err(ActivateError::BadActivate)
+    }
+
+    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        if let Some(kill_evt) = self.kill_evt.take() {
+            // Ignore the result because there is nothing we can do about it.
+            let _ = kill_evt.write(1);
+        }
+
+        // Return the interrupt and queue EventFDs
+        Some((
+            self.interrupt_cb.take().unwrap(),
+            self.queue_evts.take().unwrap(),
+        ))
     }
 }
