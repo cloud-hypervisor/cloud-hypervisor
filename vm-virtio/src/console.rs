@@ -8,6 +8,7 @@ use std::cmp;
 use std::collections::VecDeque;
 use std::io;
 use std::io::Write;
+use std::ops::DerefMut;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::{Arc, Mutex, RwLock};
@@ -57,7 +58,7 @@ struct ConsoleEpollHandler {
     mem: Arc<RwLock<GuestMemoryMmap>>,
     interrupt_cb: Arc<VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
-    out: Box<dyn io::Write + Send>,
+    out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
     input_queue_evt: EventFd,
     output_queue_evt: EventFd,
     input_evt: EventFd,
@@ -130,8 +131,13 @@ impl ConsoleEpollHandler {
         let mem = self.mem.read().unwrap();
         for avail_desc in trans_queue.iter(&mem) {
             let len;
-            let _ = mem.write_to(avail_desc.addr, &mut self.out, avail_desc.len as usize);
-            let _ = self.out.flush();
+            let mut out = self.out.lock().unwrap();
+            let _ = mem.write_to(
+                avail_desc.addr,
+                &mut out.deref_mut(),
+                avail_desc.len as usize,
+            );
+            let _ = out.flush();
 
             len = avail_desc.len;
             used_desc_heads[used_count] = (avail_desc.index, len);
@@ -321,13 +327,15 @@ pub struct Console {
     acked_features: u64,
     config: Arc<Mutex<VirtioConsoleConfig>>,
     input: Arc<ConsoleInput>,
-    out: Option<Box<dyn io::Write + Send>>,
+    out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
+    queue_evts: Option<Vec<EventFd>>,
+    interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
 impl Console {
     /// Create a new virtio console device that gets random data from /dev/urandom.
     pub fn new(
-        out: Option<Box<dyn io::Write + Send>>,
+        out: Box<dyn io::Write + Send + Sync + 'static>,
         cols: u16,
         rows: u16,
     ) -> io::Result<(Console, Arc<ConsoleInput>)> {
@@ -351,7 +359,9 @@ impl Console {
                 acked_features: 0u64,
                 config: console_config,
                 input: console_input.clone(),
-                out,
+                out: Arc::new(Mutex::new(out)),
+                queue_evts: None,
+                interrupt_cb: None,
             },
             console_input,
         ))
@@ -456,6 +466,21 @@ impl VirtioDevice for Console {
             };
         self.kill_evt = Some(self_kill_evt);
 
+        // Save the interrupt EventFD as we need to return it on reset
+        // but clone it to pass into the thread.
+        self.interrupt_cb = Some(interrupt_cb.clone());
+
+        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
+        for queue_evt in queue_evts.iter() {
+            // Save the queue EventFD as we need to return it on reset
+            // but clone it to pass into the thread.
+            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                ActivateError::BadActivate
+            })?);
+        }
+        self.queue_evts = Some(tmp_queue_evts);
+
         self.input
             .acked_features
             .store(self.acked_features, Ordering::Relaxed);
@@ -466,31 +491,41 @@ impl VirtioDevice for Console {
             }
         }
 
-        if let Some(out) = self.out.take() {
-            let mut handler = ConsoleEpollHandler {
-                queues,
-                mem,
-                interrupt_cb,
-                in_buffer: self.input.in_buffer.clone(),
-                out,
-                input_queue_evt: queue_evts.remove(0),
-                output_queue_evt: queue_evts.remove(0),
-                input_evt: self.input.input_evt.try_clone().unwrap(),
-                config_evt: self.input.config_evt.try_clone().unwrap(),
-                kill_evt,
-            };
+        let mut handler = ConsoleEpollHandler {
+            queues,
+            mem,
+            interrupt_cb,
+            in_buffer: self.input.in_buffer.clone(),
+            out: self.out.clone(),
+            input_queue_evt: queue_evts.remove(0),
+            output_queue_evt: queue_evts.remove(0),
+            input_evt: self.input.input_evt.try_clone().unwrap(),
+            config_evt: self.input.config_evt.try_clone().unwrap(),
+            kill_evt,
+        };
 
-            let worker_result = thread::Builder::new()
-                .name("virtio_console".to_string())
-                .spawn(move || handler.run());
+        let worker_result = thread::Builder::new()
+            .name("virtio_console".to_string())
+            .spawn(move || handler.run());
 
-            if let Err(e) = worker_result {
-                error!("failed to spawn virtio_console worker: {}", e);
-                return Err(ActivateError::BadActivate);
-            }
-
-            return Ok(());
+        if let Err(e) = worker_result {
+            error!("failed to spawn virtio_console worker: {}", e);
+            return Err(ActivateError::BadActivate);
         }
-        Err(ActivateError::BadActivate)
+
+        Ok(())
+    }
+
+    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        if let Some(kill_evt) = self.kill_evt.take() {
+            // Ignore the result because there is nothing we can do about it.
+            let _ = kill_evt.write(1);
+        }
+
+        // Return the interrupt and queue EventFDs
+        Some((
+            self.interrupt_cb.take().unwrap(),
+            self.queue_evts.take().unwrap(),
+        ))
     }
 }
