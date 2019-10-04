@@ -187,7 +187,10 @@ fn main() {
         .arg(
             Arg::with_name("console")
                 .long("console")
-                .help("Control (virtio) console: off|null|tty|file=/path/to/a/file")
+                .help(
+                    "Control (virtio) console: \"off|null|tty|file=/path/to/a/file,\
+                     iommu=on|off\"",
+                )
                 .default_value("tty")
                 .group("vm-config"),
         )

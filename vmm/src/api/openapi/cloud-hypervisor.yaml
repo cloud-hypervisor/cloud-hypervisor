@@ -303,6 +303,9 @@ components:
         mode:
           type: string
           enum: [Off, Tty, File, Null]
+        iommu:
+          type: boolean
+          default: false
 
     DeviceConfig:
       required:

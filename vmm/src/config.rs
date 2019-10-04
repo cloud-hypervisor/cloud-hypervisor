@@ -504,39 +504,59 @@ impl ConsoleOutputMode {
 pub struct ConsoleConfig {
     pub file: Option<PathBuf>,
     pub mode: ConsoleOutputMode,
+    #[serde(default)]
+    pub iommu: bool,
 }
 
 impl ConsoleConfig {
-    pub fn parse(param: &str) -> Result<Self> {
-        if param == "off" {
-            Ok(Self {
-                mode: ConsoleOutputMode::Off,
-                file: None,
-            })
-        } else if param == "tty" {
-            Ok(Self {
-                mode: ConsoleOutputMode::Tty,
-                file: None,
-            })
-        } else if param.starts_with("file=") {
-            Ok(Self {
-                mode: ConsoleOutputMode::File,
-                file: Some(PathBuf::from(&param[5..])),
-            })
-        } else if param.starts_with("null") {
-            Ok(Self {
-                mode: ConsoleOutputMode::Null,
-                file: None,
-            })
-        } else {
-            Err(Error::ParseConsoleParam)
+    pub fn parse(console: &str) -> Result<Self> {
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = console.split(',').collect();
+
+        let mut valid = false;
+        let mut file: Option<PathBuf> = None;
+        let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
+        let mut iommu_str: &str = "";
+
+        for param in params_list.iter() {
+            if param.starts_with("iommu=") {
+                iommu_str = &param[6..];
+            } else {
+                if *param == "off" {
+                    mode = ConsoleOutputMode::Off;
+                    file = None;
+                } else if *param == "tty" {
+                    mode = ConsoleOutputMode::Tty;
+                    file = None;
+                } else if param.starts_with("file=") {
+                    mode = ConsoleOutputMode::File;
+                    file = Some(PathBuf::from(&param[5..]));
+                } else if param.starts_with("null") {
+                    mode = ConsoleOutputMode::Null;
+                    file = None;
+                } else {
+                    return Err(Error::ParseConsoleParam);
+                }
+                valid = true;
+            }
         }
+
+        if !valid {
+            return Err(Error::ParseConsoleParam);
+        }
+
+        Ok(Self {
+            mode,
+            file,
+            iommu: parse_iommu(iommu_str)?,
+        })
     }
 
     pub fn default_serial() -> Self {
         ConsoleConfig {
             file: None,
             mode: ConsoleOutputMode::Null,
+            iommu: false,
         }
     }
 
@@ -544,6 +564,7 @@ impl ConsoleConfig {
         ConsoleConfig {
             file: None,
             mode: ConsoleOutputMode::Tty,
+            iommu: false,
         }
     }
 }
@@ -804,6 +825,9 @@ impl VmConfig {
         }
 
         let console = ConsoleConfig::parse(vm_params.console)?;
+        if console.iommu {
+            iommu = true;
+        }
         let serial = ConsoleConfig::parse(vm_params.serial)?;
         if console.mode == ConsoleOutputMode::Tty && serial.mode == ConsoleOutputMode::Tty {
             return Err(Error::ParseTTYParam);
