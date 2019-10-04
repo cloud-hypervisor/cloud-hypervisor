@@ -171,7 +171,7 @@ fn main() {
                 .long("pmem")
                 .help(
                     "Persistent memory parameters \"file=<backing_file_path>,\
-                     size=<persistent_memory_size>\"",
+                     size=<persistent_memory_size>,iommu=on|off\"",
                 )
                 .takes_value(true)
                 .min_values(1)

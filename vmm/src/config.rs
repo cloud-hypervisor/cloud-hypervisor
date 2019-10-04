@@ -448,6 +448,8 @@ impl FsConfig {
 pub struct PmemConfig {
     pub file: PathBuf,
     pub size: u64,
+    #[serde(default)]
+    pub iommu: bool,
 }
 
 impl PmemConfig {
@@ -457,12 +459,15 @@ impl PmemConfig {
 
         let mut file_str: &str = "";
         let mut size_str: &str = "";
+        let mut iommu_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("file=") {
                 file_str = &param[5..];
             } else if param.starts_with("size=") {
                 size_str = &param[5..];
+            } else if param.starts_with("iommu=") {
+                iommu_str = &param[6..];
             }
         }
 
@@ -473,6 +478,7 @@ impl PmemConfig {
         Ok(PmemConfig {
             file: PathBuf::from(file_str),
             size: parse_size(size_str)?,
+            iommu: parse_iommu(iommu_str)?,
         })
     }
 }
@@ -788,7 +794,11 @@ impl VmConfig {
         if let Some(pmem_list) = &vm_params.pmem {
             let mut pmem_config_list = Vec::new();
             for item in pmem_list.iter() {
-                pmem_config_list.push(PmemConfig::parse(item)?);
+                let pmem_config = PmemConfig::parse(item)?;
+                if pmem_config.iommu {
+                    iommu = true;
+                }
+                pmem_config_list.push(pmem_config);
             }
             pmem = Some(pmem_config_list);
         }

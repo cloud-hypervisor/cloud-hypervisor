@@ -289,6 +289,9 @@ components:
           type: string
         size:
           type: integer
+        iommu:
+          type: boolean
+          default: false
 
     ConsoleConfig:
       required:
