@@ -219,7 +219,7 @@ fn main() {
                 .long("vsock")
                 .help(
                     "Virtio VSOCK parameters \"cid=<context_id>,\
-                     sock=<socket_path>\"",
+                     sock=<socket_path>,iommu=on|off\"",
                 )
                 .takes_value(true)
                 .min_values(1)
