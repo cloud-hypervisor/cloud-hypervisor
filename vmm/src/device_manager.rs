@@ -401,20 +401,21 @@ impl DeviceManager {
 
         let mut virtio_devices: Vec<Box<dyn vm_virtio::VirtioDevice>> = Vec::new();
 
-        let console_writer: Option<Box<dyn io::Write + Send>> = match vm_info.vm_cfg.console.mode {
-            ConsoleOutputMode::File => Some(Box::new(
-                File::create(vm_info.vm_cfg.console.file.as_ref().unwrap())
-                    .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
-            )),
-            ConsoleOutputMode::Tty => Some(Box::new(stdout())),
-            ConsoleOutputMode::Null => Some(Box::new(sink())),
-            ConsoleOutputMode::Off => None,
-        };
+        // Create serial and virtio-console
+        let console_writer: Option<Box<dyn io::Write + Send + Sync>> =
+            match vm_info.vm_cfg.console.mode {
+                ConsoleOutputMode::File => Some(Box::new(
+                    File::create(vm_info.vm_cfg.console.file.as_ref().unwrap())
+                        .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
+                )),
+                ConsoleOutputMode::Tty => Some(Box::new(stdout())),
+                ConsoleOutputMode::Null => Some(Box::new(sink())),
+                ConsoleOutputMode::Off => None,
+            };
         let (col, row) = get_win_size();
-        let console_input = if console_writer.is_some() {
-            let (virtio_console_device, console_input) =
-                vm_virtio::Console::new(console_writer, col, row)
-                    .map_err(DeviceManagerError::CreateVirtioConsole)?;
+        let console_input = if let Some(writer) = console_writer {
+            let (virtio_console_device, console_input) = vm_virtio::Console::new(writer, col, row)
+                .map_err(DeviceManagerError::CreateVirtioConsole)?;
             virtio_devices
                 .push(Box::new(virtio_console_device) as Box<dyn vm_virtio::VirtioDevice>);
             Some(console_input)
