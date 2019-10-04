@@ -256,6 +256,9 @@ components:
         src:
           type: string
           default: "/dev/urandom"
+        iommu:
+          type: boolean
+          default: false
 
     FsConfig:
       required:

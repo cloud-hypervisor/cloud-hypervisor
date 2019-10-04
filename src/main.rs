@@ -80,7 +80,8 @@ fn main() {
     }
 
     let default_vcpus = format! {"{}", config::DEFAULT_VCPUS};
-    let default_memory = &format! {"size={}M", config::DEFAULT_MEMORY_MB};
+    let default_memory = format! {"size={}M", config::DEFAULT_MEMORY_MB};
+    let default_rng = format! {"src={}", config::DEFAULT_RNG_SOURCE};
 
     let cmd_arguments = App::new("cloud-hypervisor")
         .version(crate_version!())
@@ -145,8 +146,11 @@ fn main() {
         .arg(
             Arg::with_name("rng")
                 .long("rng")
-                .help("Path to entropy source")
-                .default_value(config::DEFAULT_RNG_SOURCE)
+                .help(
+                    "Random number generator parameters \
+                     \"src=<entropy_source_path>,iommu=on|off\"",
+                )
+                .default_value(&default_rng)
                 .group("vm-config"),
         )
         .arg(
