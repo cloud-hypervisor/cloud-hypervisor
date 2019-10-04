@@ -789,7 +789,7 @@ impl DeviceManager {
                 *mem_slots += 1;
 
                 let virtio_pmem_device =
-                    vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize)
+                    vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize, false)
                         .map_err(DeviceManagerError::CreateVirtioPmem)?;
 
                 devices.push(Box::new(virtio_pmem_device) as Box<dyn vm_virtio::VirtioDevice>);
