@@ -1,7 +1,7 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::vu_common_ctrl::setup_vhost_user;
+use super::vu_common_ctrl::{reset_vhost_user, setup_vhost_user};
 use super::{Error, Result};
 use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::{
@@ -118,6 +118,8 @@ pub struct Fs {
     kill_evt: Option<EventFd>,
     cache: Option<(VirtioSharedMemoryList, u64)>,
     slave_req_support: bool,
+    queue_evts: Option<Vec<EventFd>>,
+    interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
 impl Fs {
@@ -199,6 +201,8 @@ impl Fs {
             kill_evt: None,
             cache,
             slave_req_support,
+            queue_evts: None,
+            interrupt_cb: None,
         })
     }
 }
@@ -305,6 +309,21 @@ impl VirtioDevice for Fs {
             };
         self.kill_evt = Some(self_kill_evt);
 
+        // Save the interrupt EventFD as we need to return it on reset
+        // but clone it to pass into the thread.
+        self.interrupt_cb = Some(interrupt_cb.clone());
+
+        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
+        for queue_evt in queue_evts.iter() {
+            // Save the queue EventFD as we need to return it on reset
+            // but clone it to pass into the thread.
+            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                ActivateError::BadActivate
+            })?);
+        }
+        self.queue_evts = Some(tmp_queue_evts);
+
         let vu_call_evt_queue_list = setup_vhost_user(
             &mut self.vu,
             &mem.read().unwrap(),
@@ -359,6 +378,24 @@ impl VirtioDevice for Fs {
         }
 
         Ok(())
+    }
+
+    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        if let Err(e) = reset_vhost_user(&mut self.vu, self.queue_sizes.len()) {
+            error!("Failed to reset vhost-user daemon: {:?}", e);
+            return None;
+        }
+
+        if let Some(kill_evt) = self.kill_evt.take() {
+            // Ignore the result because there is nothing we can do about it.
+            let _ = kill_evt.write(1);
+        }
+
+        // Return the interrupt and queue EventFDs
+        Some((
+            self.interrupt_cb.take().unwrap(),
+            self.queue_evts.take().unwrap(),
+        ))
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
