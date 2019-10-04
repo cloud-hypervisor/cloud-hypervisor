@@ -82,7 +82,7 @@ fn http_serve<T: Read + Write>(
     while let Some(request) = http_connection.pop_parsed_request() {
         let sender = api_sender.clone();
         let path = request.uri().get_abs_path().to_string();
-        let response = match HTTP_ROUTES.routes.get(&path) {
+        let mut response = match HTTP_ROUTES.routes.get(&path) {
             Some(route) => match api_notifier.try_clone() {
                 Ok(notifier) => route.handle_request(&request, notifier, sender),
                 Err(_) => Response::new(Version::Http11, StatusCode::InternalServerError),
@@ -90,6 +90,7 @@ fn http_serve<T: Read + Write>(
             None => Response::new(Version::Http11, StatusCode::NotFound),
         };
 
+        response.set_server("Cloud Hypervisor API");
         http_connection.enqueue_response(response);
     }
 }
