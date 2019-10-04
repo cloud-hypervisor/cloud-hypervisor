@@ -21,7 +21,7 @@ use std::thread;
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, VIRTIO_F_VERSION_1,
+    VirtioDeviceType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use vm_memory::{
@@ -296,16 +296,22 @@ pub struct Pmem {
 }
 
 impl Pmem {
-    pub fn new(disk: File, addr: GuestAddress, size: GuestUsize) -> io::Result<Pmem> {
+    pub fn new(disk: File, addr: GuestAddress, size: GuestUsize, iommu: bool) -> io::Result<Pmem> {
         let config = VirtioPmemConfig {
             start: addr.raw_value().to_le(),
             size: size.to_le(),
         };
 
+        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
+
+        if iommu {
+            avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+        }
+
         Ok(Pmem {
             kill_evt: None,
             disk: Some(disk),
-            avail_features: 1u64 << VIRTIO_F_VERSION_1,
+            avail_features,
             acked_features: 0u64,
             config,
             queue_evts: None,
