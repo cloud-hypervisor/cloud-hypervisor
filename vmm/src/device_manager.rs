@@ -860,7 +860,7 @@ impl DeviceManager {
                     vm_virtio::vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
                         .map_err(DeviceManagerError::CreateVsockBackend)?;
 
-                let vsock_device = vm_virtio::Vsock::new(vsock_cfg.cid, backend)
+                let vsock_device = vm_virtio::Vsock::new(vsock_cfg.cid, backend, false)
                     .map_err(DeviceManagerError::CreateVirtioVsock)?;
 
                 devices.push(Box::new(vsock_device) as Box<dyn vm_virtio::VirtioDevice>);

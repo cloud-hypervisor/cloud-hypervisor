@@ -41,7 +41,7 @@ use crate::Error as DeviceError;
 use crate::VirtioInterrupt;
 use crate::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    VirtioInterruptType, VIRTIO_F_IN_ORDER, VIRTIO_F_VERSION_1,
+    VirtioInterruptType, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use byteorder::{ByteOrder, LittleEndian};
 use vm_memory::GuestMemoryMmap;
@@ -366,8 +366,12 @@ where
 {
     /// Create a new virtio-vsock device with the given VM CID and vsock
     /// backend.
-    pub fn new(cid: u64, backend: B) -> io::Result<Vsock<B>> {
-        let avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_F_IN_ORDER;
+    pub fn new(cid: u64, backend: B, iommu: bool) -> io::Result<Vsock<B>> {
+        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_F_IN_ORDER;
+
+        if iommu {
+            avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+        }
 
         Ok(Vsock {
             cid,
