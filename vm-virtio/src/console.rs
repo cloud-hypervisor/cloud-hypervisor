@@ -17,7 +17,7 @@ use std::thread;
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    VirtioInterruptType, VIRTIO_F_VERSION_1,
+    VirtioInterruptType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::VirtioInterrupt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -338,8 +338,13 @@ impl Console {
         out: Box<dyn io::Write + Send + Sync + 'static>,
         cols: u16,
         rows: u16,
+        iommu: bool,
     ) -> io::Result<(Console, Arc<ConsoleInput>)> {
-        let avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_CONSOLE_F_SIZE;
+        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_CONSOLE_F_SIZE;
+
+        if iommu {
+            avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+        }
 
         let input_evt = EventFd::new(EFD_NONBLOCK).unwrap();
         let config_evt = EventFd::new(EFD_NONBLOCK).unwrap();

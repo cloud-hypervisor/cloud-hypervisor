@@ -414,8 +414,9 @@ impl DeviceManager {
             };
         let (col, row) = get_win_size();
         let console_input = if let Some(writer) = console_writer {
-            let (virtio_console_device, console_input) = vm_virtio::Console::new(writer, col, row)
-                .map_err(DeviceManagerError::CreateVirtioConsole)?;
+            let (virtio_console_device, console_input) =
+                vm_virtio::Console::new(writer, col, row, false)
+                    .map_err(DeviceManagerError::CreateVirtioConsole)?;
             virtio_devices
                 .push(Box::new(virtio_console_device) as Box<dyn vm_virtio::VirtioDevice>);
             Some(console_input)
