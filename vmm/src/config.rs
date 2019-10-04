@@ -320,12 +320,29 @@ impl NetConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RngConfig {
     pub src: PathBuf,
+    #[serde(default)]
+    pub iommu: bool,
 }
 
 impl RngConfig {
     pub fn parse(rng: &str) -> Result<Self> {
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = rng.split(',').collect();
+
+        let mut src_str: &str = "";
+        let mut iommu_str: &str = "";
+
+        for param in params_list.iter() {
+            if param.starts_with("src=") {
+                src_str = &param[4..];
+            } else if param.starts_with("iommu=") {
+                iommu_str = &param[6..];
+            }
+        }
+
         Ok(RngConfig {
-            src: PathBuf::from(rng),
+            src: PathBuf::from(src_str),
+            iommu: parse_iommu(iommu_str)?,
         })
     }
 }
@@ -334,6 +351,7 @@ impl Default for RngConfig {
     fn default() -> Self {
         RngConfig {
             src: PathBuf::from(DEFAULT_RNG_SOURCE),
+            iommu: false,
         }
     }
 }
@@ -752,6 +770,11 @@ impl VmConfig {
             net = Some(net_config_list);
         }
 
+        let rng = RngConfig::parse(vm_params.rng)?;
+        if rng.iommu {
+            iommu = true;
+        }
+
         let mut fs: Option<Vec<FsConfig>> = None;
         if let Some(fs_list) = &vm_params.fs {
             let mut fs_config_list = Vec::new();
@@ -826,7 +849,7 @@ impl VmConfig {
             cmdline: CmdlineConfig::parse(vm_params.cmdline)?,
             disks,
             net,
-            rng: RngConfig::parse(vm_params.rng)?,
+            rng,
             fs,
             pmem,
             serial,
