@@ -45,8 +45,8 @@ use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
 use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::vhost_user::VhostUserConfig;
 #[cfg(feature = "pci_support")]
-use vm_virtio::{DmaRemapping, VirtioIommuRemapping};
-use vm_virtio::{IommuMapping, VirtioSharedMemory, VirtioSharedMemoryList};
+use vm_virtio::{DmaRemapping, IommuMapping, VirtioIommuRemapping};
+use vm_virtio::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(feature = "mmio_support")]
@@ -518,17 +518,19 @@ impl DeviceManager {
                     }
                 }
 
-                if let Some(iommu_id) = iommu_id {
-                    virt_iommu = Some((iommu_id, iommu_attached_devices));
-                }
-
-                DeviceManager::add_vfio_devices(
+                let mut iommu_attached_vfio_devices = DeviceManager::add_vfio_devices(
                     vm_info,
                     allocator,
                     &mut pci_bus,
                     &mut buses,
                     mem_slots,
                 )?;
+
+                iommu_attached_devices.append(&mut iommu_attached_vfio_devices);
+
+                if let Some(iommu_id) = iommu_id {
+                    virt_iommu = Some((iommu_id, iommu_attached_devices));
+                }
 
                 let pci_bus = Arc::new(Mutex::new(pci_bus));
                 let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(pci_bus.clone())));
@@ -980,14 +982,26 @@ impl DeviceManager {
         pci: &mut PciBus,
         buses: &mut BusInfo,
         mem_slots: u32,
-    ) -> DeviceManagerResult<()> {
+    ) -> DeviceManagerResult<Vec<u32>> {
         let mut mem_slot = mem_slots;
+        let mut iommu_attached_list = Vec::new();
         if let Some(device_list_cfg) = &vm_info.vm_cfg.devices {
             // Create the KVM VFIO device
             let device_fd = DeviceManager::create_kvm_device(vm_info.vm_fd)?;
             let device_fd = Arc::new(device_fd);
 
             for device_cfg in device_list_cfg.iter() {
+                // We need to shift the device id since the 3 first bits
+                // are dedicated to the PCI function, and we know we don't
+                // do multifunction. Also, because we only support one PCI
+                // bus, the bus 0, we don't need to add anything to the
+                // global device ID.
+                let device_id = pci.next_device_id() << 3;
+
+                if device_cfg.iommu {
+                    iommu_attached_list.push(device_id);
+                }
+
                 let vfio_device =
                     VfioDevice::new(&device_cfg.path, device_fd.clone(), vm_info.memory.clone())
                         .map_err(DeviceManagerError::VfioCreate)?;
@@ -1012,7 +1026,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::AddPciDevice)?;
             }
         }
-        Ok(())
+        Ok(iommu_attached_list)
     }
 
     #[cfg(feature = "pci_support")]
