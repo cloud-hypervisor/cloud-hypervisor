@@ -970,6 +970,7 @@ dependencies = [
  "pci 0.1.0",
  "vfio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-allocator 0.1.0",
+ "vm-device 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

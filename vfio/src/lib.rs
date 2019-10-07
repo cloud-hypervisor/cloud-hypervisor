@@ -14,6 +14,7 @@ extern crate log;
 extern crate pci;
 extern crate vfio_bindings;
 extern crate vm_allocator;
+extern crate vm_device;
 extern crate vm_memory;
 #[macro_use]
 extern crate vmm_sys_util;
@@ -24,7 +25,7 @@ mod vfio_pci;
 
 use std::mem::size_of;
 
-pub use vfio_device::{VfioDevice, VfioError};
+pub use vfio_device::{VfioContainer, VfioDevice, VfioDmaMapping, VfioError};
 pub use vfio_pci::{VfioPciDevice, VfioPciError};
 
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.

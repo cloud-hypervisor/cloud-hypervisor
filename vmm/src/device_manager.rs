@@ -36,7 +36,7 @@ use std::ptr::null_mut;
 use std::result;
 use std::sync::{Arc, Mutex, RwLock};
 #[cfg(feature = "pci_support")]
-use vfio::{VfioDevice, VfioPciDevice, VfioPciError};
+use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
 #[cfg(feature = "mmio_support")]
 use vm_memory::GuestAddress;
@@ -998,15 +998,18 @@ impl DeviceManager {
                 // global device ID.
                 let device_id = pci.next_device_id() << 3;
 
-                if device_cfg.iommu {
-                    iommu_attached_list.push(device_id);
-                }
-
                 let vfio_device =
                     VfioDevice::new(&device_cfg.path, device_fd.clone(), vm_info.memory.clone())
                         .map_err(DeviceManagerError::VfioCreate)?;
 
-                let _vfio_container = vfio_device.get_container();
+                if device_cfg.iommu {
+                    let _vfio_mapping = VfioDmaMapping::new(
+                        vfio_device.get_container(),
+                        Arc::clone(vm_info.memory),
+                    );
+
+                    iommu_attached_list.push(device_id);
+                }
 
                 let mut vfio_pci_device = VfioPciDevice::new(vm_info.vm_fd, allocator, vfio_device)
                     .map_err(DeviceManagerError::VfioPciCreate)?;
