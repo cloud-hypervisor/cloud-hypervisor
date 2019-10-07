@@ -103,7 +103,7 @@ struct vfio_region_info_with_cap {
     cap_info: __IncompleteArrayField<u8>,
 }
 
-struct VfioContainer {
+pub struct VfioContainer {
     container: File,
 }
 
@@ -151,7 +151,7 @@ impl VfioContainer {
         Ok(())
     }
 
-    fn vfio_dma_map(&self, iova: u64, size: u64, user_addr: u64) -> Result<()> {
+    pub fn vfio_dma_map(&self, iova: u64, size: u64, user_addr: u64) -> Result<()> {
         let dma_map = vfio_iommu_type1_dma_map {
             argsz: mem::size_of::<vfio_iommu_type1_dma_map>() as u32,
             flags: VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE,
@@ -170,7 +170,7 @@ impl VfioContainer {
         Ok(())
     }
 
-    fn vfio_dma_unmap(&self, iova: u64, size: u64) -> Result<()> {
+    pub fn vfio_dma_unmap(&self, iova: u64, size: u64) -> Result<()> {
         let mut dma_unmap = vfio_iommu_type1_dma_unmap {
             argsz: mem::size_of::<vfio_iommu_type1_dma_unmap>() as u32,
             flags: 0,
@@ -198,7 +198,7 @@ impl AsRawFd for VfioContainer {
 struct VfioGroup {
     group: File,
     device: Arc<DeviceFd>,
-    container: VfioContainer,
+    container: Arc<VfioContainer>,
 }
 
 impl VfioGroup {
@@ -225,7 +225,7 @@ impl VfioGroup {
             return Err(VfioError::GroupViable);
         }
 
-        let container = VfioContainer::new()?;
+        let container = Arc::new(VfioContainer::new()?);
         if container.get_api_version() as u32 != VFIO_API_VERSION {
             return Err(VfioError::VfioApiVersion);
         }
@@ -760,6 +760,10 @@ impl VfioDevice {
                 index, addr, e
             );
         }
+    }
+
+    pub fn get_container(&self) -> Arc<VfioContainer> {
+        self.group.container.clone()
     }
 
     fn vfio_dma_map(&self, iova: u64, size: u64, user_addr: u64) -> Result<()> {
