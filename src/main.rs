@@ -198,6 +198,10 @@ fn main() {
             Arg::with_name("device")
                 .long("device")
                 .help("Direct device assignment parameter")
+                .help(
+                    "Direct device assignment parameters \
+                     \"path=<device_path>,iommu=on|off\"",
+                )
                 .takes_value(true)
                 .min_values(1)
                 .group("vm-config"),

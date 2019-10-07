@@ -72,7 +72,7 @@ takes the device's sysfs path as an argument. In our example it is
     --cmdline "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
     --cpus 4 \
     --memory size=512M \
-    --device /sys/bus/pci/devices/0000:01:00.0/
+    --device path=/sys/bus/pci/devices/0000:01:00.0/
 ```
 
 The guest kernel will then detect the card reader on its PCI bus and provided

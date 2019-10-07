@@ -572,12 +572,29 @@ impl ConsoleConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DeviceConfig {
     pub path: PathBuf,
+    #[serde(default)]
+    pub iommu: bool,
 }
 
 impl DeviceConfig {
     pub fn parse(device: &str) -> Result<Self> {
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = device.split(',').collect();
+
+        let mut path_str: &str = "";
+        let mut iommu_str: &str = "";
+
+        for param in params_list.iter() {
+            if param.starts_with("path=") {
+                path_str = &param[5..];
+            } else if param.starts_with("iommu=") {
+                iommu_str = &param[6..];
+            }
+        }
+
         Ok(DeviceConfig {
-            path: PathBuf::from(device),
+            path: PathBuf::from(path_str),
+            iommu: parse_iommu(iommu_str)?,
         })
     }
 }
@@ -843,7 +860,11 @@ impl VmConfig {
         if let Some(device_list) = &vm_params.devices {
             let mut device_config_list = Vec::new();
             for item in device_list.iter() {
-                device_config_list.push(DeviceConfig::parse(item)?);
+                let device_config = DeviceConfig::parse(item)?;
+                if device_config.iommu {
+                    iommu = true;
+                }
+                device_config_list.push(device_config);
             }
             devices = Some(device_config_list);
         }
