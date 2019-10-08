@@ -21,7 +21,7 @@ pci = { path = "../pci", optional = true }
 tempfile = "3.1.0"
 virtio-bindings = { git = "https://github.com/rust-vmm/virtio-bindings", version = "0.1", features = ["virtio-v5_0_0"]}
 vm-allocator = { path = "../vm-allocator" }
-vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
+vmm-sys-util = "0.1.1"
 
 [dependencies.vhost_rs]
 path = "../vhost_rs"
