@@ -87,6 +87,9 @@ pub enum ApiError {
 
     /// The VM could not reboot.
     VmReboot(VmError),
+
+    /// The VMM could not shutdown.
+    VmmShutdown(VmError),
 }
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
@@ -138,6 +141,11 @@ pub enum ApiRequest {
     /// If the VM was not previously booted or created, the VMM API server
     /// will send a VmReboot error back.
     VmReboot(Sender<ApiResponse>),
+
+    /// Shut the VMM down.
+    /// This will shutdown and delete the current VM, if any, and then exit the
+    /// VMM process.
+    VmmShutdown(Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -225,4 +233,18 @@ pub fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Vm
         ApiResponsePayload::VmInfo(info) => Ok(info),
         _ => Err(ApiError::ResponsePayloadType),
     }
+}
+
+pub fn vmm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VMM shutdown request.
+    api_sender
+        .send(ApiRequest::VmmShutdown(response_sender))
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+
+    Ok(())
 }

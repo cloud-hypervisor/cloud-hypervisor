@@ -69,6 +69,9 @@ pub enum Error {
 
     /// Cannot create VMM thread
     VmmThreadSpawn(io::Error),
+
+    /// Cannot shut the VMM down
+    VmmShutdown(VmError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -168,14 +171,7 @@ pub fn start_vmm_thread(
                         // Continue and restart the VMM control loop
                         continue 'outer;
                     }
-                    Ok(ExitBehaviour::Shutdown) => {
-                        // The VMM control loop exites with a shutdown behaviour.
-                        // We have to stop the VM and we exit thr thread.
-                        if let Some(ref mut vm) = vmm.vm {
-                            vm.shutdown().map_err(Error::VmShutdown)?;
-                        }
-                        break 'outer;
-                    }
+                    Ok(ExitBehaviour::Shutdown) => break 'outer,
                     Err(e) => return Err(e),
                 }
             }
@@ -320,6 +316,10 @@ impl Vmm {
         Ok(())
     }
 
+    fn vmm_shutdown(&mut self) -> result::Result<(), VmError> {
+        self.vm_delete()
+    }
+
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<ExitBehaviour> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -354,6 +354,7 @@ impl Vmm {
                         EpollDispatch::Exit => {
                             // Consume the event.
                             self.exit_evt.read().map_err(Error::EventFdRead)?;
+                            self.vmm_shutdown().map_err(Error::VmmShutdown)?;
                             exit_behaviour = ExitBehaviour::Shutdown;
 
                             break 'outer;
@@ -437,6 +438,17 @@ impl Vmm {
                                         .map(ApiResponsePayload::VmInfo);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmmShutdown(sender) => {
+                                    let response = self
+                                        .vmm_shutdown()
+                                        .map_err(ApiError::VmmShutdown)
+                                        .map(|_| ApiResponsePayload::Empty);
+
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+
+                                    exit_behaviour = ExitBehaviour::Shutdown;
+                                    break 'outer;
                                 }
                             }
                         }

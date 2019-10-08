@@ -23,6 +23,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/VmmInfo'
 
+  /vmm.shutdown:
+    put:
+      summary: Shuts the cloud-hypervisor VMM.
+      operationId: shutdownVMM
+      responses:
+        201:
+          description: The VMM successfully shutdown.
+          content: {}
+
   /vm.info:
     get:
       summary: Returns general information about the cloud-hypervisor Virtual Machine (VM) instance.
