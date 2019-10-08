@@ -7,9 +7,9 @@ authors = ["The Chromium OS Authors"]
 libc = "0.2.60"
 rand = "0.7.0"
 serde = "1.0.98"
+vmm-sys-util = "0.1.1"
 
 net_gen = { path = "../net_gen" }
-vmm-sys-util = { git = "https://github.com/rust-vmm/vmm-sys-util" }
 
 [dev-dependencies]
 lazy_static = "1.3.0"
