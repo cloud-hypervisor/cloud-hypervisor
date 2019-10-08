@@ -578,6 +578,7 @@ pub struct VfioDevice {
     regions: Vec<VfioRegion>,
     irqs: HashMap<u32, VfioIrq>,
     mem: Arc<RwLock<GuestMemoryMmap>>,
+    iommu_attached: bool,
 }
 
 impl VfioDevice {
@@ -588,6 +589,7 @@ impl VfioDevice {
         sysfspath: &Path,
         device_fd: Arc<DeviceFd>,
         mem: Arc<RwLock<GuestMemoryMmap>>,
+        iommu_attached: bool,
     ) -> Result<Self> {
         let uuid_path: PathBuf = [sysfspath, Path::new("iommu_group")].iter().collect();
         let group_path = uuid_path.read_link().map_err(|_| VfioError::InvalidPath)?;
@@ -609,6 +611,7 @@ impl VfioDevice {
             regions,
             irqs,
             mem,
+            iommu_attached,
         })
     }
 
@@ -841,22 +844,26 @@ impl VfioDevice {
     /// Add all guest memory regions into vfio container's iommu table,
     /// then vfio kernel driver could access guest memory from gfn
     pub fn setup_dma_map(&self) -> Result<()> {
-        self.mem.read().unwrap().with_regions(|_index, region| {
-            self.vfio_dma_map(
-                region.start_addr().raw_value(),
-                region.len() as u64,
-                region.as_ptr() as u64,
-            )
-        })?;
+        if !self.iommu_attached {
+            self.mem.read().unwrap().with_regions(|_index, region| {
+                self.vfio_dma_map(
+                    region.start_addr().raw_value(),
+                    region.len() as u64,
+                    region.as_ptr() as u64,
+                )
+            })?;
+        }
         Ok(())
     }
 
     /// remove all guest memory regions from vfio containers iommu table
     /// then vfio kernel driver couldn't access this guest memory
     pub fn unset_dma_map(&self) -> Result<()> {
-        self.mem.read().unwrap().with_regions(|_index, region| {
-            self.vfio_dma_unmap(region.start_addr().raw_value(), region.len() as u64)
-        })?;
+        if !self.iommu_attached {
+            self.mem.read().unwrap().with_regions(|_index, region| {
+                self.vfio_dma_unmap(region.start_addr().raw_value(), region.len() as u64)
+            })?;
+        }
         Ok(())
     }
 

@@ -999,9 +999,13 @@ impl DeviceManager {
                 // global device ID.
                 let device_id = pci.next_device_id() << 3;
 
-                let vfio_device =
-                    VfioDevice::new(&device_cfg.path, device_fd.clone(), vm_info.memory.clone())
-                        .map_err(DeviceManagerError::VfioCreate)?;
+                let vfio_device = VfioDevice::new(
+                    &device_cfg.path,
+                    device_fd.clone(),
+                    vm_info.memory.clone(),
+                    device_cfg.iommu,
+                )
+                .map_err(DeviceManagerError::VfioCreate)?;
 
                 if device_cfg.iommu {
                     if let Some(iommu) = iommu_device {
