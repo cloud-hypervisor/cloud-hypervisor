@@ -5,8 +5,8 @@
 
 use crate::api::http::EndpointHandler;
 use crate::api::{
-    vm_boot, vm_create, vm_delete, vm_info, vm_reboot, vm_shutdown, ApiError, ApiRequest,
-    ApiResult, VmAction, VmConfig,
+    vm_boot, vm_create, vm_delete, vm_info, vm_reboot, vm_shutdown, vmm_shutdown, ApiError,
+    ApiRequest, ApiResult, VmAction, VmConfig,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
@@ -37,6 +37,9 @@ pub enum HttpError {
 
     /// Could not act on a VM
     VmAction(ApiError),
+
+    /// Could not shut the VMM down
+    VmmShutdown(ApiError),
 }
 
 fn error_response(error: HttpError, status: StatusCode) -> Response {
@@ -151,6 +154,28 @@ impl EndpointHandler for VmInfo {
                 }
                 Err(e) => error_response(e, StatusCode::InternalServerError),
             },
+            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+        }
+    }
+}
+
+// /api/v1/vmm.shutdown handler
+pub struct VmmShutdown {}
+
+impl EndpointHandler for VmmShutdown {
+    fn handle_request(
+        &self,
+        req: &Request,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+    ) -> Response {
+        match req.method() {
+            Method::Put => {
+                match vmm_shutdown(api_notifier, api_sender).map_err(HttpError::VmmShutdown) {
+                    Ok(_) => Response::new(Version::Http11, StatusCode::OK),
+                    Err(e) => error_response(e, StatusCode::InternalServerError),
+                }
+            }
             _ => Response::new(Version::Http11, StatusCode::BadRequest),
         }
     }
