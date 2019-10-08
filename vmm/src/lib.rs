@@ -252,7 +252,7 @@ impl Vmm {
     }
 
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
-        if let Some(ref mut vm) = self.vm {
+        if let Some(ref mut vm) = self.vm.take() {
             vm.shutdown()
         } else {
             Err(VmError::VmNotBooted)
@@ -312,13 +312,10 @@ impl Vmm {
             return Ok(());
         }
 
-        self.vm_config = None;
+        // First we try to shut the current VM down.
+        self.vm_shutdown()?;
 
-        // First we shut the current VM down if necessary.
-        if let Some(ref mut vm) = self.vm {
-            vm.shutdown()?;
-            self.vm = None;
-        }
+        self.vm_config = None;
 
         Ok(())
     }
