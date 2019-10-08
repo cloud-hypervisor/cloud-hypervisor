@@ -2904,7 +2904,7 @@ mod tests {
                     .ssh_command("ls /sys/kernel/iommu_groups/0/devices")
                     .unwrap()
                     .trim(),
-                "0000:00:03.0"
+                "0000:00:02.0"
             );
 
             // Verify the second disk is located under IOMMU group 1.
@@ -2914,7 +2914,7 @@ mod tests {
                     .ssh_command("ls /sys/kernel/iommu_groups/1/devices")
                     .unwrap()
                     .trim(),
-                "0000:00:04.0"
+                "0000:00:03.0"
             );
 
             // Verify the network card is located under IOMMU group 2.
@@ -2924,7 +2924,7 @@ mod tests {
                     .ssh_command("ls /sys/kernel/iommu_groups/2/devices")
                     .unwrap()
                     .trim(),
-                "0000:00:05.0"
+                "0000:00:04.0"
             );
 
             guest.ssh_command("sudo shutdown -h now")?;

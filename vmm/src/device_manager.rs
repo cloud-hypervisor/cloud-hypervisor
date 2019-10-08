@@ -463,32 +463,10 @@ impl DeviceManager {
                 let pci_root = PciRoot::new(None);
                 let mut pci_bus = PciBus::new(pci_root);
 
-                let (iommu_mapping, iommu_id) = if vm_info.vm_cfg.iommu {
-                    let (iommu_device, mapping) =
+                let (mut iommu_device, iommu_mapping) = if vm_info.vm_cfg.iommu {
+                    let (device, mapping) =
                         vm_virtio::Iommu::new().map_err(DeviceManagerError::CreateVirtioIommu)?;
-
-                    // We need to shift the device id since the 3 first bits
-                    // are dedicated to the PCI function, and we know we don't
-                    // do multifunction. Also, because we only support one PCI
-                    // bus, the bus 0, we don't need to add anything to the
-                    // global device ID.
-                    let iommu_id = pci_bus.next_device_id() << 3;
-
-                    // Because we determined the virtio-iommu b/d/f, we have to
-                    // add the device to the PCI topology now. Otherwise, the
-                    // b/d/f won't match the virtio-iommu device as expected.
-                    DeviceManager::add_virtio_pci_device(
-                        Box::new(iommu_device),
-                        vm_info.memory,
-                        allocator,
-                        vm_info.vm_fd,
-                        &mut pci_bus,
-                        &mut buses,
-                        &interrupt_info,
-                        &None,
-                    )?;
-
-                    (Some(mapping), Some(iommu_id))
+                    (Some(device), Some(mapping))
                 } else {
                     (None, None)
                 };
@@ -518,17 +496,39 @@ impl DeviceManager {
                     }
                 }
 
-                let mut iommu_attached_vfio_devices = DeviceManager::add_vfio_devices(
+                let mut vfio_iommu_device_ids = DeviceManager::add_vfio_devices(
                     vm_info,
                     allocator,
                     &mut pci_bus,
                     &mut buses,
                     mem_slots,
+                    &mut iommu_device,
                 )?;
 
-                iommu_attached_devices.append(&mut iommu_attached_vfio_devices);
+                iommu_attached_devices.append(&mut vfio_iommu_device_ids);
 
-                if let Some(iommu_id) = iommu_id {
+                if let Some(iommu_device) = iommu_device {
+                    // We need to shift the device id since the 3 first bits
+                    // are dedicated to the PCI function, and we know we don't
+                    // do multifunction. Also, because we only support one PCI
+                    // bus, the bus 0, we don't need to add anything to the
+                    // global device ID.
+                    let iommu_id = pci_bus.next_device_id() << 3;
+
+                    // Because we determined the virtio-iommu b/d/f, we have to
+                    // add the device to the PCI topology now. Otherwise, the
+                    // b/d/f won't match the virtio-iommu device as expected.
+                    DeviceManager::add_virtio_pci_device(
+                        Box::new(iommu_device),
+                        vm_info.memory,
+                        allocator,
+                        vm_info.vm_fd,
+                        &mut pci_bus,
+                        &mut buses,
+                        &interrupt_info,
+                        &None,
+                    )?;
+
                     virt_iommu = Some((iommu_id, iommu_attached_devices));
                 }
 
@@ -982,9 +982,10 @@ impl DeviceManager {
         pci: &mut PciBus,
         buses: &mut BusInfo,
         mem_slots: u32,
+        iommu_device: &mut Option<vm_virtio::Iommu>,
     ) -> DeviceManagerResult<Vec<u32>> {
         let mut mem_slot = mem_slots;
-        let mut iommu_attached_list = Vec::new();
+        let mut iommu_attached_device_ids = Vec::new();
         if let Some(device_list_cfg) = &vm_info.vm_cfg.devices {
             // Create the KVM VFIO device
             let device_fd = DeviceManager::create_kvm_device(vm_info.vm_fd)?;
@@ -1003,12 +1004,15 @@ impl DeviceManager {
                         .map_err(DeviceManagerError::VfioCreate)?;
 
                 if device_cfg.iommu {
-                    let _vfio_mapping = VfioDmaMapping::new(
-                        vfio_device.get_container(),
-                        Arc::clone(vm_info.memory),
-                    );
+                    if let Some(iommu) = iommu_device {
+                        let vfio_mapping = Arc::new(VfioDmaMapping::new(
+                            vfio_device.get_container(),
+                            Arc::clone(vm_info.memory),
+                        ));
 
-                    iommu_attached_list.push(device_id);
+                        iommu_attached_device_ids.push(device_id);
+                        iommu.add_external_mapping(device_id, vfio_mapping);
+                    }
                 }
 
                 let mut vfio_pci_device = VfioPciDevice::new(vm_info.vm_fd, allocator, vfio_device)
@@ -1031,7 +1035,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::AddPciDevice)?;
             }
         }
-        Ok(iommu_attached_list)
+        Ok(iommu_attached_device_ids)
     }
 
     #[cfg(feature = "pci_support")]
