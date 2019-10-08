@@ -16,7 +16,7 @@ extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo};
 use crate::config::VmConfig;
-use crate::vm::{Error as VmError, ExitBehaviour, Vm, VmState};
+use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -154,29 +154,9 @@ pub fn start_vmm_thread(
     let thread = thread::Builder::new()
         .name("vmm".to_string())
         .spawn(move || {
-            //   let vmm_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
             let mut vmm = Vmm::new(api_event)?;
 
-            let receiver = Arc::new(api_receiver);
-            'outer: loop {
-                match vmm.control_loop(Arc::clone(&receiver)) {
-                    Ok(ExitBehaviour::Reset) => {
-                        // The VMM control loop exites with a reset behaviour.
-                        // We have to reboot the VM, i.e. we create a new VM
-                        // based on the same VM config, boot it and restart
-                        // the control loop.
-
-                        vmm.vm_reboot().map_err(Error::VmReboot)?;
-
-                        // Continue and restart the VMM control loop
-                        continue 'outer;
-                    }
-                    Ok(ExitBehaviour::Shutdown) => break 'outer,
-                    Err(e) => return Err(e),
-                }
-            }
-
-            Ok(())
+            vmm.control_loop(Arc::new(api_receiver))
         })
         .map_err(Error::VmmThreadSpawn)?;
 
@@ -320,13 +300,11 @@ impl Vmm {
         self.vm_delete()
     }
 
-    fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<ExitBehaviour> {
+    fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
         let epoll_fd = self.epoll.as_raw_fd();
-
-        let exit_behaviour;
 
         'outer: loop {
             let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
@@ -355,16 +333,13 @@ impl Vmm {
                             // Consume the event.
                             self.exit_evt.read().map_err(Error::EventFdRead)?;
                             self.vmm_shutdown().map_err(Error::VmmShutdown)?;
-                            exit_behaviour = ExitBehaviour::Shutdown;
 
                             break 'outer;
                         }
                         EpollDispatch::Reset => {
                             // Consume the event.
                             self.reset_evt.read().map_err(Error::EventFdRead)?;
-                            exit_behaviour = ExitBehaviour::Reset;
-
-                            break 'outer;
+                            self.vm_reboot().map_err(Error::VmReboot)?;
                         }
                         EpollDispatch::Stdin => {
                             if let Some(ref vm) = self.vm {
@@ -447,7 +422,6 @@ impl Vmm {
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
 
-                                    exit_behaviour = ExitBehaviour::Shutdown;
                                     break 'outer;
                                 }
                             }
@@ -457,6 +431,6 @@ impl Vmm {
             }
         }
 
-        Ok(exit_behaviour)
+        Ok(())
     }
 }

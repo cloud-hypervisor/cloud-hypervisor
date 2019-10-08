@@ -436,12 +436,6 @@ pub struct VmInfo<'a> {
     pub vm_cfg: &'a VmConfig,
 }
 
-#[derive(PartialEq)]
-pub enum ExitBehaviour {
-    Shutdown = 1,
-    Reset = 2,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum VmState {
     Created,
