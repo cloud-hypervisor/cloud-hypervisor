@@ -21,6 +21,7 @@ use super::{
     VirtioDeviceType, VIRTIO_F_VERSION_1,
 };
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
+use vm_device::ExternalDmaMapping;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -288,6 +289,10 @@ enum Error {
     InvalidUnmapRequest,
     /// Guest sent us invalid PROBE request.
     InvalidProbeRequest,
+    /// Failed to performing external mapping.
+    ExternalMapping(io::Error),
+    /// Failed to performing external unmapping.
+    ExternalUnmapping(io::Error),
 }
 
 impl Display for Error {
@@ -306,6 +311,8 @@ impl Display for Error {
             InvalidProbeRequest => write!(f, "invalid probe request"),
             UnexpectedReadOnlyDescriptor => write!(f, "unexpected read-only descriptor"),
             UnexpectedWriteOnlyDescriptor => write!(f, "unexpected write-only descriptor"),
+            ExternalMapping(e) => write!(f, "failed performing external mapping: {}", e),
+            ExternalUnmapping(e) => write!(f, "failed performing external unmapping: {}", e),
         }
     }
 }
@@ -326,10 +333,20 @@ struct Request {
 }
 
 impl Request {
+    // Parse the available vring buffer. Based on the hashmap table of external
+    // mappings required from various devices such as VFIO or vhost-user ones,
+    // this function might update the hashmap table of external mappings per
+    // domain.
+    // Basically, the VMM knows about the device_id <=> mapping relationship
+    // before running the VM, but at runtime, a new domain <=> mapping hashmap
+    // is created based on the information provided from the guest driver for
+    // virtio-iommu (giving the link device_id <=> domain).
     fn parse(
         avail_desc: &DescriptorChain,
         mem: &GuestMemoryMmap,
         mapping: &Arc<IommuMapping>,
+        ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+        ext_domain_mapping: &mut BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     ) -> result::Result<Request, Error> {
         // The head contains the request type which MUST be readable.
         if avail_desc.is_write_only() {
@@ -363,13 +380,18 @@ impl Request {
 
                 // Copy the value to use it as a proper reference.
                 let domain = req.domain;
+                let endpoint = req.endpoint;
 
                 // Add endpoint associated with specific domain
-                mapping
-                    .endpoints
-                    .write()
-                    .unwrap()
-                    .insert(req.endpoint, domain);
+                mapping.endpoints.write().unwrap().insert(endpoint, domain);
+
+                // If the endpoint is part of the list of devices with an
+                // external mapping, insert a new entry for the corresponding
+                // domain, with the same reference to the trait.
+                if let Some(map) = ext_mapping.get(&endpoint) {
+                    ext_domain_mapping.insert(domain, map.clone());
+                }
+
                 // Add new domain with no mapping if the entry didn't exist yet
                 let mut mappings = mapping.mappings.write().unwrap();
                 if !mappings.contains_key(&domain) {
@@ -383,13 +405,21 @@ impl Request {
                     return Err(Error::InvalidDetachRequest);
                 }
 
-                let req: VirtioIommuReqAttach = mem
+                let req: VirtioIommuReqDetach = mem
                     .read_obj(req_addr as GuestAddress)
                     .map_err(Error::GuestMemory)?;
                 debug!("Detach request {:?}", req);
 
                 // Copy the value to use it as a proper reference.
+                let domain = req.domain;
                 let endpoint = req.endpoint;
+
+                // If the endpoint is part of the list of devices with an
+                // external mapping, remove the entry for the corresponding
+                // domain.
+                if ext_mapping.contains_key(&endpoint) {
+                    ext_domain_mapping.remove(&domain);
+                }
 
                 // Remove endpoint associated with specific domain
                 mapping.endpoints.write().unwrap().remove(&endpoint);
@@ -408,6 +438,14 @@ impl Request {
 
                 // Copy the value to use it as a proper reference.
                 let domain = req.domain;
+
+                // Trigger external mapping if necessary.
+                if let Some(ext_map) = ext_domain_mapping.get(&domain) {
+                    let size = req.virt_end - req.virt_start + 1;
+                    ext_map
+                        .map(req.virt_start, req.phys_start, size)
+                        .map_err(Error::ExternalMapping)?;
+                }
 
                 // Add new mapping associated with the domain
                 if let Some(entry) = mapping.mappings.write().unwrap().get_mut(&domain) {
@@ -437,6 +475,14 @@ impl Request {
                 // Copy the value to use it as a proper reference.
                 let domain = req.domain;
                 let virt_start = req.virt_start;
+
+                // Trigger external unmapping if necessary.
+                if let Some(ext_map) = ext_domain_mapping.get(&domain) {
+                    let size = req.virt_end - virt_start + 1;
+                    ext_map
+                        .unmap(virt_start, size)
+                        .map_err(Error::ExternalUnmapping)?;
+                }
 
                 // Add new mapping associated with the domain
                 if let Some(entry) = mapping.mappings.write().unwrap().get_mut(&domain) {
@@ -487,6 +533,8 @@ struct IommuEpollHandler {
     queue_evts: Vec<EventFd>,
     kill_evt: EventFd,
     mapping: Arc<IommuMapping>,
+    ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
+    ext_domain_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
 }
 
 impl IommuEpollHandler {
@@ -495,7 +543,13 @@ impl IommuEpollHandler {
         let mut used_count = 0;
         let mem = self.mem.read().unwrap();
         for avail_desc in self.queues[0].iter(&mem) {
-            let len = match Request::parse(&avail_desc, &mem, &self.mapping) {
+            let len = match Request::parse(
+                &avail_desc,
+                &mem,
+                &self.mapping,
+                &self.ext_mapping,
+                &mut self.ext_domain_mapping,
+            ) {
                 Ok(ref req) => {
                     let reply = VirtioIommuReqTail {
                         status: VIRTIO_IOMMU_S_OK,
@@ -673,6 +727,7 @@ pub struct Iommu {
     acked_features: u64,
     config: VirtioIommuConfig,
     mapping: Arc<IommuMapping>,
+    ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
@@ -696,11 +751,16 @@ impl Iommu {
                 acked_features: 0u64,
                 config,
                 mapping: mapping.clone(),
+                ext_mapping: BTreeMap::new(),
                 queue_evts: None,
                 interrupt_cb: None,
             },
             mapping,
         ))
+    }
+
+    pub fn add_external_mapping(&mut self, device_id: u32, mapping: Arc<dyn ExternalDmaMapping>) {
+        self.ext_mapping.insert(device_id, mapping);
     }
 }
 
@@ -823,6 +883,8 @@ impl VirtioDevice for Iommu {
             queue_evts,
             kill_evt,
             mapping: self.mapping.clone(),
+            ext_mapping: self.ext_mapping.clone(),
+            ext_domain_mapping: BTreeMap::new(),
         };
 
         let worker_result = thread::Builder::new()
