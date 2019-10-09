@@ -860,6 +860,13 @@ mod tests {
             )
         }
 
+        fn default_net_string_w_iommu(&self) -> String {
+            format!(
+                "tap=,mac={},ip={},mask=255.255.255.0,iommu=on",
+                self.network.guest_mac, self.network.host_ip
+            )
+        }
+
         fn ssh_command(&self, command: &str) -> Result<String, Error> {
             ssh_command_ip(command, &self.network.guest_ip)
         }
@@ -2732,6 +2739,12 @@ mod tests {
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
+    // This test validates that it can find the virtio-iommu device at first.
+    // It also verifies that both disks and the network card are attached to
+    // the virtual IOMMU by looking at /sys/kernel/iommu_groups directory.
+    // The last interesting part of this test is that it exercises the network
+    // interface attached to the virtual IOMMU since this is the one used to
+    // send all commands through SSH.
     fn test_virtio_iommu() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -2759,19 +2772,50 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--net", guest.default_net_string_w_iommu().as_str()])
                 .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
 
+            // Verify the virtio-iommu device is present.
             #[cfg(not(feature = "mmio"))]
             aver!(
                 tb,
                 guest
                     .does_device_vendor_pair_match("0x1057", "0x1af4")
                     .unwrap_or_default()
+            );
+
+            // Verify the first disk is located under IOMMU group 0.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ls /sys/kernel/iommu_groups/0/devices")
+                    .unwrap()
+                    .trim(),
+                "0000:00:03.0"
+            );
+
+            // Verify the second disk is located under IOMMU group 1.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ls /sys/kernel/iommu_groups/1/devices")
+                    .unwrap()
+                    .trim(),
+                "0000:00:04.0"
+            );
+
+            // Verify the network card is located under IOMMU group 2.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ls /sys/kernel/iommu_groups/2/devices")
+                    .unwrap()
+                    .trim(),
+                "0000:00:05.0"
             );
 
             guest.ssh_command("sudo shutdown -h now")?;
