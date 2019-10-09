@@ -14,14 +14,6 @@ if [ ! -f "$FW" ]; then
     popd
 fi
 
-OVMF_URL="https://cdn.download.clearlinux.org/image/OVMF.fd"
-OVMF="$WORKLOADS_DIR/OVMF.fd"
-if [ ! -f "$OVMF" ]; then
-    pushd $WORKLOADS_DIR
-    wget --quiet $OVMF_URL
-    popd
-fi
-
 CLEAR_OS_IMAGE_NAME="clear-cloudguest.img"
 CLEAR_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$CLEAR_OS_IMAGE_NAME"
 CLEAR_OS_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_IMAGE_NAME"
@@ -161,8 +153,6 @@ sudo setcap cap_net_admin+ep target/debug/vhost_user_net
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/debug/cloud-hypervisor $VFIO_DIR
-# We need qemu to have NET_ADMIN as well.
-sudo setcap cap_net_admin+ep /usr/bin/qemu-system-x86_64
 
 sudo adduser $USER kvm
 newgrp kvm << EOF

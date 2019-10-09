@@ -670,17 +670,17 @@ mod tests {
         }
     }
 
-    fn prepare_virtiofsd(tmp_dir: &TempDir, cache: &str) -> (std::process::Child, String) {
+    fn prepare_virtiofsd(
+        tmp_dir: &TempDir,
+        shared_dir: &str,
+        cache: &str,
+    ) -> (std::process::Child, String) {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
         let mut virtiofsd_path = workload_path.clone();
         virtiofsd_path.push("virtiofsd");
         let virtiofsd_path = String::from(virtiofsd_path.to_str().unwrap());
-
-        let mut shared_dir_path = workload_path.clone();
-        shared_dir_path.push("shared_dir");
-        let shared_dir_path = String::from(shared_dir_path.to_str().unwrap());
 
         let virtiofsd_socket_path =
             String::from(tmp_dir.path().join("virtiofs.sock").to_str().unwrap());
@@ -691,7 +691,7 @@ mod tests {
                 "-o",
                 format!("vhost_user_socket={}", virtiofsd_socket_path).as_str(),
             ])
-            .args(&["-o", format!("source={}", shared_dir_path).as_str()])
+            .args(&["-o", format!("source={}", shared_dir).as_str()])
             .args(&["-o", format!("cache={}", cache).as_str()])
             .spawn()
             .unwrap();
@@ -1624,10 +1624,12 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
-            let (mut daemon_child, virtiofsd_socket_path) =
-                prepare_virtiofsd(&guest.tmp_dir, virtiofsd_cache);
+
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
+
+            let mut shared_dir = workload_path.clone();
+            shared_dir.push("shared_dir");
 
             let mut kernel_path = workload_path.clone();
             kernel_path.push("vmlinux");
@@ -1638,6 +1640,12 @@ mod tests {
             } else {
                 "".to_string()
             };
+
+            let (mut daemon_child, virtiofsd_socket_path) = prepare_virtiofsd(
+                &guest.tmp_dir,
+                shared_dir.to_str().unwrap(),
+                virtiofsd_cache,
+            );
 
             let mut child = Command::new("target/debug/cloud-hypervisor")
                 .args(&["--cpus", "1"])
@@ -2277,26 +2285,32 @@ mod tests {
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
-    // The VFIO integration test starts a qemu guest and then direct assigns
-    // one of the virtio-PCI device to a cloud-hypervisor nested guest. The
-    // test assigns one of the 2 virtio-pci networking interface, and thus
-    // the cloud-hypervisor guest will get a networking interface through that
-    // direct assignment.
-    // The test starts the QEMU guest with 2 TAP backed networking interfaces,
-    // bound through a simple bridge on the host. So if the nested
+    // The VFIO integration test starts a cloud-hypervisor guest and then
+    // direct assigns one of the virtio-pci device to a cloud-hypervisor
+    // nested guest. The test assigns one of the 2 virtio-pci networking
+    // interface, and thus the cloud-hypervisor guest will get a networking
+    // interface through that direct assignment.
+    // The test starts cloud-hypervisor guest with 2 TAP backed networking
+    // interfaces, bound through a simple bridge on the host. So if the nested
     // cloud-hypervisor succeeds in getting a directly assigned interface from
-    // its QEMU host, we should be able to ssh into it, and verify that it's
-    // running with the right kernel command line (We tag the cloud-hypervisor
-    // command line for that puspose).
+    // its cloud-hypervisor host, we should be able to ssh into it, and verify
+    // that it's running with the right kernel command line (We tag the command
+    // line from cloud-hypervisor for that purpose).
     fn test_vfio() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new_from_ip_range(&mut clear, "172.16", 0);
 
-            let home = dirs::home_dir().unwrap();
-            let mut cloud_init_vfio_base_path = home.clone();
-            cloud_init_vfio_base_path.push("workloads");
-            cloud_init_vfio_base_path.push("vfio");
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path.clone();
+            kernel_path.push("bzImage");
+
+            let mut vfio_path = workload_path.clone();
+            vfio_path.push("vfio");
+
+            let mut cloud_init_vfio_base_path = vfio_path.clone();
             cloud_init_vfio_base_path.push("cloudinit.img");
 
             // We copy our cloudinit into the vfio mount point, for the nested
@@ -2307,81 +2321,53 @@ mod tests {
             )
             .expect("copying of cloud-init disk failed");
 
-            let vfio_9p_path = format!(
-                "local,id=shared,path={}/workloads/vfio/,security_model=none",
-                home.to_str().unwrap()
-            );
-
-            let ovmf_path = format!("{}/workloads/OVMF.fd", home.to_str().unwrap());
-            let os_disk = format!(
-                "file={},format=qcow2",
-                guest
-                    .disk_config
-                    .disk(DiskType::OperatingSystem)
-                    .unwrap()
-                    .as_str()
-            );
-            let cloud_init_disk = format!(
-                "file={},format=raw",
-                guest
-                    .disk_config
-                    .disk(DiskType::CloudInit)
-                    .unwrap()
-                    .as_str()
-            );
-
             let vfio_tap0 = "vfio-tap0";
             let vfio_tap1 = "vfio-tap1";
 
-            let ssh_net = "ssh-net";
-            let vfio_net = "vfio-net";
+            let (mut daemon_child, virtiofsd_socket_path) =
+                prepare_virtiofsd(&guest.tmp_dir, vfio_path.to_str().unwrap(), "always");
 
-            let netdev_ssh = format!(
-                "tap,ifname={},id={},script=no,downscript=no",
-                vfio_tap0, ssh_net
-            );
-            let netdev_ssh_device = format!(
-                "virtio-net-pci,netdev={},disable-legacy=on,iommu_platform=on,ats=on,mac={}",
-                ssh_net, guest.network.guest_mac
-            );
-
-            let netdev_vfio = format!(
-                "tap,ifname={},id={},script=no,downscript=no",
-                vfio_tap1, vfio_net
-            );
-            let netdev_vfio_device = format!(
-                "virtio-net-pci,netdev={},disable-legacy=on,iommu_platform=on,ats=on,mac={}",
-                vfio_net, guest.network.l2_guest_mac
-            );
-
-            let mut qemu_child = Command::new("qemu-system-x86_64")
-                .args(&["-machine", "q35,accel=kvm,kernel_irqchip=split"])
-                .args(&["-bios", &ovmf_path])
-                .args(&["-smp", "sockets=1,cpus=4,cores=2"])
-                .args(&["-cpu", "host"])
-                .args(&["-m", "1024"])
-                .args(&["-vga", "none"])
-                .args(&["-nographic"])
-                .args(&["-drive", &os_disk])
-                .args(&["-drive", &cloud_init_disk])
-                .args(&["-device", "virtio-rng-pci"])
-                .args(&["-netdev", &netdev_ssh])
-                .args(&["-device", &netdev_ssh_device])
-                .args(&["-netdev", &netdev_vfio])
-                .args(&["-device", &netdev_vfio_device])
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "4"])
+                .args(&["--memory", "size=1G,file=/dev/shm"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&[
-                    "-device",
-                    "intel-iommu,intremap=on,caching-mode=on,device-iotlb=on",
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
                 ])
-                .args(&["-fsdev", &vfio_9p_path])
+                .args(&["--cmdline", "root=PARTUUID=19866ecd-ecc4-4ef8-b313-09a92260ef9b console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts rw"])
                 .args(&[
-                    "-device",
-                    "virtio-9p-pci,fsdev=shared,mount_tag=cloud_hypervisor",
+                    "--net",
+                    format!(
+                        "tap={},mac={}", vfio_tap0, guest.network.guest_mac
+                    )
+                    .as_str(),
+                    format!(
+                        "tap={},mac={},iommu=on", vfio_tap1, guest.network.l2_guest_mac
+                    )
+                    .as_str(),
+                ])
+                .args(&[
+                    "--fs",
+                    format!(
+                        "tag=virtiofs,sock={},num_queues=1,queue_size=1024,dax=on",
+                        virtiofsd_socket_path,
+                    )
+                    .as_str(),
                 ])
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(30, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             guest.ssh_command_l1("sudo systemctl start vfio")?;
             thread::sleep(std::time::Duration::new(30, 0));
@@ -2408,8 +2394,10 @@ mod tests {
             guest.ssh_command_l1("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
 
-            let _ = qemu_child.kill();
-            let _ = qemu_child.wait();
+            let _ = child.kill();
+            let _ = daemon_child.kill();
+            let _ = child.wait();
+            let _ = daemon_child.wait();
 
             Ok(())
         });

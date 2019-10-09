@@ -47,10 +47,8 @@ write_files:
     content: |
         #!/bin/bash
 
-        mount -t 9p -o trans=virtio cloud_hypervisor /mnt -oversion=9p2000.L,posixacl,cache=loose
-        modprobe vfio_iommu_type1 allow_unsafe_interrupts
-        modprobe vfio_pci
-        bash -c "echo 0000:00:03.0 > /sys/bus/pci/devices/0000\:00\:03.0/driver/unbind"
+        mount -t virtio_fs virtiofs /mnt -o rootmode=040000,user_id=0,group_id=0,dax
+        bash -c "echo 0000:00:06.0 > /sys/bus/pci/devices/0000\:00\:06.0/driver/unbind"
         bash -c "echo 1af4 1041 > /sys/bus/pci/drivers/vfio-pci/new_id"
 
-        /mnt/cloud-hypervisor --console off --serial tty --kernel /mnt/vmlinux --cmdline "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda2 VFIOTAG" --disk path=/mnt/clear-cloudguest.img path=/mnt/cloudinit.img --cpus 1 --memory size=512M --rng --device /sys/bus/pci/devices/0000:00:03.0/
+        /mnt/cloud-hypervisor --console off --serial tty --kernel /mnt/vmlinux --cmdline "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda2 VFIOTAG" --disk path=/mnt/clear-cloudguest.img path=/mnt/cloudinit.img --cpus 1 --memory size=512M --rng --device /sys/bus/pci/devices/0000:00:06.0/
