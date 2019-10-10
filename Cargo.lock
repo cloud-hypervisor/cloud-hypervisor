@@ -1034,7 +1034,7 @@ dependencies = [
 [[package]]
 name = "virtio-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/virtio-bindings#c5676476f1048d212f53ca80711d2b132dcebe23"
+source = "git+https://github.com/rust-vmm/virtio-bindings#921b722856335b799261b736cbb90e767e739dfc"
 
 [[package]]
 name = "vm-allocator"
