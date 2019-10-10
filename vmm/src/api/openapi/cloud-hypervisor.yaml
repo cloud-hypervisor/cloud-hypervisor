@@ -80,6 +80,21 @@ paths:
           description: The VM instance could not boot because it is not created yet
           content: {}
 
+  /vm.pause:
+    put:
+      summary: Pause a previously booted VM instance.
+      operationId: pauseVM
+      responses:
+        201:
+          description: The VM instance successfully paused.
+          content: {}
+        404:
+          description: The VM instance could not pause because it is not created yet
+          content: {}
+        405:
+          description: The VM instance could not pause because it is not booted.
+          content: {}
+
   /vm.shutdown:
     put:
       summary: Shut the VM instance down.
