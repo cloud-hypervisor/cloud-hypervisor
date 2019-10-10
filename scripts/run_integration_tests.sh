@@ -134,10 +134,10 @@ if [ ! -d "$VFIO_DIR" ]; then
 fi
 
 # VFIO test network setup.
-# We reserve a different IP class for it: 172.16.0.0/24.
+# We reserve a different IP class for it: 172.17.0.0/24.
 sudo ip link add name vfio-br0 type bridge
 sudo ip link set vfio-br0 up
-sudo ip addr add 172.16.0.1/24 dev vfio-br0
+sudo ip addr add 172.17.0.1/24 dev vfio-br0
 
 sudo ip tuntap add vfio-tap0 mode tap
 sudo ip link set vfio-tap0 master vfio-br0
