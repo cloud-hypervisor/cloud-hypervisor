@@ -5,8 +5,8 @@
 
 use crate::api::http::EndpointHandler;
 use crate::api::{
-    vm_boot, vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_shutdown, vmm_shutdown,
-    ApiError, ApiRequest, ApiResult, VmAction, VmConfig,
+    vm_boot, vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_resume, vm_shutdown,
+    vmm_shutdown, ApiError, ApiRequest, ApiResult, VmAction, VmConfig,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
@@ -31,6 +31,9 @@ pub enum HttpError {
 
     /// Could not pause the VM
     VmPause(ApiError),
+
+    /// Could not pause the VM
+    VmResume(ApiError),
 
     /// Could not shut a VM down
     VmShutdown(ApiError),
@@ -107,6 +110,7 @@ impl VmActionHandler {
             VmAction::Shutdown => vm_shutdown,
             VmAction::Reboot => vm_reboot,
             VmAction::Pause => vm_pause,
+            VmAction::Resume => vm_resume,
         });
 
         VmActionHandler { action_fn }
@@ -127,6 +131,7 @@ impl EndpointHandler for VmActionHandler {
                     ApiError::VmShutdown(_) => HttpError::VmShutdown(e),
                     ApiError::VmReboot(_) => HttpError::VmReboot(e),
                     ApiError::VmPause(_) => HttpError::VmPause(e),
+                    ApiError::VmResume(_) => HttpError::VmResume(e),
                     _ => HttpError::VmAction(e),
                 }) {
                     Ok(_) => Response::new(Version::Http11, StatusCode::OK),
