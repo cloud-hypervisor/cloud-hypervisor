@@ -231,7 +231,7 @@ impl Vmm {
         if let Some(ref mut vm) = self.vm {
             vm.pause()
         } else {
-            Err(VmError::VmNotBooted)
+            Err(VmError::VmNotRunning)
         }
     }
 
@@ -239,7 +239,7 @@ impl Vmm {
         if let Some(ref mut vm) = self.vm {
             vm.resume()
         } else {
-            Err(VmError::VmNotBooted)
+            Err(VmError::VmNotRunning)
         }
     }
 
@@ -247,7 +247,7 @@ impl Vmm {
         if let Some(ref mut vm) = self.vm.take() {
             vm.shutdown()
         } else {
-            Err(VmError::VmNotBooted)
+            Err(VmError::VmNotRunning)
         }
     }
 
