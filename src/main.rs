@@ -2306,7 +2306,7 @@ mod tests {
     fn test_vfio() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new_from_ip_range(&mut clear, "172.16", 0);
+            let guest = Guest::new_from_ip_range(&mut clear, "172.17", 0);
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
