@@ -831,6 +831,25 @@ impl Vm {
         Ok(())
     }
 
+    pub fn resume(&mut self) -> Result<()> {
+        // Toggle the vCPUs pause boolean
+        self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
+
+        // Unpark all the VCPU threads.
+        // Once unparked, the next thing they will do is checking for the pause
+        // boolean. Since it'll be set to false, they will exit their pause loop
+        // and go back to vmx root.
+        for vcpu_thread in self.threads.iter() {
+            vcpu_thread.thread().unpark();
+        }
+
+        // And we're back to Booted state.
+        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
+        *state = VmState::Booted;
+
+        Ok(())
+    }
+
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>) {
         for signal in signals.forever() {
             if signal == SIGWINCH {

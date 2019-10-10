@@ -95,6 +95,21 @@ paths:
           description: The VM instance could not pause because it is not booted.
           content: {}
 
+  /vm.resume:
+    put:
+      summary: Resume a previously paused VM instance.
+      operationId: resumeVM
+      responses:
+        201:
+          description: The VM instance successfully paused.
+          content: {}
+        404:
+          description: The VM instance could not resume because it is not booted yet
+          content: {}
+        405:
+          description: The VM instance could not resume because it is not paused.
+          content: {}
+
   /vm.shutdown:
     put:
       summary: Shut the VM instance down.

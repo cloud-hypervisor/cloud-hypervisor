@@ -235,6 +235,14 @@ impl Vmm {
         }
     }
 
+    fn vm_resume(&mut self) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            vm.resume()
+        } else {
+            Err(VmError::VmNotBooted)
+        }
+    }
+
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm.take() {
             vm.shutdown()
@@ -426,6 +434,14 @@ impl Vmm {
                                     let response = self
                                         .vm_pause()
                                         .map_err(ApiError::VmPause)
+                                        .map(|_| ApiResponsePayload::Empty);
+
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmResume(sender) => {
+                                    let response = self
+                                        .vm_resume()
+                                        .map_err(ApiError::VmResume)
                                         .map(|_| ApiResponsePayload::Empty);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;

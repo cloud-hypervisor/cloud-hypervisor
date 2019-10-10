@@ -79,6 +79,9 @@ pub enum ApiError {
     /// The VM could not be paused.
     VmPause(VmError),
 
+    /// The VM could not resume.
+    VmResume(VmError),
+
     /// The VM is not booted.
     VmNotBooted,
 
@@ -138,6 +141,9 @@ pub enum ApiRequest {
     /// Pause a VM.
     VmPause(Sender<ApiResponse>),
 
+    /// Resume a VM.
+    VmResume(Sender<ApiResponse>),
+
     /// Shut the previously booted virtual machine down.
     /// If the VM was not previously booted or created, the VMM API server
     /// will send a VmShutdown error back.
@@ -190,6 +196,9 @@ pub enum VmAction {
 
     /// Pause a VM
     Pause,
+
+    /// Resume a VM
+    Resume,
 }
 
 fn vm_action(api_evt: EventFd, api_sender: Sender<ApiRequest>, action: VmAction) -> ApiResult<()> {
@@ -201,6 +210,7 @@ fn vm_action(api_evt: EventFd, api_sender: Sender<ApiRequest>, action: VmAction)
         VmAction::Shutdown => ApiRequest::VmShutdown(response_sender),
         VmAction::Reboot => ApiRequest::VmReboot(response_sender),
         VmAction::Pause => ApiRequest::VmPause(response_sender),
+        VmAction::Resume => ApiRequest::VmResume(response_sender),
     };
 
     // Send the VM request.
@@ -230,6 +240,10 @@ pub fn vm_reboot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<
 
 pub fn vm_pause(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
     vm_action(api_evt, api_sender, VmAction::Pause)
+}
+
+pub fn vm_resume(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
+    vm_action(api_evt, api_sender, VmAction::Resume)
 }
 
 pub fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<VmInfo> {
