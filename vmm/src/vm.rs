@@ -213,8 +213,8 @@ pub enum Error {
     /// VM is not created
     VmNotCreated,
 
-    /// VM is not bootted
-    VmNotBooted,
+    /// VM is not running
+    VmNotRunning,
 
     /// Cannot clone EventFd.
     EventFdClone(io::Error),
@@ -439,7 +439,7 @@ pub struct VmInfo<'a> {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum VmState {
     Created,
-    Booted,
+    Running,
     Shutdown,
     Paused,
 }
@@ -843,9 +843,9 @@ impl Vm {
             vcpu_thread.thread().unpark();
         }
 
-        // And we're back to Booted state.
+        // And we're back to the Running state.
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
-        *state = VmState::Booted;
+        *state = VmState::Running;
 
         Ok(())
     }
@@ -965,7 +965,7 @@ impl Vm {
         }
 
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
-        *state = VmState::Booted;
+        *state = VmState::Running;
 
         Ok(())
     }
