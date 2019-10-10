@@ -227,6 +227,14 @@ impl Vmm {
         }
     }
 
+    fn vm_pause(&mut self) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            vm.pause()
+        } else {
+            Err(VmError::VmNotBooted)
+        }
+    }
+
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm.take() {
             vm.shutdown()
@@ -411,6 +419,14 @@ impl Vmm {
                                         .vm_info()
                                         .map_err(ApiError::VmInfo)
                                         .map(ApiResponsePayload::VmInfo);
+
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmPause(sender) => {
+                                    let response = self
+                                        .vm_pause()
+                                        .map_err(ApiError::VmPause)
+                                        .map(|_| ApiResponsePayload::Empty);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }

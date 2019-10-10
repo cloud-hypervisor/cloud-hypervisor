@@ -441,6 +441,7 @@ pub enum VmState {
     Created,
     Booted,
     Shutdown,
+    Paused,
 }
 
 pub struct Vm {
@@ -454,6 +455,7 @@ pub struct Vm {
     on_tty: bool,
     creation_ts: std::time::Instant,
     vcpus_kill_signalled: Arc<AtomicBool>,
+    vcpus_pause_signalled: Arc<AtomicBool>,
     // Reboot (reset) control
     reset_evt: EventFd,
     signals: Option<Signals>,
@@ -685,6 +687,7 @@ impl Vm {
             on_tty,
             creation_ts,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
+            vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
             reset_evt,
             signals: None,
             state: RwLock::new(VmState::Created),
@@ -808,6 +811,26 @@ impl Vm {
         Ok(())
     }
 
+    pub fn pause(&mut self) -> Result<()> {
+        // Tell the vCPUs to pause themselves next time they exit
+        self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
+
+        // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
+        // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
+        // above. The signal handler thread will ignore this signal
+        for thread in self.threads.iter() {
+            let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
+            unsafe {
+                libc::pthread_kill(thread.as_pthread_t(), signum);
+            }
+        }
+
+        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
+        *state = VmState::Paused;
+
+        Ok(())
+    }
+
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>) {
         for signal in signals.forever() {
             if signal == SIGWINCH {
@@ -838,6 +861,7 @@ impl Vm {
 
             let reset_evt = self.reset_evt.try_clone().unwrap();
             let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
+            let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
             self.threads.push(
                 thread::Builder::new()
                     .name(format!("vcpu{}", vcpu.id))
@@ -875,6 +899,17 @@ impl Vm {
                             // We've been told to terminate
                             if vcpu_kill_signalled.load(Ordering::SeqCst) {
                                 break;
+                            }
+
+                            // If we are being told to pause, we park the thread
+                            // until the pause boolean is toggled.
+                            // The resume operation is responsible for toggling
+                            // the boolean and unpark the thread.
+                            // We enter a loop because park() could spuriously
+                            // return. We will then park() again unless the
+                            // pause boolean has been toggled.
+                            while vcpu_pause_signalled.load(Ordering::SeqCst) {
+                                thread::park();
                             }
                         }
                     })

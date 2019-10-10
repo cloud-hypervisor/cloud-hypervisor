@@ -58,6 +58,7 @@ lazy_static! {
         r.routes.insert(endpoint!("/vm.boot"), Box::new(VmActionHandler::new(VmAction::Boot)));
         r.routes.insert(endpoint!("/vm.delete"), Box::new(VmActionHandler::new(VmAction::Delete)));
         r.routes.insert(endpoint!("/vm.info"), Box::new(VmInfo {}));
+        r.routes.insert(endpoint!("/vm.pause"), Box::new(VmActionHandler::new(VmAction::Pause)));
         r.routes.insert(endpoint!("/vm.shutdown"), Box::new(VmActionHandler::new(VmAction::Shutdown)));
         r.routes.insert(endpoint!("/vm.reboot"), Box::new(VmActionHandler::new(VmAction::Reboot)));
         r.routes.insert(endpoint!("/vmm.shutdown"), Box::new(VmmShutdown {}));
