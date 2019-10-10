@@ -182,7 +182,7 @@ dependencies = [
  "tempdir 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "vhost_rs 0.1.0",
  "vhost_user_backend 0.1.0",
- "virtio-bindings 0.1.0 (git+https://github.com/rust-vmm/virtio-bindings)",
+ "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
  "vmm 0.1.0",
@@ -1037,6 +1037,11 @@ version = "0.1.0"
 source = "git+https://github.com/rust-vmm/virtio-bindings#c5676476f1048d212f53ca80711d2b132dcebe23"
 
 [[package]]
+name = "virtio-bindings"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "vm-allocator"
 version = "0.1.0"
 dependencies = [
@@ -1265,6 +1270,7 @@ dependencies = [
 "checksum vcpkg 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)" = "33dd455d0f96e90a75803cfeb7f948768c08d70a6de9a8d2362461935698bf95"
 "checksum vec_map 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)" = "05c78687fb1a80548ae3250346c3db86a80a7cdd77bda190189f2d0a0987c81a"
 "checksum virtio-bindings 0.1.0 (git+https://github.com/rust-vmm/virtio-bindings)" = "<none>"
+"checksum virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
 "checksum vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)" = "<none>"
 "checksum vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "46996f56aeae31fbc0532ae57a944e00089302f03b18c10c76eebfd9249f4a6c"
 "checksum wasi 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b89c3ce4ce14bdc6fb6beaf9ec7928ca331de5df7e5ea278375642a2f478570d"

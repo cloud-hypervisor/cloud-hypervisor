@@ -13,7 +13,7 @@ log = { version = "0.4.8", features = ["std"] }
 net_gen = { path = "net_gen" }
 net_util = { path = "net_util" }
 vhost_user_backend = { path = "vhost_user_backend"}
-virtio-bindings = { git = "https://github.com/rust-vmm/virtio-bindings", version = "0.1", features = ["virtio-v5_0_0"]}
+virtio-bindings = "0.1.0"
 vmm = { path = "vmm" }
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
 vmm-sys-util = "0.1.1"
