@@ -762,7 +762,9 @@ mod tests {
         assert!(status.success());
     }
 
-    fn ssh_command_ip(command: &str, ip: &str) -> Result<String, Error> {
+    const DEFAULT_SSH_RETRIES: u8 = 6;
+    const DEFAULT_SSH_TIMEOUT: u8 = 10;
+    fn ssh_command_ip(command: &str, ip: &str, retries: u8, timeout: u8) -> Result<String, Error> {
         let mut s = String::new();
 
         let mut counter = 0;
@@ -791,12 +793,12 @@ mod tests {
                 Ok(_) => break,
                 Err(e) => {
                     counter += 1;
-                    if counter >= 6 {
+                    if counter >= retries {
                         return Err(e);
                     }
                 }
             };
-            thread::sleep(std::time::Duration::new(10 * counter, 0));
+            thread::sleep(std::time::Duration::new((timeout * counter).into(), 0));
         }
         Ok(s)
     }
@@ -868,15 +870,30 @@ mod tests {
         }
 
         fn ssh_command(&self, command: &str) -> Result<String, Error> {
-            ssh_command_ip(command, &self.network.guest_ip)
+            ssh_command_ip(
+                command,
+                &self.network.guest_ip,
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
         }
 
         fn ssh_command_l1(&self, command: &str) -> Result<String, Error> {
-            ssh_command_ip(command, &self.network.guest_ip)
+            ssh_command_ip(
+                command,
+                &self.network.guest_ip,
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
         }
 
         fn ssh_command_l2(&self, command: &str) -> Result<String, Error> {
-            ssh_command_ip(command, &self.network.l2_guest_ip)
+            ssh_command_ip(
+                command,
+                &self.network.l2_guest_ip,
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
         }
 
         fn api_create_body(&self, cpu_count: u8) -> String {
@@ -2648,7 +2665,7 @@ mod tests {
             // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
             let guest_ip = guest.network.guest_ip.clone();
             let listen_socat = thread::spawn(move || {
-                ssh_command_ip("sudo socat - SOCKET-LISTEN:40:0:x00x00x10x00x00x00x03x00x00x00x00x00x00x00 > vsock_log", &guest_ip).unwrap();
+                ssh_command_ip("sudo socat - SOCKET-LISTEN:40:0:x00x00x10x00x00x00x03x00x00x00x00x00x00x00 > vsock_log", &guest_ip, DEFAULT_SSH_RETRIES, DEFAULT_SSH_TIMEOUT).unwrap();
             });
 
             // Make sure socat is listening, which might take a few second on slow systems
@@ -2725,6 +2742,94 @@ mod tests {
             );
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
+
+            guest
+                .ssh_command("sudo shutdown -h now")
+                .unwrap_or_default();
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            let _ = child.kill();
+            let _ = child.wait();
+
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    // Start cloud-hypervisor with no VM parameters, only the API server running.
+    // From the API: Create a VM, boot it and check that it looks as expected.
+    // Then we pause the VM, check that it's no longer available.
+    // Finally we resume the VM and check that it's available.
+    fn test_api_pause_resume() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--api-socket", &api_socket])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(1, 0));
+
+            // Create the VM first
+            let cpu_count: u8 = 4;
+            let http_body = guest.api_create_body(cpu_count);
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.create",
+                Some(&http_body),
+            );
+
+            // Then boot it
+            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
+            thread::sleep(std::time::Duration::new(5, 0));
+
+            // Check that the VM booted as expected
+            aver_eq!(
+                tb,
+                guest.get_cpu_count().unwrap_or_default() as u8,
+                cpu_count
+            );
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+            aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
+
+            // We now pause the VM
+            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.pause", None);
+            thread::sleep(std::time::Duration::new(2, 0));
+
+            // SSH into the VM should fail
+            aver!(
+                tb,
+                ssh_command_ip(
+                    "grep -c processor /proc/cpuinfo",
+                    &guest.network.guest_ip,
+                    2,
+                    5
+                )
+                .is_err()
+            );
+
+            // Resume the VM
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.resume",
+                None,
+            );
+            thread::sleep(std::time::Duration::new(2, 0));
+
+            // Now we should be able to SSH back in and get the right number of CPUs
+            aver_eq!(
+                tb,
+                guest.get_cpu_count().unwrap_or_default() as u8,
+                cpu_count
+            );
 
             guest
                 .ssh_command("sudo shutdown -h now")
