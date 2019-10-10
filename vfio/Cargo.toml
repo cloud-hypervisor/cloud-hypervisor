@@ -11,7 +11,7 @@ kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master"
 libc = "0.2.60"
 log = "0.4.8"
 pci = { path = "../pci" }
-vfio-bindings = { path = "../vfio-bindings" }
+vfio-bindings = "0.1.0"
 vm-allocator = { path = "../vm-allocator" }
 vmm-sys-util = "0.1.1"
 
