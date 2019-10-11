@@ -218,6 +218,9 @@ pub enum Error {
 
     /// Cannot clone EventFd.
     EventFdClone(io::Error),
+
+    /// Invalid VM state transition
+    InvalidStateTransition(VmState, VmState),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -436,12 +439,46 @@ pub struct VmInfo<'a> {
     pub vm_cfg: &'a VmConfig,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 pub enum VmState {
     Created,
     Running,
     Shutdown,
     Paused,
+}
+
+impl VmState {
+    fn valid_transition(self, new_state: VmState) -> Result<()> {
+        match self {
+            VmState::Created => match new_state {
+                VmState::Created | VmState::Shutdown | VmState::Paused => {
+                    Err(Error::InvalidStateTransition(self, new_state))
+                }
+                VmState::Running => Ok(()),
+            },
+
+            VmState::Running => match new_state {
+                VmState::Created | VmState::Running => {
+                    Err(Error::InvalidStateTransition(self, new_state))
+                }
+                VmState::Paused | VmState::Shutdown => Ok(()),
+            },
+
+            VmState::Shutdown => match new_state {
+                VmState::Paused | VmState::Created | VmState::Shutdown => {
+                    Err(Error::InvalidStateTransition(self, new_state))
+                }
+                VmState::Running => Ok(()),
+            },
+
+            VmState::Paused => match new_state {
+                VmState::Created | VmState::Paused => {
+                    Err(Error::InvalidStateTransition(self, new_state))
+                }
+                VmState::Running | VmState::Shutdown => Ok(()),
+            },
+        }
+    }
 }
 
 pub struct Vm {
@@ -773,6 +810,11 @@ impl Vm {
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
+        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
+        let new_state = VmState::Shutdown;
+
+        state.valid_transition(new_state)?;
+
         if self.on_tty {
             // Don't forget to set the terminal in canonical mode
             // before to exit.
@@ -805,13 +847,17 @@ impl Vm {
             thread.join().map_err(|_| Error::ThreadCleanup)?
         }
 
-        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
-        *state = VmState::Shutdown;
+        *state = new_state;
 
         Ok(())
     }
 
     pub fn pause(&mut self) -> Result<()> {
+        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
+        let new_state = VmState::Paused;
+
+        state.valid_transition(new_state)?;
+
         // Tell the vCPUs to pause themselves next time they exit
         self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
 
@@ -825,13 +871,17 @@ impl Vm {
             }
         }
 
-        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
-        *state = VmState::Paused;
+        *state = new_state;
 
         Ok(())
     }
 
     pub fn resume(&mut self) -> Result<()> {
+        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
+        let new_state = VmState::Running;
+
+        state.valid_transition(new_state)?;
+
         // Toggle the vCPUs pause boolean
         self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
 
@@ -844,8 +894,7 @@ impl Vm {
         }
 
         // And we're back to the Running state.
-        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
-        *state = VmState::Running;
+        *state = new_state;
 
         Ok(())
     }
@@ -860,6 +909,14 @@ impl Vm {
     }
 
     pub fn boot(&mut self) -> Result<()> {
+        let current_state = self.get_state()?;
+        if current_state == VmState::Paused {
+            return self.resume();
+        }
+
+        let new_state = VmState::Running;
+        current_state.valid_transition(new_state)?;
+
         let entry_addr = self.load_kernel()?;
         let vcpu_count = u8::from(&self.config.cpus);
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
@@ -965,7 +1022,7 @@ impl Vm {
         }
 
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
-        *state = VmState::Running;
+        *state = new_state;
 
         Ok(())
     }
@@ -1002,7 +1059,7 @@ impl Vm {
         self.state
             .try_read()
             .map_err(|_| Error::PoisonedState)
-            .map(|state| state.clone())
+            .map(|state| *state)
     }
 }
 
