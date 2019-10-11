@@ -1063,6 +1063,65 @@ impl Vm {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_vm_state_transitions(state: VmState) {
+        match state {
+            VmState::Created => {
+                // Check the transitions from Created
+                assert!(state.valid_transition(VmState::Created).is_err());
+                assert!(state.valid_transition(VmState::Running).is_ok());
+                assert!(state.valid_transition(VmState::Shutdown).is_err());
+                assert!(state.valid_transition(VmState::Paused).is_err());
+            }
+            VmState::Running => {
+                // Check the transitions from Running
+                assert!(state.valid_transition(VmState::Created).is_err());
+                assert!(state.valid_transition(VmState::Running).is_err());
+                assert!(state.valid_transition(VmState::Shutdown).is_ok());
+                assert!(state.valid_transition(VmState::Paused).is_ok());
+            }
+            VmState::Shutdown => {
+                // Check the transitions from Shutdown
+                assert!(state.valid_transition(VmState::Created).is_err());
+                assert!(state.valid_transition(VmState::Running).is_ok());
+                assert!(state.valid_transition(VmState::Shutdown).is_err());
+                assert!(state.valid_transition(VmState::Paused).is_err());
+            }
+            VmState::Paused => {
+                // Check the transitions from Paused
+                assert!(state.valid_transition(VmState::Created).is_err());
+                assert!(state.valid_transition(VmState::Running).is_ok());
+                assert!(state.valid_transition(VmState::Shutdown).is_ok());
+                assert!(state.valid_transition(VmState::Paused).is_err());
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn test_vm_created_transitions() {
+        test_vm_state_transitions(VmState::Created);
+    }
+
+    #[test]
+    fn test_vm_running_transitions() {
+        test_vm_state_transitions(VmState::Running);
+    }
+
+    #[test]
+    fn test_vm_shutdown_transitions() {
+        test_vm_state_transitions(VmState::Shutdown);
+    }
+
+    #[test]
+    fn test_vm_paused_transitions() {
+        test_vm_state_transitions(VmState::Paused);
+    }
+}
+
 #[allow(unused)]
 pub fn test_vm() {
     // This example based on https://lwn.net/Articles/658511/
