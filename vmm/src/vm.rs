@@ -57,6 +57,7 @@ use vmm_sys_util::signal::{register_signal_handler, validate_signal_num};
 use vmm_sys_util::terminal::Terminal;
 use vm_live_migration::receiver::MigrationReceiver;
 use vm_live_migration::sender::MigrationSender;
+use vm_live_migration::state::{MigrationState, MigrationStateFn};
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
 const X86_64_IRQ_BASE: u32 = 5;
@@ -145,6 +146,9 @@ pub enum Error {
 
     /// Cannot spawn a new migration thread.
     MigrationSpawn(io::Error),
+
+    /// Cannot spawn a new load state thread.
+    LoadStateSpawn(io::Error),
 
     #[cfg(target_arch = "x86_64")]
     /// Cannot set the local interruption due to bad configuration.
@@ -503,6 +507,8 @@ pub struct Vm {
     reset_evt: EventFd,
     signals: Option<Signals>,
     state: RwLock<VmState>,
+    version: Vec<u8>,
+    mig_state: MigrationState,
 }
 
 fn get_host_cpu_phys_bits() -> u8 {
@@ -718,6 +724,8 @@ impl Vm {
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
         let threads = Vec::with_capacity(u8::from(&config.cpus) as usize + 1);
+        let version = vec![1, 2, 3, 4, 5];
+        let mig_state = MigrationState::new();
 
         Ok(Vm {
             fd,
@@ -734,6 +742,8 @@ impl Vm {
             reset_evt,
             signals: None,
             state: RwLock::new(VmState::Created),
+            version,
+            mig_state,
         })
     }
 
@@ -914,23 +924,42 @@ impl Vm {
         }
     }
 
+    fn state_register(&self) {
+        self.register_state(self.mig_state.clone());
+    }
+
+    fn state_send(&self) {
+        self.send_state(self.mig_state.clone(), self.version.clone());
+    }
+
     fn migration_setup(&mut self) -> Result<()> {
         let lm = u8::from(&self.config.lm);
+        let state = self.mig_state.clone();
 
         thread::Builder::new()
             .name(format!("migration_{}", lm))
             .spawn(move || {
                 if lm == 0 {
                     println!("Establish migration server");
-                    let receiver = MigrationReceiver::new("127.0.0.1:3000".to_string());
+                    let receiver = MigrationReceiver::new("127.0.0.1:3000".to_string(), state);
+                    receiver.handle_state();
                     receiver.bind();
                 } else {
                     println!("Establish migration client");
-                    let sender = MigrationSender::new("127.0.0.1:3000".to_string());
+                    let mut sender = MigrationSender::new("127.0.0.1:3000".to_string(), state);
+                    sender.handle_state();
                     sender.connect();
                 }
             })
             .map_err(Error::MigrationSpawn)?;
+
+        self.state_register();
+
+        if lm == 1 {
+            self.state_send();
+        } else {
+            self.load_state();
+        }
 
         Ok(())
     }
@@ -1089,6 +1118,21 @@ impl Vm {
             .try_read()
             .map_err(|_| Error::PoisonedState)
             .map(|state| *state)
+    }
+}
+
+impl MigrationStateFn for Vm {
+    fn load_state(&mut self) {
+        let state = self.mig_state.clone();
+        let mut version = self.version.clone();
+        thread::Builder::new()
+            .name(format!("load_state_{}", "vmm"))
+            .spawn(move || {
+                let mut data = state.d_recv_return();
+                version.append(&mut data);
+                println!("Vm changed component version is {:?}", version);
+            })
+            .map_err(Error::LoadStateSpawn);
     }
 }
 

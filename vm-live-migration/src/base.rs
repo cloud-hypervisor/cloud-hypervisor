@@ -24,8 +24,6 @@ impl MigrationBase {
     }
 
     pub fn connect(&self) {
-        let mut ver = vec![1, 2, 3, 4, 5];
-        self.data.write(&mut ver, false);
         loop {
             if self.data.data_valid() == true {
                 self.trans.connect(self.data.clone())
