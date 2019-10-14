@@ -1,0 +1,10 @@
+[package]
+name = "vm-live-migration"
+version = "0.1.0"
+authors = ["Yi Sun <yi.y.sun@linux.intel.com>"]
+edition = "2018"
+
+[dependencies]
+fibers = "0.1.12"
+futures = "0.1.28"
+handy_async = "0.2.13"

@@ -80,6 +80,7 @@ fn main() {
     }
 
     let default_vcpus = format! {"{}", config::DEFAULT_VCPUS};
+    let default_lm = format! {"{}", config::DEFAULT_LM};
     let default_memory = format! {"size={}M", config::DEFAULT_MEMORY_MB};
     let default_rng = format! {"src={}", config::DEFAULT_RNG_SOURCE};
 
@@ -95,6 +96,12 @@ fn main() {
                 .help("Number of virtual CPUs")
                 .default_value(&default_vcpus)
                 .group("vm-config"),
+        )
+        .arg(
+            Arg::with_name("lm")
+                .long("lm")
+                .help("Live migration server(1) or client(0)")
+                .default_value(&default_lm),
         )
         .arg(
             Arg::with_name("memory")
@@ -265,6 +272,7 @@ fn main() {
 
     // These .unwrap()s cannot fail as there is a default value defined
     let cpus = cmd_arguments.value_of("cpus").unwrap();
+    let lm = cmd_arguments.value_of("lm").unwrap();
     let memory = cmd_arguments.value_of("memory").unwrap();
     let rng = cmd_arguments.value_of("rng").unwrap();
     let serial = cmd_arguments.value_of("serial").unwrap();
@@ -312,6 +320,7 @@ fn main() {
 
     let vm_config = match config::VmConfig::parse(config::VmParams {
         cpus,
+        lm,
         memory,
         kernel,
         cmdline,

@@ -22,6 +22,7 @@ extern crate vfio;
 extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
+extern crate vm_live_migration;
 
 use crate::config::{ConsoleOutputMode, VmConfig};
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
@@ -54,6 +55,8 @@ use vm_memory::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, validate_signal_num};
 use vmm_sys_util::terminal::Terminal;
+use vm_live_migration::receiver::MigrationReceiver;
+use vm_live_migration::sender::MigrationSender;
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
 const X86_64_IRQ_BASE: u32 = 5;
@@ -139,6 +142,9 @@ pub enum Error {
 
     /// Cannot spawn a new vCPU thread.
     VcpuSpawn(io::Error),
+
+    /// Cannot spawn a new migration thread.
+    MigrationSpawn(io::Error),
 
     #[cfg(target_arch = "x86_64")]
     /// Cannot set the local interruption due to bad configuration.
@@ -908,6 +914,27 @@ impl Vm {
         }
     }
 
+    fn migration_setup(&mut self) -> Result<()> {
+        let lm = u8::from(&self.config.lm);
+
+        thread::Builder::new()
+            .name(format!("migration_{}", lm))
+            .spawn(move || {
+                if lm == 0 {
+                    println!("Establish migration server");
+                    let receiver = MigrationReceiver::new("127.0.0.1:3000".to_string());
+                    receiver.bind();
+                } else {
+                    println!("Establish migration client");
+                    let sender = MigrationSender::new("127.0.0.1:3000".to_string());
+                    sender.connect();
+                }
+            })
+            .map_err(Error::MigrationSpawn)?;
+
+        Ok(())
+    }
+
     pub fn boot(&mut self) -> Result<()> {
         let current_state = self.get_state()?;
         if current_state == VmState::Paused {
@@ -995,6 +1022,8 @@ impl Vm {
 
         // Unblock all CPU threads.
         vcpu_thread_barrier.wait();
+
+        self.migration_setup()?;
 
         if self.devices.console().input_enabled() {
             let console = self.devices.console().clone();

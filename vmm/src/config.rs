@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::result;
 
 pub const DEFAULT_VCPUS: u8 = 1;
+pub const DEFAULT_LM: u8 = 0;
 pub const DEFAULT_MEMORY_MB: u64 = 512;
 pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
 
@@ -82,6 +83,7 @@ pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
 pub struct VmParams<'a> {
     pub cpus: &'a str,
+    pub lm: &'a str,
     pub memory: &'a str,
     pub kernel: Option<&'a str>,
     pub cmdline: Option<&'a str>,
@@ -150,6 +152,23 @@ impl From<&CpusConfig> for u8 {
 impl Default for CpusConfig {
     fn default() -> Self {
         CpusConfig(DEFAULT_VCPUS)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct LMConfig(pub u8);
+
+impl LMConfig {
+    pub fn parse(lm: &str) -> Result<Self> {
+        Ok(LMConfig(
+           lm.parse::<u8>().map_err(Error::ParseCpusParams)?,
+        ))
+    }
+}
+
+impl From<&LMConfig> for u8 {
+    fn from(val: &LMConfig) -> Self {
+        val.0
     }
 }
 
@@ -747,6 +766,7 @@ impl VhostUserBlkConfig {
 pub struct VmConfig {
     #[serde(default)]
     pub cpus: CpusConfig,
+    pub lm: LMConfig,
     #[serde(default)]
     pub memory: MemoryConfig,
     pub kernel: Option<KernelConfig>,
@@ -888,6 +908,7 @@ impl VmConfig {
 
         Ok(VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
+            lm: LMConfig::parse(vm_params.lm)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
             kernel,
             cmdline: CmdlineConfig::parse(vm_params.cmdline)?,
