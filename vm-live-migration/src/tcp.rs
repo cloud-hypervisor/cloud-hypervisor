@@ -13,6 +13,7 @@ use handy_async::io::{AsyncWrite, ReadFrom};
 use handy_async::pattern::AllowPartial;
 
 use crate::transport::MigrationTransport;
+use crate::data::MigrationDataFile;
 
 pub struct MigrationTCP(String);
 
@@ -23,21 +24,31 @@ impl MigrationTCP {
 }
 
 impl MigrationTransport for MigrationTCP {
-    fn connect(&self) {
+    fn connect(&self, data: Arc<MigrationDataFile>) {
         let server_addr = self.0.parse().unwrap();
         let mut executor = InPlaceExecutor::new().expect("Cannot create Executor");
         let handle = executor.handle();
         let should_end = Arc::new(Mutex::new(vec![0u8]));
         let end = should_end.clone();
+        //TODO: capacity should be 32 * 1024.
+        let mut entry = Vec::with_capacity(32);
+
+        data.read(&mut entry);
+        let len = entry.len() * std::mem::size_of::<u8>();
+        let c: &[u8] = unsafe {
+            std::slice::from_raw_parts((entry).as_ptr() as *const u8,
+                (entry).len() * std::mem::size_of::<u8>(),
+            )
+        };
+        let v = Arc::new(c);
 
         let mut monitor = executor.spawn_monitor(TcpStream::connect(server_addr).and_then(move |stream| {
             println!("# CONNECTED: {}", server_addr);
 
             let (reader, writer) = (stream.clone(), stream);
-            let string = "Hello, this is client";
-            let in_stream = vec![0; 256].allow_partial().into_stream(string.as_bytes());
-            println!("Client send msg: {}", string.to_string());
-
+            let in_stream = unsafe {
+                vec![0; len].allow_partial().into_stream(*Arc::into_raw(v))
+            };
             handle.spawn(in_stream.map_err(|e| e.into_error())
                 .fold(writer, |writer, (mut buf, size)| {
                     buf.truncate(size);
@@ -73,7 +84,7 @@ impl MigrationTransport for MigrationTCP {
         println!("# Disconnected");
     }
 
-    fn bind(&self) {
+    fn bind(&self, data: Arc<MigrationDataFile>) {
         let server_addr = self.0.parse().expect("Invalid TCP bind address");
 
         let mut executor = ThreadPoolExecutor::new().expect("Cannot create Executor");
@@ -85,6 +96,7 @@ impl MigrationTransport for MigrationTCP {
                 listener.incoming().for_each(move |(client, addr)| {
                     println!("# CONNECTED: {}", addr);
                     let handle1 = handle0.clone();
+                    let data1 = data.clone();
 
                     handle0.spawn(client.and_then(move |client| {
                             let (reader, writer) = (client.clone(), client);
@@ -106,7 +118,7 @@ impl MigrationTransport for MigrationTCP {
                                     buf.truncate(len);
                                     println!("# RECV: {} bytes", buf.len());
                                     println!("# Server received: {:?} ", buf);
-                                    println!("# RECV: {}", String::from_utf8(buf).expect("Invalid UTF-8"));
+                                    data1.write(&mut buf.clone(), true);
 
                                     // Sends response to the writer half.
                                     let ret = vec![0xffu8];  /* OK to make client exit */
