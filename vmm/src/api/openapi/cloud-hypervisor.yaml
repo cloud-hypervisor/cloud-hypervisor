@@ -159,7 +159,7 @@ components:
       type: object
       properties:
         version:
-          type: '#/components/schemas/VmConfig'
+          type: string
         state:
           type: string
           enum: [Created, Booted, Shutdown]
@@ -341,7 +341,7 @@ components:
           type: string
         mode:
           type: string
-          enum: [Off, Tty, File, Null]
+          enum: [Off, Tty, File, None]
         iommu:
           type: boolean
           default: false
