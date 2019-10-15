@@ -213,7 +213,6 @@ impl VhostUserNetBackend {
             let mut next_desc = vring.mut_queue().iter(&mem).next();
 
             if next_desc.is_none() {
-                println!("rx queue has no available descriptors!\n");
                 // Queue has no available descriptors
                 if self.rx_tap_listening {
                     self.vring_worker
@@ -288,7 +287,6 @@ impl VhostUserNetBackend {
                 Ok(count) => {
                     self.rx.bytes_read = count;
                     if !self.rx_single_frame(vring) {
-                        println!("read_tap done, set rx_single_frame!\n");
                         self.rx.deferred_frame = true;
                         break;
                     }
@@ -337,7 +335,6 @@ impl VhostUserNetBackend {
 
     fn process_tx(&mut self, vring: &mut Vring) -> Result<()> {
         if let Some(mem) = &self.mem {
-            println!("Entering process_tx!\n");
             let mut used_desc_heads = [(0, 0); QUEUE_SIZE];
             let mut used_count = 0;
             while let Some(avail_desc) = vring.mut_queue().iter(&mem).next() {
@@ -348,7 +345,6 @@ impl VhostUserNetBackend {
                 self.tx.iovec.clear();
                 while let Some(desc) = next_desc {
                     if desc.is_write_only() {
-                        println!("desc is write only!\n");
                         break;
                     }
                     self.tx.iovec.push((desc.addr, desc.len as usize));
@@ -370,10 +366,6 @@ impl VhostUserNetBackend {
                     );
                     match read_result {
                         Ok(_) => {
-                            println!(
-                                "process_tx read_result is good with read_count: {:?}\n",
-                                read_count
-                            );
                             // Increment by number of bytes actually read
                             read_count += limit - read_count;
                         }
@@ -450,7 +442,6 @@ impl VhostUserBackend for VhostUserNetBackend {
         match device_event {
             RX_QUEUE_EVENT => {
                 let mut vring = vrings[0].write().unwrap();
-                println!("RX_QUEUE_EVENT received");
                 self.resume_rx(&mut vring).unwrap();
 
                 if !self.rx_tap_listening {
@@ -464,12 +455,10 @@ impl VhostUserBackend for VhostUserNetBackend {
             }
             TX_QUEUE_EVENT => {
                 let mut vring = vrings[1].write().unwrap();
-                println!("TX_QUEUE_EVENT received!\n");
                 self.process_tx(&mut vring).unwrap();
             }
             RX_TAP_EVENT => {
                 let mut vring = vrings[0].write().unwrap();
-                println!("RX_TAP_EVENT received");
                 if self.rx.deferred_frame
                 // Process a deferred frame first if available. Don't read from tap again
                 // until we manage to receive this deferred frame.
@@ -487,7 +476,6 @@ impl VhostUserBackend for VhostUserNetBackend {
             }
             KILL_EVENT => {
                 self.kill_evt.read().unwrap();
-                println!("KILL_EVENT received, stopping epoll loop");
                 return Ok(true);
             }
             _ => {
@@ -570,8 +558,6 @@ fn main() {
     let net_backend = Arc::new(RwLock::new(
         VhostUserNetBackend::new(backend_config.ip, backend_config.mask).unwrap(),
     ));
-    println!("net_backend is created!\n");
-
     let name = "vhost-user-net-backend";
     let mut net_daemon = VhostUserDaemon::new(
         name.to_string(),
@@ -579,8 +565,6 @@ fn main() {
         net_backend.clone(),
     )
     .unwrap();
-    println!("net_daemon is created!\n");
-
     let vring_worker = net_daemon.get_vring_worker();
 
     if vring_worker
