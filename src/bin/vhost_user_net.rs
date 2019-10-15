@@ -83,8 +83,8 @@ pub enum Error {
     InvalidVringAddr,
     /// No vring call fd to notify.
     NoVringCallFdNotify,
-    /// No memory while handling tx.
-    NoMemoryForTx,
+    /// No memory configured.
+    NoMemoryConfigured,
     /// Failed to parse sock parameter.
     ParseSockParam,
     /// Failed to parse ip parameter.
@@ -208,76 +208,73 @@ impl VhostUserNetBackend {
     // Copies a single frame from `self.rx.frame_buf` into the guest. Returns true
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
-    fn rx_single_frame(&mut self, vring: &mut Vring) -> bool {
-        if let Some(mem) = &self.mem {
-            let mut next_desc = vring.mut_queue().iter(&mem).next();
+    fn rx_single_frame(&mut self, vring: &mut Vring) -> Result<bool> {
+        let mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
 
-            if next_desc.is_none() {
-                // Queue has no available descriptors
-                if self.rx_tap_listening {
-                    self.vring_worker
-                        .as_ref()
-                        .unwrap()
-                        .unregister_listener(
-                            self.tap.as_raw_fd(),
-                            epoll::Events::EPOLLIN,
-                            u64::from(RX_TAP_EVENT),
-                        )
-                        .unwrap();
-                    self.rx_tap_listening = false;
-                }
-                return false;
+        let mut next_desc = vring.mut_queue().iter(&mem).next();
+
+        if next_desc.is_none() {
+            // Queue has no available descriptors
+            if self.rx_tap_listening {
+                self.vring_worker
+                    .as_ref()
+                    .unwrap()
+                    .unregister_listener(
+                        self.tap.as_raw_fd(),
+                        epoll::Events::EPOLLIN,
+                        u64::from(RX_TAP_EVENT),
+                    )
+                    .unwrap();
+                self.rx_tap_listening = false;
             }
+            return Ok(false);
+        }
 
-            // We just checked that the head descriptor exists.
-            let head_index = next_desc.as_ref().unwrap().index;
-            let mut write_count = 0;
+        // We just checked that the head descriptor exists.
+        let head_index = next_desc.as_ref().unwrap().index;
+        let mut write_count = 0;
 
-            // Copy from frame into buffer, which may span multiple descriptors.
-            loop {
-                match next_desc {
-                    Some(desc) => {
-                        if !desc.is_write_only() {
-                            break;
-                        }
-                        let limit = cmp::min(write_count + desc.len as usize, self.rx.bytes_read);
-                        let source_slice = &self.rx.frame_buf[write_count..limit];
-                        let write_result = mem.write_slice(source_slice, desc.addr);
-
-                        match write_result {
-                            Ok(_) => {
-                                write_count = limit;
-                            }
-                            Err(e) => {
-                                error!("Failed to write slice: {:?}", e);
-                                break;
-                            }
-                        };
-
-                        if write_count >= self.rx.bytes_read {
-                            break;
-                        }
-                        next_desc = desc.next_descriptor();
-                    }
-                    None => {
-                        warn!("Receiving buffer is too small to hold frame of current size");
+        // Copy from frame into buffer, which may span multiple descriptors.
+        loop {
+            match next_desc {
+                Some(desc) => {
+                    if !desc.is_write_only() {
                         break;
                     }
+                    let limit = cmp::min(write_count + desc.len as usize, self.rx.bytes_read);
+                    let source_slice = &self.rx.frame_buf[write_count..limit];
+                    let write_result = mem.write_slice(source_slice, desc.addr);
+
+                    match write_result {
+                        Ok(_) => {
+                            write_count = limit;
+                        }
+                        Err(e) => {
+                            error!("Failed to write slice: {:?}", e);
+                            break;
+                        }
+                    };
+
+                    if write_count >= self.rx.bytes_read {
+                        break;
+                    }
+                    next_desc = desc.next_descriptor();
+                }
+                None => {
+                    warn!("Receiving buffer is too small to hold frame of current size");
+                    break;
                 }
             }
-
-            vring
-                .mut_queue()
-                .add_used(&mem, head_index, write_count as u32);
-
-            // Mark that we have at least one pending packet and we need to interrupt the guest.
-            self.rx.deferred_irqs = true;
-
-            write_count >= self.rx.bytes_read
-        } else {
-            error!("No memory for single frame handling!\n");
-            false
         }
+
+        vring
+            .mut_queue()
+            .add_used(&mem, head_index, write_count as u32);
+
+        // Mark that we have at least one pending packet and we need to interrupt the guest.
+        self.rx.deferred_irqs = true;
+
+        Ok(write_count >= self.rx.bytes_read)
     }
 
     fn process_rx(&mut self, vring: &mut Vring) -> Result<()> {
@@ -286,7 +283,7 @@ impl VhostUserNetBackend {
             match self.read_tap() {
                 Ok(count) => {
                     self.rx.bytes_read = count;
-                    if !self.rx_single_frame(vring) {
+                    if !self.rx_single_frame(vring)? {
                         self.rx.deferred_frame = true;
                         break;
                     }
@@ -316,7 +313,7 @@ impl VhostUserNetBackend {
 
     fn resume_rx(&mut self, vring: &mut Vring) -> Result<()> {
         if self.rx.deferred_frame {
-            if self.rx_single_frame(vring) {
+            if self.rx_single_frame(vring)? {
                 self.rx.deferred_frame = false;
                 // process_rx() was interrupted possibly before consuming all
                 // packets in the tap; try continuing now.
@@ -334,67 +331,65 @@ impl VhostUserNetBackend {
     }
 
     fn process_tx(&mut self, vring: &mut Vring) -> Result<()> {
-        if let Some(mem) = &self.mem {
-            let mut used_desc_heads = [(0, 0); QUEUE_SIZE];
-            let mut used_count = 0;
-            while let Some(avail_desc) = vring.mut_queue().iter(&mem).next() {
-                let head_index = avail_desc.index;
-                let mut read_count = 0;
-                let mut next_desc = Some(avail_desc);
+        let mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
 
-                self.tx.iovec.clear();
-                while let Some(desc) = next_desc {
-                    if desc.is_write_only() {
+        let mut used_desc_heads = [(0, 0); QUEUE_SIZE];
+        let mut used_count = 0;
+        while let Some(avail_desc) = vring.mut_queue().iter(&mem).next() {
+            let head_index = avail_desc.index;
+            let mut read_count = 0;
+            let mut next_desc = Some(avail_desc);
+
+            self.tx.iovec.clear();
+            while let Some(desc) = next_desc {
+                if desc.is_write_only() {
+                    break;
+                }
+                self.tx.iovec.push((desc.addr, desc.len as usize));
+                read_count += desc.len as usize;
+                next_desc = desc.next_descriptor();
+            }
+            used_desc_heads[used_count] = (head_index, read_count);
+            used_count += 1;
+            read_count = 0;
+            // Copy buffer from across multiple descriptors.
+            // TODO(performance - Issue #420): change this to use `writev()` instead of `write()`
+            // and get rid of the intermediate buffer.
+            for (desc_addr, desc_len) in self.tx.iovec.drain(..) {
+                let limit = cmp::min((read_count + desc_len) as usize, self.tx.frame_buf.len());
+
+                let read_result = mem.read_slice(
+                    &mut self.tx.frame_buf[read_count..limit as usize],
+                    desc_addr,
+                );
+                match read_result {
+                    Ok(_) => {
+                        // Increment by number of bytes actually read
+                        read_count += limit - read_count;
+                    }
+                    Err(e) => {
+                        println!("Failed to read slice: {:?}", e);
                         break;
                     }
-                    self.tx.iovec.push((desc.addr, desc.len as usize));
-                    read_count += desc.len as usize;
-                    next_desc = desc.next_descriptor();
                 }
-                used_desc_heads[used_count] = (head_index, read_count);
-                used_count += 1;
-                read_count = 0;
-                // Copy buffer from across multiple descriptors.
-                // TODO(performance - Issue #420): change this to use `writev()` instead of `write()`
-                // and get rid of the intermediate buffer.
-                for (desc_addr, desc_len) in self.tx.iovec.drain(..) {
-                    let limit = cmp::min((read_count + desc_len) as usize, self.tx.frame_buf.len());
-
-                    let read_result = mem.read_slice(
-                        &mut self.tx.frame_buf[read_count..limit as usize],
-                        desc_addr,
-                    );
-                    match read_result {
-                        Ok(_) => {
-                            // Increment by number of bytes actually read
-                            read_count += limit - read_count;
-                        }
-                        Err(e) => {
-                            println!("Failed to read slice: {:?}", e);
-                            break;
-                        }
-                    }
-                }
-
-                let write_result = self.tap.write(&self.tx.frame_buf[..read_count as usize]);
-                match write_result {
-                    Ok(_) => {}
-                    Err(e) => {
-                        println!("net: tx: error failed to write to tap: {}", e);
-                    }
-                };
             }
 
-            if used_count > 0 {
-                for &(desc_index, _) in &used_desc_heads[..used_count] {
-                    vring.mut_queue().add_used(&mem, desc_index, 0);
+            let write_result = self.tap.write(&self.tx.frame_buf[..read_count as usize]);
+            match write_result {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("net: tx: error failed to write to tap: {}", e);
                 }
-                vring.signal_used_queue().unwrap();
-            }
-        } else {
-            error!("No memory for vhost-user-net backend tx handling!\n");
-            return Err(Error::NoMemoryForTx);
+            };
         }
+
+        if used_count > 0 {
+            for &(desc_index, _) in &used_desc_heads[..used_count] {
+                vring.mut_queue().add_used(&mem, desc_index, 0);
+            }
+            vring.signal_used_queue().unwrap();
+        }
+
         Ok(())
     }
 
@@ -463,7 +458,7 @@ impl VhostUserBackend for VhostUserNetBackend {
                 // Process a deferred frame first if available. Don't read from tap again
                 // until we manage to receive this deferred frame.
                 {
-                    if self.rx_single_frame(&mut vring) {
+                    if self.rx_single_frame(&mut vring).unwrap() {
                         self.rx.deferred_frame = false;
                         self.process_rx(&mut vring).unwrap();
                     } else if self.rx.deferred_irqs {
