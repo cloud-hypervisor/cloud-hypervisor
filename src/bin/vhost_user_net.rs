@@ -19,6 +19,7 @@ use epoll;
 use libc::{self, EAGAIN, EFD_NONBLOCK};
 use log::*;
 use std::cmp;
+use std::fmt;
 use std::io::Read;
 use std::io::{self, Write};
 use std::mem;
@@ -103,6 +104,20 @@ pub enum Error {
     TapSetVnetHdrSize(TapError),
     /// Enabling tap interface failed.
     TapEnable(TapError),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "vhost_user_net_error: {:?}", self)
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl std::convert::From<Error> for std::io::Error {
+    fn from(e: Error) -> Self {
+        std::io::Error::new(io::ErrorKind::Other, e)
+    }
 }
 
 #[derive(Clone)]
@@ -368,7 +383,7 @@ impl VhostUserNetBackend {
                         read_count += limit - read_count;
                     }
                     Err(e) => {
-                        println!("Failed to read slice: {:?}", e);
+                        error!("Failed to read slice: {:?}", e);
                         break;
                     }
                 }
@@ -378,7 +393,7 @@ impl VhostUserNetBackend {
             match write_result {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("net: tx: error failed to write to tap: {}", e);
+                    error!("net: tx: error failed to write to tap: {}", e);
                 }
             };
         }
@@ -430,14 +445,13 @@ impl VhostUserBackend for VhostUserNetBackend {
         vrings: &[Arc<RwLock<Vring>>],
     ) -> VhostUserBackendResult<bool> {
         if evset != epoll::Events::EPOLLIN {
-            println!("Invalid events operation!\n");
-            return Ok(false);
+            return Err(Error::HandleEventNotEpollIn.into());
         }
 
         match device_event {
             RX_QUEUE_EVENT => {
                 let mut vring = vrings[0].write().unwrap();
-                self.resume_rx(&mut vring).unwrap();
+                self.resume_rx(&mut vring)?;
 
                 if !self.rx_tap_listening {
                     self.vring_worker.as_ref().unwrap().register_listener(
@@ -450,7 +464,7 @@ impl VhostUserBackend for VhostUserNetBackend {
             }
             TX_QUEUE_EVENT => {
                 let mut vring = vrings[1].write().unwrap();
-                self.process_tx(&mut vring).unwrap();
+                self.process_tx(&mut vring)?;
             }
             RX_TAP_EVENT => {
                 let mut vring = vrings[0].write().unwrap();
@@ -458,24 +472,22 @@ impl VhostUserBackend for VhostUserNetBackend {
                 // Process a deferred frame first if available. Don't read from tap again
                 // until we manage to receive this deferred frame.
                 {
-                    if self.rx_single_frame(&mut vring).unwrap() {
+                    if self.rx_single_frame(&mut vring)? {
                         self.rx.deferred_frame = false;
-                        self.process_rx(&mut vring).unwrap();
+                        self.process_rx(&mut vring)?;
                     } else if self.rx.deferred_irqs {
                         self.rx.deferred_irqs = false;
-                        vring.signal_used_queue().unwrap();
+                        vring.signal_used_queue()?;
                     }
                 } else {
-                    self.process_rx(&mut vring).unwrap();
+                    self.process_rx(&mut vring)?;
                 }
             }
             KILL_EVENT => {
                 self.kill_evt.read().unwrap();
                 return Ok(true);
             }
-            _ => {
-                println!("Unknown event for vhost-user-net");
-            }
+            _ => return Err(Error::HandleEventUnknownEvent.into()),
         }
 
         Ok(false)
@@ -562,22 +574,20 @@ fn main() {
     .unwrap();
     let vring_worker = net_daemon.get_vring_worker();
 
-    if vring_worker
-        .register_listener(
-            net_backend.read().unwrap().kill_evt.as_raw_fd(),
-            epoll::Events::EPOLLIN,
-            u64::from(KILL_EVENT),
-        )
-        .is_err()
-    {
-        println!("failed to register listener for kill event\n");
+    if let Err(e) = vring_worker.register_listener(
+        net_backend.read().unwrap().kill_evt.as_raw_fd(),
+        epoll::Events::EPOLLIN,
+        u64::from(KILL_EVENT),
+    ) {
+        println!("failed to register listener for kill event: {:?}", e);
+        process::exit(1);
     }
 
     net_backend.write().unwrap().vring_worker = Some(vring_worker);
 
     if let Err(e) = net_daemon.start() {
         println!(
-            "failed to start daemon for vhost-user-net with error: {:?}\n",
+            "failed to start daemon for vhost-user-net with error: {:?}",
             e
         );
         process::exit(1);
