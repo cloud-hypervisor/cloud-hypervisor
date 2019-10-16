@@ -62,9 +62,9 @@ impl From<&str> for Path {
     }
 }
 
-pub type AmlByte = u8;
+pub type Byte = u8;
 
-impl Aml for AmlByte {
+impl Aml for Byte {
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(0x0a); /* BytePrefix */
@@ -73,9 +73,9 @@ impl Aml for AmlByte {
     }
 }
 
-pub type AmlWord = u16;
+pub type Word = u16;
 
-impl Aml for AmlWord {
+impl Aml for Word {
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(0x0bu8); /* WordPrefix */
@@ -84,9 +84,9 @@ impl Aml for AmlWord {
     }
 }
 
-pub type AmlDWord = u32;
+pub type DWord = u32;
 
-impl Aml for AmlDWord {
+impl Aml for DWord {
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(0x0c); /* DWordPrefix */
@@ -95,14 +95,34 @@ impl Aml for AmlDWord {
     }
 }
 
-pub type AmlQWord = u64;
+pub type QWord = u64;
 
-impl Aml for AmlQWord {
+impl Aml for QWord {
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(0x0e); /* QWordPrefix */
         bytes.append(&mut self.to_le_bytes().to_vec());
         bytes
+    }
+}
+
+pub struct Name {
+    bytes: Vec<u8>,
+}
+
+impl Aml for Name {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.bytes.clone()
+    }
+}
+
+impl Name {
+    pub fn new(path: Path, inner: &dyn Aml) -> Self {
+        let mut bytes = Vec::new();
+        bytes.push(0x08); /* NameOp */
+        bytes.append(&mut path.to_bytes());
+        bytes.append(&mut inner.to_bytes());
+        Name { bytes }
     }
 }
 
@@ -138,6 +158,23 @@ mod tests {
         assert_eq!(
             0xdeca_fbad_deca_fbadu64.to_bytes(),
             [0x0e, 0xad, 0xfb, 0xca, 0xde, 0xad, 0xfb, 0xca, 0xde]
+        );
+    }
+
+    #[test]
+    fn test_name() {
+        assert_eq!(
+            Name::new("_SB_.PCI0._UID".into(), &0x1234u16).to_bytes(),
+            [
+                0x08, /* NameOp */
+                0x2F, /* MultiNamePrefix */
+                0x03, /* 3 name parts */
+                0x5F, 0x53, 0x42, 0x5F, /* _SB_ */
+                0x50, 0x43, 0x49, 0x30, /* PCI0 */
+                0x5F, 0x55, 0x49, 0x44, /* _UID  */
+                0x0b, /* WordPrefix */
+                0x34, 0x12
+            ]
         );
     }
 }
