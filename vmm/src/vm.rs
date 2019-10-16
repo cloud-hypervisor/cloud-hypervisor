@@ -711,7 +711,7 @@ impl Vm {
         .map_err(Error::DeviceManager)?;
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
-        let threads = Vec::with_capacity(u8::from(&config.cpus) as usize + 1);
+        let threads = Vec::with_capacity(config.cpus.cpu_count as usize + 1);
 
         Ok(Vm {
             fd,
@@ -767,7 +767,7 @@ impl Vm {
             &cmdline_cstring,
         )
         .map_err(|_| Error::CmdLine)?;
-        let vcpu_count = u8::from(&self.config.cpus);
+        let vcpu_count = self.config.cpus.cpu_count;
         let end_of_range = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
         match entry_addr.setup_header {
             Some(hdr) => {
@@ -918,7 +918,7 @@ impl Vm {
         current_state.valid_transition(new_state)?;
 
         let entry_addr = self.load_kernel()?;
-        let vcpu_count = u8::from(&self.config.cpus);
+        let vcpu_count = self.config.cpus.cpu_count;
         let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
 
         for cpu_id in 0..vcpu_count {
