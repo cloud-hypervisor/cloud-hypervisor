@@ -131,25 +131,23 @@ fn parse_iommu(iommu: &str) -> Result<bool> {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct CpusConfig(pub u8);
+pub struct CpusConfig {
+    pub cpu_count: u8,
+}
 
 impl CpusConfig {
     pub fn parse(cpus: &str) -> Result<Self> {
-        Ok(CpusConfig(
-            cpus.parse::<u8>().map_err(Error::ParseCpusParams)?,
-        ))
-    }
-}
-
-impl From<&CpusConfig> for u8 {
-    fn from(val: &CpusConfig) -> Self {
-        val.0
+        Ok(CpusConfig {
+            cpu_count: cpus.parse().map_err(Error::ParseCpusParams)?,
+        })
     }
 }
 
 impl Default for CpusConfig {
     fn default() -> Self {
-        CpusConfig(DEFAULT_VCPUS)
+        CpusConfig {
+            cpu_count: DEFAULT_VCPUS,
+        }
     }
 }
 
