@@ -62,6 +62,50 @@ impl From<&str> for Path {
     }
 }
 
+pub type AmlByte = u8;
+
+impl Aml for AmlByte {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x0a); /* BytePrefix */
+        bytes.push(*self);
+        bytes
+    }
+}
+
+pub type AmlWord = u16;
+
+impl Aml for AmlWord {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x0bu8); /* WordPrefix */
+        bytes.append(&mut self.to_le_bytes().to_vec());
+        bytes
+    }
+}
+
+pub type AmlDWord = u32;
+
+impl Aml for AmlDWord {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x0c); /* DWordPrefix */
+        bytes.append(&mut self.to_le_bytes().to_vec());
+        bytes
+    }
+}
+
+pub type AmlQWord = u64;
+
+impl Aml for AmlQWord {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x0e); /* QWordPrefix */
+        bytes.append(&mut self.to_le_bytes().to_vec());
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,6 +127,17 @@ mod tests {
         assert_eq!(
             (&"_SB_.PCI0._HID".into() as &Path).to_bytes(),
             [0x2F, 0x03, 0x5F, 0x53, 0x42, 0x5F, 0x50, 0x43, 0x49, 0x30, 0x5F, 0x48, 0x49, 0x44]
+        );
+    }
+
+    #[test]
+    fn test_numbers() {
+        assert_eq!(128u8.to_bytes(), [0x0a, 0x80]);
+        assert_eq!(1024u16.to_bytes(), [0x0b, 0x0, 0x04]);
+        assert_eq!((16u32 << 20).to_bytes(), [0x0c, 0x00, 0x00, 0x0, 0x01]);
+        assert_eq!(
+            0xdeca_fbad_deca_fbadu64.to_bytes(),
+            [0x0e, 0xad, 0xfb, 0xca, 0xde, 0xad, 0xfb, 0xca, 0xde]
         );
     }
 }
