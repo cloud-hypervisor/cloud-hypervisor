@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+pub mod aml;
 pub mod rsdp;
 pub mod sdt;
 
