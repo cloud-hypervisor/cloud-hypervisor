@@ -53,9 +53,9 @@ const VIRTIO_IOMMU_F_BYPASS: u32 = 3;
 #[allow(unused)]
 const VIRTIO_IOMMU_F_PROBE: u32 = 4;
 
-// Default to 4KiB page size.
+// Support 2MiB and 4KiB page sizes.
 #[allow(unused)]
-const VIRTIO_IOMMU_PAGE_SIZE_MASK: u64 = 4 << 10;
+const VIRTIO_IOMMU_PAGE_SIZE_MASK: u64 = (2 << 20) | (4 << 10);
 
 #[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
