@@ -120,3 +120,90 @@ lspci
 00:03.0 Mass storage controller: Red Hat, Inc. Virtio block device
 00:04.0 Unassigned class [ffff]: Red Hat, Inc. Virtio RNG
 ```
+
+## Faster mappings
+
+By default, the guest memory is mapped with 4k pages and no huge pages, which
+causes the virtual IOMMU device to be asked for 4k mappings only. This
+configuration slows down the setup of the physical IOMMU as an important number
+of requests need to be issued in order to create large mappings.
+
+One use case is even more impacted by the slowdown, the nested VFIO case. When
+passing a device through a L2 guest, the VFIO driver running in L1 will update
+the DMAR entries for the specific device. Because VFIO pins the entire guest
+memory, this means the entire mapping of the L2 guest need to be stored into
+multiple 4k mappings. Obviously, the bigger the L2 guest RAM is, the longer the
+update of the mappings will last. There is an additional problem happening in
+this case, if the L2 guest RAM is quite large, it will require a large number
+of mappings, which might exceed the VFIO limit set on the host. The default
+value is 65536, which can simply be reached with a 256MiB sized RAM.
+
+The way to solve both problems, the slowdown and the limit being exceeded, is
+to reduce the amount of requests to describe those same large mappings. This
+can be achieved by using 2MiB pages, known as huge pages. By seeing the guest
+RAM as larger pages, and because the virtual IOMMU device supports it, the
+guest will require less mappings, which will prevent the limit from being
+exceeded, but also will take less time to process them on the host. That's
+how using huge pages as much as possible can speed up VM boot time.
+
+### Basic usage
+
+Let's look at an example of how to run a guest with huge pages.
+
+First, make sure your system has enough pages to cover the entire guest RAM:
+```bash
+# This example creates 4096 hugepages
+echo 4096 > /proc/sys/vm/nr_hugepages
+```
+
+Next step is simply to create the VM. Two things are important, first we want
+the VM RAM to be mapped on huge pages by backing it with `/dev/hugepages`. And
+second thing, we need to create some huge pages in the guest itself so they can
+be consumed.
+
+```bash
+./cloud-hypervisor \
+    --cpus 1 \
+    --memory size=8G,file=/dev/hugepages \
+    --disk path=clear-kvm.img \
+    --kernel custom-bzImage \
+    --cmdline "console=ttyS0 root=/dev/vda3 hugepagesz=2M hugepages=2048" \
+    --net tap=,mac=,iommu=on
+```
+
+### Nested usage
+
+Let's now look at the specific example of nested virtualization. In order to
+reach optimized performances, the L2 guest also need to be mapped based on
+huge pages. Here is how to achieve this, assuming the physical device you are
+passing through is `0000:00:01.0`.
+
+```bash
+./cloud-hypervisor \
+    --cpus 1 \
+    --memory size=8G,file=/dev/hugepages \
+    --disk path=clear-kvm.img \
+    --kernel custom-bzImage \
+    --cmdline "console=ttyS0 root=/dev/vda3 kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts rw hugepagesz=2M hugepages=2048" \
+    --device path=/sys/bus/pci/devices/0000:00:01.0,iommu=on
+```
+
+Once the L1 VM is running, unbind the device from the default driver in the
+guest, and bind it to VFIO (it should appear as `0000:00:04.0`).
+
+```bash
+echo 0000:00:04.0 > /sys/bus/pci/devices/0000\:00\:04.0/driver/unbind
+echo 8086 1502 > /sys/bus/pci/drivers/vfio-pci/new_id
+```
+
+Last thing is to start the L2 guest with the huge pages memory backend.
+
+```bash
+./cloud-hypervisor \
+    --cpus 1 \
+    --memory size=4G,file=/dev/hugepages \
+    --disk path=clear-kvm.img \
+    --kernel custom-bzImage \
+    --cmdline "console=ttyS0 root=/dev/vda3" \
+    --device path=/sys/bus/pci/devices/0000:00:04.0
+```
