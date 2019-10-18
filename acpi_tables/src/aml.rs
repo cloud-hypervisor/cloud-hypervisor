@@ -238,9 +238,130 @@ impl Aml for EISAName {
     }
 }
 
+fn create_integer(v: usize) -> Vec<u8> {
+    if v <= u8::max_value().into() {
+        (v as u8).to_bytes()
+    } else if v <= u16::max_value().into() {
+        (v as u16).to_bytes()
+    } else if v <= u32::max_value() as usize {
+        (v as u32).to_bytes()
+    } else {
+        (v as u64).to_bytes()
+    }
+}
+
+pub type Usize = usize;
+
+impl Aml for Usize {
+    fn to_bytes(&self) -> Vec<u8> {
+        create_integer(*self)
+    }
+}
+
+pub struct ResourceTemplate<'a> {
+    children: Vec<&'a dyn Aml>,
+}
+
+impl<'a> Aml for ResourceTemplate<'a> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        // Add buffer data
+        for child in &self.children {
+            bytes.append(&mut child.to_bytes());
+        }
+
+        // Mark with end and mark checksum as as always valid
+        bytes.push(0x79); /* EndTag */
+        bytes.push(0); /* zero checksum byte */
+
+        // Buffer length is an encoded integer including buffer data
+        // and EndTag and checksum byte
+        let mut buffer_length = bytes.len().to_bytes();
+        buffer_length.reverse();
+        for byte in buffer_length {
+            bytes.insert(0, byte);
+        }
+
+        // PkgLength is everything else
+        let mut pkg_length = create_pkg_length(&bytes);
+        pkg_length.reverse();
+        for byte in pkg_length {
+            bytes.insert(0, byte);
+        }
+
+        bytes.insert(0, 0x11); /* BufferOp */
+
+        bytes
+    }
+}
+
+impl<'a> ResourceTemplate<'a> {
+    pub fn new(children: Vec<&'a dyn Aml>) -> Self {
+        ResourceTemplate { children }
+    }
+}
+
+pub struct Memory32Fixed {
+    read_write: bool, /* true for read & write, false for read only */
+    base: u32,
+    length: u32,
+}
+
+impl Memory32Fixed {
+    pub fn new(read_write: bool, base: u32, length: u32) -> Self {
+        Memory32Fixed {
+            read_write,
+            base,
+            length,
+        }
+    }
+}
+
+impl Aml for Memory32Fixed {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        bytes.push(0x86); /* Memory32Fixed */
+        bytes.append(&mut 9u16.to_le_bytes().to_vec());
+
+        // 9 bytes of payload
+        bytes.push(self.read_write as u8);
+        bytes.append(&mut self.base.to_le_bytes().to_vec());
+        bytes.append(&mut self.length.to_le_bytes().to_vec());
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_resource_template() {
+        /*
+        Name (_CRS, ResourceTemplate ()  // _CRS: Current Resource Settings
+        {
+            Memory32Fixed (ReadWrite,
+                0xE8000000,         // Address Base
+                0x10000000,         // Address Length
+                )
+        })
+        */
+        let crs_memory_32_fixed = [
+            0x08, 0x5F, 0x43, 0x52, 0x53, 0x11, 0x11, 0x0A, 0x0E, 0x86, 0x09, 0x00, 0x01, 0x00,
+            0x00, 0x00, 0xE8, 0x00, 0x00, 0x00, 0x10, 0x79, 0x00,
+        ];
+
+        assert_eq!(
+            Name::new(
+                "_CRS".into(),
+                &ResourceTemplate::new(vec![&Memory32Fixed::new(true, 0xE800_0000, 0x1000_0000)])
+            )
+            .to_bytes(),
+            crs_memory_32_fixed
+        );
+    }
 
     #[test]
     fn test_pkg_length() {
