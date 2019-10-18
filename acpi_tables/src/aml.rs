@@ -126,9 +126,124 @@ impl Name {
     }
 }
 
+pub struct Package<'a> {
+    children: Vec<&'a dyn Aml>,
+}
+
+impl<'a> Aml for Package<'a> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(self.children.len() as u8);
+        for child in &self.children {
+            bytes.append(&mut child.to_bytes());
+        }
+
+        let mut pkg_length = create_pkg_length(&bytes);
+        pkg_length.reverse();
+        for byte in pkg_length {
+            bytes.insert(0, byte);
+        }
+
+        bytes.insert(0, 0x12); /* PackageOp */
+
+        bytes
+    }
+}
+
+impl<'a> Package<'a> {
+    pub fn new(children: Vec<&'a dyn Aml>) -> Self {
+        Package { children }
+    }
+}
+
+/*
+
+From the ACPI spec for PkgLength:
+
+"The high 2 bits of the first byte reveal how many follow bytes are in the PkgLength. If the
+PkgLength has only one byte, bit 0 through 5 are used to encode the package length (in other
+words, values 0-63). If the package length value is more than 63, more than one byte must be
+used for the encoding in which case bit 4 and 5 of the PkgLeadByte are reserved and must be zero.
+If the multiple bytes encoding is used, bits 0-3 of the PkgLeadByte become the least significant 4
+bits of the resulting package length value. The next ByteData will become the next least
+significant 8 bits of the resulting value and so on, up to 3 ByteData bytes. Thus, the maximum
+package length is 2**28."
+
+*/
+
+fn create_pkg_length(data: &[u8]) -> Vec<u8> {
+    let mut result = Vec::new();
+
+    /* PkgLength is inclusive and includes the length bytes */
+    let length_length = if data.len() < (2usize.pow(6) - 1) {
+        1
+    } else if data.len() < (2usize.pow(12) - 2) {
+        2
+    } else if data.len() < (2usize.pow(20) - 3) {
+        3
+    } else {
+        4
+    };
+
+    let length = data.len() + length_length;
+
+    match length_length {
+        1 => result.push(length as u8),
+        2 => {
+            result.push((1u8 << 6) | (length & 0xf) as u8);
+            result.push((length >> 4) as u8)
+        }
+        3 => {
+            result.push((2u8 << 6) | (length & 0xf) as u8);
+            result.push((length >> 4) as u8);
+            result.push((length >> 12) as u8);
+        }
+        _ => {
+            result.push((3u8 << 6) | (length & 0xf) as u8);
+            result.push((length >> 4) as u8);
+            result.push((length >> 12) as u8);
+            result.push((length >> 20) as u8);
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_pkg_length() {
+        assert_eq!(create_pkg_length(&[0u8; 62].to_vec()), vec![63]);
+        assert_eq!(
+            create_pkg_length(&[0u8; 64].to_vec()),
+            vec![1 << 6 | (66 & 0xf), 66 >> 4]
+        );
+        assert_eq!(
+            create_pkg_length(&[0u8; 4096].to_vec()),
+            vec![
+                2 << 6 | (4099 & 0xf) as u8,
+                (4099 >> 4) as u8,
+                (4099 >> 12) as u8
+            ]
+        );
+    }
+
+    #[test]
+    fn test_package() {
+        /*
+        Name (_S5, Package (0x01)  // _S5_: S5 System State
+        {
+            0x05
+        })
+        */
+        let s5_sleep_data = [0x08, 0x5F, 0x53, 0x35, 0x5F, 0x12, 0x04, 0x01, 0x0A, 0x05];
+
+        let s5 = Name::new("_S5_".into(), &Package::new(vec![&5u8]));
+
+        assert_eq!(s5_sleep_data.to_vec(), s5.to_bytes());
+    }
 
     #[test]
     fn test_name_path() {
