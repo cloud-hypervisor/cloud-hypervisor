@@ -23,7 +23,7 @@ pub use self::configuration::{
     PciNetworkControllerSubclass, PciProgrammingInterface, PciSerialBusSubClass, PciSubclass,
 };
 pub use self::device::{
-    Error as PciDeviceError, InterruptDelivery, InterruptParameters, PciDevice,
+    DeviceRelocation, Error as PciDeviceError, InterruptDelivery, InterruptParameters, PciDevice,
 };
 pub use self::msi::MsiCap;
 pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry, MSIX_TABLE_ENTRY_SIZE};
