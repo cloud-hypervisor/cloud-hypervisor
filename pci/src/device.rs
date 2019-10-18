@@ -91,3 +91,18 @@ pub trait PciDevice: BusDevice {
     /// * `data` - The data to write.
     fn write_bar(&mut self, _base: u64, _offset: u64, _data: &[u8]) {}
 }
+
+/// This trait defines a set of functions which can be triggered whenever a
+/// PCI device is modified in any way.
+pub trait DeviceRelocation: Send + Sync {
+    /// The BAR needs to be moved to a different location in the guest address
+    /// space. This follows a decision from the software running in the guest.
+    fn move_bar(
+        &self,
+        old_base: u64,
+        new_base: u64,
+        len: u64,
+        pci_dev: &mut dyn PciDevice,
+        region_type: PciBarRegionType,
+    );
+}
