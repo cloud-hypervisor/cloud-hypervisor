@@ -209,6 +209,35 @@ fn create_pkg_length(data: &[u8]) -> Vec<u8> {
     result
 }
 
+pub struct EISAName {
+    value: DWord,
+}
+
+impl EISAName {
+    pub fn new(name: &str) -> Self {
+        assert_eq!(name.len(), 7);
+
+        let data = name.as_bytes();
+
+        let value: u32 = (u32::from(data[0] - 0x40) << 26
+            | u32::from(data[1] - 0x40) << 21
+            | u32::from(data[2] - 0x40) << 16
+            | name.chars().nth(3).unwrap().to_digit(16).unwrap() << 12
+            | name.chars().nth(4).unwrap().to_digit(16).unwrap() << 8
+            | name.chars().nth(5).unwrap().to_digit(16).unwrap() << 4
+            | name.chars().nth(6).unwrap().to_digit(16).unwrap())
+        .swap_bytes();
+
+        EISAName { value }
+    }
+}
+
+impl Aml for EISAName {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.value.to_bytes()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +274,13 @@ mod tests {
         assert_eq!(s5_sleep_data.to_vec(), s5.to_bytes());
     }
 
+    #[test]
+    fn test_eisa_name() {
+        assert_eq!(
+            Name::new("_HID".into(), &EISAName::new("PNP0501")).to_bytes(),
+            [0x08, 0x5F, 0x48, 0x49, 0x44, 0x0C, 0x41, 0xD0, 0x05, 0x01],
+        )
+    }
     #[test]
     fn test_name_path() {
         assert_eq!(
