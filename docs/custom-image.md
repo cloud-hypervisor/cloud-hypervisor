@@ -14,11 +14,19 @@ the custom image we want.
 IMG_VERSION=$(curl https://download.clearlinux.org/latest)
 # Get latest clear-kvm image:
 wget -P $HOME/workloads/ https://download.clearlinux.org/current/clear-${IMG_VERSION}-kvm.img.xz
+# Extract the image
+unxz $HOME/workloads/clear-${IMG_VERSION}-kvm.img.xz
+# Make sure cloud-hypervisor binary has CAP_NET_ADMIN capability set
+sudo setcap cap_net_admin+ep cloud-hypervisor
 # Boot cloud-hypervisor VM with the downloaded image
-./cloud-hypervisor -v --kernel $HOME/workloads/vmlinux --disk path=clear-30970-kvm.img --cmdline "console=ttyS0 console=hvc0 reboot=k panic=1 nomodules root=/dev/vda3" --cpus 1 --memory size=1G --net tap=,mac=
+./cloud-hypervisor -v --kernel $HOME/workloads/vmlinux --disk path=clear-${IMG_VERSION}-kvm.img --cmdline "console=ttyS0 console=hvc0 reboot=k panic=1 nomodules root=/dev/vda3 rw" --cpus 1 --memory size=4G --net tap=,mac=
 # Setup connectivity
+# First make sure to enable IP forwarding (disabled on Linux by default)
+sudo bash -c "echo 1 > /proc/sys/net/ipv4/ip_forward"
+# Retrieve the interface name and the gateway IP
 IFACE=$(ip route | grep default | awk -F 'dev' '{print $2}' | awk -F ' ' '{print $1}')
 GW=$(ip route | grep vmtap0 | awk -F ' ' '{print $1}')
+# Create a new masquerade rule to tag the packets going out
 sudo iptables -t nat -A POSTROUTING -s ${GW} -o ${IFACE} -j MASQUERADE
 ```
 
@@ -37,6 +45,7 @@ sudo swupd bundle-add os-installer
 wget https://download.clearlinux.org/current/config/image/cloudguest.yaml
 sed -i '/size: \"864M\"/d' cloudguest.yaml
 sed -i 's/\"800M\"/\"2G\"/g' cloudguest.yaml
+sed -i 's/bootloader,/bootloader,\n    iperf,/g' cloudguest.yaml
 sed -i 's/systemd-networkd-autostart/sysadmin-basic,\n    systemd-networkd-autostart/g' cloudguest.yaml
 # Create the custom cloudguest image
 clr-installer -c cloudguest.yaml
@@ -81,7 +90,7 @@ Proceed as follow to determine this UUID:
 # Mount the image
 sudo mount -o loop,offset=$((2048 * 512)) clear-cloudguest-raw.img /mnt/
 # Identify UUID
-cat mount_dir/loader/entries/Clear-linux-kvm-*.conf | grep "root=PARTUUID="
+sudo cat /mnt/loader/entries/Clear-linux-kvm-*.conf | grep "root=PARTUUID="
 # Unmount the image
 sudo umount /mnt
 ```
