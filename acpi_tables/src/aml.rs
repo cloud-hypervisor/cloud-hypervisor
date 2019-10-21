@@ -333,6 +333,129 @@ impl Aml for Memory32Fixed {
     }
 }
 
+#[derive(Copy, Clone)]
+enum AddressSpaceType {
+    Memory,
+    IO,
+    BusNumber,
+}
+
+#[derive(Copy, Clone)]
+pub enum AddressSpaceCachable {
+    NotCacheable,
+    Cacheable,
+    WriteCombining,
+    PreFetchable,
+}
+
+pub struct AddressSpace<T> {
+    r#type: AddressSpaceType,
+    min: T,
+    max: T,
+    type_flags: u8,
+}
+
+impl<T> AddressSpace<T> {
+    pub fn new_memory(cacheable: AddressSpaceCachable, read_write: bool, min: T, max: T) -> Self {
+        AddressSpace {
+            r#type: AddressSpaceType::Memory,
+            min,
+            max,
+            type_flags: (cacheable as u8) << 1 | read_write as u8,
+        }
+    }
+
+    pub fn new_io(min: T, max: T) -> Self {
+        AddressSpace {
+            r#type: AddressSpaceType::IO,
+            min,
+            max,
+            type_flags: 3, /* EntireRange */
+        }
+    }
+
+    pub fn new_bus_number(min: T, max: T) -> Self {
+        AddressSpace {
+            r#type: AddressSpaceType::BusNumber,
+            min,
+            max,
+            type_flags: 0,
+        }
+    }
+
+    fn push_header(&self, bytes: &mut Vec<u8>, descriptor: u8, length: usize) {
+        bytes.push(descriptor); /* Word Address Space Descriptor */
+        bytes.append(&mut (length as u16).to_le_bytes().to_vec());
+        bytes.push(self.r#type as u8); /* type */
+        let generic_flags = 1 << 2 /* Min Fixed */ | 1 << 3; /* Max Fixed */
+        bytes.push(generic_flags);
+        bytes.push(self.type_flags);
+    }
+}
+
+impl Aml for AddressSpace<u16> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        self.push_header(
+            &mut bytes,
+            0x88,                               /* Word Address Space Descriptor */
+            3 + 5 * std::mem::size_of::<u16>(), /* 3 bytes of header + 5 u16 fields */
+        );
+
+        bytes.append(&mut 0u16.to_le_bytes().to_vec()); /* Granularity */
+        bytes.append(&mut self.min.to_le_bytes().to_vec()); /* Min */
+        bytes.append(&mut self.max.to_le_bytes().to_vec()); /* Max */
+        bytes.append(&mut 0u16.to_le_bytes().to_vec()); /* Translation */
+        let len = self.max - self.min + 1;
+        bytes.append(&mut len.to_le_bytes().to_vec()); /* Length */
+
+        bytes
+    }
+}
+
+impl Aml for AddressSpace<u32> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        self.push_header(
+            &mut bytes,
+            0x87,                               /* DWord Address Space Descriptor */
+            3 + 5 * std::mem::size_of::<u32>(), /* 3 bytes of header + 5 u32 fields */
+        );
+
+        bytes.append(&mut 0u32.to_le_bytes().to_vec()); /* Granularity */
+        bytes.append(&mut self.min.to_le_bytes().to_vec()); /* Min */
+        bytes.append(&mut self.max.to_le_bytes().to_vec()); /* Max */
+        bytes.append(&mut 0u32.to_le_bytes().to_vec()); /* Translation */
+        let len = self.max - self.min + 1;
+        bytes.append(&mut len.to_le_bytes().to_vec()); /* Length */
+
+        bytes
+    }
+}
+
+impl Aml for AddressSpace<u64> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        self.push_header(
+            &mut bytes,
+            0x8A,                               /* QWord Address Space Descriptor */
+            3 + 5 * std::mem::size_of::<u64>(), /* 3 bytes of header + 5 u64 fields */
+        );
+
+        bytes.append(&mut 0u64.to_le_bytes().to_vec()); /* Granularity */
+        bytes.append(&mut self.min.to_le_bytes().to_vec()); /* Min */
+        bytes.append(&mut self.max.to_le_bytes().to_vec()); /* Max */
+        bytes.append(&mut 0u64.to_le_bytes().to_vec()); /* Translation */
+        let len = self.max - self.min + 1;
+        bytes.append(&mut len.to_le_bytes().to_vec()); /* Length */
+
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,6 +483,143 @@ mod tests {
             )
             .to_bytes(),
             crs_memory_32_fixed
+        );
+
+        /*
+            Name (_CRS, ResourceTemplate ()  // _CRS: Current Resource Settings
+            {
+                WordBusNumber (ResourceProducer, MinFixed, MaxFixed, PosDecode,
+                    0x0000,             // Granularity
+                    0x0000,             // Range Minimum
+                    0x00FF,             // Range Maximum
+                    0x0000,             // Translation Offset
+                    0x0100,             // Length
+                    ,, )
+                WordIO (ResourceProducer, MinFixed, MaxFixed, PosDecode, EntireRange,
+                    0x0000,             // Granularity
+                    0x0000,             // Range Minimum
+                    0x0CF7,             // Range Maximum
+                    0x0000,             // Translation Offset
+                    0x0CF8,             // Length
+                    ,, , TypeStatic, DenseTranslation)
+                WordIO (ResourceProducer, MinFixed, MaxFixed, PosDecode, EntireRange,
+                    0x0000,             // Granularity
+                    0x0D00,             // Range Minimum
+                    0xFFFF,             // Range Maximum
+                    0x0000,             // Translation Offset
+                    0xF300,             // Length
+                    ,, , TypeStatic, DenseTranslation)
+                DWordMemory (ResourceProducer, PosDecode, MinFixed, MaxFixed, Cacheable, ReadWrite,
+                    0x00000000,         // Granularity
+                    0x000A0000,         // Range Minimum
+                    0x000BFFFF,         // Range Maximum
+                    0x00000000,         // Translation Offset
+                    0x00020000,         // Length
+                    ,, , AddressRangeMemory, TypeStatic)
+                DWordMemory (ResourceProducer, PosDecode, MinFixed, MaxFixed, NonCacheable, ReadWrite,
+                    0x00000000,         // Granularity
+                    0xC0000000,         // Range Minimum
+                    0xFEBFFFFF,         // Range Maximum
+                    0x00000000,         // Translation Offset
+                    0x3EC00000,         // Length
+                    ,, , AddressRangeMemory, TypeStatic)
+                QWordMemory (ResourceProducer, PosDecode, MinFixed, MaxFixed, Cacheable, ReadWrite,
+                    0x0000000000000000, // Granularity
+                    0x0000000800000000, // Range Minimum
+                    0x0000000FFFFFFFFF, // Range Maximum
+                    0x0000000000000000, // Translation Offset
+                    0x0000000800000000, // Length
+                    ,, , AddressRangeMemory, TypeStatic)
+            })
+        */
+
+        // WordBusNumber from above
+        let crs_word_bus_number = [
+            0x08, 0x5F, 0x43, 0x52, 0x53, 0x11, 0x15, 0x0A, 0x12, 0x88, 0x0D, 0x00, 0x02, 0x0C,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x01, 0x79, 0x00,
+        ];
+
+        assert_eq!(
+            Name::new(
+                "_CRS".into(),
+                &ResourceTemplate::new(vec![&AddressSpace::new_bus_number(0x0u16, 0xffu16),])
+            )
+            .to_bytes(),
+            &crs_word_bus_number
+        );
+
+        // WordIO blocks (x 2) from above
+        let crs_word_io = [
+            0x08, 0x5F, 0x43, 0x52, 0x53, 0x11, 0x25, 0x0A, 0x22, 0x88, 0x0D, 0x00, 0x01, 0x0C,
+            0x03, 0x00, 0x00, 0x00, 0x00, 0xF7, 0x0C, 0x00, 0x00, 0xF8, 0x0C, 0x88, 0x0D, 0x00,
+            0x01, 0x0C, 0x03, 0x00, 0x00, 0x00, 0x0D, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xF3, 0x79,
+            0x00,
+        ];
+
+        assert_eq!(
+            Name::new(
+                "_CRS".into(),
+                &ResourceTemplate::new(vec![
+                    &AddressSpace::new_io(0x0u16, 0xcf7u16),
+                    &AddressSpace::new_io(0xd00u16, 0xffffu16),
+                ])
+            )
+            .to_bytes(),
+            &crs_word_io[..]
+        );
+
+        // DWordMemory blocks (x 2) from above
+        let crs_dword_memory = [
+            0x08, 0x5F, 0x43, 0x52, 0x53, 0x11, 0x39, 0x0A, 0x36, 0x87, 0x17, 0x00, 0x00, 0x0C,
+            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0xFF, 0xFF, 0x0B, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x87, 0x17, 0x00, 0x00, 0x0C, 0x01, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xFF, 0xFF, 0xBF, 0xFE, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0xC0, 0x3E, 0x79, 0x00,
+        ];
+
+        assert_eq!(
+            Name::new(
+                "_CRS".into(),
+                &ResourceTemplate::new(vec![
+                    &AddressSpace::new_memory(
+                        AddressSpaceCachable::Cacheable,
+                        true,
+                        0xa_0000u32,
+                        0xb_ffffu32
+                    ),
+                    &AddressSpace::new_memory(
+                        AddressSpaceCachable::NotCacheable,
+                        true,
+                        0xc000_0000u32,
+                        0xfebf_ffffu32
+                    ),
+                ])
+            )
+            .to_bytes(),
+            &crs_dword_memory[..]
+        );
+
+        // QWordMemory from above
+        let crs_qword_memory = [
+            0x08, 0x5F, 0x43, 0x52, 0x53, 0x11, 0x33, 0x0A, 0x30, 0x8A, 0x2B, 0x00, 0x00, 0x0C,
+            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,
+            0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x79,
+            0x00,
+        ];
+
+        assert_eq!(
+            Name::new(
+                "_CRS".into(),
+                &ResourceTemplate::new(vec![&AddressSpace::new_memory(
+                    AddressSpaceCachable::Cacheable,
+                    true,
+                    0x8_0000_0000u64,
+                    0xf_ffff_ffffu64
+                )])
+            )
+            .to_bytes(),
+            &crs_qword_memory[..]
         );
     }
 
