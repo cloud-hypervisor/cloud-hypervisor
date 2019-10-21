@@ -30,6 +30,10 @@ pub trait BusDevice: Send {
 pub enum Error {
     /// The insertion failed because the new device overlapped with an old device.
     Overlap,
+    /// Failed to operate on zero sized range.
+    ZeroSizedRange,
+    /// Failed to find address range.
+    MissingAddressRange,
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -88,7 +92,7 @@ impl Bus {
         }
     }
 
-    fn first_before(&self, addr: u64) -> Option<(BusRange, &Mutex<dyn BusDevice>)> {
+    fn first_before(&self, addr: u64) -> Option<(BusRange, &Arc<Mutex<dyn BusDevice>>)> {
         let (range, dev) = self
             .devices
             .range(..=BusRange { base: addr, len: 1 })
@@ -97,7 +101,8 @@ impl Bus {
         Some((*range, dev))
     }
 
-    pub fn resolve(&self, addr: u64) -> Option<(u64, u64, &Mutex<dyn BusDevice>)> {
+    #[allow(clippy::type_complexity)]
+    pub fn resolve(&self, addr: u64) -> Option<(u64, u64, &Arc<Mutex<dyn BusDevice>>)> {
         if let Some((range, dev)) = self.first_before(addr) {
             let offset = addr - range.base;
             if offset < range.len {
@@ -110,7 +115,7 @@ impl Bus {
     /// Puts the given device at the given address space.
     pub fn insert(&mut self, device: Arc<Mutex<dyn BusDevice>>, base: u64, len: u64) -> Result<()> {
         if len == 0 {
-            return Err(Error::Overlap);
+            return Err(Error::ZeroSizedRange);
         }
 
         // Reject all cases where the new device's range overlaps with an existing device.
@@ -131,6 +136,43 @@ impl Bus {
         }
 
         Ok(())
+    }
+
+    /// Removes the device at the given address space range.
+    pub fn remove(&mut self, base: u64, len: u64) -> Result<()> {
+        if len == 0 {
+            return Err(Error::ZeroSizedRange);
+        }
+
+        let bus_range = BusRange { base, len };
+
+        if self.devices.remove(&bus_range).is_none() {
+            return Err(Error::MissingAddressRange);
+        }
+
+        Ok(())
+    }
+
+    /// Updates the address range for an existing device.
+    pub fn update_range(
+        &mut self,
+        old_base: u64,
+        old_len: u64,
+        new_base: u64,
+        new_len: u64,
+    ) -> Result<()> {
+        // Retrieve the device corresponding to the range
+        let device = if let Some((_, _, dev)) = self.resolve(old_base) {
+            dev.clone()
+        } else {
+            return Err(Error::MissingAddressRange);
+        };
+
+        // Remove the old address range
+        self.remove(old_base, old_len)?;
+
+        // Insert the new address range
+        self.insert(device, new_base, new_len)
     }
 
     /// Reads data from the device that owns the range containing `addr` and puts it into `data`.
