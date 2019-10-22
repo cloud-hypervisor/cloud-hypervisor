@@ -456,6 +456,83 @@ impl Aml for AddressSpace<u64> {
     }
 }
 
+pub struct IO {
+    min: u16,
+    max: u16,
+    alignment: u8,
+    length: u8,
+}
+
+impl IO {
+    pub fn new(min: u16, max: u16, alignment: u8, length: u8) -> Self {
+        IO {
+            min,
+            max,
+            alignment,
+            length,
+        }
+    }
+}
+
+impl Aml for IO {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        bytes.push(0x47); /* IO Port Descriptor */
+        bytes.push(1); /* IODecode16 */
+        bytes.append(&mut self.min.to_le_bytes().to_vec());
+        bytes.append(&mut self.max.to_le_bytes().to_vec());
+        bytes.push(self.alignment);
+        bytes.push(self.length);
+
+        bytes
+    }
+}
+
+pub struct Interrupt {
+    consumer: bool,
+    edge_triggered: bool,
+    active_low: bool,
+    shared: bool,
+    number: u32,
+}
+
+impl Interrupt {
+    pub fn new(
+        consumer: bool,
+        edge_triggered: bool,
+        active_low: bool,
+        shared: bool,
+        number: u32,
+    ) -> Self {
+        Interrupt {
+            consumer,
+            edge_triggered,
+            active_low,
+            shared,
+            number,
+        }
+    }
+}
+
+impl Aml for Interrupt {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        bytes.push(0x89); /* Extended IRQ Descriptor */
+        bytes.append(&mut 6u16.to_le_bytes().to_vec());
+        let flags = (self.shared as u8) << 3
+            | (self.active_low as u8) << 2
+            | (self.edge_triggered as u8) << 1
+            | self.consumer as u8;
+        bytes.push(flags);
+        bytes.push(1u8); /* count */
+        bytes.append(&mut self.number.to_le_bytes().to_vec());
+
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -620,6 +697,39 @@ mod tests {
             )
             .to_bytes(),
             &crs_qword_memory[..]
+        );
+
+        /*
+            Name (_CRS, ResourceTemplate ()  // _CRS: Current Resource Settings
+            {
+                Interrupt (ResourceConsumer, Edge, ActiveHigh, Exclusive, ,, )
+                {
+                    0x00000004,
+                }
+                IO (Decode16,
+                    0x03F8,             // Range Minimum
+                    0x03F8,             // Range Maximum
+                    0x00,               // Alignment
+                    0x08,               // Length
+                    )
+            })
+
+        */
+        let interrupt_io_data = [
+            0x08, 0x5F, 0x43, 0x52, 0x53, 0x11, 0x16, 0x0A, 0x13, 0x89, 0x06, 0x00, 0x03, 0x01,
+            0x04, 0x00, 0x00, 0x00, 0x47, 0x01, 0xF8, 0x03, 0xF8, 0x03, 0x00, 0x08, 0x79, 0x00,
+        ];
+
+        assert_eq!(
+            Name::new(
+                "_CRS".into(),
+                &ResourceTemplate::new(vec![
+                    &Interrupt::new(true, true, false, false, 4),
+                    &IO::new(0x3f8, 0x3f8, 0, 0x8)
+                ])
+            )
+            .to_bytes(),
+            &interrupt_io_data[..]
         );
     }
 
