@@ -533,9 +533,154 @@ impl Aml for Interrupt {
     }
 }
 
+pub struct Device<'a> {
+    path: Path,
+    children: Vec<&'a dyn Aml>,
+}
+
+impl<'a> Aml for Device<'a> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.append(&mut self.path.to_bytes());
+        for child in &self.children {
+            bytes.append(&mut child.to_bytes());
+        }
+
+        let mut pkg_length = create_pkg_length(&bytes);
+        pkg_length.reverse();
+        for byte in pkg_length {
+            bytes.insert(0, byte);
+        }
+
+        bytes.insert(0, 0x82); /* DeviceOp */
+        bytes.insert(0, 0x5b); /* ExtOpPrefix */
+        bytes
+    }
+}
+
+impl<'a> Device<'a> {
+    pub fn new(path: Path, children: Vec<&'a dyn Aml>) -> Self {
+        Device { path, children }
+    }
+}
+
+pub struct Scope<'a> {
+    path: Path,
+    children: Vec<&'a dyn Aml>,
+}
+
+impl<'a> Aml for Scope<'a> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.append(&mut self.path.to_bytes());
+        for child in &self.children {
+            bytes.append(&mut child.to_bytes());
+        }
+
+        let mut pkg_length = create_pkg_length(&bytes);
+        pkg_length.reverse();
+        for byte in pkg_length {
+            bytes.insert(0, byte);
+        }
+
+        bytes.insert(0, 0x10); /* ScopeOp */
+        bytes
+    }
+}
+
+impl<'a> Scope<'a> {
+    pub fn new(path: Path, children: Vec<&'a dyn Aml>) -> Self {
+        Scope { path, children }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_device() {
+        /*
+        Device (_SB.COM1)
+        {
+            Name (_HID, EisaId ("PNP0501") /* 16550A-compatible COM Serial Port */)  // _HID: Hardware ID
+            Name (_CRS, ResourceTemplate ()  // _CRS: Current Resource Settings
+            {
+                Interrupt (ResourceConsumer, Edge, ActiveHigh, Exclusive, ,, )
+                {
+                    0x00000004,
+                }
+                IO (Decode16,
+                    0x03F8,             // Range Minimum
+                    0x03F8,             // Range Maximum
+                    0x00,               // Alignment
+                    0x08,               // Length
+                    )
+            }
+        }
+            */
+        let com1_device = [
+            0x5B, 0x82, 0x30, 0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x43, 0x4F, 0x4D, 0x31, 0x08, 0x5F,
+            0x48, 0x49, 0x44, 0x0C, 0x41, 0xD0, 0x05, 0x01, 0x08, 0x5F, 0x43, 0x52, 0x53, 0x11,
+            0x16, 0x0A, 0x13, 0x89, 0x06, 0x00, 0x03, 0x01, 0x04, 0x00, 0x00, 0x00, 0x47, 0x01,
+            0xF8, 0x03, 0xF8, 0x03, 0x00, 0x08, 0x79, 0x00,
+        ];
+        assert_eq!(
+            Device::new(
+                "_SB_.COM1".into(),
+                vec![
+                    &Name::new("_HID".into(), &EISAName::new("PNP0501")),
+                    &Name::new(
+                        "_CRS".into(),
+                        &ResourceTemplate::new(vec![
+                            &Interrupt::new(true, true, false, false, 4),
+                            &IO::new(0x3f8, 0x3f8, 0, 0x8)
+                        ])
+                    )
+                ]
+            )
+            .to_bytes(),
+            &com1_device[..]
+        );
+    }
+
+    #[test]
+    fn test_scope() {
+        /*
+        Scope (_SB.MBRD)
+        {
+            Name (_CRS, ResourceTemplate ()  // _CRS: Current Resource Settings
+            {
+                Memory32Fixed (ReadWrite,
+                    0xE8000000,         // Address Base
+                    0x10000000,         // Address Length
+                    )
+            })
+        }
+        */
+
+        let mbrd_scope = [
+            0x10, 0x21, 0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x4D, 0x42, 0x52, 0x44, 0x08, 0x5F, 0x43,
+            0x52, 0x53, 0x11, 0x11, 0x0A, 0x0E, 0x86, 0x09, 0x00, 0x01, 0x00, 0x00, 0x00, 0xE8,
+            0x00, 0x00, 0x00, 0x10, 0x79, 0x00,
+        ];
+
+        assert_eq!(
+            Scope::new(
+                "_SB_.MBRD".into(),
+                vec![&Name::new(
+                    "_CRS".into(),
+                    &ResourceTemplate::new(vec![&Memory32Fixed::new(
+                        true,
+                        0xE800_0000,
+                        0x1000_0000
+                    )])
+                )]
+            )
+            .to_bytes(),
+            &mbrd_scope[..]
+        );
+    }
 
     #[test]
     fn test_resource_template() {
