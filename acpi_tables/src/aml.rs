@@ -7,6 +7,33 @@ pub trait Aml {
     fn to_bytes(&self) -> Vec<u8>;
 }
 
+pub const ZERO: Zero = Zero {};
+pub struct Zero {}
+
+impl Aml for Zero {
+    fn to_bytes(&self) -> Vec<u8> {
+        vec![0u8]
+    }
+}
+
+pub const ONE: One = One {};
+pub struct One {}
+
+impl Aml for One {
+    fn to_bytes(&self) -> Vec<u8> {
+        vec![1u8]
+    }
+}
+
+pub const ONES: Ones = Ones {};
+pub struct Ones {}
+
+impl Aml for Ones {
+    fn to_bytes(&self) -> Vec<u8> {
+        vec![0xffu8]
+    }
+}
+
 pub struct Path {
     root: bool,
     name_parts: Vec<[u8; 4]>,
