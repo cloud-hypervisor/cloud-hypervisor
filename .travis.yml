@@ -6,6 +6,7 @@ rust:
 before_script:
   - rustup component add clippy
   - rustup component add rustfmt
+  - cargo install --force cargo-audit
 
 script:
   - cargo rustc --bin cloud-hypervisor -- -D warnings
@@ -19,6 +20,7 @@ script:
   - cargo test
   - cargo clippy --all-targets --all-features -- -D warnings
   - find . -name "*.rs" | xargs rustfmt --check
+  - cargo audit
 
 deploy:
   provider: releases
