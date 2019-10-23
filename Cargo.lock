@@ -174,6 +174,7 @@ dependencies = [
  "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "net_gen 0.1.0",
  "net_util 0.1.0",
+ "qcow 0.1.0",
  "ssh2 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempdir 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "vhost_rs 0.1.0",
