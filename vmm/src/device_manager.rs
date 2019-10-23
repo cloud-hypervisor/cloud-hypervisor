@@ -168,8 +168,8 @@ pub enum DeviceManagerError {
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 struct BusInfo<'a> {
-    io: &'a mut devices::Bus,
-    mmio: &'a mut devices::Bus,
+    io: &'a Arc<devices::Bus>,
+    mmio: &'a Arc<devices::Bus>,
 }
 
 struct InterruptInfo<'a> {
@@ -276,8 +276,8 @@ impl Console {
 }
 
 pub struct DeviceManager {
-    io_bus: devices::Bus,
-    mmio_bus: devices::Bus,
+    io_bus: Arc<devices::Bus>,
+    mmio_bus: Arc<devices::Bus>,
 
     // Console abstraction
     console: Arc<Console>,
@@ -306,8 +306,8 @@ impl DeviceManager {
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
     ) -> DeviceManagerResult<Self> {
-        let mut io_bus = devices::Bus::new();
-        let mut mmio_bus = devices::Bus::new();
+        let mut io_bus = Arc::new(devices::Bus::new());
+        let mut mmio_bus = Arc::new(devices::Bus::new());
 
         let mut buses = BusInfo {
             io: &mut io_bus,
@@ -1035,8 +1035,13 @@ impl DeviceManager {
                 pci.add_device(vfio_pci_device.clone())
                     .map_err(DeviceManagerError::AddPciDevice)?;
 
-                pci.register_mapping(vfio_pci_device.clone(), buses.io, buses.mmio, bars)
-                    .map_err(DeviceManagerError::AddPciDevice)?;
+                pci.register_mapping(
+                    vfio_pci_device.clone(),
+                    buses.io.as_ref(),
+                    buses.mmio.as_ref(),
+                    bars,
+                )
+                .map_err(DeviceManagerError::AddPciDevice)?;
             }
         }
         Ok(iommu_attached_device_ids)
@@ -1178,8 +1183,8 @@ impl DeviceManager {
 
         pci.register_mapping(
             virtio_pci_device.clone(),
-            &mut buses.io,
-            &mut buses.mmio,
+            buses.io.as_ref(),
+            buses.mmio.as_ref(),
             bars,
         )
         .map_err(DeviceManagerError::AddPciDevice)?;
@@ -1250,11 +1255,11 @@ impl DeviceManager {
         Ok(())
     }
 
-    pub fn io_bus(&self) -> &devices::Bus {
+    pub fn io_bus(&self) -> &Arc<devices::Bus> {
         &self.io_bus
     }
 
-    pub fn mmio_bus(&self) -> &devices::Bus {
+    pub fn mmio_bus(&self) -> &Arc<devices::Bus> {
         &self.mmio_bus
     }
 
