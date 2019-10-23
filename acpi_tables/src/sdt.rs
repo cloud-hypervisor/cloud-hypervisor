@@ -77,6 +77,14 @@ impl SDT {
         self.write(orig_length, value);
     }
 
+    pub fn append_slice(&mut self, data: &[u8]) {
+        let orig_length = self.data.len();
+        let new_length = orig_length + data.len();
+        self.write_u32(4, new_length as u32);
+        self.data.extend_from_slice(data);
+        self.update_checksum();
+    }
+
     /// Write a value at the given offset
     pub fn write<T>(&mut self, offset: usize, value: T) {
         assert!((offset + (std::mem::size_of::<T>() - 1)) < self.data.len());
