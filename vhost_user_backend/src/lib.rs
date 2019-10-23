@@ -62,6 +62,9 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// Virtio features.
     fn features(&self) -> u64;
 
+    /// Virtio protocol features.
+    fn protocol_features(&self) -> VhostUserProtocolFeatures;
+
     /// Update guest memory regions.
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> result::Result<(), io::Error>;
 
@@ -500,7 +503,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
     }
 
     fn get_protocol_features(&mut self) -> VhostUserResult<VhostUserProtocolFeatures> {
-        Ok(VhostUserProtocolFeatures::all())
+        Ok(self.backend.read().unwrap().protocol_features())
     }
 
     fn set_protocol_features(&mut self, features: u64) -> VhostUserResult<()> {
