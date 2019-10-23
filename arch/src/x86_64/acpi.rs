@@ -137,7 +137,7 @@ pub fn create_dsdt_table(
                             as u32,
                     ),
                     &aml::AddressSpace::new_memory(
-                        aml::AddressSpaceCachable::Cacheable,
+                        aml::AddressSpaceCachable::NotCacheable,
                         true,
                         start_of_device_area.0,
                         end_of_device_area.0,
