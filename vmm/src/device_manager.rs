@@ -167,11 +167,6 @@ pub enum DeviceManagerError {
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
-struct BusInfo<'a> {
-    io: &'a Arc<devices::Bus>,
-    mmio: &'a Arc<devices::Bus>,
-}
-
 struct InterruptInfo<'a> {
     _msi_capable: bool,
     ioapic: &'a Option<Arc<Mutex<ioapic::Ioapic>>>,
@@ -275,9 +270,15 @@ impl Console {
     }
 }
 
-pub struct DeviceManager {
+struct AddressManager {
+    allocator: Arc<Mutex<SystemAllocator>>,
     io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
+}
+
+pub struct DeviceManager {
+    // Manage address space related to devices
+    address_manager: Arc<AddressManager>,
 
     // Console abstraction
     console: Arc<Console>,
@@ -299,20 +300,15 @@ pub struct DeviceManager {
 impl DeviceManager {
     pub fn new(
         vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
+        mut allocator: SystemAllocator,
         _msi_capable: bool,
         userspace_ioapic: bool,
         mut mem_slots: u32,
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
     ) -> DeviceManagerResult<Self> {
-        let mut io_bus = Arc::new(devices::Bus::new());
-        let mut mmio_bus = Arc::new(devices::Bus::new());
-
-        let mut buses = BusInfo {
-            io: &mut io_bus,
-            mmio: &mut mmio_bus,
-        };
+        let io_bus = devices::Bus::new();
+        let mmio_bus = devices::Bus::new();
 
         let ioapic = if userspace_ioapic {
             // Create IOAPIC
@@ -320,8 +316,7 @@ impl DeviceManager {
                 vm_info.vm_fd.clone(),
                 APIC_START,
             )));
-            buses
-                .mmio
+            mmio_bus
                 .insert(ioapic.clone(), IOAPIC_START.0, IOAPIC_SIZE)
                 .map_err(DeviceManagerError::BusError)?;
             Some(ioapic)
@@ -362,8 +357,7 @@ impl DeviceManager {
                 serial_writer,
             )));
 
-            buses
-                .io
+            io_bus
                 .insert(serial.clone(), 0x3f8, 0x8)
                 .map_err(DeviceManagerError::BusError)?;
 
@@ -376,8 +370,7 @@ impl DeviceManager {
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
-        buses
-            .io
+        io_bus
             .insert(i8042.clone(), 0x61, 0x4)
             .map_err(DeviceManagerError::BusError)?;
         #[cfg(feature = "cmos")]
@@ -391,8 +384,7 @@ impl DeviceManager {
                 mem_below_4g,
                 mem_above_4g,
             )));
-            buses
-                .io
+            io_bus
                 .insert(cmos.clone(), 0x70, 0x2)
                 .map_err(DeviceManagerError::BusError)?;
         }
@@ -402,8 +394,7 @@ impl DeviceManager {
                 _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
                 reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             )));
-            buses
-                .io
+            io_bus
                 .insert(acpi_device.clone(), 0x3c0, 0x4)
                 .map_err(DeviceManagerError::BusError)?;
         }
@@ -446,7 +437,7 @@ impl DeviceManager {
 
         virtio_devices.append(&mut DeviceManager::make_virtio_devices(
             vm_info,
-            allocator,
+            &mut allocator,
             &mut mem_slots,
             &mut mmap_regions,
         )?);
@@ -456,6 +447,12 @@ impl DeviceManager {
 
         #[allow(unused_mut)]
         let mut virt_iommu: Option<(u32, Vec<u32>)> = None;
+
+        let address_manager = Arc::new(AddressManager {
+            allocator: Arc::new(Mutex::new(allocator)),
+            io_bus: Arc::new(io_bus),
+            mmio_bus: Arc::new(mmio_bus),
+        });
 
         if cfg!(feature = "pci_support") {
             #[cfg(feature = "pci_support")]
@@ -483,10 +480,9 @@ impl DeviceManager {
                     let virtio_iommu_attach_dev = DeviceManager::add_virtio_pci_device(
                         device,
                         vm_info.memory,
-                        allocator,
+                        &address_manager,
                         vm_info.vm_fd,
                         &mut pci_bus,
-                        &mut buses,
                         &interrupt_info,
                         mapping,
                     )?;
@@ -498,9 +494,8 @@ impl DeviceManager {
 
                 let mut vfio_iommu_device_ids = DeviceManager::add_vfio_devices(
                     vm_info,
-                    allocator,
+                    &address_manager,
                     &mut pci_bus,
-                    &mut buses,
                     mem_slots,
                     &mut iommu_device,
                 )?;
@@ -521,10 +516,9 @@ impl DeviceManager {
                     DeviceManager::add_virtio_pci_device(
                         Box::new(iommu_device),
                         vm_info.memory,
-                        allocator,
+                        &address_manager,
                         vm_info.vm_fd,
                         &mut pci_bus,
-                        &mut buses,
                         &interrupt_info,
                         &None,
                     )?;
@@ -534,11 +528,13 @@ impl DeviceManager {
 
                 let pci_bus = Arc::new(Mutex::new(pci_bus));
                 let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(pci_bus.clone())));
-                io_bus
+                address_manager
+                    .io_bus
                     .insert(pci_config_io, 0xcf8, 0x8)
                     .map_err(DeviceManagerError::BusError)?;
                 let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(pci_bus)));
-                mmio_bus
+                address_manager
+                    .mmio_bus
                     .insert(
                         pci_config_mmio,
                         arch::layout::PCI_MMCONFIG_START.0,
@@ -550,15 +546,17 @@ impl DeviceManager {
             #[cfg(feature = "mmio_support")]
             {
                 for (device, _) in virtio_devices {
-                    if let Some(addr) =
-                        allocator.allocate_mmio_addresses(None, MMIO_LEN, Some(MMIO_LEN))
-                    {
+                    let mmio_addr = address_manager
+                        .allocator
+                        .lock()
+                        .unwrap()
+                        .allocate_mmio_addresses(None, MMIO_LEN, Some(MMIO_LEN));
+                    if let Some(addr) = mmio_addr {
                         DeviceManager::add_virtio_mmio_device(
                             device,
                             vm_info.memory,
-                            allocator,
+                            &address_manager,
                             vm_info.vm_fd,
-                            &mut buses,
                             &interrupt_info,
                             addr,
                             &mut cmdline_additions,
@@ -571,8 +569,7 @@ impl DeviceManager {
         }
 
         Ok(DeviceManager {
-            io_bus,
-            mmio_bus,
+            address_manager,
             console,
             ioapic,
             mmap_regions,
@@ -978,14 +975,14 @@ impl DeviceManager {
     #[cfg(feature = "pci_support")]
     fn add_vfio_devices(
         vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
+        address_manager: &Arc<AddressManager>,
         pci: &mut PciBus,
-        buses: &mut BusInfo,
         mem_slots: u32,
         iommu_device: &mut Option<vm_virtio::Iommu>,
     ) -> DeviceManagerResult<Vec<u32>> {
         let mut mem_slot = mem_slots;
         let mut iommu_attached_device_ids = Vec::new();
+        let mut allocator = address_manager.allocator.lock().unwrap();
         if let Some(device_list_cfg) = &vm_info.vm_cfg.devices {
             // Create the KVM VFIO device
             let device_fd = DeviceManager::create_kvm_device(vm_info.vm_fd)?;
@@ -1019,11 +1016,12 @@ impl DeviceManager {
                     }
                 }
 
-                let mut vfio_pci_device = VfioPciDevice::new(vm_info.vm_fd, allocator, vfio_device)
-                    .map_err(DeviceManagerError::VfioPciCreate)?;
+                let mut vfio_pci_device =
+                    VfioPciDevice::new(vm_info.vm_fd, &mut allocator, vfio_device)
+                        .map_err(DeviceManagerError::VfioPciCreate)?;
 
                 let bars = vfio_pci_device
-                    .allocate_bars(allocator)
+                    .allocate_bars(&mut allocator)
                     .map_err(DeviceManagerError::AllocateBars)?;
 
                 mem_slot = vfio_pci_device
@@ -1037,8 +1035,8 @@ impl DeviceManager {
 
                 pci.register_mapping(
                     vfio_pci_device.clone(),
-                    buses.io.as_ref(),
-                    buses.mmio.as_ref(),
+                    address_manager.io_bus.as_ref(),
+                    address_manager.mmio_bus.as_ref(),
                     bars,
                 )
                 .map_err(DeviceManagerError::AddPciDevice)?;
@@ -1052,10 +1050,9 @@ impl DeviceManager {
     fn add_virtio_pci_device(
         virtio_device: Box<dyn vm_virtio::VirtioDevice>,
         memory: &Arc<RwLock<GuestMemoryMmap>>,
-        allocator: &mut SystemAllocator,
+        address_manager: &Arc<AddressManager>,
         vm_fd: &Arc<VmFd>,
         pci: &mut PciBus,
-        buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
         iommu_mapping: &Option<Arc<IommuMapping>>,
     ) -> DeviceManagerResult<Option<u32>> {
@@ -1099,8 +1096,10 @@ impl DeviceManager {
             VirtioPciDevice::new(memory.clone(), virtio_device, msix_num, iommu_mapping_cb)
                 .map_err(DeviceManagerError::VirtioDevice)?;
 
+        let mut allocator = address_manager.allocator.lock().unwrap();
+
         let bars = virtio_pci_device
-            .allocate_bars(allocator)
+            .allocate_bars(&mut allocator)
             .map_err(DeviceManagerError::AllocateBars)?;
 
         for (event, addr, _) in virtio_pci_device.ioeventfds() {
@@ -1183,8 +1182,8 @@ impl DeviceManager {
 
         pci.register_mapping(
             virtio_pci_device.clone(),
-            buses.io.as_ref(),
-            buses.mmio.as_ref(),
+            address_manager.io_bus.as_ref(),
+            address_manager.mmio_bus.as_ref(),
             bars,
         )
         .map_err(DeviceManagerError::AddPciDevice)?;
@@ -1203,9 +1202,8 @@ impl DeviceManager {
     fn add_virtio_mmio_device(
         virtio_device: Box<dyn vm_virtio::VirtioDevice>,
         memory: &Arc<RwLock<GuestMemoryMmap>>,
-        allocator: &mut SystemAllocator,
+        address_manager: &Arc<AddressManager>,
         vm_fd: &Arc<VmFd>,
-        buses: &mut BusInfo,
         interrupt_info: &InterruptInfo,
         mmio_base: GuestAddress,
         cmdline_additions: &mut Vec<String>,
@@ -1222,7 +1220,10 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
-        let irq_num = allocator
+        let irq_num = address_manager
+            .allocator
+            .lock()
+            .unwrap()
             .allocate_irq()
             .ok_or(DeviceManagerError::AllocateIrq)?;
 
@@ -1240,8 +1241,8 @@ impl DeviceManager {
 
         mmio_device.assign_interrupt(interrupt);
 
-        buses
-            .mmio
+        address_manager
+            .mmio_bus
             .insert(Arc::new(Mutex::new(mmio_device)), mmio_base.0, MMIO_LEN)
             .map_err(DeviceManagerError::BusError)?;
 
@@ -1256,11 +1257,11 @@ impl DeviceManager {
     }
 
     pub fn io_bus(&self) -> &Arc<devices::Bus> {
-        &self.io_bus
+        &self.address_manager.io_bus
     }
 
     pub fn mmio_bus(&self) -> &Arc<devices::Bus> {
-        &self.mmio_bus
+        &self.address_manager.mmio_bus
     }
 
     pub fn ioapic(&self) -> &Option<Arc<Mutex<ioapic::Ioapic>>> {
