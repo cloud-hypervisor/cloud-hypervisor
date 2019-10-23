@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 use acpi_tables::{
+    aml,
+    aml::Aml,
     rsdp::RSDP,
     sdt::{GenericAddress, SDT},
 };
@@ -111,186 +113,90 @@ pub fn create_dsdt_table(
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
 ) -> SDT {
-    /*
-        The hex tables in this file are generated from the ASL below with:
-        "iasl -tc <dsdt.asl>"
+    let pci_dsdt_data = aml::Device::new(
+        "_SB_.PCI0".into(),
+        vec![
+            &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A08")),
+            &aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A03")),
+            &aml::Name::new("_ADR".into(), &aml::ZERO),
+            &aml::Name::new("_SEG".into(), &aml::ZERO),
+            &aml::Name::new("_UID".into(), &aml::ZERO),
+            &aml::Name::new("SUPP".into(), &aml::ZERO),
+            &aml::Name::new(
+                "_CRS".into(),
+                &aml::ResourceTemplate::new(vec![
+                    &aml::AddressSpace::new_bus_number(0x0u16, 0xffu16),
+                    &aml::IO::new(0xcf8, 0xcf8, 1, 0x8),
+                    &aml::AddressSpace::new_io(0x0u16, 0xcf7u16),
+                    &aml::AddressSpace::new_io(0xd00u16, 0xffffu16),
+                    &aml::AddressSpace::new_memory(
+                        aml::AddressSpaceCachable::Cacheable,
+                        true,
+                        0xa_0000u32,
+                        0xb_ffffu32,
+                    ),
+                    &aml::AddressSpace::new_memory(
+                        aml::AddressSpaceCachable::NotCacheable,
+                        true,
+                        layout::MEM_32BIT_DEVICES_START.0 as u32,
+                        (layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE - 1)
+                            as u32,
+                    ),
+                    &aml::AddressSpace::new_memory(
+                        aml::AddressSpaceCachable::Cacheable,
+                        true,
+                        start_of_device_area.0,
+                        end_of_device_area.0,
+                    ),
+                ]),
+            ),
+        ],
+    )
+    .to_bytes();
 
-        As the output contains a table header that is not required the first 36 bytes
-        should be disregarded.
-    */
+    let mbrd_dsdt_data = aml::Device::new(
+        "_SB_.MBRD".into(),
+        vec![
+            &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C02")),
+            &aml::Name::new("_UID".into(), &aml::ZERO),
+            &aml::Name::new(
+                "_CRS".into(),
+                &aml::ResourceTemplate::new(vec![&aml::Memory32Fixed::new(
+                    true,
+                    layout::PCI_MMCONFIG_START.0 as u32,
+                    layout::PCI_MMCONFIG_SIZE as u32,
+                )]),
+            ),
+        ],
+    )
+    .to_bytes();
 
-    /*
-    Device (_SB.PCI0)
-        {
-            Name (_HID, EisaId ("PNP0A08") /* PCI Express Bus */)  // _HID: Hardware ID
-            Name (_CID, EisaId ("PNP0A03") /* PCI Bus */)  // _CID: Compatible ID
-            Name (_ADR, Zero)  // _ADR: Address
-            Name (_SEG, Zero)  // _SEG: PCI Segment
-            Name (_UID, Zero)  // _UID: Unique ID
-            Name (SUPP, Zero)
-        }
+    let com1_dsdt_data = aml::Device::new(
+        "_SB_.COM1".into(),
+        vec![
+            &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0501")),
+            &aml::Name::new("_UID".into(), &aml::ZERO),
+            &aml::Name::new(
+                "_CRS".into(),
+                &aml::ResourceTemplate::new(vec![
+                    &aml::Interrupt::new(true, true, false, false, 4),
+                    &aml::IO::new(0x3f8, 0x3f8, 0, 0x8),
+                ]),
+            ),
+        ],
+    )
+    .to_bytes();
 
-        Scope (_SB.PCI0)
-        {
-            Name (_CRS, ResourceTemplate ()  // _CRS: Current Resource Settings
-            {
-                WordBusNumber (ResourceProducer, MinFixed, MaxFixed, PosDecode,
-                    0x0000,             // Granularity
-                    0x0000,             // Range Minimum
-                    0x00FF,             // Range Maximum
-                    0x0000,             // Translation Offset
-                    0x0100,             // Length
-                    ,, )
-                IO (Decode16,
-                    0x0CF8,             // Range Minimum
-                    0x0CF8,             // Range Maximum
-                    0x01,               // Alignment
-                    0x08,               // Length
-                    )
-                WordIO (ResourceProducer, MinFixed, MaxFixed, PosDecode, EntireRange,
-                    0x0000,             // Granularity
-                    0x0000,             // Range Minimum
-                    0x0CF7,             // Range Maximum
-                    0x0000,             // Translation Offset
-                    0x0CF8,             // Length
-                    ,, , TypeStatic, DenseTranslation)
-                WordIO (ResourceProducer, MinFixed, MaxFixed, PosDecode, EntireRange,
-                    0x0000,             // Granularity
-                    0x0D00,             // Range Minimum
-                    0xFFFF,             // Range Maximum
-                    0x0000,             // Translation Offset
-                    0xF300,             // Length
-                    ,, , TypeStatic, DenseTranslation)
-                DWordMemory (ResourceProducer, PosDecode, MinFixed, MaxFixed, Cacheable, ReadWrite,
-                    0x00000000,         // Granularity
-                    0x000A0000,         // Range Minimum
-                    0x000BFFFF,         // Range Maximum
-                    0x00000000,         // Translation Offset
-                    0x00020000,         // Length
-                    ,, , AddressRangeMemory, TypeStatic)
-                DWordMemory (ResourceProducer, PosDecode, MinFixed, MaxFixed, NonCacheable, ReadWrite,
-                    0x00000000,         // Granularity
-                    0xC0000000,         // Range Minimum
-                    0xFEBFFFFF,         // Range Maximum
-                    0x00000000,         // Translation Offset
-                    0x3EC00000,         // Length
-                    ,, , AddressRangeMemory, TypeStatic)
-                QWordMemory (ResourceProducer, PosDecode, MinFixed, MaxFixed, Cacheable, ReadWrite,
-                    0x0000000000000000, // Granularity
-                    0x0000000800000000, // Range Minimum
-                    0x0000000FFFFFFFFF, // Range Maximum
-                    0x0000000000000000, // Translation Offset
-                    0x0000000800000000, // Length
-                    ,, , AddressRangeMemory, TypeStatic)
-            })
-        }
-    */
-    let mut pci_dsdt_data = [
-        0x5Bu8, 0x82, 0x36, 0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x50, 0x43, 0x49, 0x30, 0x08, 0x5F, 0x48,
-        0x49, 0x44, 0x0C, 0x41, 0xD0, 0x0A, 0x08, 0x08, 0x5F, 0x43, 0x49, 0x44, 0x0C, 0x41, 0xD0,
-        0x0A, 0x03, 0x08, 0x5F, 0x41, 0x44, 0x52, 0x00, 0x08, 0x5F, 0x53, 0x45, 0x47, 0x00, 0x08,
-        0x5F, 0x55, 0x49, 0x44, 0x00, 0x08, 0x53, 0x55, 0x50, 0x50, 0x00, 0x10, 0x41, 0x0B, 0x2E,
-        0x5F, 0x53, 0x42, 0x5F, 0x50, 0x43, 0x49, 0x30, 0x08, 0x5F, 0x43, 0x52, 0x53, 0x11, 0x40,
-        0x0A, 0x0A, 0x9C, 0x88, 0x0D, 0x00, 0x02, 0x0C, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00,
-        0x00, 0x00, 0x00, 0x01, 0x47, 0x01, 0xF8, 0x0C, 0xF8, 0x0C, 0x01, 0x08, 0x88, 0x0D, 0x00,
-        0x01, 0x0C, 0x03, 0x00, 0x00, 0x00, 0x00, 0xF7, 0x0C, 0x00, 0x00, 0xF8, 0x0C, 0x88, 0x0D,
-        0x00, 0x01, 0x0C, 0x03, 0x00, 0x00, 0x00, 0x0D, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xF3, 0x87,
-        0x17, 0x00, 0x00, 0x0C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0xFF, 0xFF,
-        0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x87, 0x17, 0x00, 0x00, 0x0C,
-        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xFF, 0xFF, 0xBF, 0xFE, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0xC0, 0x3E, 0x8A, 0x2B, 0x00, 0x00, 0x0C, 0x03, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0xFF, 0xFF,
-        0xFF, 0xFF, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x79, 0x00,
-    ];
-
-    // Patch Range Minimum/Range Maximum/Length for the the 64-bit device area
-    pci_dsdt_data[170..174].copy_from_slice(&layout::MEM_32BIT_DEVICES_START.0.to_le_bytes()[0..4]);
-    pci_dsdt_data[174..178].copy_from_slice(
-        &(layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE - 1).to_le_bytes()
-            [0..4],
-    );
-    pci_dsdt_data[182..186].copy_from_slice(&layout::MEM_32BIT_DEVICES_SIZE.to_le_bytes()[0..4]);
-
-    // Patch the Range Minimum/Range Maximum/Length for the the 64-bit device area
-    pci_dsdt_data[200..208].copy_from_slice(&(start_of_device_area.0).to_le_bytes());
-    pci_dsdt_data[208..216].copy_from_slice(&end_of_device_area.0.to_le_bytes());
-    pci_dsdt_data[224..232].copy_from_slice(
-        &(end_of_device_area.unchecked_offset_from(start_of_device_area) + 1).to_le_bytes(),
-    );
-
-    /*
-    Device (_SB.MBRD)
-    {
-        Name (_HID, EisaId ("PNP0C02") /* PNP Motherboard Resources */)  // _HID: Hardware ID
-        Name (_UID, Zero)  // _UID: Unique ID
-    }
-
-    Scope (_SB.MBRD)
-    {
-        Name (_CRS, ResourceTemplate ()  // _CRS: Current Resource Settings
-        {
-            Memory32Fixed (ReadWrite,
-                0xE8000000,         // Address Base
-                0x10000000,         // Address Length
-                )
-        })
-    }
-    */
-    let mut mbrd_dsdt_data = [
-        0x5Bu8, 0x82, 0x1A, 0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x4D, 0x42, 0x52, 0x44, 0x08, 0x5F, 0x48,
-        0x49, 0x44, 0x0C, 0x41, 0xD0, 0x0C, 0x02, 0x08, 0x5F, 0x55, 0x49, 0x44, 0x00, 0x10, 0x21,
-        0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x4D, 0x42, 0x52, 0x44, 0x08, 0x5F, 0x43, 0x52, 0x53, 0x11,
-        0x11, 0x0A, 0x0E, 0x86, 0x09, 0x00, 0x01, 0x00, 0x00, 0x00, 0xE8, 0x00, 0x00, 0x00, 0x10,
-        0x79, 0x00,
-    ];
-
-    mbrd_dsdt_data[52..56].copy_from_slice(&layout::PCI_MMCONFIG_START.0.to_le_bytes()[0..4]);
-    mbrd_dsdt_data[56..60].copy_from_slice(&layout::PCI_MMCONFIG_SIZE.to_le_bytes()[0..4]);
-
-    /*
-    Device (_SB.COM1)
-    {
-        Name (_HID, EisaId ("PNP0501") /* 16550A-compatible COM Serial Port */)  // _HID: Hardware ID
-        Name (_UID, Zero)  // _UID: Unique ID
-        Name (_CRS, ResourceTemplate ()  // _CRS: Current Resource Settings
-        {
-            Interrupt (ResourceConsumer, Edge, ActiveHigh, Exclusive, ,, )
-            {
-                0x00000004,
-            }
-            IO (Decode16,
-                0x03F8,             // Range Minimum
-                0x03F8,             // Range Maximum
-                0x00,               // Alignment
-                0x08,               // Length
-                )
-        })
-    }
-    */
-    let com1_dsdt_data = [
-        0x5Bu8, 0x82, 0x36, 0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x43, 0x4F, 0x4D, 0x31, 0x08, 0x5F, 0x48,
-        0x49, 0x44, 0x0C, 0x41, 0xD0, 0x05, 0x01, 0x08, 0x5F, 0x55, 0x49, 0x44, 0x00, 0x08, 0x5F,
-        0x43, 0x52, 0x53, 0x11, 0x16, 0x0A, 0x13, 0x89, 0x06, 0x00, 0x03, 0x01, 0x04, 0x00, 0x00,
-        0x00, 0x47, 0x01, 0xF8, 0x03, 0xF8, 0x03, 0x00, 0x08, 0x79, 0x00,
-    ];
-
-    /*
-    Name (\_S5, Package (0x01)  // _S5_: S5 System State
-    {
-        0x05
-    })
-    */
-    let s5_sleep_data = [0x08u8, 0x5F, 0x53, 0x35, 0x5F, 0x12, 0x04, 0x01, 0x0A, 0x05];
+    let s5_sleep_data = aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_bytes();
 
     // DSDT
     let mut dsdt = SDT::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
-    dsdt.append(pci_dsdt_data);
-    dsdt.append(mbrd_dsdt_data);
+    dsdt.append_slice(pci_dsdt_data.as_slice());
+    dsdt.append_slice(mbrd_dsdt_data.as_slice());
     if serial_enabled {
-        dsdt.append(com1_dsdt_data);
+        dsdt.append_slice(com1_dsdt_data.as_slice());
     }
-    dsdt.append(s5_sleep_data);
+    dsdt.append_slice(s5_sleep_data.as_slice());
 
     dsdt
 }
