@@ -265,7 +265,6 @@ impl<S: VhostUserSlaveReqHandler> SlaveReqHandler<S> {
                 if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIG.bits() == 0 {
                     return Err(Error::InvalidOperation);
                 }
-                self.check_request_size(&hdr, size, mem::size_of::<VhostUserConfig>())?;
                 self.get_config(&hdr, &buf)?;
             }
             MasterReq::SET_CONFIG => {
@@ -339,6 +338,10 @@ impl<S: VhostUserSlaveReqHandler> SlaveReqHandler<S> {
     fn get_config(&mut self, hdr: &VhostUserMsgHeader<MasterReq>, buf: &[u8]) -> Result<()> {
         let msg = unsafe { &*(buf.as_ptr() as *const VhostUserConfig) };
         if !msg.is_valid() {
+            return Err(Error::InvalidMessage);
+        }
+        let payload_offset = mem::size_of::<VhostUserConfig>();
+        if buf.len() - payload_offset != msg.size as usize {
             return Err(Error::InvalidMessage);
         }
         let flags = match VhostUserConfigFlags::from_bits(msg.flags) {
@@ -519,6 +522,7 @@ impl<S: VhostUserSlaveReqHandler> SlaveReqHandler<S> {
     fn new_reply_header<T: Sized>(
         &self,
         req: &VhostUserMsgHeader<MasterReq>,
+        payload_size: usize,
     ) -> Result<VhostUserMsgHeader<MasterReq>> {
         if mem::size_of::<T>() > MAX_MSG_SIZE {
             return Err(Error::InvalidParam);
@@ -527,7 +531,7 @@ impl<S: VhostUserSlaveReqHandler> SlaveReqHandler<S> {
         Ok(VhostUserMsgHeader::new(
             req.get_code(),
             VhostUserHeaderFlag::REPLY.bits(),
-            mem::size_of::<T>() as u32,
+            (mem::size_of::<T>() + payload_size) as u32,
         ))
     }
 
@@ -537,7 +541,7 @@ impl<S: VhostUserSlaveReqHandler> SlaveReqHandler<S> {
         res: Result<()>,
     ) -> Result<()> {
         if self.reply_ack_enabled {
-            let hdr = self.new_reply_header::<VhostUserU64>(req)?;
+            let hdr = self.new_reply_header::<VhostUserU64>(req, 0)?;
             let val = match res {
                 Ok(_) => 0,
                 Err(_) => 1,
@@ -553,7 +557,7 @@ impl<S: VhostUserSlaveReqHandler> SlaveReqHandler<S> {
         req: &VhostUserMsgHeader<MasterReq>,
         msg: &T,
     ) -> Result<()> {
-        let hdr = self.new_reply_header::<T>(req)?;
+        let hdr = self.new_reply_header::<T>(req, 0)?;
         self.main_sock.send_message(&hdr, msg, None)?;
         Ok(())
     }
@@ -568,7 +572,7 @@ impl<S: VhostUserSlaveReqHandler> SlaveReqHandler<S> {
         T: Sized,
         P: Sized,
     {
-        let hdr = self.new_reply_header::<T>(req)?;
+        let hdr = self.new_reply_header::<T>(req, payload.len())?;
         self.main_sock
             .send_message_with_payload(&hdr, msg, payload, None)?;
         Ok(())

@@ -15,7 +15,6 @@ use std::thread;
 use vhost_rs::vhost_user::message::{
     VhostUserConfigFlags, VhostUserMemoryRegion, VhostUserProtocolFeatures,
     VhostUserVirtioFeatures, VhostUserVringAddrFlags, VhostUserVringState,
-    VHOST_USER_CONFIG_OFFSET, VHOST_USER_CONFIG_SIZE,
 };
 use vhost_rs::vhost_user::{
     Error as VhostUserError, Result as VhostUserResult, SlaveListener, VhostUserSlaveReqHandler,
@@ -720,16 +719,6 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
         size: u32,
         _flags: VhostUserConfigFlags,
     ) -> VhostUserResult<Vec<u8>> {
-        if self.acked_features & VhostUserProtocolFeatures::CONFIG.bits() == 0 {
-            return Err(VhostUserError::InvalidOperation);
-        } else if offset < VHOST_USER_CONFIG_OFFSET
-            || offset >= VHOST_USER_CONFIG_SIZE
-            || size > VHOST_USER_CONFIG_SIZE - VHOST_USER_CONFIG_OFFSET
-            || size + offset > VHOST_USER_CONFIG_SIZE
-        {
-            return Err(VhostUserError::InvalidParam);
-        }
-
         Ok(self.backend.read().unwrap().get_config(offset, size))
     }
 
@@ -739,17 +728,6 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
         buf: &[u8],
         _flags: VhostUserConfigFlags,
     ) -> VhostUserResult<()> {
-        let size = buf.len() as u32;
-        if self.acked_features & VhostUserProtocolFeatures::CONFIG.bits() == 0 {
-            return Err(VhostUserError::InvalidOperation);
-        } else if offset < VHOST_USER_CONFIG_OFFSET
-            || offset >= VHOST_USER_CONFIG_SIZE
-            || size > VHOST_USER_CONFIG_SIZE - VHOST_USER_CONFIG_OFFSET
-            || size + offset > VHOST_USER_CONFIG_SIZE
-        {
-            return Err(VhostUserError::InvalidParam);
-        }
-
         self.backend
             .write()
             .unwrap()
