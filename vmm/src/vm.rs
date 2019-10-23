@@ -304,8 +304,8 @@ impl CpuidPatch {
 pub struct Vcpu {
     fd: VcpuFd,
     id: u8,
-    io_bus: devices::Bus,
-    mmio_bus: devices::Bus,
+    io_bus: Arc<devices::Bus>,
+    mmio_bus: Arc<devices::Bus>,
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
     vm_ts: std::time::Instant,
 }
@@ -320,8 +320,8 @@ impl Vcpu {
     pub fn new(
         id: u8,
         vm: &Vm,
-        io_bus: devices::Bus,
-        mmio_bus: devices::Bus,
+        io_bus: Arc<devices::Bus>,
+        mmio_bus: Arc<devices::Bus>,
         ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
     ) -> Result<Self> {
         let kvm_vcpu = vm.fd.create_vcpu(id).map_err(Error::VcpuFd)?;

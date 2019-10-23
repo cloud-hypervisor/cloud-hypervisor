@@ -89,8 +89,8 @@ impl PciBus {
     pub fn register_mapping(
         &self,
         dev: Arc<Mutex<dyn BusDevice>>,
-        io_bus: &mut devices::Bus,
-        mmio_bus: &mut devices::Bus,
+        io_bus: &devices::Bus,
+        mmio_bus: &devices::Bus,
         bars: Vec<(GuestAddress, GuestUsize, PciBarRegionType)>,
     ) -> Result<()> {
         for (address, size, type_) in bars {
