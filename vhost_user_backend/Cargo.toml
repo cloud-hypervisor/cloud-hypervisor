@@ -14,7 +14,7 @@ epoll = "4.1.0"
 libc = "0.2.65"
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" } 
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = "0.1.1"
+vmm-sys-util = "0.2.0"
 
 [dependencies.vhost_rs]
 path = "../vhost_rs"
