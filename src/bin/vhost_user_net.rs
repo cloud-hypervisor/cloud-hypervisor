@@ -433,6 +433,10 @@ impl VhostUserBackend for VhostUserNetBackend {
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 
+    fn protocol_features(&self) -> VhostUserProtocolFeatures {
+        VhostUserProtocolFeatures::all()
+    }
+
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
         self.mem = Some(mem);
         Ok(())
