@@ -130,12 +130,6 @@ pub fn create_dsdt_table(
                     &aml::AddressSpace::new_io(0x0u16, 0xcf7u16),
                     &aml::AddressSpace::new_io(0xd00u16, 0xffffu16),
                     &aml::AddressSpace::new_memory(
-                        aml::AddressSpaceCachable::Cacheable,
-                        true,
-                        0xa_0000u32,
-                        0xb_ffffu32,
-                    ),
-                    &aml::AddressSpace::new_memory(
                         aml::AddressSpaceCachable::NotCacheable,
                         true,
                         layout::MEM_32BIT_DEVICES_START.0 as u32,
