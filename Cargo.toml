@@ -12,6 +12,7 @@ libc = "0.2.65"
 log = { version = "0.4.8", features = ["std"] }
 net_gen = { path = "net_gen" }
 net_util = { path = "net_util" }
+qcow = { path = "qcow" }
 vhost_user_backend = { path = "vhost_user_backend"}
 virtio-bindings = "0.1.0"
 vmm = { path = "vmm" }
