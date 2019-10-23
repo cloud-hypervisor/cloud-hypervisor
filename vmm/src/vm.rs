@@ -701,7 +701,7 @@ impl Vm {
 
         let device_manager = DeviceManager::new(
             &vm_info,
-            &mut allocator,
+            allocator,
             msi_capable,
             userspace_ioapic,
             ram_regions.len() as u32,
