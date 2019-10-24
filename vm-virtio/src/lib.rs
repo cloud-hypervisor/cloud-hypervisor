@@ -21,7 +21,7 @@ extern crate vm_memory;
 use std::fmt;
 use std::io;
 
-mod block;
+pub mod block;
 mod console;
 mod device;
 mod iommu;
