@@ -45,7 +45,7 @@ pub const KILL_EVENT: DeviceEventT = 1;
 pub const BLOCK_EVENTS_COUNT: usize = 2;
 
 #[derive(Debug)]
-enum Error {
+pub enum Error {
     /// Guest gave us bad memory addresses.
     GuestMemory(GuestMemoryError),
     /// Guest gave us offsets that would have overflowed a usize.
@@ -65,7 +65,7 @@ enum Error {
 }
 
 #[derive(Debug)]
-enum ExecuteError {
+pub enum ExecuteError {
     BadRequest(Error),
     Flush(io::Error),
     Read(GuestMemoryError),
@@ -75,7 +75,7 @@ enum ExecuteError {
 }
 
 impl ExecuteError {
-    fn status(&self) -> u32 {
+    pub fn status(&self) -> u32 {
         match *self {
             ExecuteError::BadRequest(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Flush(_) => VIRTIO_BLK_S_IOERR,
@@ -131,7 +131,7 @@ impl Clone for RawFile {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum RequestType {
+pub enum RequestType {
     In,
     Out,
     Flush,
@@ -139,7 +139,7 @@ enum RequestType {
     Unsupported(u32),
 }
 
-fn request_type(
+pub fn request_type(
     mem: &GuestMemoryMmap,
     desc_addr: GuestAddress,
 ) -> result::Result<RequestType, Error> {
@@ -179,7 +179,7 @@ fn build_device_id(disk_path: &PathBuf) -> result::Result<String, Error> {
     Ok(device_id)
 }
 
-fn build_disk_image_id(disk_path: &PathBuf) -> Vec<u8> {
+pub fn build_disk_image_id(disk_path: &PathBuf) -> Vec<u8> {
     let mut default_disk_image_id = vec![0; VIRTIO_BLK_ID_BYTES as usize];
     match build_device_id(disk_path) {
         Err(_) => {
@@ -196,16 +196,16 @@ fn build_disk_image_id(disk_path: &PathBuf) -> Vec<u8> {
     default_disk_image_id
 }
 
-struct Request {
+pub struct Request {
     request_type: RequestType,
     sector: u64,
     data_addr: GuestAddress,
     data_len: u32,
-    status_addr: GuestAddress,
+    pub status_addr: GuestAddress,
 }
 
 impl Request {
-    fn parse(
+    pub fn parse(
         avail_desc: &DescriptorChain,
         mem: &GuestMemoryMmap,
     ) -> result::Result<Request, Error> {
@@ -269,7 +269,7 @@ impl Request {
     }
 
     #[allow(clippy::ptr_arg)]
-    fn execute<T: Seek + Read + Write>(
+    pub fn execute<T: Seek + Read + Write>(
         &self,
         disk: &mut T,
         disk_nsectors: u64,
