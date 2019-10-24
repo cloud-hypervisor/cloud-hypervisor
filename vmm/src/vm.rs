@@ -23,6 +23,7 @@ extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
 
+use crate::api::ApiRequest;
 use crate::config::{ConsoleOutputMode, VmConfig};
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use arch::RegionType;
@@ -44,6 +45,7 @@ use std::os::unix::io::FromRawFd;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::{fmt, result, str, thread};
 use vm_allocator::{GsiApic, SystemAllocator};
 use vm_memory::guest_memory::FileOffset;
@@ -54,6 +56,9 @@ use vm_memory::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, validate_signal_num};
 use vmm_sys_util::terminal::Terminal;
+use vm_migration::state::{
+    MigrationRequest, MigrationResponsePayload, MigrationStateData,
+};
 
 const VCPU_RTSIG_OFFSET: i32 = 0;
 const X86_64_IRQ_BASE: u32 = 5;
@@ -139,6 +144,18 @@ pub enum Error {
 
     /// Cannot spawn a new vCPU thread.
     VcpuSpawn(io::Error),
+
+    /// Cannot spawn a new migration thread.
+    MigrationSpawn(io::Error),
+
+    /// Cannot handle migration state.
+    MigrationStateHandle(io::Error),
+
+    /// Cannot write event fd.
+    EventFdWrite(io::Error),
+
+    /// Cannot send request.
+    RequestSend(io::Error),
 
     #[cfg(target_arch = "x86_64")]
     /// Cannot set the local interruption due to bad configuration.
@@ -495,6 +512,8 @@ pub struct Vm {
     vcpus_pause_signalled: Arc<AtomicBool>,
     // Reboot (reset) control
     reset_evt: EventFd,
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
     signals: Option<Signals>,
     state: RwLock<VmState>,
 }
@@ -514,7 +533,7 @@ fn get_host_cpu_phys_bits() -> u8 {
 }
 
 impl Vm {
-    pub fn new(config: Arc<VmConfig>, exit_evt: EventFd, reset_evt: EventFd) -> Result<Self> {
+    pub fn new(config: Arc<VmConfig>, exit_evt: EventFd, reset_evt: EventFd, api_evt: EventFd, api_sender: Sender<ApiRequest>,) -> Result<Self> {
         let kvm = Kvm::new().map_err(Error::KvmNew)?;
         let kernel =
             File::open(&config.kernel.as_ref().unwrap().path).map_err(Error::KernelFile)?;
@@ -726,6 +745,8 @@ impl Vm {
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
             reset_evt,
+            api_evt,
+            api_sender,
             signals: None,
             state: RwLock::new(VmState::Created),
         })
@@ -908,6 +929,45 @@ impl Vm {
         }
     }
 
+    fn migration_request_handle(&self, receiver: Receiver<MigrationRequest>) -> Result <()> {
+        thread::Builder::new()
+            .name(format!("migration_register"))
+            .spawn(move || {
+                let request = receiver.recv();
+
+                match request {
+                    Ok(req) => {
+                        match req {
+                            MigrationRequest::MigrationStateGet(sender) => {
+                                /* TODO: assemble Vm states and send it as payload */
+                            }
+                            MigrationRequest::MigrationStateLoad(state) => {
+                                /* TODO: load received state */
+                            }
+                        }
+                    },
+                    Err(e) => println!("Receive bad migration request {:?}", e),
+                }
+            })
+            .map_err(Error::MigrationSpawn)?;
+
+        Ok(())
+    }
+
+    /* This function is called when migration is triggered */
+    pub fn migration_register(&self) -> Result<()> {
+        let (request_sender, request_receiver) = channel();
+
+        self.api_sender
+            .send(ApiRequest::MigrationRegister("Vm".to_string(), request_sender))
+            .expect("Cannot send request");
+        self.api_evt.write(1).map_err(Error::EventFdWrite)?;
+
+        self.migration_request_handle(request_receiver).expect("Cannot handle migration states");
+
+        Ok(())
+    }
+
     pub fn boot(&mut self) -> Result<()> {
         let current_state = self.get_state()?;
         if current_state == VmState::Paused {
@@ -1023,6 +1083,8 @@ impl Vm {
 
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         *state = new_state;
+
+        self.migration_register().expect("Fail to register migration state component");
 
         Ok(())
     }

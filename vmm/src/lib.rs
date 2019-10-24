@@ -13,6 +13,7 @@ extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 extern crate vmm_sys_util;
+extern crate vm_migration;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo};
 use crate::config::VmConfig;
@@ -150,18 +151,19 @@ pub fn start_vmm_thread(
     api_receiver: Receiver<ApiRequest>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     let http_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
+    let http_api_sender = api_sender.clone();
 
     let thread = thread::Builder::new()
         .name("vmm".to_string())
         .spawn(move || {
-            let mut vmm = Vmm::new(api_event)?;
+            let mut vmm = Vmm::new(api_event, api_sender)?;
 
             vmm.control_loop(Arc::new(api_receiver))
         })
         .map_err(Error::VmmThreadSpawn)?;
 
     // The VMM thread is started, we can start serving HTTP requests
-    api::start_http_thread(http_path, http_api_event, api_sender)?;
+    api::start_http_thread(http_path, http_api_event, http_api_sender)?;
 
     Ok(thread)
 }
@@ -171,12 +173,13 @@ pub struct Vmm {
     exit_evt: EventFd,
     reset_evt: EventFd,
     api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
     vm: Option<Vm>,
     vm_config: Option<Arc<VmConfig>>,
 }
 
 impl Vmm {
-    fn new(api_evt: EventFd) -> Result<Self> {
+    fn new(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<Self> {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
@@ -202,6 +205,7 @@ impl Vmm {
             exit_evt,
             reset_evt,
             api_evt,
+            api_sender,
             vm: None,
             vm_config: None,
         })
@@ -212,9 +216,11 @@ impl Vmm {
         if self.vm.is_none() {
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
             let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+            let api_evt = self.api_evt.try_clone().map_err(VmError::EventFdClone)?;
+            let api_sender = self.api_sender.clone();
 
             if let Some(ref vm_config) = self.vm_config {
-                let vm = Vm::new(Arc::clone(vm_config), exit_evt, reset_evt)?;
+                let vm = Vm::new(Arc::clone(vm_config), exit_evt, reset_evt, api_evt, api_sender)?;
                 self.vm = Some(vm);
             }
         }
@@ -268,8 +274,10 @@ impl Vmm {
 
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
             let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+            let api_evt = self.api_evt.try_clone().map_err(VmError::EventFdClone)?;
+            let api_sender = self.api_sender.clone();
 
-            self.vm = Some(Vm::new(config, exit_evt, reset_evt)?);
+            self.vm = Some(Vm::new(config, exit_evt, reset_evt, api_evt, api_sender)?);
         }
 
         // Then we start the new VM.
@@ -455,6 +463,9 @@ impl Vmm {
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
 
                                     break 'outer;
+                                }
+                                ApiRequest::MigrationRegister(idstr, sender) => {
+                                    vm_migration::state::migration_state_insert(idstr, sender);
                                 }
                             }
                         }

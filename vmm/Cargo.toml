@@ -34,6 +34,7 @@ vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = "0.1.1"
 signal-hook = "0.1.10"
 threadpool = "1.0"
+vm-migration = { path = "../vm-migration" }
 
 [dependencies.linux-loader]
 git = "https://github.com/rust-vmm/linux-loader"

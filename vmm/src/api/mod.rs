@@ -42,6 +42,7 @@ use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
 use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
+use vm_migration::state::MigrationRequest;
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
 #[derive(Debug)]
@@ -158,6 +159,11 @@ pub enum ApiRequest {
     /// This will shutdown and delete the current VM, if any, and then exit the
     /// VMM process.
     VmmShutdown(Sender<ApiResponse>),
+
+    /// Register migration component.
+    /// This will register migration component sender to migrate state array,
+    /// then migration thread can send request to component to get/load states.
+    MigrationRegister(String, Sender<MigrationRequest>),
 }
 
 pub fn vm_create(
