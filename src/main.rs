@@ -2935,4 +2935,107 @@ mod tests {
             Ok(())
         });
     }
+
+    // We cannot force the software running in the guest to reprogram the BAR
+    // with some different addresses, but we have a reliable way of testing it
+    // with a standard Linux kernel.
+    // By removing a device from the PCI tree, and then rescanning the tree,
+    // Linux consistently chooses to reorganize the PCI device BARs to other
+    // locations in the guest address space.
+    // This test creates a dedicated PCI network device to be checked as being
+    // properly probed first, then removing it, and adding it again by doing a
+    // rescan.
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_pci_bar_reprogramming() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut child = Command::new("target/debug/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                ])
+                .args(&[
+                    "--net",
+                    guest.default_net_string().as_str(),
+                    "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
+                ])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // 2 network interfaces + default localhost ==> 3 interfaces
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ip -o link | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                3
+            );
+
+            let init_bar_addr = guest
+                .ssh_command("sudo bash -c \"cat /sys/bus/pci/devices/0000:00:05.0/resource | awk '{print $1; exit}'\"")?;
+
+            // Remove the PCI device
+            guest
+                .ssh_command("sudo bash -c 'echo 1 > /sys/bus/pci/devices/0000:00:05.0/remove'")?;
+
+            // Only 1 network interface left + default localhost ==> 2 interfaces
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ip -o link | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                2
+            );
+
+            // Remove the PCI device
+            guest.ssh_command("sudo bash -c 'echo 1 > /sys/bus/pci/rescan'")?;
+
+            // Back to 2 network interface + default localhost ==> 3 interfaces
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ip -o link | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                3
+            );
+
+            let new_bar_addr = guest
+                .ssh_command("sudo bash -c \"cat /sys/bus/pci/devices/0000:00:05.0/resource | awk '{print $1; exit}'\"")?;
+
+            // Let's compare the BAR addresses for our virtio-net device.
+            // They should be different as we expect the BAR reprogramming
+            // to have happened.
+            aver_ne!(tb, init_bar_addr, new_bar_addr);
+
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
 }
