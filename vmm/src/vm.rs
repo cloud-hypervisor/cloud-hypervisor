@@ -940,6 +940,14 @@ impl Vm {
                         match req {
                             MigrationRequest::MigrationStateGet(sender) => {
                                 /* TODO: assemble Vm states and send it as payload */
+                                /* TODO: for test only */
+                                let payload = MigrationStateData {
+                                    state: vec![1, 2, 3, 4, 5],
+                                };
+
+                                sender
+                                    .send(Ok(MigrationResponsePayload::MigrationState(payload)))
+                                    .unwrap();
                             }
                             MigrationRequest::MigrationStateLoad(state) => {
                                 /* TODO: load received state */
@@ -1085,6 +1093,15 @@ impl Vm {
         *state = new_state;
 
         self.migration_register().expect("Fail to register migration state component");
+
+        /* TODO: for test only, need remove or modify */
+        thread::Builder::new()
+            .name(format!("migration_state_get"))
+            .spawn(move || {
+                vm_migration::state::migration_state_iter_get()
+                    .expect("Fail to get migration states");
+            })
+            .map_err(Error::MigrationSpawn)?;
 
         Ok(())
     }
