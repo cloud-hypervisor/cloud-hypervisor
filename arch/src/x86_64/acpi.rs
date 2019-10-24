@@ -146,7 +146,7 @@ pub fn create_dsdt_table(
             ),
         ],
     )
-    .to_bytes();
+    .to_aml_bytes();
 
     let mbrd_dsdt_data = aml::Device::new(
         "_SB_.MBRD".into(),
@@ -163,7 +163,7 @@ pub fn create_dsdt_table(
             ),
         ],
     )
-    .to_bytes();
+    .to_aml_bytes();
 
     let com1_dsdt_data = aml::Device::new(
         "_SB_.COM1".into(),
@@ -179,9 +179,10 @@ pub fn create_dsdt_table(
             ),
         ],
     )
-    .to_bytes();
+    .to_aml_bytes();
 
-    let s5_sleep_data = aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_bytes();
+    let s5_sleep_data =
+        aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes();
 
     // DSDT
     let mut dsdt = SDT::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
