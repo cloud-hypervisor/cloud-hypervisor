@@ -709,10 +709,6 @@ mod tests {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
-        let mut vubd_path = workload_path.clone();
-        vubd_path.push("vubd");
-        let vubd_path = String::from(vubd_path.to_str().unwrap());
-
         let mut blk_file_path = workload_path.clone();
         blk_file_path.push(blk_img);
         let blk_file_path = String::from(blk_file_path.to_str().unwrap());
@@ -720,9 +716,11 @@ mod tests {
         let vubd_socket_path = String::from(tmp_dir.path().join("vub.sock").to_str().unwrap());
 
         // Start the daemon
-        let child = Command::new(vubd_path.as_str())
-            .args(&["-b", blk_file_path.as_str()])
-            .args(&["-s", vubd_socket_path.as_str()])
+        let child = Command::new("target/release/vhost_user_blk")
+            .args(&[
+                "--backend",
+                format!("image={},sock={}", blk_file_path, vubd_socket_path).as_str(),
+            ])
             .spawn()
             .unwrap();
 
