@@ -147,12 +147,12 @@ sudo ip tuntap add vfio-tap1 mode tap
 sudo ip link set vfio-tap1 master vfio-br0
 sudo ip link set vfio-tap1 up
 
-cargo build
-sudo setcap cap_net_admin+ep target/debug/cloud-hypervisor
-sudo setcap cap_net_admin+ep target/debug/vhost_user_net
+cargo build --release
+sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
+sudo setcap cap_net_admin+ep target/release/vhost_user_net
 
 # We always copy a fresh version of our binary for our L2 guest.
-cp target/debug/cloud-hypervisor $VFIO_DIR
+cp target/release/cloud-hypervisor $VFIO_DIR
 
 sudo adduser $USER kvm
 newgrp kvm << EOF
@@ -163,8 +163,8 @@ RES=$?
 
 if [ $RES -eq 0 ]; then
     # virtio-mmio based testing
-    cargo build --no-default-features --features "mmio"
-    sudo setcap cap_net_admin+ep target/debug/cloud-hypervisor
+    cargo build --release --no-default-features --features "mmio"
+    sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
 
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
