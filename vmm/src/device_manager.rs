@@ -537,7 +537,7 @@ impl DeviceManager {
             #[cfg(feature = "pci_support")]
             {
                 let pci_root = PciRoot::new(None);
-                let mut pci_bus = PciBus::new(pci_root);
+                let mut pci_bus = PciBus::new(pci_root, address_manager.clone());
 
                 let (mut iommu_device, iommu_mapping) = if vm_info.vm_cfg.iommu {
                     let (device, mapping) =
