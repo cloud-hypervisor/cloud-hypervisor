@@ -255,6 +255,8 @@ struct MmioRegion {
     start: GuestAddress,
     length: GuestUsize,
     index: u32,
+    mem_slot: Option<u32>,
+    host_addr: Option<u64>,
 }
 
 struct VfioPciConfig {
@@ -603,7 +605,7 @@ impl VfioPciDevice {
         let fd = self.device.as_raw_fd();
         let mut new_mem_slot = mem_slot;
 
-        for region in self.mmio_regions.iter() {
+        for region in self.mmio_regions.iter_mut() {
             // We want to skip the mapping of the BAR containing the MSI-X
             // table even if it is mappable. The reason is we need to trap
             // any access to the MSI-X table and update the GSI routing
@@ -658,6 +660,11 @@ impl VfioPciDevice {
                     vm.set_user_memory_region(mem_region)
                         .map_err(VfioPciError::MapRegionGuest)?;
                 }
+
+                // Update the region with memory mapped info.
+                region.mem_slot = Some(new_mem_slot);
+                region.host_addr = Some(host_addr as u64);
+
                 new_mem_slot += 1;
             }
         }
@@ -870,6 +877,8 @@ impl PciDevice for VfioPciDevice {
                 start: bar_addr,
                 length: region_size,
                 index: bar_id as u32,
+                mem_slot: None,
+                host_addr: None,
             });
 
             bar_id += 1;
@@ -983,6 +992,46 @@ impl PciDevice for VfioPciDevice {
                 }
             } else {
                 self.device.region_write(region.index, data, offset);
+            }
+        }
+    }
+
+    fn move_bar(&mut self, old_base: u64, new_base: u64) {
+        for region in self.mmio_regions.iter_mut() {
+            if region.start.raw_value() == old_base {
+                region.start = GuestAddress(new_base);
+
+                if let Some(mem_slot) = region.mem_slot {
+                    if let Some(host_addr) = region.host_addr {
+                        let (mmap_offset, mmap_size) = self.device.get_region_mmap(region.index);
+
+                        // Remove old region from KVM
+                        let old_mem_region = kvm_userspace_memory_region {
+                            slot: mem_slot,
+                            guest_phys_addr: old_base + mmap_offset,
+                            memory_size: 0,
+                            userspace_addr: host_addr,
+                            flags: 0,
+                        };
+                        // Safe because the guest regions are guaranteed not to overlap.
+                        unsafe {
+                            self.vm_fd.set_user_memory_region(old_mem_region).unwrap();
+                        }
+
+                        // Insert new region to KVM
+                        let new_mem_region = kvm_userspace_memory_region {
+                            slot: mem_slot,
+                            guest_phys_addr: new_base + mmap_offset,
+                            memory_size: mmap_size as u64,
+                            userspace_addr: host_addr,
+                            flags: 0,
+                        };
+                        // Safe because the guest regions are guaranteed not to overlap.
+                        unsafe {
+                            self.vm_fd.set_user_memory_region(new_mem_region).unwrap();
+                        }
+                    }
+                }
             }
         }
     }
