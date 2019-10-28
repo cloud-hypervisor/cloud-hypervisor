@@ -90,6 +90,8 @@ pub trait PciDevice: BusDevice {
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - The data to write.
     fn write_bar(&mut self, _base: u64, _offset: u64, _data: &[u8]) {}
+    /// Relocates the BAR to a different address in guest address space.
+    fn move_bar(&mut self, _old_base: u64, _new_base: u64) {}
 }
 
 /// This trait defines a set of functions which can be triggered whenever a
