@@ -4,6 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::device::BarReprogrammingParams;
 use crate::{MsixConfig, PciInterruptPin};
 use byteorder::{ByteOrder, LittleEndian};
 use std::fmt::{self, Display};
@@ -249,9 +250,11 @@ pub trait PciCapability {
 pub struct PciConfiguration {
     registers: [u32; NUM_CONFIGURATION_REGISTERS],
     writable_bits: [u32; NUM_CONFIGURATION_REGISTERS], // writable bits for each register.
+    bar_addr: [u32; NUM_BAR_REGS],
     bar_size: [u32; NUM_BAR_REGS],
     bar_used: [bool; NUM_BAR_REGS],
     bar_type: [Option<PciBarRegionType>; NUM_BAR_REGS],
+    rom_bar_addr: u32,
     rom_bar_size: u32,
     rom_bar_used: bool,
     // Contains the byte offset and size of the last capability.
@@ -344,6 +347,7 @@ impl PciConfiguration {
     ) -> Self {
         let mut registers = [0u32; NUM_CONFIGURATION_REGISTERS];
         let mut writable_bits = [0u32; NUM_CONFIGURATION_REGISTERS];
+        let bar_addr = [0u32; NUM_BAR_REGS];
         let bar_size = [0u32; NUM_BAR_REGS];
         registers[0] = u32::from(device_id) << 16 | u32::from(vendor_id);
         // TODO(dverkamp): Status should be write-1-to-clear
@@ -373,9 +377,11 @@ impl PciConfiguration {
         PciConfiguration {
             registers,
             writable_bits,
+            bar_addr,
             bar_size,
             bar_used: [false; NUM_BAR_REGS],
             bar_type: [None; NUM_BAR_REGS],
+            rom_bar_addr: 0,
             rom_bar_size: 0,
             rom_bar_used: false,
             last_capability: None,
@@ -392,15 +398,15 @@ impl PciConfiguration {
     /// Writes a 32bit register to `reg_idx` in the register map.
     pub fn write_reg(&mut self, reg_idx: usize, value: u32) {
         let mut mask = self.writable_bits[reg_idx];
-        if reg_idx >= BAR0_REG
-            && reg_idx < BAR0_REG + NUM_BAR_REGS
-            && (value & BAR_MEM_ADDR_MASK) == BAR_MEM_ADDR_MASK
-        {
-            // Handle very specific case where the BAR is being written with
-            // all 1's to retrieve the BAR size on next BAR reading.
-            mask = self.bar_size[reg_idx - 4];
-        } else if reg_idx == ROM_BAR_REG && (value & ROM_BAR_ADDR_MASK) == ROM_BAR_ADDR_MASK {
-            mask = self.rom_bar_size;
+
+        if value == 0xffff_ffff {
+            if reg_idx >= BAR0_REG && reg_idx < BAR0_REG + NUM_BAR_REGS {
+                // Handle very specific case where the BAR is being written with
+                // all 1's to retrieve the BAR size on next BAR reading.
+                mask = self.bar_size[reg_idx - 4];
+            } else if reg_idx == ROM_BAR_REG {
+                mask = self.rom_bar_size;
+            }
         }
 
         if let Some(r) = self.registers.get_mut(reg_idx) {
@@ -499,6 +505,7 @@ impl PciConfiguration {
 
                 self.registers[bar_idx + 1] = (config.addr >> 32) as u32;
                 self.writable_bits[bar_idx + 1] = 0xffff_ffff;
+                self.bar_addr[config.reg_idx + 1] = self.registers[bar_idx + 1];
                 self.bar_size[config.reg_idx + 1] = (config.size >> 32) as u32;
                 self.bar_used[config.reg_idx + 1] = true;
             }
@@ -514,6 +521,7 @@ impl PciConfiguration {
 
         self.registers[bar_idx] = ((config.addr as u32) & mask) | lower_bits;
         self.writable_bits[bar_idx] = mask;
+        self.bar_addr[config.reg_idx] = self.registers[bar_idx];
         self.bar_size[config.reg_idx] = config.size as u32;
         self.bar_used[config.reg_idx] = true;
         self.bar_type[config.reg_idx] = Some(config.region_type);
@@ -545,6 +553,7 @@ impl PciConfiguration {
 
         self.registers[config.reg_idx] = (config.addr as u32) | active;
         self.writable_bits[config.reg_idx] = ROM_BAR_ADDR_MASK;
+        self.rom_bar_addr = self.registers[config.reg_idx];
         self.rom_bar_size = config.size as u32;
         self.rom_bar_used = true;
         Ok(config.reg_idx)
@@ -647,6 +656,101 @@ impl PciConfiguration {
 
     pub fn read_config_register(&self, reg_idx: usize) -> u32 {
         self.read_reg(reg_idx)
+    }
+
+    pub fn detect_bar_reprogramming(
+        &mut self,
+        reg_idx: usize,
+        data: &[u8],
+    ) -> Option<BarReprogrammingParams> {
+        if data.len() != 4 {
+            return None;
+        }
+
+        let value = LittleEndian::read_u32(data);
+
+        if value == 0xffff_ffff {
+            return None;
+        }
+
+        let mask = self.writable_bits[reg_idx];
+        if reg_idx >= BAR0_REG && reg_idx < BAR0_REG + NUM_BAR_REGS {
+            let bar_idx = reg_idx - 4;
+            if (value & mask) != (self.bar_addr[bar_idx] & mask) {
+                // Handle special case where the address being written is
+                // different from the address initially provided. This is a
+                // BAR reprogramming case which needs to be properly caught.
+                if let Some(bar_type) = self.bar_type[bar_idx] {
+                    match bar_type {
+                        PciBarRegionType::Memory64BitRegion => {}
+                        _ => {
+                            debug!(
+                                "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
+                                self.registers[reg_idx], value
+                            );
+                            let old_base = u64::from(self.bar_addr[bar_idx] & mask);
+                            let new_base = u64::from(value & mask);
+                            let len = u64::from(self.bar_size[bar_idx]);
+                            let region_type = bar_type;
+
+                            self.bar_addr[bar_idx] = value;
+
+                            return Some(BarReprogrammingParams {
+                                old_base,
+                                new_base,
+                                len,
+                                region_type,
+                            });
+                        }
+                    }
+                } else if (reg_idx > BAR0_REG)
+                    && (self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1])
+                        != (self.bar_addr[bar_idx - 1] & self.writable_bits[reg_idx - 1])
+                {
+                    debug!(
+                        "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
+                        self.registers[reg_idx], value
+                    );
+                    let old_base = u64::from(self.bar_addr[bar_idx] & mask) << 32
+                        | u64::from(self.bar_addr[bar_idx - 1] & self.writable_bits[reg_idx - 1]);
+                    let new_base = u64::from(value & mask) << 32
+                        | u64::from(self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1]);
+                    let len = u64::from(self.bar_size[bar_idx]) << 32
+                        | u64::from(self.bar_size[bar_idx - 1]);
+                    let region_type = PciBarRegionType::Memory64BitRegion;
+
+                    self.bar_addr[bar_idx] = value;
+                    self.bar_addr[bar_idx - 1] = self.registers[reg_idx - 1];
+
+                    return Some(BarReprogrammingParams {
+                        old_base,
+                        new_base,
+                        len,
+                        region_type,
+                    });
+                }
+            }
+        } else if reg_idx == ROM_BAR_REG && (value & mask) != (self.rom_bar_addr & mask) {
+            debug!(
+                "DETECT ROM BAR REPROG: current 0x{:x}, new 0x{:x}",
+                self.registers[reg_idx], value
+            );
+            let old_base = u64::from(self.rom_bar_addr & mask);
+            let new_base = u64::from(value & mask);
+            let len = u64::from(self.rom_bar_size);
+            let region_type = PciBarRegionType::Memory32BitRegion;
+
+            self.rom_bar_addr = value;
+
+            return Some(BarReprogrammingParams {
+                old_base,
+                new_base,
+                len,
+                region_type,
+            });
+        }
+
+        None
     }
 }
 
