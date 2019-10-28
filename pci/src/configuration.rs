@@ -251,6 +251,7 @@ pub struct PciConfiguration {
     writable_bits: [u32; NUM_CONFIGURATION_REGISTERS], // writable bits for each register.
     bar_size: [u32; NUM_BAR_REGS],
     bar_used: [bool; NUM_BAR_REGS],
+    bar_type: [Option<PciBarRegionType>; NUM_BAR_REGS],
     rom_bar_size: u32,
     rom_bar_used: bool,
     // Contains the byte offset and size of the last capability.
@@ -374,6 +375,7 @@ impl PciConfiguration {
             writable_bits,
             bar_size,
             bar_used: [false; NUM_BAR_REGS],
+            bar_type: [None; NUM_BAR_REGS],
             rom_bar_size: 0,
             rom_bar_used: false,
             last_capability: None,
@@ -514,6 +516,7 @@ impl PciConfiguration {
         self.writable_bits[bar_idx] = mask;
         self.bar_size[config.reg_idx] = config.size as u32;
         self.bar_used[config.reg_idx] = true;
+        self.bar_type[config.reg_idx] = Some(config.region_type);
         Ok(config.reg_idx)
     }
 
@@ -547,19 +550,19 @@ impl PciConfiguration {
         Ok(config.reg_idx)
     }
 
-    /// Returns the address of the given 32 bits BAR region.
-    pub fn get_bar32_addr(&self, bar_num: usize) -> u32 {
+    /// Returns the address of the given BAR region.
+    pub fn get_bar_addr(&self, bar_num: usize) -> u64 {
         let bar_idx = BAR0_REG + bar_num;
 
-        self.registers[bar_idx] & BAR_MEM_ADDR_MASK
-    }
+        let mut addr = u64::from(self.registers[bar_idx] & self.writable_bits[bar_idx]);
 
-    /// Returns the address of the given 64 bits BAR region.
-    pub fn get_bar64_addr(&self, bar_num: usize) -> u64 {
-        let bar_idx = BAR0_REG + bar_num;
+        if let Some(bar_type) = self.bar_type[bar_num] {
+            if bar_type == PciBarRegionType::Memory64BitRegion {
+                addr |= u64::from(self.registers[bar_idx + 1]) << 32;
+            }
+        }
 
-        u64::from(self.registers[bar_idx] & BAR_MEM_ADDR_MASK)
-            | (u64::from(self.registers[bar_idx + 1]) << 32)
+        addr
     }
 
     /// Configures the IRQ line and pin used by this device.
