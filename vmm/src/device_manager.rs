@@ -34,6 +34,8 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::result;
+#[cfg(feature = "pci_support")]
+use std::sync::Weak;
 use std::sync::{Arc, Mutex, RwLock};
 #[cfg(feature = "pci_support")]
 use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
@@ -536,7 +538,10 @@ impl DeviceManager {
             #[cfg(feature = "pci_support")]
             {
                 let pci_root = PciRoot::new(None);
-                let mut pci_bus = PciBus::new(pci_root, address_manager.clone());
+                let mut pci_bus = PciBus::new(
+                    pci_root,
+                    Arc::downgrade(&address_manager) as Weak<dyn DeviceRelocation>,
+                );
 
                 let (mut iommu_device, iommu_mapping) = if vm_info.vm_cfg.iommu {
                     let (device, mapping) =

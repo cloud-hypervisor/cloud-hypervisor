@@ -10,8 +10,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use std;
 use std::ops::DerefMut;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, Weak};
 use vm_memory::{Address, GuestAddress, GuestUsize};
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
@@ -76,11 +75,11 @@ pub struct PciBus {
     /// Devices attached to this bus.
     /// Device 0 is host bridge.
     devices: Vec<Arc<Mutex<dyn PciDevice>>>,
-    device_reloc: Arc<dyn DeviceRelocation>,
+    device_reloc: Weak<dyn DeviceRelocation>,
 }
 
 impl PciBus {
-    pub fn new(pci_root: PciRoot, device_reloc: Arc<dyn DeviceRelocation>) -> Self {
+    pub fn new(pci_root: PciRoot, device_reloc: Weak<dyn DeviceRelocation>) -> Self {
         let mut devices: Vec<Arc<Mutex<dyn PciDevice>>> = Vec::new();
 
         devices.push(Arc::new(Mutex::new(pci_root)));
@@ -198,7 +197,7 @@ impl PciConfigIo {
 
             // Reprogram the BAR if needed
             if let Some(params) = bar_reprog_params {
-                pci_bus.device_reloc.move_bar(
+                pci_bus.device_reloc.upgrade().unwrap().move_bar(
                     params.old_base,
                     params.new_base,
                     params.len,
@@ -314,7 +313,7 @@ impl PciConfigMmio {
 
             // Reprogram the BAR if needed
             if let Some(params) = bar_reprog_params {
-                pci_bus.device_reloc.move_bar(
+                pci_bus.device_reloc.upgrade().unwrap().move_bar(
                     params.old_base,
                     params.new_base,
                     params.len,
