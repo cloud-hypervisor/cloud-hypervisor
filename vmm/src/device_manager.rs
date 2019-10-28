@@ -21,8 +21,8 @@ use libc::{EFD_NONBLOCK, TIOCGWINSZ};
 use net_util::Tap;
 #[cfg(feature = "pci_support")]
 use pci::{
-    InterruptDelivery, InterruptParameters, PciBus, PciConfigIo, PciConfigMmio, PciDevice,
-    PciInterruptPin, PciRoot,
+    DeviceRelocation, InterruptDelivery, InterruptParameters, PciBarRegionType, PciBus,
+    PciConfigIo, PciConfigMmio, PciDevice, PciInterruptPin, PciRoot,
 };
 use qcow::{self, ImageType, QcowFile};
 
@@ -274,6 +274,83 @@ struct AddressManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
+    #[cfg(feature = "pci_support")]
+    vm_fd: Arc<VmFd>,
+}
+
+#[cfg(feature = "pci_support")]
+impl DeviceRelocation for AddressManager {
+    fn move_bar(
+        &self,
+        old_base: u64,
+        new_base: u64,
+        len: u64,
+        pci_dev: &mut dyn PciDevice,
+        region_type: PciBarRegionType,
+    ) {
+        match region_type {
+            PciBarRegionType::IORegion => {
+                // Update system allocator
+                self.allocator
+                    .lock()
+                    .unwrap()
+                    .free_io_addresses(GuestAddress(old_base), len as GuestUsize);
+                self.allocator
+                    .lock()
+                    .unwrap()
+                    .allocate_io_addresses(Some(GuestAddress(new_base)), len as GuestUsize, None)
+                    .unwrap();
+
+                // Update PIO bus
+                self.io_bus
+                    .update_range(old_base, len, new_base, len)
+                    .unwrap();
+            }
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
+                // Update system allocator
+                self.allocator
+                    .lock()
+                    .unwrap()
+                    .free_mmio_addresses(GuestAddress(old_base), len as GuestUsize);
+
+                if region_type == PciBarRegionType::Memory32BitRegion {
+                    self.allocator
+                        .lock()
+                        .unwrap()
+                        .allocate_mmio_hole_addresses(
+                            Some(GuestAddress(new_base)),
+                            len as GuestUsize,
+                            None,
+                        )
+                        .unwrap();
+                } else {
+                    self.allocator
+                        .lock()
+                        .unwrap()
+                        .allocate_mmio_addresses(
+                            Some(GuestAddress(new_base)),
+                            len as GuestUsize,
+                            None,
+                        )
+                        .unwrap();
+                }
+
+                // Update MMIO bus
+                self.mmio_bus
+                    .update_range(old_base, len, new_base, len)
+                    .unwrap();
+            }
+        }
+
+        for (event, addr, _) in pci_dev.ioeventfds() {
+            let io_addr = IoEventAddress::Mmio(addr);
+            self.vm_fd
+                .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)
+                .unwrap();
+        }
+
+        pci_dev.move_bar(old_base, new_base);
+    }
 }
 
 pub struct DeviceManager {
@@ -452,6 +529,8 @@ impl DeviceManager {
             allocator: Arc::new(Mutex::new(allocator)),
             io_bus: Arc::new(io_bus),
             mmio_bus: Arc::new(mmio_bus),
+            #[cfg(feature = "pci_support")]
+            vm_fd: vm_info.vm_fd.clone(),
         });
 
         if cfg!(feature = "pci_support") {
