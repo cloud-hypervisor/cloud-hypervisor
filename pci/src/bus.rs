@@ -9,6 +9,7 @@ use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use std;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use std::sync::Mutex;
 use vm_memory::{Address, GuestAddress, GuestUsize};
@@ -75,7 +76,7 @@ pub struct PciBus {
     /// Devices attached to this bus.
     /// Device 0 is host bridge.
     devices: Vec<Arc<Mutex<dyn PciDevice>>>,
-    _device_reloc: Arc<dyn DeviceRelocation>,
+    device_reloc: Arc<dyn DeviceRelocation>,
 }
 
 impl PciBus {
@@ -86,7 +87,7 @@ impl PciBus {
 
         PciBus {
             devices,
-            _device_reloc: device_reloc,
+            device_reloc,
         }
     }
 
@@ -185,10 +186,26 @@ impl PciConfigIo {
             return;
         }
 
-        if let Some(d) = self.pci_bus.lock().unwrap().devices.get(device) {
-            d.lock()
-                .unwrap()
-                .write_config_register(register, offset, data);
+        let pci_bus = self.pci_bus.lock().unwrap();
+        if let Some(d) = pci_bus.devices.get(device) {
+            let mut device = d.lock().unwrap();
+
+            // Find out if one of the device's BAR is being reprogrammed
+            let bar_reprog_params = device.detect_bar_reprogramming(register, data);
+
+            // Update the register value
+            device.write_config_register(register, offset, data);
+
+            // Reprogram the BAR if needed
+            if let Some(params) = bar_reprog_params {
+                pci_bus.device_reloc.move_bar(
+                    params.old_base,
+                    params.new_base,
+                    params.len,
+                    device.deref_mut(),
+                    params.region_type,
+                );
+            }
         }
     }
 
@@ -285,10 +302,26 @@ impl PciConfigMmio {
             return;
         }
 
-        if let Some(d) = self.pci_bus.lock().unwrap().devices.get(device) {
-            d.lock()
-                .unwrap()
-                .write_config_register(register, offset, data);
+        let pci_bus = self.pci_bus.lock().unwrap();
+        if let Some(d) = pci_bus.devices.get(device) {
+            let mut device = d.lock().unwrap();
+
+            // Find out if one of the device's BAR is being reprogrammed
+            let bar_reprog_params = device.detect_bar_reprogramming(register, data);
+
+            // Update the register value
+            device.write_config_register(register, offset, data);
+
+            // Reprogram the BAR if needed
+            if let Some(params) = bar_reprog_params {
+                pci_bus.device_reloc.move_bar(
+                    params.old_base,
+                    params.new_base,
+                    params.len,
+                    device.deref_mut(),
+                    params.region_type,
+                );
+            }
         }
     }
 }

@@ -19,10 +19,10 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use devices::BusDevice;
 use pci::{
-    InterruptDelivery, InterruptParameters, MsixCap, MsixConfig, PciBarConfiguration,
-    PciBarRegionType, PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice,
-    PciDeviceError, PciHeaderType, PciInterruptPin, PciMassStorageSubclass,
-    PciNetworkControllerSubclass, PciSubclass,
+    BarReprogrammingParams, InterruptDelivery, InterruptParameters, MsixCap, MsixConfig,
+    PciBarConfiguration, PciBarRegionType, PciCapability, PciCapabilityID, PciClassCode,
+    PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciInterruptPin,
+    PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
 };
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
@@ -518,6 +518,14 @@ impl PciDevice for VirtioPciDevice {
 
     fn read_config_register(&self, reg_idx: usize) -> u32 {
         self.configuration.read_reg(reg_idx)
+    }
+
+    fn detect_bar_reprogramming(
+        &mut self,
+        reg_idx: usize,
+        data: &[u8],
+    ) -> Option<BarReprogrammingParams> {
+        self.configuration.detect_bar_reprogramming(reg_idx, data)
     }
 
     fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {

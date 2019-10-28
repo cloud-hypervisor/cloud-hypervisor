@@ -38,7 +38,6 @@ use std::sync::{Arc, Mutex, RwLock};
 #[cfg(feature = "pci_support")]
 use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
-#[cfg(feature = "mmio_support")]
 use vm_memory::GuestAddress;
 use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
 #[cfg(feature = "pci_support")]

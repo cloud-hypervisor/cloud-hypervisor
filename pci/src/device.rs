@@ -47,6 +47,14 @@ impl Display for Error {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct BarReprogrammingParams {
+    pub old_base: u64,
+    pub new_base: u64,
+    pub len: u64,
+    pub region_type: PciBarRegionType,
+}
+
 pub trait PciDevice: BusDevice {
     /// Assign a legacy PCI IRQ to this device.
     /// The device may write to `irq_evt` to trigger an interrupt.
@@ -82,6 +90,14 @@ pub trait PciDevice: BusDevice {
     /// Gets a register from the configuration space.
     /// * `reg_idx` - The index of the config register to read.
     fn read_config_register(&self, reg_idx: usize) -> u32;
+    /// Detects if a BAR is being reprogrammed.
+    fn detect_bar_reprogramming(
+        &mut self,
+        _reg_idx: usize,
+        _data: &[u8],
+    ) -> Option<BarReprogrammingParams> {
+        None
+    }
     /// Reads from a BAR region mapped in to the device.
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - Filled with the data from `addr`.

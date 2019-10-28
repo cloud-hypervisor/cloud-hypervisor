@@ -16,9 +16,9 @@ use kvm_bindings::{
 };
 use kvm_ioctls::*;
 use pci::{
-    MsiCap, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType, PciCapabilityID,
-    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
-    MSIX_TABLE_ENTRY_SIZE,
+    BarReprogrammingParams, MsiCap, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
+    PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
+    PciSubclass, MSIX_TABLE_ENTRY_SIZE,
 };
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
@@ -965,6 +965,14 @@ impl PciDevice for VfioPciDevice {
         self.vfio_pci_configuration
             .read_config_dword((reg_idx * 4) as u32)
             & mask
+    }
+
+    fn detect_bar_reprogramming(
+        &mut self,
+        reg_idx: usize,
+        data: &[u8],
+    ) -> Option<BarReprogrammingParams> {
+        self.configuration.detect_bar_reprogramming(reg_idx, data)
     }
 
     fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
