@@ -5,7 +5,7 @@
 use crate::configuration::{
     PciBarRegionType, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
 };
-use crate::device::{Error as PciDeviceError, PciDevice};
+use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use std;
@@ -75,15 +75,19 @@ pub struct PciBus {
     /// Devices attached to this bus.
     /// Device 0 is host bridge.
     devices: Vec<Arc<Mutex<dyn PciDevice>>>,
+    _device_reloc: Arc<dyn DeviceRelocation>,
 }
 
 impl PciBus {
-    pub fn new(pci_root: PciRoot) -> Self {
+    pub fn new(pci_root: PciRoot, device_reloc: Arc<dyn DeviceRelocation>) -> Self {
         let mut devices: Vec<Arc<Mutex<dyn PciDevice>>> = Vec::new();
 
         devices.push(Arc::new(Mutex::new(pci_root)));
 
-        PciBus { devices }
+        PciBus {
+            devices,
+            _device_reloc: device_reloc,
+        }
     }
 
     pub fn register_mapping(
