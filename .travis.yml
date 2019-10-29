@@ -21,6 +21,7 @@ script:
   - cargo clippy --all-targets --all-features -- -D warnings
   - find . -name "*.rs" | xargs rustfmt --check
   - cargo audit
+  - cargo build --release
 
 deploy:
   provider: releases
