@@ -8,8 +8,6 @@ edition = "2018"
 vm-allocator = { path = "../vm-allocator" }
 byteorder = "1.3.2"
 devices = { path = "../devices" }
-kvm-bindings = "0.1.1"
-kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
 libc = "0.2.60"
 log = "0.4.8"
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }

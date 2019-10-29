@@ -6,7 +6,6 @@
 #[macro_use]
 extern crate log;
 extern crate devices;
-extern crate kvm_ioctls;
 extern crate vm_memory;
 extern crate vmm_sys_util;
 
