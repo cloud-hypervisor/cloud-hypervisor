@@ -9,8 +9,8 @@
 
 use std::cmp::{Ord, Ordering, PartialEq, PartialOrd};
 use std::collections::btree_map::BTreeMap;
-use std::result;
 use std::sync::{Arc, Mutex, RwLock};
+use std::{convert, error, fmt, io, result};
 
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
 ///
@@ -37,6 +37,20 @@ pub enum Error {
 }
 
 pub type Result<T> = result::Result<T, Error>;
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "bus_error: {:?}", self)
+    }
+}
+
+impl error::Error for Error {}
+
+impl convert::From<Error> for io::Error {
+    fn from(e: Error) -> Self {
+        io::Error::new(io::ErrorKind::Other, e)
+    }
+}
 
 /// Holds a base and length representing the address space occupied by a `BusDevice`.
 ///

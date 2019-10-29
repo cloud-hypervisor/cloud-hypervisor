@@ -197,13 +197,15 @@ impl PciConfigIo {
 
             // Reprogram the BAR if needed
             if let Some(params) = bar_reprog_params {
-                pci_bus.device_reloc.upgrade().unwrap().move_bar(
+                if let Err(e) = pci_bus.device_reloc.upgrade().unwrap().move_bar(
                     params.old_base,
                     params.new_base,
                     params.len,
                     device.deref_mut(),
                     params.region_type,
-                );
+                ) {
+                    error!("Failed moving device BAR: {}", e);
+                }
             }
         }
     }
@@ -313,13 +315,15 @@ impl PciConfigMmio {
 
             // Reprogram the BAR if needed
             if let Some(params) = bar_reprog_params {
-                pci_bus.device_reloc.upgrade().unwrap().move_bar(
+                if let Err(e) = pci_bus.device_reloc.upgrade().unwrap().move_bar(
                     params.old_base,
                     params.new_base,
                     params.len,
                     device.deref_mut(),
                     params.region_type,
-                );
+                ) {
+                    error!("Failed moving device BAR: {}", e);
+                }
             }
         }
     }

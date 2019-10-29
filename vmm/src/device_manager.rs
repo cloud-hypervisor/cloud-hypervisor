@@ -288,7 +288,7 @@ impl DeviceRelocation for AddressManager {
         len: u64,
         pci_dev: &mut dyn PciDevice,
         region_type: PciBarRegionType,
-    ) {
+    ) -> std::result::Result<(), std::io::Error> {
         match region_type {
             PciBarRegionType::IORegion => {
                 // Update system allocator
@@ -296,16 +296,19 @@ impl DeviceRelocation for AddressManager {
                     .lock()
                     .unwrap()
                     .free_io_addresses(GuestAddress(old_base), len as GuestUsize);
+
                 self.allocator
                     .lock()
                     .unwrap()
                     .allocate_io_addresses(Some(GuestAddress(new_base)), len as GuestUsize, None)
-                    .unwrap();
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::Other, "failed allocating new IO range")
+                    })?;
 
                 // Update PIO bus
                 self.io_bus
                     .update_range(old_base, len, new_base, len)
-                    .unwrap();
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
             }
             PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
                 // Update system allocator
@@ -323,7 +326,12 @@ impl DeviceRelocation for AddressManager {
                             len as GuestUsize,
                             None,
                         )
-                        .unwrap();
+                        .ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::Other,
+                                "failed allocating new 32 bits MMIO range",
+                            )
+                        })?;
                 } else {
                     self.allocator
                         .lock()
@@ -333,24 +341,28 @@ impl DeviceRelocation for AddressManager {
                             len as GuestUsize,
                             None,
                         )
-                        .unwrap();
+                        .ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::Other,
+                                "failed allocating new 64 bits MMIO range",
+                            )
+                        })?;
                 }
 
                 // Update MMIO bus
                 self.mmio_bus
                     .update_range(old_base, len, new_base, len)
-                    .unwrap();
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
             }
         }
 
         for (event, addr, _) in pci_dev.ioeventfds() {
             let io_addr = IoEventAddress::Mmio(addr);
             self.vm_fd
-                .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)
-                .unwrap();
+                .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)?;
         }
 
-        pci_dev.move_bar(old_base, new_base);
+        pci_dev.move_bar(old_base, new_base)
     }
 }
 
