@@ -6,9 +6,9 @@ use crate::configuration::{self, PciBarRegionType};
 use crate::msix::MsixTableEntry;
 use crate::PciInterruptPin;
 use devices::BusDevice;
-use std;
 use std::fmt::{self, Display};
 use std::sync::Arc;
+use std::{self, io, result};
 use vm_allocator::SystemAllocator;
 use vm_memory::{GuestAddress, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
@@ -18,7 +18,7 @@ pub struct InterruptParameters<'a> {
 }
 
 pub type InterruptDelivery =
-    Box<dyn Fn(InterruptParameters) -> std::result::Result<(), std::io::Error> + Send + Sync>;
+    Box<dyn Fn(InterruptParameters) -> result::Result<(), io::Error> + Send + Sync>;
 
 #[derive(Debug)]
 pub enum Error {
@@ -107,7 +107,9 @@ pub trait PciDevice: BusDevice {
     /// * `data` - The data to write.
     fn write_bar(&mut self, _base: u64, _offset: u64, _data: &[u8]) {}
     /// Relocates the BAR to a different address in guest address space.
-    fn move_bar(&mut self, _old_base: u64, _new_base: u64) {}
+    fn move_bar(&mut self, _old_base: u64, _new_base: u64) -> result::Result<(), io::Error> {
+        Ok(())
+    }
 }
 
 /// This trait defines a set of functions which can be triggered whenever a
@@ -122,5 +124,5 @@ pub trait DeviceRelocation: Send + Sync {
         len: u64,
         pci_dev: &mut dyn PciDevice,
         region_type: PciBarRegionType,
-    );
+    ) -> result::Result<(), io::Error>;
 }

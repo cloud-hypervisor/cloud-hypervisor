@@ -23,7 +23,7 @@ use pci::{
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::Arc;
-use std::{fmt, io};
+use std::{fmt, io, result};
 use vfio_bindings::bindings::vfio::*;
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, GuestAddress, GuestUsize};
@@ -1004,7 +1004,7 @@ impl PciDevice for VfioPciDevice {
         }
     }
 
-    fn move_bar(&mut self, old_base: u64, new_base: u64) {
+    fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), io::Error> {
         for region in self.mmio_regions.iter_mut() {
             if region.start.raw_value() == old_base {
                 region.start = GuestAddress(new_base);
@@ -1023,7 +1023,7 @@ impl PciDevice for VfioPciDevice {
                         };
                         // Safe because the guest regions are guaranteed not to overlap.
                         unsafe {
-                            self.vm_fd.set_user_memory_region(old_mem_region).unwrap();
+                            self.vm_fd.set_user_memory_region(old_mem_region)?;
                         }
 
                         // Insert new region to KVM
@@ -1036,11 +1036,13 @@ impl PciDevice for VfioPciDevice {
                         };
                         // Safe because the guest regions are guaranteed not to overlap.
                         unsafe {
-                            self.vm_fd.set_user_memory_region(new_mem_region).unwrap();
+                            self.vm_fd.set_user_memory_region(new_mem_region)?;
                         }
                     }
                 }
             }
         }
+
+        Ok(())
     }
 }
