@@ -360,6 +360,10 @@ impl DeviceRelocation for AddressManager {
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
             let bar_addr = virtio_pci_dev.config_bar_addr();
             if bar_addr == new_base {
+                for (event, addr, _) in virtio_pci_dev.ioeventfds(old_base) {
+                    let io_addr = IoEventAddress::Mmio(addr);
+                    self.vm_fd.unregister_ioevent(event, &io_addr)?;
+                }
                 for (event, addr, _) in virtio_pci_dev.ioeventfds(new_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm_fd.register_ioevent(event, &io_addr, NoDatamatch)?;
