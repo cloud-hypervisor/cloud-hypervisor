@@ -44,6 +44,7 @@ use vm_memory::GuestAddress;
 use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
 #[cfg(feature = "pci_support")]
 use vm_virtio::transport::VirtioPciDevice;
+use vm_virtio::transport::VirtioTransport;
 use vm_virtio::vhost_user::VhostUserConfig;
 #[cfg(feature = "pci_support")]
 use vm_virtio::{DmaRemapping, IommuMapping, VirtioIommuRemapping};
@@ -360,11 +361,11 @@ impl DeviceRelocation for AddressManager {
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
             let bar_addr = virtio_pci_dev.config_bar_addr();
             if bar_addr == new_base {
-                for (event, addr, _) in virtio_pci_dev.ioeventfds(old_base) {
+                for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm_fd.unregister_ioevent(event, &io_addr)?;
                 }
-                for (event, addr, _) in virtio_pci_dev.ioeventfds(new_base) {
+                for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm_fd.register_ioevent(event, &io_addr, NoDatamatch)?;
                 }
@@ -1207,7 +1208,7 @@ impl DeviceManager {
             .map_err(DeviceManagerError::AllocateBars)?;
 
         let bar_addr = virtio_pci_device.config_bar_addr();
-        for (event, addr, _) in virtio_pci_device.ioeventfds(bar_addr) {
+        for (event, addr) in virtio_pci_device.ioeventfds(bar_addr) {
             let io_addr = IoEventAddress::Mmio(addr);
             vm_fd
                 .register_ioevent(event, &io_addr, NoDatamatch)
@@ -1316,12 +1317,10 @@ impl DeviceManager {
         let mut mmio_device = vm_virtio::transport::MmioDevice::new(memory.clone(), virtio_device)
             .map_err(DeviceManagerError::VirtioDevice)?;
 
-        for (i, queue_evt) in mmio_device.queue_evts().iter().enumerate() {
-            let io_addr = IoEventAddress::Mmio(
-                mmio_base.0 + u64::from(vm_virtio::transport::NOTIFY_REG_OFFSET),
-            );
+        for (i, (event, addr)) in mmio_device.ioeventfds(mmio_base.0).iter().enumerate() {
+            let io_addr = IoEventAddress::Mmio(*addr);
             vm_fd
-                .register_ioevent(queue_evt, &io_addr, i as u32)
+                .register_ioevent(event, &io_addr, i as u32)
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
