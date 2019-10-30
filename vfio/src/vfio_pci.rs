@@ -20,6 +20,7 @@ use pci::{
     PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
     PciSubclass, MSIX_TABLE_ENTRY_SIZE,
 };
+use std::any::Any;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::Arc;
@@ -1044,5 +1045,9 @@ impl PciDevice for VfioPciDevice {
         }
 
         Ok(())
+    }
+
+    fn as_any(&mut self) -> &mut dyn Any {
+        self
     }
 }

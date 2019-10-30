@@ -9,6 +9,7 @@ use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use std;
+use std::any::Any;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex, Weak};
 use vm_memory::{Address, GuestAddress, GuestUsize};
@@ -68,6 +69,10 @@ impl PciDevice for PciRoot {
 
     fn read_config_register(&self, reg_idx: usize) -> u32 {
         self.config.read_reg(reg_idx)
+    }
+
+    fn as_any(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
