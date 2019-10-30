@@ -84,7 +84,9 @@ pub fn setup_msrs(vcpu: &VcpuFd) -> Result<()> {
     msrs.nmsrs = entry_vec.len() as u32;
 
     vcpu.set_msrs(msrs)
-        .map_err(Error::SetModelSpecificRegisters)
+        .map_err(Error::SetModelSpecificRegisters)?;
+
+    Ok(())
 }
 
 /// Configure base registers for a given CPU.

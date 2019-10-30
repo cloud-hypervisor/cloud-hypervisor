@@ -251,7 +251,7 @@ impl CpuidPatch {
         reg: CpuidReg,
         value: u32,
     ) {
-        let entries = cpuid.mut_entries_slice();
+        let entries = cpuid.as_mut_slice();
 
         for entry in entries.iter_mut() {
             if entry.function == function && (index == None || index.unwrap() == entry.index) {
@@ -274,7 +274,7 @@ impl CpuidPatch {
     }
 
     fn patch_cpuid(cpuid: &mut CpuId, patches: Vec<CpuidPatch>) {
-        let entries = cpuid.mut_entries_slice();
+        let entries = cpuid.as_mut_slice();
 
         for entry in entries.iter_mut() {
             for patch in patches.iter() {
