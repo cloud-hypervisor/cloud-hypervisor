@@ -358,10 +358,13 @@ impl DeviceRelocation for AddressManager {
 
         let any_dev = pci_dev.as_any();
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
-            for (event, addr, _) in virtio_pci_dev.ioeventfds() {
-                let io_addr = IoEventAddress::Mmio(addr);
-                self.vm_fd
-                    .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)?;
+            let bar_addr = virtio_pci_dev.config_bar_addr();
+            if bar_addr == new_base {
+                for (event, addr, _) in virtio_pci_dev.ioeventfds(new_base) {
+                    let io_addr = IoEventAddress::Mmio(addr);
+                    self.vm_fd
+                        .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)?;
+                }
             }
         }
 
@@ -1200,7 +1203,8 @@ impl DeviceManager {
             .allocate_bars(&mut allocator)
             .map_err(DeviceManagerError::AllocateBars)?;
 
-        for (event, addr, _) in virtio_pci_device.ioeventfds() {
+        let bar_addr = virtio_pci_device.config_bar_addr();
+        for (event, addr, _) in virtio_pci_device.ioeventfds(bar_addr) {
             let io_addr = IoEventAddress::Mmio(addr);
             vm_fd
                 .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)

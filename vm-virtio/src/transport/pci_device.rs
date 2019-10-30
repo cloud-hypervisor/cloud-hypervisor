@@ -362,9 +362,12 @@ impl VirtioPciDevice {
         }
     }
 
-    pub fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
-        let bar0 = self.configuration.get_bar_addr(self.settings_bar as usize);
-        let notify_base = bar0 + NOTIFICATION_BAR_OFFSET;
+    pub fn config_bar_addr(&self) -> u64 {
+        self.configuration.get_bar_addr(self.settings_bar as usize)
+    }
+
+    pub fn ioeventfds(&self, bar_addr: u64) -> Vec<(&EventFd, u64, u64)> {
+        let notify_base = bar_addr + NOTIFICATION_BAR_OFFSET;
         self.queue_evts()
             .iter()
             .enumerate()

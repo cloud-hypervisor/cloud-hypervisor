@@ -563,11 +563,11 @@ impl PciConfiguration {
     pub fn get_bar_addr(&self, bar_num: usize) -> u64 {
         let bar_idx = BAR0_REG + bar_num;
 
-        let mut addr = u64::from(self.registers[bar_idx] & self.writable_bits[bar_idx]);
+        let mut addr = u64::from(self.bar_addr[bar_num] & self.writable_bits[bar_idx]);
 
         if let Some(bar_type) = self.bar_type[bar_num] {
             if bar_type == PciBarRegionType::Memory64BitRegion {
-                addr |= u64::from(self.registers[bar_idx + 1]) << 32;
+                addr |= u64::from(self.bar_addr[bar_num + 1]) << 32;
             }
         }
 

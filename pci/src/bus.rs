@@ -194,14 +194,9 @@ impl PciConfigIo {
         if let Some(d) = pci_bus.devices.get(device) {
             let mut device = d.lock().unwrap();
 
-            // Find out if one of the device's BAR is being reprogrammed
-            let bar_reprog_params = device.detect_bar_reprogramming(register, data);
-
-            // Update the register value
-            device.write_config_register(register, offset, data);
-
-            // Reprogram the BAR if needed
-            if let Some(params) = bar_reprog_params {
+            // Find out if one of the device's BAR is being reprogrammed, and
+            // reprogram it if needed.
+            if let Some(params) = device.detect_bar_reprogramming(register, data) {
                 if let Err(e) = pci_bus.device_reloc.upgrade().unwrap().move_bar(
                     params.old_base,
                     params.new_base,
@@ -212,6 +207,9 @@ impl PciConfigIo {
                     error!("Failed moving device BAR: {}", e);
                 }
             }
+
+            // Update the register value
+            device.write_config_register(register, offset, data);
         }
     }
 
@@ -312,14 +310,9 @@ impl PciConfigMmio {
         if let Some(d) = pci_bus.devices.get(device) {
             let mut device = d.lock().unwrap();
 
-            // Find out if one of the device's BAR is being reprogrammed
-            let bar_reprog_params = device.detect_bar_reprogramming(register, data);
-
-            // Update the register value
-            device.write_config_register(register, offset, data);
-
-            // Reprogram the BAR if needed
-            if let Some(params) = bar_reprog_params {
+            // Find out if one of the device's BAR is being reprogrammed, and
+            // reprogram it if needed.
+            if let Some(params) = device.detect_bar_reprogramming(register, data) {
                 if let Err(e) = pci_bus.device_reloc.upgrade().unwrap().move_bar(
                     params.old_base,
                     params.new_base,
@@ -330,6 +323,9 @@ impl PciConfigMmio {
                     error!("Failed moving device BAR: {}", e);
                 }
             }
+
+            // Update the register value
+            device.write_config_register(register, offset, data);
         }
     }
 }
