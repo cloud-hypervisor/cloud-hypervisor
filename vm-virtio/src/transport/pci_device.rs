@@ -14,6 +14,7 @@ extern crate vm_memory;
 extern crate vmm_sys_util;
 
 use libc::EFD_NONBLOCK;
+use std::any::Any;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -361,6 +362,22 @@ impl VirtioPciDevice {
         }
     }
 
+    pub fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
+        let bar0 = self.configuration.get_bar_addr(self.settings_bar as usize);
+        let notify_base = bar0 + NOTIFICATION_BAR_OFFSET;
+        self.queue_evts()
+            .iter()
+            .enumerate()
+            .map(|(i, event)| {
+                (
+                    event,
+                    notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
+                    i as u64,
+                )
+            })
+            .collect()
+    }
+
     fn add_pci_capabilities(
         &mut self,
         settings_bar: u8,
@@ -526,22 +543,6 @@ impl PciDevice for VirtioPciDevice {
         data: &[u8],
     ) -> Option<BarReprogrammingParams> {
         self.configuration.detect_bar_reprogramming(reg_idx, data)
-    }
-
-    fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
-        let bar0 = self.configuration.get_bar_addr(self.settings_bar as usize);
-        let notify_base = bar0 + NOTIFICATION_BAR_OFFSET;
-        self.queue_evts()
-            .iter()
-            .enumerate()
-            .map(|(i, event)| {
-                (
-                    event,
-                    notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
-                    i as u64,
-                )
-            })
-            .collect()
     }
 
     fn allocate_bars(
@@ -732,6 +733,10 @@ impl PciDevice for VirtioPciDevice {
                 self.common_config.driver_status = crate::DEVICE_FAILED as u8;
             }
         }
+    }
+
+    fn as_any(&mut self) -> &mut dyn Any {
+        self
     }
 }
 

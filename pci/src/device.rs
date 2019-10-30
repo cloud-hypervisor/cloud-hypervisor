@@ -6,12 +6,12 @@ use crate::configuration::{self, PciBarRegionType};
 use crate::msix::MsixTableEntry;
 use crate::PciInterruptPin;
 use devices::BusDevice;
+use std::any::Any;
 use std::fmt::{self, Display};
 use std::sync::Arc;
 use std::{self, io, result};
 use vm_allocator::SystemAllocator;
 use vm_memory::{GuestAddress, GuestUsize};
-use vmm_sys_util::eventfd::EventFd;
 
 pub struct InterruptParameters<'a> {
     pub msix: Option<&'a MsixTableEntry>,
@@ -78,11 +78,6 @@ pub trait PciDevice: BusDevice {
         Ok(Vec::new())
     }
 
-    /// Gets a list of ioeventfds that should be registered with the running VM. The list is
-    /// returned as a Vec of (eventfd, addr, datamatch) tuples.
-    fn ioeventfds(&self) -> Vec<(&EventFd, u64, u64)> {
-        Vec::new()
-    }
     /// Sets a register in the configuration space.
     /// * `reg_idx` - The index of the config register to modify.
     /// * `offset` - Offset in to the register.
@@ -110,6 +105,9 @@ pub trait PciDevice: BusDevice {
     fn move_bar(&mut self, _old_base: u64, _new_base: u64) -> result::Result<(), io::Error> {
         Ok(())
     }
+    /// Provides a mutable reference to the Any trait. This is useful to let
+    /// the caller have access to the underlying type behind the trait.
+    fn as_any(&mut self) -> &mut dyn Any;
 }
 
 /// This trait defines a set of functions which can be triggered whenever a

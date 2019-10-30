@@ -356,10 +356,13 @@ impl DeviceRelocation for AddressManager {
             }
         }
 
-        for (event, addr, _) in pci_dev.ioeventfds() {
-            let io_addr = IoEventAddress::Mmio(addr);
-            self.vm_fd
-                .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)?;
+        let any_dev = pci_dev.as_any();
+        if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
+            for (event, addr, _) in virtio_pci_dev.ioeventfds() {
+                let io_addr = IoEventAddress::Mmio(addr);
+                self.vm_fd
+                    .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)?;
+            }
         }
 
         pci_dev.move_bar(old_base, new_base)
