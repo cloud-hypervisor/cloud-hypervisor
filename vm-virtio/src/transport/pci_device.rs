@@ -30,6 +30,7 @@ use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, 
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 use super::VirtioPciCommonConfig;
+use crate::transport::VirtioTransport;
 use crate::{
     Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
     VirtioIommuRemapping, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
@@ -338,7 +339,7 @@ impl VirtioPciDevice {
     /// Gets the list of queue events that must be triggered whenever the VM writes to
     /// `virtio::NOTIFY_REG_OFFSET` past the MMIO base. Each event must be triggered when the
     /// value being written equals the index of the event in this list.
-    pub fn queue_evts(&self) -> &[EventFd] {
+    fn queue_evts(&self) -> &[EventFd] {
         self.queue_evts.as_slice()
     }
 
@@ -364,21 +365,6 @@ impl VirtioPciDevice {
 
     pub fn config_bar_addr(&self) -> u64 {
         self.configuration.get_bar_addr(self.settings_bar as usize)
-    }
-
-    pub fn ioeventfds(&self, bar_addr: u64) -> Vec<(&EventFd, u64, u64)> {
-        let notify_base = bar_addr + NOTIFICATION_BAR_OFFSET;
-        self.queue_evts()
-            .iter()
-            .enumerate()
-            .map(|(i, event)| {
-                (
-                    event,
-                    notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
-                    i as u64,
-                )
-            })
-            .collect()
     }
 
     fn add_pci_capabilities(
@@ -449,6 +435,22 @@ impl VirtioPciDevice {
 
         self.settings_bar = settings_bar;
         Ok(())
+    }
+}
+
+impl VirtioTransport for VirtioPciDevice {
+    fn ioeventfds(&self, base_addr: u64) -> Vec<(&EventFd, u64)> {
+        let notify_base = base_addr + NOTIFICATION_BAR_OFFSET;
+        self.queue_evts()
+            .iter()
+            .enumerate()
+            .map(|(i, event)| {
+                (
+                    event,
+                    notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
+                )
+            })
+            .collect()
     }
 }
 

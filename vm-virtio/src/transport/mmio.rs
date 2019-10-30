@@ -8,6 +8,7 @@ use std::sync::{Arc, RwLock};
 use byteorder::{ByteOrder, LittleEndian};
 use libc::EFD_NONBLOCK;
 
+use crate::transport::{VirtioTransport, NOTIFY_REG_OFFSET};
 use crate::{
     Queue, VirtioDevice, VirtioInterrupt, VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER,
     DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT,
@@ -86,7 +87,7 @@ impl MmioDevice {
     /// Gets the list of queue events that must be triggered whenever the VM writes to
     /// `virtio::NOTIFY_REG_OFFSET` past the MMIO base. Each event must be triggered when the
     /// value being written equals the index of the event in this list.
-    pub fn queue_evts(&self) -> &[EventFd] {
+    fn queue_evts(&self) -> &[EventFd] {
         self.queue_evts.as_slice()
     }
 
@@ -137,6 +138,16 @@ impl MmioDevice {
         ) as VirtioInterrupt);
 
         self.interrupt_cb = Some(cb);
+    }
+}
+
+impl VirtioTransport for MmioDevice {
+    fn ioeventfds(&self, base_addr: u64) -> Vec<(&EventFd, u64)> {
+        let notify_base = base_addr + u64::from(NOTIFY_REG_OFFSET);
+        self.queue_evts()
+            .iter()
+            .map(|event| (event, notify_base))
+            .collect()
     }
 }
 
