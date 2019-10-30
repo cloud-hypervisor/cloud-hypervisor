@@ -362,8 +362,7 @@ impl DeviceRelocation for AddressManager {
             if bar_addr == new_base {
                 for (event, addr, _) in virtio_pci_dev.ioeventfds(new_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm_fd
-                        .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)?;
+                    self.vm_fd.register_ioevent(event, &io_addr, NoDatamatch)?;
                 }
             }
         }
@@ -442,7 +441,7 @@ impl DeviceManager {
                 let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
                 vm_info
                     .vm_fd
-                    .register_irqfd(serial_evt.as_raw_fd(), serial_irq as u32)
+                    .register_irqfd(&serial_evt, serial_irq as u32)
                     .map_err(DeviceManagerError::Irq)?;
 
                 Box::new(KernelIoapicIrq::new(serial_evt))
@@ -1207,7 +1206,7 @@ impl DeviceManager {
         for (event, addr, _) in virtio_pci_device.ioeventfds(bar_addr) {
             let io_addr = IoEventAddress::Mmio(addr);
             vm_fd
-                .register_ioevent(event.as_raw_fd(), &io_addr, NoDatamatch)
+                .register_ioevent(event, &io_addr, NoDatamatch)
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
@@ -1264,7 +1263,7 @@ impl DeviceManager {
             } else {
                 let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
                 vm_fd
-                    .register_irqfd(irqfd.as_raw_fd(), irq_num)
+                    .register_irqfd(&irqfd, irq_num)
                     .map_err(DeviceManagerError::Irq)?;
 
                 Box::new(move |_p: InterruptParameters| irqfd.write(1)) as InterruptDelivery
@@ -1318,7 +1317,7 @@ impl DeviceManager {
                 mmio_base.0 + u64::from(vm_virtio::transport::NOTIFY_REG_OFFSET),
             );
             vm_fd
-                .register_ioevent(queue_evt.as_raw_fd(), &io_addr, i as u32)
+                .register_ioevent(queue_evt, &io_addr, i as u32)
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
@@ -1335,7 +1334,7 @@ impl DeviceManager {
             let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
 
             vm_fd
-                .register_irqfd(irqfd.as_raw_fd(), irq_num as u32)
+                .register_irqfd(&irqfd, irq_num as u32)
                 .map_err(DeviceManagerError::Irq)?;
 
             Box::new(KernelIoapicIrq::new(irqfd))

@@ -14,7 +14,7 @@ pci = { path = "../pci" }
 vfio-bindings = "0.1.0"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vmm-sys-util = "0.2.0"
+vmm-sys-util = ">=0.1.1"
 
 [dependencies.vm-memory]
 git = "https://github.com/rust-vmm/vm-memory"

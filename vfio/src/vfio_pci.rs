@@ -240,7 +240,7 @@ impl InterruptRoute {
         let irq_fd = EventFd::new(libc::EFD_NONBLOCK).map_err(VfioPciError::EventFd)?;
         let gsi = allocator.allocate_gsi().ok_or(VfioPciError::AllocateGsi)?;
 
-        vm.register_irqfd(irq_fd.as_raw_fd(), gsi)
+        vm.register_irqfd(&irq_fd, gsi)
             .map_err(VfioPciError::IrqFd)?;
 
         Ok(InterruptRoute {
