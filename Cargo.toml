@@ -14,6 +14,7 @@ net_gen = { path = "net_gen" }
 net_util = { path = "net_util" }
 qcow = { path = "qcow" }
 vhost_user_backend = { path = "vhost_user_backend"}
+vhost_user_fs = { path = "vhost_user_fs"}
 virtio-bindings = "0.1.0"
 vmm = { path = "vmm" }
 vm-device = { path = "vm-device" }
