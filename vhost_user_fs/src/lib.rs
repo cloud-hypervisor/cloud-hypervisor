@@ -2,6 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+#[macro_use]
+extern crate log;
+
 pub mod filesystem;
 pub mod fuse;
 pub mod multikey;
+pub mod passthrough;
