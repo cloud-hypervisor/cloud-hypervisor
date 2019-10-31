@@ -1012,6 +1012,11 @@ dependencies = [
 [[package]]
 name = "vhost_user_fs"
 version = "0.1.0"
+dependencies = [
+ "bitflags 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.65 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
+]
 
 [[package]]
 name = "virtio-bindings"
