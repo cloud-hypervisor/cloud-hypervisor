@@ -157,7 +157,7 @@ cp target/debug/cloud-hypervisor $VFIO_DIR
 sudo adduser $USER kvm
 newgrp kvm << EOF
 export RUST_BACKTRACE=1
-cargo test --features "integration_tests" -- --nocapture
+cargo kcov --features "integration_tests" -j `nproc`
 EOF
 RES=$?
 
@@ -168,7 +168,7 @@ if [ $RES -eq 0 ]; then
 
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
-cargo test --features "integration_tests,mmio" -- --nocapture
+cargo kcov --features "integration_tests,mmio" -j `nproc`
 EOF
 
     RES=$?
