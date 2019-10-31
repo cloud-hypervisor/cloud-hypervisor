@@ -6,9 +6,11 @@ stage ("Builds") {
 		stage ('Install system packages') {
 			sh "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq build-essential mtools libssl-dev pkg-config"
 			sh "sudo apt-get install -yq flex bison libelf-dev qemu-utils qemu-system libglib2.0-dev libpixman-1-dev libseccomp-dev socat"
+			sh "sudo apt-get install -yq cmake g++ pkg-config jq libcurl4-openssl-dev libelf-dev libdw-dev binutils-dev libiberty-dev"
 		}
-		stage ('Install Rust') {
+		stage ('Install Rust tools') {
 			sh "nohup curl https://sh.rustup.rs -sSf | sh -s -- -y"
+			sh "scripts/setup_kcov.sh"
 		}
 		stage ('Run unit tests') {
 			sh "scripts/run_unit_tests.sh"
