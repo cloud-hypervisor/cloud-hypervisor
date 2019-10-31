@@ -9,3 +9,4 @@ bitflags = "1.1.0"
 libc = "0.2.65"
 log = "0.4.8"
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
+vm-virtio = { path = "../vm-virtio" }
