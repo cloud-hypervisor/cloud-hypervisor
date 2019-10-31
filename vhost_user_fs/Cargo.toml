@@ -1,0 +1,7 @@
+[package]
+name = "vhost_user_fs"
+version = "0.1.0"
+authors = ["The Cloud Hypervisor Authors"]
+edition = "2018"
+
+[dependencies]

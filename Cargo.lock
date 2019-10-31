@@ -182,6 +182,7 @@ dependencies = [
  "tempdir 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "vhost_rs 0.1.0",
  "vhost_user_backend 0.1.0",
+ "vhost_user_fs 0.1.0",
  "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-device 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
@@ -1007,6 +1008,10 @@ dependencies = [
  "vm-virtio 0.1.0",
  "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "vhost_user_fs"
+version = "0.1.0"
 
 [[package]]
 name = "virtio-bindings"
