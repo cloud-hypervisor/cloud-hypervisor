@@ -29,6 +29,37 @@ pub(super) const VIRTQ_DESC_F_WRITE: u16 = 0x2;
 // The Virtio Spec 1.0 defines the alignment of VirtIO descriptor is 16 bytes,
 // which fulfills the explicit constraint of GuestMemoryMmap::read_obj().
 
+/// An iterator over a single descriptor chain.  Not to be confused with AvailIter,
+/// which iterates over the descriptor chain heads in a queue.
+pub struct DescIter<'a> {
+    next: Option<DescriptorChain<'a>>,
+}
+
+impl<'a> DescIter<'a> {
+    /// Returns an iterator that only yields the readable descriptors in the chain.
+    pub fn readable(self) -> impl Iterator<Item = DescriptorChain<'a>> {
+        self.filter(|d| !d.is_write_only())
+    }
+
+    /// Returns an iterator that only yields the writable descriptors in the chain.
+    pub fn writable(self) -> impl Iterator<Item = DescriptorChain<'a>> {
+        self.filter(DescriptorChain::is_write_only)
+    }
+}
+
+impl<'a> Iterator for DescIter<'a> {
+    type Item = DescriptorChain<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(current) = self.next.take() {
+            self.next = current.next_descriptor();
+            Some(current)
+        } else {
+            None
+        }
+    }
+}
+
 /// A virtio descriptor constraints with C representive.
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -42,6 +73,7 @@ struct Descriptor {
 unsafe impl ByteValued for Descriptor {}
 
 /// A virtio descriptor chain.
+#[derive(Clone)]
 pub struct DescriptorChain<'a> {
     desc_table: GuestAddress,
     queue_size: u16,
@@ -69,7 +101,7 @@ pub struct DescriptorChain<'a> {
 }
 
 impl<'a> DescriptorChain<'a> {
-    fn checked_new(
+    pub fn checked_new(
         mem: &GuestMemoryMmap,
         desc_table: GuestAddress,
         queue_size: u16,
@@ -164,6 +196,15 @@ impl<'a> DescriptorChain<'a> {
         } else {
             None
         }
+    }
+}
+
+impl<'a> IntoIterator for DescriptorChain<'a> {
+    type Item = DescriptorChain<'a>;
+    type IntoIter = DescIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        DescIter { next: Some(self) }
     }
 }
 
