@@ -5,6 +5,7 @@
 #[macro_use]
 extern crate log;
 
+pub mod file_traits;
 pub mod filesystem;
 pub mod fuse;
 pub mod multikey;
