@@ -285,6 +285,30 @@ impl Aml for Usize {
     }
 }
 
+fn create_aml_string(v: &str) -> Vec<u8> {
+    let mut data = Vec::new();
+    data.push(0x0D); /* String Op */
+    data.extend_from_slice(v.as_bytes());
+    data.push(0x0); /* NullChar */
+    data
+}
+
+pub type AmlStr = &'static str;
+
+impl Aml for AmlStr {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        create_aml_string(self)
+    }
+}
+
+pub type AmlString = String;
+
+impl Aml for AmlString {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        create_aml_string(self)
+    }
+}
+
 pub struct ResourceTemplate<'a> {
     children: Vec<&'a dyn Aml>,
 }
@@ -989,6 +1013,18 @@ mod tests {
                 0x0b, /* WordPrefix */
                 0x34, 0x12
             ]
+        );
+    }
+
+    #[test]
+    fn test_string() {
+        assert_eq!(
+            (&"ACPI" as &dyn Aml).to_aml_bytes(),
+            [0x0d, b'A', b'C', b'P', b'I', 0]
+        );
+        assert_eq!(
+            "ACPI".to_owned().to_aml_bytes(),
+            [0x0d, b'A', b'C', b'P', b'I', 0]
         );
     }
 }
