@@ -12,16 +12,16 @@ servers:
 
 paths:
 
-  /vmm.info:
+  /vmm.ping:
     get:
-      summary: Returns general information about the cloud-hypervisor Virtual Machine Monitor (VMM).
+      summary: Ping the VMM to check for API server availability
       responses:
         200:
           description: The VMM information
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VmmInfo'
+                $ref: '#/components/schemas/VmmPingResponse'
 
   /vmm.shutdown:
     put:
@@ -126,7 +126,7 @@ paths:
 components:
   schemas:
 
-    VmmInfo:
+    VmmPingResponse:
       required:
       - version
       type: object

@@ -14,7 +14,7 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate vmm_sys_util;
 
-use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo};
+use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
 use crate::config::VmConfig;
 use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
@@ -302,6 +302,12 @@ impl Vmm {
         }
     }
 
+    fn vmm_ping(&self) -> result::Result<VmmPingResponse, ApiError> {
+        Ok(VmmPingResponse {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        })
+    }
+
     fn vm_delete(&mut self) -> result::Result<(), VmError> {
         if self.vm_config.is_none() {
             return Ok(());
@@ -430,6 +436,11 @@ impl Vmm {
                                         .vm_info()
                                         .map_err(ApiError::VmInfo)
                                         .map(ApiResponsePayload::VmInfo);
+
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmmPing(sender) => {
+                                    let response = self.vmm_ping().map(ApiResponsePayload::VmmPing);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
