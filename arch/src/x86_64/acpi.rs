@@ -108,10 +108,70 @@ struct IortIdMapping {
     pub flags: u32,
 }
 
+struct CPU {
+    cpu_id: u8,
+    present: bool,
+}
+
+impl aml::Aml for CPU {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        aml::Device::new(
+            format!("C{:03}", self.cpu_id).as_str().into(),
+            vec![
+                &aml::Name::new("_HID".into(), &"ACPI0007"),
+                &aml::Name::new("_UID".into(), &self.cpu_id),
+                /*
+                _STA return value:
+                Bit [0] – Set if the device is present.
+                Bit [1] – Set if the device is enabled and decoding its resources.
+                Bit [2] – Set if the device should be shown in the UI.
+                Bit [3] – Set if the device is functioning properly (cleared if device failed its diagnostics).
+                Bit [4] – Set if the battery is present.
+                Bits [31:5] – Reserved (must be cleared).
+                */
+                &aml::Method::new(
+                    "_STA".into(),
+                    0,
+                    false,
+                    vec![&aml::Return::new(if self.present {
+                        &0xfu8
+                    } else {
+                        &aml::ZERO
+                    })],
+                ),
+            ],
+        )
+        .to_aml_bytes()
+    }
+}
+
+fn create_cpu_data(num_cpus: u8) -> Vec<u8> {
+    let hid = aml::Name::new("_HID".into(), &"ACPI0010");
+    let uid = aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A05"));
+    let mut cpu_data_inner: Vec<&dyn aml::Aml> = vec![&hid, &uid];
+
+    let mut cpu_devices = Vec::new();
+    for cpu_id in 0..num_cpus {
+        let cpu_device = CPU {
+            cpu_id,
+            present: true,
+        };
+
+        cpu_devices.push(cpu_device);
+    }
+
+    for cpu_device in cpu_devices.iter() {
+        cpu_data_inner.push(cpu_device);
+    }
+
+    aml::Device::new("_SB_.CPUS".into(), cpu_data_inner).to_aml_bytes()
+}
+
 pub fn create_dsdt_table(
     serial_enabled: bool,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
+    num_cpus: u8,
 ) -> SDT {
     let pci_dsdt_data = aml::Device::new(
         "_SB_.PCI0".into(),
@@ -184,6 +244,8 @@ pub fn create_dsdt_table(
     let s5_sleep_data =
         aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes();
 
+    let cpu_data = create_cpu_data(num_cpus);
+
     // DSDT
     let mut dsdt = SDT::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
     dsdt.append_slice(pci_dsdt_data.as_slice());
@@ -192,6 +254,7 @@ pub fn create_dsdt_table(
         dsdt.append_slice(com1_dsdt_data.as_slice());
     }
     dsdt.append_slice(s5_sleep_data.as_slice());
+    dsdt.append_slice(cpu_data.as_slice());
 
     dsdt
 }
@@ -208,7 +271,12 @@ pub fn create_acpi_tables(
     let mut tables: Vec<u64> = Vec::new();
 
     // DSDT
-    let dsdt = create_dsdt_table(serial_enabled, start_of_device_area, end_of_device_area);
+    let dsdt = create_dsdt_table(
+        serial_enabled,
+        start_of_device_area,
+        end_of_device_area,
+        num_cpus,
+    );
     let dsdt_offset = rsdp_offset.checked_add(RSDP::len() as u64).unwrap();
     guest_mem
         .write_slice(dsdt.as_slice(), dsdt_offset)
