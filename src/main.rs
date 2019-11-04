@@ -2722,6 +2722,9 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(1, 0));
 
+            // Verify API server is running
+            curl_command(&api_socket, "GET", "http://localhost/api/v1/vmm.ping", None);
+
             // Create the VM first
             let cpu_count: u8 = 4;
             let http_body = guest.api_create_body(cpu_count);
@@ -2777,6 +2780,9 @@ mod tests {
                 .unwrap();
 
             thread::sleep(std::time::Duration::new(1, 0));
+
+            // Verify API server is running
+            curl_command(&api_socket, "GET", "http://localhost/api/v1/vmm.ping", None);
 
             // Create the VM first
             let cpu_count: u8 = 4;
