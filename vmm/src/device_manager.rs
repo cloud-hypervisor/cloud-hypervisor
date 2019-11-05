@@ -166,6 +166,9 @@ pub enum DeviceManagerError {
 
     /// Cannot add legacy device to Bus.
     BusError(devices::BusError),
+
+    /// Failed to allocate IO port
+    AllocateIOPort,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -457,6 +460,10 @@ impl DeviceManager {
                 serial_writer,
             )));
 
+            allocator
+                .allocate_io_addresses(Some(GuestAddress(0x3f8)), 0x8, None)
+                .ok_or(DeviceManagerError::AllocateIOPort)?;
+
             io_bus
                 .insert(serial.clone(), 0x3f8, 0x8)
                 .map_err(DeviceManagerError::BusError)?;
@@ -470,6 +477,11 @@ impl DeviceManager {
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )));
+
+        allocator
+            .allocate_io_addresses(Some(GuestAddress(0x61)), 0x4, None)
+            .ok_or(DeviceManagerError::AllocateIOPort)?;
+
         io_bus
             .insert(i8042.clone(), 0x61, 0x4)
             .map_err(DeviceManagerError::BusError)?;
@@ -494,6 +506,11 @@ impl DeviceManager {
                 _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
                 reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             )));
+
+            allocator
+                .allocate_io_addresses(Some(GuestAddress(0x3c0)), 0x4, None)
+                .ok_or(DeviceManagerError::AllocateIOPort)?;
+
             io_bus
                 .insert(acpi_device.clone(), 0x3c0, 0x4)
                 .map_err(DeviceManagerError::BusError)?;
