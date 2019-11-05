@@ -645,6 +645,64 @@ impl<'a> Scope<'a> {
     }
 }
 
+pub struct Method<'a> {
+    path: Path,
+    children: Vec<&'a dyn Aml>,
+    args: u8,
+    serialized: bool,
+}
+
+impl<'a> Method<'a> {
+    pub fn new(path: Path, args: u8, serialized: bool, children: Vec<&'a dyn Aml>) -> Self {
+        Method {
+            path,
+            children,
+            args,
+            serialized,
+        }
+    }
+}
+
+impl<'a> Aml for Method<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.append(&mut self.path.to_aml_bytes());
+        let flags: u8 = (self.args & 0x7) | (self.serialized as u8) << 3;
+        bytes.push(flags);
+        for child in &self.children {
+            bytes.append(&mut child.to_aml_bytes());
+        }
+
+        let mut pkg_length = create_pkg_length(&bytes);
+        pkg_length.reverse();
+        for byte in pkg_length {
+            bytes.insert(0, byte);
+        }
+
+        bytes.insert(0, 0x14); /* MethodOp */
+        bytes
+    }
+}
+
+pub struct Return<'a> {
+    value: &'a dyn Aml,
+}
+
+impl<'a> Return<'a> {
+    pub fn new(value: &'a dyn Aml) -> Self {
+        Return { value }
+    }
+}
+
+impl<'a> Aml for Return<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0xa4); /* ReturnOp */
+        bytes.append(&mut self.value.to_aml_bytes());
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1025,6 +1083,14 @@ mod tests {
         assert_eq!(
             "ACPI".to_owned().to_aml_bytes(),
             [0x0d, b'A', b'C', b'P', b'I', 0]
+        );
+    }
+
+    #[test]
+    fn test_method() {
+        assert_eq!(
+            Method::new("_STA".into(), 0, false, vec![&Return::new(&0xfu8)]).to_aml_bytes(),
+            [0x14, 0x09, 0x5F, 0x53, 0x54, 0x41, 0x00, 0xA4, 0x0A, 0x0F]
         );
     }
 }
