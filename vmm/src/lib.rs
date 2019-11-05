@@ -255,16 +255,15 @@ impl Vmm {
         // Without ACPI, a reset is equivalent to a shutdown
         #[cfg(not(feature = "acpi"))]
         {
-            if let Some(ref mut vm) = self.vm {
-                vm.shutdown()?;
-                return Ok(());
+            if self.vm.is_some() {
+                return self.vm_shutdown();
             }
         }
 
         // First we stop the current VM and create a new one.
         if let Some(ref mut vm) = self.vm {
             let config = vm.get_config();
-            vm.shutdown()?;
+            self.vm_shutdown()?;
 
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
             let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
