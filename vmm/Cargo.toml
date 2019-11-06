@@ -6,7 +6,7 @@ edition = "2018"
 
 [features]
 default = []
-acpi = ["acpi_tables","devices/acpi", "arch/acpi"]
+acpi = ["acpi_tables","devices/acpi"]
 pci_support = ["pci", "vfio", "vm-virtio/pci_support"]
 mmio_support = ["vm-virtio/mmio_support"]
 cmos = ["devices/cmos"]

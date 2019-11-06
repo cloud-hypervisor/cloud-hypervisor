@@ -5,9 +5,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-#[cfg(feature = "acpi")]
-mod acpi;
-
 mod gdt;
 pub mod interrupts;
 pub mod layout;
@@ -111,9 +108,7 @@ pub fn configure_system(
     cmdline_size: usize,
     num_cpus: u8,
     setup_hdr: Option<setup_header>,
-    _serial_enabled: bool,
-    _end_of_range: GuestAddress,
-    _virt_iommu: Option<(u32, &[u32])>,
+    rsdp_addr: Option<GuestAddress>,
 ) -> super::Result<()> {
     const KERNEL_BOOT_FLAG_MAGIC: u16 = 0xaa55;
     const KERNEL_HDR_MAGIC: u32 = 0x53726448;
@@ -172,21 +167,7 @@ pub fn configure_system(
         E820_RESERVED,
     )?;
 
-    #[cfg(feature = "acpi")]
-    {
-        let start_of_device_area = if mem_end < layout::MEM_32BIT_RESERVED_START {
-            layout::RAM_64BIT_START
-        } else {
-            guest_mem.end_addr().unchecked_add(1)
-        };
-        let rsdp_addr = acpi::create_acpi_tables(
-            guest_mem,
-            num_cpus,
-            _serial_enabled,
-            start_of_device_area,
-            _end_of_range,
-            _virt_iommu,
-        );
+    if let Some(rsdp_addr) = rsdp_addr {
         params.0.acpi_rsdp_addr = rsdp_addr.0;
     }
 
@@ -246,16 +227,7 @@ mod tests {
     fn test_system_configuration() {
         let no_vcpus = 4;
         let gm = GuestMemoryMmap::new(&vec![(GuestAddress(0), 0x10000)]).unwrap();
-        let config_err = configure_system(
-            &gm,
-            GuestAddress(0),
-            0,
-            1,
-            None,
-            false,
-            GuestAddress((1 << 36) - 1),
-            None,
-        );
+        let config_err = configure_system(&gm, GuestAddress(0), 0, 1, None, None);
         assert!(config_err.is_err());
         assert_eq!(
             config_err.unwrap_err(),
@@ -273,17 +245,7 @@ mod tests {
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
-        configure_system(
-            &gm,
-            GuestAddress(0),
-            0,
-            no_vcpus,
-            None,
-            false,
-            GuestAddress((1 << 36) - 1),
-            None,
-        )
-        .unwrap();
+        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None, None).unwrap();
 
         // Now assigning some memory that is equal to the start of the 32bit memory hole.
         let mem_size = 3328 << 20;
@@ -294,17 +256,7 @@ mod tests {
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
-        configure_system(
-            &gm,
-            GuestAddress(0),
-            0,
-            no_vcpus,
-            None,
-            false,
-            GuestAddress((1 << 36) - 1),
-            None,
-        )
-        .unwrap();
+        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None, None).unwrap();
 
         // Now assigning some memory that falls after the 32bit memory hole.
         let mem_size = 3330 << 20;
@@ -315,17 +267,7 @@ mod tests {
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
-        configure_system(
-            &gm,
-            GuestAddress(0),
-            0,
-            no_vcpus,
-            None,
-            false,
-            GuestAddress((1 << 36) - 1),
-            None,
-        )
-        .unwrap();
+        configure_system(&gm, GuestAddress(0), 0, no_vcpus, None, None).unwrap();
     }
 
     #[test]

@@ -23,7 +23,7 @@ extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
 
-use crate::config::{ConsoleOutputMode, VmConfig};
+use crate::config::VmConfig;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use arch::RegionType;
 use devices::ioapic;
@@ -768,7 +768,34 @@ impl Vm {
         )
         .map_err(|_| Error::CmdLine)?;
         let vcpu_count = self.config.cpus.cpu_count;
-        let end_of_range = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
+
+        #[allow(unused_mut, unused_assignments)]
+        let mut rsdp_addr: Option<GuestAddress> = None;
+
+        #[cfg(feature = "acpi")]
+        {
+            rsdp_addr = Some({
+                let end_of_range = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
+
+                let mem_end = mem.end_addr();
+                let start_of_device_area = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
+                    arch::layout::RAM_64BIT_START
+                } else {
+                    mem_end.unchecked_add(1)
+                };
+
+                use crate::config::ConsoleOutputMode;
+                crate::acpi::create_acpi_tables(
+                    &mem,
+                    vcpu_count,
+                    self.config.serial.mode != ConsoleOutputMode::Off,
+                    start_of_device_area,
+                    end_of_range,
+                    self.devices.virt_iommu(),
+                )
+            });
+        }
+
         match entry_addr.setup_header {
             Some(hdr) => {
                 arch::configure_system(
@@ -777,9 +804,7 @@ impl Vm {
                     cmdline_cstring.to_bytes().len() + 1,
                     vcpu_count,
                     Some(hdr),
-                    self.config.serial.mode != ConsoleOutputMode::Off,
-                    end_of_range,
-                    self.devices.virt_iommu(),
+                    rsdp_addr,
                 )
                 .map_err(|_| Error::CmdLine)?;
 
@@ -798,9 +823,7 @@ impl Vm {
                     cmdline_cstring.to_bytes().len() + 1,
                     vcpu_count,
                     None,
-                    self.config.serial.mode != ConsoleOutputMode::Off,
-                    end_of_range,
-                    self.devices.virt_iommu(),
+                    rsdp_addr,
                 )
                 .map_err(|_| Error::CmdLine)?;
 
