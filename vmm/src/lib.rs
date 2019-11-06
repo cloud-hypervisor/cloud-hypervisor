@@ -30,6 +30,9 @@ pub mod config;
 pub mod device_manager;
 pub mod vm;
 
+#[cfg(feature = "acpi")]
+mod acpi;
+
 /// Errors associated with VMM management
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]

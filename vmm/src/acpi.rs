@@ -14,7 +14,7 @@ use vm_memory::{Address, ByteValued, Bytes};
 
 use std::convert::TryInto;
 
-use super::layout;
+use arch::layout;
 
 #[repr(packed)]
 struct LocalAPIC {
