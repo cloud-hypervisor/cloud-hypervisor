@@ -514,7 +514,7 @@ dependencies = [
 
 [[package]]
 name = "pnet_macros"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "regex 1.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -537,7 +537,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "glob 0.2.11 (registry+https://github.com/rust-lang/crates.io-index)",
  "pnet_base 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "pnet_macros 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "pnet_macros 0.23.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "pnet_macros_support 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "syntex 0.42.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -1209,7 +1209,7 @@ dependencies = [
 "checksum pnet 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)" = "63d693c84430248366146e3181ff9d330243464fa9e6146c372b2f3eb2e2d8e7"
 "checksum pnet_base 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)" = "4df28acf2fcc77436dd2b91a9a0c2bb617f9ca5f2acefee1a4135058b9f9801f"
 "checksum pnet_datalink 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)" = "7b34f8ca857599d05b6b082e9baff8d27c54cb9c26568cf3c0993a5755816966"
-"checksum pnet_macros 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e2f16d1fa7fd0edebc36055587b8b5af8a109bbc29a55fb484a37e2029b971a7"
+"checksum pnet_macros 0.23.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a1635e02f6f098c62682e77b49ae7f3a8f1d0661df5efef679a10f162d29db27"
 "checksum pnet_macros_support 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)" = "84684f2cddefc37a06f2fe2ca4dcc3457fc3b282734b5246507d8ee75d2780ae"
 "checksum pnet_packet 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)" = "08a6cdcdaddc5174f18286298842a4e31cd3cc018933d42af51434b1fa07dcbe"
 "checksum pnet_sys 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)" = "682b2eca84cc440bce8336813f78eb6d3cb0fed89fe0e87ae22acfca8363f176"
