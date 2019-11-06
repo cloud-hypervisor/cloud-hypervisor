@@ -17,11 +17,15 @@ extern crate vmm_sys_util;
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo};
 use crate::config::VmConfig;
 use crate::vm::{Error as VmError, Vm, VmState};
+use crate::migration::Migration;
+use crate::migration::state::{
+    MigrationResponsePayload, MigrationStateData,
+};
 use libc::EFD_NONBLOCK;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
-use std::sync::Arc;
+use std::sync::mpsc::{channel, Receiver, RecvError, SendError, Sender};
+use std::sync::{Arc, Mutex};
 use std::{result, thread};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -29,6 +33,7 @@ pub mod api;
 pub mod config;
 pub mod device_manager;
 pub mod vm;
+pub mod migration;
 
 /// Errors associated with VMM management
 #[derive(Debug)]
@@ -72,6 +77,12 @@ pub enum Error {
 
     /// Cannot shut the VMM down
     VmmShutdown(VmError),
+
+    /// Cannot spawn a new migration thread.
+    MigrationSpawn(io::Error),
+
+    /// Cannot write event fd.
+    EventFdWrite(io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -150,18 +161,19 @@ pub fn start_vmm_thread(
     api_receiver: Receiver<ApiRequest>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     let http_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
+    let http_api_sender = api_sender.clone();
 
     let thread = thread::Builder::new()
         .name("vmm".to_string())
         .spawn(move || {
-            let mut vmm = Vmm::new(api_event)?;
+            let mut vmm = Vmm::new(api_event, api_sender)?;
 
             vmm.control_loop(Arc::new(api_receiver))
         })
         .map_err(Error::VmmThreadSpawn)?;
 
     // The VMM thread is started, we can start serving HTTP requests
-    api::start_http_thread(http_path, http_api_event, api_sender)?;
+    api::start_http_thread(http_path, http_api_event, http_api_sender)?;
 
     Ok(thread)
 }
@@ -171,15 +183,18 @@ pub struct Vmm {
     exit_evt: EventFd,
     reset_evt: EventFd,
     api_evt: EventFd,
-    vm: Option<Vm>,
+    api_sender: Sender<ApiRequest>,
+    vm: Option<Arc<Mutex<Vm>>>,
     vm_config: Option<Arc<VmConfig>>,
+    migration: Migration,
 }
 
 impl Vmm {
-    fn new(api_evt: EventFd) -> Result<Self> {
+    fn new(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> Result<Self> {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
+        let migration = Migration::new().unwrap();
 
         if unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0 {
             epoll.add_stdin().map_err(Error::Epoll)?;
@@ -202,9 +217,72 @@ impl Vmm {
             exit_evt,
             reset_evt,
             api_evt,
+            api_sender,
             vm: None,
             vm_config: None,
+            migration: migration,
         })
+    }
+
+    fn migration_request_handle(&self, receiver: Receiver<ApiResponse>) -> Result <()> {
+        let mut vm_clone: Option<Arc<Mutex<Vm>>> = None;
+        if let Some(ref vm) = self.vm {
+            vm_clone = Some(vm.clone());
+        }
+
+        thread::Builder::new()
+            .name(format!("migration_state_handle"))
+            .spawn(move || {
+                loop {
+                    let request = receiver.recv().unwrap();
+
+                    match request {
+                        Ok(r) => {
+                            match r {
+                                ApiResponsePayload::MigrationStateGet(sender) => {
+                                    /* TODO: assemble Vm states and send it as payload */
+                                    if let Some(ref vm) = vm_clone {
+                                        let states = vm.lock().unwrap().get_states();
+                                        let payload = MigrationStateData {
+                                            state: states.clone().into_bytes(),
+                                        };
+                                        sender
+                                            .send(Ok(MigrationResponsePayload::MigrationState(payload)))
+                                            .unwrap();
+                                    }
+                                },
+                                ApiResponsePayload::MigrationState(state) => {
+                                    /* TODO: load received state */
+                                },
+                                ApiResponsePayload::Empty => {
+                                    println!("Register succeed!");
+                                },
+                                _ => {},
+                            }
+                        },
+                        Err(e) => {
+                            error!("ApiResponse error: {:?}", e);
+                        },
+                    }
+                }
+            })
+            .map_err(Error::MigrationSpawn)?;
+
+        Ok(())
+    }
+
+    /* This function is called when migration is triggered */
+    fn migration_register(&self) -> Result<()> {
+        let (request_sender, request_receiver) = channel();
+
+        self.api_sender
+            .send(ApiRequest::MigrationRegister("Vmm".to_string(), request_sender))
+            .expect("Cannot send request");
+        self.api_evt.write(1).map_err(Error::EventFdWrite)?;
+
+        self.migration_request_handle(request_receiver).expect("Cannot handle migration states");
+
+        Ok(())
     }
 
     fn vm_boot(&mut self) -> result::Result<(), VmError> {
@@ -215,12 +293,14 @@ impl Vmm {
 
             if let Some(ref vm_config) = self.vm_config {
                 let vm = Vm::new(Arc::clone(vm_config), exit_evt, reset_evt)?;
-                self.vm = Some(vm);
+                self.vm = Some(Arc::new(Mutex::new(vm)));
+                self.migration_register().expect("Fail to register migration state component");
             }
         }
 
         // Now we can boot the VM.
         if let Some(ref mut vm) = self.vm {
+            let mut vm = vm.lock().unwrap();
             vm.boot()
         } else {
             Err(VmError::VmNotCreated)
@@ -229,6 +309,7 @@ impl Vmm {
 
     fn vm_pause(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
+            let mut vm = vm.lock().unwrap();
             vm.pause()
         } else {
             Err(VmError::VmNotRunning)
@@ -237,6 +318,7 @@ impl Vmm {
 
     fn vm_resume(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
+            let mut vm = vm.lock().unwrap();
             vm.resume()
         } else {
             Err(VmError::VmNotRunning)
@@ -245,6 +327,7 @@ impl Vmm {
 
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm.take() {
+            let mut vm = vm.lock().unwrap();
             vm.shutdown()
         } else {
             Err(VmError::VmNotRunning)
@@ -256,6 +339,7 @@ impl Vmm {
         #[cfg(not(feature = "acpi"))]
         {
             if let Some(ref mut vm) = self.vm {
+                let mut vm = vm.lock().unwrap();
                 vm.shutdown()?;
                 return Ok(());
             }
@@ -263,17 +347,25 @@ impl Vmm {
 
         // First we stop the current VM and create a new one.
         if let Some(ref mut vm) = self.vm {
+            let mut vm = vm.lock().unwrap();
             let config = vm.get_config();
             vm.shutdown()?;
 
-            let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
-            let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+            self.vm_config = Some(config)
+        }
 
-            self.vm = Some(Vm::new(config, exit_evt, reset_evt)?);
+        let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
+        let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+
+        if let Some(ref vm_config) = self.vm_config {
+            let vm = Vm::new(Arc::clone(vm_config), exit_evt, reset_evt)?;
+            self.vm = Some(Arc::new(Mutex::new(vm)));
+            self.migration_register().expect("Fail to register migration state component");
         }
 
         // Then we start the new VM.
         if let Some(ref mut vm) = self.vm {
+            let mut vm = vm.lock().unwrap();
             vm.boot()?;
         } else {
             return Err(VmError::VmNotCreated);
@@ -286,7 +378,10 @@ impl Vmm {
         match &self.vm_config {
             Some(config) => {
                 let state = match &self.vm {
-                    Some(vm) => vm.get_state()?,
+                    Some(vm) => {
+                        let vm = vm.lock().unwrap();
+                        vm.get_state()?
+                    },
                     None => VmState::Created,
                 };
 
@@ -359,6 +454,7 @@ impl Vmm {
                         }
                         EpollDispatch::Stdin => {
                             if let Some(ref vm) = self.vm {
+                                let vm = vm.lock().unwrap();
                                 vm.handle_stdin().map_err(Error::Stdin)?;
                             }
                         }
@@ -455,6 +551,10 @@ impl Vmm {
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
 
                                     break 'outer;
+                                }
+                                ApiRequest::MigrationRegister(idstr, sender) => {
+                                    let response = self.migration.insert(idstr, sender.clone());
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                             }
                         }

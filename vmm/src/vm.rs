@@ -499,6 +499,8 @@ pub struct Vm {
     state: RwLock<VmState>,
 }
 
+unsafe impl Send for Vm {}
+
 fn get_host_cpu_phys_bits() -> u8 {
     use core::arch::x86_64;
     unsafe {
@@ -906,6 +908,14 @@ impl Vm {
                 console_input_clone.update_console_size(col, row);
             }
         }
+    }
+
+    pub fn get_states(&self) -> String {
+        /* TODO: use config as example first. Need handle
+         * devices/memory/vcpu/etc in the future
+         */
+        let config = serde_json::to_string_pretty(&self.config).unwrap();
+        config
     }
 
     pub fn boot(&mut self) -> Result<()> {
