@@ -301,7 +301,16 @@ impl Vmm {
         // Now we can boot the VM.
         if let Some(ref mut vm) = self.vm {
             let mut vm = vm.lock().unwrap();
-            vm.boot()
+            vm.boot()?;
+
+            let migration = self.migration.clone();
+            thread::Builder::new()
+                .name(format!("migration_state_get"))
+                .spawn(move || {
+                    migration.take_snapshot();
+                });
+
+            Ok(())
         } else {
             Err(VmError::VmNotCreated)
         }

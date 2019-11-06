@@ -96,6 +96,8 @@ impl MigrationState {
                         MigrationResponsePayload::Empty => {},
                         MigrationResponsePayload::MigrationState(data) => {
                             /* TODO: Put received state into MigrateDataFile buffer */
+                            let s = String::from_utf8(data.state).expect("Invalid utf8");
+                            println!("Received state is {}", s);
                         }
                     }
                 },
