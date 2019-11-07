@@ -319,12 +319,13 @@ impl Vcpu {
     /// * `vm` - The virtual machine this vcpu will get attached to.
     pub fn new(
         id: u8,
-        vm: &Vm,
+        fd: &Arc<VmFd>,
         io_bus: Arc<devices::Bus>,
         mmio_bus: Arc<devices::Bus>,
         ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
+        creation_ts: std::time::Instant,
     ) -> Result<Self> {
-        let kvm_vcpu = vm.fd.create_vcpu(id).map_err(Error::VcpuFd)?;
+        let kvm_vcpu = fd.create_vcpu(id).map_err(Error::VcpuFd)?;
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Vcpu {
             fd: kvm_vcpu,
@@ -332,7 +333,7 @@ impl Vcpu {
             io_bus,
             mmio_bus,
             ioapic,
-            vm_ts: vm.creation_ts,
+            vm_ts: creation_ts,
         })
     }
 
@@ -343,8 +344,13 @@ impl Vcpu {
     /// * `machine_config` - Specifies necessary info used for the CPUID configuration.
     /// * `kernel_start_addr` - Offset from `guest_mem` at which the kernel starts.
     /// * `vm` - The virtual machine this vcpu will get attached to.
-    pub fn configure(&mut self, kernel_start_addr: GuestAddress, vm: &Vm) -> Result<()> {
-        let mut cpuid = vm.cpuid.clone();
+    pub fn configure(
+        &mut self,
+        kernel_start_addr: GuestAddress,
+        vm_memory: &Arc<RwLock<GuestMemoryMmap>>,
+        cpuid: CpuId,
+    ) -> Result<()> {
+        let mut cpuid = cpuid;
         CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(self.id));
         self.fd
             .set_cpuid2(&cpuid)
@@ -352,7 +358,6 @@ impl Vcpu {
 
         arch::x86_64::regs::setup_msrs(&self.fd).map_err(Error::MSRSConfiguration)?;
         // Safe to unwrap because this method is called after the VM is configured
-        let vm_memory = vm.get_memory();
         arch::x86_64::regs::setup_regs(
             &self.fd,
             kernel_start_addr.raw_value(),
@@ -481,22 +486,196 @@ impl VmState {
     }
 }
 
-pub struct Vm {
+pub struct CpuManager {
+    boot_vcpus: u8,
+    io_bus: Arc<devices::Bus>,
+    mmio_bus: Arc<devices::Bus>,
+    ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
+    vm_memory: Arc<RwLock<GuestMemoryMmap>>,
+    cpuid: CpuId,
     fd: Arc<VmFd>,
+    vcpus_kill_signalled: Arc<AtomicBool>,
+    vcpus_pause_signalled: Arc<AtomicBool>,
+    reset_evt: EventFd,
+    threads: Vec<thread::JoinHandle<()>>,
+}
+
+impl CpuManager {
+    fn new(
+        boot_vcpus: u8,
+        device_manager: &DeviceManager,
+        guest_memory: Arc<RwLock<GuestMemoryMmap>>,
+        fd: Arc<VmFd>,
+        cpuid: CpuId,
+        reset_evt: EventFd,
+    ) -> CpuManager {
+        CpuManager {
+            boot_vcpus,
+            io_bus: device_manager.io_bus().clone(),
+            mmio_bus: device_manager.mmio_bus().clone(),
+            ioapic: device_manager.ioapic().clone(),
+            vm_memory: guest_memory,
+            cpuid,
+            fd,
+            vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
+            vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
+            threads: Vec::with_capacity(boot_vcpus as usize),
+            reset_evt,
+        }
+    }
+
+    // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
+    fn start_boot_vcpus(&mut self, entry_addr: GuestAddress) -> Result<()> {
+        let creation_ts = std::time::Instant::now();
+
+        let vcpu_thread_barrier = Arc::new(Barrier::new((self.boot_vcpus + 1) as usize));
+
+        for cpu_id in 0..self.boot_vcpus {
+            let ioapic = if let Some(ioapic) = &self.ioapic {
+                Some(ioapic.clone())
+            } else {
+                None
+            };
+
+            let mut vcpu = Vcpu::new(
+                cpu_id,
+                &self.fd,
+                self.io_bus.clone(),
+                self.mmio_bus.clone(),
+                ioapic,
+                creation_ts,
+            )?;
+            vcpu.configure(entry_addr, &self.vm_memory, self.cpuid.clone())?;
+
+            let vcpu_thread_barrier = vcpu_thread_barrier.clone();
+
+            let reset_evt = self.reset_evt.try_clone().unwrap();
+            let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
+            let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
+            self.threads.push(
+                thread::Builder::new()
+                    .name(format!("vcpu{}", vcpu.id))
+                    .spawn(move || {
+                        unsafe {
+                            extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {
+                            }
+                            // This uses an async signal safe handler to kill the vcpu handles.
+                            register_signal_handler(
+                                VCPU_RTSIG_OFFSET,
+                                vmm_sys_util::signal::SignalHandler::Siginfo(handle_signal),
+                                true,
+                                0,
+                            )
+                            .expect("Failed to register vcpu signal handler");
+                        }
+
+                        // Block until all CPUs are ready.
+                        vcpu_thread_barrier.wait();
+
+                        loop {
+                            // vcpu.run() returns false on a KVM_EXIT_SHUTDOWN (triple-fault) so trigger a reset
+                            match vcpu.run() {
+                                Err(e) => {
+                                    error!("VCPU generated error: {:?}", e);
+                                    break;
+                                }
+                                Ok(true) => {}
+                                Ok(false) => {
+                                    reset_evt.write(1).unwrap();
+                                    break;
+                                }
+                            }
+
+                            // We've been told to terminate
+                            if vcpu_kill_signalled.load(Ordering::SeqCst) {
+                                break;
+                            }
+
+                            // If we are being told to pause, we park the thread
+                            // until the pause boolean is toggled.
+                            // The resume operation is responsible for toggling
+                            // the boolean and unpark the thread.
+                            // We enter a loop because park() could spuriously
+                            // return. We will then park() again unless the
+                            // pause boolean has been toggled.
+                            while vcpu_pause_signalled.load(Ordering::SeqCst) {
+                                thread::park();
+                            }
+                        }
+                    })
+                    .map_err(Error::VcpuSpawn)?,
+            );
+        }
+
+        // Unblock all CPU threads.
+        vcpu_thread_barrier.wait();
+        Ok(())
+    }
+
+    fn shutdown(&mut self) -> Result<()> {
+        // Tell the vCPUs to stop themselves next time they go through the loop
+        self.vcpus_kill_signalled.store(true, Ordering::SeqCst);
+
+        // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
+        // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
+        // above.
+        for thread in self.threads.iter() {
+            let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
+            unsafe {
+                libc::pthread_kill(thread.as_pthread_t(), signum);
+            }
+        }
+
+        // Wait for all the threads to finish
+        for thread in self.threads.drain(..) {
+            thread.join().map_err(|_| Error::ThreadCleanup)?
+        }
+
+        Ok(())
+    }
+
+    fn pause(&self) -> Result<()> {
+        // Tell the vCPUs to pause themselves next time they exit
+        self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
+
+        // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
+        // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
+        // above.
+        for thread in self.threads.iter() {
+            let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
+            unsafe {
+                libc::pthread_kill(thread.as_pthread_t(), signum);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn resume(&self) -> Result<()> {
+        // Toggle the vCPUs pause boolean
+        self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
+
+        // Unpark all the VCPU threads.
+        // Once unparked, the next thing they will do is checking for the pause
+        // boolean. Since it'll be set to false, they will exit their pause loop
+        // and go back to vmx root.
+        for vcpu_thread in self.threads.iter() {
+            vcpu_thread.thread().unpark();
+        }
+        Ok(())
+    }
+}
+
+pub struct Vm {
     kernel: File,
     memory: Arc<RwLock<GuestMemoryMmap>>,
     threads: Vec<thread::JoinHandle<()>>,
     devices: DeviceManager,
-    cpuid: CpuId,
     config: Arc<VmConfig>,
     on_tty: bool,
-    creation_ts: std::time::Instant,
-    vcpus_kill_signalled: Arc<AtomicBool>,
-    vcpus_pause_signalled: Arc<AtomicBool>,
-    // Reboot (reset) control
-    reset_evt: EventFd,
     signals: Option<Signals>,
     state: RwLock<VmState>,
+    cpu_manager: CpuManager,
 }
 
 fn get_host_cpu_phys_bits() -> u8 {
@@ -520,7 +699,6 @@ impl Vm {
             File::open(&config.kernel.as_ref().unwrap().path).map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
         let fd = Arc::new(fd);
-        let creation_ts = std::time::Instant::now();
 
         // Init guest memory
         let arch_mem_regions = arch::arch_memory_regions(config.memory.size);
@@ -601,11 +779,6 @@ impl Vm {
         fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize)
             .map_err(Error::VmSetup)?;
 
-        // Supported CPUID
-        let mut cpuid = kvm
-            .get_supported_cpuid(MAX_KVM_CPUID_ENTRIES)
-            .map_err(Error::VmSetup)?;
-
         let msi_capable = kvm.check_extension(Cap::SignalMsi);
 
         let mut cpuid_patches = Vec::new();
@@ -661,6 +834,11 @@ impl Vm {
             edx_bit: None,
         });
 
+        // Supported CPUID
+        let mut cpuid = kvm
+            .get_supported_cpuid(MAX_KVM_CPUID_ENTRIES)
+            .map_err(Error::VmSetup)?;
+
         CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
 
         let ioapic = GsiApic::new(
@@ -711,23 +889,27 @@ impl Vm {
         .map_err(Error::DeviceManager)?;
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
-        let threads = Vec::with_capacity(config.cpus.cpu_count as usize + 1);
+
+        let boot_vcpus = config.cpus.cpu_count;
+        let cpu_manager = CpuManager::new(
+            boot_vcpus,
+            &device_manager,
+            guest_memory.clone(),
+            fd,
+            cpuid,
+            reset_evt,
+        );
 
         Ok(Vm {
-            fd,
             kernel,
             memory: guest_memory,
-            threads,
             devices: device_manager,
-            cpuid,
             config,
             on_tty,
-            creation_ts,
-            vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
-            vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
-            reset_evt,
+            threads: Vec::with_capacity(1),
             signals: None,
             state: RwLock::new(VmState::Created),
+            cpu_manager,
         })
     }
 
@@ -829,24 +1011,12 @@ impl Vm {
             signals.close();
         }
 
-        // Tell the vCPUs to stop themselves next time they go through the loop
-        self.vcpus_kill_signalled.store(true, Ordering::SeqCst);
-
-        // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
-        // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
-        // above. The signal handler thread will ignore this signal
-        for thread in self.threads.iter() {
-            let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
-            unsafe {
-                libc::pthread_kill(thread.as_pthread_t(), signum);
-            }
-        }
+        self.cpu_manager.shutdown()?;
 
         // Wait for all the threads to finish
         for thread in self.threads.drain(..) {
             thread.join().map_err(|_| Error::ThreadCleanup)?
         }
-
         *state = new_state;
 
         Ok(())
@@ -858,18 +1028,7 @@ impl Vm {
 
         state.valid_transition(new_state)?;
 
-        // Tell the vCPUs to pause themselves next time they exit
-        self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
-
-        // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
-        // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
-        // above. The signal handler thread will ignore this signal
-        for thread in self.threads.iter() {
-            let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
-            unsafe {
-                libc::pthread_kill(thread.as_pthread_t(), signum);
-            }
-        }
+        self.cpu_manager.pause()?;
 
         *state = new_state;
 
@@ -882,16 +1041,7 @@ impl Vm {
 
         state.valid_transition(new_state)?;
 
-        // Toggle the vCPUs pause boolean
-        self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
-
-        // Unpark all the VCPU threads.
-        // Once unparked, the next thing they will do is checking for the pause
-        // boolean. Since it'll be set to false, they will exit their pause loop
-        // and go back to vmx root.
-        for vcpu_thread in self.threads.iter() {
-            vcpu_thread.thread().unpark();
-        }
+        self.cpu_manager.resume()?;
 
         // And we're back to the Running state.
         *state = new_state;
@@ -918,83 +1068,8 @@ impl Vm {
         current_state.valid_transition(new_state)?;
 
         let entry_addr = self.load_kernel()?;
-        let vcpu_count = self.config.cpus.cpu_count;
-        let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_count + 1) as usize));
 
-        for cpu_id in 0..vcpu_count {
-            let io_bus = self.devices.io_bus().clone();
-            let mmio_bus = self.devices.mmio_bus().clone();
-            let ioapic = if let Some(ioapic) = &self.devices.ioapic() {
-                Some(ioapic.clone())
-            } else {
-                None
-            };
-
-            let mut vcpu = Vcpu::new(cpu_id, &self, io_bus, mmio_bus, ioapic)?;
-            vcpu.configure(entry_addr, &self)?;
-
-            let vcpu_thread_barrier = vcpu_thread_barrier.clone();
-
-            let reset_evt = self.reset_evt.try_clone().unwrap();
-            let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
-            let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
-            self.threads.push(
-                thread::Builder::new()
-                    .name(format!("vcpu{}", vcpu.id))
-                    .spawn(move || {
-                        unsafe {
-                            extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {
-                            }
-                            // This uses an async signal safe handler to kill the vcpu handles.
-                            register_signal_handler(
-                                VCPU_RTSIG_OFFSET,
-                                vmm_sys_util::signal::SignalHandler::Siginfo(handle_signal),
-                                true,
-                                0,
-                            )
-                            .expect("Failed to register vcpu signal handler");
-                        }
-
-                        // Block until all CPUs are ready.
-                        vcpu_thread_barrier.wait();
-
-                        loop {
-                            // vcpu.run() returns false on a KVM_EXIT_SHUTDOWN (triple-fault) so trigger a reset
-                            match vcpu.run() {
-                                Err(e) => {
-                                    error!("VCPU generated error: {:?}", e);
-                                    break;
-                                }
-                                Ok(true) => {}
-                                Ok(false) => {
-                                    reset_evt.write(1).unwrap();
-                                    break;
-                                }
-                            }
-
-                            // We've been told to terminate
-                            if vcpu_kill_signalled.load(Ordering::SeqCst) {
-                                break;
-                            }
-
-                            // If we are being told to pause, we park the thread
-                            // until the pause boolean is toggled.
-                            // The resume operation is responsible for toggling
-                            // the boolean and unpark the thread.
-                            // We enter a loop because park() could spuriously
-                            // return. We will then park() again unless the
-                            // pause boolean has been toggled.
-                            while vcpu_pause_signalled.load(Ordering::SeqCst) {
-                                thread::park();
-                            }
-                        }
-                    })
-                    .map_err(Error::VcpuSpawn)?,
-            );
-        }
-
-        // Unblock all CPU threads.
-        vcpu_thread_barrier.wait();
+        self.cpu_manager.start_boot_vcpus(entry_addr)?;
 
         if self.devices.console().input_enabled() {
             let console = self.devices.console().clone();
