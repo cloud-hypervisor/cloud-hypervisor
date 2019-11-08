@@ -14,6 +14,7 @@ mod configuration;
 mod device;
 mod msi;
 mod msix;
+mod vfio;
 
 pub use self::bus::{PciBus, PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
 pub use self::configuration::{
@@ -27,6 +28,7 @@ pub use self::device::{
 };
 pub use self::msi::MsiCap;
 pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry, MSIX_TABLE_ENTRY_SIZE};
+pub use self::vfio::{VfioPciDevice, VfioPciError};
 
 /// PCI has four interrupt pins A->D.
 #[derive(Copy, Clone)]

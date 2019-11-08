@@ -5,14 +5,11 @@ authors = ["The Cloud Hypervisor Authors"]
 
 [dependencies]
 byteorder = "1.3.2"
-devices = { path = "../devices" }
 kvm-bindings = "0.1.1"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
 libc = "0.2.60"
 log = "0.4.8"
-pci = { path = "../pci" }
 vfio-bindings = "0.1.0"
-vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vmm-sys-util = ">=0.1.1"
 

@@ -4,27 +4,25 @@
 //
 
 extern crate devices;
-extern crate pci;
 extern crate vm_allocator;
 
-use crate::vec_with_array_field;
-use crate::vfio_device::VfioDevice;
+use crate::{
+    BarReprogrammingParams, MsiCap, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
+    PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
+    PciSubclass, MSIX_TABLE_ENTRY_SIZE,
+};
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use kvm_bindings::{
     kvm_irq_routing, kvm_irq_routing_entry, kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI,
 };
 use kvm_ioctls::*;
-use pci::{
-    BarReprogrammingParams, MsiCap, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
-    PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
-    PciSubclass, MSIX_TABLE_ENTRY_SIZE,
-};
 use std::any::Any;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::Arc;
 use std::{fmt, io, result};
+use vfio::{vec_with_array_field, VfioDevice};
 use vfio_bindings::bindings::vfio::*;
 use vm_allocator::SystemAllocator;
 use vm_memory::{Address, GuestAddress, GuestUsize};

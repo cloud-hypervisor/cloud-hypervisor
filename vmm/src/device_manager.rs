@@ -22,7 +22,7 @@ use net_util::Tap;
 #[cfg(feature = "pci_support")]
 use pci::{
     DeviceRelocation, InterruptDelivery, InterruptParameters, PciBarRegionType, PciBus,
-    PciConfigIo, PciConfigMmio, PciDevice, PciInterruptPin, PciRoot,
+    PciConfigIo, PciConfigMmio, PciDevice, PciInterruptPin, PciRoot, VfioPciDevice,
 };
 use qcow::{self, ImageType, QcowFile};
 
@@ -38,7 +38,7 @@ use std::result;
 use std::sync::Weak;
 use std::sync::{Arc, Mutex, RwLock};
 #[cfg(feature = "pci_support")]
-use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
+use vfio::{VfioDevice, VfioDmaMapping};
 use vm_allocator::SystemAllocator;
 use vm_memory::GuestAddress;
 use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
@@ -152,11 +152,11 @@ pub enum DeviceManagerError {
 
     /// Cannot create a VFIO PCI device
     #[cfg(feature = "pci_support")]
-    VfioPciCreate(vfio::VfioPciError),
+    VfioPciCreate(pci::VfioPciError),
 
     /// Failed to map VFIO MMIO region.
     #[cfg(feature = "pci_support")]
-    VfioMapRegion(VfioPciError),
+    VfioMapRegion(pci::VfioPciError),
 
     /// Failed to create the KVM device.
     CreateKvmDevice(io::Error),
