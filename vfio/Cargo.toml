@@ -6,13 +6,10 @@ authors = ["The Cloud Hypervisor Authors"]
 [dependencies]
 arc-swap = ">=0.4.4"
 byteorder = "1.3.4"
-devices = { path = "../devices" }
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch" }
 kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
 libc = "0.2.71"
 log = "0.4.8"
-pci = { path = "../pci" }
-vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.2.1", features = ["backend-mmap"] }
 vmm-sys-util = ">=0.3.1"
