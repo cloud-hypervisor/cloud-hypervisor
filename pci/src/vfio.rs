@@ -20,8 +20,8 @@ use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::Arc;
 use std::{fmt, io, result};
-use vfio::{VfioDevice, VfioError};
 use vfio_bindings::bindings::vfio::*;
+use vfio_ioctls::{VfioDevice, VfioError};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
