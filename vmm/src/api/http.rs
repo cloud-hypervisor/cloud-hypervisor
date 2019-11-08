@@ -3,22 +3,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-extern crate threadpool;
-
 use crate::api::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmShutdown};
 use crate::api::{ApiRequest, VmAction};
 use crate::{Error, Result};
-use micro_http::{HttpConnection, MediaType, Request, Response, StatusCode, Version};
+use micro_http::{HttpServer, MediaType, Request, Response, StatusCode, Version};
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::os::unix::net::UnixListener;
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::thread;
-use threadpool::ThreadPool;
 use vmm_sys_util::eventfd::EventFd;
 
 const HTTP_ROOT: &str = "/api/v1";
-const NUM_THREADS: usize = 4;
 
 /// An HTTP endpoint handler interface
 pub trait EndpointHandler: Sync + Send {
@@ -68,35 +63,23 @@ lazy_static! {
     };
 }
 
-fn http_serve<T: Read + Write>(
-    http_connection: &mut HttpConnection<T>,
-    api_notifier: EventFd,
-    api_sender: Sender<ApiRequest>,
-) {
-    if http_connection.try_read().is_err() {
-        http_connection.enqueue_response(Response::new(
-            Version::Http11,
-            StatusCode::InternalServerError,
-        ));
+fn handle_http_request(
+    request: &Request,
+    api_notifier: &EventFd,
+    api_sender: &Sender<ApiRequest>,
+) -> Response {
+    let path = request.uri().get_abs_path().to_string();
+    let mut response = match HTTP_ROUTES.routes.get(&path) {
+        Some(route) => match api_notifier.try_clone() {
+            Ok(notifier) => route.handle_request(&request, notifier, api_sender.clone()),
+            Err(_) => Response::new(Version::Http11, StatusCode::InternalServerError),
+        },
+        None => Response::new(Version::Http11, StatusCode::NotFound),
+    };
 
-        return;
-    }
-
-    while let Some(request) = http_connection.pop_parsed_request() {
-        let sender = api_sender.clone();
-        let path = request.uri().get_abs_path().to_string();
-        let mut response = match HTTP_ROUTES.routes.get(&path) {
-            Some(route) => match api_notifier.try_clone() {
-                Ok(notifier) => route.handle_request(&request, notifier, sender),
-                Err(_) => Response::new(Version::Http11, StatusCode::InternalServerError),
-            },
-            None => Response::new(Version::Http11, StatusCode::NotFound),
-        };
-
-        response.set_server("Cloud Hypervisor API");
-        response.set_content_type(MediaType::ApplicationJson);
-        http_connection.enqueue_response(response);
-    }
+    response.set_server("Cloud Hypervisor API");
+    response.set_content_type(MediaType::ApplicationJson);
+    response
 }
 
 pub fn start_http_thread(
@@ -104,36 +87,36 @@ pub fn start_http_thread(
     api_notifier: EventFd,
     api_sender: Sender<ApiRequest>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
-    let listener = UnixListener::bind(path).map_err(Error::Bind)?;
-    let pool = ThreadPool::new(NUM_THREADS);
+    std::fs::remove_file(path).unwrap_or_default();
+    let socket_path = PathBuf::from(path);
 
     thread::Builder::new()
         .name("http-server".to_string())
         .spawn(move || {
-            for stream in listener.incoming() {
-                match stream {
-                    Ok(s) => {
-                        let sender = api_sender.clone();
-                        let notifier = api_notifier.try_clone().map_err(Error::EventFdClone)?;
-
-                        pool.execute(move || {
-                            let mut http_connection = HttpConnection::new(s);
-
-                            http_serve(&mut http_connection, notifier, sender);
-
-                            // It's ok to panic from a threadpool managed thread,
-                            // it won't make parent threads crash.
-                            http_connection.try_write().unwrap();
-                        });
+            let mut server = HttpServer::new(socket_path).unwrap();
+            server.start_server().unwrap();
+            loop {
+                match server.requests() {
+                    Ok(request_vec) => {
+                        for server_request in request_vec {
+                            server
+                                .respond(server_request.process(|request| {
+                                    handle_http_request(request, &api_notifier, &api_sender)
+                                }))
+                                .or_else(|e| {
+                                    error!("HTTP server error on response: {}", e);
+                                    Ok(())
+                                })?;
+                        }
                     }
-
-                    Err(_) => continue,
+                    Err(e) => {
+                        error!(
+                            "HTTP server error on retrieving incoming request. Error: {}",
+                            e
+                        );
+                    }
                 }
             }
-
-            pool.join();
-
-            Ok(())
         })
         .map_err(Error::HttpThreadSpawn)
 }
