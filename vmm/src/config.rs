@@ -288,7 +288,7 @@ impl NetConfig {
 
         let mut tap: Option<String> = None;
         let mut ip: Ipv4Addr = Ipv4Addr::new(192, 168, 249, 1);
-        let mut mask: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);;
+        let mut mask: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
         let mut mac: MacAddr = MacAddr::local_random();
         let iommu = parse_iommu(iommu_str)?;
 
