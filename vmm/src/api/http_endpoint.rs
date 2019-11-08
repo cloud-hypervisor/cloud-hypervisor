@@ -81,7 +81,7 @@ impl EndpointHandler for VmCreate {
                         match vm_create(api_notifier, api_sender, Arc::new(vm_config))
                             .map_err(HttpError::VmCreate)
                         {
-                            Ok(_) => Response::new(Version::Http11, StatusCode::OK),
+                            Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
                             Err(e) => error_response(e, StatusCode::InternalServerError),
                         }
                     }
@@ -134,7 +134,7 @@ impl EndpointHandler for VmActionHandler {
                     ApiError::VmResume(_) => HttpError::VmResume(e),
                     _ => HttpError::VmAction(e),
                 }) {
-                    Ok(_) => Response::new(Version::Http11, StatusCode::OK),
+                    Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
                     Err(e) => error_response(e, StatusCode::InternalServerError),
                 }
             }
