@@ -66,7 +66,7 @@ impl TxBuf {
                 // Using uninitialized memory here is quite safe, since we never read from any
                 // area of the buffer before writing to it. First we push, then we flush only
                 // what had been prviously pushed.
-                Box::new(unsafe {mem::uninitialized::<[u8; Self::SIZE]>()}));
+                Box::new(unsafe {mem::MaybeUninit::<[u8; Self::SIZE]>::uninit().assume_init()}));
 
         // Buffer head, as an offset into the data slice.
         let head_ofs = self.head.0 as usize % Self::SIZE;
