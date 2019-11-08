@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 clap = "2.33.0"
-epoll = "4.1.0"
+epoll = ">=4.0.1"
 lazy_static = "1.4.0"
 libc = "0.2.65"
 log = { version = "0.4.8", features = ["std"] }

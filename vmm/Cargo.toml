@@ -15,7 +15,7 @@ cmos = ["devices/cmos"]
 acpi_tables = { path = "../acpi_tables", optional = true }
 arch = { path = "../arch" }
 devices = { path = "../devices" }
-epoll = "4.1.0"
+epoll = ">=4.0.1"
 kvm-bindings = "0.1.1"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
 lazy_static = "1.4.0"
