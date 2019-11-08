@@ -1,0 +1,18 @@
+[package]
+name = "vfio-ioctls"
+version = "0.0.1"
+authors = ["The Cloud Hypervisor Authors", "Liu Jiang <gerry@linux.alibaba.com>"]
+description = "Safe wrappers over VFIO ioctls"
+keywords = ["vfio"]
+license = "Apache-2.0 OR BSD-3-Clause"
+edition = "2018"
+
+[dependencies]
+byteorder = "~1.2.1"
+log = "0.4"
+kvm-bindings = "~0"
+kvm-ioctls = "~0"
+vfio-bindings = "0.1.0"
+vmm-sys-util = "~0"
+
+vm-memory = { git = "https://github.com/rust-vmm/vm-memory", features = ["backend-mmap"] }
