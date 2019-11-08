@@ -7,7 +7,7 @@ edition = "2018"
 [features]
 default = []
 acpi = ["acpi_tables","devices/acpi"]
-pci_support = ["pci", "vfio", "vm-virtio/pci_support"]
+pci_support = ["pci", "vfio-ioctls", "vm-virtio/pci_support"]
 mmio_support = ["vm-virtio/mmio_support"]
 cmos = ["devices/cmos"]
 
@@ -28,7 +28,7 @@ qcow = { path = "../qcow" }
 serde = {version = ">=1.0.27", features = ["rc"] }
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
-vfio = { path = "../vfio", optional = true }
+vfio-ioctls = { path = "../vfio-ioctls", optional = true }
 vm-allocator = { path = "../vm-allocator" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.1.1"

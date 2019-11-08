@@ -1,5 +1,5 @@
 [package]
-name = "vfio"
+name = "vfio-ioctls"
 version = "0.0.1"
 authors = ["The Cloud Hypervisor Authors"]
 
@@ -11,7 +11,7 @@ libc = "0.2.60"
 log = "0.4.8"
 vfio-bindings = "0.1.0"
 vm-device = { path = "../vm-device" }
-vmm-sys-util = ">=0.1.1"
+vmm-sys-util = ">=0.2.0"
 
 [dependencies.vm-memory]
 git = "https://github.com/rust-vmm/vm-memory"

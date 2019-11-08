@@ -38,7 +38,7 @@ use std::result;
 use std::sync::Weak;
 use std::sync::{Arc, Mutex, RwLock};
 #[cfg(feature = "pci_support")]
-use vfio::{VfioDevice, VfioDmaMapping};
+use vfio_ioctls::{VfioDevice, VfioDmaMapping};
 use vm_allocator::SystemAllocator;
 use vm_memory::GuestAddress;
 use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
@@ -148,7 +148,7 @@ pub enum DeviceManagerError {
 
     /// Cannot create a VFIO device
     #[cfg(feature = "pci_support")]
-    VfioCreate(vfio::VfioError),
+    VfioCreate(vfio_ioctls::VfioError),
 
     /// Cannot create a VFIO PCI device
     #[cfg(feature = "pci_support")]
