@@ -1,5 +1,5 @@
 [package]
-name = "vfio"
+name = "vfio-ioctls"
 version = "0.0.1"
 authors = ["The Cloud Hypervisor Authors"]
 

@@ -55,7 +55,7 @@ use std::result;
 use std::sync::{Arc, Mutex};
 use tempfile::NamedTempFile;
 #[cfg(feature = "pci_support")]
-use vfio::{VfioDevice, VfioDmaMapping};
+use vfio_ioctls::{VfioDevice, VfioDmaMapping};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
@@ -212,7 +212,7 @@ pub enum DeviceManagerError {
 
     /// Cannot create a VFIO device
     #[cfg(feature = "pci_support")]
-    VfioCreate(vfio::VfioError),
+    VfioCreate(vfio_ioctls::VfioError),
 
     /// Cannot create a VFIO PCI device
     #[cfg(feature = "pci_support")]
