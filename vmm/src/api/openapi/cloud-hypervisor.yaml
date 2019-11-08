@@ -28,9 +28,8 @@ paths:
       summary: Shuts the cloud-hypervisor VMM.
       operationId: shutdownVMM
       responses:
-        201:
+        204:
           description: The VMM successfully shutdown.
-          content: {}
 
   /vm.info:
     get:
@@ -55,90 +54,74 @@ paths:
               $ref: '#/components/schemas/VmConfig'
         required: true
       responses:
-        201:
+        204:
           description: The VM instance was successfully created.
-          content: {}
 
   /vm.delete:
     put:
       summary: Delete the cloud-hypervisor Virtual Machine (VM) instance.
       operationId: deleteVM
       responses:
-        201:
+        204:
           description: The VM instance was successfully deleted.
-          content: {}
 
   /vm.boot:
     put:
       summary: Boot the previously created VM instance.
       operationId: bootVM
       responses:
-        201:
+        204:
           description: The VM instance successfully booted.
-          content: {}
         404:
           description: The VM instance could not boot because it is not created yet
-          content: {}
 
   /vm.pause:
     put:
       summary: Pause a previously booted VM instance.
       operationId: pauseVM
       responses:
-        201:
+        204:
           description: The VM instance successfully paused.
-          content: {}
         404:
           description: The VM instance could not pause because it is not created yet
-          content: {}
         405:
           description: The VM instance could not pause because it is not booted.
-          content: {}
 
   /vm.resume:
     put:
       summary: Resume a previously paused VM instance.
       operationId: resumeVM
       responses:
-        201:
+        204:
           description: The VM instance successfully paused.
-          content: {}
         404:
           description: The VM instance could not resume because it is not booted yet
-          content: {}
         405:
           description: The VM instance could not resume because it is not paused.
-          content: {}
 
   /vm.shutdown:
     put:
       summary: Shut the VM instance down.
       operationId: shutdownVM
       responses:
-        201:
+        204:
           description: The VM instance successfully shut down.
-          content: {}
         404:
           description: The VM instance could not shut down because is not created.
-          content: {}
         405:
           description: The VM instance could not shut down because it is not started.
-          content: {}
 
   /vm.reboot:
     put:
       summary: Reboot the VM instance.
       operationId: rebootVM
       responses:
-        201:
+        204:
           description: The VM instance successfully rebooted.
-          content: {}
         404:
           description: The VM instance could not reboot because it is not created.
-          content: {}
         405:
           description: The VM instance could not reboot because it is not booted.
-          content: {}
 
 components:
   schemas:
