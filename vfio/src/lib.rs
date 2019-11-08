@@ -16,12 +16,14 @@ extern crate vm_memory;
 #[macro_use]
 extern crate vmm_sys_util;
 
+mod dma_mapping;
 mod vfio_device;
 mod vfio_ioctls;
 
 use std::mem::size_of;
 
-pub use vfio_device::{VfioContainer, VfioDevice, VfioDmaMapping, VfioError};
+pub use dma_mapping::VfioDmaMapping;
+pub use vfio_device::{VfioContainer, VfioDevice, VfioError};
 
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
 fn vec_with_size_in_bytes<T: Default>(size_in_bytes: usize) -> Vec<T> {

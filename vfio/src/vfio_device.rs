@@ -14,13 +14,11 @@ use std::mem;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::prelude::FileExt;
 use std::path::{Path, PathBuf};
-use std::result;
 use std::sync::{Arc, RwLock};
 use std::u32;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::*;
-use vm_device::ExternalDmaMapping;
-use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
+use vm_memory::{Address, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::ioctl::*;
 
@@ -505,68 +503,6 @@ impl VfioDeviceInfo {
         }
 
         Ok(regions)
-    }
-}
-
-/// This structure implements the ExternalDmaMapping trait. It is meant to
-/// be used when the caller tries to provide a way to update the mappings
-/// associated with a specific VFIO container.
-pub struct VfioDmaMapping {
-    container: Arc<VfioContainer>,
-    memory: Arc<RwLock<GuestMemoryMmap>>,
-}
-
-impl VfioDmaMapping {
-    pub fn new(container: Arc<VfioContainer>, memory: Arc<RwLock<GuestMemoryMmap>>) -> Self {
-        VfioDmaMapping { container, memory }
-    }
-}
-
-impl ExternalDmaMapping for VfioDmaMapping {
-    fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
-        let user_addr = if let Some(addr) = self
-            .memory
-            .read()
-            .unwrap()
-            .get_host_address(GuestAddress(gpa))
-        {
-            addr as u64
-        } else {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "failed to convert guest address 0x{:x} into \
-                     host user virtual address",
-                    gpa
-                ),
-            ));
-        };
-
-        self.container
-            .vfio_dma_map(iova, size, user_addr)
-            .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!(
-                        "failed to map memory for VFIO container, \
-                         iova 0x{:x}, gpa 0x{:x}, size 0x{:x}: {:?}",
-                        iova, gpa, size, e
-                    ),
-                )
-            })
-    }
-
-    fn unmap(&self, iova: u64, size: u64) -> result::Result<(), io::Error> {
-        self.container.vfio_dma_unmap(iova, size).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "failed to unmap memory for VFIO container, \
-                     iova 0x{:x}, size 0x{:x}: {:?}",
-                    iova, size, e
-                ),
-            )
-        })
     }
 }
 
