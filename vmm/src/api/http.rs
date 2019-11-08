@@ -8,7 +8,7 @@ extern crate threadpool;
 use crate::api::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmShutdown};
 use crate::api::{ApiRequest, VmAction};
 use crate::{Error, Result};
-use micro_http::{HttpConnection, Request, Response, StatusCode, Version};
+use micro_http::{HttpConnection, MediaType, Request, Response, StatusCode, Version};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixListener;
@@ -94,6 +94,7 @@ fn http_serve<T: Read + Write>(
         };
 
         response.set_server("Cloud Hypervisor API");
+        response.set_content_type(MediaType::ApplicationJson);
         http_connection.enqueue_response(response);
     }
 }
