@@ -7,14 +7,11 @@
 //! Virtual Function I/O (VFIO) API
 extern crate arc_swap;
 extern crate byteorder;
-extern crate devices;
 extern crate kvm_bindings;
 extern crate kvm_ioctls;
 #[macro_use]
 extern crate log;
-extern crate pci;
 extern crate vfio_bindings;
-extern crate vm_allocator;
 extern crate vm_device;
 extern crate vm_memory;
 #[macro_use]
@@ -22,12 +19,10 @@ extern crate vmm_sys_util;
 
 mod vfio_device;
 mod vfio_ioctls;
-mod vfio_pci;
 
 use std::mem::size_of;
 
 pub use vfio_device::{VfioContainer, VfioDevice, VfioDmaMapping, VfioError};
-pub use vfio_pci::{VfioPciDevice, VfioPciError};
 
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
 fn vec_with_size_in_bytes<T: Default>(size_in_bytes: usize) -> Vec<T> {

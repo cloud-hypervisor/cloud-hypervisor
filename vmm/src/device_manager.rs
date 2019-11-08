@@ -40,6 +40,7 @@ use libc::{MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WR
 #[cfg(feature = "pci_support")]
 use pci::{
     DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
+    VfioPciDevice,
 };
 use qcow::{self, ImageType, QcowFile};
 #[cfg(feature = "pci_support")]
@@ -54,7 +55,7 @@ use std::result;
 use std::sync::{Arc, Mutex};
 use tempfile::NamedTempFile;
 #[cfg(feature = "pci_support")]
-use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
+use vfio::{VfioDevice, VfioDmaMapping};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
@@ -215,11 +216,11 @@ pub enum DeviceManagerError {
 
     /// Cannot create a VFIO PCI device
     #[cfg(feature = "pci_support")]
-    VfioPciCreate(vfio::VfioPciError),
+    VfioPciCreate(pci::VfioPciError),
 
     /// Failed to map VFIO MMIO region.
     #[cfg(feature = "pci_support")]
-    VfioMapRegion(VfioPciError),
+    VfioMapRegion(pci::VfioPciError),
 
     /// Failed to create the KVM device.
     CreateKvmDevice(kvm_ioctls::Error),
@@ -326,7 +327,7 @@ pub enum DeviceManagerError {
 
     /// Failed updating guest memory for VFIO PCI device.
     #[cfg(feature = "pci_support")]
-    UpdateMemoryForVfioPciDevice(VfioPciError),
+    UpdateMemoryForVfioPciDevice(pci::VfioPciError),
 
     /// Trying to use a directory for pmem but no size specified
     PmemWithDirectorySizeMissing,

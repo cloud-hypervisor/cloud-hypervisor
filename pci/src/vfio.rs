@@ -4,15 +4,13 @@
 //
 
 extern crate devices;
-extern crate pci;
 extern crate vm_allocator;
 
-use crate::vfio_device::VfioDevice;
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::*;
-use pci::{
+use crate::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig,
     PciBarConfiguration, PciBarRegionType, PciCapabilityID, PciClassCode, PciConfiguration,
     PciDevice, PciDeviceError, PciHeaderType, PciSubclass, MSIX_TABLE_ENTRY_SIZE,
@@ -22,6 +20,7 @@ use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::Arc;
 use std::{fmt, io, result};
+use vfio::{VfioDevice, VfioError};
 use vfio_bindings::bindings::vfio::*;
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
@@ -41,7 +40,7 @@ pub enum VfioPciError {
     SetGsiRouting(kvm_ioctls::Error),
     MsiNotConfigured,
     MsixNotConfigured,
-    UpdateMemory(crate::VfioError),
+    UpdateMemory(VfioError),
     UpdateMsiEventFd,
     UpdateMsixEventFd,
 }
