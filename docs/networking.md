@@ -1,6 +1,6 @@
 # How to use networking
 
-cloud-hypervisor can emulate one or more virtual network interfaces, represented at the hypervisor host by [tap devices](https://www.kernel.org/doc/Documentation/networking/tuntap.txt"). This guide briefly describes, in a manual and distribution neutral way, how to setup and use networking with cloud-hypevisor.
+cloud-hypervisor can emulate one or more virtual network interfaces, represented at the hypervisor host by [tap devices](https://www.kernel.org/doc/Documentation/networking/tuntap.txt). This guide briefly describes, in a manual and distribution neutral way, how to setup and use networking with cloud-hypevisor.
 
 ## Start cloud-hypervisor with net devices
 
