@@ -1478,6 +1478,10 @@ impl DeviceManager {
         &self.address_manager.mmio_bus
     }
 
+    pub fn allocator(&self) -> &Arc<Mutex<SystemAllocator>> {
+        &self.address_manager.allocator
+    }
+
     pub fn ioapic(&self) -> &Option<Arc<Mutex<ioapic::Ioapic>>> {
         &self.ioapic
     }
