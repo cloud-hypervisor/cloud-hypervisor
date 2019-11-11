@@ -828,6 +828,124 @@ impl Aml for OpRegion {
     }
 }
 
+pub struct If<'a> {
+    predicate: &'a dyn Aml,
+    if_children: Vec<&'a dyn Aml>,
+}
+
+impl<'a> If<'a> {
+    pub fn new(predicate: &'a dyn Aml, if_children: Vec<&'a dyn Aml>) -> Self {
+        If {
+            predicate,
+            if_children,
+        }
+    }
+}
+
+impl<'a> Aml for If<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.predicate.to_aml_bytes());
+        for child in self.if_children.iter() {
+            bytes.extend_from_slice(&child.to_aml_bytes());
+        }
+
+        let mut pkg_length = create_pkg_length(&bytes, true);
+        pkg_length.reverse();
+        for byte in pkg_length {
+            bytes.insert(0, byte);
+        }
+
+        bytes.insert(0, 0xa0); /* IfOp */
+        bytes
+    }
+}
+
+pub struct Equal<'a> {
+    right: &'a dyn Aml,
+    left: &'a dyn Aml,
+}
+
+impl<'a> Equal<'a> {
+    pub fn new(left: &'a dyn Aml, right: &'a dyn Aml) -> Self {
+        Equal { left, right }
+    }
+}
+
+impl<'a> Aml for Equal<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x93); /* LEqualOp */
+        bytes.extend_from_slice(&self.left.to_aml_bytes());
+        bytes.extend_from_slice(&self.right.to_aml_bytes());
+        bytes
+    }
+}
+
+pub struct LessThan<'a> {
+    right: &'a dyn Aml,
+    left: &'a dyn Aml,
+}
+
+impl<'a> LessThan<'a> {
+    pub fn new(left: &'a dyn Aml, right: &'a dyn Aml) -> Self {
+        LessThan { left, right }
+    }
+}
+
+impl<'a> Aml for LessThan<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x95); /* LLessOp */
+        bytes.extend_from_slice(&self.left.to_aml_bytes());
+        bytes.extend_from_slice(&self.right.to_aml_bytes());
+        bytes
+    }
+}
+
+pub struct Arg(pub u8);
+
+impl Aml for Arg {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        assert!(self.0 <= 6);
+        bytes.push(0x68 + self.0); /* Arg0Op */
+        bytes
+    }
+}
+
+pub struct Local(pub u8);
+
+impl Aml for Local {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        assert!(self.0 <= 7);
+        bytes.push(0x60 + self.0); /* Local0Op */
+        bytes
+    }
+}
+
+pub struct Store<'a> {
+    name: &'a dyn Aml,
+    value: &'a dyn Aml,
+}
+
+impl<'a> Store<'a> {
+    pub fn new(name: &'a dyn Aml, value: &'a dyn Aml) -> Self {
+        Store { name, value }
+    }
+}
+
+impl<'a> Aml for Store<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x70); /* StoreOp */
+        bytes.extend_from_slice(&self.value.to_aml_bytes());
+        bytes.extend_from_slice(&self.name.to_aml_bytes());
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1302,6 +1420,67 @@ mod tests {
         assert_eq!(
             OpRegion::new("PRST".into(), OpRegionSpace::SystemIO, 0xcd8, 0xc).to_aml_bytes(),
             &op_region_data[..]
+        );
+    }
+
+    #[test]
+    fn test_arg_if() {
+        /*
+            Method(TEST, 1, NotSerialized) {
+                If (Arg0 == Zero) {
+                        Return(One)
+                }
+                Return(Zero)
+            }
+        */
+        let arg_if_data = [
+            0x14, 0x0F, 0x54, 0x45, 0x53, 0x54, 0x01, 0xA0, 0x06, 0x93, 0x68, 0x00, 0xA4, 0x01,
+            0xA4, 0x00,
+        ];
+
+        assert_eq!(
+            Method::new(
+                "TEST".into(),
+                1,
+                false,
+                vec![
+                    &If::new(&Equal::new(&Arg(0), &ZERO), vec![&Return::new(&ONE)]),
+                    &Return::new(&ZERO)
+                ]
+            )
+            .to_aml_bytes(),
+            &arg_if_data
+        );
+    }
+
+    #[test]
+    fn test_local_if() {
+        /*
+            Method(TEST, 0, NotSerialized) {
+                Local0 = One
+                If (Local0 == Zero) {
+                        Return(One)
+                }
+                Return(Zero)
+            }
+        */
+        let local_if_data = [
+            0x14, 0x12, 0x54, 0x45, 0x53, 0x54, 0x00, 0x70, 0x01, 0x60, 0xA0, 0x06, 0x93, 0x60,
+            0x00, 0xA4, 0x01, 0xA4, 0x00,
+        ];
+        assert_eq!(
+            Method::new(
+                "TEST".into(),
+                0,
+                false,
+                vec![
+                    &Store::new(&Local(0), &ONE),
+                    &If::new(&Equal::new(&Local(0), &ZERO), vec![&Return::new(&ONE)]),
+                    &Return::new(&ZERO)
+                ]
+            )
+            .to_aml_bytes(),
+            &local_if_data
         );
     }
 }
