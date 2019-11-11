@@ -428,7 +428,8 @@ impl Vm {
             fd,
             cpuid,
             reset_evt,
-        );
+        )
+        .map_err(Error::CpuManager)?;
 
         Ok(Vm {
             kernel,

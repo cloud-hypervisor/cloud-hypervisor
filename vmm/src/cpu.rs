@@ -11,7 +11,7 @@
 
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::sync::{Arc, Barrier, Mutex, RwLock, Weak};
 use std::thread;
 use std::{fmt, io, result};
 
@@ -19,7 +19,7 @@ use libc::{c_void, siginfo_t};
 
 use crate::device_manager::DeviceManager;
 
-use devices::ioapic;
+use devices::{ioapic, BusDevice};
 use kvm_ioctls::*;
 
 use vm_memory::{Address, GuestAddress, GuestMemoryMmap};
@@ -110,6 +110,9 @@ pub enum Error {
 
     /// Failed to join on vCPU threads
     ThreadCleanup,
+
+    /// Cannot add legacy device to Bus.
+    BusError(devices::BusError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -329,7 +332,7 @@ impl Vcpu {
 
 pub struct CpuManager {
     boot_vcpus: u8,
-    io_bus: Arc<devices::Bus>,
+    io_bus: Weak<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
     vm_memory: Arc<RwLock<GuestMemoryMmap>>,
@@ -341,6 +344,12 @@ pub struct CpuManager {
     threads: Vec<thread::JoinHandle<()>>,
 }
 
+impl BusDevice for CpuManager {
+    fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {}
+
+    fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) {}
+}
+
 impl CpuManager {
     pub fn new(
         boot_vcpus: u8,
@@ -349,10 +358,10 @@ impl CpuManager {
         fd: Arc<VmFd>,
         cpuid: CpuId,
         reset_evt: EventFd,
-    ) -> Arc<Mutex<CpuManager>> {
+    ) -> Result<Arc<Mutex<CpuManager>>> {
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus,
-            io_bus: device_manager.io_bus().clone(),
+            io_bus: Arc::downgrade(&device_manager.io_bus().clone()),
             mmio_bus: device_manager.mmio_bus().clone(),
             ioapic: device_manager.ioapic().clone(),
             vm_memory: guest_memory,
@@ -365,6 +374,15 @@ impl CpuManager {
         }));
 
         cpu_manager
+            .lock()
+            .unwrap()
+            .io_bus
+            .upgrade()
+            .unwrap()
+            .insert(cpu_manager.clone(), 0x0cd8, 0xc)
+            .map_err(Error::BusError)?;
+
+        Ok(cpu_manager)
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
@@ -383,7 +401,7 @@ impl CpuManager {
             let mut vcpu = Vcpu::new(
                 cpu_id,
                 &self.fd,
-                self.io_bus.clone(),
+                self.io_bus.clone().upgrade().unwrap(),
                 self.mmio_bus.clone(),
                 ioapic,
                 creation_ts,
