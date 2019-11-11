@@ -349,8 +349,8 @@ impl CpuManager {
         fd: Arc<VmFd>,
         cpuid: CpuId,
         reset_evt: EventFd,
-    ) -> CpuManager {
-        CpuManager {
+    ) -> Arc<Mutex<CpuManager>> {
+        let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus,
             io_bus: device_manager.io_bus().clone(),
             mmio_bus: device_manager.mmio_bus().clone(),
@@ -362,7 +362,9 @@ impl CpuManager {
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
             threads: Vec::with_capacity(boot_vcpus as usize),
             reset_evt,
-        }
+        }));
+
+        cpu_manager
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.

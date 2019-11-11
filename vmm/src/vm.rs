@@ -43,7 +43,7 @@ use std::io;
 use std::ops::Deref;
 use std::os::unix::io::FromRawFd;
 
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_allocator::{GsiApic, SystemAllocator};
 use vm_memory::guest_memory::FileOffset;
@@ -205,7 +205,7 @@ pub struct Vm {
     on_tty: bool,
     signals: Option<Signals>,
     state: RwLock<VmState>,
-    cpu_manager: cpu::CpuManager,
+    cpu_manager: Arc<Mutex<cpu::CpuManager>>,
 }
 
 fn get_host_cpu_phys_bits() -> u8 {
@@ -564,7 +564,11 @@ impl Vm {
             signals.close();
         }
 
-        self.cpu_manager.shutdown().map_err(Error::CpuManager)?;
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .shutdown()
+            .map_err(Error::CpuManager)?;
 
         // Wait for all the threads to finish
         for thread in self.threads.drain(..) {
@@ -581,7 +585,11 @@ impl Vm {
 
         state.valid_transition(new_state)?;
 
-        self.cpu_manager.pause().map_err(Error::CpuManager)?;
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .pause()
+            .map_err(Error::CpuManager)?;
 
         *state = new_state;
 
@@ -594,7 +602,11 @@ impl Vm {
 
         state.valid_transition(new_state)?;
 
-        self.cpu_manager.resume().map_err(Error::CpuManager)?;
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .resume()
+            .map_err(Error::CpuManager)?;
 
         // And we're back to the Running state.
         *state = new_state;
@@ -623,6 +635,8 @@ impl Vm {
         let entry_addr = self.load_kernel()?;
 
         self.cpu_manager
+            .lock()
+            .unwrap()
             .start_boot_vcpus(entry_addr)
             .map_err(Error::CpuManager)?;
 
