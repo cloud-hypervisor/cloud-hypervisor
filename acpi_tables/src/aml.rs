@@ -165,7 +165,7 @@ impl<'a> Aml for Package<'a> {
             bytes.append(&mut child.to_aml_bytes());
         }
 
-        let mut pkg_length = create_pkg_length(&bytes);
+        let mut pkg_length = create_pkg_length(&bytes, true);
         pkg_length.reverse();
         for byte in pkg_length {
             bytes.insert(0, byte);
@@ -198,7 +198,8 @@ package length is 2**28."
 
 */
 
-fn create_pkg_length(data: &[u8]) -> Vec<u8> {
+/* Also used for NamedField but in that case the length is not included in itself */
+fn create_pkg_length(data: &[u8], include_self: bool) -> Vec<u8> {
     let mut result = Vec::new();
 
     /* PkgLength is inclusive and includes the length bytes */
@@ -212,7 +213,7 @@ fn create_pkg_length(data: &[u8]) -> Vec<u8> {
         4
     };
 
-    let length = data.len() + length_length;
+    let length = data.len() + if include_self { length_length } else { 0 };
 
     match length_length {
         1 => result.push(length as u8),
@@ -335,7 +336,7 @@ impl<'a> Aml for ResourceTemplate<'a> {
         }
 
         // PkgLength is everything else
-        let mut pkg_length = create_pkg_length(&bytes);
+        let mut pkg_length = create_pkg_length(&bytes, true);
         pkg_length.reverse();
         for byte in pkg_length {
             bytes.insert(0, byte);
@@ -597,7 +598,7 @@ impl<'a> Aml for Device<'a> {
             bytes.append(&mut child.to_aml_bytes());
         }
 
-        let mut pkg_length = create_pkg_length(&bytes);
+        let mut pkg_length = create_pkg_length(&bytes, true);
         pkg_length.reverse();
         for byte in pkg_length {
             bytes.insert(0, byte);
@@ -628,7 +629,7 @@ impl<'a> Aml for Scope<'a> {
             bytes.append(&mut child.to_aml_bytes());
         }
 
-        let mut pkg_length = create_pkg_length(&bytes);
+        let mut pkg_length = create_pkg_length(&bytes, true);
         pkg_length.reverse();
         for byte in pkg_length {
             bytes.insert(0, byte);
@@ -673,7 +674,7 @@ impl<'a> Aml for Method<'a> {
             bytes.append(&mut child.to_aml_bytes());
         }
 
-        let mut pkg_length = create_pkg_length(&bytes);
+        let mut pkg_length = create_pkg_length(&bytes, true);
         pkg_length.reverse();
         for byte in pkg_length {
             bytes.insert(0, byte);
@@ -989,13 +990,13 @@ mod tests {
 
     #[test]
     fn test_pkg_length() {
-        assert_eq!(create_pkg_length(&[0u8; 62].to_vec()), vec![63]);
+        assert_eq!(create_pkg_length(&[0u8; 62].to_vec(), true), vec![63]);
         assert_eq!(
-            create_pkg_length(&[0u8; 64].to_vec()),
+            create_pkg_length(&[0u8; 64].to_vec(), true),
             vec![1 << 6 | (66 & 0xf), 66 >> 4]
         );
         assert_eq!(
-            create_pkg_length(&[0u8; 4096].to_vec()),
+            create_pkg_length(&[0u8; 4096].to_vec(), true),
             vec![
                 2 << 6 | (4099 & 0xf) as u8,
                 (4099 >> 4) as u8,
