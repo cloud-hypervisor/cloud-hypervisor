@@ -27,6 +27,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 pub mod api;
 pub mod config;
+pub mod cpu;
 pub mod device_manager;
 pub mod vm;
 
