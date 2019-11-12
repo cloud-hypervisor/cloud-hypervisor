@@ -63,7 +63,6 @@ members = [
     "vhost_user_backend",
     "vhost_user_fs",
     "vhost_user_net",
-    "vfio-ioctls",
     "net_util",
     "acpi_tables",
     "arch_gen",

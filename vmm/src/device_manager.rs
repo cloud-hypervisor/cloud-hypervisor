@@ -55,7 +55,7 @@ use std::result;
 use std::sync::{Arc, Mutex};
 use tempfile::NamedTempFile;
 #[cfg(feature = "pci_support")]
-use vfio_ioctls::{VfioDevice, VfioDmaMapping};
+use vfio_ioctls::{VfioContainer, VfioDevice, VfioDmaMapping};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
@@ -2177,18 +2177,23 @@ impl DeviceManager {
             << 3;
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
+        let vfio_container = Arc::new(
+            VfioContainer::new(device_fd.clone()).map_err(DeviceManagerError::VfioCreate)?,
+        );
+
         let vfio_device = VfioDevice::new(
             &device_cfg.path,
-            device_fd.clone(),
-            memory.clone(),
+            Arc::clone(&vfio_container),
             device_cfg.iommu,
         )
         .map_err(DeviceManagerError::VfioCreate)?;
 
         if device_cfg.iommu {
             if let Some(iommu) = &self.iommu_device {
-                let vfio_mapping =
-                    Arc::new(VfioDmaMapping::new(vfio_device.get_container(), memory));
+                let vfio_mapping = Arc::new(VfioDmaMapping::new(
+                    Arc::clone(&vfio_container),
+                    Arc::new(memory),
+                ));
 
                 iommu
                     .lock()
@@ -2197,9 +2202,14 @@ impl DeviceManager {
             }
         }
 
-        let mut vfio_pci_device =
-            VfioPciDevice::new(&self.address_manager.vm_fd, vfio_device, interrupt_manager)
-                .map_err(DeviceManagerError::VfioPciCreate)?;
+        let memory = self.memory_manager.lock().unwrap().guest_memory();
+        let mut vfio_pci_device = VfioPciDevice::new(
+            &self.address_manager.vm_fd,
+            vfio_device,
+            interrupt_manager,
+            memory,
+        )
+        .map_err(DeviceManagerError::VfioPciCreate)?;
 
         let bars = vfio_pci_device
             .allocate_bars(&mut self.address_manager.allocator.lock().unwrap())
