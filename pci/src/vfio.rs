@@ -20,12 +20,12 @@ use kvm_ioctls::*;
 use std::any::Any;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::{fmt, io, result};
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::{vec_with_array_field, VfioDevice};
 use vm_allocator::SystemAllocator;
-use vm_memory::{Address, GuestAddress, GuestUsize};
+use vm_memory::{Address, GuestAddress, GuestMemoryMmap, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]
@@ -312,6 +312,7 @@ pub struct VfioPciDevice {
     mmio_regions: Vec<MmioRegion>,
     interrupt: Interrupt,
     interrupt_routes: Vec<InterruptRoute>,
+    mem: Arc<RwLock<GuestMemoryMmap>>,
 }
 
 impl VfioPciDevice {
@@ -320,6 +321,7 @@ impl VfioPciDevice {
         vm_fd: &Arc<VmFd>,
         allocator: &mut SystemAllocator,
         device: VfioDevice,
+        mem: Arc<RwLock<GuestMemoryMmap>>,
     ) -> Result<Self> {
         let device = Arc::new(device);
         device.reset();
@@ -349,6 +351,7 @@ impl VfioPciDevice {
                 msix: None,
             },
             interrupt_routes: Vec::new(),
+            mem,
         };
 
         vfio_pci_device.parse_capabilities();
@@ -686,7 +689,12 @@ impl Drop for VfioPciDevice {
             }
         }
 
-        if self.device.unset_dma_map().is_err() {
+        if self
+            .device
+            .container()
+            .unset_dma_map(self.mem.read().unwrap().clone())
+            .is_err()
+        {
             error!("failed to remove all guest memory regions from iommu table");
         }
     }
@@ -890,7 +898,12 @@ impl PciDevice for VfioPciDevice {
             }
         }
 
-        if self.device.setup_dma_map().is_err() {
+        if self
+            .device
+            .container()
+            .setup_dma_map(self.mem.read().unwrap().clone())
+            .is_err()
+        {
             error!("failed to add all guest memory regions into iommu table");
         }
 

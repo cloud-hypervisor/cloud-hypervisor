@@ -38,7 +38,7 @@ use std::result;
 use std::sync::Weak;
 use std::sync::{Arc, Mutex, RwLock};
 #[cfg(feature = "pci_support")]
-use vfio_ioctls::{VfioDevice, VfioDmaMapping};
+use vfio_ioctls::{VfioContainer, VfioDevice, VfioDmaMapping};
 use vm_allocator::SystemAllocator;
 use vm_memory::GuestAddress;
 use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
@@ -1236,18 +1236,19 @@ impl DeviceManager {
                 // global device ID.
                 let device_id = pci.next_device_id() << 3;
 
-                let vfio_device = VfioDevice::new(
-                    &device_cfg.path,
-                    device_fd.clone(),
-                    vm_info.memory.clone(),
-                    device_cfg.iommu,
-                )
-                .map_err(DeviceManagerError::VfioCreate)?;
+                let vfio_container = Arc::new(
+                    VfioContainer::new(device_fd.clone())
+                        .map_err(DeviceManagerError::VfioCreate)?,
+                );
+
+                // TODO: Pass the iommu toogle
+                let vfio_device = VfioDevice::new(&device_cfg.path, Arc::clone(&vfio_container))
+                    .map_err(DeviceManagerError::VfioCreate)?;
 
                 if device_cfg.iommu {
                     if let Some(iommu) = iommu_device {
                         let vfio_mapping = Arc::new(VfioDmaMapping::new(
-                            vfio_device.get_container(),
+                            Arc::clone(&vfio_container),
                             Arc::clone(vm_info.memory),
                         ));
 
@@ -1256,9 +1257,13 @@ impl DeviceManager {
                     }
                 }
 
-                let mut vfio_pci_device =
-                    VfioPciDevice::new(vm_info.vm_fd, &mut allocator, vfio_device)
-                        .map_err(DeviceManagerError::VfioPciCreate)?;
+                let mut vfio_pci_device = VfioPciDevice::new(
+                    vm_info.vm_fd,
+                    &mut allocator,
+                    vfio_device,
+                    vm_info.memory.clone(),
+                )
+                .map_err(DeviceManagerError::VfioPciCreate)?;
 
                 let bars = vfio_pci_device
                     .allocate_bars(&mut allocator)
