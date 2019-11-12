@@ -783,6 +783,51 @@ impl Aml for Field {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum OpRegionSpace {
+    SystemMemory,
+    SystemIO,
+    PCIConfig,
+    EmbeddedControl,
+    SMBus,
+    SystemCMOS,
+    PciBarTarget,
+    IPMI,
+    GeneralPurposeIO,
+    GenericSerialBus,
+}
+
+pub struct OpRegion {
+    path: Path,
+    space: OpRegionSpace,
+    offset: usize,
+    length: usize,
+}
+
+impl OpRegion {
+    pub fn new(path: Path, space: OpRegionSpace, offset: usize, length: usize) -> Self {
+        OpRegion {
+            path,
+            space,
+            offset,
+            length,
+        }
+    }
+}
+
+impl Aml for OpRegion {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.append(&mut self.path.to_aml_bytes());
+        bytes.push(self.space as u8);
+        bytes.extend_from_slice(&self.offset.to_aml_bytes()); /* RegionOffset */
+        bytes.extend_from_slice(&self.length.to_aml_bytes()); /* RegionLen */
+        bytes.insert(0, 0x80); /* OpRegionOp */
+        bytes.insert(0, 0x5b); /* ExtOpPrefix */
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1242,6 +1287,21 @@ mod tests {
             )
             .to_aml_bytes(),
             &field_data[..]
+        );
+    }
+
+    #[test]
+    fn test_op_region() {
+        /*
+            OperationRegion (PRST, SystemIO, 0x0CD8, 0x0C)
+        */
+        let op_region_data = [
+            0x5Bu8, 0x80, 0x50, 0x52, 0x53, 0x54, 0x01, 0x0B, 0xD8, 0x0C, 0x0A, 0x0C,
+        ];
+
+        assert_eq!(
+            OpRegion::new("PRST".into(), OpRegionSpace::SystemIO, 0xcd8, 0xc).to_aml_bytes(),
+            &op_region_data[..]
         );
     }
 }
