@@ -6,16 +6,17 @@
 extern crate devices;
 extern crate vm_allocator;
 
-use byteorder::{ByteOrder, LittleEndian};
-use devices::BusDevice;
-use kvm_bindings::kvm_userspace_memory_region;
-use kvm_ioctls::*;
 use crate::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig,
     PciBarConfiguration, PciBarRegionType, PciCapabilityID, PciClassCode, PciConfiguration,
     PciDevice, PciDeviceError, PciHeaderType, PciSubclass, MSIX_TABLE_ENTRY_SIZE,
 };
+use byteorder::{ByteOrder, LittleEndian};
+use devices::BusDevice;
+use kvm_bindings::kvm_userspace_memory_region;
+use kvm_ioctls::*;
 use std::any::Any;
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::Arc;
@@ -26,7 +27,10 @@ use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
-use vm_memory::{Address, GuestAddress, GuestRegionMmap, GuestUsize};
+use vm_memory::{
+    Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap, GuestRegionMmap,
+    GuestUsize,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]
@@ -283,6 +287,7 @@ pub struct VfioPciDevice {
     configuration: PciConfiguration,
     mmio_regions: Vec<MmioRegion>,
     interrupt: Interrupt,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
 }
 
 impl VfioPciDevice {
@@ -291,6 +296,7 @@ impl VfioPciDevice {
         vm_fd: &Arc<VmFd>,
         device: VfioDevice,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> Result<Self> {
         let device = Arc::new(device);
         device.reset();
@@ -320,6 +326,7 @@ impl VfioPciDevice {
                 msi: None,
                 msix: None,
             },
+            mem,
         };
 
         vfio_pci_device.parse_capabilities(interrupt_manager);
@@ -636,7 +643,11 @@ impl Drop for VfioPciDevice {
             }
         }
 
-        if self.device.unset_dma_map().is_err() {
+        if self
+            .device
+            .setup_dma_map(self.mem.memory().deref())
+            .is_err()
+        {
             error!("failed to remove all guest memory regions from iommu table");
         }
     }
@@ -842,7 +853,11 @@ impl PciDevice for VfioPciDevice {
             }
         }
 
-        if self.device.setup_dma_map().is_err() {
+        if self
+            .device
+            .setup_dma_map(self.mem.memory().deref())
+            .is_err()
+        {
             error!("failed to add all guest memory regions into iommu table");
         }
 

@@ -690,7 +690,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "vfio-bindings",
+ "vfio-bindings 0.2.0 (git+https://github.com/rust-vmm/vfio-bindings)",
  "vfio-ioctls",
  "vm-allocator",
  "vm-device",
@@ -1353,17 +1353,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "vfio-bindings"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a21f546f2bda37f5a8cfb138c87f95b8e34d2d78d6a7a92ba3785f4e08604a7"
+
+[[package]]
 name = "vfio-ioctls"
-version = "0.0.1"
+version = "0.1.0"
+source = "git+https://github.com/cloud-hypervisor/vfio-ioctls?branch=ch#f6f81ee865cb60a24ad5d4ba8200940ed1d5d1f4"
 dependencies = [
- "arc-swap",
  "byteorder",
  "kvm-bindings",
  "kvm-ioctls",
- "libc",
  "log 0.4.8",
- "vfio-bindings",
- "vm-device",
+ "vfio-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory",
  "vmm-sys-util",
 ]
@@ -1509,6 +1513,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tempfile",
+ "vfio-ioctls",
  "vhost",
  "virtio-bindings",
  "vm-allocator",
