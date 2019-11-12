@@ -46,6 +46,10 @@ pub enum Error<'a> {
     ParseNetMaskParam(AddrParseError),
     /// Failed parsing network mac parameter.
     ParseNetMacParam(&'a str),
+    /// Failed parsing network queue number parameter.
+    ParseNetNumQueuesParam(std::num::ParseIntError),
+    /// Failed parsing network queue size parameter.
+    ParseNetQueueSizeParam(std::num::ParseIntError),
     /// Failed parsing fs tag parameter.
     ParseFsTagParam,
     /// Failed parsing fs socket path parameter.
@@ -361,6 +365,10 @@ pub struct NetConfig {
     pub mac: MacAddr,
     #[serde(default)]
     pub iommu: bool,
+    #[serde(default = "default_netconfig_num_queues")]
+    pub num_queues: usize,
+    #[serde(default = "default_netconfig_queue_size")]
+    pub queue_size: u16,
 }
 
 fn default_netconfig_tap() -> Option<String> {
@@ -379,6 +387,14 @@ fn default_netconfig_mac() -> MacAddr {
     MacAddr::local_random()
 }
 
+fn default_netconfig_num_queues() -> usize {
+    DEFAULT_NUM_QUEUES_VUNET
+}
+
+fn default_netconfig_queue_size() -> u16 {
+    DEFAULT_QUEUE_SIZE_VUNET
+}
+
 impl NetConfig {
     pub fn parse(net: &str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
@@ -389,6 +405,8 @@ impl NetConfig {
         let mut mask_str: &str = "";
         let mut mac_str: &str = "";
         let mut iommu_str: &str = "";
+        let mut num_queues_str: &str = "";
+        let mut queue_size_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("tap=") {
@@ -401,6 +419,10 @@ impl NetConfig {
                 mac_str = &param[4..];
             } else if param.starts_with("iommu=") {
                 iommu_str = &param[6..];
+            } else if param.starts_with("num_queues=") {
+                num_queues_str = &param[11..];
+            } else if param.starts_with("queue_size=") {
+                queue_size_str = &param[11..];
             }
         }
 
@@ -409,6 +431,8 @@ impl NetConfig {
         let mut mask: Ipv4Addr = default_netconfig_mask();
         let mut mac: MacAddr = default_netconfig_mac();
         let iommu = parse_on_off(iommu_str)?;
+        let mut num_queues: usize = default_netconfig_num_queues();
+        let mut queue_size: u16 = default_netconfig_queue_size();
 
         if !tap_str.is_empty() {
             tap = Some(tap_str.to_string());
@@ -422,6 +446,16 @@ impl NetConfig {
         if !mac_str.is_empty() {
             mac = MacAddr::parse_str(mac_str).map_err(Error::ParseNetMacParam)?;
         }
+        if !num_queues_str.is_empty() {
+            num_queues = num_queues_str
+                .parse()
+                .map_err(Error::ParseNetNumQueuesParam)?;
+        }
+        if !queue_size_str.is_empty() {
+            queue_size = queue_size_str
+                .parse()
+                .map_err(Error::ParseNetQueueSizeParam)?;
+        }
 
         Ok(NetConfig {
             tap,
@@ -429,6 +463,8 @@ impl NetConfig {
             mask,
             mac,
             iommu,
+            num_queues,
+            queue_size,
         })
     }
 }

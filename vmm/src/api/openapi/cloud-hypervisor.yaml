@@ -295,6 +295,12 @@ components:
         iommu:
           type: boolean
           default: false
+        num_queues:
+          type: integer
+          default: 2
+        queue_size:
+          type: integer
+          default: 256
 
     RngConfig:
       required:
