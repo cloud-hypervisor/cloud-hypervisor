@@ -141,8 +141,8 @@ components:
       - state
       type: object
       properties:
-        version:
-          type: string
+        config:
+          $ref: '#/components/schemas/VmConfig'
         state:
           type: string
           enum: [Created, Booted, Shutdown]
