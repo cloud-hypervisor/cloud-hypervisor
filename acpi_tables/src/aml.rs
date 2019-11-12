@@ -704,6 +704,85 @@ impl<'a> Aml for Return<'a> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum FieldAccessType {
+    Any,
+    Byte,
+    Word,
+    DWord,
+    QWord,
+    Buffer,
+}
+
+#[derive(Clone, Copy)]
+pub enum FieldUpdateRule {
+    Preserve = 0,
+    WriteAsOnes = 1,
+    WriteAsZeroes = 2,
+}
+
+pub enum FieldEntry {
+    Named([u8; 4], usize),
+    Reserved(usize),
+}
+
+pub struct Field {
+    path: Path,
+
+    fields: Vec<FieldEntry>,
+    access_type: FieldAccessType,
+    update_rule: FieldUpdateRule,
+}
+
+impl Field {
+    pub fn new(
+        path: Path,
+        access_type: FieldAccessType,
+        update_rule: FieldUpdateRule,
+        fields: Vec<FieldEntry>,
+    ) -> Self {
+        Field {
+            path,
+            access_type,
+            update_rule,
+            fields,
+        }
+    }
+}
+
+impl Aml for Field {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.append(&mut self.path.to_aml_bytes());
+
+        let flags: u8 = self.access_type as u8 | (self.update_rule as u8) << 5;
+        bytes.push(flags);
+
+        for field in self.fields.iter() {
+            match field {
+                FieldEntry::Named(name, length) => {
+                    bytes.extend_from_slice(name);
+                    bytes.append(&mut create_pkg_length(&vec![0; *length], false));
+                }
+                FieldEntry::Reserved(length) => {
+                    bytes.push(0x0);
+                    bytes.append(&mut create_pkg_length(&vec![0; *length], false));
+                }
+            }
+        }
+
+        let mut pkg_length = create_pkg_length(&bytes, true);
+        pkg_length.reverse();
+        for byte in pkg_length {
+            bytes.insert(0, byte);
+        }
+
+        bytes.insert(0, 0x81); /* FieldOp */
+        bytes.insert(0, 0x5b); /* ExtOpPrefix */
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1092,6 +1171,77 @@ mod tests {
         assert_eq!(
             Method::new("_STA".into(), 0, false, vec![&Return::new(&0xfu8)]).to_aml_bytes(),
             [0x14, 0x09, 0x5F, 0x53, 0x54, 0x41, 0x00, 0xA4, 0x0A, 0x0F]
+        );
+    }
+
+    #[test]
+    fn test_field() {
+        /*
+            Field (PRST, ByteAcc, NoLock, WriteAsZeros)
+            {
+                Offset (0x04),
+                CPEN,   1,
+                CINS,   1,
+                CRMV,   1,
+                CEJ0,   1,
+                Offset (0x05),
+                CCMD,   8
+            }
+
+        */
+
+        let field_data = [
+            0x5Bu8, 0x81, 0x23, 0x50, 0x52, 0x53, 0x54, 0x41, 0x00, 0x20, 0x43, 0x50, 0x45, 0x4E,
+            0x01, 0x43, 0x49, 0x4E, 0x53, 0x01, 0x43, 0x52, 0x4D, 0x56, 0x01, 0x43, 0x45, 0x4A,
+            0x30, 0x01, 0x00, 0x04, 0x43, 0x43, 0x4D, 0x44, 0x08,
+        ];
+
+        assert_eq!(
+            Field::new(
+                "PRST".into(),
+                FieldAccessType::Byte,
+                FieldUpdateRule::WriteAsZeroes,
+                vec![
+                    FieldEntry::Reserved(32),
+                    FieldEntry::Named(*b"CPEN", 1),
+                    FieldEntry::Named(*b"CINS", 1),
+                    FieldEntry::Named(*b"CRMV", 1),
+                    FieldEntry::Named(*b"CEJ0", 1),
+                    FieldEntry::Reserved(4),
+                    FieldEntry::Named(*b"CCMD", 8)
+                ]
+            )
+            .to_aml_bytes(),
+            &field_data[..]
+        );
+
+        /*
+            Field (PRST, DWordAcc, NoLock, Preserve)
+            {
+                CSEL,   32,
+                Offset (0x08),
+                CDAT,   32
+            }
+        */
+
+        let field_data = [
+            0x5Bu8, 0x81, 0x12, 0x50, 0x52, 0x53, 0x54, 0x03, 0x43, 0x53, 0x45, 0x4C, 0x20, 0x00,
+            0x20, 0x43, 0x44, 0x41, 0x54, 0x20,
+        ];
+
+        assert_eq!(
+            Field::new(
+                "PRST".into(),
+                FieldAccessType::DWord,
+                FieldUpdateRule::Preserve,
+                vec![
+                    FieldEntry::Named(*b"CSEL", 32),
+                    FieldEntry::Reserved(32),
+                    FieldEntry::Named(*b"CDAT", 32)
+                ]
+            )
+            .to_aml_bytes(),
+            &field_data[..]
         );
     }
 }
