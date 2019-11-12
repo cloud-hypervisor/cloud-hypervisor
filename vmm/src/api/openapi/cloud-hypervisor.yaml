@@ -222,6 +222,7 @@ components:
       properties:
         size:
           type: integer
+          format: int64
           default: 512 MB
         file:
           type: string
@@ -302,6 +303,7 @@ components:
           type: integer
         cache_size:
           type: integer
+          format: int64
 
     PmemConfig:
       required:
@@ -313,6 +315,7 @@ components:
           type: string
         size:
           type: integer
+          format: int64
         iommu:
           type: boolean
           default: false
