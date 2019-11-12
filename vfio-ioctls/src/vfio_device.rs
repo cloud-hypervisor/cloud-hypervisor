@@ -949,6 +949,36 @@ impl VfioDevice {
     pub fn container(&self) -> Arc<VfioContainer> {
         Arc::clone(&self.container)
     }
+
+    /// Add all guest memory regions into the vfio device container's iommu table.
+    ///
+    /// # Parameters
+    /// * mem: pinned guest memory which could be accessed by devices binding to the container.
+    pub fn setup_dma_map(&self, mem: GuestMemoryMmap) -> Result<()> {
+        mem.with_regions(|_index, region| {
+            self.container.vfio_dma_map(
+                region.start_addr().raw_value(),
+                region.len() as u64,
+                region.as_ptr() as u64,
+            )
+        })?;
+        Ok(())
+    }
+
+    /// Remove all guest memory regions from the vfio device container's iommu table.
+    ///
+    /// The vfio kernel driver and device hardware couldn't access this guest memory after
+    /// returning from the function.
+    ///
+    /// # Parameters
+    /// * mem: pinned guest memory which could be accessed by devices binding to the container.
+    pub fn unset_dma_map(&self, mem: GuestMemoryMmap) -> Result<()> {
+        mem.with_regions(|_index, region| {
+            self.container
+                .vfio_dma_unmap(region.start_addr().raw_value(), region.len() as u64)
+        })?;
+        Ok(())
+    }
 }
 
 impl AsRawFd for VfioDevice {

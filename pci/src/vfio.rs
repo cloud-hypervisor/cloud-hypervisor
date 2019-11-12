@@ -691,7 +691,6 @@ impl Drop for VfioPciDevice {
 
         if self
             .device
-            .container()
             .unset_dma_map(self.mem.read().unwrap().clone())
             .is_err()
         {
@@ -900,7 +899,6 @@ impl PciDevice for VfioPciDevice {
 
         if self
             .device
-            .container()
             .setup_dma_map(self.mem.read().unwrap().clone())
             .is_err()
         {
