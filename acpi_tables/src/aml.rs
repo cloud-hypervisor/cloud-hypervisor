@@ -946,6 +946,70 @@ impl<'a> Aml for Store<'a> {
     }
 }
 
+pub struct Mutex {
+    path: Path,
+    sync_level: u8,
+}
+
+impl Mutex {
+    pub fn new(path: Path, sync_level: u8) -> Self {
+        Self { path, sync_level }
+    }
+}
+
+impl Aml for Mutex {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x5b); /* ExtOpPrefix */
+        bytes.push(0x01); /* MutexOp */
+        bytes.extend_from_slice(&self.path.to_aml_bytes());
+        bytes.push(self.sync_level);
+        bytes
+    }
+}
+
+pub struct Acquire {
+    mutex: Path,
+    timeout: u16,
+}
+
+impl Acquire {
+    pub fn new(mutex: Path, timeout: u16) -> Self {
+        Acquire { mutex, timeout }
+    }
+}
+
+impl Aml for Acquire {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x5b); /* ExtOpPrefix */
+        bytes.push(0x23); /* AcquireOp */
+        bytes.extend_from_slice(&self.mutex.to_aml_bytes());
+        bytes.extend_from_slice(&self.timeout.to_le_bytes());
+        bytes
+    }
+}
+
+pub struct Release {
+    mutex: Path,
+}
+
+impl Release {
+    pub fn new(mutex: Path) -> Self {
+        Release { mutex }
+    }
+}
+
+impl Aml for Release {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x5b); /* ExtOpPrefix */
+        bytes.push(0x27); /* ReleaseOp */
+        bytes.extend_from_slice(&self.mutex.to_aml_bytes());
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1481,6 +1545,53 @@ mod tests {
             )
             .to_aml_bytes(),
             &local_if_data
+        );
+    }
+
+    #[test]
+    fn test_mutex() {
+        /*
+        Device (_SB_.MHPC)
+        {
+                Name (_HID, EisaId("PNP0A06") /* Generic Container Device */)  // _HID: Hardware ID
+                Mutex (MLCK, 0x00)
+                Method (TEST, 0, NotSerialized)
+                {
+                    Acquire (MLCK, 0xFFFF)
+                    Local0 = One
+                    Release (MLCK)
+                }
+        }
+        */
+
+        let mutex_data = [
+            0x5B, 0x82, 0x33, 0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x4D, 0x48, 0x50, 0x43, 0x08, 0x5F,
+            0x48, 0x49, 0x44, 0x0C, 0x41, 0xD0, 0x0A, 0x06, 0x5B, 0x01, 0x4D, 0x4C, 0x43, 0x4B,
+            0x00, 0x14, 0x17, 0x54, 0x45, 0x53, 0x54, 0x00, 0x5B, 0x23, 0x4D, 0x4C, 0x43, 0x4B,
+            0xFF, 0xFF, 0x70, 0x01, 0x60, 0x5B, 0x27, 0x4D, 0x4C, 0x43, 0x4B,
+        ];
+
+        let mutex = Mutex::new("MLCK".into(), 0);
+        assert_eq!(
+            Device::new(
+                "_SB_.MHPC".into(),
+                vec![
+                    &Name::new("_HID".into(), &EISAName::new("PNP0A06")),
+                    &mutex,
+                    &Method::new(
+                        "TEST".into(),
+                        0,
+                        false,
+                        vec![
+                            &Acquire::new("MLCK".into(), 0xffff),
+                            &Store::new(&Local(0), &ONE),
+                            &Release::new("MLCK".into())
+                        ]
+                    )
+                ]
+            )
+            .to_aml_bytes(),
+            &mutex_data[..]
         );
     }
 }
