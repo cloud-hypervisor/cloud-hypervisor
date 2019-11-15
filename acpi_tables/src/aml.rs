@@ -1010,6 +1010,27 @@ impl Aml for Release {
     }
 }
 
+pub struct Notify<'a> {
+    object: &'a dyn Aml,
+    value: &'a dyn Aml,
+}
+
+impl<'a> Notify<'a> {
+    pub fn new(object: &'a dyn Aml, value: &'a dyn Aml) -> Self {
+        Notify { object, value }
+    }
+}
+
+impl<'a> Aml for Notify<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x86); /* NotifyOp */
+        bytes.extend_from_slice(&self.object.to_aml_bytes());
+        bytes.extend_from_slice(&self.value.to_aml_bytes());
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1592,6 +1613,42 @@ mod tests {
             )
             .to_aml_bytes(),
             &mutex_data[..]
+        );
+    }
+
+    #[test]
+    fn test_notify() {
+        /*
+        Device (_SB.MHPC)
+        {
+            Name (_HID, EisaId ("PNP0A06") /* Generic Container Device */)  // _HID: Hardware ID
+            Method (TEST, 0, NotSerialized)
+            {
+                Notify (MHPC, One) // Device Check
+            }
+        }
+        */
+        let notify_data = [
+            0x5B, 0x82, 0x21, 0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x4D, 0x48, 0x50, 0x43, 0x08, 0x5F,
+            0x48, 0x49, 0x44, 0x0C, 0x41, 0xD0, 0x0A, 0x06, 0x14, 0x0C, 0x54, 0x45, 0x53, 0x54,
+            0x00, 0x86, 0x4D, 0x48, 0x50, 0x43, 0x01,
+        ];
+
+        assert_eq!(
+            Device::new(
+                "_SB_.MHPC".into(),
+                vec![
+                    &Name::new("_HID".into(), &EISAName::new("PNP0A06")),
+                    &Method::new(
+                        "TEST".into(),
+                        0,
+                        false,
+                        vec![&Notify::new(&Path::new("MHPC"), &ONE),]
+                    )
+                ]
+            )
+            .to_aml_bytes(),
+            &notify_data[..]
         );
     }
 }
