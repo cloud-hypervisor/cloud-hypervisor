@@ -148,6 +148,7 @@ sudo ip link set vfio-tap1 up
 cargo build --release
 sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
 sudo setcap cap_net_admin+ep target/release/vhost_user_net
+sudo setcap cap_dac_override,cap_sys_admin+epi target/release/vhost_user_fs
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/release/cloud-hypervisor $VFIO_DIR
