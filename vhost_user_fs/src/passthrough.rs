@@ -27,7 +27,6 @@ use crate::multikey::MultikeyBTreeMap;
 const CURRENT_DIR_CSTR: &[u8] = b".\0";
 const PARENT_DIR_CSTR: &[u8] = b"..\0";
 const EMPTY_CSTR: &[u8] = b"\0";
-const ROOT_CSTR: &[u8] = b"/\0";
 const PROC_CSTR: &[u8] = b"/proc\0";
 
 type Inode = u64;
@@ -226,6 +225,11 @@ pub struct Config {
     ///
     /// The default value for this option is `false`.
     pub writeback: bool,
+
+    /// The path of the root directory.
+    ///
+    /// The default is `/`.
+    pub root_dir: String,
 }
 
 impl Default for Config {
@@ -235,6 +239,7 @@ impl Default for Config {
             attr_timeout: Duration::from_secs(5),
             cache_policy: Default::default(),
             writeback: false,
+            root_dir: String::from("/"),
         }
     }
 }
@@ -640,8 +645,7 @@ impl FileSystem for PassthroughFs {
     type Handle = Handle;
 
     fn init(&self, capable: FsOptions) -> io::Result<FsOptions> {
-        // Safe because this is a constant value and a valid C string.
-        let root = unsafe { CStr::from_bytes_with_nul_unchecked(ROOT_CSTR) };
+        let root = CString::new(self.cfg.root_dir.as_str()).expect("CString::new failed");
 
         // Safe because this doesn't modify any memory and we check the return value.
         // We use `O_PATH` because we just want this for traversing the directory tree

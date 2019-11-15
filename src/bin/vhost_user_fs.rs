@@ -199,7 +199,7 @@ fn main() {
         .get_matches();
 
     // Retrieve arguments
-    let _shared_dir = cmd_arguments
+    let shared_dir = cmd_arguments
         .value_of("shared-dir")
         .expect("Failed to retrieve shared directory path");
     let sock = cmd_arguments
@@ -209,7 +209,11 @@ fn main() {
     // Convert into appropriate types
     let sock = String::from(sock);
 
-    let fs = PassthroughFs::new(passthrough::Config::default()).unwrap();
+    let fs_cfg = passthrough::Config {
+        root_dir: shared_dir.to_string(),
+        ..Default::default()
+    };
+    let fs = PassthroughFs::new(fs_cfg).unwrap();
     let fs_backend = Arc::new(RwLock::new(VhostUserFsBackend::new(fs).unwrap()));
 
     let mut daemon = VhostUserDaemon::new(
