@@ -709,6 +709,26 @@ mod tests {
         (child, virtiofsd_socket_path)
     }
 
+    fn prepare_vhost_user_fs_daemon(
+        tmp_dir: &TempDir,
+        shared_dir: &str,
+        _cache: &str,
+    ) -> (std::process::Child, String) {
+        let virtiofsd_socket_path =
+            String::from(tmp_dir.path().join("virtiofs.sock").to_str().unwrap());
+
+        // Start the daemon
+        let child = Command::new("target/release/vhost_user_fs")
+            .args(&["--shared-dir", shared_dir])
+            .args(&["--sock", virtiofsd_socket_path.as_str()])
+            .spawn()
+            .unwrap();
+
+        thread::sleep(std::time::Duration::new(10, 0));
+
+        (child, virtiofsd_socket_path)
+    }
+
     fn prepare_vubd(tmp_dir: &TempDir, blk_img: &str) -> (std::process::Child, String) {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
@@ -1650,7 +1670,12 @@ mod tests {
         });
     }
 
-    fn test_virtio_fs(dax: bool, cache_size: Option<u64>, virtiofsd_cache: &str) {
+    fn test_virtio_fs(
+        dax: bool,
+        cache_size: Option<u64>,
+        virtiofsd_cache: &str,
+        prepare_daemon: &dyn Fn(&TempDir, &str, &str) -> (std::process::Child, String),
+    ) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
@@ -1671,7 +1696,7 @@ mod tests {
                 "".to_string()
             };
 
-            let (mut daemon_child, virtiofsd_socket_path) = prepare_virtiofsd(
+            let (mut daemon_child, virtiofsd_socket_path) = prepare_daemon(
                 &guest.tmp_dir,
                 shared_dir.to_str().unwrap(),
                 virtiofsd_cache,
@@ -1777,17 +1802,22 @@ mod tests {
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_on_default_cache_size() {
-        test_virtio_fs(true, None, "always")
+        test_virtio_fs(true, None, "always", &prepare_virtiofsd)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_on_cache_size_1_gib() {
-        test_virtio_fs(true, Some(0x4000_0000), "always")
+        test_virtio_fs(true, Some(0x4000_0000), "always", &prepare_virtiofsd)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_off() {
-        test_virtio_fs(false, None, "none")
+        test_virtio_fs(false, None, "none", &prepare_virtiofsd)
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_virtio_fs_dax_off_w_vhost_user_fs_daemon() {
+        test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon)
     }
 
     #[test]
