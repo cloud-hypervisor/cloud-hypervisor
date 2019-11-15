@@ -27,9 +27,12 @@ _Run virtiofsd_
     -d \
     -o vhost_user_socket=/tmp/virtiofs \
     -o source=/tmp/shared_dir \
-    -o cache=none
+    -o cache=always
 ```
-The `cache=none` option here is an important one as it tells the daemon not to try any memory mapping of the files, but instead to use the _virtqueues_ to convey the files content. The support for the memory mapping of the files will be added later.
+
+The `cache=always` option should be the default when using `virtiofsd` with the __cloud-hypervisor__ VMM. This allows the daemon to memory map the shared files, which gives better I/O performance.
+
+The `cache=none` option is another way to run the daemon but because the _virtqueues_ are used to convey the files content in this case, the I/O performance is impacted.
 
 ### The kernel
 
@@ -59,12 +62,28 @@ Assuming you have `clear-kvm.img` and `custom-vmlinux.bin` on your system, here 
     --fs tag=virtiofs,sock=/tmp/virtiofs,num_queues=1,queue_size=512
 ```
 
+By default, DAX is enabled with a cache window of 8GiB. You can specify a custom size (let's say 4GiB for this example) for the cache by explicitly setting DAX and the cache size:
+
+```bash
+--fs tag=virtiofs,sock=/tmp/virtiofs,num_queues=1,queue_size=512,dax=on,cache_size=4G
+
+```
+
+In case you don't want to use a shared window of cache to pass the shared files content, this means you will have to explicitly disable DAX with `dax=off`. Note that in this case, the `cache_size` parameter will be ignored.
+
+```bash
+--fs tag=virtiofs,sock=/tmp/virtiofs,num_queues=1,queue_size=512,dax=off
+
+```
+
 ### Mount the shared directory
 The last step is to mount the shared directory inside the guest, using the `virtio_fs` filesystem type.
 ```bash
 mkdir mount_dir
 mount \
-    -t virtio_fs /dev/null mount_dir/ \
-    -o tag=virtiofs,rootmode=040000,user_id=0,group_id=0
+    -t virtio_fs virtiofs mount_dir/ \
+    -o rootmode=040000,user_id=0,group_id=0,dax
 ```
-The `tag` needs to be consistent with what has been provided through the __cloud-hypervisor__ command line.
+The `tag` needs to be consistent with what has been provided through the __cloud-hypervisor__ command line, which happens to be `virtiofs` in this example.
+
+The `dax` option must be removed in case the shared cache region is not enabled from the VMM.
