@@ -1031,6 +1031,62 @@ impl<'a> Aml for Notify<'a> {
     }
 }
 
+pub struct While<'a> {
+    predicate: &'a dyn Aml,
+    while_children: Vec<&'a dyn Aml>,
+}
+
+impl<'a> While<'a> {
+    pub fn new(predicate: &'a dyn Aml, while_children: Vec<&'a dyn Aml>) -> Self {
+        While {
+            predicate,
+            while_children,
+        }
+    }
+}
+
+impl<'a> Aml for While<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.predicate.to_aml_bytes());
+        for child in self.while_children.iter() {
+            bytes.extend_from_slice(&child.to_aml_bytes());
+        }
+
+        let mut pkg_length = create_pkg_length(&bytes, true);
+        pkg_length.reverse();
+        for byte in pkg_length {
+            bytes.insert(0, byte);
+        }
+
+        bytes.insert(0, 0xa2); /* WhileOp */
+        bytes
+    }
+}
+
+pub struct Add<'a> {
+    a: &'a dyn Aml,
+    b: &'a dyn Aml,
+    target: &'a dyn Aml,
+}
+
+impl<'a> Add<'a> {
+    pub fn new(target: &'a dyn Aml, a: &'a dyn Aml, b: &'a dyn Aml) -> Self {
+        Add { target, a, b }
+    }
+}
+
+impl<'a> Aml for Add<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x72); /* AddOp */
+        bytes.extend_from_slice(&self.a.to_aml_bytes());
+        bytes.extend_from_slice(&self.b.to_aml_bytes());
+        bytes.extend_from_slice(&self.target.to_aml_bytes());
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1650,5 +1706,52 @@ mod tests {
             .to_aml_bytes(),
             &notify_data[..]
         );
+    }
+
+    #[test]
+    fn test_while() {
+        /*
+        Device (_SB.MHPC)
+        {
+            Name (_HID, EisaId ("PNP0A06") /* Generic Container Device */)  // _HID: Hardware ID
+            Method (TEST, 0, NotSerialized)
+            {
+                Local0 = Zero
+                While ((Local0 < 0x04))
+                {
+                    Local0 += One
+                }
+            }
+        }
+        */
+
+        let while_data = [
+            0x5B, 0x82, 0x28, 0x2E, 0x5F, 0x53, 0x42, 0x5F, 0x4D, 0x48, 0x50, 0x43, 0x08, 0x5F,
+            0x48, 0x49, 0x44, 0x0C, 0x41, 0xD0, 0x0A, 0x06, 0x14, 0x13, 0x54, 0x45, 0x53, 0x54,
+            0x00, 0x70, 0x00, 0x60, 0xA2, 0x09, 0x95, 0x60, 0x0A, 0x04, 0x72, 0x60, 0x01, 0x60,
+        ];
+
+        assert_eq!(
+            Device::new(
+                "_SB_.MHPC".into(),
+                vec![
+                    &Name::new("_HID".into(), &EISAName::new("PNP0A06")),
+                    &Method::new(
+                        "TEST".into(),
+                        0,
+                        false,
+                        vec![
+                            &Store::new(&Local(0), &ZERO),
+                            &While::new(
+                                &LessThan::new(&Local(0), &4usize),
+                                vec![&Add::new(&Local(0), &Local(0), &ONE)]
+                            )
+                        ]
+                    )
+                ]
+            )
+            .to_aml_bytes(),
+            &while_data[..]
+        )
     }
 }
