@@ -413,25 +413,6 @@ impl DeviceManager {
         let io_bus = devices::Bus::new();
         let mmio_bus = devices::Bus::new();
 
-        let ioapic = if userspace_ioapic {
-            // Create IOAPIC
-            let ioapic = Arc::new(Mutex::new(ioapic::Ioapic::new(
-                vm_info.vm_fd.clone(),
-                APIC_START,
-            )));
-            mmio_bus
-                .insert(ioapic.clone(), IOAPIC_START.0, IOAPIC_SIZE)
-                .map_err(DeviceManagerError::BusError)?;
-            Some(ioapic)
-        } else {
-            None
-        };
-
-        let interrupt_info = InterruptInfo {
-            _msi_capable,
-            ioapic: &ioapic,
-        };
-
         let mut virtio_devices: Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)> = Vec::new();
         let mut mmap_regions = Vec::new();
 
@@ -448,6 +429,12 @@ impl DeviceManager {
             #[cfg(feature = "pci_support")]
             vm_fd: vm_info.vm_fd.clone(),
         });
+
+        let ioapic = DeviceManager::make_ioapic(vm_info, &address_manager, userspace_ioapic)?;
+        let interrupt_info = InterruptInfo {
+            _msi_capable,
+            ioapic: &ioapic,
+        };
 
         let console = DeviceManager::make_console_device(
             vm_info,
@@ -600,6 +587,30 @@ impl DeviceManager {
             cmdline_additions,
             virt_iommu,
         })
+    }
+
+    fn make_ioapic(
+        vm_info: &VmInfo,
+        address_manager: &Arc<AddressManager>,
+        userspace_ioapic: bool,
+    ) -> DeviceManagerResult<Option<Arc<Mutex<ioapic::Ioapic>>>> {
+        let ioapic = if userspace_ioapic {
+            // Create IOAPIC
+            let ioapic = Arc::new(Mutex::new(ioapic::Ioapic::new(
+                vm_info.vm_fd.clone(),
+                APIC_START,
+            )));
+
+            address_manager
+                .mmio_bus
+                .insert(ioapic.clone(), IOAPIC_START.0, IOAPIC_SIZE)
+                .map_err(DeviceManagerError::BusError)?;
+            Some(ioapic)
+        } else {
+            None
+        };
+
+        Ok(ioapic)
     }
 
     #[allow(unused_variables)]
