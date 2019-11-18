@@ -14,6 +14,7 @@
 		 - [Disk image](#disk-image)
 		 - [Booting the guest VM](#booting-the-guest-vm)
 3. [Status](#2-status)
+	* [Device Model](#device-model)
 	* [TODO](#todo)
 4. [rust-vmm dependency](#4-rust-vmm-dependency)
 	* [Firecracker and crosvm](#firecracker-and-crosvm)
@@ -203,6 +204,10 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 As of 2019/05/12, booting cloud images has only been tested with [Clear Linux images](https://download.clearlinux.org/current/).
 Direct kernel boot to userspace should work with most rootfs and it's been tested with
 Clear Linux root partitions, and also basic initrd/initramfs images.
+
+## Device Model
+
+Follow this [documentation](https://github.com/intel/cloud-hypervisor/blob/master/docs/device_model.md).
 
 ## TODO
 
