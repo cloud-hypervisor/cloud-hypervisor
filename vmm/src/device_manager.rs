@@ -178,6 +178,8 @@ pub enum DeviceManagerError {
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
+type VirtioDeviceArc = Arc<Mutex<dyn vm_virtio::VirtioDevice>>;
+
 struct InterruptInfo<'a> {
     _ioapic: &'a Arc<Mutex<ioapic::Ioapic>>,
 }
@@ -415,7 +417,7 @@ impl DeviceManager {
         let io_bus = devices::Bus::new();
         let mmio_bus = devices::Bus::new();
 
-        let mut virtio_devices: Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)> = Vec::new();
+        let mut virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)> = Vec::new();
         let mut mmap_regions = Vec::new();
 
         #[allow(unused_mut)]
@@ -508,7 +510,7 @@ impl DeviceManager {
         address_manager: &Arc<AddressManager>,
         mem_slots: u32,
         virt_iommu: &mut Option<(u32, Vec<u32>)>,
-        virtio_devices: Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>,
+        virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
         interrupt_info: &InterruptInfo,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "pci_support")]
@@ -572,7 +574,7 @@ impl DeviceManager {
                 // add the device to the PCI topology now. Otherwise, the
                 // b/d/f won't match the virtio-iommu device as expected.
                 DeviceManager::add_virtio_pci_device(
-                    Box::new(iommu_device),
+                    Arc::new(Mutex::new(iommu_device)),
                     vm_info.memory,
                     &address_manager,
                     vm_info.vm_fd,
@@ -607,7 +609,7 @@ impl DeviceManager {
     fn add_mmio_devices(
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
-        virtio_devices: Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>,
+        virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
         interrupt_info: &InterruptInfo,
         mut cmdline_additions: &mut Vec<String>,
     ) -> DeviceManagerResult<()> {
@@ -744,7 +746,7 @@ impl DeviceManager {
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
         ioapic: &Arc<Mutex<ioapic::Ioapic>>,
-        virtio_devices: &mut Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>,
+        virtio_devices: &mut Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
     ) -> DeviceManagerResult<Arc<Console>> {
         let serial_config = vm_info.vm_cfg.lock().unwrap().serial.clone();
         let serial_writer: Option<Box<dyn io::Write + Send>> = match serial_config.mode {
@@ -809,7 +811,8 @@ impl DeviceManager {
                 vm_virtio::Console::new(writer, col, row, console_config.iommu)
                     .map_err(DeviceManagerError::CreateVirtioConsole)?;
             virtio_devices.push((
-                Box::new(virtio_console_device) as Box<dyn vm_virtio::VirtioDevice>,
+                Arc::new(Mutex::new(virtio_console_device))
+                    as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                 false,
             ));
             Some(console_input)
@@ -830,9 +833,9 @@ impl DeviceManager {
         address_manager: &Arc<AddressManager>,
         mut mem_slots: &mut u32,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
-    ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
+    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut allocator = address_manager.allocator.lock().unwrap();
-        let mut devices: Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)> = Vec::new();
+        let mut devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)> = Vec::new();
 
         // Create "standard" virtio devices (net/block/rng)
         devices.append(&mut DeviceManager::make_virtio_block_devices(vm_info)?);
@@ -873,7 +876,7 @@ impl DeviceManager {
 
     fn make_virtio_block_devices(
         vm_info: &VmInfo,
-    ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
+    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
 
         if let Some(disk_list_cfg) = &vm_info.vm_cfg.lock().unwrap().disks {
@@ -897,7 +900,8 @@ impl DeviceManager {
                             disk_cfg.iommu,
                         )
                         .map_err(DeviceManagerError::CreateVirtioBlock)?;
-                        Box::new(dev) as Box<dyn vm_virtio::VirtioDevice>
+
+                        Arc::new(Mutex::new(dev)) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>
                     }
                     ImageType::Qcow2 => {
                         let qcow_img = QcowFile::from(raw_img)
@@ -909,11 +913,11 @@ impl DeviceManager {
                             disk_cfg.iommu,
                         )
                         .map_err(DeviceManagerError::CreateVirtioBlock)?;
-                        Box::new(dev) as Box<dyn vm_virtio::VirtioDevice>
+                        Arc::new(Mutex::new(dev)) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>
                     }
                 };
 
-                devices.push((block, disk_cfg.iommu));
+                devices.push((Arc::clone(&block), disk_cfg.iommu));
             }
         }
 
@@ -922,7 +926,7 @@ impl DeviceManager {
 
     fn make_virtio_net_devices(
         vm_info: &VmInfo,
-    ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
+    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
 
         // Add virtio-net if required
@@ -930,15 +934,24 @@ impl DeviceManager {
             for net_cfg in net_list_cfg.iter() {
                 let virtio_net_device = if let Some(ref tap_if_name) = net_cfg.tap {
                     let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
-                    vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac), net_cfg.iommu)
-                        .map_err(DeviceManagerError::CreateVirtioNet)?
+                    Arc::new(Mutex::new(
+                        vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac), net_cfg.iommu)
+                            .map_err(DeviceManagerError::CreateVirtioNet)?,
+                    ))
                 } else {
-                    vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac), net_cfg.iommu)
-                        .map_err(DeviceManagerError::CreateVirtioNet)?
+                    Arc::new(Mutex::new(
+                        vm_virtio::Net::new(
+                            net_cfg.ip,
+                            net_cfg.mask,
+                            Some(&net_cfg.mac),
+                            net_cfg.iommu,
+                        )
+                        .map_err(DeviceManagerError::CreateVirtioNet)?,
+                    ))
                 };
 
                 devices.push((
-                    Box::new(virtio_net_device) as Box<dyn vm_virtio::VirtioDevice>,
+                    Arc::clone(&virtio_net_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                     net_cfg.iommu,
                 ));
             }
@@ -949,16 +962,18 @@ impl DeviceManager {
 
     fn make_virtio_rng_devices(
         vm_info: &VmInfo,
-    ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
+    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
 
         // Add virtio-rng if required
         let rng_config = vm_info.vm_cfg.lock().unwrap().rng.clone();
         if let Some(rng_path) = rng_config.src.to_str() {
-            let virtio_rng_device = vm_virtio::Rng::new(rng_path, rng_config.iommu)
-                .map_err(DeviceManagerError::CreateVirtioRng)?;
+            let virtio_rng_device = Arc::new(Mutex::new(
+                vm_virtio::Rng::new(rng_path, rng_config.iommu)
+                    .map_err(DeviceManagerError::CreateVirtioRng)?,
+            ));
             devices.push((
-                Box::new(virtio_rng_device) as Box<dyn vm_virtio::VirtioDevice>,
+                Arc::clone(&virtio_rng_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                 false,
             ));
         }
@@ -971,7 +986,7 @@ impl DeviceManager {
         allocator: &mut SystemAllocator,
         mem_slots: &mut u32,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
-    ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
+    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
         // Add virtio-fs if required
         if let Some(fs_list_cfg) = &vm_info.vm_cfg.lock().unwrap().fs {
@@ -1036,17 +1051,19 @@ impl DeviceManager {
                         None
                     };
 
-                    let virtio_fs_device = vm_virtio::vhost_user::Fs::new(
-                        fs_sock,
-                        &fs_cfg.tag,
-                        fs_cfg.num_queues,
-                        fs_cfg.queue_size,
-                        cache,
-                    )
-                    .map_err(DeviceManagerError::CreateVirtioFs)?;
+                    let virtio_fs_device = Arc::new(Mutex::new(
+                        vm_virtio::vhost_user::Fs::new(
+                            fs_sock,
+                            &fs_cfg.tag,
+                            fs_cfg.num_queues,
+                            fs_cfg.queue_size,
+                            cache,
+                        )
+                        .map_err(DeviceManagerError::CreateVirtioFs)?,
+                    ));
 
                     devices.push((
-                        Box::new(virtio_fs_device) as Box<dyn vm_virtio::VirtioDevice>,
+                        Arc::clone(&virtio_fs_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                         false,
                     ));
                 }
@@ -1061,7 +1078,7 @@ impl DeviceManager {
         allocator: &mut SystemAllocator,
         mem_slots: &mut u32,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
-    ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
+    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
         // Add virtio-pmem if required
         if let Some(pmem_list_cfg) = &vm_info.vm_cfg.lock().unwrap().pmem {
@@ -1143,12 +1160,13 @@ impl DeviceManager {
                 // Increment the KVM slot number
                 *mem_slots += 1;
 
-                let virtio_pmem_device =
+                let virtio_pmem_device = Arc::new(Mutex::new(
                     vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize, pmem_cfg.iommu)
-                        .map_err(DeviceManagerError::CreateVirtioPmem)?;
+                        .map_err(DeviceManagerError::CreateVirtioPmem)?,
+                ));
 
                 devices.push((
-                    Box::new(virtio_pmem_device) as Box<dyn vm_virtio::VirtioDevice>,
+                    Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                     false,
                 ));
             }
@@ -1159,7 +1177,7 @@ impl DeviceManager {
 
     fn make_virtio_vhost_user_net_devices(
         vm_info: &VmInfo,
-    ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
+    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
         // Add vhost-user-net if required
         if let Some(vhost_user_net_list_cfg) = &vm_info.vm_cfg.lock().unwrap().vhost_user_net {
@@ -1169,12 +1187,13 @@ impl DeviceManager {
                     num_queues: vhost_user_net_cfg.num_queues,
                     queue_size: vhost_user_net_cfg.queue_size,
                 };
-                let vhost_user_net_device =
+                let vhost_user_net_device = Arc::new(Mutex::new(
                     vm_virtio::vhost_user::Net::new(vhost_user_net_cfg.mac, vu_cfg)
-                        .map_err(DeviceManagerError::CreateVhostUserNet)?;
+                        .map_err(DeviceManagerError::CreateVhostUserNet)?,
+                ));
 
                 devices.push((
-                    Box::new(vhost_user_net_device) as Box<dyn vm_virtio::VirtioDevice>,
+                    Arc::clone(&vhost_user_net_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                     false,
                 ));
             }
@@ -1185,7 +1204,7 @@ impl DeviceManager {
 
     fn make_virtio_vhost_user_blk_devices(
         vm_info: &VmInfo,
-    ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
+    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
         // Add vhost-user-blk if required
         if let Some(vhost_user_blk_list_cfg) = &vm_info.vm_cfg.lock().unwrap().vhost_user_blk {
@@ -1195,12 +1214,13 @@ impl DeviceManager {
                     num_queues: vhost_user_blk_cfg.num_queues,
                     queue_size: vhost_user_blk_cfg.queue_size,
                 };
-                let vhost_user_blk_device =
+                let vhost_user_blk_device = Arc::new(Mutex::new(
                     vm_virtio::vhost_user::Blk::new(vhost_user_blk_cfg.wce, vu_cfg)
-                        .map_err(DeviceManagerError::CreateVhostUserBlk)?;
+                        .map_err(DeviceManagerError::CreateVhostUserBlk)?,
+                ));
 
                 devices.push((
-                    Box::new(vhost_user_blk_device) as Box<dyn vm_virtio::VirtioDevice>,
+                    Arc::clone(&vhost_user_blk_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                     false,
                 ));
             }
@@ -1211,7 +1231,7 @@ impl DeviceManager {
 
     fn make_virtio_vsock_devices(
         vm_info: &VmInfo,
-    ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
+    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
         // Add vsock if required
         if let Some(vsock_list_cfg) = &vm_info.vm_cfg.lock().unwrap().vsock {
@@ -1224,11 +1244,13 @@ impl DeviceManager {
                     vm_virtio::vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
                         .map_err(DeviceManagerError::CreateVsockBackend)?;
 
-                let vsock_device = vm_virtio::Vsock::new(vsock_cfg.cid, backend, vsock_cfg.iommu)
-                    .map_err(DeviceManagerError::CreateVirtioVsock)?;
+                let vsock_device = Arc::new(Mutex::new(
+                    vm_virtio::Vsock::new(vsock_cfg.cid, backend, vsock_cfg.iommu)
+                        .map_err(DeviceManagerError::CreateVirtioVsock)?,
+                ));
 
                 devices.push((
-                    Box::new(vsock_device) as Box<dyn vm_virtio::VirtioDevice>,
+                    Arc::clone(&vsock_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                     false,
                 ));
             }
@@ -1337,7 +1359,7 @@ impl DeviceManager {
     #[cfg(feature = "pci_support")]
     #[allow(clippy::too_many_arguments)]
     fn add_virtio_pci_device(
-        virtio_device: Box<dyn vm_virtio::VirtioDevice>,
+        virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
         memory: &Arc<RwLock<GuestMemoryMmap>>,
         address_manager: &Arc<AddressManager>,
         vm_fd: &Arc<VmFd>,
@@ -1347,7 +1369,7 @@ impl DeviceManager {
         // Allows support for one MSI-X vector per queue. It also adds 1
         // as we need to take into account the dedicated vector to notify
         // about a virtio config change.
-        let msix_num = (virtio_device.queue_max_sizes().len() + 1) as u16;
+        let msix_num = (virtio_device.lock().unwrap().queue_max_sizes().len() + 1) as u16;
 
         // We need to shift the device id since the 3 first bits are dedicated
         // to the PCI function, and we know we don't do multifunction.
@@ -1453,7 +1475,7 @@ impl DeviceManager {
     #[allow(clippy::too_many_arguments)]
     #[cfg(feature = "mmio_support")]
     fn add_virtio_mmio_device(
-        virtio_device: Box<dyn vm_virtio::VirtioDevice>,
+        virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
         memory: &Arc<RwLock<GuestMemoryMmap>>,
         address_manager: &Arc<AddressManager>,
         vm_fd: &Arc<VmFd>,
