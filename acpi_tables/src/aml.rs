@@ -1087,6 +1087,28 @@ impl<'a> Aml for Add<'a> {
     }
 }
 
+pub struct MethodCall<'a> {
+    name: Path,
+    args: Vec<&'a dyn Aml>,
+}
+
+impl<'a> MethodCall<'a> {
+    pub fn new(name: Path, args: Vec<&'a dyn Aml>) -> Self {
+        MethodCall { name, args }
+    }
+}
+
+impl<'a> Aml for MethodCall<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.name.to_aml_bytes());
+        for arg in self.args.iter() {
+            bytes.extend_from_slice(&arg.to_aml_bytes());
+        }
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1753,5 +1775,45 @@ mod tests {
             .to_aml_bytes(),
             &while_data[..]
         )
+    }
+
+    #[test]
+    fn test_method_call() {
+        /*
+            Method (TST1, 1, NotSerialized)
+            {
+                TST2 (One, One)
+            }
+
+            Method (TST2, 2, NotSerialized)
+            {
+                TST1 (One)
+            }
+        */
+        let test_data = [
+            0x14, 0x0C, 0x54, 0x53, 0x54, 0x31, 0x01, 0x54, 0x53, 0x54, 0x32, 0x01, 0x01, 0x14,
+            0x0B, 0x54, 0x53, 0x54, 0x32, 0x02, 0x54, 0x53, 0x54, 0x31, 0x01,
+        ];
+
+        let mut methods = Vec::new();
+        methods.extend_from_slice(
+            &Method::new(
+                "TST1".into(),
+                1,
+                false,
+                vec![&MethodCall::new("TST2".into(), vec![&ONE, &ONE])],
+            )
+            .to_aml_bytes(),
+        );
+        methods.extend_from_slice(
+            &Method::new(
+                "TST2".into(),
+                2,
+                false,
+                vec![&MethodCall::new("TST1".into(), vec![&ONE])],
+            )
+            .to_aml_bytes(),
+        );
+        assert_eq!(&methods[..], &test_data[..])
     }
 }
