@@ -43,6 +43,7 @@ use std::os::unix::io::FromRawFd;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_allocator::{GsiApic, SystemAllocator};
+use vm_device::{MigratableError, Pausable};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     Address, Bytes, Error as MmapError, GuestAddress, GuestMemory, GuestMemoryMmap,
@@ -145,6 +146,12 @@ pub enum Error {
 
     /// Capability missing
     CapabilityMissing(Cap),
+
+    /// Cannot pause devices
+    PauseDevices(MigratableError),
+
+    /// Cannot resume devices
+    ResumeDevices(MigratableError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -627,6 +634,7 @@ impl Vm {
             .unwrap()
             .pause()
             .map_err(Error::CpuManager)?;
+        self.devices.pause().map_err(Error::PauseDevices)?;
 
         *state = new_state;
 
@@ -639,6 +647,7 @@ impl Vm {
 
         state.valid_transition(new_state)?;
 
+        self.devices.resume().map_err(Error::ResumeDevices)?;
         self.cpu_manager
             .lock()
             .unwrap()
