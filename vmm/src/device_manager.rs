@@ -432,47 +432,6 @@ impl DeviceManager {
             ioapic: &ioapic,
         };
 
-        let serial_writer: Option<Box<dyn io::Write + Send>> = match vm_info.vm_cfg.serial.mode {
-            ConsoleOutputMode::File => Some(Box::new(
-                File::create(vm_info.vm_cfg.serial.file.as_ref().unwrap())
-                    .map_err(DeviceManagerError::SerialOutputFileOpen)?,
-            )),
-            ConsoleOutputMode::Tty => Some(Box::new(stdout())),
-            ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
-        };
-        let serial = if vm_info.vm_cfg.serial.mode != ConsoleOutputMode::Off {
-            // Serial is tied to IRQ #4
-            let serial_irq = 4;
-            let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = &ioapic {
-                Box::new(UserIoapicIrq::new(ioapic.clone(), serial_irq))
-            } else {
-                let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-                vm_info
-                    .vm_fd
-                    .register_irqfd(&serial_evt, serial_irq as u32)
-                    .map_err(DeviceManagerError::Irq)?;
-
-                Box::new(KernelIoapicIrq::new(serial_evt))
-            };
-
-            let serial = Arc::new(Mutex::new(devices::legacy::Serial::new(
-                interrupt,
-                serial_writer,
-            )));
-
-            allocator
-                .allocate_io_addresses(Some(GuestAddress(0x3f8)), 0x8, None)
-                .ok_or(DeviceManagerError::AllocateIOPort)?;
-
-            io_bus
-                .insert(serial.clone(), 0x3f8, 0x8)
-                .map_err(DeviceManagerError::BusError)?;
-
-            Some(serial)
-        } else {
-            None
-        };
-
         // Add a shutdown device (i8042)
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
@@ -517,47 +476,7 @@ impl DeviceManager {
         }
 
         let mut virtio_devices: Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)> = Vec::new();
-
-        // Create serial and virtio-console
-        let console_writer: Option<Box<dyn io::Write + Send + Sync>> =
-            match vm_info.vm_cfg.console.mode {
-                ConsoleOutputMode::File => Some(Box::new(
-                    File::create(vm_info.vm_cfg.console.file.as_ref().unwrap())
-                        .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
-                )),
-                ConsoleOutputMode::Tty => Some(Box::new(stdout())),
-                ConsoleOutputMode::Null => Some(Box::new(sink())),
-                ConsoleOutputMode::Off => None,
-            };
-        let (col, row) = get_win_size();
-        let console_input = if let Some(writer) = console_writer {
-            let (virtio_console_device, console_input) =
-                vm_virtio::Console::new(writer, col, row, vm_info.vm_cfg.console.iommu)
-                    .map_err(DeviceManagerError::CreateVirtioConsole)?;
-            virtio_devices.push((
-                Box::new(virtio_console_device) as Box<dyn vm_virtio::VirtioDevice>,
-                false,
-            ));
-            Some(console_input)
-        } else {
-            None
-        };
-
-        let console = Arc::new(Console {
-            serial,
-            console_input,
-            input_enabled: vm_info.vm_cfg.serial.mode.input_enabled()
-                || vm_info.vm_cfg.console.mode.input_enabled(),
-        });
-
         let mut mmap_regions = Vec::new();
-
-        virtio_devices.append(&mut DeviceManager::make_virtio_devices(
-            vm_info,
-            &mut allocator,
-            &mut mem_slots,
-            &mut mmap_regions,
-        )?);
 
         #[allow(unused_mut)]
         let mut cmdline_additions = Vec::new();
@@ -572,6 +491,20 @@ impl DeviceManager {
             #[cfg(feature = "pci_support")]
             vm_fd: vm_info.vm_fd.clone(),
         });
+
+        let console = DeviceManager::make_console_device(
+            vm_info,
+            &address_manager,
+            &ioapic,
+            &mut virtio_devices,
+        )?;
+
+        virtio_devices.append(&mut DeviceManager::make_virtio_devices(
+            vm_info,
+            &address_manager,
+            &mut mem_slots,
+            &mut mmap_regions,
+        )?);
 
         if cfg!(feature = "pci_support") {
             #[cfg(feature = "pci_support")]
@@ -700,12 +633,97 @@ impl DeviceManager {
         })
     }
 
+    fn make_console_device(
+        vm_info: &VmInfo,
+        address_manager: &Arc<AddressManager>,
+        ioapic: &Option<Arc<Mutex<ioapic::Ioapic>>>,
+        virtio_devices: &mut Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>,
+    ) -> DeviceManagerResult<Arc<Console>> {
+        let serial_writer: Option<Box<dyn io::Write + Send>> = match vm_info.vm_cfg.serial.mode {
+            ConsoleOutputMode::File => Some(Box::new(
+                File::create(vm_info.vm_cfg.serial.file.as_ref().unwrap())
+                    .map_err(DeviceManagerError::SerialOutputFileOpen)?,
+            )),
+            ConsoleOutputMode::Tty => Some(Box::new(stdout())),
+            ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
+        };
+        let serial = if vm_info.vm_cfg.serial.mode != ConsoleOutputMode::Off {
+            // Serial is tied to IRQ #4
+            let serial_irq = 4;
+            let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = &ioapic {
+                Box::new(UserIoapicIrq::new(ioapic.clone(), serial_irq))
+            } else {
+                let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+                vm_info
+                    .vm_fd
+                    .register_irqfd(&serial_evt, serial_irq as u32)
+                    .map_err(DeviceManagerError::Irq)?;
+
+                Box::new(KernelIoapicIrq::new(serial_evt))
+            };
+
+            let serial = Arc::new(Mutex::new(devices::legacy::Serial::new(
+                interrupt,
+                serial_writer,
+            )));
+
+            address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_io_addresses(Some(GuestAddress(0x3f8)), 0x8, None)
+                .ok_or(DeviceManagerError::AllocateIOPort)?;
+
+            address_manager
+                .io_bus
+                .insert(serial.clone(), 0x3f8, 0x8)
+                .map_err(DeviceManagerError::BusError)?;
+
+            Some(serial)
+        } else {
+            None
+        };
+
+        // Create serial and virtio-console
+        let console_writer: Option<Box<dyn io::Write + Send + Sync>> =
+            match vm_info.vm_cfg.console.mode {
+                ConsoleOutputMode::File => Some(Box::new(
+                    File::create(vm_info.vm_cfg.console.file.as_ref().unwrap())
+                        .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
+                )),
+                ConsoleOutputMode::Tty => Some(Box::new(stdout())),
+                ConsoleOutputMode::Null => Some(Box::new(sink())),
+                ConsoleOutputMode::Off => None,
+            };
+        let (col, row) = get_win_size();
+        let console_input = if let Some(writer) = console_writer {
+            let (virtio_console_device, console_input) =
+                vm_virtio::Console::new(writer, col, row, vm_info.vm_cfg.console.iommu)
+                    .map_err(DeviceManagerError::CreateVirtioConsole)?;
+            virtio_devices.push((
+                Box::new(virtio_console_device) as Box<dyn vm_virtio::VirtioDevice>,
+                false,
+            ));
+            Some(console_input)
+        } else {
+            None
+        };
+
+        Ok(Arc::new(Console {
+            serial,
+            console_input,
+            input_enabled: vm_info.vm_cfg.serial.mode.input_enabled()
+                || vm_info.vm_cfg.console.mode.input_enabled(),
+        }))
+    }
+
     fn make_virtio_devices(
         vm_info: &VmInfo,
-        allocator: &mut SystemAllocator,
+        address_manager: &Arc<AddressManager>,
         mut mem_slots: &mut u32,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
     ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
+        let mut allocator = address_manager.allocator.lock().unwrap();
         let mut devices: Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)> = Vec::new();
 
         // Create "standard" virtio devices (net/block/rng)
@@ -716,7 +734,7 @@ impl DeviceManager {
         // Add virtio-fs if required
         devices.append(&mut DeviceManager::make_virtio_fs_devices(
             vm_info,
-            allocator,
+            &mut allocator,
             &mut mem_slots,
             mmap_regions,
         )?);
@@ -724,7 +742,7 @@ impl DeviceManager {
         // Add virtio-pmem if required
         devices.append(&mut DeviceManager::make_virtio_pmem_devices(
             vm_info,
-            allocator,
+            &mut allocator,
             &mut mem_slots,
             mmap_regions,
         )?);
