@@ -225,7 +225,7 @@ pub struct VirtioPciDevice {
     msix_num: u16,
 
     // Virtio device reference and status
-    device: Box<dyn VirtioDevice>,
+    device: Arc<Mutex<dyn VirtioDevice>>,
     device_activated: bool,
 
     // PCI interrupts.
@@ -250,15 +250,17 @@ impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
     pub fn new(
         memory: Arc<RwLock<GuestMemoryMmap>>,
-        device: Box<dyn VirtioDevice>,
+        device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
         iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
     ) -> Result<Self> {
+        let device_clone = device.clone();
+        let locked_device = device_clone.lock().unwrap();
         let mut queue_evts = Vec::new();
-        for _ in device.queue_max_sizes().iter() {
+        for _ in locked_device.queue_max_sizes().iter() {
             queue_evts.push(EventFd::new(EFD_NONBLOCK)?)
         }
-        let queues = device
+        let queues = locked_device
             .queue_max_sizes()
             .iter()
             .map(|&s| {
@@ -268,7 +270,7 @@ impl VirtioPciDevice {
             })
             .collect();
 
-        let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + device.device_type() as u16;
+        let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + locked_device.device_type() as u16;
 
         let (msix_config, msix_config_clone) = if msix_num > 0 {
             let msix_config = Arc::new(Mutex::new(MsixConfig::new(msix_num)));
@@ -282,7 +284,7 @@ impl VirtioPciDevice {
         // The block devices should be given a 32-bit BAR so that they are easily accessible
         // to firmware without requiring excessive identity mapping.
         let mut use_64bit_bar = true;
-        let (class, subclass) = match VirtioDeviceType::from(device.device_type()) {
+        let (class, subclass) = match VirtioDeviceType::from(locked_device.device_type()) {
             VirtioDeviceType::TYPE_NET => (
                 PciClassCode::NetworkController,
                 &PciNetworkControllerSubclass::EthernetController as &dyn PciSubclass,
@@ -556,6 +558,8 @@ impl PciDevice for VirtioPciDevice {
     ) -> std::result::Result<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>, PciDeviceError>
     {
         let mut ranges = Vec::new();
+        let device_clone = self.device.clone();
+        let device = device_clone.lock().unwrap();
 
         // Allocate the virtio-pci capability BAR.
         // See http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-740004
@@ -589,7 +593,7 @@ impl PciDevice for VirtioPciDevice {
         self.add_pci_capabilities(virtio_pci_bar)?;
 
         // Allocate a dedicated BAR if there are some shared memory regions.
-        if let Some(shm_list) = self.device.get_shm_regions() {
+        if let Some(shm_list) = device.get_shm_regions() {
             let config = PciBarConfiguration::default()
                 .set_register_index(2)
                 .set_address(shm_list.addr.raw_value())
@@ -622,7 +626,7 @@ impl PciDevice for VirtioPciDevice {
                 o - COMMON_CONFIG_BAR_OFFSET,
                 data,
                 &mut self.queues,
-                self.device.as_mut(),
+                self.device.clone(),
             ),
             o if ISR_CONFIG_BAR_OFFSET <= o && o < ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE => {
                 if let Some(v) = data.get_mut(0) {
@@ -633,7 +637,8 @@ impl PciDevice for VirtioPciDevice {
             o if DEVICE_CONFIG_BAR_OFFSET <= o
                 && o < DEVICE_CONFIG_BAR_OFFSET + DEVICE_CONFIG_SIZE =>
             {
-                self.device.read_config(o - DEVICE_CONFIG_BAR_OFFSET, data);
+                let device = self.device.lock().unwrap();
+                device.read_config(o - DEVICE_CONFIG_BAR_OFFSET, data);
             }
             o if NOTIFICATION_BAR_OFFSET <= o
                 && o < NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE =>
@@ -666,7 +671,7 @@ impl PciDevice for VirtioPciDevice {
                 o - COMMON_CONFIG_BAR_OFFSET,
                 data,
                 &mut self.queues,
-                self.device.as_mut(),
+                self.device.clone(),
             ),
             o if ISR_CONFIG_BAR_OFFSET <= o && o < ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE => {
                 if let Some(v) = data.get(0) {
@@ -677,7 +682,8 @@ impl PciDevice for VirtioPciDevice {
             o if DEVICE_CONFIG_BAR_OFFSET <= o
                 && o < DEVICE_CONFIG_BAR_OFFSET + DEVICE_CONFIG_SIZE =>
             {
-                self.device.write_config(o - DEVICE_CONFIG_BAR_OFFSET, data);
+                let mut device = self.device.lock().unwrap();
+                device.write_config(o - DEVICE_CONFIG_BAR_OFFSET, data);
             }
             o if NOTIFICATION_BAR_OFFSET <= o
                 && o < NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE =>
@@ -707,7 +713,8 @@ impl PciDevice for VirtioPciDevice {
             if let Some(interrupt_cb) = self.interrupt_cb.take() {
                 if self.memory.is_some() {
                     let mem = self.memory.as_ref().unwrap().clone();
-                    self.device
+                    let mut device = self.device.lock().unwrap();
+                    device
                         .activate(
                             mem,
                             interrupt_cb,
@@ -722,7 +729,8 @@ impl PciDevice for VirtioPciDevice {
 
         // Device has been reset by the driver
         if self.device_activated && self.is_driver_init() {
-            if let Some((interrupt_cb, mut queue_evts)) = self.device.reset() {
+            let mut device = self.device.lock().unwrap();
+            if let Some((interrupt_cb, mut queue_evts)) = device.reset() {
                 // Upon reset the device returns its interrupt EventFD and it's queue EventFDs
                 self.interrupt_cb = Some(interrupt_cb);
                 self.queue_evts.append(&mut queue_evts);

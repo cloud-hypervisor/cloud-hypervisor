@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use byteorder::{ByteOrder, LittleEndian};
 use libc::EFD_NONBLOCK;
@@ -38,7 +38,7 @@ const MMIO_VERSION: u32 = 2;
 /// Typically one page (4096 bytes) of MMIO address space is sufficient to handle this transport
 /// and inner virtio device.
 pub struct MmioDevice {
-    device: Box<dyn VirtioDevice>,
+    device: Arc<Mutex<dyn VirtioDevice>>,
     device_activated: bool,
 
     features_select: u32,
@@ -57,13 +57,15 @@ impl MmioDevice {
     /// Constructs a new MMIO transport for the given virtio device.
     pub fn new(
         mem: Arc<RwLock<GuestMemoryMmap>>,
-        device: Box<dyn VirtioDevice>,
+        device: Arc<Mutex<dyn VirtioDevice>>,
     ) -> Result<MmioDevice> {
+        let device_clone = device.clone();
+        let locked_device = device_clone.lock().unwrap();
         let mut queue_evts = Vec::new();
-        for _ in device.queue_max_sizes().iter() {
+        for _ in locked_device.queue_max_sizes().iter() {
             queue_evts.push(EventFd::new(EFD_NONBLOCK)?)
         }
-        let queues = device
+        let queues = locked_device
             .queue_max_sizes()
             .iter()
             .map(|&s| Queue::new(s))
@@ -158,10 +160,10 @@ impl BusDevice for MmioDevice {
                 let v = match offset {
                     0x0 => MMIO_MAGIC_VALUE,
                     0x04 => MMIO_VERSION,
-                    0x08 => self.device.device_type(),
+                    0x08 => self.device.lock().unwrap().device_type(),
                     0x0c => VENDOR_ID, // vendor id
                     0x10 => {
-                        self.device.features(self.features_select)
+                        self.device.lock().unwrap().features(self.features_select)
                             | if self.features_select == 1 { 0x1 } else { 0x0 }
                     }
                     0x34 => self.with_queue(0, |q| u32::from(q.get_max_size())),
@@ -176,7 +178,11 @@ impl BusDevice for MmioDevice {
                 };
                 LittleEndian::write_u32(data, v);
             }
-            0x100..=0xfff => self.device.read_config(offset - 0x100, data),
+            0x100..=0xfff => self
+                .device
+                .lock()
+                .unwrap()
+                .read_config(offset - 0x100, data),
             _ => {
                 warn!(
                     "invalid virtio mmio read: 0x{:x}:0x{:x}",
@@ -202,7 +208,11 @@ impl BusDevice for MmioDevice {
                 let v = LittleEndian::read_u32(data);
                 match offset {
                     0x14 => self.features_select = v,
-                    0x20 => self.device.ack_features(self.acked_features_select, v),
+                    0x20 => self
+                        .device
+                        .lock()
+                        .unwrap()
+                        .ack_features(self.acked_features_select, v),
                     0x24 => self.acked_features_select = v,
                     0x30 => self.queue_select = v,
                     0x38 => mut_q = self.with_queue_mut(|q| q.size = v as u16),
@@ -224,7 +234,13 @@ impl BusDevice for MmioDevice {
                     }
                 }
             }
-            0x100..=0xfff => return self.device.write_config(offset - 0x100, data),
+            0x100..=0xfff => {
+                return self
+                    .device
+                    .lock()
+                    .unwrap()
+                    .write_config(offset - 0x100, data)
+            }
             _ => {
                 warn!(
                     "invalid virtio mmio write: 0x{:x}:0x{:x}",
@@ -244,6 +260,8 @@ impl BusDevice for MmioDevice {
                 if self.mem.is_some() {
                     let mem = self.mem.as_ref().unwrap().clone();
                     self.device
+                        .lock()
+                        .unwrap()
                         .activate(
                             mem,
                             interrupt_cb,

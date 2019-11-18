@@ -9,7 +9,7 @@ extern crate byteorder;
 
 use byteorder::{ByteOrder, LittleEndian};
 use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use vm_memory::GuestAddress;
 
 use crate::{Queue, VirtioDevice};
@@ -51,7 +51,7 @@ impl VirtioPciCommonConfig {
         offset: u64,
         data: &mut [u8],
         queues: &mut Vec<Queue>,
-        device: &mut dyn VirtioDevice,
+        device: Arc<Mutex<dyn VirtioDevice>>,
     ) {
         assert!(data.len() <= 8);
 
@@ -81,7 +81,7 @@ impl VirtioPciCommonConfig {
         offset: u64,
         data: &[u8],
         queues: &mut Vec<Queue>,
-        device: &mut dyn VirtioDevice,
+        device: Arc<Mutex<dyn VirtioDevice>>,
     ) {
         assert!(data.len() <= 8);
 
@@ -156,15 +156,16 @@ impl VirtioPciCommonConfig {
         }
     }
 
-    fn read_common_config_dword(&self, offset: u64, device: &dyn VirtioDevice) -> u32 {
+    fn read_common_config_dword(&self, offset: u64, device: Arc<Mutex<dyn VirtioDevice>>) -> u32 {
         debug!("read_common_config_dword: offset 0x{:x}", offset);
         match offset {
             0x00 => self.device_feature_select,
             0x04 => {
+                let locked_device = device.lock().unwrap();
                 // Only 64 bits of features (2 pages) are defined for now, so limit
                 // device_feature_select to avoid shifting by 64 or more bits.
                 if self.device_feature_select < 2 {
-                    device.features(self.device_feature_select)
+                    locked_device.features(self.device_feature_select)
                 } else {
                     0
                 }
@@ -182,7 +183,7 @@ impl VirtioPciCommonConfig {
         offset: u64,
         value: u32,
         queues: &mut Vec<Queue>,
-        device: &mut dyn VirtioDevice,
+        device: Arc<Mutex<dyn VirtioDevice>>,
     ) {
         debug!("write_common_config_dword: offset 0x{:x}", offset);
         fn hi(v: &mut GuestAddress, x: u32) {
@@ -198,7 +199,8 @@ impl VirtioPciCommonConfig {
             0x08 => self.driver_feature_select = value,
             0x0c => {
                 if self.driver_feature_select < 2 {
-                    device.ack_features(self.driver_feature_select, value);
+                    let mut locked_device = device.lock().unwrap();
+                    locked_device.ack_features(self.driver_feature_select, value);
                 } else {
                     warn!(
                         "invalid ack_features (page {}, value 0x{:x})",
