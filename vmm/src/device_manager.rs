@@ -472,29 +472,13 @@ impl DeviceManager {
                 &interrupt_info,
             )?;
         } else if cfg!(feature = "mmio_support") {
-            #[cfg(feature = "mmio_support")]
-            {
-                for (device, _) in virtio_devices {
-                    let mmio_addr = address_manager
-                        .allocator
-                        .lock()
-                        .unwrap()
-                        .allocate_mmio_addresses(None, MMIO_LEN, Some(MMIO_LEN));
-                    if let Some(addr) = mmio_addr {
-                        DeviceManager::add_virtio_mmio_device(
-                            device,
-                            vm_info.memory,
-                            &address_manager,
-                            vm_info.vm_fd,
-                            &interrupt_info,
-                            addr,
-                            &mut cmdline_additions,
-                        )?;
-                    } else {
-                        error!("Unable to allocate MMIO address!");
-                    }
-                }
-            }
+            DeviceManager::add_mmio_devices(
+                vm_info,
+                &address_manager,
+                virtio_devices,
+                &interrupt_info,
+                &mut cmdline_additions,
+            )?;
         }
 
         Ok(DeviceManager {
@@ -605,6 +589,41 @@ impl DeviceManager {
                     arch::layout::PCI_MMCONFIG_SIZE,
                 )
                 .map_err(DeviceManagerError::BusError)?;
+        }
+
+        Ok(())
+    }
+
+    #[allow(unused_variables, unused_mut)]
+    fn add_mmio_devices(
+        vm_info: &VmInfo,
+        address_manager: &Arc<AddressManager>,
+        virtio_devices: Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>,
+        interrupt_info: &InterruptInfo,
+        mut cmdline_additions: &mut Vec<String>,
+    ) -> DeviceManagerResult<()> {
+        #[cfg(feature = "mmio_support")]
+        {
+            for (device, _) in virtio_devices {
+                let mmio_addr = address_manager
+                    .allocator
+                    .lock()
+                    .unwrap()
+                    .allocate_mmio_addresses(None, MMIO_LEN, Some(MMIO_LEN));
+                if let Some(addr) = mmio_addr {
+                    DeviceManager::add_virtio_mmio_device(
+                        device,
+                        vm_info.memory,
+                        &address_manager,
+                        vm_info.vm_fd,
+                        &interrupt_info,
+                        addr,
+                        &mut cmdline_additions,
+                    )?;
+                } else {
+                    error!("Unable to allocate MMIO address!");
+                }
+            }
         }
 
         Ok(())
