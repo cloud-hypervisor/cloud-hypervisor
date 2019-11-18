@@ -463,96 +463,14 @@ impl DeviceManager {
         )?;
 
         if cfg!(feature = "pci_support") {
-            #[cfg(feature = "pci_support")]
-            {
-                let pci_root = PciRoot::new(None);
-                let mut pci_bus = PciBus::new(
-                    pci_root,
-                    Arc::downgrade(&address_manager) as Weak<dyn DeviceRelocation>,
-                );
-
-                let (mut iommu_device, iommu_mapping) = if vm_info.vm_cfg.iommu {
-                    let (device, mapping) =
-                        vm_virtio::Iommu::new().map_err(DeviceManagerError::CreateVirtioIommu)?;
-                    (Some(device), Some(mapping))
-                } else {
-                    (None, None)
-                };
-
-                let mut iommu_attached_devices = Vec::new();
-
-                for (device, iommu_attached) in virtio_devices {
-                    let mapping: &Option<Arc<IommuMapping>> = if iommu_attached {
-                        &iommu_mapping
-                    } else {
-                        &None
-                    };
-
-                    let virtio_iommu_attach_dev = DeviceManager::add_virtio_pci_device(
-                        device,
-                        vm_info.memory,
-                        &address_manager,
-                        vm_info.vm_fd,
-                        &mut pci_bus,
-                        &interrupt_info,
-                        mapping,
-                    )?;
-
-                    if let Some(dev_id) = virtio_iommu_attach_dev {
-                        iommu_attached_devices.push(dev_id);
-                    }
-                }
-
-                let mut vfio_iommu_device_ids = DeviceManager::add_vfio_devices(
-                    vm_info,
-                    &address_manager,
-                    &mut pci_bus,
-                    mem_slots,
-                    &mut iommu_device,
-                )?;
-
-                iommu_attached_devices.append(&mut vfio_iommu_device_ids);
-
-                if let Some(iommu_device) = iommu_device {
-                    // We need to shift the device id since the 3 first bits
-                    // are dedicated to the PCI function, and we know we don't
-                    // do multifunction. Also, because we only support one PCI
-                    // bus, the bus 0, we don't need to add anything to the
-                    // global device ID.
-                    let iommu_id = pci_bus.next_device_id() << 3;
-
-                    // Because we determined the virtio-iommu b/d/f, we have to
-                    // add the device to the PCI topology now. Otherwise, the
-                    // b/d/f won't match the virtio-iommu device as expected.
-                    DeviceManager::add_virtio_pci_device(
-                        Box::new(iommu_device),
-                        vm_info.memory,
-                        &address_manager,
-                        vm_info.vm_fd,
-                        &mut pci_bus,
-                        &interrupt_info,
-                        &None,
-                    )?;
-
-                    virt_iommu = Some((iommu_id, iommu_attached_devices));
-                }
-
-                let pci_bus = Arc::new(Mutex::new(pci_bus));
-                let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(pci_bus.clone())));
-                address_manager
-                    .io_bus
-                    .insert(pci_config_io, 0xcf8, 0x8)
-                    .map_err(DeviceManagerError::BusError)?;
-                let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(pci_bus)));
-                address_manager
-                    .mmio_bus
-                    .insert(
-                        pci_config_mmio,
-                        arch::layout::PCI_MMCONFIG_START.0,
-                        arch::layout::PCI_MMCONFIG_SIZE,
-                    )
-                    .map_err(DeviceManagerError::BusError)?;
-            }
+            DeviceManager::add_pci_devices(
+                vm_info,
+                &address_manager,
+                mem_slots,
+                &mut virt_iommu,
+                virtio_devices,
+                &interrupt_info,
+            )?;
         } else if cfg!(feature = "mmio_support") {
             #[cfg(feature = "mmio_support")]
             {
@@ -587,6 +505,109 @@ impl DeviceManager {
             cmdline_additions,
             virt_iommu,
         })
+    }
+
+    #[allow(unused_variables)]
+    fn add_pci_devices(
+        vm_info: &VmInfo,
+        address_manager: &Arc<AddressManager>,
+        mem_slots: u32,
+        virt_iommu: &mut Option<(u32, Vec<u32>)>,
+        virtio_devices: Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>,
+        interrupt_info: &InterruptInfo,
+    ) -> DeviceManagerResult<()> {
+        #[cfg(feature = "pci_support")]
+        {
+            let pci_root = PciRoot::new(None);
+            let mut pci_bus = PciBus::new(
+                pci_root,
+                Arc::downgrade(&address_manager) as Weak<dyn DeviceRelocation>,
+            );
+
+            let (mut iommu_device, iommu_mapping) = if vm_info.vm_cfg.iommu {
+                let (device, mapping) =
+                    vm_virtio::Iommu::new().map_err(DeviceManagerError::CreateVirtioIommu)?;
+                (Some(device), Some(mapping))
+            } else {
+                (None, None)
+            };
+
+            let mut iommu_attached_devices = Vec::new();
+
+            for (device, iommu_attached) in virtio_devices {
+                let mapping: &Option<Arc<IommuMapping>> = if iommu_attached {
+                    &iommu_mapping
+                } else {
+                    &None
+                };
+
+                let virtio_iommu_attach_dev = DeviceManager::add_virtio_pci_device(
+                    device,
+                    vm_info.memory,
+                    &address_manager,
+                    vm_info.vm_fd,
+                    &mut pci_bus,
+                    &interrupt_info,
+                    mapping,
+                )?;
+
+                if let Some(dev_id) = virtio_iommu_attach_dev {
+                    iommu_attached_devices.push(dev_id);
+                }
+            }
+
+            let mut vfio_iommu_device_ids = DeviceManager::add_vfio_devices(
+                vm_info,
+                &address_manager,
+                &mut pci_bus,
+                mem_slots,
+                &mut iommu_device,
+            )?;
+
+            iommu_attached_devices.append(&mut vfio_iommu_device_ids);
+
+            if let Some(iommu_device) = iommu_device {
+                // We need to shift the device id since the 3 first bits
+                // are dedicated to the PCI function, and we know we don't
+                // do multifunction. Also, because we only support one PCI
+                // bus, the bus 0, we don't need to add anything to the
+                // global device ID.
+                let iommu_id = pci_bus.next_device_id() << 3;
+
+                // Because we determined the virtio-iommu b/d/f, we have to
+                // add the device to the PCI topology now. Otherwise, the
+                // b/d/f won't match the virtio-iommu device as expected.
+                DeviceManager::add_virtio_pci_device(
+                    Box::new(iommu_device),
+                    vm_info.memory,
+                    &address_manager,
+                    vm_info.vm_fd,
+                    &mut pci_bus,
+                    &interrupt_info,
+                    &None,
+                )?;
+
+                *virt_iommu = Some((iommu_id, iommu_attached_devices));
+            }
+
+            let pci_bus = Arc::new(Mutex::new(pci_bus));
+            let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(pci_bus.clone())));
+            address_manager
+                .io_bus
+                .insert(pci_config_io, 0xcf8, 0x8)
+                .map_err(DeviceManagerError::BusError)?;
+            let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(pci_bus)));
+            address_manager
+                .mmio_bus
+                .insert(
+                    pci_config_mmio,
+                    arch::layout::PCI_MMCONFIG_START.0,
+                    arch::layout::PCI_MMCONFIG_SIZE,
+                )
+                .map_err(DeviceManagerError::BusError)?;
+        }
+
+        Ok(())
     }
 
     fn make_ioapic(
