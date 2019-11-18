@@ -403,7 +403,7 @@ pub struct DeviceManager {
 impl DeviceManager {
     pub fn new(
         vm_info: &VmInfo,
-        mut allocator: SystemAllocator,
+        allocator: SystemAllocator,
         _msi_capable: bool,
         userspace_ioapic: bool,
         mut mem_slots: u32,
@@ -431,22 +431,6 @@ impl DeviceManager {
             _msi_capable,
             ioapic: &ioapic,
         };
-
-        #[cfg(feature = "acpi")]
-        {
-            let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
-                _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-                reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-            )));
-
-            allocator
-                .allocate_io_addresses(Some(GuestAddress(0x3c0)), 0x4, None)
-                .ok_or(DeviceManagerError::AllocateIOPort)?;
-
-            io_bus
-                .insert(acpi_device.clone(), 0x3c0, 0x4)
-                .map_err(DeviceManagerError::BusError)?;
-        }
 
         let mut virtio_devices: Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)> = Vec::new();
         let mut mmap_regions = Vec::new();
@@ -483,6 +467,12 @@ impl DeviceManager {
             vm_info,
             &address_manager,
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+        )?;
+
+        DeviceManager::add_acpi_device(
+            &address_manager,
+            reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )?;
 
         if cfg!(feature = "pci_support") {
@@ -610,6 +600,27 @@ impl DeviceManager {
             cmdline_additions,
             virt_iommu,
         })
+    }
+
+    #[allow(unused_variables)]
+    fn add_acpi_device(
+        address_manager: &Arc<AddressManager>,
+        reset_evt: EventFd,
+        exit_evt: EventFd,
+    ) -> DeviceManagerResult<()> {
+        #[cfg(feature = "acpi")]
+        {
+            let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
+                exit_evt, reset_evt,
+            )));
+
+            address_manager
+                .io_bus
+                .insert(acpi_device.clone(), 0x3c0, 0x4)
+                .map_err(DeviceManagerError::BusError)?;
+        }
+
+        Ok(())
     }
 
     fn add_legacy_devices(
