@@ -432,33 +432,6 @@ impl DeviceManager {
             ioapic: &ioapic,
         };
 
-        // Add a shutdown device (i8042)
-        let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(
-            reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-        )));
-
-        allocator
-            .allocate_io_addresses(Some(GuestAddress(0x61)), 0x4, None)
-            .ok_or(DeviceManagerError::AllocateIOPort)?;
-
-        io_bus
-            .insert(i8042.clone(), 0x61, 0x4)
-            .map_err(DeviceManagerError::BusError)?;
-        #[cfg(feature = "cmos")]
-        {
-            use vm_memory::GuestMemory;
-            let mem_size = vm_info.memory.as_ref().read().unwrap().end_addr().0 + 1;
-            let mem_below_4g = std::cmp::min(arch::layout::MEM_32BIT_RESERVED_START.0, mem_size);
-            let mem_above_4g = mem_size.saturating_sub(arch::layout::RAM_64BIT_START.0);
-
-            let cmos = Arc::new(Mutex::new(devices::legacy::Cmos::new(
-                mem_below_4g,
-                mem_above_4g,
-            )));
-            io_bus
-                .insert(cmos.clone(), 0x70, 0x2)
-                .map_err(DeviceManagerError::BusError)?;
-        }
         #[cfg(feature = "acpi")]
         {
             let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
@@ -505,6 +478,12 @@ impl DeviceManager {
             &mut mem_slots,
             &mut mmap_regions,
         )?);
+
+        DeviceManager::add_legacy_devices(
+            vm_info,
+            &address_manager,
+            reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+        )?;
 
         if cfg!(feature = "pci_support") {
             #[cfg(feature = "pci_support")]
@@ -631,6 +610,40 @@ impl DeviceManager {
             cmdline_additions,
             virt_iommu,
         })
+    }
+
+    fn add_legacy_devices(
+        _vm_info: &VmInfo,
+        address_manager: &Arc<AddressManager>,
+        reset_evt: EventFd,
+    ) -> DeviceManagerResult<()> {
+        // Add a shutdown device (i8042)
+        let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(reset_evt)));
+
+        address_manager
+            .io_bus
+            .insert(i8042.clone(), 0x61, 0x4)
+            .map_err(DeviceManagerError::BusError)?;
+        #[cfg(feature = "cmos")]
+        {
+            // Add a CMOS emulated device
+            use vm_memory::GuestMemory;
+            let mem_size = _vm_info.memory.as_ref().read().unwrap().end_addr().0 + 1;
+            let mem_below_4g = std::cmp::min(arch::layout::MEM_32BIT_RESERVED_START.0, mem_size);
+            let mem_above_4g = mem_size.saturating_sub(arch::layout::RAM_64BIT_START.0);
+
+            let cmos = Arc::new(Mutex::new(devices::legacy::Cmos::new(
+                mem_below_4g,
+                mem_above_4g,
+            )));
+
+            address_manager
+                .io_bus
+                .insert(cmos.clone(), 0x70, 0x2)
+                .map_err(DeviceManagerError::BusError)?;
+        }
+
+        Ok(())
     }
 
     fn make_console_device(
