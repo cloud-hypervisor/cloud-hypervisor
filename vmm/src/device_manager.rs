@@ -9,6 +9,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+extern crate vm_device;
+
 use crate::config::{ConsoleOutputMode, VmConfig};
 use crate::vm::VmInfo;
 #[cfg(feature = "acpi")]
@@ -43,6 +45,7 @@ use std::sync::{Arc, Mutex, RwLock};
 #[cfg(feature = "pci_support")]
 use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::GuestAddress;
 use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
 #[cfg(feature = "pci_support")]
@@ -404,6 +407,9 @@ pub struct DeviceManager {
 
     // VM configuration
     config: Arc<Mutex<VmConfig>>,
+
+    // Migratable devices
+    migratable_devices: Vec<Arc<Mutex<dyn Migratable>>>,
 }
 
 impl DeviceManager {
@@ -418,6 +424,7 @@ impl DeviceManager {
         let mmio_bus = devices::Bus::new();
 
         let mut virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)> = Vec::new();
+        let mut migratable_devices: Vec<Arc<Mutex<dyn Migratable>>> = Vec::new();
         let mut mmap_regions = Vec::new();
 
         #[allow(unused_mut)]
@@ -501,6 +508,7 @@ impl DeviceManager {
             start_of_device_area,
             end_of_device_area,
             config,
+            migratable_devices,
         })
     }
 
@@ -1710,3 +1718,24 @@ impl Aml for DeviceManager {
         bytes
     }
 }
+
+impl Pausable for DeviceManager {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
+        for dev in &self.migratable_devices {
+            dev.lock().unwrap().pause()?;
+        }
+
+        Ok(())
+    }
+
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
+        for dev in &self.migratable_devices {
+            dev.lock().unwrap().resume()?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Snapshotable for DeviceManager {}
+impl Migratable for DeviceManager {}
