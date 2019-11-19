@@ -15,6 +15,7 @@ extern crate vmm_sys_util;
 
 use libc::EFD_NONBLOCK;
 use std::any::Any;
+use std::result;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -26,6 +27,7 @@ use pci::{
     PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
 };
 use vm_allocator::SystemAllocator;
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
@@ -762,3 +764,16 @@ impl BusDevice for VirtioPciDevice {
         self.write_bar(base, offset, data)
     }
 }
+
+impl Pausable for VirtioPciDevice {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
+        Ok(())
+    }
+
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
+        Ok(())
+    }
+}
+
+impl Snapshotable for VirtioPciDevice {}
+impl Migratable for VirtioPciDevice {}

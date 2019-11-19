@@ -9,6 +9,7 @@ use std::fs::File;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -18,6 +19,7 @@ use super::{
     VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Bytes, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -29,6 +31,8 @@ const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
 const QUEUE_AVAIL_EVENT: DeviceEventT = 0;
 // The device has been dropped.
 const KILL_EVENT: DeviceEventT = 1;
+// The device should be paused.
+const PAUSE_EVENT: DeviceEventT = 2;
 
 struct RngEpollHandler {
     queues: Vec<Queue>,
@@ -37,6 +41,7 @@ struct RngEpollHandler {
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evt: EventFd,
     kill_evt: EventFd,
+    pause_evt: EventFd,
 }
 
 impl RngEpollHandler {
@@ -81,7 +86,7 @@ impl RngEpollHandler {
         })
     }
 
-    fn run(&mut self) -> result::Result<(), DeviceError> {
+    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
 
@@ -98,6 +103,13 @@ impl RngEpollHandler {
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.pause_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
 
@@ -141,6 +153,15 @@ impl RngEpollHandler {
                         debug!("KILL_EVENT received, stopping epoll loop");
                         break 'epoll;
                     }
+                    PAUSE_EVENT => {
+                        debug!("PAUSE_EVENT received, pausing virtio-rng epoll loop");
+                        // We loop here to handle spurious park() returns.
+                        // Until we have not resumed, the paused boolean will
+                        // be true.
+                        while paused.load(Ordering::SeqCst) {
+                            thread::park();
+                        }
+                    }
                     _ => {
                         error!("Unknown event for virtio-block");
                     }
@@ -155,11 +176,14 @@ impl RngEpollHandler {
 /// Virtio device for exposing entropy to the guest OS through virtio.
 pub struct Rng {
     kill_evt: Option<EventFd>,
+    pause_evt: Option<EventFd>,
     random_file: Option<File>,
     avail_features: u64,
     acked_features: u64,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    paused: Arc<AtomicBool>,
 }
 
 impl Rng {
@@ -174,11 +198,14 @@ impl Rng {
 
         Ok(Rng {
             kill_evt: None,
+            pause_evt: None,
             random_file: Some(random_file),
             avail_features,
             acked_features: 0u64,
             queue_evts: None,
             interrupt_cb: None,
+            epoll_thread: None,
+            paused: Arc::new(AtomicBool::new(false)),
         })
     }
 }
@@ -259,15 +286,21 @@ impl VirtioDevice for Rng {
             return Err(ActivateError::BadActivate);
         }
 
-        let (self_kill_evt, kill_evt) =
-            match EventFd::new(EFD_NONBLOCK).and_then(|e| Ok((e.try_clone()?, e))) {
-                Ok(v) => v,
-                Err(e) => {
-                    error!("failed creating kill EventFd pair: {}", e);
-                    return Err(ActivateError::BadActivate);
-                }
-            };
+        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating kill EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
         self.kill_evt = Some(self_kill_evt);
+
+        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating pause EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+        self.pause_evt = Some(self_pause_evt);
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
@@ -296,16 +329,18 @@ impl VirtioDevice for Rng {
                 interrupt_cb,
                 queue_evt: queue_evts.remove(0),
                 kill_evt,
+                pause_evt,
             };
 
-            let worker_result = thread::Builder::new()
+            let paused = self.paused.clone();
+            thread::Builder::new()
                 .name("virtio_rng".to_string())
-                .spawn(move || handler.run());
-
-            if let Err(e) = worker_result {
-                error!("failed to spawn virtio_rng worker: {}", e);
-                return Err(ActivateError::BadActivate);
-            }
+                .spawn(move || handler.run(paused))
+                .map(|thread| self.epoll_thread = Some(thread))
+                .map_err(|e| {
+                    error!("failed to clone the virtio-rng epoll thread: {}", e);
+                    ActivateError::BadActivate
+                })?;
 
             return Ok(());
         }
@@ -313,6 +348,12 @@ impl VirtioDevice for Rng {
     }
 
     fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        // We first must resume the virtio thread if it was paused.
+        if self.pause_evt.take().is_some() {
+            self.resume().ok()?;
+        }
+
+        // Then kill it.
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
@@ -325,3 +366,7 @@ impl VirtioDevice for Rng {
         ))
     }
 }
+
+virtio_pausable!(Rng);
+impl Snapshotable for Rng {}
+impl Migratable for Rng {}

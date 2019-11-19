@@ -33,6 +33,7 @@ use std;
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -44,6 +45,7 @@ use crate::{
     VirtioInterruptType, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use byteorder::{ByteOrder, LittleEndian};
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -61,7 +63,9 @@ pub const EVT_QUEUE_EVENT: DeviceEventT = 2;
 pub const BACKEND_EVENT: DeviceEventT = 3;
 // The device has been dropped.
 pub const KILL_EVENT: DeviceEventT = 4;
-pub const EVENTS_LEN: usize = 5;
+// The device should be paused.
+const PAUSE_EVENT: DeviceEventT = 5;
+pub const EVENTS_LEN: usize = 6;
 
 /// The `VsockEpollHandler` implements the runtime logic of our vsock device:
 /// 1. Respond to TX queue events by wrapping virtio buffers into `VsockPacket`s, then sending those
@@ -86,6 +90,7 @@ pub struct VsockEpollHandler<B: VsockBackend> {
     pub queues: Vec<Queue>,
     pub queue_evts: Vec<EventFd>,
     pub kill_evt: EventFd,
+    pub pause_evt: EventFd,
     pub interrupt_cb: Arc<VirtioInterrupt>,
     pub backend: Arc<RwLock<B>>,
 }
@@ -188,7 +193,7 @@ where
         }
     }
 
-    fn run(&mut self) -> result::Result<(), DeviceError> {
+    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
 
@@ -231,6 +236,13 @@ where
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.pause_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
 
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EVENTS_LEN];
 
@@ -264,7 +276,7 @@ where
 
                 let ev_type = event.data as DeviceEventT;
 
-                if self.handle_event(ev_type, evset)? {
+                if self.handle_event(ev_type, evset, paused.clone())? {
                     break 'epoll;
                 }
             }
@@ -277,6 +289,7 @@ where
         &mut self,
         device_event: DeviceEventT,
         evset: epoll::Events,
+        paused: Arc<AtomicBool>,
     ) -> Result<bool, DeviceError> {
         match device_event {
             RX_QUEUE_EVENT => {
@@ -336,6 +349,15 @@ where
                 debug!("KILL_EVENT received, stopping epoll loop");
                 return Ok(true);
             }
+            PAUSE_EVENT => {
+                debug!("PAUSE_EVENT received, pausing virtio-vsock epoll loop");
+                // We loop here to handle spurious park() returns.
+                // Until we have not resumed, the paused boolean will
+                // be true.
+                while paused.load(Ordering::SeqCst) {
+                    thread::park();
+                }
+            }
             other => {
                 error!("Unknown event for virtio-vsock");
                 return Err(DeviceError::UnknownEvent {
@@ -354,10 +376,13 @@ pub struct Vsock<B: VsockBackend> {
     cid: u64,
     backend: Arc<RwLock<B>>,
     kill_evt: Option<EventFd>,
+    pause_evt: Option<EventFd>,
     avail_features: u64,
     acked_features: u64,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    paused: Arc<AtomicBool>,
 }
 
 impl<B> Vsock<B>
@@ -377,10 +402,13 @@ where
             cid,
             backend: Arc::new(RwLock::new(backend)),
             kill_evt: None,
+            pause_evt: None,
             avail_features,
             acked_features: 0u64,
             queue_evts: None,
             interrupt_cb: None,
+            epoll_thread: None,
+            paused: Arc::new(AtomicBool::new(false)),
         })
     }
 }
@@ -482,15 +510,21 @@ where
             return Err(ActivateError::BadActivate);
         }
 
-        let (self_kill_evt, kill_evt) =
-            match EventFd::new(EFD_NONBLOCK).and_then(|e| Ok((e.try_clone()?, e))) {
-                Ok(v) => v,
-                Err(e) => {
-                    error!("failed creating kill EventFd pair: {}", e);
-                    return Err(ActivateError::BadActivate);
-                }
-            };
+        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating kill EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
         self.kill_evt = Some(self_kill_evt);
+
+        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating pause EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+        self.pause_evt = Some(self_pause_evt);
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
@@ -512,23 +546,30 @@ where
             queues,
             queue_evts,
             kill_evt,
+            pause_evt,
             interrupt_cb,
             backend: self.backend.clone(),
         };
 
-        let worker_result = thread::Builder::new()
+        let paused = self.paused.clone();
+        thread::Builder::new()
             .name("virtio_vsock".to_string())
-            .spawn(move || handler.run());
-
-        if let Err(e) = worker_result {
-            error!("failed to spawn virtio_vsock worker: {}", e);
-            return Err(ActivateError::BadActivate);
-        }
+            .spawn(move || handler.run(paused))
+            .map(|thread| self.epoll_thread = Some(thread))
+            .map_err(|e| {
+                error!("failed to clone the vsock epoll thread: {}", e);
+                ActivateError::BadActivate
+            })?;
 
         Ok(())
     }
 
     fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        // We first must resume the virtio thread if it was paused.
+        if self.pause_evt.take().is_some() {
+            self.resume().ok()?;
+        }
+
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
@@ -541,6 +582,16 @@ where
         ))
     }
 }
+
+impl<B> Pausable for Vsock<B>
+where
+    B: VsockBackend + Sync + 'static,
+{
+    virtio_pausable_inner!();
+}
+
+impl<B> Snapshotable for Vsock<B> where B: VsockBackend + Sync + 'static {}
+impl<B> Migratable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 
 #[cfg(test)]
 mod tests {
@@ -730,10 +781,11 @@ mod tests {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
 
-            match ctx
-                .handler
-                .handle_event(TX_QUEUE_EVENT, epoll::Events::EPOLLIN)
-            {
+            match ctx.handler.handle_event(
+                TX_QUEUE_EVENT,
+                epoll::Events::EPOLLIN,
+                Arc::new(AtomicBool::new(false)),
+            ) {
                 Err(DeviceError::FailedReadingQueue { .. }) => (),
                 other => panic!("{:?}", other),
             }
@@ -796,10 +848,11 @@ mod tests {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
             ctx.handler.backend.write().unwrap().set_pending_rx(false);
-            match ctx
-                .handler
-                .handle_event(RX_QUEUE_EVENT, epoll::Events::EPOLLIN)
-            {
+            match ctx.handler.handle_event(
+                RX_QUEUE_EVENT,
+                epoll::Events::EPOLLIN,
+                Arc::new(AtomicBool::new(false)),
+            ) {
                 Err(DeviceError::FailedReadingQueue { .. }) => (),
                 other => panic!("{:?}", other),
             }
@@ -813,10 +866,11 @@ mod tests {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
             ctx.handler.backend.write().unwrap().set_pending_rx(false);
-            match ctx
-                .handler
-                .handle_event(EVT_QUEUE_EVENT, epoll::Events::EPOLLIN)
-            {
+            match ctx.handler.handle_event(
+                EVT_QUEUE_EVENT,
+                epoll::Events::EPOLLIN,
+                Arc::new(AtomicBool::new(false)),
+            ) {
                 Err(DeviceError::FailedReadingQueue { .. }) => (),
                 other => panic!("{:?}", other),
             }
@@ -834,7 +888,11 @@ mod tests {
 
             ctx.handler.backend.write().unwrap().set_pending_rx(true);
             ctx.handler
-                .handle_event(BACKEND_EVENT, epoll::Events::EPOLLIN)
+                .handle_event(
+                    BACKEND_EVENT,
+                    epoll::Events::EPOLLIN,
+                    Arc::new(AtomicBool::new(false)),
+                )
                 .unwrap();
 
             // The backend should've received this event.
@@ -857,7 +915,11 @@ mod tests {
 
             ctx.handler.backend.write().unwrap().set_pending_rx(false);
             ctx.handler
-                .handle_event(BACKEND_EVENT, epoll::Events::EPOLLIN)
+                .handle_event(
+                    BACKEND_EVENT,
+                    epoll::Events::EPOLLIN,
+                    Arc::new(AtomicBool::new(false)),
+                )
                 .unwrap();
 
             // The backend should've received this event.
@@ -877,7 +939,11 @@ mod tests {
         let test_ctx = TestContext::new();
         let mut ctx = test_ctx.create_epoll_handler_context();
 
-        match ctx.handler.handle_event(0xff, epoll::Events::EPOLLIN) {
+        match ctx.handler.handle_event(
+            0xff,
+            epoll::Events::EPOLLIN,
+            Arc::new(AtomicBool::new(false)),
+        ) {
             Err(DeviceError::UnknownEvent { .. }) => (),
             other => panic!("{:?}", other),
         }

@@ -16,14 +16,16 @@ extern crate log;
 extern crate pci;
 extern crate vhost_rs;
 extern crate virtio_bindings;
+extern crate vm_device;
 extern crate vm_memory;
 
 use std::fmt;
 use std::io;
 
+#[macro_use]
+mod device;
 pub mod block;
 mod console;
-mod device;
 mod iommu;
 pub mod net;
 mod pmem;

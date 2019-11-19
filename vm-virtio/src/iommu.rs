@@ -12,6 +12,7 @@ use std::mem::size_of;
 use std::ops::Bound::Included;
 use std::os::unix::io::AsRawFd;
 use std::result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -21,7 +22,7 @@ use super::{
     VirtioDeviceType, VIRTIO_F_VERSION_1,
 };
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
-use vm_device::ExternalDmaMapping;
+use vm_device::{ExternalDmaMapping, Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -40,6 +41,8 @@ const REQUEST_Q_EVENT: DeviceEventT = 0;
 const EVENT_Q_EVENT: DeviceEventT = 1;
 /// The device has been dropped.
 const KILL_EVENT: DeviceEventT = 2;
+/// The device should be paused.
+const PAUSE_EVENT: DeviceEventT = 3;
 
 /// Virtio IOMMU features
 #[allow(unused)]
@@ -532,6 +535,7 @@ struct IommuEpollHandler {
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evts: Vec<EventFd>,
     kill_evt: EventFd,
+    pause_evt: EventFd,
     mapping: Arc<IommuMapping>,
     ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     ext_domain_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
@@ -591,7 +595,7 @@ impl IommuEpollHandler {
         })
     }
 
-    fn run(&mut self) -> result::Result<(), DeviceError> {
+    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
 
@@ -615,6 +619,13 @@ impl IommuEpollHandler {
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.pause_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
 
@@ -668,6 +679,15 @@ impl IommuEpollHandler {
                     KILL_EVENT => {
                         debug!("kill_evt received, stopping epoll loop");
                         break 'epoll;
+                    }
+                    PAUSE_EVENT => {
+                        debug!("PAUSE_EVENT received, pausing virtio-iommu epoll loop");
+                        // We loop here to handle spurious park() returns.
+                        // Until we have not resumed, the paused boolean will
+                        // be true.
+                        while paused.load(Ordering::SeqCst) {
+                            thread::park();
+                        }
                     }
                     _ => {
                         error!("Unknown event for virtio-iommu");
@@ -723,6 +743,7 @@ impl DmaRemapping for IommuMapping {
 
 pub struct Iommu {
     kill_evt: Option<EventFd>,
+    pause_evt: Option<EventFd>,
     avail_features: u64,
     acked_features: u64,
     config: VirtioIommuConfig,
@@ -730,6 +751,8 @@ pub struct Iommu {
     ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    paused: Arc<AtomicBool>,
 }
 
 impl Iommu {
@@ -747,6 +770,7 @@ impl Iommu {
         Ok((
             Iommu {
                 kill_evt: None,
+                pause_evt: None,
                 avail_features: 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP,
                 acked_features: 0u64,
                 config,
@@ -754,6 +778,8 @@ impl Iommu {
                 ext_mapping: BTreeMap::new(),
                 queue_evts: None,
                 interrupt_cb: None,
+                epoll_thread: None,
+                paused: Arc::new(AtomicBool::new(false)),
             },
             mapping,
         ))
@@ -851,15 +877,21 @@ impl VirtioDevice for Iommu {
             return Err(ActivateError::BadActivate);
         }
 
-        let (self_kill_evt, kill_evt) =
-            match EventFd::new(EFD_NONBLOCK).and_then(|e| Ok((e.try_clone()?, e))) {
-                Ok(v) => v,
-                Err(e) => {
-                    error!("failed creating kill EventFd pair: {}", e);
-                    return Err(ActivateError::BadActivate);
-                }
-            };
+        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating kill EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
         self.kill_evt = Some(self_kill_evt);
+
+        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating pause EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+        self.pause_evt = Some(self_pause_evt);
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
@@ -882,24 +914,31 @@ impl VirtioDevice for Iommu {
             interrupt_cb,
             queue_evts,
             kill_evt,
+            pause_evt,
             mapping: self.mapping.clone(),
             ext_mapping: self.ext_mapping.clone(),
             ext_domain_mapping: BTreeMap::new(),
         };
 
-        let worker_result = thread::Builder::new()
-            .name("virtio-iommu".to_string())
-            .spawn(move || handler.run());
-
-        if let Err(e) = worker_result {
-            error!("failed to spawn virtio-iommu worker: {}", e);
-            return Err(ActivateError::BadActivate);
-        }
+        let paused = self.paused.clone();
+        thread::Builder::new()
+            .name("virtio_iommu".to_string())
+            .spawn(move || handler.run(paused))
+            .map(|thread| self.epoll_thread = Some(thread))
+            .map_err(|e| {
+                error!("failed to clone the virtio-iommu epoll thread: {}", e);
+                ActivateError::BadActivate
+            })?;
 
         Ok(())
     }
 
     fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        // We first must resume the virtio thread if it was paused.
+        if self.pause_evt.take().is_some() {
+            self.resume().ok()?;
+        }
+
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
@@ -912,3 +951,7 @@ impl VirtioDevice for Iommu {
         ))
     }
 }
+
+virtio_pausable!(Iommu);
+impl Snapshotable for Iommu {}
+impl Migratable for Iommu {}

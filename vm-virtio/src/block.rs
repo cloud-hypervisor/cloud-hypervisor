@@ -17,6 +17,7 @@ use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -27,6 +28,7 @@ use super::{
 };
 use crate::VirtioInterrupt;
 use virtio_bindings::bindings::virtio_blk::*;
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -43,6 +45,8 @@ const QUEUE_AVAIL_EVENT: DeviceEventT = 0;
 pub const KILL_EVENT: DeviceEventT = 1;
 // Number of DeviceEventT events supported by this implementation.
 pub const BLOCK_EVENTS_COUNT: usize = 2;
+// The device should be paused.
+const PAUSE_EVENT: DeviceEventT = 3;
 
 #[derive(Debug)]
 pub enum Error {
@@ -326,6 +330,8 @@ struct BlockEpollHandler<T: DiskFile> {
     disk_nsectors: u64,
     interrupt_cb: Arc<VirtioInterrupt>,
     disk_image_id: Vec<u8>,
+    kill_evt: EventFd,
+    pause_evt: EventFd,
 }
 
 impl<T: DiskFile> BlockEpollHandler<T> {
@@ -399,7 +405,11 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         Ok(())
     }
 
-    fn run(&mut self, queue_evt: EventFd, kill_evt: EventFd) -> result::Result<(), DeviceError> {
+    fn run(
+        &mut self,
+        queue_evt: EventFd,
+        paused: Arc<AtomicBool>,
+    ) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
 
@@ -414,8 +424,15 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         epoll::ctl(
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
-            kill_evt.as_raw_fd(),
+            self.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.pause_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
 
@@ -459,6 +476,15 @@ impl<T: DiskFile> BlockEpollHandler<T> {
                         debug!("KILL_EVENT received, stopping epoll loop");
                         break 'epoll;
                     }
+                    PAUSE_EVENT => {
+                        debug!("PAUSE_EVENT received, pausing virtio-block epoll loop");
+                        // We loop here to handle spurious park() returns.
+                        // Until we have not resumed, the paused boolean will
+                        // be true.
+                        while paused.load(Ordering::SeqCst) {
+                            thread::park();
+                        }
+                    }
                     _ => {
                         error!("Unknown event for virtio-block");
                     }
@@ -481,6 +507,9 @@ pub struct Block<T: DiskFile> {
     config_space: Vec<u8>,
     queue_evt: Option<EventFd>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    pause_evt: Option<EventFd>,
+    paused: Arc<AtomicBool>,
 }
 
 pub fn build_config_space(disk_size: u64) -> Vec<u8> {
@@ -534,6 +563,9 @@ impl<T: DiskFile> Block<T> {
             config_space: build_config_space(disk_size),
             queue_evt: None,
             interrupt_cb: None,
+            epoll_thread: None,
+            pause_evt: None,
+            paused: Arc::new(AtomicBool::new(false)),
         })
     }
 }
@@ -630,15 +662,22 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
             return Err(ActivateError::BadActivate);
         }
 
-        let (self_kill_evt, kill_evt) =
-            match EventFd::new(EFD_NONBLOCK).and_then(|e| Ok((e.try_clone()?, e))) {
-                Ok(v) => v,
-                Err(e) => {
-                    error!("failed creating kill EventFd pair: {}", e);
-                    return Err(ActivateError::BadActivate);
-                }
-            };
+        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating kill EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+
         self.kill_evt = Some(self_kill_evt);
+
+        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating pause EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+        self.pause_evt = Some(self_pause_evt);
 
         if let Some(disk_image) = self.disk_image.clone() {
             let disk_image_id = build_disk_image_id(&self.disk_path);
@@ -663,16 +702,19 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                 disk_nsectors: self.disk_nsectors,
                 interrupt_cb,
                 disk_image_id,
+                kill_evt,
+                pause_evt,
             };
 
-            let worker_result = thread::Builder::new()
+            let paused = self.paused.clone();
+            thread::Builder::new()
                 .name("virtio_blk".to_string())
-                .spawn(move || handler.run(queue_evt, kill_evt));
-
-            if let Err(e) = worker_result {
-                error!("failed to spawn virtio_blk worker: {}", e);
-                return Err(ActivateError::BadActivate);
-            }
+                .spawn(move || handler.run(queue_evt, paused))
+                .map(|thread| self.epoll_thread = Some(thread))
+                .map_err(|e| {
+                    error!("failed to clone the virtio-blk epoll thread: {}", e);
+                    ActivateError::BadActivate
+                })?;
 
             return Ok(());
         }
@@ -680,6 +722,11 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
     }
 
     fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        // We first must resume the virtio thread if it was paused.
+        if self.pause_evt.take().is_some() {
+            self.resume().ok()?;
+        }
+
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
@@ -692,3 +739,10 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         ))
     }
 }
+
+impl<T: 'static + DiskFile + Send> Pausable for Block<T> {
+    virtio_pausable_inner!();
+}
+
+impl<T: 'static + DiskFile + Send> Snapshotable for Block<T> {}
+impl<T: 'static + DiskFile + Send> Migratable for Block<T> {}

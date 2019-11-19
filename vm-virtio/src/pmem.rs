@@ -15,6 +15,7 @@ use std::io::{self, Write};
 use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -24,6 +25,7 @@ use super::{
     VirtioDeviceType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap, GuestUsize,
 };
@@ -41,6 +43,8 @@ const VIRTIO_PMEM_RESP_TYPE_EIO: u32 = 1;
 const QUEUE_AVAIL_EVENT: DeviceEventT = 0;
 // The device has been dropped.
 const KILL_EVENT: DeviceEventT = 1;
+// The device should be paused.
+const PAUSE_EVENT: DeviceEventT = 2;
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C)]
@@ -159,6 +163,7 @@ struct PmemEpollHandler {
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evt: EventFd,
     kill_evt: EventFd,
+    pause_evt: EventFd,
 }
 
 impl PmemEpollHandler {
@@ -214,7 +219,7 @@ impl PmemEpollHandler {
         })
     }
 
-    fn run(&mut self) -> result::Result<(), DeviceError> {
+    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
 
@@ -231,6 +236,14 @@ impl PmemEpollHandler {
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.pause_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
 
@@ -274,6 +287,15 @@ impl PmemEpollHandler {
                         debug!("kill_evt received, stopping epoll loop");
                         break 'epoll;
                     }
+                    PAUSE_EVENT => {
+                        debug!("PAUSE_EVENT received, pausing virtio-pmem epoll loop");
+                        // We loop here to handle spurious park() returns.
+                        // Until we have not resumed, the paused boolean will
+                        // be true.
+                        while paused.load(Ordering::SeqCst) {
+                            thread::park();
+                        }
+                    }
                     _ => {
                         error!("Unknown event for virtio-block");
                     }
@@ -287,12 +309,15 @@ impl PmemEpollHandler {
 
 pub struct Pmem {
     kill_evt: Option<EventFd>,
+    pause_evt: Option<EventFd>,
     disk: Option<File>,
     avail_features: u64,
     acked_features: u64,
     config: VirtioPmemConfig,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    paused: Arc<AtomicBool>,
 }
 
 impl Pmem {
@@ -310,12 +335,15 @@ impl Pmem {
 
         Ok(Pmem {
             kill_evt: None,
+            pause_evt: None,
             disk: Some(disk),
             avail_features,
             acked_features: 0u64,
             config,
             queue_evts: None,
             interrupt_cb: None,
+            epoll_thread: None,
+            paused: Arc::new(AtomicBool::new(false)),
         })
     }
 }
@@ -407,15 +435,21 @@ impl VirtioDevice for Pmem {
             return Err(ActivateError::BadActivate);
         }
 
-        let (self_kill_evt, kill_evt) =
-            match EventFd::new(EFD_NONBLOCK).and_then(|e| Ok((e.try_clone()?, e))) {
-                Ok(v) => v,
-                Err(e) => {
-                    error!("failed creating kill EventFd pair: {}", e);
-                    return Err(ActivateError::BadActivate);
-                }
-            };
+        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating kill EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
         self.kill_evt = Some(self_kill_evt);
+
+        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating pause EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+        self.pause_evt = Some(self_pause_evt);
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
@@ -444,16 +478,18 @@ impl VirtioDevice for Pmem {
                 interrupt_cb,
                 queue_evt: queue_evts.remove(0),
                 kill_evt,
+                pause_evt,
             };
 
-            let worker_result = thread::Builder::new()
+            let paused = self.paused.clone();
+            thread::Builder::new()
                 .name("virtio_pmem".to_string())
-                .spawn(move || handler.run());
-
-            if let Err(e) = worker_result {
-                error!("failed to spawn virtio_pmem worker: {}", e);
-                return Err(ActivateError::BadActivate);
-            }
+                .spawn(move || handler.run(paused))
+                .map(|thread| self.epoll_thread = Some(thread))
+                .map_err(|e| {
+                    error!("failed to clone virtio-pmem epoll thread: {}", e);
+                    ActivateError::BadActivate
+                })?;
 
             return Ok(());
         }
@@ -461,6 +497,11 @@ impl VirtioDevice for Pmem {
     }
 
     fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        // We first must resume the virtio thread if it was paused.
+        if self.pause_evt.take().is_some() {
+            self.resume().ok()?;
+        }
+
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
@@ -473,3 +514,7 @@ impl VirtioDevice for Pmem {
         ))
     }
 }
+
+virtio_pausable!(Pmem);
+impl Snapshotable for Pmem {}
+impl Migratable for Pmem {}
