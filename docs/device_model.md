@@ -5,7 +5,7 @@ This document describes the device model supported by `cloud-hypervisor`.
 ## Summary
 
 | Device | Build configurable | Enabled by default | Runtime configurable |
-| :----: | :----: | :----: | :----: | :----: |
+| :----: | :----: | :----: | :----: |
 | Serial port | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
 | RTC/CMOS | :heavy_check_mark: | :heavy_check_mark: | :negative_squared_cross_mark: |
 | I/O APIC | :negative_squared_cross_mark: | :negative_squared_cross_mark: | :heavy_check_mark: |
