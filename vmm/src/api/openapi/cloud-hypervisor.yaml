@@ -322,6 +322,9 @@ components:
         iommu:
           type: boolean
           default: false
+        mergeable:
+          type: boolean
+          default: false
 
     ConsoleConfig:
       required:
