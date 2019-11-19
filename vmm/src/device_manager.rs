@@ -430,13 +430,13 @@ impl DeviceManager {
             vm_fd: vm_info.vm_fd.clone(),
         });
 
-        let ioapic = DeviceManager::make_ioapic(vm_info, &address_manager, userspace_ioapic)?;
+        let ioapic = DeviceManager::add_ioapic(vm_info, &address_manager, userspace_ioapic)?;
         let interrupt_info = InterruptInfo {
             _msi_capable,
             ioapic: &ioapic,
         };
 
-        let console = DeviceManager::make_console_device(
+        let console = DeviceManager::add_console_device(
             vm_info,
             &address_manager,
             &ioapic,
@@ -629,7 +629,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    fn make_ioapic(
+    fn add_ioapic(
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
         userspace_ioapic: bool,
@@ -708,7 +708,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    fn make_console_device(
+    fn add_console_device(
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
         ioapic: &Option<Arc<Mutex<ioapic::Ioapic>>>,
