@@ -301,9 +301,36 @@ impl Vm {
                 };
 
                 // Safe because the guest regions are guaranteed not to overlap.
-                unsafe { fd.set_user_memory_region(mem_region) }
+                unsafe { fd.set_user_memory_region(mem_region) }?;
+
+                // Mark the pages as mergeable if explicitly asked for.
+                if config.memory.mergeable {
+                    // Safe because the address and size are valid since the
+                    // mmap succeeded.
+                    let ret = unsafe {
+                        libc::madvise(
+                            region.as_ptr() as *mut libc::c_void,
+                            region.len() as libc::size_t,
+                            libc::MADV_MERGEABLE,
+                        )
+                    };
+                    if ret != 0 {
+                        let err = io::Error::last_os_error();
+                        // Safe to unwrap because the error is constructed with
+                        // last_os_error(), which ensures the output will be Some().
+                        let errno = err.raw_os_error().unwrap();
+                        if errno == libc::EINVAL {
+                            warn!("kernel not configured with CONFIG_KSM");
+                        } else {
+                            warn!("madvise error: {}", err);
+                        }
+                        warn!("failed to mark pages as mergeable");
+                    }
+                }
+
+                Ok(())
             })
-            .map_err(|_| Error::GuestMemory(MmapError::NoMemoryRegion))?;
+            .map_err(|_: io::Error| Error::GuestMemory(MmapError::NoMemoryRegion))?;
 
         // Set TSS
         fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize)
