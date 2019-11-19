@@ -101,7 +101,7 @@ fn main() {
                 .long("memory")
                 .help(
                     "Memory parameters \"size=<guest_memory_size>,\
-                     file=<backing_file_path>\"",
+                     file=<backing_file_path>,mergeable=on|off\"",
                 )
                 .default_value(&default_memory)
                 .group("vm-config"),

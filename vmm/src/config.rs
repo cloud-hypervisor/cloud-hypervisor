@@ -75,8 +75,8 @@ pub enum Error<'a> {
     ParseVsockSockParam,
     /// Missing kernel configuration
     ValidateMissingKernelConfig,
-    /// Failed parsing iommu parameter for the device.
-    ParseDeviceIommu,
+    /// Failed parsing generic on|off parameter.
+    ParseOnOff,
 }
 pub type Result<'a, T> = result::Result<T, Error<'a>>;
 
@@ -116,12 +116,12 @@ fn parse_size(size: &str) -> Result<u64> {
     Ok(res << shift)
 }
 
-fn parse_iommu(iommu: &str) -> Result<bool> {
-    if !iommu.is_empty() {
-        let res = match iommu {
+fn parse_on_off(param: &str) -> Result<bool> {
+    if !param.is_empty() {
+        let res = match param {
             "on" => true,
             "off" => false,
-            _ => return Err(Error::ParseDeviceIommu),
+            _ => return Err(Error::ParseOnOff),
         };
 
         Ok(res)
@@ -155,6 +155,8 @@ impl Default for CpusConfig {
 pub struct MemoryConfig {
     pub size: u64,
     pub file: Option<PathBuf>,
+    #[serde(default)]
+    pub mergeable: bool,
 }
 
 impl MemoryConfig {
@@ -164,6 +166,7 @@ impl MemoryConfig {
 
         let mut size_str: &str = "";
         let mut file_str: &str = "";
+        let mut mergeable_str: &str = "";
         let mut backed = false;
 
         for param in params_list.iter() {
@@ -172,6 +175,8 @@ impl MemoryConfig {
             } else if param.starts_with("file=") {
                 backed = true;
                 file_str = &param[5..];
+            } else if param.starts_with("mergeable=") {
+                mergeable_str = &param[10..];
             }
         }
 
@@ -188,6 +193,7 @@ impl MemoryConfig {
         Ok(MemoryConfig {
             size: parse_size(size_str)?,
             file,
+            mergeable: parse_on_off(mergeable_str)?,
         })
     }
 }
@@ -197,6 +203,7 @@ impl Default for MemoryConfig {
         MemoryConfig {
             size: DEFAULT_MEMORY_MB << 20,
             file: None,
+            mergeable: false,
         }
     }
 }
@@ -246,7 +253,7 @@ impl DiskConfig {
 
         Ok(DiskConfig {
             path: PathBuf::from(path_str),
-            iommu: parse_iommu(iommu_str)?,
+            iommu: parse_on_off(iommu_str)?,
         })
     }
 }
@@ -290,7 +297,7 @@ impl NetConfig {
         let mut ip: Ipv4Addr = Ipv4Addr::new(192, 168, 249, 1);
         let mut mask: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
         let mut mac: MacAddr = MacAddr::local_random();
-        let iommu = parse_iommu(iommu_str)?;
+        let iommu = parse_on_off(iommu_str)?;
 
         if !tap_str.is_empty() {
             tap = Some(tap_str.to_string());
@@ -340,7 +347,7 @@ impl RngConfig {
 
         Ok(RngConfig {
             src: PathBuf::from(src_str),
-            iommu: parse_iommu(iommu_str)?,
+            iommu: parse_on_off(iommu_str)?,
         })
     }
 }
@@ -476,7 +483,7 @@ impl PmemConfig {
         Ok(PmemConfig {
             file: PathBuf::from(file_str),
             size: parse_size(size_str)?,
-            iommu: parse_iommu(iommu_str)?,
+            iommu: parse_on_off(iommu_str)?,
         })
     }
 }
@@ -546,7 +553,7 @@ impl ConsoleConfig {
         Ok(Self {
             mode,
             file,
-            iommu: parse_iommu(iommu_str)?,
+            iommu: parse_on_off(iommu_str)?,
         })
     }
 
@@ -592,7 +599,7 @@ impl DeviceConfig {
 
         Ok(DeviceConfig {
             path: PathBuf::from(path_str),
-            iommu: parse_iommu(iommu_str)?,
+            iommu: parse_on_off(iommu_str)?,
         })
     }
 }
@@ -697,7 +704,7 @@ impl VsockConfig {
         Ok(VsockConfig {
             cid: cid_str.parse::<u64>().map_err(Error::ParseVsockCidParam)?,
             sock: PathBuf::from(sock_str),
-            iommu: parse_iommu(iommu_str)?,
+            iommu: parse_on_off(iommu_str)?,
         })
     }
 }
