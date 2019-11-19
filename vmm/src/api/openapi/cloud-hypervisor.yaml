@@ -226,6 +226,9 @@ components:
           default: 512 MB
         file:
           type: string
+        mergeable:
+          type: boolean
+          default: false
 
     KernelConfig:
       required:
