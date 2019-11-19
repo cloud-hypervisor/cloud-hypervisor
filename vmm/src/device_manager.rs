@@ -456,6 +456,7 @@ impl DeviceManager {
             &address_manager,
             &mut mem_slots,
             &mut mmap_regions,
+            &mut migratable_devices,
         )?);
 
         DeviceManager::add_legacy_devices(
@@ -481,6 +482,7 @@ impl DeviceManager {
                 &mut virt_iommu,
                 virtio_devices,
                 &interrupt_info,
+                &mut migratable_devices,
             )?;
         } else if cfg!(feature = "mmio_support") {
             DeviceManager::add_mmio_devices(
@@ -489,6 +491,7 @@ impl DeviceManager {
                 virtio_devices,
                 &interrupt_info,
                 &mut cmdline_additions,
+                &mut migratable_devices,
             )?;
         }
 
@@ -520,6 +523,7 @@ impl DeviceManager {
         virt_iommu: &mut Option<(u32, Vec<u32>)>,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
         interrupt_info: &InterruptInfo,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "pci_support")]
         {
@@ -553,6 +557,7 @@ impl DeviceManager {
                     vm_info.vm_fd,
                     &mut pci_bus,
                     mapping,
+                    migratable_devices,
                 )?;
 
                 if let Some(dev_id) = virtio_iommu_attach_dev {
@@ -588,6 +593,7 @@ impl DeviceManager {
                     vm_info.vm_fd,
                     &mut pci_bus,
                     &None,
+                    migratable_devices,
                 )?;
 
                 *virt_iommu = Some((iommu_id, iommu_attached_devices));
@@ -620,6 +626,7 @@ impl DeviceManager {
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
         interrupt_info: &InterruptInfo,
         mut cmdline_additions: &mut Vec<String>,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "mmio_support")]
         {
@@ -638,6 +645,7 @@ impl DeviceManager {
                         &interrupt_info,
                         addr,
                         &mut cmdline_additions,
+                        migratable_devices,
                     )?;
                 } else {
                     error!("Unable to allocate MMIO address!");
@@ -841,14 +849,24 @@ impl DeviceManager {
         address_manager: &Arc<AddressManager>,
         mut mem_slots: &mut u32,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut allocator = address_manager.allocator.lock().unwrap();
         let mut devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)> = Vec::new();
 
         // Create "standard" virtio devices (net/block/rng)
-        devices.append(&mut DeviceManager::make_virtio_block_devices(vm_info)?);
-        devices.append(&mut DeviceManager::make_virtio_net_devices(vm_info)?);
-        devices.append(&mut DeviceManager::make_virtio_rng_devices(vm_info)?);
+        devices.append(&mut DeviceManager::make_virtio_block_devices(
+            vm_info,
+            migratable_devices,
+        )?);
+        devices.append(&mut DeviceManager::make_virtio_net_devices(
+            vm_info,
+            migratable_devices,
+        )?);
+        devices.append(&mut DeviceManager::make_virtio_rng_devices(
+            vm_info,
+            migratable_devices,
+        )?);
 
         // Add virtio-fs if required
         devices.append(&mut DeviceManager::make_virtio_fs_devices(
@@ -856,6 +874,7 @@ impl DeviceManager {
             &mut allocator,
             &mut mem_slots,
             mmap_regions,
+            migratable_devices,
         )?);
 
         // Add virtio-pmem if required
@@ -864,26 +883,33 @@ impl DeviceManager {
             &mut allocator,
             &mut mem_slots,
             mmap_regions,
+            migratable_devices,
         )?);
 
         // Add virtio-vhost-user-net if required
         devices.append(&mut DeviceManager::make_virtio_vhost_user_net_devices(
             vm_info,
+            migratable_devices,
         )?);
 
         // Add virtio-vhost-user-blk if required
         devices.append(&mut DeviceManager::make_virtio_vhost_user_blk_devices(
             vm_info,
+            migratable_devices,
         )?);
 
         // Add virtio-vsock if required
-        devices.append(&mut DeviceManager::make_virtio_vsock_devices(vm_info)?);
+        devices.append(&mut DeviceManager::make_virtio_vsock_devices(
+            vm_info,
+            migratable_devices,
+        )?);
 
         Ok(devices)
     }
 
     fn make_virtio_block_devices(
         vm_info: &VmInfo,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
 
@@ -898,7 +924,7 @@ impl DeviceManager {
 
                 let image_type = qcow::detect_image_type(&raw_img)
                     .map_err(DeviceManagerError::DetectImageType)?;
-                let block = match image_type {
+                match image_type {
                     ImageType::Raw => {
                         let raw_img = vm_virtio::RawFile::new(raw_img);
                         let dev = vm_virtio::Block::new(
@@ -909,7 +935,13 @@ impl DeviceManager {
                         )
                         .map_err(DeviceManagerError::CreateVirtioBlock)?;
 
-                        Arc::new(Mutex::new(dev)) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>
+                        let block = Arc::new(Mutex::new(dev));
+
+                        devices.push((
+                            Arc::clone(&block) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
+                            disk_cfg.iommu,
+                        ));
+                        migratable_devices.push(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>);
                     }
                     ImageType::Qcow2 => {
                         let qcow_img = QcowFile::from(raw_img)
@@ -921,11 +953,16 @@ impl DeviceManager {
                             disk_cfg.iommu,
                         )
                         .map_err(DeviceManagerError::CreateVirtioBlock)?;
-                        Arc::new(Mutex::new(dev)) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>
+
+                        let block = Arc::new(Mutex::new(dev));
+
+                        devices.push((
+                            Arc::clone(&block) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
+                            disk_cfg.iommu,
+                        ));
+                        migratable_devices.push(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>);
                     }
                 };
-
-                devices.push((Arc::clone(&block), disk_cfg.iommu));
             }
         }
 
@@ -934,6 +971,7 @@ impl DeviceManager {
 
     fn make_virtio_net_devices(
         vm_info: &VmInfo,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
 
@@ -962,6 +1000,8 @@ impl DeviceManager {
                     Arc::clone(&virtio_net_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                     net_cfg.iommu,
                 ));
+                migratable_devices
+                    .push(Arc::clone(&virtio_net_device) as Arc<Mutex<dyn Migratable>>);
             }
         }
 
@@ -970,6 +1010,7 @@ impl DeviceManager {
 
     fn make_virtio_rng_devices(
         vm_info: &VmInfo,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
 
@@ -984,6 +1025,8 @@ impl DeviceManager {
                 Arc::clone(&virtio_rng_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                 false,
             ));
+
+            migratable_devices.push(Arc::clone(&virtio_rng_device) as Arc<Mutex<dyn Migratable>>);
         }
 
         Ok(devices)
@@ -994,6 +1037,7 @@ impl DeviceManager {
         allocator: &mut SystemAllocator,
         mem_slots: &mut u32,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
         // Add virtio-fs if required
@@ -1074,6 +1118,9 @@ impl DeviceManager {
                         Arc::clone(&virtio_fs_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                         false,
                     ));
+
+                    migratable_devices
+                        .push(Arc::clone(&virtio_fs_device) as Arc<Mutex<dyn Migratable>>);
                 }
             }
         }
@@ -1086,6 +1133,7 @@ impl DeviceManager {
         allocator: &mut SystemAllocator,
         mem_slots: &mut u32,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
         // Add virtio-pmem if required
@@ -1177,6 +1225,9 @@ impl DeviceManager {
                     Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                     false,
                 ));
+
+                migratable_devices
+                    .push(Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn Migratable>>);
             }
         }
 
@@ -1185,6 +1236,7 @@ impl DeviceManager {
 
     fn make_virtio_vhost_user_net_devices(
         vm_info: &VmInfo,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
         // Add vhost-user-net if required
@@ -1204,6 +1256,9 @@ impl DeviceManager {
                     Arc::clone(&vhost_user_net_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                     false,
                 ));
+
+                migratable_devices
+                    .push(Arc::clone(&vhost_user_net_device) as Arc<Mutex<dyn Migratable>>);
             }
         }
 
@@ -1212,6 +1267,7 @@ impl DeviceManager {
 
     fn make_virtio_vhost_user_blk_devices(
         vm_info: &VmInfo,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
         // Add vhost-user-blk if required
@@ -1231,6 +1287,9 @@ impl DeviceManager {
                     Arc::clone(&vhost_user_blk_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                     false,
                 ));
+
+                migratable_devices
+                    .push(Arc::clone(&vhost_user_blk_device) as Arc<Mutex<dyn Migratable>>);
             }
         }
 
@@ -1239,6 +1298,7 @@ impl DeviceManager {
 
     fn make_virtio_vsock_devices(
         vm_info: &VmInfo,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
         // Add vsock if required
@@ -1261,6 +1321,8 @@ impl DeviceManager {
                     Arc::clone(&vsock_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                     false,
                 ));
+
+                migratable_devices.push(Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>);
             }
         }
 
@@ -1373,6 +1435,7 @@ impl DeviceManager {
         vm_fd: &Arc<VmFd>,
         pci: &mut PciBus,
         iommu_mapping: &Option<Arc<IommuMapping>>,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Option<u32>> {
         // Allows support for one MSI-X vector per queue. It also adds 1
         // as we need to take into account the dedicated vector to notify
@@ -1471,6 +1534,8 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::AddPciDevice)?;
 
+        migratable_devices.push(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
+
         let ret = if iommu_mapping.is_some() {
             Some(dev_id)
         } else {
@@ -1490,6 +1555,7 @@ impl DeviceManager {
         interrupt_info: &InterruptInfo,
         mmio_base: GuestAddress,
         cmdline_additions: &mut Vec<String>,
+        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<()> {
         let mut mmio_device = vm_virtio::transport::MmioDevice::new(memory.clone(), virtio_device)
             .map_err(DeviceManagerError::VirtioDevice)?;
@@ -1515,9 +1581,10 @@ impl DeviceManager {
 
         mmio_device.assign_interrupt(interrupt);
 
+        let mmio_device_arc = Arc::new(Mutex::new(mmio_device));
         address_manager
             .mmio_bus
-            .insert(Arc::new(Mutex::new(mmio_device)), mmio_base.0, MMIO_LEN)
+            .insert(mmio_device_arc.clone(), mmio_base.0, MMIO_LEN)
             .map_err(DeviceManagerError::BusError)?;
 
         cmdline_additions.push(format!(
@@ -1526,6 +1593,8 @@ impl DeviceManager {
             mmio_base.0,
             irq_num
         ));
+
+        migratable_devices.push(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn Migratable>>);
 
         Ok(())
     }
