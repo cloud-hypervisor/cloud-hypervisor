@@ -455,6 +455,8 @@ pub struct PmemConfig {
     pub size: u64,
     #[serde(default)]
     pub iommu: bool,
+    #[serde(default)]
+    pub mergeable: bool,
 }
 
 impl PmemConfig {
@@ -465,6 +467,7 @@ impl PmemConfig {
         let mut file_str: &str = "";
         let mut size_str: &str = "";
         let mut iommu_str: &str = "";
+        let mut mergeable_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("file=") {
@@ -473,6 +476,8 @@ impl PmemConfig {
                 size_str = &param[5..];
             } else if param.starts_with("iommu=") {
                 iommu_str = &param[6..];
+            } else if param.starts_with("mergeable=") {
+                mergeable_str = &param[10..];
             }
         }
 
@@ -484,6 +489,7 @@ impl PmemConfig {
             file: PathBuf::from(file_str),
             size: parse_size(size_str)?,
             iommu: parse_on_off(iommu_str)?,
+            mergeable: parse_on_off(mergeable_str)?,
         })
     }
 }
