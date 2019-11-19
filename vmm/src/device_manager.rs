@@ -1078,6 +1078,31 @@ impl DeviceManager {
                 // Safe because the guest regions are guaranteed not to overlap.
                 let _ = unsafe { vm_info.vm_fd.set_user_memory_region(mem_region) };
 
+                // Mark the pages as mergeable if explicitly asked for.
+                if pmem_cfg.mergeable {
+                    // Safe because the address and size are valid since the
+                    // mmap succeeded..
+                    let ret = unsafe {
+                        libc::madvise(
+                            addr as *mut libc::c_void,
+                            size as libc::size_t,
+                            libc::MADV_MERGEABLE,
+                        )
+                    };
+                    if ret != 0 {
+                        let err = io::Error::last_os_error();
+                        // Safe to unwrap because the error is constructed with
+                        // last_os_error(), which ensures the output will be Some().
+                        let errno = err.raw_os_error().unwrap();
+                        if errno == libc::EINVAL {
+                            warn!("kernel not configured with CONFIG_KSM");
+                        } else {
+                            warn!("madvise error: {}", err);
+                        }
+                        warn!("failed to mark pages as mergeable");
+                    }
+                }
+
                 // Increment the KVM slot number
                 *mem_slots += 1;
 
