@@ -15,6 +15,7 @@ use std::mem;
 use std::net::Ipv4Addr;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::vec::Vec;
@@ -29,6 +30,7 @@ use super::{
 use crate::VirtioInterrupt;
 use net_util::{MacAddr, Tap, TapError, MAC_ADDR_LEN};
 use virtio_bindings::bindings::virtio_net::*;
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -50,6 +52,8 @@ const TX_QUEUE_EVENT: DeviceEventT = 2;
 pub const KILL_EVENT: DeviceEventT = 3;
 // Number of DeviceEventT events supported by this implementation.
 pub const NET_EVENTS_COUNT: usize = 4;
+// The device should be paused.
+const PAUSE_EVENT: DeviceEventT = 5;
 
 #[derive(Debug)]
 pub enum Error {
@@ -121,6 +125,7 @@ struct NetEpollHandler {
     tx: TxVirtio,
     interrupt_cb: Arc<VirtioInterrupt>,
     kill_evt: EventFd,
+    pause_evt: EventFd,
     epoll_fd: RawFd,
     rx_tap_listening: bool,
 }
@@ -323,7 +328,7 @@ impl NetEpollHandler {
         Ok(())
     }
 
-    fn run(&mut self) -> result::Result<(), DeviceError> {
+    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         self.epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
         // Add events
@@ -349,6 +354,13 @@ impl NetEpollHandler {
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+        epoll::ctl(
+            self.epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.pause_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
 
@@ -420,6 +432,15 @@ impl NetEpollHandler {
                         debug!("KILL_EVENT received, stopping epoll loop");
                         break 'epoll;
                     }
+                    PAUSE_EVENT => {
+                        debug!("PAUSE_EVENT received, pausing virtio-net epoll loop");
+                        // We loop here to handle spurious park() returns.
+                        // Until we have not resumed, the paused boolean will
+                        // be true.
+                        while paused.load(Ordering::SeqCst) {
+                            thread::park();
+                        }
+                    }
                     _ => {
                         error!("Unknown event for virtio-net");
                     }
@@ -433,6 +454,7 @@ impl NetEpollHandler {
 
 pub struct Net {
     kill_evt: Option<EventFd>,
+    pause_evt: Option<EventFd>,
     tap: Option<Tap>,
     avail_features: u64,
     acked_features: u64,
@@ -441,6 +463,8 @@ pub struct Net {
     config_space: Vec<u8>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    paused: Arc<AtomicBool>,
 }
 
 impl Net {
@@ -483,12 +507,15 @@ impl Net {
 
         Ok(Net {
             kill_evt: None,
+            pause_evt: None,
             tap: Some(tap),
             avail_features,
             acked_features: 0u64,
             config_space,
             queue_evts: None,
             interrupt_cb: None,
+            epoll_thread: None,
+            paused: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -600,15 +627,21 @@ impl VirtioDevice for Net {
             return Err(ActivateError::BadActivate);
         }
 
-        let (self_kill_evt, kill_evt) =
-            match EventFd::new(EFD_NONBLOCK).and_then(|e| Ok((e.try_clone()?, e))) {
-                Ok(v) => v,
-                Err(e) => {
-                    error!("failed creating kill EventFd pair: {}", e);
-                    return Err(ActivateError::BadActivate);
-                }
-            };
+        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating kill EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
         self.kill_evt = Some(self_kill_evt);
+
+        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating pause EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+        self.pause_evt = Some(self_pause_evt);
 
         if let Some(tap) = self.tap.clone() {
             // Save the interrupt EventFD as we need to return it on reset
@@ -637,18 +670,20 @@ impl VirtioDevice for Net {
                 tx: TxVirtio::new(tx_queue, tx_queue_evt),
                 interrupt_cb,
                 kill_evt,
+                pause_evt,
                 epoll_fd: 0,
                 rx_tap_listening: false,
             };
 
-            let worker_result = thread::Builder::new()
+            let paused = self.paused.clone();
+            thread::Builder::new()
                 .name("virtio_net".to_string())
-                .spawn(move || handler.run());
-
-            if let Err(e) = worker_result {
-                error!("failed to spawn virtio_blk worker: {}", e);
-                return Err(ActivateError::BadActivate);
-            }
+                .spawn(move || handler.run(paused))
+                .map(|thread| self.epoll_thread = Some(thread))
+                .map_err(|e| {
+                    error!("failed to clone the virtio-net epoll thread: {}", e);
+                    ActivateError::BadActivate
+                })?;
 
             return Ok(());
         }
@@ -656,6 +691,11 @@ impl VirtioDevice for Net {
     }
 
     fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        // We first must resume the virtio thread if it was paused.
+        if self.pause_evt.take().is_some() {
+            self.resume().ok()?;
+        }
+
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
@@ -668,3 +708,7 @@ impl VirtioDevice for Net {
         ))
     }
 }
+
+virtio_pausable!(Net);
+impl Snapshotable for Net {}
+impl Migratable for Net {}

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+use std::result;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -15,6 +16,7 @@ use crate::{
     INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
 };
 use devices::{BusDevice, Interrupt};
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{GuestAddress, GuestMemoryMmap};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
@@ -275,3 +277,16 @@ impl BusDevice for MmioDevice {
         }
     }
 }
+
+impl Pausable for MmioDevice {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
+        Ok(())
+    }
+
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
+        Ok(())
+    }
+}
+
+impl Snapshotable for MmioDevice {}
+impl Migratable for MmioDevice {}

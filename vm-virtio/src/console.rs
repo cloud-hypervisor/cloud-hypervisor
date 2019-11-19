@@ -20,7 +20,8 @@ use super::{
     VirtioInterruptType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::VirtioInterrupt;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{ByteValued, Bytes, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -37,6 +38,8 @@ const INPUT_EVENT: DeviceEventT = 2;
 const KILL_EVENT: DeviceEventT = 3;
 // Console configuration change event is triggered.
 const CONFIG_EVENT: DeviceEventT = 4;
+// The device should be paused.
+const PAUSE_EVENT: DeviceEventT = 5;
 
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
@@ -64,6 +67,7 @@ struct ConsoleEpollHandler {
     input_evt: EventFd,
     config_evt: EventFd,
     kill_evt: EventFd,
+    pause_evt: EventFd,
 }
 
 impl ConsoleEpollHandler {
@@ -157,7 +161,7 @@ impl ConsoleEpollHandler {
         })
     }
 
-    fn run(&mut self) -> result::Result<(), DeviceError> {
+    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
 
@@ -196,6 +200,13 @@ impl ConsoleEpollHandler {
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.pause_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
 
@@ -264,6 +275,15 @@ impl ConsoleEpollHandler {
                         debug!("KILL_EVENT received, stopping epoll loop");
                         break 'epoll;
                     }
+                    PAUSE_EVENT => {
+                        debug!("PAUSE_EVENT received, pausing virtio-console epoll loop");
+                        // We loop here to handle spurious park() returns.
+                        // Until we have not resumed, the paused boolean will
+                        // be true.
+                        while paused.load(Ordering::SeqCst) {
+                            thread::park();
+                        }
+                    }
                     _ => {
                         error!("Unknown event for virtio-console");
                     }
@@ -323,6 +343,7 @@ impl VirtioConsoleConfig {
 /// Virtio device for exposing console to the guest OS through virtio.
 pub struct Console {
     kill_evt: Option<EventFd>,
+    pause_evt: Option<EventFd>,
     avail_features: u64,
     acked_features: u64,
     config: Arc<Mutex<VirtioConsoleConfig>>,
@@ -330,6 +351,8 @@ pub struct Console {
     out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    paused: Arc<AtomicBool>,
 }
 
 impl Console {
@@ -360,6 +383,7 @@ impl Console {
         Ok((
             Console {
                 kill_evt: None,
+                pause_evt: None,
                 avail_features,
                 acked_features: 0u64,
                 config: console_config,
@@ -367,6 +391,8 @@ impl Console {
                 out: Arc::new(Mutex::new(out)),
                 queue_evts: None,
                 interrupt_cb: None,
+                epoll_thread: None,
+                paused: Arc::new(AtomicBool::new(false)),
             },
             console_input,
         ))
@@ -461,15 +487,22 @@ impl VirtioDevice for Console {
             return Err(ActivateError::BadActivate);
         }
 
-        let (self_kill_evt, kill_evt) =
-            match EventFd::new(EFD_NONBLOCK).and_then(|e| Ok((e.try_clone()?, e))) {
-                Ok(v) => v,
-                Err(e) => {
-                    error!("failed creating kill EventFd pair: {}", e);
-                    return Err(ActivateError::BadActivate);
-                }
-            };
+        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating kill EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+
         self.kill_evt = Some(self_kill_evt);
+
+        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating pause EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+        self.pause_evt = Some(self_pause_evt);
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
@@ -507,21 +540,28 @@ impl VirtioDevice for Console {
             input_evt: self.input.input_evt.try_clone().unwrap(),
             config_evt: self.input.config_evt.try_clone().unwrap(),
             kill_evt,
+            pause_evt,
         };
 
-        let worker_result = thread::Builder::new()
+        let paused = self.paused.clone();
+        thread::Builder::new()
             .name("virtio_console".to_string())
-            .spawn(move || handler.run());
-
-        if let Err(e) = worker_result {
-            error!("failed to spawn virtio_console worker: {}", e);
-            return Err(ActivateError::BadActivate);
-        }
+            .spawn(move || handler.run(paused))
+            .map(|thread| self.epoll_thread = Some(thread))
+            .map_err(|e| {
+                error!("failed to clone the virtio-console epoll thread: {}", e);
+                ActivateError::BadActivate
+            })?;
 
         Ok(())
     }
 
     fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        // We first must resume the virtio thread if it was paused.
+        if self.pause_evt.take().is_some() {
+            self.resume().ok()?;
+        }
+
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
@@ -534,3 +574,7 @@ impl VirtioDevice for Console {
         ))
     }
 }
+
+virtio_pausable!(Console);
+impl Snapshotable for Console {}
+impl Migratable for Console {}

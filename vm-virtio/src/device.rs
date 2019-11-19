@@ -101,3 +101,45 @@ pub trait VirtioDevice: Send {
 pub trait DmaRemapping: Send + Sync {
     fn translate(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error>;
 }
+
+#[macro_export]
+macro_rules! virtio_pausable_inner {
+    () => {
+        fn pause(&mut self) -> result::Result<(), MigratableError> {
+            debug!(
+                "Pausing virtio-{}",
+                VirtioDeviceType::from(self.device_type())
+            );
+            self.paused.store(true, Ordering::SeqCst);
+            if let Some(pause_evt) = &self.pause_evt {
+                pause_evt
+                    .write(1)
+                    .map_err(|e| MigratableError::Pause(e.into()))?;
+            }
+
+            Ok(())
+        }
+
+        fn resume(&mut self) -> result::Result<(), MigratableError> {
+            debug!(
+                "Resuming virtio-{}",
+                VirtioDeviceType::from(self.device_type())
+            );
+            self.paused.store(false, Ordering::SeqCst);
+            if let Some(epoll_thread) = &self.epoll_thread {
+                epoll_thread.thread().unpark();
+            }
+
+            Ok(())
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! virtio_pausable {
+    ($name:ident) => {
+        impl Pausable for $name {
+            virtio_pausable_inner!();
+        }
+    };
+}

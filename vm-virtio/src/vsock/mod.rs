@@ -165,6 +165,7 @@ mod tests {
     use super::*;
 
     use std::os::unix::io::AsRawFd;
+    use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, RwLock};
     use vmm_sys_util::eventfd::EventFd;
 
@@ -306,6 +307,7 @@ mod tests {
                     queues,
                     queue_evts,
                     kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
+                    pause_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
                     interrupt_cb,
                     backend: Arc::new(RwLock::new(TestBackend::new())),
                 },
@@ -324,13 +326,21 @@ mod tests {
         pub fn signal_txq_event(&mut self) {
             self.handler.queue_evts[1].write(1).unwrap();
             self.handler
-                .handle_event(TX_QUEUE_EVENT, epoll::Events::EPOLLIN)
+                .handle_event(
+                    TX_QUEUE_EVENT,
+                    epoll::Events::EPOLLIN,
+                    Arc::new(AtomicBool::new(false)),
+                )
                 .unwrap();
         }
         pub fn signal_rxq_event(&mut self) {
             self.handler.queue_evts[0].write(1).unwrap();
             self.handler
-                .handle_event(RX_QUEUE_EVENT, epoll::Events::EPOLLIN)
+                .handle_event(
+                    RX_QUEUE_EVENT,
+                    epoll::Events::EPOLLIN,
+                    Arc::new(AtomicBool::new(false)),
+                )
                 .unwrap();
         }
     }
