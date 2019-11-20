@@ -113,6 +113,9 @@ pub enum Error {
 
     /// Cannot add legacy device to Bus.
     BusError(devices::BusError),
+
+    /// Failed to allocate IO port
+    AllocateIOPort,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -404,6 +407,13 @@ impl CpuManager {
             reset_evt,
             selected_cpu: 0,
         }));
+
+        device_manager
+            .allocator()
+            .lock()
+            .unwrap()
+            .allocate_io_addresses(Some(GuestAddress(0x0cd8)), 0x8, None)
+            .ok_or(Error::AllocateIOPort)?;
 
         cpu_manager
             .lock()
