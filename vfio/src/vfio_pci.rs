@@ -573,7 +573,7 @@ impl VfioPciDevice {
             },
             Some(InterruptUpdateAction::DisableMsix) => {
                 if let Err(e) = self.device.disable_msix() {
-                    warn!("Could not disable MSI: {}", e);
+                    warn!("Could not disable MSI-X: {}", e);
                 }
             }
             _ => {}
@@ -676,12 +676,16 @@ impl VfioPciDevice {
 
 impl Drop for VfioPciDevice {
     fn drop(&mut self) {
-        if self.interrupt.msi.is_some() && self.device.disable_msi().is_err() {
-            error!("Could not disable MSI");
+        if let Some(msix) = &self.interrupt.msix {
+            if msix.cap.enabled() && self.device.disable_msix().is_err() {
+                error!("Could not disable MSI-X");
+            }
         }
 
-        if self.interrupt.msix.is_some() && self.device.disable_msix().is_err() {
-            error!("Could not disable MSI-X");
+        if let Some(msi) = &self.interrupt.msi {
+            if msi.cap.enabled() && self.device.disable_msi().is_err() {
+                error!("Could not disable MSI");
+            }
         }
 
         if self.device.unset_dma_map().is_err() {
