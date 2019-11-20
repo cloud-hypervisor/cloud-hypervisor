@@ -692,10 +692,10 @@ impl VfioDevice {
 
         let mut irq_set = vec_with_array_field::<vfio_irq_set, u32>(0);
         irq_set[0].argsz = mem::size_of::<vfio_irq_set>() as u32;
-        irq_set[0].flags = VFIO_IRQ_SET_ACTION_MASK;
+        irq_set[0].flags = VFIO_IRQ_SET_ACTION_TRIGGER | VFIO_IRQ_SET_DATA_NONE;
         irq_set[0].index = irq_index;
         irq_set[0].start = 0;
-        irq_set[0].count = irq.count;
+        irq_set[0].count = 0;
 
         // Safe as we are the owner of self and irq_set which are valid value
         let ret = unsafe { ioctl_with_ref(self, VFIO_DEVICE_SET_IRQS(), &irq_set[0]) };
