@@ -342,12 +342,43 @@ pub struct CpuManager {
     vcpus_pause_signalled: Arc<AtomicBool>,
     reset_evt: EventFd,
     threads: Vec<thread::JoinHandle<()>>,
+    selected_cpu: u8,
 }
 
-impl BusDevice for CpuManager {
-    fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {}
+const CPU_ENABLE_FLAG: usize = 0;
 
-    fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) {}
+const CPU_STATUS_OFFSET: u64 = 4;
+const CPU_SELECTION_OFFSET: u64 = 0;
+
+impl BusDevice for CpuManager {
+    fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
+        match offset {
+            CPU_STATUS_OFFSET => {
+                // All CPUs are currently enabled
+                data[0] |= 1 << CPU_ENABLE_FLAG;
+            }
+            _ => {
+                warn!(
+                    "Unexpected offset for accessing CPU manager device: {:#}",
+                    offset
+                );
+            }
+        }
+    }
+
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
+        match offset {
+            CPU_SELECTION_OFFSET => {
+                self.selected_cpu = data[0];
+            }
+            _ => {
+                warn!(
+                    "Unexpected offset for accessing CPU manager device: {:#}",
+                    offset
+                );
+            }
+        }
+    }
 }
 
 impl CpuManager {
@@ -371,6 +402,7 @@ impl CpuManager {
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
             threads: Vec::with_capacity(boot_vcpus as usize),
             reset_evt,
+            selected_cpu: 0,
         }));
 
         cpu_manager
