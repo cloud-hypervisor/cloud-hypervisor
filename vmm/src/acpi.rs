@@ -110,7 +110,6 @@ struct IortIdMapping {
 
 struct CPU {
     cpu_id: u8,
-    present: bool,
 }
 
 const MADT_CPU_ENABLE_FLAG: usize = 0;
@@ -147,33 +146,112 @@ impl aml::Aml for CPU {
                     "_STA".into(),
                     0,
                     false,
-                    vec![&aml::Return::new(if self.present {
-                        &0xfu8
-                    } else {
-                        &aml::ZERO
-                    })],
+                    // Call into CSTA method which will interrogate device
+                    vec![&aml::Return::new(&aml::MethodCall::new(
+                        "CSTA".into(),
+                        vec![&self.cpu_id],
+                    ))],
                 ),
                 // The Linux kernel expects every CPU device to have a _MAT entry
                 // containing the LAPIC for this processor with the enabled bit set
                 // even it if is disabled in the MADT (non-boot CPU)
-                &aml::Name::new("_MAT".into(), &aml::Buffer::new(mat_data))
+                &aml::Name::new("_MAT".into(), &aml::Buffer::new(mat_data)),
             ],
         )
         .to_aml_bytes()
     }
 }
 
+struct CPUMethods;
+impl Aml for CPUMethods {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(
+            // CPU status method
+            &aml::Method::new(
+                "CSTA".into(),
+                1,
+                true,
+                vec![
+                    // Take lock defined above
+                    &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xfff),
+                    // Write CPU number (in first argument) to I/O port via field
+                    &aml::Store::new(&aml::Path::new("\\_SB_.PRES.CSEL"), &aml::Arg(0)),
+                    &aml::Store::new(&aml::Local(0), &aml::ZERO),
+                    // Check if CPEN bit is set, if so make the local variable 0xf (see _STA for details of meaning)
+                    &aml::If::new(
+                        &aml::Equal::new(&aml::Path::new("\\_SB_.PRES.CPEN"), &aml::ONE),
+                        vec![&aml::Store::new(&aml::Local(0), &0xfu8)],
+                    ),
+                    // Release lock
+                    &aml::Release::new("\\_SB_.PRES.CPLK".into()),
+                    // Return 0 or 0xf
+                    &aml::Return::new(&aml::Local(0)),
+                ],
+            )
+            .to_aml_bytes(),
+        );
+
+        bytes
+    }
+}
+
 fn create_cpu_data(num_cpus: u8) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    // CPU hotplug controller
+    bytes.extend_from_slice(
+        &aml::Device::new(
+            "_SB_.PRES".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
+                // Mutex to protect concurrent access as we write to choose CPU and then read back status
+                &aml::Mutex::new("CPLK".into(), 0),
+                // I/O port for CPU controller
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![&aml::IO::new(0x0cd8, 0x0cd8, 0x01, 0x0c)]),
+                ),
+                // OpRegion and Fields map I/O port into individual field values
+                &aml::OpRegion::new("PRST".into(), aml::OpRegionSpace::SystemIO, 0x0cd8, 0x0c),
+                &aml::Field::new(
+                    "PRST".into(),
+                    aml::FieldAccessType::Byte,
+                    aml::FieldUpdateRule::WriteAsZeroes,
+                    vec![
+                        aml::FieldEntry::Reserved(32),
+                        aml::FieldEntry::Named(*b"CPEN", 1),
+                        aml::FieldEntry::Named(*b"CINS", 1),
+                        aml::FieldEntry::Named(*b"CRMV", 1),
+                        aml::FieldEntry::Named(*b"CEJ0", 1),
+                        aml::FieldEntry::Reserved(4),
+                        aml::FieldEntry::Named(*b"CCMD", 8),
+                    ],
+                ),
+                &aml::Field::new(
+                    "PRST".into(),
+                    aml::FieldAccessType::DWord,
+                    aml::FieldUpdateRule::Preserve,
+                    vec![
+                        aml::FieldEntry::Named(*b"CSEL", 32),
+                        aml::FieldEntry::Reserved(32),
+                        aml::FieldEntry::Named(*b"CDAT", 32),
+                    ],
+                ),
+            ],
+        )
+        .to_aml_bytes(),
+    );
+
+    // CPU devices
     let hid = aml::Name::new("_HID".into(), &"ACPI0010");
     let uid = aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A05"));
-    let mut cpu_data_inner: Vec<&dyn aml::Aml> = vec![&hid, &uid];
+    // Bundle methods together under a common object
+    let methods = CPUMethods;
+    let mut cpu_data_inner: Vec<&dyn aml::Aml> = vec![&hid, &uid, &methods];
 
     let mut cpu_devices = Vec::new();
     for cpu_id in 0..num_cpus {
-        let cpu_device = CPU {
-            cpu_id,
-            present: true,
-        };
+        let cpu_device = CPU { cpu_id };
 
         cpu_devices.push(cpu_device);
     }
@@ -182,7 +260,8 @@ fn create_cpu_data(num_cpus: u8) -> Vec<u8> {
         cpu_data_inner.push(cpu_device);
     }
 
-    aml::Device::new("_SB_.CPUS".into(), cpu_data_inner).to_aml_bytes()
+    bytes.extend_from_slice(&aml::Device::new("_SB_.CPUS".into(), cpu_data_inner).to_aml_bytes());
+    bytes
 }
 
 pub fn create_dsdt_table(
