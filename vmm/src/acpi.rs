@@ -113,8 +113,22 @@ struct CPU {
     present: bool,
 }
 
+const MADT_CPU_ENABLE_FLAG: usize = 0;
+
 impl aml::Aml for CPU {
     fn to_aml_bytes(&self) -> Vec<u8> {
+        let lapic = LocalAPIC {
+            r#type: 0,
+            length: 8,
+            processor_id: self.cpu_id,
+            apic_id: self.cpu_id,
+            flags: 1 << MADT_CPU_ENABLE_FLAG,
+        };
+
+        let mut mat_data: Vec<u8> = Vec::new();
+        mat_data.resize(std::mem::size_of_val(&lapic), 0);
+        unsafe { *(mat_data.as_mut_ptr() as *mut LocalAPIC) = lapic };
+
         aml::Device::new(
             format!("C{:03}", self.cpu_id).as_str().into(),
             vec![
@@ -139,6 +153,10 @@ impl aml::Aml for CPU {
                         &aml::ZERO
                     })],
                 ),
+                // The Linux kernel expects every CPU device to have a _MAT entry
+                // containing the LAPIC for this processor with the enabled bit set
+                // even it if is disabled in the MADT (non-boot CPU)
+                &aml::Name::new("_MAT".into(), &aml::Buffer::new(mat_data))
             ],
         )
         .to_aml_bytes()
@@ -322,7 +340,7 @@ pub fn create_acpi_tables(
             length: 8,
             processor_id: cpu,
             apic_id: cpu,
-            flags: 1,
+            flags: 1 << MADT_CPU_ENABLE_FLAG,
         };
         madt.append(lapic);
     }
