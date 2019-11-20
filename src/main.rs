@@ -456,6 +456,7 @@ mod tests {
         fn disk(&self, disk_type: DiskType) -> Option<String>;
     }
 
+    #[derive(Clone)]
     struct ClearDiskConfig {
         osdisk_path: String,
         osdisk_raw_path: String,
@@ -3042,5 +3043,132 @@ mod tests {
             let _ = child.wait();
             Ok(())
         });
+    }
+
+    fn get_pss(pid: u32) -> u32 {
+        let output = Command::new("bash")
+            .arg("-c")
+            .arg(
+                format!(
+                    "cat /proc/{}/smaps | grep -i pss |  awk '{{Total+=$2}} END {{print Total}}'",
+                    pid
+                )
+                .as_str(),
+            )
+            .output()
+            .unwrap();
+
+        std::str::from_utf8(output.stdout.as_slice())
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap()
+    }
+
+    fn test_memory_mergeable(mergeable: bool) {
+        test_block!(tb, "", {
+            let memory_param = if mergeable {
+                "mergeable=on"
+            } else {
+                "mergeable=off"
+            };
+
+            let mut clear1 = ClearDiskConfig::new();
+            let mut clear2 = ClearDiskConfig::new();
+
+            let guest1 = Guest::new(&mut clear1 as &mut dyn DiskConfig);
+
+            let mut child1 = Command::new("target/release/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
+                .args(&["--kernel", guest1.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest1.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest1.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                ])
+                .args(&["--net", guest1.default_net_string().as_str()])
+                .args(&["--serial", "tty", "--console", "off"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Get initial PSS
+            let old_pss = get_pss(child1.id());
+
+            let guest2 = Guest::new(&mut clear2 as &mut dyn DiskConfig);
+
+            let mut child2 = Command::new("target/release/cloud-hypervisor")
+                .args(&["--cpus", "1"])
+                .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
+                .args(&["--kernel", guest2.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest2.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest2.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                ])
+                .args(&["--net", guest2.default_net_string().as_str()])
+                .args(&["--serial", "tty", "--console", "off"])
+                .spawn()
+                .unwrap();
+
+            // Let enough time for the second VM to be spawned, and to make
+            // sure KVM has enough time to merge identical pages between the
+            // 2 VMs.
+            thread::sleep(std::time::Duration::new(30, 0));
+
+            // Get new PSS
+            let new_pss = get_pss(child1.id());
+
+            // Convert PSS from u32 into float.
+            let old_pss = old_pss as f32;
+            let new_pss = new_pss as f32;
+
+            if mergeable {
+                aver!(tb, new_pss < (old_pss * 0.9));
+            } else {
+                aver!(tb, (old_pss * 0.95) < new_pss && new_pss < (old_pss * 1.05));
+            }
+
+            guest1
+                .ssh_command("sudo shutdown -h now")
+                .unwrap_or_default();
+            guest2
+                .ssh_command("sudo shutdown -h now")
+                .unwrap_or_default();
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child1.kill();
+            let _ = child2.kill();
+            let _ = child1.wait();
+            let _ = child2.wait();
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_memory_mergeable_on() {
+        test_memory_mergeable(true)
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_memory_mergeable_off() {
+        test_memory_mergeable(false)
     }
 }

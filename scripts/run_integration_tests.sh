@@ -152,6 +152,12 @@ sudo setcap cap_net_admin+ep target/release/vhost_user_net
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/release/cloud-hypervisor $VFIO_DIR
 
+# Enable KSM with some reasonable parameters so that it won't take too long
+# for the memory to be merged between two processes.
+sudo bash -c "echo 10000 > /sys/kernel/mm/ksm/pages_to_scan"
+sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
+sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
+
 sudo adduser $USER kvm
 newgrp kvm << EOF
 export RUST_BACKTRACE=1
