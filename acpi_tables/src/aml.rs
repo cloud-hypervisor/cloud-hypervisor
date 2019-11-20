@@ -1109,6 +1109,34 @@ impl<'a> Aml for MethodCall<'a> {
     }
 }
 
+pub struct Buffer {
+    data: Vec<u8>,
+}
+
+impl Buffer {
+    pub fn new(data: Vec<u8>) -> Self {
+        Buffer { data }
+    }
+}
+
+impl Aml for Buffer {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.data.len().to_aml_bytes());
+        bytes.extend_from_slice(&self.data);
+
+        let mut pkg_length = create_pkg_length(&bytes, true);
+        pkg_length.reverse();
+        for byte in pkg_length {
+            bytes.insert(0, byte);
+        }
+
+        bytes.insert(0, 0x11); /* BufferOp */
+
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1815,5 +1843,28 @@ mod tests {
             .to_aml_bytes(),
         );
         assert_eq!(&methods[..], &test_data[..])
+    }
+
+    #[test]
+    fn test_buffer() {
+        /*
+        Name (_MAT, Buffer (0x08)  // _MAT: Multiple APIC Table Entry
+        {
+            0x00, 0x08, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00   /* ........ */
+        })
+        */
+        let buffer_data = [
+            0x08, 0x5F, 0x4D, 0x41, 0x54, 0x11, 0x0B, 0x0A, 0x08, 0x00, 0x08, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00,
+        ];
+
+        assert_eq!(
+            Name::new(
+                "_MAT".into(),
+                &Buffer::new(vec![0x00, 0x08, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00])
+            )
+            .to_aml_bytes(),
+            &buffer_data[..]
+        )
     }
 }
