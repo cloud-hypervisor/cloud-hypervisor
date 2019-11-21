@@ -152,6 +152,12 @@ pub enum Error {
 
     /// Cannot resume devices
     ResumeDevices(MigratableError),
+
+    /// Cannot pause CPUs
+    PauseCpus(MigratableError),
+
+    /// Cannot resume cpus
+    ResumeCpus(MigratableError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -633,7 +639,7 @@ impl Vm {
             .lock()
             .unwrap()
             .pause()
-            .map_err(Error::CpuManager)?;
+            .map_err(Error::PauseCpus)?;
         self.devices.pause().map_err(Error::PauseDevices)?;
 
         *state = new_state;
@@ -652,7 +658,7 @@ impl Vm {
             .lock()
             .unwrap()
             .resume()
-            .map_err(Error::CpuManager)?;
+            .map_err(Error::ResumeCpus)?;
 
         // And we're back to the Running state.
         *state = new_state;

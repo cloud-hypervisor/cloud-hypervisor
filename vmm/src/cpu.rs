@@ -25,6 +25,7 @@ use devices::{ioapic, BusDevice};
 use kvm_bindings::CpuId;
 use kvm_ioctls::*;
 
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Address, GuestAddress, GuestMemoryMmap};
 
 use vmm_sys_util::eventfd::EventFd;
@@ -627,34 +628,6 @@ impl CpuManager {
         Ok(())
     }
 
-    pub fn pause(&self) -> Result<()> {
-        // Tell the vCPUs to pause themselves next time they exit
-        self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
-
-        // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
-        // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
-        // above.
-        for state in self.vcpu_states.iter() {
-            state.signal_thread();
-        }
-
-        Ok(())
-    }
-
-    pub fn resume(&self) -> Result<()> {
-        // Toggle the vCPUs pause boolean
-        self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
-
-        // Unpark all the VCPU threads.
-        // Once unparked, the next thing they will do is checking for the pause
-        // boolean. Since it'll be set to false, they will exit their pause loop
-        // and go back to vmx root.
-        for state in self.vcpu_states.iter() {
-            state.unpark_thread();
-        }
-        Ok(())
-    }
-
     pub fn boot_vcpus(&self) -> u8 {
         self.boot_vcpus
     }
@@ -900,3 +873,36 @@ impl Aml for CpuManager {
         bytes
     }
 }
+
+impl Pausable for CpuManager {
+    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+        // Tell the vCPUs to pause themselves next time they exit
+        self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
+
+        // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
+        // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
+        // above.
+        for state in self.vcpu_states.iter() {
+            state.signal_thread();
+        }
+
+        Ok(())
+    }
+
+    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        // Toggle the vCPUs pause boolean
+        self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
+
+        // Unpark all the VCPU threads.
+        // Once unparked, the next thing they will do is checking for the pause
+        // boolean. Since it'll be set to false, they will exit their pause loop
+        // and go back to vmx root.
+        for state in self.vcpu_states.iter() {
+            state.unpark_thread();
+        }
+        Ok(())
+    }
+}
+
+impl Snapshotable for CpuManager {}
+impl Migratable for CpuManager {}
