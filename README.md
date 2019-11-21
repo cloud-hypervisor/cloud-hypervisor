@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.com/intel/cloud-hypervisor.svg?branch=master)](https://travis-ci.com/intel/cloud-hypervisor)
+[![Build Status](https://travis-ci.com/cloud-hypervisor/cloud-hypervisor.svg?branch=master)](https://travis-ci.com/cloud-hypervisor/cloud-hypervisor)
 
 1. [What is Cloud Hypervisor?](#1-what-is-cloud-hypervisor)
    * [Requirements](#requirements)
@@ -74,7 +74,7 @@ First you need to clone and build the cloud-hypervisor repo:
 
 ```shell
 $ pushd $CLOUDH
-$ git clone https://github.com/intel/cloud-hypervisor.git
+$ git clone https://github.com/cloud-hypervisor/cloud-hypervisor.git
 $ cd cloud-hypervisor
 $ cargo build --release
 
@@ -95,7 +95,7 @@ You can run a guest VM by either using an existing cloud image or booting into y
 `cloud-hypervisor` supports booting disk images containing all needed
 components to run cloud workloads, a.k.a. cloud images.  To do that we rely on
 the [Rust Hypervisor
-Firmware](https://github.com/intel/rust-hypervisor-firmware) project to provide
+Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware) project to provide
 an ELF
 formatted KVM firmware for `cloud-hypervisor` to directly boot into.
 
@@ -105,7 +105,7 @@ We need to get the latest `rust-hypervisor-firmware` release and also a working 
 $ pushd $CLOUDH
 $ wget https://download.clearlinux.org/releases/29160/clear/clear-29160-kvm.img.xz
 $ unxz clear-29160-kvm.img.xz
-$ wget https://github.com/intel/rust-hypervisor-firmware/releases/download/0.2.0/hypervisor-fw
+$ wget https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.2.0/hypervisor-fw
 $ popd
 ```
 
@@ -207,12 +207,12 @@ Clear Linux root partitions, and also basic initrd/initramfs images.
 
 ## Device Model
 
-Follow this [documentation](https://github.com/intel/cloud-hypervisor/blob/master/docs/device_model.md).
+Follow this [documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/device_model.md).
 
 ## TODO
 
 We are not tracking the `cloud-hypervisor` TODO list from a specific git tracked file but through
-[github issues](https://github.com/intel/cloud-hypervisor/issues/new) instead.
+[github issues](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new) instead.
 
 # 4. `rust-vmm` project dependency
 

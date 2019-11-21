@@ -6,7 +6,7 @@ source $HOME/.cargo/env
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
 
-FW_URL=$(curl --silent https://api.github.com/repos/intel/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
 FW="$WORKLOADS_DIR/hypervisor-fw"
 if [ ! -f "$FW" ]; then
     pushd $WORKLOADS_DIR
