@@ -51,7 +51,7 @@ Signed-off-by: Rob Bradford <robert.bradford@intel.com>
 Cloud Hypervisor uses the “fork-and-pull” development model. Follow these steps if
 you want to merge your changes to `cloud-hypervisor`:
 
-1. Fork the [cloud-hypervisor](https://github.com/intel/cloud-hypervisor) project
+1. Fork the [cloud-hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) project
    into your github organization.
 2. Within your fork, create a branch for your contribution.
 3. [Create a pull request](https://help.github.com/articles/creating-a-pull-request-from-a-fork/)
@@ -65,7 +65,7 @@ you want to merge your changes to `cloud-hypervisor`:
 ## Issue tracking
 
 If you have a problem, please let us know. We recommend using
-[github issues](https://github.com/intel/cloud-hypervisor/issues/new) for formally
+[github issues](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new) for formally
 reporting and documenting them.
 
 To quickly and informally bring something up to us, you can also reach out on [Slack](https://cloud-hypervisor.slack.com).

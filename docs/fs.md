@@ -12,7 +12,7 @@ This virtual device relies on the _vhost-user_ protocol, which assumes the backe
 
 _Install virtiofsd_
 ```bash
-VIRTIOFSD_URL="$(curl --silent https://api.github.com/repos/intel/nemu/releases/latest | grep "browser_download_url" | grep "virtiofsd-x86_64" | grep -o 'https://.*[^ "]')"
+VIRTIOFSD_URL="$(curl --silent https://api.github.com/repos/cloud-hypervisor/nemu/releases/latest | grep "browser_download_url" | grep "virtiofsd-x86_64" | grep -o 'https://.*[^ "]')"
 wget --quiet $VIRTIOFSD_URL -O "virtiofsd"
 chmod +x "virtiofsd"
 sudo setcap cap_sys_admin+epi "virtiofsd"

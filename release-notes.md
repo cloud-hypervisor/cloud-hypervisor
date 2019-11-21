@@ -26,7 +26,7 @@
 
 # v0.3.0
 
-This release has been tracked through the [0.3.0 project](https://github.com/intel/cloud-hypervisor/projects/3).
+This release has been tracked through the [0.3.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/3).
 
 Highlights for `cloud-hypervisor` version 0.3.0 include:
 
@@ -73,7 +73,7 @@ configurations that do not require a PCI bus emulation.
 ### Paravirtualized IOMMU
 
 As we want to improve our nested guests support, we added support for exposing
-a [paravirtualized IOMMU](https://github.com/intel/cloud-hypervisor/blob/master/docs/iommu.md)
+a [paravirtualized IOMMU](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/iommu.md)
 device through virtio. This allows for a safer nested virtio and directly
 assigned devices support.
 
@@ -85,7 +85,7 @@ setting.
 
 ### Ubuntu 19.10
 
-With the latest [hypervisor firmware](https://github.com/intel/rust-hypervisor-firmware),
+With the latest [hypervisor firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware),
 we can now support the latest
 [Ubuntu 19.10 (Eoan Ermine)](http://releases.ubuntu.com/19.10/) cloud images.
 
@@ -96,7 +96,7 @@ support guests with large amount of memory (more than 64GB).
 
 # v0.2.0
 
-This release has been tracked through the [0.2.0 project](https://github.com/intel/cloud-hypervisor/projects/2).
+This release has been tracked through the [0.2.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/2).
 
 Highlights for `cloud-hypervisor` version 0.2.0 include:
 
@@ -124,7 +124,7 @@ Based on the Firecracker idea of using a dedicated I/O port to measure guest
 boot times, we added support for logging guest events through the
 [0x80](https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html)
 PC debug port. This allows, among other things, for granular guest boot time
-measurements. See our [debug port documentation](https://github.com/intel/cloud-hypervisor/blob/master/docs/debug-port.md)
+measurements. See our [debug port documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/debug-port.md)
 for more details.
 
 ### Improved direct device assignment
@@ -144,13 +144,13 @@ memory footprint.
 
 ### Ubuntu bionic based CI
 
-Thanks to our [simple KVM firmware](https://github.com/intel/rust-hypervisor-firmware)
+Thanks to our [simple KVM firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware)
 improvements, we are now able to boot Ubuntu bionic images. We added those to
 our CI pipeline.
 
 # v0.1.0
 
-This release has been tracked through the [0.1.0 project](https://github.com/intel/cloud-hypervisor/projects/1).
+This release has been tracked through the [0.1.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/1).
 
 Highlights for `cloud-hypervisor` version 0.1.0 include:
 
@@ -160,7 +160,7 @@ We added support for the [virtio-fs](https://virtio-fs.gitlab.io/) shared file
 system, allowing for an efficient and reliable way of sharing a filesystem
 between the host and the `cloud-hypervisor` guest.
 
-See our [filesystem sharing](https://github.com/intel/cloud-hypervisor/blob/master/docs/fs.md)
+See our [filesystem sharing](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/fs.md)
 documentation for more details on how to use virtio-fs with `cloud-hypervisor`.
 
 ### Initial direct device assignment support
@@ -169,7 +169,7 @@ VFIO (Virtual Function I/O) is a kernel framework that exposes direct device
 access to userspace. `cloud-hypervisor` uses VFIO to directly assign host
 physical devices into its guest.
 
-See our [VFIO](https://github.com/intel/cloud-hypervisor/blob/master/docs/vfio.md)
+See our [VFIO](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/vfio.md)
 documentation for more detail on how to directly assign host devices to
 `cloud-hypervisor` guests.
 
