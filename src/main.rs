@@ -414,6 +414,8 @@ mod tests {
     #![allow(dead_code)]
     use ssh2::Session;
     use std::fs;
+    use std::io;
+    use std::io::BufRead;
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::process::{Command, Stdio};
@@ -3046,23 +3048,20 @@ mod tests {
     }
 
     fn get_pss(pid: u32) -> u32 {
-        let output = Command::new("bash")
-            .arg("-c")
-            .arg(
-                format!(
-                    "cat /proc/{}/smaps | grep -i pss |  awk '{{Total+=$2}} END {{print Total}}'",
-                    pid
-                )
-                .as_str(),
-            )
-            .output()
-            .unwrap();
+        let smaps = fs::File::open(format!("/proc/{}/smaps", pid)).unwrap();
+        let reader = io::BufReader::new(smaps);
 
-        std::str::from_utf8(output.stdout.as_slice())
-            .unwrap()
-            .trim()
-            .parse::<u32>()
-            .unwrap()
+        let mut total = 0;
+        for line in reader.lines() {
+            let l = line.unwrap();
+            // Lines look like this:
+            // Pss:                 176 kB
+            if l.contains("Pss") {
+                let values: Vec<&str> = l.rsplit(' ').collect();
+                total += values[1].trim().parse::<u32>().unwrap()
+            }
+        }
+        total
     }
 
     fn test_memory_mergeable(mergeable: bool) {
