@@ -148,6 +148,7 @@ impl AsRawFd for EpollContext {
 }
 
 pub fn start_vmm_thread(
+    vmm_version: String,
     http_path: &str,
     api_event: EventFd,
     api_sender: Sender<ApiRequest>,
@@ -158,7 +159,7 @@ pub fn start_vmm_thread(
     let thread = thread::Builder::new()
         .name("vmm".to_string())
         .spawn(move || {
-            let mut vmm = Vmm::new(api_event)?;
+            let mut vmm = Vmm::new(vmm_version.to_string(), api_event)?;
 
             vmm.control_loop(Arc::new(api_receiver))
         })
@@ -175,12 +176,13 @@ pub struct Vmm {
     exit_evt: EventFd,
     reset_evt: EventFd,
     api_evt: EventFd,
+    version: String,
     vm: Option<Vm>,
     vm_config: Option<Arc<VmConfig>>,
 }
 
 impl Vmm {
-    fn new(api_evt: EventFd) -> Result<Self> {
+    fn new(vmm_version: String, api_evt: EventFd) -> Result<Self> {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
@@ -206,6 +208,7 @@ impl Vmm {
             exit_evt,
             reset_evt,
             api_evt,
+            version: vmm_version,
             vm: None,
             vm_config: None,
         })
@@ -304,7 +307,7 @@ impl Vmm {
 
     fn vmm_ping(&self) -> result::Result<VmmPingResponse, ApiError> {
         Ok(VmmPingResponse {
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: self.version.clone(),
         })
     }
 

@@ -358,6 +358,7 @@ fn main() {
 
     let http_sender = api_request_sender.clone();
     let vmm_thread = match vmm::start_vmm_thread(
+        env!("CARGO_PKG_VERSION").to_string(),
         api_socket_path,
         api_evt.try_clone().unwrap(),
         http_sender,
