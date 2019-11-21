@@ -158,6 +158,10 @@ sudo bash -c "echo 10000 > /sys/kernel/mm/ksm/pages_to_scan"
 sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
+# Ensure test binary has the same caps as the cloud-hypervisor one
+cargo test --no-run --features "integration_tests" -- --nocapture
+sudo setcap cap_net_admin+ep target/debug/deps/cloud_hypervisor-*
+
 sudo adduser $USER kvm
 newgrp kvm << EOF
 export RUST_BACKTRACE=1
