@@ -1111,6 +1111,7 @@ name = "vmm"
 version = "0.1.0"
 dependencies = [
  "acpi_tables 0.1.0",
+ "anyhow 1.0.23 (registry+https://github.com/rust-lang/crates.io-index)",
  "arch 0.1.0",
  "devices 0.1.0",
  "epoll 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
