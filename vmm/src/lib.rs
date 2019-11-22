@@ -23,6 +23,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::{result, thread};
+use vm_device::Pausable;
 use vmm_sys_util::eventfd::EventFd;
 
 pub mod api;
@@ -236,7 +237,7 @@ impl Vmm {
 
     fn vm_pause(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            vm.pause()
+            vm.pause().map_err(VmError::Pause)
         } else {
             Err(VmError::VmNotRunning)
         }
@@ -244,7 +245,7 @@ impl Vmm {
 
     fn vm_resume(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            vm.resume()
+            vm.resume().map_err(VmError::Resume)
         } else {
             Err(VmError::VmNotRunning)
         }

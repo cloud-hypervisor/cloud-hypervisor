@@ -9,6 +9,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+extern crate anyhow;
 extern crate arch;
 extern crate devices;
 extern crate epoll;
@@ -26,6 +27,7 @@ extern crate vm_virtio;
 use crate::config::VmConfig;
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
+use anyhow::anyhow;
 use arch::RegionType;
 use devices::{ioapic, HotPlugNotificationType};
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
@@ -43,7 +45,7 @@ use std::os::unix::io::FromRawFd;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_allocator::{GsiApic, SystemAllocator};
-use vm_device::{MigratableError, Pausable};
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     Address, Bytes, Error as MmapError, GuestAddress, GuestMemory, GuestMemoryMmap,
@@ -158,6 +160,12 @@ pub enum Error {
 
     /// Cannot resume cpus
     ResumeCpus(MigratableError),
+
+    /// Cannot pause VM
+    Pause(MigratableError),
+
+    /// Cannot resume VM
+    Resume(MigratableError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -629,43 +637,6 @@ impl Vm {
         Ok(())
     }
 
-    pub fn pause(&mut self) -> Result<()> {
-        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
-        let new_state = VmState::Paused;
-
-        state.valid_transition(new_state)?;
-
-        self.cpu_manager
-            .lock()
-            .unwrap()
-            .pause()
-            .map_err(Error::PauseCpus)?;
-        self.devices.pause().map_err(Error::PauseDevices)?;
-
-        *state = new_state;
-
-        Ok(())
-    }
-
-    pub fn resume(&mut self) -> Result<()> {
-        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
-        let new_state = VmState::Running;
-
-        state.valid_transition(new_state)?;
-
-        self.devices.resume().map_err(Error::ResumeDevices)?;
-        self.cpu_manager
-            .lock()
-            .unwrap()
-            .resume()
-            .map_err(Error::ResumeCpus)?;
-
-        // And we're back to the Running state.
-        *state = new_state;
-
-        Ok(())
-    }
-
     pub fn resize(&mut self, desired_vcpus: u8) -> Result<()> {
         self.cpu_manager
             .lock()
@@ -703,7 +674,7 @@ impl Vm {
     pub fn boot(&mut self) -> Result<()> {
         let current_state = self.get_state()?;
         if current_state == VmState::Paused {
-            return self.resume();
+            return self.resume().map_err(Error::Resume);
         }
 
         let new_state = VmState::Running;
@@ -784,6 +755,50 @@ impl Vm {
             .map(|state| *state)
     }
 }
+
+impl Pausable for Vm {
+    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+        let mut state = self
+            .state
+            .try_write()
+            .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM state: {}", e)))?;
+        let new_state = VmState::Paused;
+
+        state
+            .valid_transition(new_state)
+            .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {:?}", e)))?;
+
+        self.cpu_manager.lock().unwrap().pause()?;
+        self.devices.pause()?;
+
+        *state = new_state;
+
+        Ok(())
+    }
+
+    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        let mut state = self
+            .state
+            .try_write()
+            .map_err(|e| MigratableError::Resume(anyhow!("Could not get VM state: {}", e)))?;
+        let new_state = VmState::Running;
+
+        state
+            .valid_transition(new_state)
+            .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {:?}", e)))?;
+
+        self.devices.resume()?;
+        self.cpu_manager.lock().unwrap().resume()?;
+
+        // And we're back to the Running state.
+        *state = new_state;
+
+        Ok(())
+    }
+}
+
+impl Snapshotable for Vm {}
+impl Migratable for Vm {}
 
 #[cfg(test)]
 mod tests {

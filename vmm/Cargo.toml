@@ -13,6 +13,7 @@ cmos = ["devices/cmos"]
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables", optional = true }
+anyhow = "1.0"
 arch = { path = "../arch" }
 devices = { path = "../devices" }
 epoll = ">=4.0.1"
