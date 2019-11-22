@@ -472,6 +472,14 @@ mod tests {
         }
     }
 
+    impl Drop for ClearDiskConfig {
+        fn drop(&mut self) {
+            fs::remove_file(&self.osdisk_path).unwrap_or_default();
+            fs::remove_file(&self.osdisk_raw_path).unwrap_or_default();
+            fs::remove_file(&self.cloudinit_path).unwrap_or_default();
+        }
+    }
+
     struct UbuntuDiskConfig {
         osdisk_raw_path: String,
         cloudinit_path: String,
@@ -488,6 +496,13 @@ mod tests {
                 osdisk_raw_path: String::new(),
                 cloudinit_path: String::new(),
             }
+        }
+    }
+
+    impl Drop for UbuntuDiskConfig {
+        fn drop(&mut self) {
+            fs::remove_file(&self.osdisk_raw_path).unwrap_or_default();
+            fs::remove_file(&self.cloudinit_path).unwrap_or_default();
         }
     }
 
