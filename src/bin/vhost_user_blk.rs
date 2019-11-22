@@ -62,6 +62,8 @@ pub enum Error {
     ParseImageParam,
     /// Failed to parse sock parameter.
     ParseSockParam,
+    /// Failed to parse iommu parameter.
+    ParseDeviceIommu,
 }
 
 struct VhostUserBlkBackend {
@@ -71,10 +73,11 @@ struct VhostUserBlkBackend {
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
     config: virtio_blk_config,
+    iommu: bool,
 }
 
 impl VhostUserBlkBackend {
-    pub fn new(image_path: String) -> Result<Self> {
+    pub fn new(image_path: String, iommu: bool) -> Result<Self> {
         let raw_img: File = OpenOptions::new()
             .read(true)
             .write(true)
@@ -106,6 +109,7 @@ impl VhostUserBlkBackend {
             disk_image_id: image_id,
             disk_nsectors: nsectors,
             config,
+            iommu,
         })
     }
 
@@ -162,9 +166,14 @@ impl VhostUserBackend for VhostUserBlkBackend {
     }
 
     fn features(&self) -> u64 {
-        1 << VIRTIO_BLK_F_MQ
+        let mut avail_features = 1 << VIRTIO_BLK_F_MQ
             | 1 << VIRTIO_F_VERSION_1
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+
+        if self.iommu {
+            avail_features |= 1 << VIRTIO_F_IOMMU_PLATFORM;
+        }
+        avail_features
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
@@ -211,9 +220,24 @@ impl VhostUserBackend for VhostUserBlkBackend {
     }
 }
 
+fn parse_iommu(iommu: &str) -> Result<bool> {
+    if !iommu.is_empty() {
+        let res = match iommu {
+            "on" => true,
+            "off" => false,
+            _ => return Err(Error::ParseDeviceIommu),
+        };
+
+        Ok(res)
+    } else {
+        Ok(false)
+    }
+}
+
 pub struct VhostUserBlkBackendConfig<'a> {
     pub image: &'a str,
     pub sock: &'a str,
+    pub iommu: bool,
 }
 
 impl<'a> VhostUserBlkBackendConfig<'a> {
@@ -222,12 +246,15 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
 
         let mut image: &str = "";
         let mut sock: &str = "";
+        let mut iommu: bool = false;
 
         for param in params_list.iter() {
             if param.starts_with("image=") {
                 image = &param[6..];
             } else if param.starts_with("sock=") {
                 sock = &param[5..];
+            } else if param.starts_with("iommu=") {
+                iommu = parse_iommu(&param[6..])?;
             }
         }
 
@@ -238,7 +265,7 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
             return Err(Error::ParseSockParam);
         }
 
-        Ok(VhostUserBlkBackendConfig { image, sock })
+        Ok(VhostUserBlkBackendConfig { image, sock, iommu })
     }
 }
 
@@ -252,7 +279,7 @@ fn main() {
                 .long("backend")
                 .help(
                     "Backend parameters \"image=<image_path>,\
-                     sock=<socket_path>\"",
+                     sock=<socket_path>, iommu=on|off\"",
                 )
                 .takes_value(true)
                 .min_values(1),
@@ -270,7 +297,7 @@ fn main() {
     };
 
     let blk_backend = Arc::new(RwLock::new(
-        VhostUserBlkBackend::new(backend_config.image.to_string()).unwrap(),
+        VhostUserBlkBackend::new(backend_config.image.to_string(), backend_config.iommu).unwrap(),
     ));
 
     debug!("blk_backend is created!\n");
