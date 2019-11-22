@@ -1,5 +1,8 @@
 pipeline{
 	agent { node { label 'bionic' } }
+	options {
+		timeout(time: 1, unit: 'HOURS')
+	}
 	stages {
 		stage ('Checkout') {
 			steps {
