@@ -38,9 +38,10 @@ pub mod http_endpoint;
 
 use crate::config::VmConfig;
 use crate::vm::{Error as VmError, VmState};
+use crate::migration::state::Migratable;
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
@@ -119,6 +120,9 @@ pub enum ApiResponsePayload {
 
     /// Vmm ping response
     VmmPing(VmmPingResponse),
+
+    /// Used on target VM to returen migration states as response
+    MigrationState(Vec<u8>),
 }
 
 /// This is the response sent by the VMM API server through the mpsc channel.
@@ -169,6 +173,11 @@ pub enum ApiRequest {
     /// This will shutdown and delete the current VM, if any, and then exit the
     /// VMM process.
     VmmShutdown(Sender<ApiResponse>),
+
+    /// Register migration component.
+    /// This will register migration component sender to migrate state array,
+    /// then migration thread can send request to component to get/load states.
+    MigrationRegister(String, Arc<Mutex<dyn Migratable>>, Sender<ApiResponse>),
 }
 
 pub fn vm_create(

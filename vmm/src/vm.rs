@@ -26,6 +26,7 @@ extern crate vm_virtio;
 use crate::config::VmConfig;
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
+use crate::migration::state::Migratable;
 use arch::RegionType;
 use devices::ioapic;
 use kvm_bindings::{
@@ -207,6 +208,9 @@ pub struct Vm {
     state: RwLock<VmState>,
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
 }
+
+unsafe impl Send for Vm {}
+unsafe impl Sync for Vm {}
 
 fn get_host_cpu_phys_bits() -> u8 {
     use core::arch::x86_64;
@@ -705,6 +709,14 @@ impl Vm {
             .try_read()
             .map_err(|_| Error::PoisonedState)
             .map(|state| *state)
+    }
+}
+
+impl Migratable for Vm {
+    fn snapshot(&self) -> Option<String> {
+        println!("Vm is taking snapshot.");
+        let config = serde_json::to_string_pretty(&self.config).unwrap();
+        Some(config)
     }
 }
 
