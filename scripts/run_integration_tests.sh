@@ -161,7 +161,7 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
 # Ensure test binary has the same caps as the cloud-hypervisor one
 cargo test --no-run --features "integration_tests" -- --nocapture
-sudo setcap cap_net_admin+ep target/debug/deps/cloud_hypervisor-*
+ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
 
 sudo adduser $USER kvm
 newgrp kvm << EOF
