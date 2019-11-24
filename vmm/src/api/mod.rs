@@ -29,6 +29,7 @@
 //! 5. The thread handles the response and forwards potential errors.
 
 extern crate micro_http;
+extern crate vm_device;
 extern crate vmm_sys_util;
 
 pub use self::http::start_http_thread;
@@ -94,6 +95,9 @@ pub enum ApiError {
     /// The VM could not reboot.
     VmReboot(VmError),
 
+    /// The VM could not be snapshotted.
+    VmSnapshot(VmError),
+
     /// The VMM could not shutdown.
     VmmShutdown(VmError),
 
@@ -143,6 +147,12 @@ pub struct VmResizeData {
 #[derive(Clone, Deserialize, Serialize)]
 pub struct VmRemoveDeviceData {
     pub id: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct VmSnapshotConfig {
+    /// The snapshot destination URL
+    pub destination_url: String,
 }
 
 pub enum ApiResponsePayload {
@@ -222,6 +232,9 @@ pub enum ApiRequest {
 
     /// Add a network device to the VM.
     VmAddNet(Arc<NetConfig>, Sender<ApiResponse>),
+
+    /// Take a VM snapshot
+    VmSnapshot(Arc<VmSnapshotConfig>, Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -308,6 +321,24 @@ pub fn vm_pause(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<(
 
 pub fn vm_resume(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
     vm_action(api_evt, api_sender, VmAction::Resume)
+}
+
+pub fn vm_snapshot(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VmSnapshotConfig>,
+) -> ApiResult<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM snapshot request.
+    api_sender
+        .send(ApiRequest::VmSnapshot(data, response_sender))
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+
+    Ok(())
 }
 
 pub fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<VmInfo> {

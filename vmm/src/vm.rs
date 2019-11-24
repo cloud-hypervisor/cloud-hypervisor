@@ -180,6 +180,12 @@ pub enum Error {
 
     /// Eventfd write error
     EventfdError(std::io::Error),
+
+    /// Cannot snapshot VM
+    Snapshot(MigratableError),
+
+    /// Cannot send VM snapshot
+    SnapshotSend(MigratableError),
 }
 pub type Result<T> = result::Result<T, Error>;
 

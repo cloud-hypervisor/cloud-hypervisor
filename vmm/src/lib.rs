@@ -288,6 +288,10 @@ impl Vmm {
         }
     }
 
+    fn vm_snapshot(&mut self, _destination_url: &str) -> result::Result<(), VmError> {
+        Ok(())
+    }
+
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm.take() {
             vm.shutdown()
@@ -585,6 +589,14 @@ impl Vmm {
                                     let response = self
                                         .vm_resume()
                                         .map_err(ApiError::VmResume)
+                                        .map(|_| ApiResponsePayload::Empty);
+
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmSnapshot(snapshot_data, sender) => {
+                                    let response = self
+                                        .vm_snapshot(&snapshot_data.destination_url)
+                                        .map_err(ApiError::VmSnapshot)
                                         .map(|_| ApiResponsePayload::Empty);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
