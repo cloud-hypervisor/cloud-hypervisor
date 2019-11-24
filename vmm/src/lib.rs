@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::{result, thread};
-use vm_migration::Pausable;
+use vm_migration::{Pausable, Snapshotable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 pub mod api;
@@ -283,6 +283,19 @@ impl Vmm {
     fn vm_resume(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
             vm.resume().map_err(VmError::Resume)
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
+    fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            vm.snapshot()
+                .map_err(VmError::Snapshot)
+                .and_then(|snapshot| {
+                    vm.send(&snapshot, destination_url)
+                        .map_err(VmError::SnapshotSend)
+                })
         } else {
             Err(VmError::VmNotRunning)
         }
@@ -585,6 +598,14 @@ impl Vmm {
                                     let response = self
                                         .vm_resume()
                                         .map_err(ApiError::VmResume)
+                                        .map(|_| ApiResponsePayload::Empty);
+
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmSnapshot(snapshot_data, sender) => {
+                                    let response = self
+                                        .vm_snapshot(&snapshot_data.destination_url)
+                                        .map_err(ApiError::VmSnapshot)
                                         .map(|_| ApiResponsePayload::Empty);
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
