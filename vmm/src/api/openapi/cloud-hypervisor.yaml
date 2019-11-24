@@ -171,6 +171,24 @@ paths:
         404:
           description: The device could not be removed from the VM instance.
 
+  /vm.snapshot:
+    put:
+      summary: Returns a VM snapshot.
+      requestBody:
+        description: The snapshot configuration
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VmSnapshotConfig'
+        required: true
+      responses:
+        204:
+          description: The VM instance was successfully snapshotted.
+        404:
+          description: The VM instance could not be snapshotted because it is not created.
+        405:
+          description: The VM instance could not be snapshotted because it is not booted.
+
   /vm.add-disk:
     put:
       summary: Add a new disk to the VM
@@ -541,4 +559,10 @@ components:
       type: object
       properties:
         id:
+          type: string
+
+    VmSnapshotConfig:
+      type: object
+      properties:
+        destination_url:
           type: string

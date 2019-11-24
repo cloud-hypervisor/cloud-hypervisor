@@ -6,9 +6,9 @@
 use crate::api::http::EndpointHandler;
 use crate::api::{
     vm_add_device, vm_add_disk, vm_add_net, vm_add_pmem, vm_boot, vm_create, vm_delete, vm_info,
-    vm_pause, vm_reboot, vm_remove_device, vm_resize, vm_resume, vm_shutdown, vmm_ping,
-    vmm_shutdown, ApiError, ApiRequest, ApiResult, DeviceConfig, DiskConfig, NetConfig, PmemConfig,
-    VmAction, VmConfig, VmRemoveDeviceData, VmResizeData,
+    vm_pause, vm_reboot, vm_remove_device, vm_resize, vm_resume, vm_shutdown, vm_snapshot,
+    vmm_ping, vmm_shutdown, ApiError, ApiRequest, ApiResult, DeviceConfig, DiskConfig, NetConfig,
+    PmemConfig, VmAction, VmConfig, VmRemoveDeviceData, VmResizeData, VmSnapshotConfig,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
@@ -42,6 +42,9 @@ pub enum HttpError {
 
     /// Could not reboot a VM
     VmReboot(ApiError),
+
+    /// Could not snapshot a VM
+    VmSnapshot(ApiError),
 
     /// Could not act on a VM
     VmAction(ApiError),
@@ -187,6 +190,45 @@ impl EndpointHandler for VmInfo {
                 }
                 Err(e) => error_response(e, StatusCode::InternalServerError),
             },
+            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+        }
+    }
+}
+
+// /api/v1/vm.snapshot handler
+pub struct VmSnapshot {}
+
+impl EndpointHandler for VmSnapshot {
+    fn handle_request(
+        &self,
+        req: &Request,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+    ) -> Response {
+        match req.method() {
+            Method::Put => {
+                match &req.body {
+                    Some(body) => {
+                        // Deserialize into a VmSnapshotConfig
+                        let vm_snapshot_data: VmSnapshotConfig =
+                            match serde_json::from_slice(body.raw())
+                                .map_err(HttpError::SerdeJsonDeserialize)
+                            {
+                                Ok(data) => data,
+                                Err(e) => return error_response(e, StatusCode::BadRequest),
+                            };
+
+                        // Call vm_snapshot()
+                        match vm_snapshot(api_notifier, api_sender, Arc::new(vm_snapshot_data))
+                            .map_err(HttpError::VmSnapshot)
+                        {
+                            Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
+                            Err(e) => error_response(e, StatusCode::InternalServerError),
+                        }
+                    }
+                    None => Response::new(Version::Http11, StatusCode::BadRequest),
+                }
+            }
             _ => Response::new(Version::Http11, StatusCode::BadRequest),
         }
     }
