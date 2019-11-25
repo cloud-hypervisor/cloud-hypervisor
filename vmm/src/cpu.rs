@@ -335,6 +335,7 @@ impl Vcpu {
 
 pub struct CpuManager {
     boot_vcpus: u8,
+    max_vcpus: u8,
     io_bus: Weak<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
@@ -387,6 +388,7 @@ impl BusDevice for CpuManager {
 impl CpuManager {
     pub fn new(
         boot_vcpus: u8,
+        max_vcpus: u8,
         device_manager: &DeviceManager,
         guest_memory: Arc<RwLock<GuestMemoryMmap>>,
         fd: Arc<VmFd>,
@@ -395,6 +397,7 @@ impl CpuManager {
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus,
+            max_vcpus,
             io_bus: Arc::downgrade(&device_manager.io_bus().clone()),
             mmio_bus: device_manager.mmio_bus().clone(),
             ioapic: device_manager.ioapic().clone(),
@@ -566,5 +569,13 @@ impl CpuManager {
             vcpu_thread.thread().unpark();
         }
         Ok(())
+    }
+
+    pub fn boot_vcpus(&self) -> u8 {
+        self.boot_vcpus
+    }
+
+    pub fn max_vcpus(&self) -> u8 {
+        self.max_vcpus
     }
 }
