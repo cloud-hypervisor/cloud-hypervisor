@@ -3,6 +3,7 @@ name = "cloud-hypervisor"
 version = "0.3.0"
 authors = ["The Cloud Hypervisor Authors"]
 edition = "2018"
+default-run = "cloud-hypervisor"
 
 [dependencies]
 clap = "2.33.0"
