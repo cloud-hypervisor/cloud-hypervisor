@@ -64,6 +64,8 @@ pub enum Error {
     ParseSockParam,
     /// Failed to parse iommu parameter.
     ParseDeviceIommu,
+    /// Failed to parse readonly parameter.
+    ParseVuBlkReadOnlyParam(std::str::ParseBoolError),
 }
 
 struct VhostUserBlkBackend {
@@ -74,10 +76,11 @@ struct VhostUserBlkBackend {
     disk_nsectors: u64,
     config: virtio_blk_config,
     iommu: bool,
+    rdonly: bool,
 }
 
 impl VhostUserBlkBackend {
-    pub fn new(image_path: String, iommu: bool) -> Result<Self> {
+    pub fn new(image_path: String, iommu: bool, rdonly: bool) -> Result<Self> {
         let raw_img: File = OpenOptions::new()
             .read(true)
             .write(true)
@@ -110,6 +113,7 @@ impl VhostUserBlkBackend {
             disk_nsectors: nsectors,
             config,
             iommu,
+            rdonly,
         })
     }
 
@@ -172,6 +176,10 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
         if self.iommu {
             avail_features |= 1 << VIRTIO_F_IOMMU_PLATFORM;
+        }
+
+        if self.rdonly {
+            avail_features |= 1 << VIRTIO_BLK_F_RO;
         }
         avail_features
     }
@@ -238,6 +246,7 @@ pub struct VhostUserBlkBackendConfig<'a> {
     pub image: &'a str,
     pub sock: &'a str,
     pub iommu: bool,
+    pub readonly: bool,
 }
 
 impl<'a> VhostUserBlkBackendConfig<'a> {
@@ -247,6 +256,7 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
         let mut image: &str = "";
         let mut sock: &str = "";
         let mut iommu: bool = false;
+        let mut readonly_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("image=") {
@@ -255,8 +265,12 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
                 sock = &param[5..];
             } else if param.starts_with("iommu=") {
                 iommu = parse_iommu(&param[6..])?;
+            } else if param.starts_with("readonly=") {
+                readonly_str = &param[9..];
             }
         }
+
+        let mut readonly: bool = false;
 
         if image.is_empty() {
             return Err(Error::ParseImageParam);
@@ -264,8 +278,18 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
         if sock.is_empty() {
             return Err(Error::ParseSockParam);
         }
+        if !readonly_str.is_empty() {
+            readonly = readonly_str
+                .parse()
+                .map_err(Error::ParseVuBlkReadOnlyParam)?;
+        }
 
-        Ok(VhostUserBlkBackendConfig { image, sock, iommu })
+        Ok(VhostUserBlkBackendConfig {
+            image,
+            sock,
+            iommu,
+            readonly,
+        })
     }
 }
 
@@ -279,7 +303,8 @@ fn main() {
                 .long("backend")
                 .help(
                     "Backend parameters \"image=<image_path>,\
-                     sock=<socket_path>, iommu=on|off\"",
+                     sock=<socket_path>, iommu=on|off,\
+                     readonly=true|false\"",
                 )
                 .takes_value(true)
                 .min_values(1),
@@ -297,7 +322,12 @@ fn main() {
     };
 
     let blk_backend = Arc::new(RwLock::new(
-        VhostUserBlkBackend::new(backend_config.image.to_string(), backend_config.iommu).unwrap(),
+        VhostUserBlkBackend::new(
+            backend_config.image.to_string(),
+            backend_config.iommu,
+            backend_config.readonly,
+        )
+        .unwrap(),
     ));
 
     debug!("blk_backend is created!\n");
