@@ -447,8 +447,8 @@ impl Vm {
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
 
-        let boot_vcpus = config.cpus.cpu_count;
-        let max_vcpus = config.cpus.cpu_count;
+        let boot_vcpus = config.cpus.boot_vcpus;
+        let max_vcpus = config.cpus.max_vcpus;
         let cpu_manager = cpu::CpuManager::new(
             boot_vcpus,
             max_vcpus,
