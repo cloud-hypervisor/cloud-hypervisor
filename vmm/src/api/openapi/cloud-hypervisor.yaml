@@ -395,6 +395,7 @@ components:
       properties:
         cid:
           type: integer
+          format: int64
           minimum: 3
           description: Guest Vsock CID
         sock:
