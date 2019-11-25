@@ -346,7 +346,7 @@ fn main() {
         "Cloud Hypervisor Guest\n\tAPI server: {}\n\tvCPUs: {}\n\tMemory: {} MB\
          \n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
         api_socket_path,
-        vm_config.cpus.cpu_count,
+        vm_config.cpus.boot_vcpus,
         vm_config.memory.size >> 20,
         vm_config.kernel,
         vm_config.cmdline.args.as_str(),
@@ -923,7 +923,8 @@ mod tests {
         }
 
         fn api_create_body(&self, cpu_count: u8) -> String {
-            format! {"{{\"cpus\":{{\"cpu_count\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
+            format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
+                     cpu_count,
                      cpu_count,
                      self.fw_path.as_str(),
                      self.network.host_ip,
