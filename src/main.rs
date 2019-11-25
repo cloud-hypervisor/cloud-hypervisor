@@ -1119,10 +1119,10 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_multi_cpu() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut bionic);
             let mut child = Command::new("target/release/cloud-hypervisor")
-                .args(&["--cpus", "boot=2"])
+                .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
@@ -1146,6 +1146,14 @@ mod tests {
 
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 2);
 
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command(r#"dmesg | grep "smpboot: Allowing" | sed "s/\[\ *[0-9.]*\] //""#)
+                    .unwrap_or_default()
+                    .trim(),
+                "smpboot: Allowing 4 CPUs, 2 hotplug CPUs"
+            );
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
