@@ -355,9 +355,11 @@ pub fn create_dsdt_table(
 
     dsdt
 }
+
 pub fn create_acpi_tables(
     guest_mem: &GuestMemoryMmap,
-    num_cpus: u8,
+    boot_vcpus: u8,
+    max_vcpus: u8,
     serial_enabled: bool,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
@@ -372,7 +374,7 @@ pub fn create_acpi_tables(
         serial_enabled,
         start_of_device_area,
         end_of_device_area,
-        num_cpus,
+        boot_vcpus,
     );
     let dsdt_offset = rsdp_offset.checked_add(RSDP::len() as u64).unwrap();
     guest_mem
@@ -413,13 +415,20 @@ pub fn create_acpi_tables(
     let mut madt = SDT::new(*b"APIC", 44, 5, *b"CLOUDH", *b"CHMADT  ", 1);
     madt.write(36, layout::APIC_START);
 
-    for cpu in 0..num_cpus {
+    // This is also checked in the commandline parsing.
+    assert!(boot_vcpus <= max_vcpus);
+
+    for cpu in 0..max_vcpus {
         let lapic = LocalAPIC {
             r#type: 0,
             length: 8,
             processor_id: cpu,
             apic_id: cpu,
-            flags: 1 << MADT_CPU_ENABLE_FLAG,
+            flags: if cpu < boot_vcpus {
+                1 << MADT_CPU_ENABLE_FLAG
+            } else {
+                0
+            },
         };
         madt.append(lapic);
     }
