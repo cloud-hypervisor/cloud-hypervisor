@@ -9,6 +9,7 @@ use crate::{BusDevice, Interrupt};
 use std::collections::VecDeque;
 use std::{io, result};
 use vmm_sys_util::errno::Result;
+use vmm_serde::*;
 
 const LOOP_SIZE: usize = 0x40;
 
@@ -52,6 +53,7 @@ const DEFAULT_BAUD_DIVISOR: u16 = 12; // 9600 bps
 ///
 /// This can optionally write the guest's output to a Write trait object. To send input to the
 /// guest, use `queue_input_bytes`.
+#[vmm_serde::export_as_pub()]
 pub struct Serial {
     interrupt_enable: u8,
     interrupt_identification: u8,

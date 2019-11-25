@@ -491,6 +491,26 @@ impl DeviceManager {
         })
     }
 
+    pub fn serde_devices(&self) -> String {
+        let devices = self.address_manager.io_bus.devices.read().unwrap();
+        let mut json = String::new();
+
+        for (_range, device) in devices.iter() {
+            let mut guard = device.lock().unwrap();
+
+            if let Some(dev) = guard.as_any().downcast_ref::<devices::legacy::Serial>() {
+                println!("Serial device.");
+                let serial = crate::migration::device_states::serde_serial(dev);
+                json.push_str(&serial);
+            }
+        }
+
+        println!("Serialize device_state result:");
+        println!("{}", json);
+
+        json
+    }
+
     #[allow(unused_variables)]
     fn add_pci_devices(
         vm_info: &VmInfo,

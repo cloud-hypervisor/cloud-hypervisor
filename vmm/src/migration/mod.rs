@@ -9,6 +9,7 @@ use crate::api::ApiResponse;
 use crate::migration::state::{MigrationState, MigrationStateError, Migratable};
 
 pub mod state;
+pub mod device_states;
 
 /// Errors associated with VM management
 #[derive(Debug)]

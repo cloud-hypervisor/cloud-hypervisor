@@ -12,6 +12,7 @@ libc = "0.2.60"
 log = "0.4.8"
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
 vmm-sys-util = ">=0.1.1"
+vmm-serde = { git = "https://github.com/jiangliu/vmm-serde", branch = "v1", features = ["export_as_pub"] }
 
 [dev-dependencies]
 tempfile = "3.1.0"

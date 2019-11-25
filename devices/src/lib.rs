@@ -15,6 +15,7 @@ extern crate libc;
 extern crate log;
 extern crate vm_memory;
 extern crate vmm_sys_util;
+extern crate vmm_serde;
 
 use std::fs::File;
 use std::{io, result};
@@ -27,7 +28,7 @@ pub mod legacy;
 
 #[cfg(feature = "acpi")]
 pub use self::acpi::AcpiShutdownDevice;
-pub use self::bus::{Bus, BusDevice, Error as BusError};
+pub use self::bus::{Bus, BusDevice, BusDeviceAny, Error as BusError};
 
 pub type DeviceEventT = u16;
 

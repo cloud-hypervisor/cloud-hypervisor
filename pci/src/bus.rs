@@ -7,7 +7,7 @@ use crate::configuration::{
 };
 use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
 use byteorder::{ByteOrder, LittleEndian};
-use devices::BusDevice;
+use devices::{BusDevice, BusDeviceAny};
 use std;
 use std::any::Any;
 use std::ops::DerefMut;
@@ -97,7 +97,7 @@ impl PciBus {
 
     pub fn register_mapping(
         &self,
-        dev: Arc<Mutex<dyn BusDevice>>,
+        dev: Arc<Mutex<dyn BusDeviceAny>>,
         io_bus: &devices::Bus,
         mmio_bus: &devices::Bus,
         bars: Vec<(GuestAddress, GuestUsize, PciBarRegionType)>,

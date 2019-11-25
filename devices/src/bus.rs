@@ -11,6 +11,8 @@ use std::cmp::{Ord, Ordering, PartialEq, PartialOrd};
 use std::collections::btree_map::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{convert, error, fmt, io, result};
+use std::any::Any;
+use vmm_serde::*;
 
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
 ///
@@ -24,6 +26,19 @@ pub trait BusDevice: Send {
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) {}
     /// Triggers the `irq_mask` interrupt on this device
     fn interrupt(&self, irq_mask: u32) {}
+}
+
+#[allow(unused_variables)]
+pub trait BusDeviceAny: BusDevice + Any {
+    fn as_any(&mut self) -> &mut dyn Any;
+}
+
+impl<T> BusDeviceAny for T
+    where T: BusDevice + Any
+{
+    fn as_any(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -93,9 +108,10 @@ impl PartialOrd for BusRange {
 ///
 /// This doesn't have any restrictions on what kind of device or address space this applies to. The
 /// only restriction is that no two devices can overlap in this address space.
+#[vmm_serde::export_as_pub()]
 #[derive(Default)]
 pub struct Bus {
-    devices: RwLock<BTreeMap<BusRange, Arc<Mutex<dyn BusDevice>>>>,
+    devices: RwLock<BTreeMap<BusRange, Arc<Mutex<dyn BusDeviceAny>>>>,
 }
 
 impl Bus {
@@ -106,7 +122,7 @@ impl Bus {
         }
     }
 
-    fn first_before(&self, addr: u64) -> Option<(BusRange, Arc<Mutex<dyn BusDevice>>)> {
+    fn first_before(&self, addr: u64) -> Option<(BusRange, Arc<Mutex<dyn BusDeviceAny>>)> {
         let devices = self.devices.read().unwrap();
         let (range, dev) = devices
             .range(..=BusRange { base: addr, len: 1 })
@@ -116,7 +132,7 @@ impl Bus {
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn resolve(&self, addr: u64) -> Option<(u64, u64, Arc<Mutex<dyn BusDevice>>)> {
+    pub fn resolve(&self, addr: u64) -> Option<(u64, u64, Arc<Mutex<dyn BusDeviceAny>>)> {
         if let Some((range, dev)) = self.first_before(addr) {
             let offset = addr - range.base;
             if offset < range.len {
@@ -127,7 +143,7 @@ impl Bus {
     }
 
     /// Puts the given device at the given address space.
-    pub fn insert(&self, device: Arc<Mutex<dyn BusDevice>>, base: u64, len: u64) -> Result<()> {
+    pub fn insert(&self, device: Arc<Mutex<dyn BusDeviceAny>>, base: u64, len: u64) -> Result<()> {
         if len == 0 {
             return Err(Error::ZeroSizedRange);
         }

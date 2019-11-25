@@ -715,8 +715,12 @@ impl Vm {
 impl Migratable for Vm {
     fn snapshot(&self) -> Option<String> {
         println!("Vm is taking snapshot.");
-        let config = serde_json::to_string_pretty(&self.config).unwrap();
-        Some(config)
+        let mut vm_states = serde_json::to_string_pretty(&self.config).unwrap();
+        let device_states = self.devices.serde_devices();
+
+        vm_states.push_str(&device_states);
+
+        Some(vm_states)
     }
 }
 
