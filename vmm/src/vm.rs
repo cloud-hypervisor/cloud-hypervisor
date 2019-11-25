@@ -509,7 +509,7 @@ impl Vm {
             &cmdline_cstring,
         )
         .map_err(|_| Error::CmdLine)?;
-        let vcpu_count = self.config.cpus.cpu_count;
+        let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
 
         #[allow(unused_mut, unused_assignments)]
         let mut rsdp_addr: Option<GuestAddress> = None;
@@ -529,7 +529,7 @@ impl Vm {
                 use crate::config::ConsoleOutputMode;
                 crate::acpi::create_acpi_tables(
                     &mem,
-                    vcpu_count,
+                    boot_vcpus,
                     self.config.serial.mode != ConsoleOutputMode::Off,
                     start_of_device_area,
                     end_of_range,
@@ -544,7 +544,7 @@ impl Vm {
                     &mem,
                     arch::layout::CMDLINE_START,
                     cmdline_cstring.to_bytes().len() + 1,
-                    vcpu_count,
+                    boot_vcpus,
                     Some(hdr),
                     rsdp_addr,
                 )
@@ -563,7 +563,7 @@ impl Vm {
                     &mem,
                     arch::layout::CMDLINE_START,
                     cmdline_cstring.to_bytes().len() + 1,
-                    vcpu_count,
+                    boot_vcpus,
                     None,
                     rsdp_addr,
                 )
