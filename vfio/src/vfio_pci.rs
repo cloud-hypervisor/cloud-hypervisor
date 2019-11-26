@@ -258,6 +258,7 @@ struct MmioRegion {
     index: u32,
     mem_slot: Option<u32>,
     host_addr: Option<u64>,
+    mmap_size: Option<usize>,
 }
 
 struct VfioPciConfig {
@@ -665,6 +666,7 @@ impl VfioPciDevice {
                 // Update the region with memory mapped info.
                 region.mem_slot = Some(new_mem_slot);
                 region.host_addr = Some(host_addr as u64);
+                region.mmap_size = Some(mmap_size as usize);
 
                 new_mem_slot += 1;
             }
@@ -672,10 +674,26 @@ impl VfioPciDevice {
 
         Ok(new_mem_slot)
     }
+
+    pub fn unmap_mmio_regions(&mut self) {
+        for region in self.mmio_regions.iter() {
+            if let (Some(addr), Some(size)) = (region.host_addr, region.mmap_size) {
+                let ret = unsafe { libc::munmap(addr as *mut libc::c_void, size) };
+                if ret != 0 {
+                    error!(
+                        "Could not unmap regions, error:{}",
+                        io::Error::last_os_error()
+                    );
+                }
+            }
+        }
+    }
 }
 
 impl Drop for VfioPciDevice {
     fn drop(&mut self) {
+        self.unmap_mmio_regions();
+
         if let Some(msix) = &self.interrupt.msix {
             if msix.cap.enabled() && self.device.disable_msix().is_err() {
                 error!("Could not disable MSI-X");
@@ -884,6 +902,7 @@ impl PciDevice for VfioPciDevice {
                 index: bar_id as u32,
                 mem_slot: None,
                 host_addr: None,
+                mmap_size: None,
             });
 
             bar_id += 1;
