@@ -5,8 +5,8 @@
 
 use crate::api::http::EndpointHandler;
 use crate::api::{
-    vm_boot, vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_resume, vm_shutdown, vmm_ping,
-    vmm_shutdown, ApiError, ApiRequest, ApiResult, VmAction, VmConfig,
+    vm_boot, vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_resize, vm_resume, vm_shutdown,
+    vmm_ping, vmm_shutdown, ApiError, ApiRequest, ApiResult, VmAction, VmConfig, VmResizeData,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
@@ -213,6 +213,45 @@ impl EndpointHandler for VmmShutdown {
                 match vmm_shutdown(api_notifier, api_sender).map_err(HttpError::VmmShutdown) {
                     Ok(_) => Response::new(Version::Http11, StatusCode::OK),
                     Err(e) => error_response(e, StatusCode::InternalServerError),
+                }
+            }
+            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+        }
+    }
+}
+
+// /api/v1/vm.resize handler
+pub struct VmResize {}
+
+impl EndpointHandler for VmResize {
+    fn handle_request(
+        &self,
+        req: &Request,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+    ) -> Response {
+        match req.method() {
+            Method::Put => {
+                match &req.body {
+                    Some(body) => {
+                        // Deserialize into a VmConfig
+                        let vm_resize_data: VmResizeData = match serde_json::from_slice(body.raw())
+                            .map_err(HttpError::SerdeJsonDeserialize)
+                        {
+                            Ok(config) => config,
+                            Err(e) => return error_response(e, StatusCode::BadRequest),
+                        };
+
+                        // Call vm_resize()
+                        match vm_resize(api_notifier, api_sender, Arc::new(vm_resize_data))
+                            .map_err(HttpError::VmCreate)
+                        {
+                            Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
+                            Err(e) => error_response(e, StatusCode::InternalServerError),
+                        }
+                    }
+
+                    None => Response::new(Version::Http11, StatusCode::BadRequest),
                 }
             }
             _ => Response::new(Version::Http11, StatusCode::BadRequest),

@@ -3,7 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::api::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmPing, VmmShutdown};
+use crate::api::http_endpoint::{
+    VmActionHandler, VmCreate, VmInfo, VmResize, VmmPing, VmmShutdown,
+};
 use crate::api::{ApiRequest, VmAction};
 use crate::{Error, Result};
 use micro_http::{HttpServer, MediaType, Request, Response, StatusCode, Version};
@@ -59,6 +61,7 @@ lazy_static! {
         r.routes.insert(endpoint!("/vm.reboot"), Box::new(VmActionHandler::new(VmAction::Reboot)));
         r.routes.insert(endpoint!("/vmm.shutdown"), Box::new(VmmShutdown {}));
         r.routes.insert(endpoint!("/vmm.ping"), Box::new(VmmPing {}));
+        r.routes.insert(endpoint!("/vm.resize"), Box::new(VmResize {}));
 
         r
     };

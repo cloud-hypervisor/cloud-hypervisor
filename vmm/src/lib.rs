@@ -328,6 +328,14 @@ impl Vmm {
         self.vm_delete()
     }
 
+    fn vm_resize(&mut self, desired_vcpus: u8) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            vm.resize(desired_vcpus)
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -472,6 +480,13 @@ impl Vmm {
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
 
                                     break 'outer;
+                                }
+                                ApiRequest::VmResize(resize_data, sender) => {
+                                    let response = self
+                                        .vm_resize(resize_data.desired_vcpus)
+                                        .map_err(ApiError::VmResize)
+                                        .map(|_| ApiResponsePayload::Empty);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                             }
                         }

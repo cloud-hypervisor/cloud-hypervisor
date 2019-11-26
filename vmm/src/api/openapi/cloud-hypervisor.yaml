@@ -123,6 +123,16 @@ paths:
         405:
           description: The VM instance could not reboot because it is not booted.
 
+  /vm.resize:
+    put:
+      summary: Resize the VM
+      requestBody:
+        description: The target size for the VM
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VmResize'
+        required: true
 components:
   schemas:
 
@@ -411,3 +421,13 @@ components:
         iommu:
           type: boolean
           default: false
+
+    VmResize:
+      required:
+      - desired_vcpus
+      type: object
+      properties:
+        cpu_count:
+          minimum: 1
+          default: 1
+          type: integer

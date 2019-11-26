@@ -96,6 +96,9 @@ pub enum ApiError {
 
     /// The VMM could not shutdown.
     VmmShutdown(VmError),
+
+    /// The VM could not be resized
+    VmResize(VmError),
 }
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
@@ -108,6 +111,11 @@ pub struct VmInfo {
 #[derive(Clone, Deserialize, Serialize)]
 pub struct VmmPingResponse {
     pub version: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct VmResizeData {
+    pub desired_vcpus: u8,
 }
 
 pub enum ApiResponsePayload {
@@ -169,6 +177,9 @@ pub enum ApiRequest {
     /// This will shutdown and delete the current VM, if any, and then exit the
     /// VMM process.
     VmmShutdown(Sender<ApiResponse>),
+
+    //// Resuze the VMM
+    VmResize(Arc<VmResizeData>, Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -296,6 +307,24 @@ pub fn vmm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResu
     // Send the VMM shutdown request.
     api_sender
         .send(ApiRequest::VmmShutdown(response_sender))
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+
+    Ok(())
+}
+
+pub fn vm_resize(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VmResizeData>,
+) -> ApiResult<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM creation request.
+    api_sender
+        .send(ApiRequest::VmResize(data, response_sender))
         .map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
