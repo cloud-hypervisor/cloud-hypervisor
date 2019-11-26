@@ -207,7 +207,14 @@ components:
 
     CpuConfig:
       required:
-      - cpu_count
+      - boot_vcpus
+      type: object
+      properties:
+        cpu_count:
+          minimum: 1
+          default: 1
+          type: integer
+      - max_vcpus
       type: object
       properties:
         cpu_count:
