@@ -132,7 +132,7 @@ impl MsiCap {
             4 => {
                 let value = LittleEndian::read_u32(data);
                 match offset {
-                    MSI_MSG_CTL_OFFSET => {
+                    0x0 => {
                         self.msg_ctl = (self.msg_ctl & !(MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE))
                             | ((value >> 16) as u16 & (MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE))
                     }
