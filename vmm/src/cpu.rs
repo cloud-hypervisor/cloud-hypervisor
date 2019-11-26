@@ -346,7 +346,7 @@ pub struct CpuManager {
     vcpus_kill_signalled: Arc<AtomicBool>,
     vcpus_pause_signalled: Arc<AtomicBool>,
     reset_evt: EventFd,
-    threads: Vec<thread::JoinHandle<()>>,
+    vcpu_states: Vec<VcpuState>,
     selected_cpu: u8,
 }
 
@@ -359,8 +359,12 @@ impl BusDevice for CpuManager {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         match offset {
             CPU_STATUS_OFFSET => {
-                // All CPUs are currently enabled
-                data[0] |= 1 << CPU_ENABLE_FLAG;
+                if self.selected_cpu < self.present_vcpus() {
+                    let state = &self.vcpu_states[usize::from(self.selected_cpu)];
+                    if state.active() {
+                        data[0] |= 1 << CPU_ENABLE_FLAG;
+                    }
+                }
             }
             _ => {
                 warn!(
@@ -382,6 +386,39 @@ impl BusDevice for CpuManager {
                     offset
                 );
             }
+        }
+    }
+}
+
+struct VcpuState {
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl VcpuState {
+    fn active(&self) -> bool {
+        self.handle.is_some()
+    }
+
+    fn signal_thread(&self) {
+        if let Some(handle) = self.handle.as_ref() {
+            let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
+            unsafe {
+                libc::pthread_kill(handle.as_pthread_t(), signum);
+            }
+        }
+    }
+
+    fn join_thread(&mut self) -> Result<()> {
+        if let Some(handle) = self.handle.take() {
+            handle.join().map_err(|_| Error::ThreadCleanup)?
+        }
+
+        Ok(())
+    }
+
+    fn unpark_thread(&self) {
+        if let Some(handle) = self.handle.as_ref() {
+            handle.thread().unpark()
         }
     }
 }
@@ -459,7 +496,8 @@ impl CpuManager {
             let reset_evt = self.reset_evt.try_clone().unwrap();
             let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
             let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
-            self.threads.push(
+
+            let handle = Some(
                 thread::Builder::new()
                     .name(format!("vcpu{}", vcpu.id))
                     .spawn(move || {
@@ -512,6 +550,8 @@ impl CpuManager {
                     })
                     .map_err(Error::VcpuSpawn)?,
             );
+
+            self.vcpu_states.push(VcpuState { handle });
         }
 
         // Unblock all CPU threads.
@@ -526,16 +566,13 @@ impl CpuManager {
         // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
         // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
         // above.
-        for thread in self.threads.iter() {
-            let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
-            unsafe {
-                libc::pthread_kill(thread.as_pthread_t(), signum);
-            }
+        for state in self.vcpu_states.iter() {
+            state.signal_thread();
         }
 
-        // Wait for all the threads to finish
-        for thread in self.threads.drain(..) {
-            thread.join().map_err(|_| Error::ThreadCleanup)?
+        // Wait for all the threads to finish. This removes the state from the vector.
+        for mut state in self.vcpu_states.drain(..) {
+            state.join_thread()?;
         }
 
         Ok(())
@@ -548,11 +585,8 @@ impl CpuManager {
         // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
         // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
         // above.
-        for thread in self.threads.iter() {
-            let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
-            unsafe {
-                libc::pthread_kill(thread.as_pthread_t(), signum);
-            }
+        for state in self.vcpu_states.iter() {
+            state.signal_thread();
         }
 
         Ok(())
@@ -566,8 +600,8 @@ impl CpuManager {
         // Once unparked, the next thing they will do is checking for the pause
         // boolean. Since it'll be set to false, they will exit their pause loop
         // and go back to vmx root.
-        for vcpu_thread in self.threads.iter() {
-            vcpu_thread.thread().unpark();
+        for state in self.vcpu_states.iter() {
+            state.unpark_thread();
         }
         Ok(())
     }
@@ -578,5 +612,9 @@ impl CpuManager {
 
     pub fn max_vcpus(&self) -> u8 {
         self.max_vcpus
+    }
+
+    fn present_vcpus(&self) -> u8 {
+        self.vcpu_states.len() as u8
     }
 }
