@@ -646,6 +646,14 @@ impl Vm {
         Ok(())
     }
 
+    pub fn resize(&mut self, desired_vcpus: u8) -> Result<()> {
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .resize(desired_vcpus)
+            .map_err(Error::CpuManager)
+    }
+
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>) {
         for signal in signals.forever() {
             if signal == SIGWINCH {
