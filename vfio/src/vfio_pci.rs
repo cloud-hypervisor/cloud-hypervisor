@@ -236,18 +236,25 @@ struct InterruptRoute {
 }
 
 impl InterruptRoute {
-    fn new(vm: &Arc<VmFd>, allocator: &mut SystemAllocator, msi_vector: MsiVector) -> Result<Self> {
+    fn new(allocator: &mut SystemAllocator, msi_vector: MsiVector) -> Result<Self> {
         let irq_fd = EventFd::new(libc::EFD_NONBLOCK).map_err(VfioPciError::EventFd)?;
         let gsi = allocator.allocate_gsi().ok_or(VfioPciError::AllocateGsi)?;
-
-        vm.register_irqfd(&irq_fd, gsi)
-            .map_err(VfioPciError::IrqFd)?;
 
         Ok(InterruptRoute {
             gsi,
             irq_fd,
             msi_vector,
         })
+    }
+
+    fn enable(&self, vm: &Arc<VmFd>) -> Result<()> {
+        vm.register_irqfd(&self.irq_fd, self.gsi)
+            .map_err(VfioPciError::IrqFd)
+    }
+
+    fn disable(&self, vm: &Arc<VmFd>) -> Result<()> {
+        vm.unregister_irqfd(&self.irq_fd, self.gsi)
+            .map_err(VfioPciError::IrqFd)
     }
 }
 
@@ -361,21 +368,30 @@ impl VfioPciDevice {
         let max_interrupts = vfio_pci_device.device.max_interrupts();
         for _ in 0..max_interrupts {
             let msi_vector: MsiVector = Default::default();
-            let route = InterruptRoute::new(vm_fd, allocator, msi_vector)?;
+            let route = InterruptRoute::new(allocator, msi_vector)?;
             vfio_pci_device.interrupt_routes.push(route);
         }
 
         Ok(vfio_pci_device)
     }
 
-    fn irq_fds(&self) -> Result<Vec<&EventFd>> {
+    fn enable_irq_fds(&self) -> Result<Vec<&EventFd>> {
         let mut irq_fds: Vec<&EventFd> = Vec::new();
 
         for r in &self.interrupt_routes {
+            r.enable(&self.vm_fd)?;
             irq_fds.push(&r.irq_fd);
         }
 
         Ok(irq_fds)
+    }
+
+    fn disable_irq_fds(&self) -> Result<()> {
+        for r in &self.interrupt_routes {
+            r.disable(&self.vm_fd)?;
+        }
+
+        Ok(())
     }
 
     fn set_kvm_routes(&self) -> Result<()> {
@@ -535,7 +551,7 @@ impl VfioPciDevice {
 
     fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
         match self.interrupt.update_msi(offset, data) {
-            Some(InterruptUpdateAction::EnableMsi) => match self.irq_fds() {
+            Some(InterruptUpdateAction::EnableMsi) => match self.enable_irq_fds() {
                 Ok(fds) => {
                     if let Err(e) = self.device.enable_msi(fds) {
                         warn!("Could not enable MSI: {}", e);
@@ -544,6 +560,9 @@ impl VfioPciDevice {
                 Err(e) => warn!("Could not get IRQ fds: {}", e),
             },
             Some(InterruptUpdateAction::DisableMsi) => {
+                if let Err(e) = self.disable_irq_fds() {
+                    warn!("Could not disable MSI: {}", e);
+                }
                 if let Err(e) = self.device.disable_msi() {
                     warn!("Could not disable MSI: {}", e);
                 }
@@ -564,7 +583,7 @@ impl VfioPciDevice {
 
     fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) {
         match self.interrupt.update_msix(offset, data) {
-            Some(InterruptUpdateAction::EnableMsix) => match self.irq_fds() {
+            Some(InterruptUpdateAction::EnableMsix) => match self.enable_irq_fds() {
                 Ok(fds) => {
                     if let Err(e) = self.device.enable_msix(fds) {
                         warn!("Could not enable MSI-X: {}", e);
@@ -573,6 +592,9 @@ impl VfioPciDevice {
                 Err(e) => warn!("Could not get IRQ fds: {}", e),
             },
             Some(InterruptUpdateAction::DisableMsix) => {
+                if let Err(e) = self.disable_irq_fds() {
+                    warn!("Could not disable MSI: {}", e);
+                }
                 if let Err(e) = self.device.disable_msix() {
                     warn!("Could not disable MSI-X: {}", e);
                 }
