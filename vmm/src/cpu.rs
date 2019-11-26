@@ -472,7 +472,11 @@ impl CpuManager {
         Ok(cpu_manager)
     }
 
-    fn activate_vcpus(&mut self, desired_vcpus: u8, entry_addr: GuestAddress) -> Result<()> {
+    fn activate_vcpus(
+        &mut self,
+        desired_vcpus: u8,
+        entry_addr: Option<GuestAddress>,
+    ) -> Result<()> {
         if desired_vcpus > self.max_vcpus {
             return Err(Error::DesiredVCPUCountExceedsMax);
         }
@@ -497,7 +501,7 @@ impl CpuManager {
                 ioapic,
                 creation_ts,
             )?;
-            vcpu.configure(Some(entry_addr), &self.vm_memory, self.cpuid.clone())?;
+            vcpu.configure(entry_addr, &self.vm_memory, self.cpuid.clone())?;
 
             let vcpu_thread_barrier = vcpu_thread_barrier.clone();
 
@@ -569,7 +573,11 @@ impl CpuManager {
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
     pub fn start_boot_vcpus(&mut self, entry_addr: GuestAddress) -> Result<()> {
-        self.activate_vcpus(self.boot_vcpus(), entry_addr)
+        self.activate_vcpus(self.boot_vcpus(), Some(entry_addr))
+    }
+
+    pub fn resize(&mut self, desired_vcpus: u8) -> Result<()> {
+        self.activate_vcpus(desired_vcpus, None)
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
