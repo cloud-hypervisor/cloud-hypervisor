@@ -117,6 +117,9 @@ pub enum Error {
 
     /// Failed to allocate IO port
     AllocateIOPort,
+
+    /// Asking for more vCPUs that we can have
+    DesiredVCPUCountExceedsMax,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -444,7 +447,7 @@ impl CpuManager {
             fd,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
-            threads: Vec::with_capacity(boot_vcpus as usize),
+            vcpu_states: Vec::with_capacity(max_vcpus as usize),
             reset_evt,
             selected_cpu: 0,
         }));
@@ -468,13 +471,17 @@ impl CpuManager {
         Ok(cpu_manager)
     }
 
-    // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
-    pub fn start_boot_vcpus(&mut self, entry_addr: GuestAddress) -> Result<()> {
+    fn activate_vcpus(&mut self, desired_vcpus: u8, entry_addr: GuestAddress) -> Result<()> {
+        if desired_vcpus > self.max_vcpus {
+            return Err(Error::DesiredVCPUCountExceedsMax);
+        }
+
         let creation_ts = std::time::Instant::now();
+        let vcpu_thread_barrier = Arc::new(Barrier::new(
+            (desired_vcpus - self.present_vcpus() + 1) as usize,
+        ));
 
-        let vcpu_thread_barrier = Arc::new(Barrier::new((self.boot_vcpus + 1) as usize));
-
-        for cpu_id in 0..self.boot_vcpus {
+        for cpu_id in self.present_vcpus()..desired_vcpus {
             let ioapic = if let Some(ioapic) = &self.ioapic {
                 Some(ioapic.clone())
             } else {
@@ -557,6 +564,11 @@ impl CpuManager {
         // Unblock all CPU threads.
         vcpu_thread_barrier.wait();
         Ok(())
+    }
+
+    // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
+    pub fn start_boot_vcpus(&mut self, entry_addr: GuestAddress) -> Result<()> {
+        self.activate_vcpus(self.boot_vcpus(), entry_addr)
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
