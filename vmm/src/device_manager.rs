@@ -12,7 +12,7 @@
 use crate::config::ConsoleOutputMode;
 use crate::vm::VmInfo;
 
-use devices::ioapic;
+use devices::{ioapic, HotPlugNotificationType};
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::*;
 use libc::O_TMPFILE;
@@ -169,6 +169,9 @@ pub enum DeviceManagerError {
 
     /// Failed to allocate IO port
     AllocateIOPort,
+
+    // Failed to make hotplug notification
+    HotPlugNotification(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -398,6 +401,10 @@ pub struct DeviceManager {
     // Virtual IOMMU ID along with the list of device IDs attached to the
     // virtual IOMMU. This is useful for filling the ACPI IORT table.
     virt_iommu: Option<(u32, Vec<u32>)>,
+
+    // ACPI GED notification device
+    #[cfg(feature = "acpi")]
+    ged_notification_device: Option<Arc<Mutex<devices::AcpiGEDDevice>>>,
 }
 
 impl DeviceManager {
@@ -456,10 +463,13 @@ impl DeviceManager {
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )?;
 
-        DeviceManager::add_acpi_device(
+        #[cfg(feature = "acpi")]
+        let ged_notification_device = DeviceManager::add_acpi_devices(
+            vm_info,
             &address_manager,
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            &ioapic,
         )?;
 
         if cfg!(feature = "pci_support") {
@@ -488,6 +498,8 @@ impl DeviceManager {
             mmap_regions,
             cmdline_additions,
             virt_iommu,
+            #[cfg(feature = "acpi")]
+            ged_notification_device,
         })
     }
 
@@ -654,31 +666,58 @@ impl DeviceManager {
     }
 
     #[allow(unused_variables)]
-    fn add_acpi_device(
+    #[cfg(feature = "acpi")]
+    fn add_acpi_devices(
+        vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
         reset_evt: EventFd,
         exit_evt: EventFd,
-    ) -> DeviceManagerResult<()> {
-        #[cfg(feature = "acpi")]
-        {
-            let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
-                exit_evt, reset_evt,
-            )));
+        ioapic: &Option<Arc<Mutex<ioapic::Ioapic>>>,
+    ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGEDDevice>>>> {
+        let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
+            exit_evt, reset_evt,
+        )));
 
-            address_manager
-                .allocator
-                .lock()
-                .unwrap()
-                .allocate_io_addresses(Some(GuestAddress(0x3c0)), 0x8, None)
-                .ok_or(DeviceManagerError::AllocateIOPort)?;
+        address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_io_addresses(Some(GuestAddress(0x3c0)), 0x8, None)
+            .ok_or(DeviceManagerError::AllocateIOPort)?;
 
-            address_manager
-                .io_bus
-                .insert(acpi_device.clone(), 0x3c0, 0x4)
-                .map_err(DeviceManagerError::BusError)?;
-        }
+        address_manager
+            .io_bus
+            .insert(acpi_device.clone(), 0x3c0, 0x4)
+            .map_err(DeviceManagerError::BusError)?;
 
-        Ok(())
+        // We need to hardcode this as the ACPI tables need to specify a particular IRQ and it's not possible
+        // to ask the allocator for a specific one.
+        let ged_irq = 5;
+        let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = &ioapic {
+            Box::new(UserIoapicIrq::new(ioapic.clone(), ged_irq))
+        } else {
+            let ged_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
+            vm_info
+                .vm_fd
+                .register_irqfd(&ged_evt, ged_irq as u32)
+                .map_err(DeviceManagerError::Irq)?;
+
+            Box::new(KernelIoapicIrq::new(ged_evt))
+        };
+        let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(interrupt)));
+
+        address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_io_addresses(Some(GuestAddress(0xb000)), 0x1, None)
+            .ok_or(DeviceManagerError::AllocateIOPort)?;
+
+        address_manager
+            .io_bus
+            .insert(ged_device.clone(), 0xb000, 0x1)
+            .map_err(DeviceManagerError::BusError)?;
+        Ok(Some(ged_device))
     }
 
     fn add_legacy_devices(
@@ -1532,6 +1571,23 @@ impl DeviceManager {
         } else {
             None
         }
+    }
+
+    pub fn notify_hotplug(
+        &self,
+        _notification_type: HotPlugNotificationType,
+    ) -> DeviceManagerResult<()> {
+        #[cfg(feature = "acpi")]
+        return self
+            .ged_notification_device
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .notify(_notification_type)
+            .map_err(DeviceManagerError::HotPlugNotification);
+        #[cfg(not(feature = "acpi"))]
+        return Ok(());
     }
 }
 
