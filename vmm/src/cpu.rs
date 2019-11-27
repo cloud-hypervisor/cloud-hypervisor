@@ -245,7 +245,7 @@ impl Vcpu {
     /// * `vm` - The virtual machine this vcpu will get attached to.
     pub fn configure(
         &mut self,
-        kernel_start_addr: GuestAddress,
+        kernel_start_addr: Option<GuestAddress>,
         vm_memory: &Arc<RwLock<GuestMemoryMmap>>,
         cpuid: CpuId,
     ) -> Result<()> {
@@ -256,17 +256,19 @@ impl Vcpu {
             .map_err(Error::SetSupportedCpusFailed)?;
 
         arch::x86_64::regs::setup_msrs(&self.fd).map_err(Error::MSRSConfiguration)?;
-        // Safe to unwrap because this method is called after the VM is configured
-        arch::x86_64::regs::setup_regs(
-            &self.fd,
-            kernel_start_addr.raw_value(),
-            arch::x86_64::layout::BOOT_STACK_POINTER.raw_value(),
-            arch::x86_64::layout::ZERO_PAGE_START.raw_value(),
-        )
-        .map_err(Error::REGSConfiguration)?;
-        arch::x86_64::regs::setup_fpu(&self.fd).map_err(Error::FPUConfiguration)?;
-        arch::x86_64::regs::setup_sregs(&vm_memory.read().unwrap(), &self.fd)
-            .map_err(Error::SREGSConfiguration)?;
+        if let Some(kernel_start_addr) = kernel_start_addr {
+            // Safe to unwrap because this method is called after the VM is configured
+            arch::x86_64::regs::setup_regs(
+                &self.fd,
+                kernel_start_addr.raw_value(),
+                arch::x86_64::layout::BOOT_STACK_POINTER.raw_value(),
+                arch::x86_64::layout::ZERO_PAGE_START.raw_value(),
+            )
+            .map_err(Error::REGSConfiguration)?;
+            arch::x86_64::regs::setup_fpu(&self.fd).map_err(Error::FPUConfiguration)?;
+            arch::x86_64::regs::setup_sregs(&vm_memory.read().unwrap(), &self.fd)
+                .map_err(Error::SREGSConfiguration)?;
+        }
         arch::x86_64::interrupts::set_lint(&self.fd).map_err(Error::LocalIntConfiguration)?;
         Ok(())
     }
@@ -496,7 +498,7 @@ impl CpuManager {
                 ioapic,
                 creation_ts,
             )?;
-            vcpu.configure(entry_addr, &self.vm_memory, self.cpuid.clone())?;
+            vcpu.configure(Some(entry_addr), &self.vm_memory, self.cpuid.clone())?;
 
             let vcpu_thread_barrier = vcpu_thread_barrier.clone();
 
