@@ -169,7 +169,11 @@ pub enum DeviceManagerError {
 
     /// Failed to allocate IO port
     AllocateIOPort,
+
+    /// Config is not correct
+    ConfigError,
 }
+
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 struct InterruptInfo<'a> {
@@ -900,8 +904,20 @@ impl DeviceManager {
                     vm_virtio::Net::new_with_tap(tap, Some(&net_cfg.mac), net_cfg.iommu)
                         .map_err(DeviceManagerError::CreateVirtioNet)?
                 } else {
-                    vm_virtio::Net::new(net_cfg.ip, net_cfg.mask, Some(&net_cfg.mac), net_cfg.iommu)
-                        .map_err(DeviceManagerError::CreateVirtioNet)?
+                    vm_virtio::Net::new(
+                        net_cfg
+                            .ip
+                            .ok_or(())
+                            // FIXME
+                            .map_err(|_| DeviceManagerError::ConfigError)?,
+                        net_cfg
+                            .mask
+                            .ok_or("ip is None")
+                            .map_err(|_| DeviceManagerError::ConfigError)?,
+                        Some(&net_cfg.mac),
+                        net_cfg.iommu,
+                    )
+                    .map_err(DeviceManagerError::CreateVirtioNet)?
                 };
 
                 devices.push((

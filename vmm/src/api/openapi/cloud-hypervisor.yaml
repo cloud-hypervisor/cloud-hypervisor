@@ -259,8 +259,6 @@ components:
 
     NetConfig:
       required:
-      - ip
-      - mask
       - mac
       type: object
       properties:
