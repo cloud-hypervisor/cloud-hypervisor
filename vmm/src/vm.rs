@@ -27,7 +27,7 @@ use crate::config::VmConfig;
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use arch::RegionType;
-use devices::ioapic;
+use devices::{ioapic, HotPlugNotificationType};
 use kvm_bindings::{
     kvm_enable_cap, kvm_pit_config, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP,
     KVM_PIT_SPEAKER_DUMMY,
@@ -654,7 +654,11 @@ impl Vm {
             .lock()
             .unwrap()
             .resize(desired_vcpus)
-            .map_err(Error::CpuManager)
+            .map_err(Error::CpuManager)?;
+        self.devices
+            .notify_hotplug(HotPlugNotificationType::CPUDevicesChanged)
+            .map_err(Error::DeviceManager)?;
+        Ok(())
     }
 
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>) {
