@@ -5,6 +5,8 @@
 
 use vmm_sys_util::eventfd::EventFd;
 use BusDevice;
+use HotPlugNotificationType;
+use Interrupt;
 
 /// A device for handling ACPI shutdown and reboot
 pub struct AcpiShutdownDevice {
@@ -49,4 +51,38 @@ impl BusDevice for AcpiShutdownDevice {
             }
         }
     }
+}
+
+/// A device for handling ACPI GED event generation
+pub struct AcpiGEDDevice {
+    interrupt: Box<dyn Interrupt>,
+    notification_type: HotPlugNotificationType,
+}
+
+impl AcpiGEDDevice {
+    pub fn new(interrupt: Box<dyn Interrupt>) -> AcpiGEDDevice {
+        AcpiGEDDevice {
+            interrupt,
+            notification_type: HotPlugNotificationType::NoDevicesChanged,
+        }
+    }
+
+    pub fn notify(
+        &mut self,
+        notification_type: HotPlugNotificationType,
+    ) -> Result<(), std::io::Error> {
+        self.notification_type = notification_type;
+        self.interrupt.deliver()
+    }
+}
+
+// I/O port reports what type of notification was made
+impl BusDevice for AcpiGEDDevice {
+    // Spec has all fields as zero
+    fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
+        data[0] = self.notification_type as u8;
+        self.notification_type = HotPlugNotificationType::NoDevicesChanged;
+    }
+
+    fn write(&mut self, _base: u64, _offset: u64, _data: &[u8]) {}
 }
