@@ -286,6 +286,39 @@ fn create_cpu_data(max_vcpus: u8) -> Vec<u8> {
     bytes
 }
 
+fn create_ged_device() -> Vec<u8> {
+    aml::Device::new(
+        "_SB_.GED_".into(),
+        vec![
+            &aml::Name::new("_HID".into(), &"ACPI0013"),
+            &aml::Name::new("_UID".into(), &aml::ZERO),
+            &aml::Name::new(
+                "_CRS".into(),
+                &aml::ResourceTemplate::new(vec![&aml::Interrupt::new(
+                    true, false, false, false, 5,
+                )]),
+            ),
+            &aml::OpRegion::new("GDST".into(), aml::OpRegionSpace::SystemIO, 0xb000, 0x1),
+            &aml::Field::new(
+                "GDST".into(),
+                aml::FieldAccessType::Byte,
+                aml::FieldUpdateRule::WriteAsZeroes,
+                vec![aml::FieldEntry::Named(*b"GDAT", 8)],
+            ),
+            &aml::Method::new(
+                "_EVT".into(),
+                1,
+                true,
+                vec![&aml::If::new(
+                    &aml::Equal::new(&aml::Path::new("GDAT"), &aml::ONE),
+                    vec![&aml::MethodCall::new("\\_SB_.CPUS.CTFY".into(), vec![])],
+                )],
+            ),
+        ],
+    )
+    .to_aml_bytes()
+}
+
 pub fn create_dsdt_table(
     serial_enabled: bool,
     start_of_device_area: GuestAddress,
@@ -364,6 +397,7 @@ pub fn create_dsdt_table(
         aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes();
 
     let cpu_data = create_cpu_data(max_vcpus);
+    let ged_data = create_ged_device();
 
     // DSDT
     let mut dsdt = SDT::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
@@ -374,6 +408,7 @@ pub fn create_dsdt_table(
     }
     dsdt.append_slice(s5_sleep_data.as_slice());
     dsdt.append_slice(cpu_data.as_slice());
+    dsdt.append_slice(ged_data.as_slice());
 
     dsdt
 }
