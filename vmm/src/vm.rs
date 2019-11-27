@@ -510,7 +510,7 @@ impl Vm {
         )
         .map_err(|_| Error::CmdLine)?;
         let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
-        let max_vcpus = self.cpu_manager.lock().unwrap().max_vcpus();
+        let _max_vcpus = self.cpu_manager.lock().unwrap().max_vcpus();
 
         #[allow(unused_mut, unused_assignments)]
         let mut rsdp_addr: Option<GuestAddress> = None;
@@ -531,7 +531,7 @@ impl Vm {
                 crate::acpi::create_acpi_tables(
                     &mem,
                     boot_vcpus,
-                    max_vcpus,
+                    _max_vcpus,
                     self.config.serial.mode != ConsoleOutputMode::Off,
                     start_of_device_area,
                     end_of_range,
