@@ -162,7 +162,10 @@ impl aml::Aml for CPU {
     }
 }
 
-struct CPUMethods;
+struct CPUMethods {
+    max_vcpus: u8,
+}
+
 impl Aml for CPUMethods {
     fn to_aml_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -192,6 +195,25 @@ impl Aml for CPUMethods {
             .to_aml_bytes(),
         );
 
+        let mut paths = Vec::new();
+        for cpu_id in 0..self.max_vcpus {
+            paths.push(aml::Path::new(format!("C{:03}", cpu_id).as_str()))
+        }
+        let mut notify_methods = Vec::new();
+
+        for cpu_id in 0..self.max_vcpus {
+            notify_methods.push(aml::Notify::new(&paths[usize::from(cpu_id)], &aml::ONE));
+        }
+
+        let mut notify_methods_inner: Vec<&dyn Aml> = Vec::new();
+        for notify_method in notify_methods.iter() {
+            notify_methods_inner.push(notify_method);
+        }
+
+        bytes.extend_from_slice(
+            // Notify all vCPUs
+            &aml::Method::new("CTFY".into(), 0, true, notify_methods_inner).to_aml_bytes(),
+        );
         bytes
     }
 }
@@ -246,7 +268,7 @@ fn create_cpu_data(max_vcpus: u8) -> Vec<u8> {
     let hid = aml::Name::new("_HID".into(), &"ACPI0010");
     let uid = aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A05"));
     // Bundle methods together under a common object
-    let methods = CPUMethods;
+    let methods = CPUMethods { max_vcpus };
     let mut cpu_data_inner: Vec<&dyn aml::Aml> = vec![&hid, &uid, &methods];
 
     let mut cpu_devices = Vec::new();
