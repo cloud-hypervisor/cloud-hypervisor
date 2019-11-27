@@ -666,6 +666,13 @@ impl DeviceManager {
             )));
 
             address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_io_addresses(Some(GuestAddress(0x3c0)), 0x8, None)
+                .ok_or(DeviceManagerError::AllocateIOPort)?;
+
+            address_manager
                 .io_bus
                 .insert(acpi_device.clone(), 0x3c0, 0x4)
                 .map_err(DeviceManagerError::BusError)?;
