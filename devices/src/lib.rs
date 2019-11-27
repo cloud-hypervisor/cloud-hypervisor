@@ -26,7 +26,7 @@ pub mod ioapic;
 pub mod legacy;
 
 #[cfg(feature = "acpi")]
-pub use self::acpi::AcpiShutdownDevice;
+pub use self::acpi::{AcpiGEDDevice, AcpiShutdownDevice};
 pub use self::bus::{Bus, BusDevice, Error as BusError};
 
 pub type DeviceEventT = u16;
@@ -69,4 +69,10 @@ pub enum Error {
 
 pub trait Interrupt: Send + Sync {
     fn deliver(&self) -> result::Result<(), std::io::Error>;
+}
+
+#[derive(Clone, Copy)]
+pub enum HotPlugNotificationType {
+    NoDevicesChanged,
+    CPUDevicesChanged,
 }
