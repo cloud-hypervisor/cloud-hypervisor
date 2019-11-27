@@ -54,7 +54,7 @@ use vm_memory::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
 
-const X86_64_IRQ_BASE: u32 = 5;
+const X86_64_IRQ_BASE: u32 = 6;
 
 // CPUID feature bits
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
