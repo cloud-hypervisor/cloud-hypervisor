@@ -196,7 +196,7 @@ impl Aml for CPUMethods {
     }
 }
 
-fn create_cpu_data(num_cpus: u8) -> Vec<u8> {
+fn create_cpu_data(max_vcpus: u8) -> Vec<u8> {
     let mut bytes = Vec::new();
     // CPU hotplug controller
     bytes.extend_from_slice(
@@ -250,7 +250,7 @@ fn create_cpu_data(num_cpus: u8) -> Vec<u8> {
     let mut cpu_data_inner: Vec<&dyn aml::Aml> = vec![&hid, &uid, &methods];
 
     let mut cpu_devices = Vec::new();
-    for cpu_id in 0..num_cpus {
+    for cpu_id in 0..max_vcpus {
         let cpu_device = CPU { cpu_id };
 
         cpu_devices.push(cpu_device);
@@ -268,7 +268,7 @@ pub fn create_dsdt_table(
     serial_enabled: bool,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
-    num_cpus: u8,
+    max_vcpus: u8,
 ) -> SDT {
     let pci_dsdt_data = aml::Device::new(
         "_SB_.PCI0".into(),
@@ -341,7 +341,7 @@ pub fn create_dsdt_table(
     let s5_sleep_data =
         aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes();
 
-    let cpu_data = create_cpu_data(num_cpus);
+    let cpu_data = create_cpu_data(max_vcpus);
 
     // DSDT
     let mut dsdt = SDT::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
@@ -374,7 +374,7 @@ pub fn create_acpi_tables(
         serial_enabled,
         start_of_device_area,
         end_of_device_area,
-        boot_vcpus,
+        max_vcpus,
     );
     let dsdt_offset = rsdp_offset.checked_add(RSDP::len() as u64).unwrap();
     guest_mem
