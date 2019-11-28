@@ -25,6 +25,12 @@ pub type VirtioInterrupt = Box<
 pub type VirtioIommuRemapping =
     Box<dyn Fn(u64) -> std::result::Result<u64, std::io::Error> + Send + Sync>;
 
+pub type VirtioResetData = (
+    Option<Arc<VirtioInterrupt>>,
+    Option<Arc<VirtioInterrupt>>,
+    Vec<EventFd>,
+);
+
 #[derive(Clone)]
 pub struct VirtioSharedMemory {
     pub offset: u64,
@@ -71,14 +77,15 @@ pub trait VirtioDevice: Send {
     fn activate(
         &mut self,
         mem: Arc<RwLock<GuestMemoryMmap>>,
-        interrupt_evt: Arc<VirtioInterrupt>,
+        msix_interrupt_evt: Option<Arc<VirtioInterrupt>>,
+        isr_interrupt_evt: Option<Arc<VirtioInterrupt>>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult;
 
     /// Optionally deactivates this device and returns ownership of the guest memory map, interrupt
     /// event, and queue events.
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<VirtioResetData> {
         None
     }
 

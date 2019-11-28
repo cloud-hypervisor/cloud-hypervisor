@@ -17,7 +17,7 @@ use std::thread;
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    VirtioInterruptType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    VirtioInterruptType, VirtioResetData, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::VirtioInterrupt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -329,7 +329,8 @@ pub struct Console {
     input: Arc<ConsoleInput>,
     out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
     queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    msix_interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    isr_interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
 impl Console {
@@ -366,7 +367,8 @@ impl Console {
                 input: console_input.clone(),
                 out: Arc::new(Mutex::new(out)),
                 queue_evts: None,
-                interrupt_cb: None,
+                msix_interrupt_cb: None,
+                isr_interrupt_cb: None,
             },
             console_input,
         ))
@@ -448,10 +450,15 @@ impl VirtioDevice for Console {
     fn activate(
         &mut self,
         mem: Arc<RwLock<GuestMemoryMmap>>,
-        interrupt_cb: Arc<VirtioInterrupt>,
+        mut msix_interrupt_cb: Option<Arc<VirtioInterrupt>>,
+        mut isr_interrupt_cb: Option<Arc<VirtioInterrupt>>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
+        if msix_interrupt_cb.is_none() && isr_interrupt_cb.is_none() {
+            return Err(ActivateError::BadActivate);
+        }
+
         if queues.len() != NUM_QUEUES || queue_evts.len() != NUM_QUEUES {
             error!(
                 "Cannot perform activate. Expected {} queue(s), got {}",
@@ -473,7 +480,8 @@ impl VirtioDevice for Console {
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
-        self.interrupt_cb = Some(interrupt_cb.clone());
+        self.msix_interrupt_cb = msix_interrupt_cb.clone();
+        self.isr_interrupt_cb = isr_interrupt_cb.clone();
 
         let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
         for queue_evt in queue_evts.iter() {
@@ -489,6 +497,18 @@ impl VirtioDevice for Console {
         self.input
             .acked_features
             .store(self.acked_features, Ordering::Relaxed);
+
+        let interrupt_cb = if let Some(msix_interrupt_cb) = msix_interrupt_cb.take() {
+            msix_interrupt_cb
+        } else if let Some(isr_interrupt_cb) = isr_interrupt_cb.take() {
+            isr_interrupt_cb
+        } else {
+            // It will never go here.
+            Arc::new(
+                Box::new(move |_: &VirtioInterruptType, _: Option<&Queue>| Ok(()))
+                    as VirtioInterrupt,
+            )
+        };
 
         if (self.acked_features & (1u64 << VIRTIO_CONSOLE_F_SIZE)) != 0 {
             if let Err(e) = (interrupt_cb)(&VirtioInterruptType::Config, None) {
@@ -521,7 +541,7 @@ impl VirtioDevice for Console {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<VirtioResetData> {
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
@@ -529,7 +549,8 @@ impl VirtioDevice for Console {
 
         // Return the interrupt and queue EventFDs
         Some((
-            self.interrupt_cb.take().unwrap(),
+            self.msix_interrupt_cb.take(),
+            self.isr_interrupt_cb.take(),
             self.queue_evts.take().unwrap(),
         ))
     }

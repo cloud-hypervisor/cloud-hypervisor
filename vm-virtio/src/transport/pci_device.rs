@@ -230,7 +230,8 @@ pub struct VirtioPciDevice {
 
     // PCI interrupts.
     interrupt_status: Arc<AtomicUsize>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    isr_interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    msix_interrupt_cb: Option<Arc<VirtioInterrupt>>,
 
     // virtio queues
     queues: Vec<Queue>,
@@ -327,7 +328,8 @@ impl VirtioPciDevice {
             device,
             device_activated: false,
             interrupt_status: Arc::new(AtomicUsize::new(0)),
-            interrupt_cb: None,
+            isr_interrupt_cb: None,
+            msix_interrupt_cb: None,
             queues,
             queue_evts,
             memory: Some(memory),
@@ -478,7 +480,7 @@ impl PciDevice for VirtioPciDevice {
             },
         ) as VirtioInterrupt);
 
-        self.interrupt_cb = Some(cb);
+        self.isr_interrupt_cb = Some(cb);
     }
 
     fn assign_msix(&mut self, msi_cb: Arc<InterruptDelivery>) {
@@ -529,7 +531,7 @@ impl PciDevice for VirtioPciDevice {
                 },
             ) as VirtioInterrupt);
 
-            self.interrupt_cb = Some(cb);
+            self.msix_interrupt_cb = Some(cb);
         }
     }
 
@@ -704,27 +706,30 @@ impl PciDevice for VirtioPciDevice {
         };
 
         if !self.device_activated && self.is_driver_ready() && self.are_queues_valid() {
-            if let Some(interrupt_cb) = self.interrupt_cb.take() {
-                if self.memory.is_some() {
-                    let mem = self.memory.as_ref().unwrap().clone();
-                    self.device
-                        .activate(
-                            mem,
-                            interrupt_cb,
-                            self.queues.clone(),
-                            self.queue_evts.split_off(0),
-                        )
-                        .expect("Failed to activate device");
-                    self.device_activated = true;
-                }
+            //if let Some(msix_interrupt_cb) = self.msix_interrupt_cb.take() {
+            if self.memory.is_some() {
+                let mem = self.memory.as_ref().unwrap().clone();
+                self.device
+                    .activate(
+                        mem,
+                        self.msix_interrupt_cb.clone(),
+                        self.isr_interrupt_cb.clone(),
+                        self.queues.clone(),
+                        self.queue_evts.split_off(0),
+                    )
+                    .expect("Failed to activate device");
+                self.device_activated = true;
             }
+            //}
         }
 
         // Device has been reset by the driver
         if self.device_activated && self.is_driver_init() {
-            if let Some((interrupt_cb, mut queue_evts)) = self.device.reset() {
+            if let Some((msix_interrupt_cb, isr_interrupt_cb, mut queue_evts)) = self.device.reset()
+            {
                 // Upon reset the device returns its interrupt EventFD and it's queue EventFDs
-                self.interrupt_cb = Some(interrupt_cb);
+                self.msix_interrupt_cb = msix_interrupt_cb;
+                self.isr_interrupt_cb = isr_interrupt_cb;
                 self.queue_evts.append(&mut queue_evts);
 
                 self.device_activated = false;

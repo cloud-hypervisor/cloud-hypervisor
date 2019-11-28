@@ -21,7 +21,7 @@ use std::thread;
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    VirtioDeviceType, VirtioResetData, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use vm_memory::{
@@ -292,7 +292,8 @@ pub struct Pmem {
     acked_features: u64,
     config: VirtioPmemConfig,
     queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    msix_interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    isr_interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
 impl Pmem {
@@ -315,7 +316,8 @@ impl Pmem {
             acked_features: 0u64,
             config,
             queue_evts: None,
-            interrupt_cb: None,
+            msix_interrupt_cb: None,
+            isr_interrupt_cb: None,
         })
     }
 }
@@ -394,10 +396,15 @@ impl VirtioDevice for Pmem {
     fn activate(
         &mut self,
         mem: Arc<RwLock<GuestMemoryMmap>>,
-        interrupt_cb: Arc<VirtioInterrupt>,
+        mut msix_interrupt_cb: Option<Arc<VirtioInterrupt>>,
+        mut isr_interrupt_cb: Option<Arc<VirtioInterrupt>>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
+        if msix_interrupt_cb.is_none() && isr_interrupt_cb.is_none() {
+            return Err(ActivateError::BadActivate);
+        }
+
         if queues.len() != NUM_QUEUES || queue_evts.len() != NUM_QUEUES {
             error!(
                 "Cannot perform activate. Expected {} queue(s), got {}",
@@ -419,7 +426,8 @@ impl VirtioDevice for Pmem {
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
-        self.interrupt_cb = Some(interrupt_cb.clone());
+        self.msix_interrupt_cb = msix_interrupt_cb.clone();
+        self.isr_interrupt_cb = isr_interrupt_cb.clone();
 
         let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
         for queue_evt in queue_evts.iter() {
@@ -437,6 +445,19 @@ impl VirtioDevice for Pmem {
                 error!("failed cloning pmem disk: {}", e);
                 ActivateError::BadActivate
             })?;
+
+            let interrupt_cb = if let Some(msix_interrupt_cb) = msix_interrupt_cb.take() {
+                msix_interrupt_cb
+            } else if let Some(isr_interrupt_cb) = isr_interrupt_cb.take() {
+                isr_interrupt_cb
+            } else {
+                // It will never go here.
+                Arc::new(
+                    Box::new(move |_: &VirtioInterruptType, _: Option<&Queue>| Ok(()))
+                        as VirtioInterrupt,
+                )
+            };
+
             let mut handler = PmemEpollHandler {
                 queue: queues.remove(0),
                 mem,
@@ -460,7 +481,7 @@ impl VirtioDevice for Pmem {
         Err(ActivateError::BadActivate)
     }
 
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<VirtioResetData> {
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
@@ -468,7 +489,8 @@ impl VirtioDevice for Pmem {
 
         // Return the interrupt and queue EventFDs
         Some((
-            self.interrupt_cb.take().unwrap(),
+            self.msix_interrupt_cb.take(),
+            self.isr_interrupt_cb.take(),
             self.queue_evts.take().unwrap(),
         ))
     }

@@ -246,7 +246,8 @@ impl BusDevice for MmioDevice {
                     self.device
                         .activate(
                             mem,
-                            interrupt_cb,
+                            None,
+                            Some(interrupt_cb),
                             self.queues.clone(),
                             self.queue_evts.split_off(0),
                         )

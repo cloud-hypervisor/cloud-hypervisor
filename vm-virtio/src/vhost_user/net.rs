@@ -15,7 +15,10 @@ use net_util::{MacAddr, MAC_ADDR_LEN};
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::eventfd::EventFd;
 
-use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
+use super::super::{
+    ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
+    VirtioResetData,
+};
 use super::handler::*;
 use super::vu_common_ctrl::*;
 use super::{Error, Result};
@@ -37,7 +40,8 @@ pub struct Net {
     config_space: Vec<u8>,
     queue_sizes: Vec<u16>,
     queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    msix_interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    isr_interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
 impl Net {
@@ -115,7 +119,8 @@ impl Net {
             config_space,
             queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
             queue_evts: None,
-            interrupt_cb: None,
+            msix_interrupt_cb: None,
+            isr_interrupt_cb: None,
         })
     }
 }
@@ -197,10 +202,15 @@ impl VirtioDevice for Net {
     fn activate(
         &mut self,
         mem: Arc<RwLock<GuestMemoryMmap>>,
-        interrupt_cb: Arc<VirtioInterrupt>,
+        mut msix_interrupt_cb: Option<Arc<VirtioInterrupt>>,
+        mut isr_interrupt_cb: Option<Arc<VirtioInterrupt>>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
+        if msix_interrupt_cb.is_none() && isr_interrupt_cb.is_none() {
+            return Err(ActivateError::BadActivate);
+        }
+
         let (self_kill_evt, kill_evt) =
             match EventFd::new(EFD_NONBLOCK).and_then(|e| Ok((e.try_clone()?, e))) {
                 Ok(v) => v,
@@ -213,7 +223,8 @@ impl VirtioDevice for Net {
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
-        self.interrupt_cb = Some(interrupt_cb.clone());
+        self.msix_interrupt_cb = msix_interrupt_cb.clone();
+        self.isr_interrupt_cb = isr_interrupt_cb.clone();
 
         let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
         for queue_evt in queue_evts.iter() {
@@ -235,6 +246,18 @@ impl VirtioDevice for Net {
         )
         .map_err(ActivateError::VhostUserNetSetup)?;
 
+        let interrupt_cb = if let Some(msix_interrupt_cb) = msix_interrupt_cb.take() {
+            msix_interrupt_cb
+        } else if let Some(isr_interrupt_cb) = isr_interrupt_cb.take() {
+            isr_interrupt_cb
+        } else {
+            // It will never go here.
+            Arc::new(
+                Box::new(move |_: &VirtioInterruptType, _: Option<&Queue>| Ok(()))
+                    as VirtioInterrupt,
+            )
+        };
+
         let mut handler = VhostUserEpollHandler::<SlaveReqHandler>::new(VhostUserEpollConfig {
             interrupt_cb,
             kill_evt,
@@ -252,10 +275,11 @@ impl VirtioDevice for Net {
         if let Err(e) = handler_result {
             error!("vhost-user net thread create failed with error {:?}", e);
         }
+
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<VirtioResetData> {
         if let Err(e) = reset_vhost_user(&mut self.vhost_user_net, self.queue_sizes.len()) {
             error!("Failed to reset vhost-user daemon: {:?}", e);
             return None;
@@ -268,7 +292,8 @@ impl VirtioDevice for Net {
 
         // Return the interrupt and queue EventFDs
         Some((
-            self.interrupt_cb.take().unwrap(),
+            self.msix_interrupt_cb.take(),
+            self.isr_interrupt_cb.take(),
             self.queue_evts.take().unwrap(),
         ))
     }

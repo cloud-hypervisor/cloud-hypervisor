@@ -23,7 +23,7 @@ use std::thread;
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, VirtioInterruptType,
+    VirtioDeviceType, VirtioInterruptType, VirtioResetData,
 };
 use crate::VirtioInterrupt;
 use virtio_bindings::bindings::virtio_blk::*;
@@ -480,7 +480,8 @@ pub struct Block<T: DiskFile> {
     acked_features: u64,
     config_space: Vec<u8>,
     queue_evt: Option<EventFd>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    msix_interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    isr_interrupt_cb: Option<Arc<VirtioInterrupt>>,
 }
 
 pub fn build_config_space(disk_size: u64) -> Vec<u8> {
@@ -533,7 +534,8 @@ impl<T: DiskFile> Block<T> {
             acked_features: 0u64,
             config_space: build_config_space(disk_size),
             queue_evt: None,
-            interrupt_cb: None,
+            msix_interrupt_cb: None,
+            isr_interrupt_cb: None,
         })
     }
 }
@@ -617,10 +619,15 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
     fn activate(
         &mut self,
         mem: Arc<RwLock<GuestMemoryMmap>>,
-        interrupt_cb: Arc<VirtioInterrupt>,
+        msix_interrupt_cb: Option<Arc<VirtioInterrupt>>,
+        isr_interrupt_cb: Option<Arc<VirtioInterrupt>>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
+        if msix_interrupt_cb.is_none() && isr_interrupt_cb.is_none() {
+            return Err(ActivateError::BadActivate);
+        }
+
         if queues.len() != NUM_QUEUES || queue_evts.len() != NUM_QUEUES {
             error!(
                 "Cannot perform activate. Expected {} queue(s), got {}",
@@ -645,8 +652,16 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 
             // Save the interrupt EventFD as we need to return it on reset
             // but clone it to pass into the thread.
-            self.interrupt_cb = Some(interrupt_cb);
-            let interrupt_cb = self.interrupt_cb.as_ref().unwrap().clone();
+            self.msix_interrupt_cb = msix_interrupt_cb.clone();
+            self.isr_interrupt_cb = isr_interrupt_cb.clone();
+            let mut interrupt_cb = Arc::new(Box::new(
+                move |_: &VirtioInterruptType, _: Option<&Queue>| Ok(()),
+            ) as VirtioInterrupt);
+            if msix_interrupt_cb.is_some() {
+                interrupt_cb = msix_interrupt_cb.as_ref().unwrap().clone();
+            } else if isr_interrupt_cb.is_some() {
+                interrupt_cb = isr_interrupt_cb.as_ref().unwrap().clone();
+            }
 
             // Save the queue EventFD as we need to return it on reset
             // but clone it to pass into the thread.
@@ -679,7 +694,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         Err(ActivateError::BadActivate)
     }
 
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<VirtioResetData> {
         if let Some(kill_evt) = self.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
@@ -687,7 +702,8 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 
         // Return the interrupt and queue EventFDs
         Some((
-            self.interrupt_cb.take().unwrap(),
+            self.msix_interrupt_cb.take(),
+            self.isr_interrupt_cb.take(),
             vec![self.queue_evt.take().unwrap()],
         ))
     }
