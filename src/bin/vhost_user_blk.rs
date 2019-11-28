@@ -172,6 +172,11 @@ impl VhostUserBackend for VhostUserBlkBackend {
     fn features(&self) -> u64 {
         let mut avail_features = 1 << VIRTIO_BLK_F_MQ
             | 1 << VIRTIO_F_VERSION_1
+            | 1 << VIRTIO_BLK_F_SIZE_MAX
+            | 1 << VIRTIO_BLK_F_SEG_MAX
+            | 1 << VIRTIO_BLK_F_TOPOLOGY
+            | 1 << VIRTIO_BLK_F_BLK_SIZE
+            | 1 << VIRTIO_BLK_F_FLUSH
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
         if self.iommu {
