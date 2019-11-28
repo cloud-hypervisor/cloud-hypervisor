@@ -39,7 +39,6 @@ use vm_memory::{Bytes, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::block::{build_disk_image_id, Request};
 
 const QUEUE_SIZE: usize = 1024;
-const NUM_QUEUES: usize = 1;
 const SECTOR_SHIFT: u8 = 9;
 const SECTOR_SIZE: u64 = (0x01 as u64) << SECTOR_SHIFT;
 const BLK_SIZE: u32 = 512;
@@ -66,6 +65,8 @@ pub enum Error {
     ParseDeviceIommu,
     /// Failed to parse readonly parameter.
     ParseVuBlkReadOnlyParam(std::str::ParseBoolError),
+    /// Failed parsing fs number of queues parameter.
+    ParseBlkNumQueuesParam(std::num::ParseIntError),
 }
 
 struct VhostUserBlkBackend {
@@ -80,7 +81,7 @@ struct VhostUserBlkBackend {
 }
 
 impl VhostUserBlkBackend {
-    pub fn new(image_path: String, iommu: bool, rdonly: bool) -> Result<Self> {
+    pub fn new(image_path: String, num_queues: usize, iommu: bool, rdonly: bool) -> Result<Self> {
         let raw_img: File = OpenOptions::new()
             .read(true)
             .write(true)
@@ -103,7 +104,7 @@ impl VhostUserBlkBackend {
         config.seg_max = 128 - 2;
         config.min_io_size = 1;
         config.opt_io_size = 1;
-        config.num_queues = 1;
+        config.num_queues = num_queues as u16;
 
         Ok(VhostUserBlkBackend {
             mem: None,
@@ -162,7 +163,7 @@ impl VhostUserBlkBackend {
 
 impl VhostUserBackend for VhostUserBlkBackend {
     fn num_queues(&self) -> usize {
-        NUM_QUEUES
+        self.config.num_queues as usize
     }
 
     fn max_queue_size(&self) -> usize {
@@ -252,6 +253,7 @@ pub struct VhostUserBlkBackendConfig<'a> {
     pub sock: &'a str,
     pub iommu: bool,
     pub readonly: bool,
+    pub num_queues: usize,
 }
 
 impl<'a> VhostUserBlkBackendConfig<'a> {
@@ -262,6 +264,7 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
         let mut sock: &str = "";
         let mut iommu: bool = false;
         let mut readonly_str: &str = "";
+        let mut num_queues_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("image=") {
@@ -272,11 +275,13 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
                 iommu = parse_iommu(&param[6..])?;
             } else if param.starts_with("readonly=") {
                 readonly_str = &param[9..];
+            } else if param.starts_with("num_queues=") {
+                num_queues_str = &param[11..];
             }
         }
 
         let mut readonly: bool = false;
-
+        let mut num_queues: usize = 1;
         if image.is_empty() {
             return Err(Error::ParseImageParam);
         }
@@ -288,12 +293,17 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
                 .parse()
                 .map_err(Error::ParseVuBlkReadOnlyParam)?;
         }
-
+        if !num_queues_str.is_empty() {
+            num_queues = num_queues_str
+                .parse()
+                .map_err(Error::ParseBlkNumQueuesParam)?;
+        }
         Ok(VhostUserBlkBackendConfig {
             image,
             sock,
             iommu,
             readonly,
+            num_queues,
         })
     }
 }
@@ -308,8 +318,8 @@ fn main() {
                 .long("backend")
                 .help(
                     "Backend parameters \"image=<image_path>,\
-                     sock=<socket_path>, iommu=on|off,\
-                     readonly=true|false\"",
+                     sock=<socket_path>, num_queues=<number_of_queues>,\
+                     iommu=on|off,readonly=true|false\"",
                 )
                 .takes_value(true)
                 .min_values(1),
@@ -329,6 +339,7 @@ fn main() {
     let blk_backend = Arc::new(RwLock::new(
         VhostUserBlkBackend::new(
             backend_config.image.to_string(),
+            backend_config.num_queues,
             backend_config.iommu,
             backend_config.readonly,
         )
