@@ -169,7 +169,7 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
 struct AddrMapping {
     vmm_addr: u64,
     size: u64,
-    offset: u64,
+    gpa_base: u64,
 }
 
 struct Memory {
@@ -446,7 +446,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
         if let Some(memory) = &self.memory {
             for mapping in memory.mappings.iter() {
                 if vmm_va >= mapping.vmm_addr && vmm_va < mapping.vmm_addr + mapping.size {
-                    return Ok(vmm_va - mapping.vmm_addr + mapping.offset);
+                    return Ok(vmm_va - mapping.vmm_addr + mapping.gpa_base);
                 }
             }
         }
@@ -524,15 +524,15 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
 
         for (idx, region) in ctx.iter().enumerate() {
             let g_addr = GuestAddress(region.guest_phys_addr);
-            let len = (region.memory_size + region.mmap_offset) as usize;
+            let len = region.memory_size as usize;
             let file = unsafe { File::from_raw_fd(fds[idx]) };
-            let f_off = FileOffset::new(file, 0);
+            let f_off = FileOffset::new(file, region.mmap_offset);
 
             regions.push((g_addr, len, Some(f_off)));
             mappings.push(AddrMapping {
                 vmm_addr: region.user_addr,
                 size: region.memory_size,
-                offset: region.mmap_offset,
+                gpa_base: region.guest_phys_addr,
             });
         }
 
