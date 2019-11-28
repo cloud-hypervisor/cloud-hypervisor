@@ -38,7 +38,7 @@ The `cache=none` option is another way to run the daemon but because the _virtqu
 
 In order to leverage __virtio-fs__ support from within the guest, and because the code has not been merged in upstream Linux kernel yet, it is required to build a custom kernel embedding the patches.
 
-The following branch `virtio-pmem_and_virtio-fs` on the repository https://github.com/sboeuf/linux.git includes all the needed patches to support __virtio-fs__.
+The following branch `virtio-fs-virtio-iommu` on the repository https://github.com/cloud-hypervisor/linux.git includes all the needed patches to support __virtio-fs__.
 
 Make sure to build a kernel out of this branch that can be then used to boot the VM.
 
