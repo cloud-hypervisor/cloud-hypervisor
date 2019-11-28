@@ -90,6 +90,10 @@ pub trait VirtioDevice: Send {
     fn iommu_translate(&self, addr: u64) -> u64 {
         addr
     }
+
+    fn isr_need(&self) -> bool {
+        false
+    }
 }
 
 /// Trait providing address translation the same way a physical DMA remapping
