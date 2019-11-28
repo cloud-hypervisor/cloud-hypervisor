@@ -1332,6 +1332,8 @@ impl DeviceManager {
                 None
             };
 
+        let isr_needed: bool = virtio_device.isr_need();
+
         let mut virtio_pci_device =
             VirtioPciDevice::new(memory.clone(), virtio_device, msix_num, iommu_mapping_cb)
                 .map_err(DeviceManagerError::VirtioDevice)?;
@@ -1381,7 +1383,9 @@ impl DeviceManager {
             }) as InterruptDelivery);
 
             virtio_pci_device.assign_msix(msi_cb);
-        } else {
+        }
+
+        if isr_needed || !interrupt_info._msi_capable {
             let irq_num = allocator
                 .allocate_irq()
                 .ok_or(DeviceManagerError::AllocateIrq)?;
