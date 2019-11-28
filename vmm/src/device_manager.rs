@@ -13,7 +13,7 @@ use crate::config::ConsoleOutputMode;
 use crate::vm::VmInfo;
 
 use devices::{ioapic, HotPlugNotificationType};
-use kvm_bindings::kvm_userspace_memory_region;
+use kvm_bindings::{kvm_irq_routing_entry, kvm_userspace_memory_region};
 use kvm_ioctls::*;
 use libc::O_TMPFILE;
 use libc::{EFD_NONBLOCK, TIOCGWINSZ};
@@ -30,6 +30,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
 
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
+use std::collections::HashMap;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
@@ -1273,6 +1274,14 @@ impl DeviceManager {
         let mut mem_slot = mem_slots;
         let mut iommu_attached_device_ids = Vec::new();
         let mut allocator = address_manager.allocator.lock().unwrap();
+
+        // Create a shared list of GSI that can be shared through all VFIO
+        // devices. This way, we can maintain the full list of used GSI,
+        // preventing one device from overriding interrupts setting from
+        // another one.
+        let gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
         if let Some(device_list_cfg) = &vm_info.vm_cfg.devices {
             // Create the KVM VFIO device
             let device_fd = DeviceManager::create_kvm_device(vm_info.vm_fd)?;
@@ -1306,9 +1315,13 @@ impl DeviceManager {
                     }
                 }
 
-                let mut vfio_pci_device =
-                    VfioPciDevice::new(vm_info.vm_fd, &mut allocator, vfio_device)
-                        .map_err(DeviceManagerError::VfioPciCreate)?;
+                let mut vfio_pci_device = VfioPciDevice::new(
+                    vm_info.vm_fd,
+                    &mut allocator,
+                    vfio_device,
+                    gsi_msi_routes.clone(),
+                )
+                .map_err(DeviceManagerError::VfioPciCreate)?;
 
                 let bars = vfio_pci_device
                     .allocate_bars(&mut allocator)
