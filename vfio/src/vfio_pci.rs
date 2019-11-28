@@ -21,9 +21,10 @@ use pci::{
     PciSubclass, MSIX_TABLE_ENTRY_SIZE,
 };
 use std::any::Any;
+use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{fmt, io, result};
 use vfio_bindings::bindings::vfio::*;
 use vm_allocator::SystemAllocator;
@@ -38,6 +39,8 @@ pub enum VfioPciError {
     NewVfioPciDevice,
     MapRegionGuest(kvm_ioctls::Error),
     SetGsiRouting(kvm_ioctls::Error),
+    MsiNotConfigured,
+    MsixNotConfigured,
 }
 pub type Result<T> = std::result::Result<T, VfioPciError>;
 
@@ -52,6 +55,8 @@ impl fmt::Display for VfioPciError {
                 write!(f, "failed to map VFIO PCI region into guest: {}", e)
             }
             VfioPciError::SetGsiRouting(e) => write!(f, "failed to set GSI routes for KVM: {}", e),
+            VfioPciError::MsiNotConfigured => write!(f, "MSI interrupt not yet configured"),
+            VfioPciError::MsixNotConfigured => write!(f, "MSI-X interrupt not yet configured"),
         }
     }
 }
@@ -182,22 +187,6 @@ impl Interrupt {
         None
     }
 
-    fn msix_enabled(&self) -> bool {
-        if let Some(msix) = &self.msix {
-            return msix.cap.enabled();
-        }
-
-        false
-    }
-
-    fn msix_function_masked(&self) -> bool {
-        if let Some(msix) = &self.msix {
-            return msix.cap.masked();
-        }
-
-        false
-    }
-
     fn msix_table_accessed(&self, bar_index: u32, offset: u64) -> bool {
         if let Some(msix) = &self.msix {
             return msix.table_accessed(bar_index, offset);
@@ -221,30 +210,17 @@ impl Interrupt {
     }
 }
 
-#[derive(Copy, Clone, Default)]
-struct MsiVector {
-    msg_addr_lo: u32,
-    msg_addr_hi: u32,
-    msg_data: u32,
-    masked: bool,
-}
-
 struct InterruptRoute {
     gsi: u32,
     irq_fd: EventFd,
-    msi_vector: MsiVector,
 }
 
 impl InterruptRoute {
-    fn new(allocator: &mut SystemAllocator, msi_vector: MsiVector) -> Result<Self> {
+    fn new(allocator: &mut SystemAllocator) -> Result<Self> {
         let irq_fd = EventFd::new(libc::EFD_NONBLOCK).map_err(VfioPciError::EventFd)?;
         let gsi = allocator.allocate_gsi().ok_or(VfioPciError::AllocateGsi)?;
 
-        Ok(InterruptRoute {
-            gsi,
-            irq_fd,
-            msi_vector,
-        })
+        Ok(InterruptRoute { gsi, irq_fd })
     }
 
     fn enable(&self, vm: &Arc<VmFd>) -> Result<()> {
@@ -322,6 +298,7 @@ pub struct VfioPciDevice {
     mmio_regions: Vec<MmioRegion>,
     interrupt: Interrupt,
     interrupt_routes: Vec<InterruptRoute>,
+    gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
 }
 
 impl VfioPciDevice {
@@ -330,6 +307,7 @@ impl VfioPciDevice {
         vm_fd: &Arc<VmFd>,
         allocator: &mut SystemAllocator,
         device: VfioDevice,
+        gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
     ) -> Result<Self> {
         let device = Arc::new(device);
         device.reset();
@@ -359,6 +337,7 @@ impl VfioPciDevice {
                 msix: None,
             },
             interrupt_routes: Vec::new(),
+            gsi_msi_routes,
         };
 
         vfio_pci_device.parse_capabilities();
@@ -367,8 +346,7 @@ impl VfioPciDevice {
         // The MSI vectors will be filled when the guest driver programs the device.
         let max_interrupts = vfio_pci_device.device.max_interrupts();
         for _ in 0..max_interrupts {
-            let msi_vector: MsiVector = Default::default();
-            let route = InterruptRoute::new(allocator, msi_vector)?;
+            let route = InterruptRoute::new(allocator)?;
             vfio_pci_device.interrupt_routes.push(route);
         }
 
@@ -396,23 +374,8 @@ impl VfioPciDevice {
 
     fn set_kvm_routes(&self) -> Result<()> {
         let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
-        for route in self.interrupt_routes.iter() {
-            // Do not add masked vectors to the GSI mapping
-            if route.msi_vector.masked {
-                continue;
-            }
-
-            let mut entry = kvm_irq_routing_entry {
-                gsi: route.gsi,
-                type_: KVM_IRQ_ROUTING_MSI,
-                ..Default::default()
-            };
-
-            entry.u.msi.address_lo = route.msi_vector.msg_addr_lo;
-            entry.u.msi.address_hi = route.msi_vector.msg_addr_hi;
-            entry.u.msi.data = route.msi_vector.msg_data;
-
-            entry_vec.push(entry);
+        for (_, entry) in self.gsi_msi_routes.lock().unwrap().iter() {
+            entry_vec.push(*entry);
         }
 
         let mut irq_routing =
@@ -498,55 +461,94 @@ impl VfioPciDevice {
         }
     }
 
-    fn update_msi_interrupt_routes(&mut self, msi: &VfioMsi) -> Result<()> {
-        let num_vectors = msi.cap.num_enabled_vectors();
-        for (idx, route) in self.interrupt_routes.iter_mut().enumerate() {
-            // Mask the MSI vector if the amount of vectors supported by the
-            // guest OS does not match the expected amount. This is related
-            // to "Multiple Message Capable" and "Multiple Message Enable"
-            // fields from the "Message Control" register.
-            if idx >= num_vectors {
-                route.msi_vector.masked = true;
-                continue;
-            }
-
-            route.msi_vector.msg_addr_lo = msi.cap.msg_addr_lo;
-            route.msi_vector.msg_addr_hi = msi.cap.msg_addr_hi;
-            route.msi_vector.msg_data = u32::from(msi.cap.msg_data) | (idx as u32);
-            route.msi_vector.masked = msi.cap.vector_masked(idx);
-        }
-
-        // Check if we need to update KVM GSI mapping, based on the status of
-        // the "MSI Enable" bit.
+    fn update_msi_interrupt_routes(&self, msi: &VfioMsi) -> Result<()> {
         if msi.cap.enabled() {
-            return self.set_kvm_routes();
+            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
+
+            for (idx, route) in self.interrupt_routes.iter().enumerate() {
+                // Ignore MSI vector if the amount of vectors supported by the
+                // guest OS does not match the expected amount. This is related
+                // to "Multiple Message Capable" and "Multiple Message Enable"
+                // fields from the "Message Control" register.
+                if idx >= msi.cap.num_enabled_vectors() {
+                    continue;
+                }
+
+                // Ignore MSI vector if masked.
+                if msi.cap.vector_masked(idx) {
+                    continue;
+                }
+
+                let mut entry = kvm_irq_routing_entry {
+                    gsi: route.gsi,
+                    type_: KVM_IRQ_ROUTING_MSI,
+                    ..Default::default()
+                };
+
+                entry.u.msi.address_lo = msi.cap.msg_addr_lo;
+                entry.u.msi.address_hi = msi.cap.msg_addr_hi;
+                entry.u.msi.data = u32::from(msi.cap.msg_data) | (idx as u32);
+
+                gsi_msi_routes.insert(route.gsi, entry);
+            }
+        } else {
+            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
+
+            for route in self.interrupt_routes.iter() {
+                gsi_msi_routes.remove(&route.gsi);
+            }
         }
 
-        Ok(())
+        self.set_kvm_routes()
+    }
+
+    fn update_msix_interrupt_routes(&self, msix: &VfioMsix) -> Result<()> {
+        if msix.cap.enabled() && !msix.cap.masked() {
+            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
+
+            for (idx, table_entry) in msix.bar.table_entries.iter().enumerate() {
+                // Ignore MSI-X vector if masked.
+                if table_entry.masked() {
+                    continue;
+                }
+
+                let gsi = self.interrupt_routes[idx].gsi;
+
+                let mut entry = kvm_irq_routing_entry {
+                    gsi,
+                    type_: KVM_IRQ_ROUTING_MSI,
+                    ..Default::default()
+                };
+
+                entry.u.msi.address_lo = table_entry.msg_addr_lo;
+                entry.u.msi.address_hi = table_entry.msg_addr_hi;
+                entry.u.msi.data = table_entry.msg_data;
+
+                gsi_msi_routes.insert(gsi, entry);
+            }
+        } else {
+            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
+
+            for route in self.interrupt_routes.iter() {
+                gsi_msi_routes.remove(&route.gsi);
+            }
+        }
+
+        self.set_kvm_routes()
     }
 
     fn read_msix_table(&mut self, offset: u64, data: &mut [u8]) {
         self.interrupt.msix_read_table(offset, data);
     }
 
-    fn update_msix_table(&mut self, offset: u64, data: &[u8]) -> Result<()> {
+    fn write_msix_table(&mut self, offset: u64, data: &[u8]) {
         self.interrupt.msix_write_table(offset, data);
 
-        if self.interrupt.msix_enabled() && !self.interrupt.msix_function_masked() {
-            // Fill tables
-            if let Some(msix) = &self.interrupt.msix {
-                for (idx, entry) in msix.bar.table_entries.iter().enumerate() {
-                    self.interrupt_routes[idx].msi_vector.msg_addr_lo = entry.msg_addr_lo;
-                    self.interrupt_routes[idx].msi_vector.msg_addr_hi = entry.msg_addr_hi;
-                    self.interrupt_routes[idx].msi_vector.msg_data = entry.msg_data;
-                    self.interrupt_routes[idx].msi_vector.masked = entry.masked();
-                }
+        if let Some(msix) = &self.interrupt.msix {
+            if let Err(e) = self.update_msix_interrupt_routes(&msix) {
+                error!("Could not update MSI-X interrupt routes: {}", e);
             }
-
-            return self.set_kvm_routes();
         }
-
-        Ok(())
     }
 
     fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
@@ -560,28 +562,29 @@ impl VfioPciDevice {
                 Err(e) => warn!("Could not get IRQ fds: {}", e),
             },
             Some(InterruptUpdateAction::DisableMsi) => {
-                if let Err(e) = self.disable_irq_fds() {
+                if let Err(e) = self.device.disable_msi() {
                     warn!("Could not disable MSI: {}", e);
                 }
-                if let Err(e) = self.device.disable_msi() {
+                if let Err(e) = self.disable_irq_fds() {
                     warn!("Could not disable MSI: {}", e);
                 }
             }
             _ => {}
         }
 
-        // Update the interrupt_routes table now that the MSI cache has been
+        // Update the gsi_msi_routes table now that the MSI cache has been
         // updated. The point is to always update the table based on latest
         // changes to the cache, and based on the state of masking flags, the
         // KVM GSI routes should be configured.
-        if let Some(msi) = self.interrupt.msi {
+        if let Some(msi) = &self.interrupt.msi {
             return self.update_msi_interrupt_routes(&msi);
         }
 
-        Ok(())
+        // If the code reach this point, something went wrong.
+        Err(VfioPciError::MsiNotConfigured)
     }
 
-    fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) {
+    fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
         match self.interrupt.update_msix(offset, data) {
             Some(InterruptUpdateAction::EnableMsix) => match self.enable_irq_fds() {
                 Ok(fds) => {
@@ -592,15 +595,24 @@ impl VfioPciDevice {
                 Err(e) => warn!("Could not get IRQ fds: {}", e),
             },
             Some(InterruptUpdateAction::DisableMsix) => {
-                if let Err(e) = self.disable_irq_fds() {
-                    warn!("Could not disable MSI: {}", e);
-                }
                 if let Err(e) = self.device.disable_msix() {
                     warn!("Could not disable MSI-X: {}", e);
+                }
+                if let Err(e) = self.disable_irq_fds() {
+                    warn!("Could not disable MSI: {}", e);
                 }
             }
             _ => {}
         }
+
+        // Update the gsi_msi_routes table because the state of the enable bit
+        // changed.
+        if let Some(msix) = &self.interrupt.msix {
+            return self.update_msix_interrupt_routes(&msix);
+        }
+
+        // If the code reach this point, something went wrong.
+        Err(VfioPciError::MsixNotConfigured)
     }
 
     fn find_region(&self, addr: u64) -> Option<MmioRegion> {
@@ -972,7 +984,9 @@ impl PciDevice for VfioPciDevice {
                     }
                 }
                 PciCapabilityID::MSIX => {
-                    self.update_msix_capabilities(cap_offset, data);
+                    if let Err(e) = self.update_msix_capabilities(cap_offset, data) {
+                        error!("Could not update MSI-X capabilities: {}", e);
+                    }
                 }
                 _ => {}
             }
@@ -1041,9 +1055,7 @@ impl PciDevice for VfioPciDevice {
 
             // If the MSI-X table is written to, we need to update our cache.
             if self.interrupt.msix_table_accessed(region.index, offset) {
-                if let Err(e) = self.update_msix_table(offset, data) {
-                    error!("Could not update MSI-X table: {}", e);
-                }
+                self.write_msix_table(offset, data);
             } else {
                 self.device.region_write(region.index, data, offset);
             }
