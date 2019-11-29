@@ -188,7 +188,7 @@ dependencies = [
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
  "vmm 0.1.0",
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -234,7 +234,7 @@ dependencies = [
  "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -340,7 +340,7 @@ source = "git+https://github.com/rust-vmm/kvm-ioctls#681745a7776d60e390bcf62eefd
 dependencies = [
  "kvm-bindings 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -418,7 +418,7 @@ dependencies = [
 name = "net_gen"
 version = "0.1.0"
 dependencies = [
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -432,7 +432,7 @@ dependencies = [
  "rand 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.103 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.42 (registry+https://github.com/rust-lang/crates.io-index)",
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -457,7 +457,7 @@ dependencies = [
  "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-allocator 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -568,7 +568,7 @@ dependencies = [
  "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "remain 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -975,7 +975,7 @@ dependencies = [
  "vm-allocator 0.1.0",
  "vm-device 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -994,7 +994,7 @@ dependencies = [
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1006,7 +1006,7 @@ dependencies = [
  "vhost_rs 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1070,7 +1070,7 @@ dependencies = [
  "vm-allocator 0.1.0",
  "vm-device 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1099,7 +1099,7 @@ dependencies = [
  "vm-allocator 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
- "vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1112,7 +1112,7 @@ dependencies = [
 
 [[package]]
 name = "vmm-sys-util"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1271,7 +1271,7 @@ dependencies = [
 "checksum virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
 "checksum vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)" = "<none>"
 "checksum vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "46996f56aeae31fbc0532ae57a944e00089302f03b18c10c76eebfd9249f4a6c"
-"checksum vmm-sys-util 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b75440f66b299f66acf005431d5f13be6e6a8d02b4dcaa83be5144e88762d010"
+"checksum vmm-sys-util 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "6ebb6ba7ba5653b69bfd3fab8c8c363945c0d3f616a6a1592e12122c3be4724e"
 "checksum wasi 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b89c3ce4ce14bdc6fb6beaf9ec7928ca331de5df7e5ea278375642a2f478570d"
 "checksum winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)" = "167dc9d6949a9b857f3451275e911c3f44255842c1f7a76f33c55103a909087a"
 "checksum winapi 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)" = "f10e386af2b13e47c89e7236a7a14a086791a2b88ebad6df9bf42040195cf770"
