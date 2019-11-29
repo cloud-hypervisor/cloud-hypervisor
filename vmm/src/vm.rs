@@ -70,10 +70,10 @@ pub enum Error {
     VmFd(io::Error),
 
     /// Cannot create the KVM instance
-    VmCreate(io::Error),
+    VmCreate(kvm_ioctls::Error),
 
     /// Cannot set the VM up
-    VmSetup(io::Error),
+    VmSetup(kvm_ioctls::Error),
 
     /// Cannot open the kernel image
     KernelFile(io::Error),
@@ -129,7 +129,7 @@ pub enum Error {
     ThreadCleanup,
 
     /// Failed to create a new KVM instance
-    KvmNew(io::Error),
+    KvmNew(kvm_ioctls::Error),
 
     /// VM is not created
     VmNotCreated,
@@ -301,7 +301,10 @@ impl Vm {
                 };
 
                 // Safe because the guest regions are guaranteed not to overlap.
-                unsafe { fd.set_user_memory_region(mem_region) }?;
+                unsafe {
+                    fd.set_user_memory_region(mem_region)
+                        .map_err(|e| io::Error::from_raw_os_error(e.errno()))
+                }?;
 
                 // Mark the pages as mergeable if explicitly asked for.
                 if config.memory.mergeable {
@@ -393,7 +396,7 @@ impl Vm {
 
         // Supported CPUID
         let mut cpuid = kvm
-            .get_supported_cpuid(MAX_KVM_CPUID_ENTRIES)
+            .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
             .map_err(Error::VmSetup)?;
 
         cpu::CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);

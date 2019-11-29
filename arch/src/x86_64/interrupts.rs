@@ -5,7 +5,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use std::io::{self, Cursor};
+use std::io::Cursor;
 use std::mem;
 use std::result;
 
@@ -16,8 +16,8 @@ use kvm_ioctls;
 
 #[derive(Debug)]
 pub enum Error {
-    GetLapic(io::Error),
-    SetLapic(io::Error),
+    GetLapic(kvm_ioctls::Error),
+    SetLapic(kvm_ioctls::Error),
 }
 
 pub type Result<T> = result::Result<T, Error>;

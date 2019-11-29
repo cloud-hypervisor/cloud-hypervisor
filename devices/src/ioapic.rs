@@ -13,14 +13,14 @@ use crate::BusDevice;
 use byteorder::{ByteOrder, LittleEndian};
 use kvm_bindings::kvm_msi;
 use kvm_ioctls::VmFd;
+use std::result;
 use std::sync::Arc;
-use std::{io, result};
 use vm_memory::GuestAddress;
 
 #[derive(Debug)]
 pub enum Error {
     /// Failed to send an interrupt.
-    InterruptFailed(io::Error),
+    InterruptFailed(kvm_ioctls::Error),
     /// Invalid destination mode.
     InvalidDestinationMode,
     /// Invalid trigger mode.

@@ -11,4 +11,4 @@ devices = { path = "../devices" }
 libc = "0.2.60"
 log = "0.4.8"
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
-vmm-sys-util = ">=0.1.1"
+vmm-sys-util = ">=0.2.1"
