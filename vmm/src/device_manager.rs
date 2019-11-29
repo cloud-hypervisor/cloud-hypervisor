@@ -112,14 +112,14 @@ pub enum DeviceManagerError {
     AllocateIrq,
 
     /// Cannot configure the IRQ.
-    Irq(io::Error),
+    Irq(kvm_ioctls::Error),
 
     /// Cannot allocate PCI BARs
     #[cfg(feature = "pci_support")]
     AllocateBars(pci::PciDeviceError),
 
     /// Cannot register ioevent.
-    RegisterIoevent(io::Error),
+    RegisterIoevent(kvm_ioctls::Error),
 
     /// Cannot create virtio device
     VirtioDevice(vmm_sys_util::errno::Error),
@@ -159,7 +159,7 @@ pub enum DeviceManagerError {
     VfioMapRegion(VfioPciError),
 
     /// Failed to create the KVM device.
-    CreateKvmDevice(io::Error),
+    CreateKvmDevice(kvm_ioctls::Error),
 
     /// Failed to memory map.
     Mmap(io::Error),
@@ -366,11 +366,15 @@ impl DeviceRelocation for AddressManager {
             if bar_addr == new_base {
                 for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm_fd.unregister_ioevent(event, &io_addr)?;
+                    self.vm_fd
+                        .unregister_ioevent(event, &io_addr)
+                        .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
                 }
                 for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm_fd.register_ioevent(event, &io_addr, NoDatamatch)?;
+                    self.vm_fd
+                        .register_ioevent(event, &io_addr, NoDatamatch)
+                        .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
                 }
             }
         }
@@ -1365,13 +1369,16 @@ impl DeviceManager {
                         pad: [0u8; 12],
                     };
 
-                    return vm_fd_clone.signal_msi(msi_queue).map(|ret| {
-                        if ret > 0 {
-                            debug!("MSI message successfully delivered");
-                        } else if ret == 0 {
-                            warn!("failed to deliver MSI message, blocked by guest");
-                        }
-                    });
+                    return vm_fd_clone
+                        .signal_msi(msi_queue)
+                        .map_err(|e| io::Error::from_raw_os_error(e.errno()))
+                        .map(|ret| {
+                            if ret > 0 {
+                                debug!("MSI message successfully delivered");
+                            } else if ret == 0 {
+                                warn!("failed to deliver MSI message, blocked by guest");
+                            }
+                        });
                 }
 
                 Err(std::io::Error::new(

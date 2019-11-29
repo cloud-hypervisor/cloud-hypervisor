@@ -34,10 +34,10 @@ use vmm_sys_util::eventfd::EventFd;
 pub enum VfioPciError {
     AllocateGsi,
     EventFd(io::Error),
-    IrqFd(io::Error),
+    IrqFd(kvm_ioctls::Error),
     NewVfioPciDevice,
-    MapRegionGuest(io::Error),
-    SetGsiRouting(io::Error),
+    MapRegionGuest(kvm_ioctls::Error),
+    SetGsiRouting(kvm_ioctls::Error),
 }
 pub type Result<T> = std::result::Result<T, VfioPciError>;
 
@@ -1047,7 +1047,9 @@ impl PciDevice for VfioPciDevice {
                         };
                         // Safe because the guest regions are guaranteed not to overlap.
                         unsafe {
-                            self.vm_fd.set_user_memory_region(old_mem_region)?;
+                            self.vm_fd
+                                .set_user_memory_region(old_mem_region)
+                                .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
                         }
 
                         // Insert new region to KVM
@@ -1060,7 +1062,9 @@ impl PciDevice for VfioPciDevice {
                         };
                         // Safe because the guest regions are guaranteed not to overlap.
                         unsafe {
-                            self.vm_fd.set_user_memory_region(new_mem_region)?;
+                            self.vm_fd
+                                .set_user_memory_region(new_mem_region)
+                                .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
                         }
                     }
                 }

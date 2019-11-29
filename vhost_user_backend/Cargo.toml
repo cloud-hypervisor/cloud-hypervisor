@@ -12,9 +12,9 @@ mmio_support = ["vm-virtio/mmio_support"]
 [dependencies]
 epoll = ">=4.0.1"
 libc = "0.2.66"
-vm-memory = { git = "https://github.com/rust-vmm/vm-memory" } 
+vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = ">=0.1.1"
+vmm-sys-util = ">=0.2.1"
 
 [dependencies.vhost_rs]
 path = "../vhost_rs"

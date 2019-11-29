@@ -20,6 +20,7 @@ use libc::{c_void, siginfo_t};
 use crate::device_manager::DeviceManager;
 
 use devices::{ioapic, BusDevice};
+use kvm_bindings::CpuId;
 use kvm_ioctls::*;
 
 use vm_memory::{Address, GuestAddress, GuestMemoryMmap};
@@ -74,10 +75,10 @@ impl fmt::Display for DebugIoPortRange {
 #[derive(Debug)]
 pub enum Error {
     /// Cannot open the VCPU file descriptor.
-    VcpuFd(io::Error),
+    VcpuFd(kvm_ioctls::Error),
 
     /// Cannot run the VCPUs.
-    VcpuRun(io::Error),
+    VcpuRun(kvm_ioctls::Error),
 
     /// Cannot spawn a new vCPU thread.
     VcpuSpawn(io::Error),
@@ -95,7 +96,7 @@ pub enum Error {
     FPUConfiguration(arch::x86_64::regs::Error),
 
     /// The call to KVM_SET_CPUID2 failed.
-    SetSupportedCpusFailed(io::Error),
+    SetSupportedCpusFailed(kvm_ioctls::Error),
 
     #[cfg(target_arch = "x86_64")]
     /// Cannot set the local interruption due to bad configuration.
@@ -309,7 +310,7 @@ impl Vcpu {
                 }
             },
 
-            Err(ref e) => match e.raw_os_error().unwrap() {
+            Err(ref e) => match e.errno() {
                 libc::EAGAIN | libc::EINTR => Ok(true),
                 _ => {
                     error!("VCPU {:?} error {:?}", self.id, e);
