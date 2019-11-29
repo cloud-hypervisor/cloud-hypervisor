@@ -1064,28 +1064,49 @@ impl<'a> Aml for While<'a> {
     }
 }
 
-pub struct Add<'a> {
-    a: &'a dyn Aml,
-    b: &'a dyn Aml,
-    target: &'a dyn Aml,
+macro_rules! binary_op {
+    ($name:ident, $opcode:expr) => {
+        pub struct $name<'a> {
+            a: &'a dyn Aml,
+            b: &'a dyn Aml,
+            target: &'a dyn Aml,
+        }
+
+        impl<'a> $name<'a> {
+            pub fn new(target: &'a dyn Aml, a: &'a dyn Aml, b: &'a dyn Aml) -> Self {
+                $name { target, a, b }
+            }
+        }
+
+        impl<'a> Aml for $name<'a> {
+            fn to_aml_bytes(&self) -> Vec<u8> {
+                let mut bytes = Vec::new();
+                bytes.push($opcode); /* Op for the binary operator */
+                bytes.extend_from_slice(&self.a.to_aml_bytes());
+                bytes.extend_from_slice(&self.b.to_aml_bytes());
+                bytes.extend_from_slice(&self.target.to_aml_bytes());
+                bytes
+            }
+        }
+    };
 }
 
-impl<'a> Add<'a> {
-    pub fn new(target: &'a dyn Aml, a: &'a dyn Aml, b: &'a dyn Aml) -> Self {
-        Add { target, a, b }
-    }
-}
-
-impl<'a> Aml for Add<'a> {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x72); /* AddOp */
-        bytes.extend_from_slice(&self.a.to_aml_bytes());
-        bytes.extend_from_slice(&self.b.to_aml_bytes());
-        bytes.extend_from_slice(&self.target.to_aml_bytes());
-        bytes
-    }
-}
+/* binary operators: TermArg TermArg Target */
+binary_op!(Add, 0x72);
+binary_op!(Concat, 0x73);
+binary_op!(Subtract, 0x74);
+binary_op!(Multiply, 0x77);
+binary_op!(ShiftLeft, 0x79);
+binary_op!(ShiftRight, 0x7A);
+binary_op!(And, 0x7B);
+binary_op!(Nand, 0x7C);
+binary_op!(Or, 0x7D);
+binary_op!(Nor, 0x7E);
+binary_op!(Xor, 0x7F);
+binary_op!(ConateRes, 0x84);
+binary_op!(Mod, 0x85);
+binary_op!(Index, 0x88);
+binary_op!(ToString, 0x9C);
 
 pub struct MethodCall<'a> {
     name: Path,
