@@ -2041,18 +2041,6 @@ mod tests {
                 0
             );
 
-            // Further test that we're MSI only now
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("cat /proc/interrupts | grep -c 'IO-APIC'")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or(1),
-                0
-            );
-
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
