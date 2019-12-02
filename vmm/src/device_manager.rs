@@ -21,6 +21,7 @@ use crate::interrupt::{
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
+use anyhow::anyhow;
 #[cfg(feature = "acpi")]
 use arch::layout;
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
@@ -55,7 +56,7 @@ use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize, MmapRegion,
 };
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 #[cfg(feature = "pci_support")]
 use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::transport::VirtioTransport;
@@ -2388,7 +2389,37 @@ impl Pausable for DeviceManager {
     }
 }
 
-impl Snapshottable for DeviceManager {}
+const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";
+impl Snapshottable for DeviceManager {
+    fn id(&self) -> String {
+        DEVICE_MANAGER_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let mut snapshot = Snapshot::new(DEVICE_MANAGER_SNAPSHOT_ID);
+
+        // We aggregate all devices snapshot.
+        for dev in self.migratable_devices.values() {
+            let device_snapshot = dev.lock().unwrap().snapshot()?;
+            snapshot.add_snapshot(device_snapshot);
+        }
+
+        Ok(snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        for (id, snapshot) in snapshot.snapshots {
+            if let Some(device) = self.migratable_devices.get(&id) {
+                device.lock().unwrap().restore(*snapshot)?;
+            } else {
+                return Err(MigratableError::Restore(anyhow!("Missing device {}", id)));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl Transportable for DeviceManager {}
 impl Migratable for DeviceManager {}
 
