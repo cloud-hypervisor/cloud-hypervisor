@@ -15,7 +15,9 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::VirtioInterrupt;
 use std::io;
 use std::os::unix::io::AsRawFd;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread;
 use vhost_rs::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 
 /// Collection of common parameters required by vhost-user devices while
@@ -28,6 +30,7 @@ use vhost_rs::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 pub struct VhostUserEpollConfig<S: VhostUserMasterReqHandler> {
     pub interrupt_cb: Arc<VirtioInterrupt>,
     pub kill_evt: EventFd,
+    pub pause_evt: EventFd,
     pub vu_interrupt_list: Vec<(EventFd, Queue)>,
     pub slave_req_handler: Option<MasterReqHandler<S>>,
 }
@@ -53,7 +56,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
             .map_err(Error::FailedSignalingUsedQueue)
     }
 
-    pub fn run(&mut self) -> Result<()> {
+    pub fn run(&mut self, paused: Arc<AtomicBool>) -> Result<()> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(Error::EpollCreateFd)?;
 
@@ -79,10 +82,20 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
         )
         .map_err(Error::EpollCtl)?;
 
-        let mut index = kill_evt_index;
+        let pause_evt_index = kill_evt_index + 1;
+
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.vu_epoll_cfg.pause_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, pause_evt_index as u64),
+        )
+        .map_err(Error::EpollCtl)?;
+
+        let mut index = pause_evt_index;
 
         let slave_evt_index = if let Some(self_req_handler) = &self.vu_epoll_cfg.slave_req_handler {
-            index = kill_evt_index + 1;
+            index = pause_evt_index + 1;
             epoll::ctl(
                 epoll_fd,
                 epoll::ControlOptions::EPOLL_CTL_ADD,
@@ -135,6 +148,15 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
                     x if kill_evt_index == x => {
                         debug!("KILL_EVENT received, stopping epoll loop");
                         break 'poll;
+                    }
+                    x if pause_evt_index == x => {
+                        debug!("PAUSE_EVENT received, pausing vhost-user epoll loop");
+                        // We loop here to handle spurious park() returns.
+                        // Until we have not resumed, the paused boolean will
+                        // be true.
+                        while paused.load(Ordering::SeqCst) {
+                            thread::park();
+                        }
                     }
                     x if (slave_evt_index.is_some() && slave_evt_index.unwrap() == x) => {
                         if let Some(slave_req_handler) =

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::vu_common_ctrl::{reset_vhost_user, setup_vhost_user};
+use super::Error as DeviceError;
 use super::{Error, Result};
 use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::{
@@ -13,6 +14,8 @@ use std::cmp;
 use std::io;
 use std::io::Write;
 use std::os::unix::io::RawFd;
+use std::result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use vhost_rs::vhost_user::message::{
@@ -22,6 +25,7 @@ use vhost_rs::vhost_user::{
     HandlerResult, Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
 };
 use vhost_rs::VhostBackend;
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -116,10 +120,13 @@ pub struct Fs {
     acked_features: u64,
     config_space: Vec<u8>,
     kill_evt: Option<EventFd>,
+    pause_evt: Option<EventFd>,
     cache: Option<(VirtioSharedMemoryList, u64)>,
     slave_req_support: bool,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    paused: Arc<AtomicBool>,
 }
 
 impl Fs {
@@ -199,10 +206,13 @@ impl Fs {
             acked_features,
             config_space,
             kill_evt: None,
+            pause_evt: None,
             cache,
             slave_req_support,
             queue_evts: None,
             interrupt_cb: None,
+            epoll_thread: None,
+            paused: Arc::new(AtomicBool::new(false)),
         })
     }
 }
@@ -299,15 +309,21 @@ impl VirtioDevice for Fs {
             return Err(ActivateError::BadActivate);
         }
 
-        let (self_kill_evt, kill_evt) =
-            match EventFd::new(EFD_NONBLOCK).and_then(|e| Ok((e.try_clone()?, e))) {
-                Ok(v) => v,
-                Err(e) => {
-                    error!("failed creating kill EventFd pair: {}", e);
-                    return Err(ActivateError::BadActivate);
-                }
-            };
+        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating kill EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
         self.kill_evt = Some(self_kill_evt);
+
+        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating pause EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+        self.pause_evt = Some(self_pause_evt);
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
@@ -361,26 +377,29 @@ impl VirtioDevice for Fs {
             vu_interrupt_list: vu_call_evt_queue_list,
             interrupt_cb,
             kill_evt,
+            pause_evt,
             slave_req_handler,
         });
 
-        let worker_result = thread::Builder::new()
+        let paused = self.paused.clone();
+        thread::Builder::new()
             .name("virtio_fs".to_string())
-            .spawn(move || {
-                if let Err(e) = handler.run() {
-                    error!("net worker thread exited with error {:?}!", e);
-                }
-            });
-
-        if let Err(e) = worker_result {
-            error!("failed to spawn virtio-fs worker: {}", e);
-            return Err(ActivateError::BadActivate);
-        }
+            .spawn(move || handler.run(paused))
+            .map(|thread| self.epoll_thread = Some(thread))
+            .map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                ActivateError::BadActivate
+            })?;
 
         Ok(())
     }
 
     fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        // We first must resume the virtio thread if it was paused.
+        if self.pause_evt.take().is_some() {
+            self.resume().ok()?;
+        }
+
         if let Err(e) = reset_vhost_user(&mut self.vu, self.queue_sizes.len()) {
             error!("Failed to reset vhost-user daemon: {:?}", e);
             return None;
@@ -406,3 +425,7 @@ impl VirtioDevice for Fs {
         }
     }
 }
+
+virtio_pausable!(Fs);
+impl Snapshotable for Fs {}
+impl Migratable for Fs {}

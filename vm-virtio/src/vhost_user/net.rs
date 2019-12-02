@@ -5,13 +5,17 @@ use libc;
 use libc::EFD_NONBLOCK;
 use std::cmp;
 use std::io::Write;
+use std::result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::vec::Vec;
 
+use super::Error as DeviceError;
 use crate::VirtioInterrupt;
 use net_util::{MacAddr, MAC_ADDR_LEN};
 
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -31,6 +35,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {}
 pub struct Net {
     vhost_user_net: Master,
     kill_evt: Option<EventFd>,
+    pause_evt: Option<EventFd>,
     avail_features: u64,
     acked_features: u64,
     backend_features: u64,
@@ -38,6 +43,8 @@ pub struct Net {
     queue_sizes: Vec<u16>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    paused: Arc<AtomicBool>,
 }
 
 impl Net {
@@ -109,6 +116,7 @@ impl Net {
         Ok(Net {
             vhost_user_net,
             kill_evt: None,
+            pause_evt: None,
             avail_features,
             acked_features,
             backend_features,
@@ -116,6 +124,8 @@ impl Net {
             queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
             queue_evts: None,
             interrupt_cb: None,
+            epoll_thread: None,
+            paused: Arc::new(AtomicBool::new(false)),
         })
     }
 }
@@ -201,15 +211,21 @@ impl VirtioDevice for Net {
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
-        let (self_kill_evt, kill_evt) =
-            match EventFd::new(EFD_NONBLOCK).and_then(|e| Ok((e.try_clone()?, e))) {
-                Ok(v) => v,
-                Err(e) => {
-                    error!("failed creating kill EventFd pair: {}", e);
-                    return Err(ActivateError::BadActivate);
-                }
-            };
+        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating kill EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
         self.kill_evt = Some(self_kill_evt);
+
+        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
+            .and_then(|e| Ok((e.try_clone()?, e)))
+            .map_err(|e| {
+                error!("failed creating pause EventFd pair: {}", e);
+                ActivateError::BadActivate
+            })?;
+        self.pause_evt = Some(self_pause_evt);
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
@@ -238,24 +254,30 @@ impl VirtioDevice for Net {
         let mut handler = VhostUserEpollHandler::<SlaveReqHandler>::new(VhostUserEpollConfig {
             interrupt_cb,
             kill_evt,
+            pause_evt,
             vu_interrupt_list,
             slave_req_handler: None,
         });
 
-        let handler_result = thread::Builder::new()
+        let paused = self.paused.clone();
+        thread::Builder::new()
             .name("vhost_user_net".to_string())
-            .spawn(move || {
-                if let Err(e) = handler.run() {
-                    error!("net worker thread exited with error {:?}!", e);
-                }
-            });
-        if let Err(e) = handler_result {
-            error!("vhost-user net thread create failed with error {:?}", e);
-        }
+            .spawn(move || handler.run(paused))
+            .map(|thread| self.epoll_thread = Some(thread))
+            .map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                ActivateError::BadActivate
+            })?;
+
         Ok(())
     }
 
     fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+        // We first must resume the virtio thread if it was paused.
+        if self.pause_evt.take().is_some() {
+            self.resume().ok()?;
+        }
+
         if let Err(e) = reset_vhost_user(&mut self.vhost_user_net, self.queue_sizes.len()) {
             error!("Failed to reset vhost-user daemon: {:?}", e);
             return None;
@@ -273,3 +295,7 @@ impl VirtioDevice for Net {
         ))
     }
 }
+
+virtio_pausable!(Net);
+impl Snapshotable for Net {}
+impl Migratable for Net {}
