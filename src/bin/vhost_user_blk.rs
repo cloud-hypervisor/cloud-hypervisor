@@ -23,6 +23,7 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::{Seek, SeekFrom, Write};
 use std::mem;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process;
 use std::slice;
@@ -58,6 +59,8 @@ pub enum Error {
     GuestMemory(GuestMemoryError),
     /// Can't open image file.
     OpenImage,
+    /// Failed to parse direct parameter.
+    ParseDirectParam,
     /// Failed to parse image parameter.
     ParseImageParam,
     /// Failed to parse sock parameter.
@@ -77,13 +80,15 @@ struct VhostUserBlkBackend {
 }
 
 impl VhostUserBlkBackend {
-    pub fn new(image_path: String, rdonly: bool) -> Result<Self> {
-        let image: File = OpenOptions::new()
-            .read(true)
-            .write(!rdonly)
-            .open(&image_path)
-            .unwrap();
-        let mut raw_img = vm_virtio::RawFile::new(image, false);
+    pub fn new(image_path: String, rdonly: bool, direct: bool) -> Result<Self> {
+        let mut options = OpenOptions::new();
+        options.read(true);
+        options.write(!rdonly);
+        if direct {
+            options.custom_flags(libc::O_DIRECT);
+        }
+        let image: File = options.open(&image_path).unwrap();
+        let mut raw_img: vm_virtio::RawFile = vm_virtio::RawFile::new(image, direct);
 
         let image_id = build_disk_image_id(&PathBuf::from(&image_path));
         let image_type = qcow::detect_image_type(&mut raw_img).unwrap();
@@ -225,6 +230,7 @@ pub struct VhostUserBlkBackendConfig<'a> {
     pub image: &'a str,
     pub sock: &'a str,
     pub readonly: bool,
+    pub direct: bool,
 }
 
 impl<'a> VhostUserBlkBackendConfig<'a> {
@@ -234,6 +240,7 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
         let mut image: &str = "";
         let mut sock: &str = "";
         let mut readonly: bool = false;
+        let mut direct: bool = false;
 
         for param in params_list.iter() {
             if param.starts_with("image=") {
@@ -244,6 +251,11 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
                 readonly = match param[9..].parse::<bool>() {
                     Ok(b) => b,
                     Err(_) => return Err(Error::ParseReadOnlyParam),
+                }
+            } else if param.starts_with("direct=") {
+                direct = match param[7..].parse::<bool>() {
+                    Ok(b) => b,
+                    Err(_) => return Err(Error::ParseDirectParam),
                 }
             }
         }
@@ -259,6 +271,7 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
             image,
             sock,
             readonly,
+            direct,
         })
     }
 }
@@ -273,7 +286,8 @@ fn main() {
                 .long("backend")
                 .help(
                     "Backend parameters \"image=<image_path>,\
-                     sock=<socket_path>,readonly=true|false\"",
+                     sock=<socket_path>,readonly=true|false,\
+                     direct=true|false\"",
                 )
                 .takes_value(true)
                 .min_values(1),
@@ -291,8 +305,12 @@ fn main() {
     };
 
     let blk_backend = Arc::new(RwLock::new(
-        VhostUserBlkBackend::new(backend_config.image.to_string(), backend_config.readonly)
-            .unwrap(),
+        VhostUserBlkBackend::new(
+            backend_config.image.to_string(),
+            backend_config.readonly,
+            backend_config.direct,
+        )
+        .unwrap(),
     ));
 
     debug!("blk_backend is created!\n");
