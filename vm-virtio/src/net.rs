@@ -21,6 +21,7 @@ use std::vec::Vec;
 
 use net_gen;
 
+use super::net_ctrl::*;
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
@@ -38,7 +39,6 @@ use vmm_sys_util::eventfd::EventFd;
 const MAX_BUFFER_SIZE: usize = 65562;
 const QUEUE_SIZE: u16 = 256;
 const NUM_QUEUES: usize = 2;
-const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
 
 // A frame is available for reading from the tap device to receive in the guest.
 const RX_TAP_EVENT: DeviceEventT = 0;
@@ -46,10 +46,12 @@ const RX_TAP_EVENT: DeviceEventT = 0;
 const RX_QUEUE_EVENT: DeviceEventT = 1;
 // The transmit queue has a frame that is ready to send from the guest.
 const TX_QUEUE_EVENT: DeviceEventT = 2;
+// The event number for control queue.
+const CTRL_QUEUE_EVENT: DeviceEventT = 3;
 // The device has been dropped.
-pub const KILL_EVENT: DeviceEventT = 3;
+pub const KILL_EVENT: DeviceEventT = 4;
 // Number of DeviceEventT events supported by this implementation.
-pub const NET_EVENTS_COUNT: usize = 4;
+pub const NET_EVENTS_COUNT: usize = 5;
 
 #[derive(Debug)]
 pub enum Error {
@@ -119,6 +121,7 @@ struct NetEpollHandler {
     tap: Tap,
     rx: RxVirtio,
     tx: TxVirtio,
+    ctrl: Option<(CtrlVirtio, Arc<VirtioInterrupt>)>,
     interrupt_cb: Arc<VirtioInterrupt>,
     kill_evt: EventFd,
     epoll_fd: RawFd,
@@ -341,6 +344,15 @@ impl NetEpollHandler {
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(TX_QUEUE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
+        if let Some(ctrl) = &self.ctrl {
+            epoll::ctl(
+                self.epoll_fd,
+                epoll::ControlOptions::EPOLL_CTL_ADD,
+                ctrl.0.queue_evt.as_raw_fd(),
+                epoll::Event::new(epoll::Events::EPOLLIN, u64::from(CTRL_QUEUE_EVENT)),
+            )
+            .map_err(DeviceError::EpollCtl)?;
+        }
         self.register_tap_rx_listener()
             .map_err(DeviceError::EpollCtl)?;
         self.rx_tap_listening = true;
@@ -416,6 +428,27 @@ impl NetEpollHandler {
                             self.process_rx().unwrap();
                         }
                     }
+                    CTRL_QUEUE_EVENT => {
+                        let mut mem = self.mem.write().unwrap().clone();
+                        if let Some((mut cvq, isr_interrupt_cb)) = self.ctrl.take() {
+                            if let Err(_e) = cvq.queue_evt.read() {
+                                error!("failed to get ctl queue event: {:?}", _e);
+                            }
+                            match cvq.process_cvq(&mut mem) {
+                                Ok(_) => {
+                                    if let Err(e) = (isr_interrupt_cb)(
+                                        &VirtioInterruptType::Queue,
+                                        Some(&cvq.queue),
+                                    ) {
+                                        error!("Failed to signal used queue: {:?}", e);
+                                    }
+                                }
+                                Err(_e) => {
+                                    error!("failed to process ctrl queue: {:?}", _e);
+                                }
+                            }
+                        }
+                    }
                     KILL_EVENT => {
                         debug!("KILL_EVENT received, stopping epoll loop");
                         break 'epoll;
@@ -442,6 +475,7 @@ pub struct Net {
     queue_evts: Option<Vec<EventFd>>,
     msix_interrupt_cb: Option<Arc<VirtioInterrupt>>,
     isr_interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    queue_size: Vec<u16>,
 }
 
 impl Net {
@@ -481,6 +515,9 @@ impl Net {
         } else {
             config_space = Vec::new();
         }
+        avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
+
+        let queue_num = 1 + NUM_QUEUES;
 
         Ok(Net {
             kill_evt: None,
@@ -491,6 +528,7 @@ impl Net {
             queue_evts: None,
             msix_interrupt_cb: None,
             isr_interrupt_cb: None,
+            queue_size: vec![QUEUE_SIZE; queue_num],
         })
     }
 
@@ -526,7 +564,7 @@ impl VirtioDevice for Net {
     }
 
     fn queue_max_sizes(&self) -> &[u16] {
-        QUEUE_SIZES
+        &self.queue_size.as_slice()
     }
 
     fn features(&self, page: u32) -> u32 {
@@ -594,16 +632,12 @@ impl VirtioDevice for Net {
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
-        if msix_interrupt_cb.is_none() && isr_interrupt_cb.is_none() {
+        if self.isr_need() && isr_interrupt_cb.is_none() {
+            println!("isr_interrupt_cb is none!\n");
             return Err(ActivateError::BadActivate);
         }
 
-        if queues.len() != NUM_QUEUES || queue_evts.len() != NUM_QUEUES {
-            error!(
-                "Cannot perform activate. Expected {} queue(s), got {}",
-                NUM_QUEUES,
-                queues.len()
-            );
+        if msix_interrupt_cb.is_none() && isr_interrupt_cb.is_none() {
             return Err(ActivateError::BadActivate);
         }
 
@@ -651,11 +685,32 @@ impl VirtioDevice for Net {
                 )
             };
 
+            let ctrl = if self.acked_features & 1 << VIRTIO_NET_F_CTRL_VQ != 0 {
+                let cvq_index = queues.len() - 1;
+                let cvq_queue = queues.remove(cvq_index);
+                let cvq_queue_evt = queue_evts.remove(cvq_index);
+                let isr_interrupt_cb = if msix_interrupt_cb.is_none() {
+                    interrupt_cb.clone()
+                } else if let Some(isr_interrupt_cb) = isr_interrupt_cb.take() {
+                    isr_interrupt_cb
+                } else {
+                    // It will never go here.
+                    Arc::new(
+                        Box::new(move |_: &VirtioInterruptType, _: Option<&Queue>| Ok(()))
+                            as VirtioInterrupt,
+                    )
+                };
+                Some((CtrlVirtio::new(cvq_queue, cvq_queue_evt), isr_interrupt_cb))
+            } else {
+                None
+            };
+
             let mut handler = NetEpollHandler {
                 mem,
                 tap,
                 rx: RxVirtio::new(rx_queue, rx_queue_evt),
                 tx: TxVirtio::new(tx_queue, tx_queue_evt),
+                ctrl,
                 interrupt_cb,
                 kill_evt,
                 epoll_fd: 0,
@@ -688,5 +743,9 @@ impl VirtioDevice for Net {
             self.isr_interrupt_cb.take(),
             self.queue_evts.take().unwrap(),
         ))
+    }
+
+    fn isr_need(&self) -> bool {
+        self.queue_size.len() % 2 != 0
     }
 }
