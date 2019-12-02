@@ -220,14 +220,14 @@ components:
       - boot_vcpus
       type: object
       properties:
-        cpu_count:
+        boot_vcpus:
           minimum: 1
           default: 1
           type: integer
       - max_vcpus
       type: object
       properties:
-        cpu_count:
+        max_vcpus:
           minimum: 1
           default: 1
           type: integer
@@ -427,7 +427,7 @@ components:
       - desired_vcpus
       type: object
       properties:
-        cpu_count:
+        desired_vcpus:
           minimum: 1
           default: 1
           type: integer
