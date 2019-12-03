@@ -10,11 +10,12 @@ __virtio-fs__, also known as __vhost-user-fs__ is a virtual device defined by th
 
 This virtual device relies on the _vhost-user_ protocol, which assumes the backend (device emulation) is handled by a dedicated process running on the host. This daemon is called __virtiofsd__ and needs to be present on the host.
 
-_Install virtiofsd_
+_Build virtiofsd_
 ```bash
-VIRTIOFSD_URL="$(curl --silent https://api.github.com/repos/cloud-hypervisor/nemu/releases/latest | grep "browser_download_url" | grep "virtiofsd-x86_64" | grep -o 'https://.*[^ "]')"
-wget --quiet $VIRTIOFSD_URL -O "virtiofsd"
-chmod +x "virtiofsd"
+git clone --depth 1 "https://github.com/sboeuf/qemu.git" -b "virtio-fs" $VIRTIOFSD_DIR
+cd $VIRTIOFSD_DIR
+./configure --prefix=$PWD --target-list=x86_64-softmmu
+make virtiofsd -j `nproc`
 sudo setcap cap_sys_admin+epi "virtiofsd"
 ```
 _Create shared directory_
