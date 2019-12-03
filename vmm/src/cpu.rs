@@ -502,13 +502,15 @@ impl CpuManager {
                 ioapic,
                 creation_ts,
             )?;
-            vcpu.configure(entry_addr, &self.vm_memory, self.cpuid.clone())?;
 
             let vcpu_thread_barrier = vcpu_thread_barrier.clone();
 
             let reset_evt = self.reset_evt.try_clone().unwrap();
             let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
             let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
+
+            let vm_memory = self.vm_memory.clone();
+            let cpuid = self.cpuid.clone();
 
             let handle = Some(
                 thread::Builder::new()
@@ -526,6 +528,9 @@ impl CpuManager {
                             )
                             .expect("Failed to register vcpu signal handler");
                         }
+
+                        vcpu.configure(entry_addr, &vm_memory, cpuid)
+                            .expect("Failed to configure vCPU");
 
                         // Block until all CPUs are ready.
                         vcpu_thread_barrier.wait();
