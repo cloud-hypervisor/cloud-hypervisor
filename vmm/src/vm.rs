@@ -676,6 +676,7 @@ impl Vm {
         self.devices
             .notify_hotplug(HotPlugNotificationType::CPUDevicesChanged)
             .map_err(Error::DeviceManager)?;
+        self.config.lock().unwrap().cpus.boot_vcpus = desired_vcpus;
         Ok(())
     }
 
