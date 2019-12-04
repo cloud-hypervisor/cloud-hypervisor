@@ -968,8 +968,6 @@ impl PciDevice for VfioPciDevice {
         }
 
         let reg = (reg_idx * PCI_CONFIG_REGISTER_SIZE) as u64;
-        self.device
-            .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, reg + offset);
 
         // If the MSI or MSI-X capabilities are accessed, we need to
         // update our local cache accordingly.
@@ -991,6 +989,17 @@ impl PciDevice for VfioPciDevice {
                 _ => {}
             }
         }
+
+        // Make sure to write to the device's PCI config space after MSI/MSI-X
+        // interrupts have been enabled/disabled. In case of MSI, when the
+        // interrupts are enabled through VFIO (using VFIO_DEVICE_SET_IRQS),
+        // the MSI Enable bit in the MSI capability structure found in the PCI
+        // config space is disabled by default. That's why when the guest is
+        // enabling this bit, we first need to enable the MSI interrupts with
+        // VFIO through VFIO_DEVICE_SET_IRQS ioctl, and only after we can write
+        // to the device region to update the MSI Enable bit.
+        self.device
+            .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, reg + offset);
     }
 
     fn read_config_register(&self, reg_idx: usize) -> u32 {
