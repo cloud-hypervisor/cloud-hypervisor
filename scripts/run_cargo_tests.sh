@@ -21,5 +21,5 @@ cargo rustc --bin cloud-hypervisor --no-default-features --features "pci"  -- -D
 cargo rustc --bin vhost_user_net --no-default-features --features "pci"  -- -D warnings
 cargo rustc --bin cloud-hypervisor --no-default-features --features "mmio"  -- -D warnings
 cargo rustc --bin vhost_user_net --no-default-features --features "mmio"  -- -D warnings
-find . -name "*.rs" | xargs rustfmt --check
+find . \( -name "*.rs" ! -wholename "*/out/*.rs" \) | xargs rustfmt --check
 cargo build --release
