@@ -380,9 +380,6 @@ impl Vm {
         cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
         fd.enable_cap(&cap).map_err(Error::VmSetup)?;
 
-        // Because of the split irqchip, we need a userspace IOAPIC.
-        let userspace_ioapic = true;
-
         // Patch tsc deadline timer bit
         cpuid_patches.push(cpu::CpuidPatch {
             function: 1,
@@ -451,7 +448,6 @@ impl Vm {
         let device_manager = DeviceManager::new(
             &vm_info,
             allocator,
-            userspace_ioapic,
             ram_regions.len() as u32,
             &exit_evt,
             &reset_evt,

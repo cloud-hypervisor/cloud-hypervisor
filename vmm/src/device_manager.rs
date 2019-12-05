@@ -16,7 +16,7 @@ use devices::{ioapic, HotPlugNotificationType};
 use kvm_bindings::{kvm_irq_routing_entry, kvm_userspace_memory_region};
 use kvm_ioctls::*;
 use libc::O_TMPFILE;
-use libc::{EFD_NONBLOCK, TIOCGWINSZ};
+use libc::TIOCGWINSZ;
 
 use net_util::Tap;
 #[cfg(feature = "pci_support")]
@@ -177,23 +177,7 @@ pub enum DeviceManagerError {
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 struct InterruptInfo<'a> {
-    _ioapic: &'a Option<Arc<Mutex<ioapic::Ioapic>>>,
-}
-
-struct KernelIoapicIrq {
-    evt: EventFd,
-}
-
-impl KernelIoapicIrq {
-    fn new(evt: EventFd) -> Self {
-        KernelIoapicIrq { evt }
-    }
-}
-
-impl devices::Interrupt for KernelIoapicIrq {
-    fn deliver(&self) -> result::Result<(), io::Error> {
-        self.evt.write(1)
-    }
+    _ioapic: &'a Arc<Mutex<ioapic::Ioapic>>,
 }
 
 struct UserIoapicIrq {
@@ -415,7 +399,6 @@ impl DeviceManager {
     pub fn new(
         vm_info: &VmInfo,
         allocator: SystemAllocator,
-        userspace_ioapic: bool,
         mut mem_slots: u32,
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
@@ -440,7 +423,7 @@ impl DeviceManager {
             vm_fd: vm_info.vm_fd.clone(),
         });
 
-        let ioapic = DeviceManager::add_ioapic(vm_info, &address_manager, userspace_ioapic)?;
+        let ioapic = DeviceManager::add_ioapic(vm_info, &address_manager)?;
         let interrupt_info = InterruptInfo { _ioapic: &ioapic };
 
         let console = DeviceManager::add_console_device(
@@ -494,7 +477,7 @@ impl DeviceManager {
         Ok(DeviceManager {
             address_manager,
             console,
-            ioapic,
+            ioapic: Some(ioapic),
             mmap_regions,
             cmdline_additions,
             virt_iommu,
@@ -642,23 +625,17 @@ impl DeviceManager {
     fn add_ioapic(
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
-        userspace_ioapic: bool,
-    ) -> DeviceManagerResult<Option<Arc<Mutex<ioapic::Ioapic>>>> {
-        let ioapic = if userspace_ioapic {
-            // Create IOAPIC
-            let ioapic = Arc::new(Mutex::new(ioapic::Ioapic::new(
-                vm_info.vm_fd.clone(),
-                APIC_START,
-            )));
+    ) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
+        // Create IOAPIC
+        let ioapic = Arc::new(Mutex::new(ioapic::Ioapic::new(
+            vm_info.vm_fd.clone(),
+            APIC_START,
+        )));
 
-            address_manager
-                .mmio_bus
-                .insert(ioapic.clone(), IOAPIC_START.0, IOAPIC_SIZE)
-                .map_err(DeviceManagerError::BusError)?;
-            Some(ioapic)
-        } else {
-            None
-        };
+        address_manager
+            .mmio_bus
+            .insert(ioapic.clone(), IOAPIC_START.0, IOAPIC_SIZE)
+            .map_err(DeviceManagerError::BusError)?;
 
         Ok(ioapic)
     }
@@ -670,7 +647,7 @@ impl DeviceManager {
         address_manager: &Arc<AddressManager>,
         reset_evt: EventFd,
         exit_evt: EventFd,
-        ioapic: &Option<Arc<Mutex<ioapic::Ioapic>>>,
+        ioapic: &Arc<Mutex<ioapic::Ioapic>>,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGEDDevice>>>> {
         let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
             exit_evt, reset_evt,
@@ -691,17 +668,9 @@ impl DeviceManager {
         // We need to hardcode this as the ACPI tables need to specify a particular IRQ and it's not possible
         // to ask the allocator for a specific one.
         let ged_irq = 5;
-        let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = &ioapic {
-            Box::new(UserIoapicIrq::new(ioapic.clone(), ged_irq))
-        } else {
-            let ged_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-            vm_info
-                .vm_fd
-                .register_irqfd(&ged_evt, ged_irq as u32)
-                .map_err(DeviceManagerError::Irq)?;
+        let interrupt: Box<dyn devices::Interrupt> =
+            Box::new(UserIoapicIrq::new(ioapic.clone(), ged_irq));
 
-            Box::new(KernelIoapicIrq::new(ged_evt))
-        };
         let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(interrupt)));
 
         address_manager
@@ -755,7 +724,7 @@ impl DeviceManager {
     fn add_console_device(
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
-        ioapic: &Option<Arc<Mutex<ioapic::Ioapic>>>,
+        ioapic: &Arc<Mutex<ioapic::Ioapic>>,
         virtio_devices: &mut Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>,
     ) -> DeviceManagerResult<Arc<Console>> {
         let serial_config = vm_info.vm_cfg.lock().unwrap().serial.clone();
@@ -770,17 +739,8 @@ impl DeviceManager {
         let serial = if serial_config.mode != ConsoleOutputMode::Off {
             // Serial is tied to IRQ #4
             let serial_irq = 4;
-            let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = &ioapic {
-                Box::new(UserIoapicIrq::new(ioapic.clone(), serial_irq))
-            } else {
-                let serial_evt = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-                vm_info
-                    .vm_fd
-                    .register_irqfd(&serial_evt, serial_irq as u32)
-                    .map_err(DeviceManagerError::Irq)?;
-
-                Box::new(KernelIoapicIrq::new(serial_evt))
-            };
+            let interrupt: Box<dyn devices::Interrupt> =
+                Box::new(UserIoapicIrq::new(ioapic.clone(), serial_irq));
 
             let serial = Arc::new(Mutex::new(devices::legacy::Serial::new(
                 interrupt,
@@ -1496,17 +1456,10 @@ impl DeviceManager {
             .allocate_irq()
             .ok_or(DeviceManagerError::AllocateIrq)?;
 
-        let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = interrupt_info._ioapic {
-            Box::new(UserIoapicIrq::new(ioapic.clone(), irq_num as usize))
-        } else {
-            let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-
-            vm_fd
-                .register_irqfd(&irqfd, irq_num as u32)
-                .map_err(DeviceManagerError::Irq)?;
-
-            Box::new(KernelIoapicIrq::new(irqfd))
-        };
+        let interrupt: Box<dyn devices::Interrupt> = Box::new(UserIoapicIrq::new(
+            interrupt_info._ioapic.clone(),
+            irq_num as usize,
+        ));
 
         mmio_device.assign_interrupt(interrupt);
 
