@@ -36,7 +36,7 @@ use kvm_ioctls::*;
 
 use linux_loader::cmdline::Cmdline;
 use linux_loader::loader::KernelLoader;
-use signal_hook::{iterator::Signals, SIGWINCH};
+use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -675,11 +675,23 @@ impl Vm {
         Ok(())
     }
 
-    fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>) {
+    fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>, on_tty: bool) {
         for signal in signals.forever() {
-            if signal == SIGWINCH {
-                let (col, row) = get_win_size();
-                console_input_clone.update_console_size(col, row);
+            match signal {
+                SIGWINCH => {
+                    let (col, row) = get_win_size();
+                    console_input_clone.update_console_size(col, row);
+                }
+                SIGTERM | SIGINT => {
+                    if on_tty {
+                        io::stdin()
+                            .lock()
+                            .set_canon_mode()
+                            .expect("failed to restore terminal mode");
+                    }
+                    std::process::exit((signal != SIGTERM) as i32);
+                }
+                _ => (),
             }
         }
     }
@@ -703,15 +715,16 @@ impl Vm {
 
         if self.devices.console().input_enabled() {
             let console = self.devices.console().clone();
-            let signals = Signals::new(&[SIGWINCH]);
+            let signals = Signals::new(&[SIGWINCH, SIGINT, SIGTERM]);
             match signals {
                 Ok(signals) => {
                     self.signals = Some(signals.clone());
 
+                    let on_tty = self.on_tty;
                     self.threads.push(
                         thread::Builder::new()
                             .name("signal_handler".to_string())
-                            .spawn(move || Vm::os_signal_handler(signals, console))
+                            .spawn(move || Vm::os_signal_handler(signals, console, on_tty))
                             .map_err(Error::SignalHandlerSpawn)?,
                     );
                 }
