@@ -40,7 +40,7 @@ use crate::config::VmConfig;
 use crate::vm::{Error as VmError, VmState};
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
@@ -104,7 +104,7 @@ pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct VmInfo {
-    pub config: Arc<VmConfig>,
+    pub config: Arc<Mutex<VmConfig>>,
     pub state: VmState,
 }
 
@@ -138,7 +138,7 @@ pub enum ApiRequest {
     /// (VmConfig).
     /// If the VMM API server could not create the VM, it will send a VmCreate
     /// error back.
-    VmCreate(Arc<VmConfig>, Sender<ApiResponse>),
+    VmCreate(Arc<Mutex<VmConfig>>, Sender<ApiResponse>),
 
     /// Boot the previously created virtual machine.
     /// If the VM was not previously created, the VMM API server will send a
@@ -185,7 +185,7 @@ pub enum ApiRequest {
 pub fn vm_create(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
-    config: Arc<VmConfig>,
+    config: Arc<Mutex<VmConfig>>,
 ) -> ApiResult<()> {
     let (response_sender, response_receiver) = channel();
 

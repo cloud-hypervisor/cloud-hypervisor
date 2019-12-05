@@ -21,7 +21,7 @@ use libc::EFD_NONBLOCK;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{result, thread};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -178,7 +178,7 @@ pub struct Vmm {
     api_evt: EventFd,
     version: String,
     vm: Option<Vm>,
-    vm_config: Option<Arc<VmConfig>>,
+    vm_config: Option<Arc<Mutex<VmConfig>>>,
 }
 
 impl Vmm {

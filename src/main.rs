@@ -377,7 +377,7 @@ fn main() {
         vmm::api::vm_create(
             api_evt.try_clone().unwrap(),
             api_request_sender,
-            Arc::new(vm_config),
+            Arc::new(Mutex::new(vm_config)),
         )
         .expect("Could not create the VM");
         vmm::api::vm_boot(api_evt.try_clone().unwrap(), sender).expect("Could not boot the VM");

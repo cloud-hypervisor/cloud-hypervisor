@@ -151,7 +151,7 @@ pub type Result<T> = result::Result<T, Error>;
 pub struct VmInfo<'a> {
     pub memory: &'a Arc<RwLock<GuestMemoryMmap>>,
     pub vm_fd: &'a Arc<VmFd>,
-    pub vm_cfg: &'a VmConfig,
+    pub vm_cfg: Arc<Mutex<VmConfig>>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
@@ -201,7 +201,7 @@ pub struct Vm {
     memory: Arc<RwLock<GuestMemoryMmap>>,
     threads: Vec<thread::JoinHandle<()>>,
     devices: DeviceManager,
-    config: Arc<VmConfig>,
+    config: Arc<Mutex<VmConfig>>,
     on_tty: bool,
     signals: Option<Signals>,
     state: RwLock<VmState>,
@@ -237,15 +237,19 @@ fn get_host_cpu_phys_bits() -> u8 {
 }
 
 impl Vm {
-    pub fn new(config: Arc<VmConfig>, exit_evt: EventFd, reset_evt: EventFd) -> Result<Self> {
+    pub fn new(
+        config: Arc<Mutex<VmConfig>>,
+        exit_evt: EventFd,
+        reset_evt: EventFd,
+    ) -> Result<Self> {
         let kvm = Kvm::new().map_err(Error::KvmNew)?;
-        let kernel =
-            File::open(&config.kernel.as_ref().unwrap().path).map_err(Error::KernelFile)?;
+        let kernel = File::open(&config.lock().unwrap().kernel.as_ref().unwrap().path)
+            .map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
         let fd = Arc::new(fd);
 
         // Init guest memory
-        let arch_mem_regions = arch::arch_memory_regions(config.memory.size);
+        let arch_mem_regions = arch::arch_memory_regions(config.lock().unwrap().memory.size);
 
         let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
             .iter()
@@ -268,7 +272,7 @@ impl Vm {
             }
         }
 
-        let guest_memory = match config.memory.file {
+        let guest_memory = match config.lock().unwrap().memory.file {
             Some(ref file) => {
                 let mut mem_regions = Vec::<(GuestAddress, usize, Option<FileOffset>)>::new();
                 for region in ram_regions.iter() {
@@ -321,7 +325,7 @@ impl Vm {
                 }?;
 
                 // Mark the pages as mergeable if explicitly asked for.
-                if config.memory.mergeable {
+                if config.lock().unwrap().memory.mergeable {
                     // Safe because the address and size are valid since the
                     // mmap succeeded.
                     let ret = unsafe {
@@ -448,7 +452,7 @@ impl Vm {
         let vm_info = VmInfo {
             memory: &guest_memory,
             vm_fd: &fd,
-            vm_cfg: &config,
+            vm_cfg: config.clone(),
         };
 
         let device_manager = DeviceManager::new(
@@ -464,8 +468,8 @@ impl Vm {
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
 
-        let boot_vcpus = config.cpus.boot_vcpus;
-        let max_vcpus = config.cpus.max_vcpus;
+        let boot_vcpus = config.lock().unwrap().cpus.boot_vcpus;
+        let max_vcpus = config.lock().unwrap().cpus.max_vcpus;
         let cpu_manager = cpu::CpuManager::new(
             boot_vcpus,
             max_vcpus,
@@ -493,7 +497,7 @@ impl Vm {
     fn load_kernel(&mut self) -> Result<GuestAddress> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE);
         cmdline
-            .insert_str(self.config.cmdline.args.clone())
+            .insert_str(self.config.lock().unwrap().cmdline.args.clone())
             .map_err(|_| Error::CmdLine)?;
         for entry in self.devices.cmdline_additions() {
             cmdline.insert_str(entry).map_err(|_| Error::CmdLine)?;
@@ -549,7 +553,7 @@ impl Vm {
                     &mem,
                     boot_vcpus,
                     _max_vcpus,
-                    self.config.serial.mode != ConsoleOutputMode::Off,
+                    self.config.lock().unwrap().serial.mode != ConsoleOutputMode::Off,
                     start_of_device_area,
                     end_of_range,
                     self.devices.virt_iommu(),
@@ -768,7 +772,7 @@ impl Vm {
     }
 
     /// Gets a thread-safe reference counted pointer to the VM configuration.
-    pub fn get_config(&self) -> Arc<VmConfig> {
+    pub fn get_config(&self) -> Arc<Mutex<VmConfig>> {
         Arc::clone(&self.config)
     }
 
