@@ -525,7 +525,7 @@ impl DeviceManager {
                 Arc::downgrade(&address_manager) as Weak<dyn DeviceRelocation>,
             );
 
-            let (mut iommu_device, iommu_mapping) = if vm_info.vm_cfg.iommu {
+            let (mut iommu_device, iommu_mapping) = if vm_info.vm_cfg.lock().unwrap().iommu {
                 let (device, mapping) =
                     vm_virtio::Iommu::new().map_err(DeviceManagerError::CreateVirtioIommu)?;
                 (Some(device), Some(mapping))
@@ -765,15 +765,16 @@ impl DeviceManager {
         ioapic: &Option<Arc<Mutex<ioapic::Ioapic>>>,
         virtio_devices: &mut Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>,
     ) -> DeviceManagerResult<Arc<Console>> {
-        let serial_writer: Option<Box<dyn io::Write + Send>> = match vm_info.vm_cfg.serial.mode {
+        let serial_config = vm_info.vm_cfg.lock().unwrap().serial.clone();
+        let serial_writer: Option<Box<dyn io::Write + Send>> = match serial_config.mode {
             ConsoleOutputMode::File => Some(Box::new(
-                File::create(vm_info.vm_cfg.serial.file.as_ref().unwrap())
+                File::create(serial_config.file.as_ref().unwrap())
                     .map_err(DeviceManagerError::SerialOutputFileOpen)?,
             )),
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
             ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
         };
-        let serial = if vm_info.vm_cfg.serial.mode != ConsoleOutputMode::Off {
+        let serial = if serial_config.mode != ConsoleOutputMode::Off {
             // Serial is tied to IRQ #4
             let serial_irq = 4;
             let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = &ioapic {
@@ -811,20 +812,29 @@ impl DeviceManager {
         };
 
         // Create serial and virtio-console
-        let console_writer: Option<Box<dyn io::Write + Send + Sync>> =
-            match vm_info.vm_cfg.console.mode {
-                ConsoleOutputMode::File => Some(Box::new(
-                    File::create(vm_info.vm_cfg.console.file.as_ref().unwrap())
-                        .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
-                )),
-                ConsoleOutputMode::Tty => Some(Box::new(stdout())),
-                ConsoleOutputMode::Null => Some(Box::new(sink())),
-                ConsoleOutputMode::Off => None,
-            };
+        let console_config = vm_info.vm_cfg.lock().unwrap().console.clone();
+        let console_writer: Option<Box<dyn io::Write + Send + Sync>> = match console_config.mode {
+            ConsoleOutputMode::File => Some(Box::new(
+                File::create(
+                    vm_info
+                        .vm_cfg
+                        .lock()
+                        .unwrap()
+                        .console
+                        .file
+                        .as_ref()
+                        .unwrap(),
+                )
+                .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
+            )),
+            ConsoleOutputMode::Tty => Some(Box::new(stdout())),
+            ConsoleOutputMode::Null => Some(Box::new(sink())),
+            ConsoleOutputMode::Off => None,
+        };
         let (col, row) = get_win_size();
         let console_input = if let Some(writer) = console_writer {
             let (virtio_console_device, console_input) =
-                vm_virtio::Console::new(writer, col, row, vm_info.vm_cfg.console.iommu)
+                vm_virtio::Console::new(writer, col, row, console_config.iommu)
                     .map_err(DeviceManagerError::CreateVirtioConsole)?;
             virtio_devices.push((
                 Box::new(virtio_console_device) as Box<dyn vm_virtio::VirtioDevice>,
@@ -838,8 +848,8 @@ impl DeviceManager {
         Ok(Arc::new(Console {
             serial,
             console_input,
-            input_enabled: vm_info.vm_cfg.serial.mode.input_enabled()
-                || vm_info.vm_cfg.console.mode.input_enabled(),
+            input_enabled: serial_config.mode.input_enabled()
+                || console_config.mode.input_enabled(),
         }))
     }
 
@@ -894,7 +904,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
         let mut devices = Vec::new();
 
-        if let Some(disk_list_cfg) = &vm_info.vm_cfg.disks {
+        if let Some(disk_list_cfg) = &vm_info.vm_cfg.lock().unwrap().disks {
             for disk_cfg in disk_list_cfg.iter() {
                 // Open block device path
                 let raw_img: File = OpenOptions::new()
@@ -944,7 +954,7 @@ impl DeviceManager {
         let mut devices = Vec::new();
 
         // Add virtio-net if required
-        if let Some(net_list_cfg) = &vm_info.vm_cfg.net {
+        if let Some(net_list_cfg) = &vm_info.vm_cfg.lock().unwrap().net {
             for net_cfg in net_list_cfg.iter() {
                 let virtio_net_device = if let Some(ref tap_if_name) = net_cfg.tap {
                     let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
@@ -971,8 +981,9 @@ impl DeviceManager {
         let mut devices = Vec::new();
 
         // Add virtio-rng if required
-        if let Some(rng_path) = vm_info.vm_cfg.rng.src.to_str() {
-            let virtio_rng_device = vm_virtio::Rng::new(rng_path, vm_info.vm_cfg.rng.iommu)
+        let rng_config = vm_info.vm_cfg.lock().unwrap().rng.clone();
+        if let Some(rng_path) = rng_config.src.to_str() {
+            let virtio_rng_device = vm_virtio::Rng::new(rng_path, rng_config.iommu)
                 .map_err(DeviceManagerError::CreateVirtioRng)?;
             devices.push((
                 Box::new(virtio_rng_device) as Box<dyn vm_virtio::VirtioDevice>,
@@ -991,7 +1002,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
         let mut devices = Vec::new();
         // Add virtio-fs if required
-        if let Some(fs_list_cfg) = &vm_info.vm_cfg.fs {
+        if let Some(fs_list_cfg) = &vm_info.vm_cfg.lock().unwrap().fs {
             for fs_cfg in fs_list_cfg.iter() {
                 if let Some(fs_sock) = fs_cfg.sock.to_str() {
                     let mut cache: Option<(VirtioSharedMemoryList, u64)> = None;
@@ -1078,7 +1089,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
         let mut devices = Vec::new();
         // Add virtio-pmem if required
-        if let Some(pmem_list_cfg) = &vm_info.vm_cfg.pmem {
+        if let Some(pmem_list_cfg) = &vm_info.vm_cfg.lock().unwrap().pmem {
             for pmem_cfg in pmem_list_cfg.iter() {
                 let size = pmem_cfg.size;
 
@@ -1176,7 +1187,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
         let mut devices = Vec::new();
         // Add vhost-user-net if required
-        if let Some(vhost_user_net_list_cfg) = &vm_info.vm_cfg.vhost_user_net {
+        if let Some(vhost_user_net_list_cfg) = &vm_info.vm_cfg.lock().unwrap().vhost_user_net {
             for vhost_user_net_cfg in vhost_user_net_list_cfg.iter() {
                 let vu_cfg = VhostUserConfig {
                     sock: vhost_user_net_cfg.vu_cfg.sock.clone(),
@@ -1202,7 +1213,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
         let mut devices = Vec::new();
         // Add vhost-user-blk if required
-        if let Some(vhost_user_blk_list_cfg) = &vm_info.vm_cfg.vhost_user_blk {
+        if let Some(vhost_user_blk_list_cfg) = &vm_info.vm_cfg.lock().unwrap().vhost_user_blk {
             for vhost_user_blk_cfg in vhost_user_blk_list_cfg.iter() {
                 let vu_cfg = VhostUserConfig {
                     sock: vhost_user_blk_cfg.vu_cfg.sock.clone(),
@@ -1228,7 +1239,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Vec<(Box<dyn vm_virtio::VirtioDevice>, bool)>> {
         let mut devices = Vec::new();
         // Add vsock if required
-        if let Some(vsock_list_cfg) = &vm_info.vm_cfg.vsock {
+        if let Some(vsock_list_cfg) = &vm_info.vm_cfg.lock().unwrap().vsock {
             for vsock_cfg in vsock_list_cfg.iter() {
                 let socket_path = vsock_cfg
                     .sock
@@ -1282,7 +1293,7 @@ impl DeviceManager {
         let gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
-        if let Some(device_list_cfg) = &vm_info.vm_cfg.devices {
+        if let Some(device_list_cfg) = &vm_info.vm_cfg.lock().unwrap().devices {
             // Create the KVM VFIO device
             let device_fd = DeviceManager::create_kvm_device(vm_info.vm_fd)?;
             let device_fd = Arc::new(device_fd);

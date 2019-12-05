@@ -11,7 +11,7 @@ use crate::api::{
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
 
 /// Errors associated with VMM management
@@ -81,7 +81,7 @@ impl EndpointHandler for VmCreate {
                         };
 
                         // Call vm_create()
-                        match vm_create(api_notifier, api_sender, Arc::new(vm_config))
+                        match vm_create(api_notifier, api_sender, Arc::new(Mutex::new(vm_config)))
                             .map_err(HttpError::VmCreate)
                         {
                             Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
