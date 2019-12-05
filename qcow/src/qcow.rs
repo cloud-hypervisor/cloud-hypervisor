@@ -769,11 +769,14 @@ impl QcowFile {
             let mut ref_table = vec![0; refcount_table_entries as usize];
             let mut first_free_cluster: u64 = 0;
             for refblock_addr in &mut ref_table {
-                while refcounts[first_free_cluster as usize] != 0 {
-                    first_free_cluster += 1;
+                loop {
                     if first_free_cluster >= refcounts.len() as u64 {
                         return Err(Error::NotEnoughSpaceForRefcounts);
                     }
+                    if refcounts[first_free_cluster as usize] == 0 {
+                        break;
+                    }
+                    first_free_cluster += 1;
                 }
 
                 *refblock_addr = first_free_cluster * cluster_size;
