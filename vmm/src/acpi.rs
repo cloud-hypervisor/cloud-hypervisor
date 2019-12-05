@@ -295,7 +295,7 @@ fn create_ged_device() -> Vec<u8> {
             &aml::Name::new(
                 "_CRS".into(),
                 &aml::ResourceTemplate::new(vec![&aml::Interrupt::new(
-                    true, false, false, false, 5,
+                    true, true, false, false, 5,
                 )]),
             ),
             &aml::OpRegion::new("GDST".into(), aml::OpRegionSpace::SystemIO, 0xb000, 0x1),
