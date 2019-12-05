@@ -145,6 +145,9 @@ pub enum Error {
 
     /// Error from CPU handling
     CpuManager(cpu::Error),
+
+    /// Capability missing
+    CapabilityMissing(Cap),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -243,6 +246,20 @@ impl Vm {
         reset_evt: EventFd,
     ) -> Result<Self> {
         let kvm = Kvm::new().map_err(Error::KvmNew)?;
+
+        // Check required capabilities:
+        if !kvm.check_extension(Cap::SignalMsi) {
+            return Err(Error::CapabilityMissing(Cap::SignalMsi));
+        }
+
+        if !kvm.check_extension(Cap::TscDeadlineTimer) {
+            return Err(Error::CapabilityMissing(Cap::TscDeadlineTimer));
+        }
+
+        if !kvm.check_extension(Cap::SplitIrqchip) {
+            return Err(Error::CapabilityMissing(Cap::SplitIrqchip));
+        }
+
         let kernel = File::open(&config.lock().unwrap().kernel.as_ref().unwrap().path)
             .map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
