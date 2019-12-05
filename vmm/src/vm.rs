@@ -28,10 +28,7 @@ use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use arch::RegionType;
 use devices::{ioapic, HotPlugNotificationType};
-use kvm_bindings::{
-    kvm_enable_cap, kvm_pit_config, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP,
-    KVM_PIT_SPEAKER_DUMMY,
-};
+use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::*;
 
 use linux_loader::cmdline::Cmdline;
@@ -374,49 +371,28 @@ impl Vm {
         fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize)
             .map_err(Error::VmSetup)?;
 
-        let msi_capable = kvm.check_extension(Cap::SignalMsi);
-
         let mut cpuid_patches = Vec::new();
-        let mut userspace_ioapic = false;
-        if kvm.check_extension(Cap::TscDeadlineTimer) {
-            if kvm.check_extension(Cap::SplitIrqchip) && msi_capable {
-                // Create split irqchip
-                // Only the local APIC is emulated in kernel, both PICs and IOAPIC
-                // are not.
-                let mut cap: kvm_enable_cap = Default::default();
-                cap.cap = KVM_CAP_SPLIT_IRQCHIP;
-                cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
-                fd.enable_cap(&cap).map_err(Error::VmSetup)?;
+        // Create split irqchip
+        // Only the local APIC is emulated in kernel, both PICs and IOAPIC
+        // are not.
+        let mut cap: kvm_enable_cap = Default::default();
+        cap.cap = KVM_CAP_SPLIT_IRQCHIP;
+        cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
+        fd.enable_cap(&cap).map_err(Error::VmSetup)?;
 
-                // Because of the split irqchip, we need a userspace IOAPIC.
-                userspace_ioapic = true;
-            } else {
-                // Create irqchip
-                // A local APIC, 2 PICs and an IOAPIC are emulated in kernel.
-                fd.create_irq_chip().map_err(Error::VmSetup)?;
-            }
+        // Because of the split irqchip, we need a userspace IOAPIC.
+        let userspace_ioapic = true;
 
-            // Patch tsc deadline timer bit
-            cpuid_patches.push(cpu::CpuidPatch {
-                function: 1,
-                index: 0,
-                flags_bit: None,
-                eax_bit: None,
-                ebx_bit: None,
-                ecx_bit: Some(TSC_DEADLINE_TIMER_ECX_BIT),
-                edx_bit: None,
-            });
-        } else {
-            // Create irqchip
-            // A local APIC, 2 PICs and an IOAPIC are emulated in kernel.
-            fd.create_irq_chip().map_err(Error::VmSetup)?;
-            // Creates an in-kernel device model for the PIT.
-            let mut pit_config = kvm_pit_config::default();
-            // We need to enable the emulation of a dummy speaker port stub so that writing to port 0x61
-            // (i.e. KVM_SPEAKER_BASE_ADDRESS) does not trigger an exit to user space.
-            pit_config.flags = KVM_PIT_SPEAKER_DUMMY;
-            fd.create_pit2(pit_config).map_err(Error::VmSetup)?;
-        }
+        // Patch tsc deadline timer bit
+        cpuid_patches.push(cpu::CpuidPatch {
+            function: 1,
+            index: 0,
+            flags_bit: None,
+            eax_bit: None,
+            ebx_bit: None,
+            ecx_bit: Some(TSC_DEADLINE_TIMER_ECX_BIT),
+            edx_bit: None,
+        });
 
         // Patch hypervisor bit
         cpuid_patches.push(cpu::CpuidPatch {
