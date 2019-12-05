@@ -22,7 +22,7 @@ use net_util::Tap;
 #[cfg(feature = "pci_support")]
 use pci::{
     DeviceRelocation, InterruptDelivery, InterruptParameters, PciBarRegionType, PciBus,
-    PciConfigIo, PciConfigMmio, PciDevice, PciInterruptPin, PciRoot,
+    PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
 };
 use qcow::{self, ImageType, QcowFile};
 
@@ -177,8 +177,7 @@ pub enum DeviceManagerError {
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 struct InterruptInfo<'a> {
-    _msi_capable: bool,
-    ioapic: &'a Option<Arc<Mutex<ioapic::Ioapic>>>,
+    _ioapic: &'a Option<Arc<Mutex<ioapic::Ioapic>>>,
 }
 
 struct KernelIoapicIrq {
@@ -416,7 +415,6 @@ impl DeviceManager {
     pub fn new(
         vm_info: &VmInfo,
         allocator: SystemAllocator,
-        _msi_capable: bool,
         userspace_ioapic: bool,
         mut mem_slots: u32,
         _exit_evt: &EventFd,
@@ -443,10 +441,7 @@ impl DeviceManager {
         });
 
         let ioapic = DeviceManager::add_ioapic(vm_info, &address_manager, userspace_ioapic)?;
-        let interrupt_info = InterruptInfo {
-            _msi_capable,
-            ioapic: &ioapic,
-        };
+        let interrupt_info = InterruptInfo { _ioapic: &ioapic };
 
         let console = DeviceManager::add_console_device(
             vm_info,
@@ -548,7 +543,6 @@ impl DeviceManager {
                     &address_manager,
                     vm_info.vm_fd,
                     &mut pci_bus,
-                    &interrupt_info,
                     mapping,
                 )?;
 
@@ -584,7 +578,6 @@ impl DeviceManager {
                     &address_manager,
                     vm_info.vm_fd,
                     &mut pci_bus,
-                    &interrupt_info,
                     &None,
                 )?;
 
@@ -1367,17 +1360,12 @@ impl DeviceManager {
         address_manager: &Arc<AddressManager>,
         vm_fd: &Arc<VmFd>,
         pci: &mut PciBus,
-        interrupt_info: &InterruptInfo,
         iommu_mapping: &Option<Arc<IommuMapping>>,
     ) -> DeviceManagerResult<Option<u32>> {
-        let msix_num = if interrupt_info._msi_capable {
-            // Allows support for one MSI-X vector per queue. It also adds 1
-            // as we need to take into account the dedicated vector to notify
-            // about a virtio config change.
-            (virtio_device.queue_max_sizes().len() + 1) as u16
-        } else {
-            0
-        };
+        // Allows support for one MSI-X vector per queue. It also adds 1
+        // as we need to take into account the dedicated vector to notify
+        // about a virtio config change.
+        let msix_num = (virtio_device.queue_max_sizes().len() + 1) as u16;
 
         // We need to shift the device id since the 3 first bits are dedicated
         // to the PCI function, and we know we don't do multifunction.
@@ -1424,74 +1412,39 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
-        if interrupt_info._msi_capable {
-            let vm_fd_clone = vm_fd.clone();
+        let vm_fd_clone = vm_fd.clone();
 
-            let msi_cb = Arc::new(Box::new(move |p: InterruptParameters| {
-                if let Some(entry) = p.msix {
-                    use kvm_bindings::kvm_msi;
-                    let msi_queue = kvm_msi {
-                        address_lo: entry.msg_addr_lo,
-                        address_hi: entry.msg_addr_hi,
-                        data: entry.msg_data,
-                        flags: 0u32,
-                        devid: 0u32,
-                        pad: [0u8; 12],
-                    };
+        let msi_cb = Arc::new(Box::new(move |p: InterruptParameters| {
+            if let Some(entry) = p.msix {
+                use kvm_bindings::kvm_msi;
+                let msi_queue = kvm_msi {
+                    address_lo: entry.msg_addr_lo,
+                    address_hi: entry.msg_addr_hi,
+                    data: entry.msg_data,
+                    flags: 0u32,
+                    devid: 0u32,
+                    pad: [0u8; 12],
+                };
 
-                    return vm_fd_clone
-                        .signal_msi(msi_queue)
-                        .map_err(|e| io::Error::from_raw_os_error(e.errno()))
-                        .map(|ret| {
-                            if ret > 0 {
-                                debug!("MSI message successfully delivered");
-                            } else if ret == 0 {
-                                warn!("failed to deliver MSI message, blocked by guest");
-                            }
-                        });
-                }
+                return vm_fd_clone
+                    .signal_msi(msi_queue)
+                    .map_err(|e| io::Error::from_raw_os_error(e.errno()))
+                    .map(|ret| {
+                        if ret > 0 {
+                            debug!("MSI message successfully delivered");
+                        } else if ret == 0 {
+                            warn!("failed to deliver MSI message, blocked by guest");
+                        }
+                    });
+            }
 
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "missing MSI-X entry",
-                ))
-            }) as InterruptDelivery);
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "missing MSI-X entry",
+            ))
+        }) as InterruptDelivery);
 
-            virtio_pci_device.assign_msix(msi_cb);
-        } else {
-            let irq_num = allocator
-                .allocate_irq()
-                .ok_or(DeviceManagerError::AllocateIrq)?;
-
-            let irq_cb = if let Some(ioapic) = interrupt_info.ioapic {
-                let ioapic_clone = ioapic.clone();
-                Box::new(move |_p: InterruptParameters| {
-                    ioapic_clone
-                        .lock()
-                        .unwrap()
-                        .service_irq(irq_num as usize)
-                        .map_err(|e| {
-                            std::io::Error::new(
-                                std::io::ErrorKind::Other,
-                                format!("failed to inject IRQ #{}: {:?}", irq_num, e),
-                            )
-                        })
-                }) as InterruptDelivery
-            } else {
-                let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
-                vm_fd
-                    .register_irqfd(&irqfd, irq_num)
-                    .map_err(DeviceManagerError::Irq)?;
-
-                Box::new(move |_p: InterruptParameters| irqfd.write(1)) as InterruptDelivery
-            };
-
-            virtio_pci_device.assign_pin_irq(
-                Arc::new(irq_cb),
-                irq_num as u32,
-                PciInterruptPin::IntA,
-            );
-        }
+        virtio_pci_device.assign_msix(msi_cb);
 
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
 
@@ -1543,7 +1496,7 @@ impl DeviceManager {
             .allocate_irq()
             .ok_or(DeviceManagerError::AllocateIrq)?;
 
-        let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = interrupt_info.ioapic {
+        let interrupt: Box<dyn devices::Interrupt> = if let Some(ioapic) = interrupt_info._ioapic {
             Box::new(UserIoapicIrq::new(ioapic.clone(), irq_num as usize))
         } else {
             let irqfd = EventFd::new(EFD_NONBLOCK).map_err(DeviceManagerError::EventFd)?;
