@@ -321,9 +321,13 @@ components:
           type: integer
         queue_size:
           type: integer
+        dax:
+          type: boolean
+          default: true
         cache_size:
           type: integer
           format: int64
+          default: 8589934592
 
     PmemConfig:
       required:
