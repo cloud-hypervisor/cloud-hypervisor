@@ -430,10 +430,12 @@ mod tests {
 
     struct GuestNetworkConfig {
         guest_ip: String,
-        l2_guest_ip: String,
+        l2_guest_ip1: String,
+        l2_guest_ip2: String,
         host_ip: String,
         guest_mac: String,
-        l2_guest_mac: String,
+        l2_guest_mac1: String,
+        l2_guest_mac2: String,
     }
 
     struct Guest<'a> {
@@ -531,9 +533,13 @@ mod tests {
 
             user_data_string = user_data_string.replace("192.168.2.1", &network.host_ip);
             user_data_string = user_data_string.replace("192.168.2.2", &network.guest_ip);
-            user_data_string = user_data_string.replace("192.168.2.3", &network.l2_guest_ip);
+            user_data_string = user_data_string.replace("192.168.2.3", &network.l2_guest_ip1);
+            user_data_string = user_data_string.replace("192.168.2.4", &network.l2_guest_ip2);
             user_data_string = user_data_string.replace("12:34:56:78:90:ab", &network.guest_mac);
-            user_data_string = user_data_string.replace("de:ad:be:ef:12:34", &network.l2_guest_mac);
+            user_data_string =
+                user_data_string.replace("de:ad:be:ef:12:34", &network.l2_guest_mac1);
+            user_data_string =
+                user_data_string.replace("de:ad:be:ef:34:56", &network.l2_guest_mac2);
 
             fs::File::create(cloud_init_directory.join("latest").join("user_data"))
                 .unwrap()
@@ -857,10 +863,12 @@ mod tests {
             let fw_path = String::from(fw_path.to_str().unwrap());
             let network = GuestNetworkConfig {
                 guest_ip: format!("{}.{}.2", class, id),
-                l2_guest_ip: format!("{}.{}.3", class, id),
+                l2_guest_ip1: format!("{}.{}.3", class, id),
+                l2_guest_ip2: format!("{}.{}.4", class, id),
                 host_ip: format!("{}.{}.1", class, id),
                 guest_mac: format!("12:34:56:78:90:{:02x}", id),
-                l2_guest_mac: format!("de:ad:be:ef:12:{:02x}", id),
+                l2_guest_mac1: format!("de:ad:be:ef:12:{:02x}", id),
+                l2_guest_mac2: format!("de:ad:be:ef:34:{:02x}", id),
             };
 
             disk_config.prepare_files(&tmp_dir, &network);
@@ -913,10 +921,19 @@ mod tests {
             )
         }
 
-        fn ssh_command_l2(&self, command: &str) -> Result<String, Error> {
+        fn ssh_command_l2_1(&self, command: &str) -> Result<String, Error> {
             ssh_command_ip(
                 command,
-                &self.network.l2_guest_ip,
+                &self.network.l2_guest_ip1,
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
+        }
+
+        fn ssh_command_l2_2(&self, command: &str) -> Result<String, Error> {
+            ssh_command_ip(
+                command,
+                &self.network.l2_guest_ip2,
                 DEFAULT_SSH_RETRIES,
                 DEFAULT_SSH_TIMEOUT,
             )
@@ -2384,6 +2401,7 @@ mod tests {
 
             let vfio_tap0 = "vfio-tap0";
             let vfio_tap1 = "vfio-tap1";
+            let vfio_tap2 = "vfio-tap2";
 
             let (mut daemon_child, virtiofsd_socket_path) =
                 prepare_virtiofsd(&guest.tmp_dir, vfio_path.to_str().unwrap(), "always");
@@ -2413,7 +2431,11 @@ mod tests {
                     )
                     .as_str(),
                     format!(
-                        "tap={},mac={},iommu=on", vfio_tap1, guest.network.l2_guest_mac
+                        "tap={},mac={},iommu=on", vfio_tap1, guest.network.l2_guest_mac1
+                    )
+                    .as_str(),
+                    format!(
+                        "tap={},mac={},iommu=on", vfio_tap2, guest.network.l2_guest_mac2
                     )
                     .as_str(),
                 ])
@@ -2441,7 +2463,7 @@ mod tests {
             aver_eq!(
                 tb,
                 guest
-                    .ssh_command_l2("cat /proc/cmdline | grep -c 'VFIOTAG'")
+                    .ssh_command_l2_1("grep -c VFIOTAG /proc/cmdline")
                     .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
@@ -2449,7 +2471,20 @@ mod tests {
                 1
             );
 
-            guest.ssh_command_l2("sudo shutdown -h now")?;
+            // Let's also verify from the second virtio-net device passed to
+            // the L2 VM.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command_l2_2("grep -c VFIOTAG /proc/cmdline")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            guest.ssh_command_l2_1("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
 
             guest.ssh_command_l1("sudo shutdown -h now")?;
