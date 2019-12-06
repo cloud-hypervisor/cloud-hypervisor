@@ -13,39 +13,10 @@ use vm_memory::{GuestAddress, GuestMemoryMmap};
 use vm_memory::{Address, ByteValued, Bytes};
 
 use std::convert::TryInto;
+use std::sync::{Arc, Mutex};
 
+use crate::cpu::CpuManager;
 use arch::layout;
-
-#[repr(packed)]
-struct LocalAPIC {
-    pub r#type: u8,
-    pub length: u8,
-    pub processor_id: u8,
-    pub apic_id: u8,
-    pub flags: u32,
-}
-
-#[repr(packed)]
-#[derive(Default)]
-struct IOAPIC {
-    pub r#type: u8,
-    pub length: u8,
-    pub ioapic_id: u8,
-    _reserved: u8,
-    pub apic_address: u32,
-    pub gsi_base: u32,
-}
-
-#[repr(packed)]
-#[derive(Default)]
-struct InterruptSourceOverride {
-    pub r#type: u8,
-    pub length: u8,
-    pub bus: u8,
-    pub source: u8,
-    pub gsi: u32,
-    pub flags: u16,
-}
 
 #[repr(packed)]
 #[derive(Default)]
@@ -108,184 +79,6 @@ struct IortIdMapping {
     pub flags: u32,
 }
 
-struct CPU {
-    cpu_id: u8,
-}
-
-const MADT_CPU_ENABLE_FLAG: usize = 0;
-
-impl aml::Aml for CPU {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let lapic = LocalAPIC {
-            r#type: 0,
-            length: 8,
-            processor_id: self.cpu_id,
-            apic_id: self.cpu_id,
-            flags: 1 << MADT_CPU_ENABLE_FLAG,
-        };
-
-        let mut mat_data: Vec<u8> = Vec::new();
-        mat_data.resize(std::mem::size_of_val(&lapic), 0);
-        unsafe { *(mat_data.as_mut_ptr() as *mut LocalAPIC) = lapic };
-
-        aml::Device::new(
-            format!("C{:03}", self.cpu_id).as_str().into(),
-            vec![
-                &aml::Name::new("_HID".into(), &"ACPI0007"),
-                &aml::Name::new("_UID".into(), &self.cpu_id),
-                /*
-                _STA return value:
-                Bit [0] – Set if the device is present.
-                Bit [1] – Set if the device is enabled and decoding its resources.
-                Bit [2] – Set if the device should be shown in the UI.
-                Bit [3] – Set if the device is functioning properly (cleared if device failed its diagnostics).
-                Bit [4] – Set if the battery is present.
-                Bits [31:5] – Reserved (must be cleared).
-                */
-                &aml::Method::new(
-                    "_STA".into(),
-                    0,
-                    false,
-                    // Call into CSTA method which will interrogate device
-                    vec![&aml::Return::new(&aml::MethodCall::new(
-                        "CSTA".into(),
-                        vec![&self.cpu_id],
-                    ))],
-                ),
-                // The Linux kernel expects every CPU device to have a _MAT entry
-                // containing the LAPIC for this processor with the enabled bit set
-                // even it if is disabled in the MADT (non-boot CPU)
-                &aml::Name::new("_MAT".into(), &aml::Buffer::new(mat_data)),
-            ],
-        )
-        .to_aml_bytes()
-    }
-}
-
-struct CPUMethods {
-    max_vcpus: u8,
-}
-
-impl Aml for CPUMethods {
-    fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(
-            // CPU status method
-            &aml::Method::new(
-                "CSTA".into(),
-                1,
-                true,
-                vec![
-                    // Take lock defined above
-                    &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xfff),
-                    // Write CPU number (in first argument) to I/O port via field
-                    &aml::Store::new(&aml::Path::new("\\_SB_.PRES.CSEL"), &aml::Arg(0)),
-                    &aml::Store::new(&aml::Local(0), &aml::ZERO),
-                    // Check if CPEN bit is set, if so make the local variable 0xf (see _STA for details of meaning)
-                    &aml::If::new(
-                        &aml::Equal::new(&aml::Path::new("\\_SB_.PRES.CPEN"), &aml::ONE),
-                        vec![&aml::Store::new(&aml::Local(0), &0xfu8)],
-                    ),
-                    // Release lock
-                    &aml::Release::new("\\_SB_.PRES.CPLK".into()),
-                    // Return 0 or 0xf
-                    &aml::Return::new(&aml::Local(0)),
-                ],
-            )
-            .to_aml_bytes(),
-        );
-
-        let mut paths = Vec::new();
-        for cpu_id in 0..self.max_vcpus {
-            paths.push(aml::Path::new(format!("C{:03}", cpu_id).as_str()))
-        }
-        let mut notify_methods = Vec::new();
-
-        for cpu_id in 0..self.max_vcpus {
-            notify_methods.push(aml::Notify::new(&paths[usize::from(cpu_id)], &aml::ONE));
-        }
-
-        let mut notify_methods_inner: Vec<&dyn Aml> = Vec::new();
-        for notify_method in notify_methods.iter() {
-            notify_methods_inner.push(notify_method);
-        }
-
-        bytes.extend_from_slice(
-            // Notify all vCPUs
-            &aml::Method::new("CTFY".into(), 0, true, notify_methods_inner).to_aml_bytes(),
-        );
-        bytes
-    }
-}
-
-fn create_cpu_data(max_vcpus: u8) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    // CPU hotplug controller
-    bytes.extend_from_slice(
-        &aml::Device::new(
-            "_SB_.PRES".into(),
-            vec![
-                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
-                // Mutex to protect concurrent access as we write to choose CPU and then read back status
-                &aml::Mutex::new("CPLK".into(), 0),
-                // I/O port for CPU controller
-                &aml::Name::new(
-                    "_CRS".into(),
-                    &aml::ResourceTemplate::new(vec![&aml::IO::new(0x0cd8, 0x0cd8, 0x01, 0x0c)]),
-                ),
-                // OpRegion and Fields map I/O port into individual field values
-                &aml::OpRegion::new("PRST".into(), aml::OpRegionSpace::SystemIO, 0x0cd8, 0x0c),
-                &aml::Field::new(
-                    "PRST".into(),
-                    aml::FieldAccessType::Byte,
-                    aml::FieldUpdateRule::WriteAsZeroes,
-                    vec![
-                        aml::FieldEntry::Reserved(32),
-                        aml::FieldEntry::Named(*b"CPEN", 1),
-                        aml::FieldEntry::Named(*b"CINS", 1),
-                        aml::FieldEntry::Named(*b"CRMV", 1),
-                        aml::FieldEntry::Named(*b"CEJ0", 1),
-                        aml::FieldEntry::Reserved(4),
-                        aml::FieldEntry::Named(*b"CCMD", 8),
-                    ],
-                ),
-                &aml::Field::new(
-                    "PRST".into(),
-                    aml::FieldAccessType::DWord,
-                    aml::FieldUpdateRule::Preserve,
-                    vec![
-                        aml::FieldEntry::Named(*b"CSEL", 32),
-                        aml::FieldEntry::Reserved(32),
-                        aml::FieldEntry::Named(*b"CDAT", 32),
-                    ],
-                ),
-            ],
-        )
-        .to_aml_bytes(),
-    );
-
-    // CPU devices
-    let hid = aml::Name::new("_HID".into(), &"ACPI0010");
-    let uid = aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A05"));
-    // Bundle methods together under a common object
-    let methods = CPUMethods { max_vcpus };
-    let mut cpu_data_inner: Vec<&dyn aml::Aml> = vec![&hid, &uid, &methods];
-
-    let mut cpu_devices = Vec::new();
-    for cpu_id in 0..max_vcpus {
-        let cpu_device = CPU { cpu_id };
-
-        cpu_devices.push(cpu_device);
-    }
-
-    for cpu_device in cpu_devices.iter() {
-        cpu_data_inner.push(cpu_device);
-    }
-
-    bytes.extend_from_slice(&aml::Device::new("_SB_.CPUS".into(), cpu_data_inner).to_aml_bytes());
-    bytes
-}
-
 fn create_ged_device() -> Vec<u8> {
     aml::Device::new(
         "_SB_.GED_".into(),
@@ -323,7 +116,7 @@ pub fn create_dsdt_table(
     serial_enabled: bool,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
-    max_vcpus: u8,
+    cpu_manager: &Arc<Mutex<CpuManager>>,
 ) -> SDT {
     let pci_dsdt_data = aml::Device::new(
         "_SB_.PCI0".into(),
@@ -396,7 +189,6 @@ pub fn create_dsdt_table(
     let s5_sleep_data =
         aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes();
 
-    let cpu_data = create_cpu_data(max_vcpus);
     let ged_data = create_ged_device();
 
     // DSDT
@@ -407,20 +199,19 @@ pub fn create_dsdt_table(
         dsdt.append_slice(com1_dsdt_data.as_slice());
     }
     dsdt.append_slice(s5_sleep_data.as_slice());
-    dsdt.append_slice(cpu_data.as_slice());
     dsdt.append_slice(ged_data.as_slice());
+    dsdt.append_slice(cpu_manager.lock().unwrap().to_aml_bytes().as_slice());
 
     dsdt
 }
 
 pub fn create_acpi_tables(
     guest_mem: &GuestMemoryMmap,
-    boot_vcpus: u8,
-    max_vcpus: u8,
     serial_enabled: bool,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
     virt_iommu: Option<(u32, &[u32])>,
+    cpu_manager: &Arc<Mutex<CpuManager>>,
 ) -> GuestAddress {
     // RSDP is at the EBDA
     let rsdp_offset = layout::RSDP_POINTER;
@@ -431,7 +222,7 @@ pub fn create_acpi_tables(
         serial_enabled,
         start_of_device_area,
         end_of_device_area,
-        max_vcpus,
+        cpu_manager,
     );
     let dsdt_offset = rsdp_offset.checked_add(RSDP::len() as u64).unwrap();
     guest_mem
@@ -469,45 +260,7 @@ pub fn create_acpi_tables(
     tables.push(facp_offset.0);
 
     // MADT
-    let mut madt = SDT::new(*b"APIC", 44, 5, *b"CLOUDH", *b"CHMADT  ", 1);
-    madt.write(36, layout::APIC_START);
-
-    // This is also checked in the commandline parsing.
-    assert!(boot_vcpus <= max_vcpus);
-
-    for cpu in 0..max_vcpus {
-        let lapic = LocalAPIC {
-            r#type: 0,
-            length: 8,
-            processor_id: cpu,
-            apic_id: cpu,
-            flags: if cpu < boot_vcpus {
-                1 << MADT_CPU_ENABLE_FLAG
-            } else {
-                0
-            },
-        };
-        madt.append(lapic);
-    }
-
-    madt.append(IOAPIC {
-        r#type: 1,
-        length: 12,
-        ioapic_id: 0,
-        apic_address: layout::IOAPIC_START.0 as u32,
-        gsi_base: 0,
-        ..Default::default()
-    });
-
-    madt.append(InterruptSourceOverride {
-        r#type: 2,
-        length: 10,
-        bus: 0,
-        source: 4,
-        gsi: 4,
-        flags: 0,
-    });
-
+    let madt = cpu_manager.lock().unwrap().create_madt();
     let madt_offset = facp_offset.checked_add(facp.len() as u64).unwrap();
     guest_mem
         .write_slice(madt.as_slice(), madt_offset)

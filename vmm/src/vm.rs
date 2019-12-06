@@ -539,12 +539,11 @@ impl Vm {
                 use crate::config::ConsoleOutputMode;
                 crate::acpi::create_acpi_tables(
                     &mem,
-                    boot_vcpus,
-                    _max_vcpus,
                     self.config.lock().unwrap().serial.mode != ConsoleOutputMode::Off,
                     start_of_device_area,
                     end_of_range,
                     self.devices.virt_iommu(),
+                    &self.cpu_manager,
                 )
             });
         }
