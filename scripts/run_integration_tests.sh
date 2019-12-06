@@ -145,6 +145,10 @@ sudo ip tuntap add vfio-tap1 mode tap
 sudo ip link set vfio-tap1 master vfio-br0
 sudo ip link set vfio-tap1 up
 
+sudo ip tuntap add vfio-tap2 mode tap
+sudo ip link set vfio-tap2 master vfio-br0
+sudo ip link set vfio-tap2 up
+
 cargo build --release
 sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
 sudo setcap cap_net_admin+ep target/release/vhost_user_net
@@ -187,5 +191,6 @@ fi
 sudo ip link del vfio-br0
 sudo ip link del vfio-tap0
 sudo ip link del vfio-tap1
+sudo ip link del vfio-tap2
 
 exit $RES
