@@ -152,6 +152,8 @@ pub struct VmInfo<'a> {
     pub memory: &'a Arc<RwLock<GuestMemoryMmap>>,
     pub vm_fd: &'a Arc<VmFd>,
     pub vm_cfg: Arc<Mutex<VmConfig>>,
+    pub start_of_device_area: GuestAddress,
+    pub end_of_device_area: GuestAddress,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
@@ -433,6 +435,14 @@ impl Vm {
                 .ok_or(Error::MemoryRangeAllocation)?;
         }
 
+        let end_of_device_area = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
+        let mem_end = guest_memory.end_addr();
+        let start_of_device_area = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
+            arch::layout::RAM_64BIT_START
+        } else {
+            mem_end.unchecked_add(1)
+        };
+
         // Convert the guest memory into an Arc. The point being able to use it
         // anywhere in the code, no matter which thread might use it.
         // Add the RwLock aspect to guest memory as we might want to perform
@@ -443,6 +453,8 @@ impl Vm {
             memory: &guest_memory,
             vm_fd: &fd,
             vm_cfg: config.clone(),
+            start_of_device_area,
+            end_of_device_area,
         };
 
         let device_manager = DeviceManager::new(
@@ -526,26 +538,11 @@ impl Vm {
 
         #[cfg(feature = "acpi")]
         {
-            rsdp_addr = Some({
-                let end_of_range = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
-
-                let mem_end = mem.end_addr();
-                let start_of_device_area = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
-                    arch::layout::RAM_64BIT_START
-                } else {
-                    mem_end.unchecked_add(1)
-                };
-
-                use crate::config::ConsoleOutputMode;
-                crate::acpi::create_acpi_tables(
-                    &mem,
-                    self.config.lock().unwrap().serial.mode != ConsoleOutputMode::Off,
-                    start_of_device_area,
-                    end_of_range,
-                    self.devices.virt_iommu(),
-                    &self.cpu_manager,
-                )
-            });
+            rsdp_addr = Some(crate::acpi::create_acpi_tables(
+                &mem,
+                &self.devices,
+                &self.cpu_manager,
+            ));
         }
 
         match entry_addr.setup_header {

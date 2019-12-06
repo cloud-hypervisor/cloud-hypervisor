@@ -9,9 +9,11 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::ConsoleOutputMode;
+use crate::config::{ConsoleOutputMode, VmConfig};
 use crate::vm::VmInfo;
-
+#[cfg(feature = "acpi")]
+use acpi_tables::{aml, aml::Aml};
+use arch::layout;
 use devices::{ioapic, HotPlugNotificationType};
 use kvm_bindings::{kvm_irq_routing_entry, kvm_userspace_memory_region};
 use kvm_ioctls::*;
@@ -393,6 +395,13 @@ pub struct DeviceManager {
     // ACPI GED notification device
     #[cfg(feature = "acpi")]
     ged_notification_device: Option<Arc<Mutex<devices::AcpiGEDDevice>>>,
+
+    // Dimensions of the device area
+    start_of_device_area: GuestAddress,
+    end_of_device_area: GuestAddress,
+
+    // VM configuration
+    config: Arc<Mutex<VmConfig>>,
 }
 
 impl DeviceManager {
@@ -474,6 +483,10 @@ impl DeviceManager {
             )?;
         }
 
+        let start_of_device_area = vm_info.start_of_device_area;
+        let end_of_device_area = vm_info.end_of_device_area;
+        let config = vm_info.vm_cfg.clone();
+
         Ok(DeviceManager {
             address_manager,
             console,
@@ -483,6 +496,9 @@ impl DeviceManager {
             virt_iommu,
             #[cfg(feature = "acpi")]
             ged_notification_device,
+            start_of_device_area,
+            end_of_device_area,
+            config,
         })
     }
 
@@ -1538,5 +1554,127 @@ impl Drop for DeviceManager {
                 libc::munmap(addr, size);
             }
         }
+    }
+}
+
+#[cfg(feature = "acpi")]
+fn create_ged_device() -> Vec<u8> {
+    aml::Device::new(
+        "_SB_.GED_".into(),
+        vec![
+            &aml::Name::new("_HID".into(), &"ACPI0013"),
+            &aml::Name::new("_UID".into(), &aml::ZERO),
+            &aml::Name::new(
+                "_CRS".into(),
+                &aml::ResourceTemplate::new(vec![&aml::Interrupt::new(
+                    true, true, false, false, 5,
+                )]),
+            ),
+            &aml::OpRegion::new("GDST".into(), aml::OpRegionSpace::SystemIO, 0xb000, 0x1),
+            &aml::Field::new(
+                "GDST".into(),
+                aml::FieldAccessType::Byte,
+                aml::FieldUpdateRule::WriteAsZeroes,
+                vec![aml::FieldEntry::Named(*b"GDAT", 8)],
+            ),
+            &aml::Method::new(
+                "_EVT".into(),
+                1,
+                true,
+                vec![&aml::If::new(
+                    &aml::Equal::new(&aml::Path::new("GDAT"), &aml::ONE),
+                    vec![&aml::MethodCall::new("\\_SB_.CPUS.CTFY".into(), vec![])],
+                )],
+            ),
+        ],
+    )
+    .to_aml_bytes()
+}
+
+#[cfg(feature = "acpi")]
+impl Aml for DeviceManager {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let pci_dsdt_data = aml::Device::new(
+            "_SB_.PCI0".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A08")),
+                &aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A03")),
+                &aml::Name::new("_ADR".into(), &aml::ZERO),
+                &aml::Name::new("_SEG".into(), &aml::ZERO),
+                &aml::Name::new("_UID".into(), &aml::ZERO),
+                &aml::Name::new("SUPP".into(), &aml::ZERO),
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![
+                        &aml::AddressSpace::new_bus_number(0x0u16, 0xffu16),
+                        &aml::IO::new(0xcf8, 0xcf8, 1, 0x8),
+                        &aml::AddressSpace::new_io(0x0u16, 0xcf7u16),
+                        &aml::AddressSpace::new_io(0xd00u16, 0xffffu16),
+                        &aml::AddressSpace::new_memory(
+                            aml::AddressSpaceCachable::NotCacheable,
+                            true,
+                            layout::MEM_32BIT_DEVICES_START.0 as u32,
+                            (layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE - 1)
+                                as u32,
+                        ),
+                        &aml::AddressSpace::new_memory(
+                            aml::AddressSpaceCachable::NotCacheable,
+                            true,
+                            self.start_of_device_area.0,
+                            self.end_of_device_area.0,
+                        ),
+                    ]),
+                ),
+            ],
+        )
+        .to_aml_bytes();
+
+        let mbrd_dsdt_data = aml::Device::new(
+            "_SB_.MBRD".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C02")),
+                &aml::Name::new("_UID".into(), &aml::ZERO),
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![&aml::Memory32Fixed::new(
+                        true,
+                        layout::PCI_MMCONFIG_START.0 as u32,
+                        layout::PCI_MMCONFIG_SIZE as u32,
+                    )]),
+                ),
+            ],
+        )
+        .to_aml_bytes();
+
+        let com1_dsdt_data = aml::Device::new(
+            "_SB_.COM1".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0501")),
+                &aml::Name::new("_UID".into(), &aml::ZERO),
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![
+                        &aml::Interrupt::new(true, true, false, false, 4),
+                        &aml::IO::new(0x3f8, 0x3f8, 0, 0x8),
+                    ]),
+                ),
+            ],
+        )
+        .to_aml_bytes();
+
+        let s5_sleep_data =
+            aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes();
+
+        let ged_data = create_ged_device();
+
+        bytes.extend_from_slice(pci_dsdt_data.as_slice());
+        bytes.extend_from_slice(mbrd_dsdt_data.as_slice());
+        if self.config.lock().unwrap().serial.mode != ConsoleOutputMode::Off {
+            bytes.extend_from_slice(com1_dsdt_data.as_slice());
+        }
+        bytes.extend_from_slice(s5_sleep_data.as_slice());
+        bytes.extend_from_slice(ged_data.as_slice());
+        bytes
     }
 }
