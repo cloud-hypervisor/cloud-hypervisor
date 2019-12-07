@@ -409,8 +409,7 @@ pub struct FsConfig {
     pub sock: PathBuf,
     pub num_queues: usize,
     pub queue_size: u16,
-    pub dax: bool,
-    pub cache_size: u64,
+    pub cache_size: Option<u64>,
 }
 
 impl FsConfig {
@@ -445,7 +444,7 @@ impl FsConfig {
         let mut queue_size: u16 = 1024;
         let mut dax: bool = true;
         // Default cache size set to 8Gib.
-        let mut cache_size: u64 = 0x0002_0000_0000;
+        let mut cache_size: Option<u64> = Some(0x0002_0000_0000);
 
         if tag.is_empty() {
             return Err(Error::ParseFsTagParam);
@@ -477,9 +476,9 @@ impl FsConfig {
             if !cache_size_str.is_empty() {
                 return Err(Error::InvalidCacheSizeWithDaxOff);
             }
-            cache_size = 0;
+            cache_size = None;
         } else if !cache_size_str.is_empty() {
-            cache_size = parse_size(cache_size_str)?;
+            cache_size = Some(parse_size(cache_size_str)?);
         }
 
         Ok(FsConfig {
@@ -487,7 +486,6 @@ impl FsConfig {
             sock: PathBuf::from(sock),
             num_queues,
             queue_size,
-            dax,
             cache_size,
         })
     }
