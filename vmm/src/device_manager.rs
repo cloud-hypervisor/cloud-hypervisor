@@ -958,8 +958,8 @@ impl DeviceManager {
         if let Some(fs_list_cfg) = &vm_info.vm_cfg.lock().unwrap().fs {
             for fs_cfg in fs_list_cfg.iter() {
                 if let Some(fs_sock) = fs_cfg.sock.to_str() {
-                    let cache: Option<(VirtioSharedMemoryList, u64)> = if fs_cfg.dax {
-                        let fs_cache = fs_cfg.cache_size;
+                    let mut cache: Option<(VirtioSharedMemoryList, u64)> = None;
+                    if let Some(fs_cache) = fs_cfg.cache_size {
                         // The memory needs to be 2MiB aligned in order to support
                         // hugepages.
                         let fs_guest_addr = allocator
@@ -1004,18 +1004,15 @@ impl DeviceManager {
                             offset: 0,
                             len: fs_cache,
                         });
-
-                        Some((
+                        cache = Some((
                             VirtioSharedMemoryList {
                                 addr: fs_guest_addr,
                                 len: fs_cache as GuestUsize,
                                 region_list,
                             },
                             addr as u64,
-                        ))
-                    } else {
-                        None
-                    };
+                        ));
+                    }
 
                     let virtio_fs_device = vm_virtio::vhost_user::Fs::new(
                         fs_sock,
