@@ -302,7 +302,7 @@ impl DiskConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NetConfig {
-    pub tap: Option<String>,
+    pub tap: String,
     pub ip: Ipv4Addr,
     pub mask: Ipv4Addr,
     pub mac: MacAddr,
@@ -335,15 +335,11 @@ impl NetConfig {
             }
         }
 
-        let mut tap: Option<String> = None;
         let mut ip: Ipv4Addr = Ipv4Addr::new(192, 168, 249, 1);
         let mut mask: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
         let mut mac: MacAddr = MacAddr::local_random();
         let iommu = parse_on_off(iommu_str)?;
 
-        if !tap_str.is_empty() {
-            tap = Some(tap_str.to_string());
-        }
         if !ip_str.is_empty() {
             ip = ip_str.parse().map_err(Error::ParseNetIpParam)?;
         }
@@ -355,7 +351,7 @@ impl NetConfig {
         }
 
         Ok(NetConfig {
-            tap,
+            tap: tap_str.to_string(),
             ip,
             mask,
             mac,

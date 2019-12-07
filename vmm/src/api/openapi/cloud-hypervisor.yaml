@@ -281,6 +281,7 @@ components:
       properties:
         tap:
           type: string
+          default: ""
         ip:
           type: string
           default: "192.168.249.1"
