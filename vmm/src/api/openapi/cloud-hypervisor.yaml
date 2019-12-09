@@ -279,18 +279,17 @@ components:
           default: false
 
     NetConfig:
-      required:
-      - ip
-      - mask
-      - mac
       type: object
       properties:
         tap:
           type: string
+          default: ""
         ip:
           type: string
+          default: "192.168.249.1"
         mask:
           type: string
+          default: "255.255.255.0"
         mac:
           type: string
         iommu:

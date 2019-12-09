@@ -302,12 +302,32 @@ impl DiskConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NetConfig {
+    #[serde(default = "default_netconfig_tap")]
     pub tap: Option<String>,
+    #[serde(default = "default_netconfig_ip")]
     pub ip: Ipv4Addr,
+    #[serde(default = "default_netconfig_mask")]
     pub mask: Ipv4Addr,
+    #[serde(default = "default_netconfig_mac")]
     pub mac: MacAddr,
     #[serde(default)]
     pub iommu: bool,
+}
+
+fn default_netconfig_tap() -> Option<String> {
+    None
+}
+
+fn default_netconfig_ip() -> Ipv4Addr {
+    Ipv4Addr::new(192, 168, 249, 1)
+}
+
+fn default_netconfig_mask() -> Ipv4Addr {
+    Ipv4Addr::new(255, 255, 255, 0)
+}
+
+fn default_netconfig_mac() -> MacAddr {
+    MacAddr::local_random()
 }
 
 impl NetConfig {
@@ -335,10 +355,10 @@ impl NetConfig {
             }
         }
 
-        let mut tap: Option<String> = None;
-        let mut ip: Ipv4Addr = Ipv4Addr::new(192, 168, 249, 1);
-        let mut mask: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
-        let mut mac: MacAddr = MacAddr::local_random();
+        let mut tap: Option<String> = default_netconfig_tap();
+        let mut ip: Ipv4Addr = default_netconfig_ip();
+        let mut mask: Ipv4Addr = default_netconfig_mask();
+        let mut mac: MacAddr = default_netconfig_mac();
         let iommu = parse_on_off(iommu_str)?;
 
         if !tap_str.is_empty() {
