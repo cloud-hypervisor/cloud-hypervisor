@@ -312,8 +312,6 @@ components:
       required:
       - tag
       - sock
-      - num_queues
-      - queue_size
       type: object
       properties:
         tag:
@@ -322,11 +320,14 @@ components:
           type: string
         num_queues:
           type: integer
+          default: 1
         queue_size:
           type: integer
+          default: 1024
         cache_size:
           type: integer
           format: int64
+          default: 8589934592
 
     PmemConfig:
       required:

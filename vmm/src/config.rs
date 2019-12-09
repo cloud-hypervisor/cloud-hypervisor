@@ -427,9 +427,24 @@ impl Default for RngConfig {
 pub struct FsConfig {
     pub tag: String,
     pub sock: PathBuf,
+    #[serde(default = "default_fsconfig_num_queues")]
     pub num_queues: usize,
+    #[serde(default = "default_fsconfig_queue_size")]
     pub queue_size: u16,
+    #[serde(default = "default_fsconfig_cache_size")]
     pub cache_size: Option<u64>,
+}
+
+fn default_fsconfig_num_queues() -> usize {
+    1
+}
+
+fn default_fsconfig_queue_size() -> u16 {
+    1024
+}
+
+fn default_fsconfig_cache_size() -> Option<u64> {
+    Some(0x0002_0000_0000)
 }
 
 impl FsConfig {
@@ -460,11 +475,11 @@ impl FsConfig {
             }
         }
 
-        let mut num_queues: usize = 1;
-        let mut queue_size: u16 = 1024;
+        let mut num_queues: usize = default_fsconfig_num_queues();
+        let mut queue_size: u16 = default_fsconfig_queue_size();
         let mut dax: bool = true;
         // Default cache size set to 8Gib.
-        let mut cache_size: Option<u64> = Some(0x0002_0000_0000);
+        let mut cache_size: Option<u64> = default_fsconfig_cache_size();
 
         if tag.is_empty() {
             return Err(Error::ParseFsTagParam);
