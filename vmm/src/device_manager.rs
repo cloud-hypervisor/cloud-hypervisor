@@ -681,13 +681,16 @@ impl DeviceManager {
             .insert(acpi_device.clone(), 0x3c0, 0x4)
             .map_err(DeviceManagerError::BusError)?;
 
-        // We need to hardcode this as the ACPI tables need to specify a particular IRQ and it's not possible
-        // to ask the allocator for a specific one.
-        let ged_irq = 5;
+        let ged_irq = address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_irq()
+            .unwrap();
         let interrupt: Box<dyn devices::Interrupt> =
-            Box::new(UserIoapicIrq::new(ioapic.clone(), ged_irq));
+            Box::new(UserIoapicIrq::new(ioapic.clone(), ged_irq as usize));
 
-        let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(interrupt)));
+        let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(interrupt, ged_irq)));
 
         address_manager
             .allocator
@@ -1555,7 +1558,7 @@ impl Drop for DeviceManager {
 }
 
 #[cfg(feature = "acpi")]
-fn create_ged_device() -> Vec<u8> {
+fn create_ged_device(ged_irq: u32) -> Vec<u8> {
     aml::Device::new(
         "_SB_.GED_".into(),
         vec![
@@ -1564,7 +1567,7 @@ fn create_ged_device() -> Vec<u8> {
             &aml::Name::new(
                 "_CRS".into(),
                 &aml::ResourceTemplate::new(vec![&aml::Interrupt::new(
-                    true, true, false, false, 5,
+                    true, true, false, false, ged_irq,
                 )]),
             ),
             &aml::OpRegion::new("GDST".into(), aml::OpRegionSpace::SystemIO, 0xb000, 0x1),
@@ -1663,7 +1666,14 @@ impl Aml for DeviceManager {
         let s5_sleep_data =
             aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes();
 
-        let ged_data = create_ged_device();
+        let ged_data = create_ged_device(
+            self.ged_notification_device
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .irq(),
+        );
 
         bytes.extend_from_slice(pci_dsdt_data.as_slice());
         bytes.extend_from_slice(mbrd_dsdt_data.as_slice());

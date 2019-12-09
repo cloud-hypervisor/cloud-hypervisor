@@ -57,13 +57,15 @@ impl BusDevice for AcpiShutdownDevice {
 pub struct AcpiGEDDevice {
     interrupt: Box<dyn Interrupt>,
     notification_type: HotPlugNotificationType,
+    ged_irq: u32,
 }
 
 impl AcpiGEDDevice {
-    pub fn new(interrupt: Box<dyn Interrupt>) -> AcpiGEDDevice {
+    pub fn new(interrupt: Box<dyn Interrupt>, ged_irq: u32) -> AcpiGEDDevice {
         AcpiGEDDevice {
             interrupt,
             notification_type: HotPlugNotificationType::NoDevicesChanged,
+            ged_irq,
         }
     }
 
@@ -73,6 +75,10 @@ impl AcpiGEDDevice {
     ) -> Result<(), std::io::Error> {
         self.notification_type = notification_type;
         self.interrupt.deliver()
+    }
+
+    pub fn irq(&self) -> u32 {
+        self.ged_irq
     }
 }
 
