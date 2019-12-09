@@ -133,6 +133,12 @@ paths:
             schema:
               $ref: '#/components/schemas/VmResize'
         required: true
+      responses:
+        204:
+          description: The VM instance was successfully resized.
+        404:
+          description: The VM instance could not be resized because it is not created.
+
 components:
   schemas:
 
@@ -218,15 +224,13 @@ components:
     CpuConfig:
       required:
       - boot_vcpus
+      - max_vcpus
       type: object
       properties:
         boot_vcpus:
           minimum: 1
           default: 1
           type: integer
-      - max_vcpus
-      type: object
-      properties:
         max_vcpus:
           minimum: 1
           default: 1
