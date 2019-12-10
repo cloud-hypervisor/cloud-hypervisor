@@ -694,16 +694,11 @@ impl DeviceConfig {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct VuConfig {
+pub struct VhostUserNetConfig {
     pub sock: String,
     pub num_queues: usize,
     pub queue_size: u16,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct VhostUserNetConfig {
     pub mac: MacAddr,
-    pub vu_cfg: VuConfig,
 }
 
 impl VhostUserNetConfig {
@@ -749,13 +744,12 @@ impl VhostUserNetConfig {
                 .map_err(Error::ParseVuQueueSizeParam)?;
         }
 
-        let vu_cfg = VuConfig {
+        Ok(VhostUserNetConfig {
             sock: sock.to_string(),
             num_queues,
             queue_size,
-        };
-
-        Ok(VhostUserNetConfig { mac, vu_cfg })
+            mac,
+        })
     }
 }
 
@@ -800,8 +794,10 @@ impl VsockConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VhostUserBlkConfig {
+    pub sock: String,
+    pub num_queues: usize,
+    pub queue_size: u16,
     pub wce: bool,
-    pub vu_cfg: VuConfig,
 }
 
 impl VhostUserBlkConfig {
@@ -844,13 +840,12 @@ impl VhostUserBlkConfig {
             wce = wce_str.parse().map_err(Error::ParseVuBlkWceParam)?;
         }
 
-        let vu_cfg = VuConfig {
+        Ok(VhostUserBlkConfig {
             sock: sock.to_string(),
             num_queues,
             queue_size,
-        };
-
-        Ok(VhostUserBlkConfig { wce, vu_cfg })
+            wce,
+        })
     }
 }
 
