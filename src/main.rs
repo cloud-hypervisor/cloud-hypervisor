@@ -79,7 +79,7 @@ fn main() {
         }
     }
 
-    let default_vcpus = format! {"{}", config::DEFAULT_VCPUS};
+    let default_vcpus = format! {"boot={}", config::DEFAULT_VCPUS};
     let default_memory = format! {"size={}M", config::DEFAULT_MEMORY_MB};
     let default_rng = format! {"src={}", config::DEFAULT_RNG_SOURCE};
 
