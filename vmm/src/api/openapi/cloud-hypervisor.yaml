@@ -391,19 +391,19 @@ components:
     VhostUserBlkConfig:
       required:
       - sock
-      - num_queues
-      - queue_size
-      - wce
       type: object
       properties:
         sock:
           type: string
         num_queues:
           type: integer
+          default: 1
         queue_size:
           type: integer
+          default: 128
         wce:
           type: boolean
+          default: true
 
     VsockConfig:
       required:
