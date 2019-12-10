@@ -196,6 +196,7 @@ impl Default for CpusConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub size: u64,
+    #[serde(default)]
     pub file: Option<PathBuf>,
     #[serde(default)]
     pub mergeable: bool,
