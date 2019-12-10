@@ -17,6 +17,8 @@ pub const DEFAULT_MEMORY_MB: u64 = 512;
 pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
 pub const DEFAULT_NUM_QUEUES_VUNET: usize = 2;
 pub const DEFAULT_QUEUE_SIZE_VUNET: u16 = 256;
+pub const DEFAULT_NUM_QUEUES_VUBLK: usize = 1;
+pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = 128;
 
 /// Errors associated with VM configuration parameters.
 #[derive(Debug)]
@@ -812,9 +814,24 @@ impl VsockConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VhostUserBlkConfig {
     pub sock: String,
+    #[serde(default = "default_vublkconfig_num_queues")]
     pub num_queues: usize,
+    #[serde(default = "default_vublkconfig_queue_size")]
     pub queue_size: u16,
+    #[serde(default = "default_vublkconfig_wce")]
     pub wce: bool,
+}
+
+fn default_vublkconfig_num_queues() -> usize {
+    DEFAULT_NUM_QUEUES_VUBLK
+}
+
+fn default_vublkconfig_queue_size() -> u16 {
+    DEFAULT_QUEUE_SIZE_VUBLK
+}
+
+fn default_vublkconfig_wce() -> bool {
+    true
 }
 
 impl VhostUserBlkConfig {
@@ -839,9 +856,9 @@ impl VhostUserBlkConfig {
             }
         }
 
-        let mut num_queues: usize = 1;
-        let mut queue_size: u16 = 128;
-        let mut wce: bool = true;
+        let mut num_queues: usize = default_vublkconfig_num_queues();
+        let mut queue_size: u16 = default_vublkconfig_queue_size();
+        let mut wce: bool = default_vublkconfig_wce();
 
         if !num_queues_str.is_empty() {
             num_queues = num_queues_str
