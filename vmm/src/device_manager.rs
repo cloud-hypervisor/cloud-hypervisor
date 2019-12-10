@@ -1162,9 +1162,9 @@ impl DeviceManager {
         if let Some(vhost_user_net_list_cfg) = &vm_info.vm_cfg.lock().unwrap().vhost_user_net {
             for vhost_user_net_cfg in vhost_user_net_list_cfg.iter() {
                 let vu_cfg = VhostUserConfig {
-                    sock: vhost_user_net_cfg.vu_cfg.sock.clone(),
-                    num_queues: vhost_user_net_cfg.vu_cfg.num_queues,
-                    queue_size: vhost_user_net_cfg.vu_cfg.queue_size,
+                    sock: vhost_user_net_cfg.sock.clone(),
+                    num_queues: vhost_user_net_cfg.num_queues,
+                    queue_size: vhost_user_net_cfg.queue_size,
                 };
                 let vhost_user_net_device =
                     vm_virtio::vhost_user::Net::new(vhost_user_net_cfg.mac, vu_cfg)
@@ -1188,9 +1188,9 @@ impl DeviceManager {
         if let Some(vhost_user_blk_list_cfg) = &vm_info.vm_cfg.lock().unwrap().vhost_user_blk {
             for vhost_user_blk_cfg in vhost_user_blk_list_cfg.iter() {
                 let vu_cfg = VhostUserConfig {
-                    sock: vhost_user_blk_cfg.vu_cfg.sock.clone(),
-                    num_queues: vhost_user_blk_cfg.vu_cfg.num_queues,
-                    queue_size: vhost_user_blk_cfg.vu_cfg.queue_size,
+                    sock: vhost_user_blk_cfg.sock.clone(),
+                    num_queues: vhost_user_blk_cfg.num_queues,
+                    queue_size: vhost_user_blk_cfg.queue_size,
                 };
                 let vhost_user_blk_device =
                     vm_virtio::vhost_user::Blk::new(vhost_user_blk_cfg.wce, vu_cfg)
