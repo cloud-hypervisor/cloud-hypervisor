@@ -591,10 +591,15 @@ impl ConsoleOutputMode {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct ConsoleConfig {
+    #[serde(default = "default_consoleconfig_file")]
     pub file: Option<PathBuf>,
     pub mode: ConsoleOutputMode,
     #[serde(default)]
     pub iommu: bool,
+}
+
+fn default_consoleconfig_file() -> Option<PathBuf> {
+    None
 }
 
 impl ConsoleConfig {
@@ -603,7 +608,7 @@ impl ConsoleConfig {
         let params_list: Vec<&str> = console.split(',').collect();
 
         let mut valid = false;
-        let mut file: Option<PathBuf> = None;
+        let mut file: Option<PathBuf> = default_consoleconfig_file();
         let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
         let mut iommu_str: &str = "";
 
