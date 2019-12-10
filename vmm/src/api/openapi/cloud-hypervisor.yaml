@@ -375,17 +375,16 @@ components:
     VhostUserNetConfig:
       required:
       - sock
-      - num_queues
-      - queue_size
-      - mac
       type: object
       properties:
         sock:
           type: string
         num_queues:
           type: integer
+          default: 2
         queue_size:
           type: integer
+          default: 256
         mac:
           type: string
 

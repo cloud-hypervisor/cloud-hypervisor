@@ -15,6 +15,8 @@ use std::result;
 pub const DEFAULT_VCPUS: u8 = 1;
 pub const DEFAULT_MEMORY_MB: u64 = 512;
 pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
+pub const DEFAULT_NUM_QUEUES_VUNET: usize = 2;
+pub const DEFAULT_QUEUE_SIZE_VUNET: u16 = 256;
 
 /// Errors associated with VM configuration parameters.
 #[derive(Debug)]
@@ -696,9 +698,24 @@ impl DeviceConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VhostUserNetConfig {
     pub sock: String,
+    #[serde(default = "default_vunetconfig_num_queues")]
     pub num_queues: usize,
+    #[serde(default = "default_vunetconfig_queue_size")]
     pub queue_size: u16,
+    #[serde(default = "default_vunetconfig_mac")]
     pub mac: MacAddr,
+}
+
+fn default_vunetconfig_num_queues() -> usize {
+    DEFAULT_NUM_QUEUES_VUNET
+}
+
+fn default_vunetconfig_queue_size() -> u16 {
+    DEFAULT_QUEUE_SIZE_VUNET
+}
+
+fn default_vunetconfig_mac() -> MacAddr {
+    MacAddr::local_random()
 }
 
 impl VhostUserNetConfig {
@@ -723,9 +740,9 @@ impl VhostUserNetConfig {
             }
         }
 
-        let mut mac: MacAddr = MacAddr::local_random();
-        let mut num_queues: usize = 2;
-        let mut queue_size: u16 = 256;
+        let mut mac: MacAddr = default_vunetconfig_mac();
+        let mut num_queues: usize = default_vunetconfig_num_queues();
+        let mut queue_size: u16 = default_vunetconfig_queue_size();
 
         if !mac_str.is_empty() {
             mac = MacAddr::parse_str(mac_str).map_err(Error::ParseVuNetMacParam)?;
