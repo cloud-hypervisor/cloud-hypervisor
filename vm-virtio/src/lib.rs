@@ -128,6 +128,7 @@ impl fmt::Display for VirtioDeviceType {
 const INTERRUPT_STATUS_USED_RING: u32 = 0x1;
 #[allow(dead_code)]
 const INTERRUPT_STATUS_CONFIG_CHANGED: u32 = 0x2;
+const VIRTIO_MSI_NO_VECTOR: u16 = 0xffff;
 
 #[derive(Debug)]
 pub enum ActivateError {
