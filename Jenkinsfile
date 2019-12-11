@@ -20,6 +20,11 @@ pipeline{
 				sh "nohup curl https://sh.rustup.rs -sSf | sh -s -- -y"
 			}
 		}
+		stage ('Run Cargo tests') {
+			steps {
+				sh "scripts/run_cargo_tests.sh"
+			}
+		}
 		stage ('Run unit tests') {
 			steps {
 				sh "scripts/run_unit_tests.sh"
