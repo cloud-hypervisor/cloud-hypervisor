@@ -37,6 +37,7 @@ use crate::{
     Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
     VirtioIommuRemapping, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
     DEVICE_FEATURES_OK, DEVICE_INIT, INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
+    VIRTIO_MSI_NO_VECTOR,
 };
 
 #[allow(clippy::enum_variant_names)]
@@ -509,6 +510,10 @@ impl PciDevice for VirtioPciDevice {
                             }
                         }
                     };
+
+                    if vector == VIRTIO_MSI_NO_VECTOR {
+                        return Ok(());
+                    }
 
                     let config = &mut msix_config_clone.lock().unwrap();
                     let entry = &config.table_entries[vector as usize];
