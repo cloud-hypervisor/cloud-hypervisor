@@ -324,6 +324,9 @@ components:
         queue_size:
           type: integer
           default: 1024
+        dax:
+          type: boolean
+          default: true
         cache_size:
           type: integer
           format: int64
