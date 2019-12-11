@@ -28,9 +28,7 @@ use kvm_ioctls::*;
 use vm_memory::{Address, GuestAddress, GuestMemoryMmap};
 
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::signal::{register_signal_handler, validate_signal_num};
-
-const VCPU_RTSIG_OFFSET: i32 = 0;
+use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
 // Debug I/O port
 #[cfg(target_arch = "x86_64")]
@@ -439,9 +437,8 @@ impl VcpuState {
 
     fn signal_thread(&self) {
         if let Some(handle) = self.handle.as_ref() {
-            let signum = validate_signal_num(VCPU_RTSIG_OFFSET, true).unwrap();
             unsafe {
-                libc::pthread_kill(handle.as_pthread_t(), signum);
+                libc::pthread_kill(handle.as_pthread_t(), SIGRTMIN());
             }
         }
     }
@@ -549,18 +546,10 @@ impl CpuManager {
                 thread::Builder::new()
                     .name(format!("vcpu{}", vcpu.id))
                     .spawn(move || {
-                        unsafe {
-                            extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {
-                            }
-                            // This uses an async signal safe handler to kill the vcpu handles.
-                            register_signal_handler(
-                                VCPU_RTSIG_OFFSET,
-                                vmm_sys_util::signal::SignalHandler::Siginfo(handle_signal),
-                                true,
-                                0,
-                            )
+                        extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
+                        // This uses an async signal safe handler to kill the vcpu handles.
+                        register_signal_handler(SIGRTMIN(), handle_signal)
                             .expect("Failed to register vcpu signal handler");
-                        }
 
                         vcpu.configure(entry_addr, &vm_memory, cpuid)
                             .expect("Failed to configure vCPU");
