@@ -436,8 +436,10 @@ pub struct FsConfig {
     pub num_queues: usize,
     #[serde(default = "default_fsconfig_queue_size")]
     pub queue_size: u16,
+    #[serde(default = "default_fsconfig_dax")]
+    pub dax: bool,
     #[serde(default = "default_fsconfig_cache_size")]
-    pub cache_size: Option<u64>,
+    pub cache_size: u64,
 }
 
 fn default_fsconfig_num_queues() -> usize {
@@ -448,8 +450,12 @@ fn default_fsconfig_queue_size() -> u16 {
     1024
 }
 
-fn default_fsconfig_cache_size() -> Option<u64> {
-    Some(0x0002_0000_0000)
+fn default_fsconfig_dax() -> bool {
+    true
+}
+
+fn default_fsconfig_cache_size() -> u64 {
+    0x0002_0000_0000
 }
 
 impl FsConfig {
@@ -482,9 +488,9 @@ impl FsConfig {
 
         let mut num_queues: usize = default_fsconfig_num_queues();
         let mut queue_size: u16 = default_fsconfig_queue_size();
-        let mut dax: bool = true;
+        let mut dax: bool = default_fsconfig_dax();
         // Default cache size set to 8Gib.
-        let mut cache_size: Option<u64> = default_fsconfig_cache_size();
+        let mut cache_size: u64 = default_fsconfig_cache_size();
 
         if tag.is_empty() {
             return Err(Error::ParseFsTagParam);
@@ -516,9 +522,9 @@ impl FsConfig {
             if !cache_size_str.is_empty() {
                 return Err(Error::InvalidCacheSizeWithDaxOff);
             }
-            cache_size = None;
+            cache_size = 0;
         } else if !cache_size_str.is_empty() {
-            cache_size = Some(parse_size(cache_size_str)?);
+            cache_size = parse_size(cache_size_str)?;
         }
 
         Ok(FsConfig {
@@ -526,6 +532,7 @@ impl FsConfig {
             sock: PathBuf::from(sock),
             num_queues,
             queue_size,
+            dax,
             cache_size,
         })
     }
