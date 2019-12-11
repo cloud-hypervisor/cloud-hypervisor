@@ -4,7 +4,16 @@ pipeline{
 		stage ('Master build') {
 			agent { node { label 'master' } }
 			stages {
-				stage('Cancel older builds') {
+				stage ('Check for RFC/WIP builds') {
+					when {
+  						changeRequest comparator: 'REGEXP', title: '.*(rfc|RFC|wip|WIP).*'
+  						beforeAgent true
+					}
+					steps {
+						error("Failing as this is marked as a WIP or RFC PR.")
+					}
+				}
+				stage ('Cancel older builds') {
 					steps {
 						cancelPreviousBuilds()
 					}
