@@ -183,6 +183,7 @@ dependencies = [
  "net_gen 0.1.0",
  "net_util 0.1.0",
  "qcow 0.1.0",
+ "serde_json 1.0.44 (registry+https://github.com/rust-lang/crates.io-index)",
  "ssh2 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempdir 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "vhost_rs 0.1.0",
