@@ -34,7 +34,7 @@ pipeline{
 				stage ('Install system packages') {
 					steps {
 						sh "sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq build-essential mtools libssl-dev pkg-config"
-							sh "sudo apt-get install -yq flex bison libelf-dev qemu-utils qemu-system libglib2.0-dev libpixman-1-dev libseccomp-dev socat"
+							sh "sudo apt-get install -yq flex bison libelf-dev qemu-utils qemu-system libglib2.0-dev libpixman-1-dev libseccomp-dev libcap-ng-dev socat"
 							sh "sudo snap install docker"
 					}
 				}
