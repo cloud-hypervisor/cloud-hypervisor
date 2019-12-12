@@ -1114,6 +1114,7 @@ dependencies = [
  "acpi_tables 0.1.0",
  "anyhow 1.0.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "arch 0.1.0",
+ "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "devices 0.1.0",
  "epoll 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
