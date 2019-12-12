@@ -10,6 +10,7 @@
 // See https://pdos.csail.mit.edu/6.828/2016/readings/ia32/ioapic.pdf for a specification.
 
 use crate::BusDevice;
+use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::io;
 use std::result;
@@ -19,6 +20,14 @@ use vm_device::interrupt::{
     MsiIrqGroupConfig, MsiIrqSourceConfig,
 };
 use vm_memory::GuestAddress;
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshotable,
+    Transportable,
+};
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "GuestAddress")]
+pub struct GuestAddressDef(pub u64);
 
 #[derive(Debug)]
 pub enum Error {
@@ -152,6 +161,15 @@ pub struct Ioapic {
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
     apic_address: GuestAddress,
     interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct IoapicState {
+    id: u32,
+    reg_sel: u32,
+    reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
+    #[serde(with = "GuestAddressDef")]
+    apic_address: GuestAddress,
 }
 
 impl BusDevice for Ioapic {
@@ -366,4 +384,70 @@ impl Ioapic {
             }
         }
     }
+
+    fn state(&self) -> IoapicState {
+        IoapicState {
+            id: self.id,
+            reg_sel: self.reg_sel,
+            reg_entries: self.reg_entries,
+            apic_address: self.apic_address,
+        }
+    }
+
+    #[allow(unused)]
+    fn set_state(&mut self, state: &IoapicState) {
+        self.id = state.id;
+        self.reg_sel = state.reg_sel;
+        self.reg_entries = state.reg_entries;
+        self.apic_address = state.apic_address;
+    }
 }
+
+const IOAPIC_SNAPSHOT_ID: &str = "ioapic";
+impl Snapshotable for Ioapic {
+    fn id(&self) -> String {
+        IOAPIC_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut ioapic_snapshot = Snapshot::new(IOAPIC_SNAPSHOT_ID);
+        ioapic_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", IOAPIC_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(ioapic_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(ioapic_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", IOAPIC_SNAPSHOT_ID))
+        {
+            let ioapic_state = match serde_json::from_slice(&ioapic_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize IOAPIC {}",
+                        error
+                    )))
+                }
+            };
+
+            self.set_state(&ioapic_state);
+
+            return Ok(());
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find IOAPIC snapshot section"
+        )))
+    }
+}
+
+impl Pausable for Ioapic {}
+impl Transportable for Ioapic {}
+impl Migratable for Ioapic {}
