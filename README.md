@@ -103,9 +103,9 @@ We need to get the latest `rust-hypervisor-firmware` release and also a working 
 
 ```shell
 $ pushd $CLOUDH
-$ wget https://download.clearlinux.org/releases/29160/clear/clear-29160-kvm.img.xz
-$ unxz clear-29160-kvm.img.xz
-$ wget https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.2.0/hypervisor-fw
+$ wget https://download.clearlinux.org/releases/31890/clear/clear-31890-kvm.img.xz
+$ unxz clear-31890-kvm.img.xz
+$ wget https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.2.6/hypervisor-fw
 $ popd
 ```
 
@@ -114,7 +114,7 @@ $ pushd $CLOUDH
 $ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hypervisor
 $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel ./hypervisor-fw \
-	--disk path=clear-29160-kvm.img \
+	--disk path=clear-31890-kvm.img \
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
@@ -153,8 +153,8 @@ For the disk image, we will use a Clear Linux cloud image that contains a root p
 
 ```shell
 $ pushd $CLOUDH
-$ wget https://download.clearlinux.org/releases/29160/clear/clear-29160-kvm.img.xz
-$ unxz clear-29160-kvm.img.xz
+$ wget https://download.clearlinux.org/releases/31890/clear/clear-31890-kvm.img.xz
+$ unxz clear-31890-kvm.img.xz
 $ popd
 ```
 
@@ -168,7 +168,7 @@ $ pushd $CLOUDH
 $ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hypervisor
 $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
-	--disk path=clear-29160-kvm.img \
+	--disk path=clear-31890-kvm.img \
 	--cmdline "console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
 	--cpus boot=4 \
 	--memory size=1024M \
@@ -188,7 +188,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
 	--console off \
 	--serial tty \
-	--disk path=clear-29160-kvm.img \
+	--disk path=clear-31890-kvm.img \
 	--cmdline "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
 	--cpus boot=4 \
 	--memory size=1024M \
@@ -201,9 +201,12 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 
 `cloud-hypervisor` is in a very early, pre-alpha stage. Use at your own risk!
 
-As of 2019/05/12, booting cloud images has only been tested with [Clear Linux images](https://download.clearlinux.org/current/).
-Direct kernel boot to userspace should work with most rootfs and it's been tested with
-Clear Linux root partitions, and also basic initrd/initramfs images.
+As of 2019-12-12, the following cloud images are supported:
+* [Clear Linux](https://download.clearlinux.org/current/) (cloudguest and kvm)
+* [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (cloudimg)
+* [Ubuntu Eoan](https://cloud-images.ubuntu.com/eoan/current/) (cloudimg)
+
+Direct kernel boot to userspace should work with most rootfs.
 
 ## Device Model
 
