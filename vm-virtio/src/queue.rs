@@ -63,7 +63,7 @@ impl<'a> Iterator for DescIter<'a> {
 /// A virtio descriptor constraints with C representive.
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
-struct Descriptor {
+pub struct Descriptor {
     addr: u64,
     len: u32,
     flags: u16,

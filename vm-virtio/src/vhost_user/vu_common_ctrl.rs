@@ -3,9 +3,13 @@
 
 use libc;
 use libc::EFD_NONBLOCK;
+use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
 use std::vec::Vec;
 
+use crate::queue::Descriptor;
+
+use vm_device::get_host_address_range;
 use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -54,6 +58,8 @@ pub fn setup_vhost_user_vring(
     let mut vu_interrupt_list = Vec::new();
 
     for (queue_index, queue) in queues.into_iter().enumerate() {
+        let actual_size: usize = queue.actual_size().try_into().unwrap();
+
         vu.set_vring_num(queue_index, queue.actual_size())
             .map_err(Error::VhostUserSetVringNum)?;
 
@@ -61,14 +67,19 @@ pub fn setup_vhost_user_vring(
             queue_max_size: queue.get_max_size(),
             queue_size: queue.actual_size(),
             flags: 0u32,
-            desc_table_addr: mem
-                .get_host_address(queue.desc_table)
-                .ok_or_else(|| Error::DescriptorTableAddress)? as u64,
-            used_ring_addr: mem
-                .get_host_address(queue.used_ring)
+            desc_table_addr: get_host_address_range(
+                &mem,
+                queue.desc_table,
+                actual_size * std::mem::size_of::<Descriptor>(),
+            )
+            .ok_or_else(|| Error::DescriptorTableAddress)? as u64,
+            // The used ring is {flags: u16; idx: u16; virtq_used_elem [{id: u16, len: u16}; actual_size]},
+            // i.e. 4 + (4 + 4) * actual_size.
+            used_ring_addr: get_host_address_range(&mem, queue.used_ring, 4 + actual_size * 8)
                 .ok_or_else(|| Error::UsedAddress)? as u64,
-            avail_ring_addr: mem
-                .get_host_address(queue.avail_ring)
+            // The used ring is {flags: u16; idx: u16; elem [u16; actual_size]},
+            // i.e. 4 + (2) * actual_size.
+            avail_ring_addr: get_host_address_range(&mem, queue.avail_ring, 4 + actual_size * 2)
                 .ok_or_else(|| Error::AvailAddress)? as u64,
             log_addr: None,
         };

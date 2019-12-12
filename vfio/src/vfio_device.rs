@@ -6,6 +6,7 @@ use crate::vec_with_array_field;
 use byteorder::{ByteOrder, LittleEndian};
 use kvm_ioctls::*;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::ffi::CString;
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -19,7 +20,7 @@ use std::sync::{Arc, RwLock};
 use std::u32;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::*;
-use vm_device::ExternalDmaMapping;
+use vm_device::{get_host_address_range, ExternalDmaMapping};
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::ioctl::*;
@@ -524,12 +525,11 @@ impl VfioDmaMapping {
 
 impl ExternalDmaMapping for VfioDmaMapping {
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
-        let user_addr = if let Some(addr) = self
-            .memory
-            .read()
-            .unwrap()
-            .get_host_address(GuestAddress(gpa))
-        {
+        let user_addr = if let Some(addr) = get_host_address_range(
+            &self.memory.read().unwrap(),
+            GuestAddress(gpa),
+            size.try_into().unwrap(),
+        ) {
             addr as u64
         } else {
             return Err(io::Error::new(
