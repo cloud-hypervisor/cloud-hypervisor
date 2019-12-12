@@ -6,10 +6,15 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use crate::BusDevice;
+use anyhow::anyhow;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::{io, result};
 use vm_device::interrupt::InterruptSourceGroup;
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::errno::Result;
 
 const LOOP_SIZE: usize = 0x40;
@@ -66,6 +71,19 @@ pub struct Serial {
     baud_divisor: u16,
     in_buffer: VecDeque<u8>,
     out: Option<Box<dyn io::Write + Send>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SerialState {
+    interrupt_enable: u8,
+    interrupt_identification: u8,
+    line_control: u8,
+    line_status: u8,
+    modem_control: u8,
+    modem_status: u8,
+    scratch: u8,
+    baud_divisor: u16,
+    in_buffer: VecDeque<u8>,
 }
 
 impl Serial {
@@ -194,6 +212,32 @@ impl Serial {
         }
         Ok(())
     }
+
+    fn state(&self) -> SerialState {
+        SerialState {
+            interrupt_enable: self.interrupt_enable,
+            interrupt_identification: self.interrupt_identification,
+            line_control: self.line_control,
+            line_status: self.line_status,
+            modem_control: self.modem_control,
+            modem_status: self.modem_status,
+            scratch: self.scratch,
+            baud_divisor: self.baud_divisor,
+            in_buffer: self.in_buffer.clone(),
+        }
+    }
+
+    fn set_state(&mut self, state: &SerialState) {
+        self.interrupt_enable = state.interrupt_enable;
+        self.interrupt_identification = state.interrupt_identification;
+        self.line_control = state.line_control;
+        self.line_status = state.line_status;
+        self.modem_control = state.modem_control;
+        self.modem_status = state.modem_status;
+        self.scratch = state.scratch;
+        self.baud_divisor = state.baud_divisor;
+        self.in_buffer = state.in_buffer.clone();
+    }
 }
 
 impl BusDevice for Serial {
@@ -235,6 +279,55 @@ impl BusDevice for Serial {
         if let Err(_e) = self.handle_write(offset as u8, data[0]) {}
     }
 }
+
+const SERIAL_SNAPSHOT_ID: &str = "serial";
+impl Snapshottable for Serial {
+    fn id(&self) -> String {
+        SERIAL_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut serial_snapshot = Snapshot::new(SERIAL_SNAPSHOT_ID);
+        serial_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", SERIAL_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(serial_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(serial_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", SERIAL_SNAPSHOT_ID))
+        {
+            let serial_state = match serde_json::from_slice(&serial_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize SERIAL {}",
+                        error
+                    )))
+                }
+            };
+
+            self.set_state(&serial_state);
+
+            return Ok(());
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find the serial snapshot section"
+        )))
+    }
+}
+
+impl Pausable for Serial {}
+impl Transportable for Serial {}
+impl Migratable for Serial {}
 
 #[cfg(test)]
 mod tests {
