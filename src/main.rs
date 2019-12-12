@@ -62,28 +62,13 @@ impl log::Log for Logger {
     fn flush(&self) {}
 }
 
-fn main() {
-    let pid = unsafe { libc::getpid() };
-    let uid = unsafe { libc::getuid() };
-
-    let mut api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", uid, pid};
-    if uid == 0 {
-        // If we're running as root, we try to get the real user ID if we've been sudo'ed
-        // or else create our socket directly under /run.
-        let key = "SUDO_UID";
-        match env::var(key) {
-            Ok(sudo_uid) => {
-                api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", sudo_uid, pid}
-            }
-            Err(_) => api_server_path = format! {"/run/cloud-hypervisor.{}", pid},
-        }
-    }
-
-    let default_vcpus = format! {"boot={}", config::DEFAULT_VCPUS};
-    let default_memory = format! {"size={}M", config::DEFAULT_MEMORY_MB};
-    let default_rng = format! {"src={}", config::DEFAULT_RNG_SOURCE};
-
-    let cmd_arguments = App::new("cloud-hypervisor")
+fn create_app<'a, 'b>(
+    default_vcpus: &'a str,
+    default_memory: &'a str,
+    default_rng: &'a str,
+    api_server_path: &'a str,
+) -> App<'a, 'b> {
+    App::new("cloud-hypervisor")
         .version(crate_version!())
         .author(crate_authors!())
         .about("Launch a cloud-hypervisor VMM.")
@@ -265,7 +250,36 @@ fn main() {
                 .default_value(&api_server_path)
                 .group("vmm-config"),
         )
-        .get_matches();
+}
+
+fn main() {
+    let pid = unsafe { libc::getpid() };
+    let uid = unsafe { libc::getuid() };
+
+    let mut api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", uid, pid};
+    if uid == 0 {
+        // If we're running as root, we try to get the real user ID if we've been sudo'ed
+        // or else create our socket directly under /run.
+        let key = "SUDO_UID";
+        match env::var(key) {
+            Ok(sudo_uid) => {
+                api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", sudo_uid, pid}
+            }
+            Err(_) => api_server_path = format! {"/run/cloud-hypervisor.{}", pid},
+        }
+    }
+
+    let default_vcpus = format! {"boot={}", config::DEFAULT_VCPUS};
+    let default_memory = format! {"size={}M", config::DEFAULT_MEMORY_MB};
+    let default_rng = format! {"src={}", config::DEFAULT_RNG_SOURCE};
+
+    let cmd_arguments = create_app(
+        &default_vcpus,
+        &default_memory,
+        &default_rng,
+        &api_server_path,
+    )
+    .get_matches();
 
     // These .unwrap()s cannot fail as there is a default value defined
     let cpus = cmd_arguments.value_of("cpus").unwrap();
