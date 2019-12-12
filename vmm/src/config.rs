@@ -5,6 +5,7 @@
 
 extern crate vm_virtio;
 
+use clap::ArgMatches;
 use net_util::MacAddr;
 use std::convert::From;
 use std::net::AddrParseError;
@@ -104,6 +105,49 @@ pub struct VmParams<'a> {
     pub vhost_user_net: Option<Vec<&'a str>>,
     pub vhost_user_blk: Option<Vec<&'a str>>,
     pub vsock: Option<Vec<&'a str>>,
+}
+
+impl<'a> VmParams<'a> {
+    pub fn from_arg_matches(args: &'a ArgMatches) -> Self {
+        // These .unwrap()s cannot fail as there is a default value defined
+        let cpus = args.value_of("cpus").unwrap();
+        let memory = args.value_of("memory").unwrap();
+        let rng = args.value_of("rng").unwrap();
+        let serial = args.value_of("serial").unwrap();
+
+        let kernel = args.value_of("kernel");
+        let cmdline = args.value_of("cmdline");
+
+        let disks: Option<Vec<&str>> = args.values_of("disk").map(|x| x.collect());
+        let net: Option<Vec<&str>> = args.values_of("net").map(|x| x.collect());
+        let console = args.value_of("console").unwrap();
+        let fs: Option<Vec<&str>> = args.values_of("fs").map(|x| x.collect());
+        let pmem: Option<Vec<&str>> = args.values_of("pmem").map(|x| x.collect());
+        let devices: Option<Vec<&str>> = args.values_of("device").map(|x| x.collect());
+        let vhost_user_net: Option<Vec<&str>> =
+            args.values_of("vhost-user-net").map(|x| x.collect());
+        let vhost_user_blk: Option<Vec<&str>> =
+            args.values_of("vhost-user-blk").map(|x| x.collect());
+        let vsock: Option<Vec<&str>> = args.values_of("vsock").map(|x| x.collect());
+
+        VmParams {
+            cpus,
+            memory,
+            kernel,
+            cmdline,
+            disks,
+            net,
+            rng,
+            fs,
+            pmem,
+            serial,
+            console,
+            devices,
+            vhost_user_net,
+            vhost_user_blk,
+            vsock,
+        }
+    }
 }
 
 fn parse_size(size: &str) -> Result<u64> {

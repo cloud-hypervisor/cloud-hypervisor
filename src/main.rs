@@ -287,28 +287,7 @@ fn main() {
     )
     .get_matches();
 
-    // These .unwrap()s cannot fail as there is a default value defined
-    let cpus = cmd_arguments.value_of("cpus").unwrap();
-    let memory = cmd_arguments.value_of("memory").unwrap();
-    let rng = cmd_arguments.value_of("rng").unwrap();
-    let serial = cmd_arguments.value_of("serial").unwrap();
-
-    let kernel = cmd_arguments.value_of("kernel");
-    let cmdline = cmd_arguments.value_of("cmdline");
-
-    let disks: Option<Vec<&str>> = cmd_arguments.values_of("disk").map(|x| x.collect());
-    let net: Option<Vec<&str>> = cmd_arguments.values_of("net").map(|x| x.collect());
-    let console = cmd_arguments.value_of("console").unwrap();
-    let fs: Option<Vec<&str>> = cmd_arguments.values_of("fs").map(|x| x.collect());
-    let pmem: Option<Vec<&str>> = cmd_arguments.values_of("pmem").map(|x| x.collect());
-    let devices: Option<Vec<&str>> = cmd_arguments.values_of("device").map(|x| x.collect());
-    let vhost_user_net: Option<Vec<&str>> = cmd_arguments
-        .values_of("vhost-user-net")
-        .map(|x| x.collect());
-    let vhost_user_blk: Option<Vec<&str>> = cmd_arguments
-        .values_of("vhost-user-blk")
-        .map(|x| x.collect());
-    let vsock: Option<Vec<&str>> = cmd_arguments.values_of("vsock").map(|x| x.collect());
+    let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
 
     let log_level = match cmd_arguments.occurrences_of("v") {
         0 => LevelFilter::Error,
@@ -334,23 +313,7 @@ fn main() {
     .map(|()| log::set_max_level(log_level))
     .expect("Expected to be able to setup logger");
 
-    let vm_config = match config::VmConfig::parse(config::VmParams {
-        cpus,
-        memory,
-        kernel,
-        cmdline,
-        disks,
-        net,
-        rng,
-        fs,
-        pmem,
-        serial,
-        console,
-        devices,
-        vhost_user_net,
-        vhost_user_blk,
-        vsock,
-    }) {
+    let vm_config = match config::VmConfig::parse(vm_params) {
         Ok(config) => config,
         Err(e) => {
             println!("Failed parsing parameters {:?}", e);
