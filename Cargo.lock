@@ -242,14 +242,19 @@ name = "devices"
 version = "0.1.0"
 dependencies = [
  "acpi_tables",
+ "anyhow",
  "bitflags 1.2.1",
  "byteorder",
  "epoll",
  "libc",
  "log 0.4.8",
+ "serde",
+ "serde_derive",
+ "serde_json",
  "tempfile",
  "vm-device",
  "vm-memory",
+ "vm-migration",
  "vmm-sys-util",
 ]
 
