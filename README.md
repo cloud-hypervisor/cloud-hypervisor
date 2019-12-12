@@ -196,7 +196,6 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--rng
 ```
 
-
 # 3. Status
 
 `cloud-hypervisor` is in a very early, pre-alpha stage. Use at your own risk!
@@ -207,6 +206,11 @@ As of 2019-12-12, the following cloud images are supported:
 * [Ubuntu Eoan](https://cloud-images.ubuntu.com/eoan/current/) (cloudimg)
 
 Direct kernel boot to userspace should work with most rootfs.
+
+## Hot Plug
+
+This [document](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/hotplug.md) details how to add devices to
+a running VM. Currently only CPU hot plug is supported.
 
 ## Device Model
 
