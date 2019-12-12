@@ -115,7 +115,7 @@ $ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hyperviso
 $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel ./hypervisor-fw \
 	--disk path=clear-29160-kvm.img \
-	--cpus 4 \
+	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
 	--rng
@@ -170,7 +170,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
 	--disk path=clear-29160-kvm.img \
 	--cmdline "console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
-	--cpus 4 \
+	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
 	--rng
@@ -190,7 +190,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--serial tty \
 	--disk path=clear-29160-kvm.img \
 	--cmdline "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
-	--cpus 4 \
+	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
 	--rng
