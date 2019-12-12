@@ -10,6 +10,7 @@
 // See https://pdos.csail.mit.edu/6.828/2016/readings/ia32/ioapic.pdf for a specification.
 
 use crate::BusDevice;
+use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::io;
 use std::result;
@@ -19,6 +20,14 @@ use vm_device::interrupt::{
     MsiIrqGroupConfig, MsiIrqSourceConfig,
 };
 use vm_memory::GuestAddress;
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "GuestAddress")]
+pub struct GuestAddressDef(pub u64);
 
 #[derive(Debug)]
 pub enum Error {
@@ -150,8 +159,19 @@ pub struct Ioapic {
     id: u32,
     reg_sel: u32,
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
+    used_entries: [bool; NUM_IOAPIC_PINS],
     apic_address: GuestAddress,
     interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct IoapicState {
+    id: u32,
+    reg_sel: u32,
+    reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
+    used_entries: [bool; NUM_IOAPIC_PINS],
+    #[serde(with = "GuestAddressDef")]
+    apic_address: GuestAddress,
 }
 
 impl BusDevice for Ioapic {
@@ -209,6 +229,7 @@ impl Ioapic {
             id: 0,
             reg_sel: 0,
             reg_entries: [0; NUM_IOAPIC_PINS],
+            used_entries: [false; NUM_IOAPIC_PINS],
             apic_address,
             interrupt_source_group,
         })
@@ -341,6 +362,8 @@ impl Ioapic {
                 if let Err(e) = self.update_entry(index) {
                     error!("Failed updating IOAPIC entry: {:?}", e);
                 }
+                // Store the information this IRQ is now being used.
+                self.used_entries[index] = true;
             }
             _ => error!("IOAPIC: invalid write to register offset"),
         }
@@ -366,4 +389,78 @@ impl Ioapic {
             }
         }
     }
+
+    fn state(&self) -> IoapicState {
+        IoapicState {
+            id: self.id,
+            reg_sel: self.reg_sel,
+            reg_entries: self.reg_entries,
+            used_entries: self.used_entries,
+            apic_address: self.apic_address,
+        }
+    }
+
+    fn set_state(&mut self, state: &IoapicState) -> Result<()> {
+        self.id = state.id;
+        self.reg_sel = state.reg_sel;
+        self.reg_entries = state.reg_entries;
+        self.used_entries = state.used_entries;
+        self.apic_address = state.apic_address;
+        for (irq, entry) in self.used_entries.iter().enumerate() {
+            if *entry {
+                self.update_entry(irq)?;
+            }
+        }
+
+        Ok(())
+    }
 }
+
+const IOAPIC_SNAPSHOT_ID: &str = "ioapic";
+impl Snapshottable for Ioapic {
+    fn id(&self) -> String {
+        IOAPIC_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut ioapic_snapshot = Snapshot::new(IOAPIC_SNAPSHOT_ID);
+        ioapic_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", IOAPIC_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(ioapic_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(ioapic_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", IOAPIC_SNAPSHOT_ID))
+        {
+            let ioapic_state = match serde_json::from_slice(&ioapic_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize IOAPIC {}",
+                        error
+                    )))
+                }
+            };
+
+            return self.set_state(&ioapic_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore IOAPIC state {:?}", e))
+            });
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find IOAPIC snapshot section"
+        )))
+    }
+}
+
+impl Pausable for Ioapic {}
+impl Transportable for Ioapic {}
+impl Migratable for Ioapic {}
