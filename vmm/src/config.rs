@@ -182,7 +182,7 @@ fn parse_on_off(param: &str) -> Result<bool> {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct CpusConfig {
     pub boot_vcpus: u8,
     pub max_vcpus: u8,
@@ -241,7 +241,7 @@ impl Default for CpusConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub size: u64,
     #[serde(default)]
@@ -299,12 +299,12 @@ impl Default for MemoryConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct KernelConfig {
     pub path: PathBuf,
 }
 
-#[derive(Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct CmdlineConfig {
     pub args: String,
 }
@@ -319,7 +319,7 @@ impl CmdlineConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: PathBuf,
     #[serde(default)]
@@ -349,7 +349,7 @@ impl DiskConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct NetConfig {
     #[serde(default = "default_netconfig_tap")]
     pub tap: Option<String>,
@@ -433,7 +433,7 @@ impl NetConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct RngConfig {
     pub src: PathBuf,
     #[serde(default)]
@@ -472,7 +472,7 @@ impl Default for RngConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct FsConfig {
     pub tag: String,
     pub sock: PathBuf,
@@ -582,7 +582,7 @@ impl FsConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct PmemConfig {
     pub file: PathBuf,
     pub size: u64,
@@ -627,7 +627,7 @@ impl PmemConfig {
     }
 }
 
-#[derive(Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum ConsoleOutputMode {
     Off,
     Tty,
@@ -644,7 +644,7 @@ impl ConsoleOutputMode {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ConsoleConfig {
     #[serde(default = "default_consoleconfig_file")]
     pub file: Option<PathBuf>,
@@ -718,7 +718,7 @@ impl ConsoleConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct DeviceConfig {
     pub path: PathBuf,
     #[serde(default)]
@@ -748,7 +748,7 @@ impl DeviceConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct VhostUserNetConfig {
     pub sock: String,
     #[serde(default = "default_vunetconfig_num_queues")]
@@ -823,7 +823,7 @@ impl VhostUserNetConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct VsockConfig {
     pub cid: u64,
     pub sock: PathBuf,
@@ -862,7 +862,7 @@ impl VsockConfig {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct VhostUserBlkConfig {
     pub sock: String,
     #[serde(default = "default_vublkconfig_num_queues")]
@@ -934,7 +934,7 @@ impl VhostUserBlkConfig {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct VmConfig {
     #[serde(default)]
     pub cpus: CpusConfig,
