@@ -62,6 +62,14 @@ impl log::Log for Logger {
     fn flush(&self) {}
 }
 
+fn prepare_default_values() -> (String, String, String) {
+    let default_vcpus = format! {"boot={}", config::DEFAULT_VCPUS};
+    let default_memory = format! {"size={}M", config::DEFAULT_MEMORY_MB};
+    let default_rng = format! {"src={}", config::DEFAULT_RNG_SOURCE};
+
+    (default_vcpus, default_memory, default_rng)
+}
+
 fn create_app<'a, 'b>(
     default_vcpus: &'a str,
     default_memory: &'a str,
@@ -269,9 +277,7 @@ fn main() {
         }
     }
 
-    let default_vcpus = format! {"boot={}", config::DEFAULT_VCPUS};
-    let default_memory = format! {"size={}M", config::DEFAULT_MEMORY_MB};
-    let default_rng = format! {"src={}", config::DEFAULT_RNG_SOURCE};
+    let (default_vcpus, default_memory, default_rng) = prepare_default_values();
 
     let cmd_arguments = create_app(
         &default_vcpus,
