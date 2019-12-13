@@ -304,7 +304,7 @@ pub struct KernelConfig {
     pub path: PathBuf,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 pub struct CmdlineConfig {
     pub args: String,
 }
@@ -941,6 +941,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub memory: MemoryConfig,
     pub kernel: Option<KernelConfig>,
+    #[serde(default)]
     pub cmdline: CmdlineConfig,
     pub disks: Option<Vec<DiskConfig>>,
     pub net: Option<Vec<NetConfig>>,
