@@ -418,6 +418,7 @@ mod tests {
     use std::io::BufRead;
     use std::io::{Read, Write};
     use std::net::TcpStream;
+    use std::path::Path;
     use std::process::{Command, Stdio};
     use std::string::String;
     use std::sync::Mutex;
@@ -496,6 +497,24 @@ mod tests {
         }
     }
 
+    fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<u64> {
+        for _ in 0..10 {
+            match fs::copy(&from, &to) {
+                Err(e) => {
+                    if let Some(errno) = e.raw_os_error() {
+                        if errno == libc::ENOSPC {
+                            thread::sleep(std::time::Duration::new(60, 0));
+                            continue;
+                        }
+                    }
+                    return Err(e);
+                }
+                Ok(i) => return Ok(i),
+            }
+        }
+        Err(io::Error::last_os_error())
+    }
+
     impl DiskConfig for ClearDiskConfig {
         fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
             let cloudinit_file_path =
@@ -518,7 +537,7 @@ mod tests {
                 .join("openstack")
                 .join("latest");
 
-            fs::copy(
+            rate_limited_copy(
                 source_file_dir.join("meta_data.json"),
                 cloud_init_directory.join("latest").join("meta_data.json"),
             )
@@ -578,9 +597,9 @@ mod tests {
                 String::from(tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
             let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
 
-            fs::copy(osdisk_base_path, &osdisk_path)
+            rate_limited_copy(osdisk_base_path, &osdisk_path)
                 .expect("copying of OS source disk image failed");
-            fs::copy(osdisk_raw_base_path, &osdisk_raw_path)
+            rate_limited_copy(osdisk_raw_base_path, &osdisk_raw_path)
                 .expect("copying of OS source disk raw image failed");
 
             self.cloudinit_path = cloudinit_path;
@@ -614,7 +633,7 @@ mod tests {
                 .join("ubuntu");
 
             vec!["meta-data", "user-data"].iter().for_each(|x| {
-                fs::copy(source_file_dir.join(x), cloud_init_directory.join(x))
+                rate_limited_copy(source_file_dir.join(x), cloud_init_directory.join(x))
                     .expect("Expect copying cloud-init meta-data to succeed");
             });
 
@@ -667,7 +686,7 @@ mod tests {
                 String::from(tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
             let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
 
-            fs::copy(osdisk_raw_base_path, &osdisk_raw_path)
+            rate_limited_copy(osdisk_raw_base_path, &osdisk_raw_path)
                 .expect("copying of OS source disk raw image failed");
 
             self.cloudinit_path = cloudinit_path;
@@ -2393,7 +2412,7 @@ mod tests {
 
             // We copy our cloudinit into the vfio mount point, for the nested
             // cloud-hypervisor guest to use.
-            fs::copy(
+            rate_limited_copy(
                 &guest.disk_config.disk(DiskType::CloudInit).unwrap(),
                 &cloud_init_vfio_base_path,
             )
