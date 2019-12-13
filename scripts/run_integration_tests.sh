@@ -10,7 +10,7 @@ FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hyperv
 FW="$WORKLOADS_DIR/hypervisor-fw"
 if [ ! -f "$FW" ]; then
     pushd $WORKLOADS_DIR
-    wget --quiet $FW_URL
+    time wget --quiet $FW_URL
     popd
 fi
 
@@ -19,7 +19,7 @@ CLEAR_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/
 CLEAR_OS_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_IMAGE_NAME"
 if [ ! -f "$CLEAR_OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
-    wget --quiet $CLEAR_OS_IMAGE_URL
+    time wget --quiet $CLEAR_OS_IMAGE_URL
     popd
 fi
 
@@ -27,7 +27,7 @@ CLEAR_OS_RAW_IMAGE_NAME="clear-31310-cloudguest-raw.img"
 CLEAR_OS_RAW_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_RAW_IMAGE_NAME"
 if [ ! -f "$CLEAR_OS_RAW_IMAGE" ]; then
     pushd $WORKLOADS_DIR
-    qemu-img convert -p -f qcow2 -O raw $CLEAR_OS_IMAGE_NAME $CLEAR_OS_RAW_IMAGE_NAME
+    time qemu-img convert -p -f qcow2 -O raw $CLEAR_OS_IMAGE_NAME $CLEAR_OS_RAW_IMAGE_NAME
     popd
 fi
 
@@ -36,7 +36,7 @@ BIONIC_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images
 BIONIC_OS_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_IMAGE_NAME"
 if [ ! -f "$BIONIC_OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
-    wget --quiet $BIONIC_OS_IMAGE_URL
+    time wget --quiet $BIONIC_OS_IMAGE_URL
     popd
 fi
 
@@ -44,7 +44,7 @@ BIONIC_OS_RAW_IMAGE_NAME="bionic-server-cloudimg-amd64-raw.img"
 BIONIC_OS_RAW_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_RAW_IMAGE_NAME"
 if [ ! -f "$BIONIC_OS_RAW_IMAGE" ]; then
     pushd $WORKLOADS_DIR
-    qemu-img convert -p -f qcow2 -O raw $BIONIC_OS_IMAGE_NAME $BIONIC_OS_RAW_IMAGE_NAME
+    time qemu-img convert -p -f qcow2 -O raw $BIONIC_OS_IMAGE_NAME $BIONIC_OS_RAW_IMAGE_NAME
     popd
 fi
 
@@ -54,7 +54,7 @@ EOAN_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$
 EOAN_OS_IMAGE="$WORKLOADS_DIR/$EOAN_OS_IMAGE_NAME"
 if [ ! -f "$EOAN_OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
-    wget --quiet $EOAN_OS_IMAGE_URL
+    time wget --quiet $EOAN_OS_IMAGE_URL
     popd
 fi
 
@@ -62,7 +62,7 @@ EOAN_OS_RAW_IMAGE_NAME="eoan-server-cloudimg-amd64-raw.img"
 EOAN_OS_RAW_IMAGE="$WORKLOADS_DIR/$EOAN_OS_RAW_IMAGE_NAME"
 if [ ! -f "$EOAN_OS_RAW_IMAGE" ]; then
     pushd $WORKLOADS_DIR
-    qemu-img convert -p -f qcow2 -O raw $EOAN_OS_IMAGE_NAME $EOAN_OS_RAW_IMAGE_NAME
+    time qemu-img convert -p -f qcow2 -O raw $EOAN_OS_IMAGE_NAME $EOAN_OS_RAW_IMAGE_NAME
     popd
 fi
 
@@ -76,10 +76,10 @@ LINUX_CUSTOM_DIR="linux-custom"
 if [ ! -f "$VMLINUX_IMAGE" ]; then
     SRCDIR=$PWD
     pushd $WORKLOADS_DIR
-    git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu" $LINUX_CUSTOM_DIR
+    time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu" $LINUX_CUSTOM_DIR
     pushd $LINUX_CUSTOM_DIR
     cp $SRCDIR/resources/linux-virtio-fs-virtio-iommu-config .config
-    make bzImage -j `nproc`
+    time make bzImage -j `nproc`
     cp vmlinux $VMLINUX_IMAGE
     cp arch/x86/boot/bzImage $BZIMAGE_IMAGE
     popd
@@ -93,8 +93,8 @@ if [ ! -f "$VIRTIOFSD" ]; then
     pushd $WORKLOADS_DIR
     git clone --depth 1 "https://gitlab.com/virtio-fs/qemu.git" -b "virtio-fs-dev" $QEMU_DIR
     pushd $QEMU_DIR
-    ./configure --prefix=$PWD --target-list=x86_64-softmmu
-    make virtiofsd -j `nproc`
+    time ./configure --prefix=$PWD --target-list=x86_64-softmmu
+    time make virtiofsd -j `nproc`
     cp virtiofsd $VIRTIOFSD
     popd
     rm -rf $QEMU_DIR
@@ -164,13 +164,13 @@ sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
 # Ensure test binary has the same caps as the cloud-hypervisor one
-cargo test --no-run --features "integration_tests" -- --nocapture
+time cargo test --no-run --features "integration_tests" -- --nocapture
 ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
 
 sudo adduser $USER kvm
 newgrp kvm << EOF
 export RUST_BACKTRACE=1
-cargo test --features "integration_tests" -- --nocapture
+time cargo test --features "integration_tests" -- --nocapture
 EOF
 RES=$?
 
@@ -181,7 +181,7 @@ if [ $RES -eq 0 ]; then
 
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
-cargo test --features "integration_tests,mmio" -- --nocapture
+time cargo test --features "integration_tests,mmio" -- --nocapture
 EOF
 
     RES=$?
