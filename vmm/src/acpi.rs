@@ -169,8 +169,13 @@ pub fn create_acpi_tables(
 
     let (prev_tbl_len, prev_tbl_off) =
         if let Some((iommu_id, dev_ids)) = &device_manager.virt_iommu() {
+            // VIOT
+            let mut viot = SDT::new(*b"VIOT", 36, 0, *b"CLOUDH", *b"CHVIOT  ", 0);
+            // VIOT reserved 12 bytes
+            viot.append_slice(&[0u8; 12]);
+
             // IORT
-            let mut iort = SDT::new(*b"IORT", 36, 1, *b"CLOUDH", *b"CHIORT  ", 1);
+            let mut iort = SDT::new(*b"IORT", 36, 0, *b"CLOUDH", *b"CHIORT  ", 1);
             // IORT number of nodes
             iort.append(2u32);
             // IORT offset to array of IORT nodes
@@ -216,13 +221,17 @@ pub fn create_acpi_tables(
                 });
             }
 
-            let iort_offset = mcfg_offset.checked_add(mcfg.len() as u64).unwrap();
-            guest_mem
-                .write_slice(iort.as_slice(), iort_offset)
-                .expect("Error writing IORT table");
-            tables.push(iort_offset.0);
+            // Finalize VIOT by including the IORT table and all related
+            // subtables.
+            viot.append_slice(iort.as_slice());
 
-            (iort.len(), iort_offset)
+            let viot_offset = mcfg_offset.checked_add(mcfg.len() as u64).unwrap();
+            guest_mem
+                .write_slice(viot.as_slice(), viot_offset)
+                .expect("Error writing IORT table");
+            tables.push(viot_offset.0);
+
+            (viot.len(), viot_offset)
         } else {
             (mcfg.len(), mcfg_offset)
         };
