@@ -440,6 +440,7 @@ impl BusDevice for CpuManager {
     }
 }
 
+#[derive(Default)]
 struct VcpuState {
     inserting: bool,
     handle: Option<thread::JoinHandle<()>>,
@@ -483,6 +484,9 @@ impl CpuManager {
         cpuid: CpuId,
         reset_evt: EventFd,
     ) -> Result<Arc<Mutex<CpuManager>>> {
+        let mut vcpu_states = Vec::with_capacity(usize::from(max_vcpus));
+        vcpu_states.resize_with(usize::from(max_vcpus), VcpuState::default);
+
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus,
             max_vcpus,
@@ -494,7 +498,7 @@ impl CpuManager {
             fd,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
-            vcpu_states: Vec::with_capacity(max_vcpus as usize),
+            vcpu_states,
             reset_evt,
             selected_cpu: 0,
         }));
@@ -608,10 +612,8 @@ impl CpuManager {
 
             // On hot plug calls into this function entry_addr is None. It is for
             // those hotplug CPU additions that we need to set the inserting flag.
-            self.vcpu_states.push(VcpuState {
-                handle,
-                inserting: entry_addr.is_none(),
-            });
+            self.vcpu_states[usize::from(cpu_id)].handle = handle;
+            self.vcpu_states[usize::from(cpu_id)].inserting = entry_addr.is_none();
         }
 
         // Unblock all CPU threads.
@@ -656,7 +658,9 @@ impl CpuManager {
     }
 
     fn present_vcpus(&self) -> u8 {
-        self.vcpu_states.len() as u8
+        self.vcpu_states
+            .iter()
+            .fold(0, |acc, state| acc + state.active() as u8)
     }
 
     #[cfg(feature = "acpi")]
