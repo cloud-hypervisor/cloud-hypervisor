@@ -740,6 +740,22 @@ impl Aml for CPU {
     }
 }
 
+struct CPUNotify {
+    cpu_id: u8,
+}
+
+#[cfg(feature = "acpi")]
+impl Aml for CPUNotify {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let object = aml::Path::new(&format!("C{:03}", self.cpu_id));
+        aml::If::new(
+            &aml::Equal::new(&aml::Arg(0), &self.cpu_id),
+            vec![&aml::Notify::new(&object, &aml::Arg(1))],
+        )
+        .to_aml_bytes()
+    }
+}
+
 struct CPUMethods {
     max_vcpus: u8,
 }
@@ -774,24 +790,37 @@ impl Aml for CPUMethods {
             .to_aml_bytes(),
         );
 
-        let mut paths = Vec::new();
+        let mut cpu_notifies = Vec::new();
         for cpu_id in 0..self.max_vcpus {
-            paths.push(aml::Path::new(format!("C{:03}", cpu_id).as_str()))
-        }
-        let mut notify_methods = Vec::new();
-
-        for cpu_id in 0..self.max_vcpus {
-            notify_methods.push(aml::Notify::new(&paths[usize::from(cpu_id)], &aml::ONE));
+            cpu_notifies.push(CPUNotify { cpu_id });
         }
 
-        let mut notify_methods_inner: Vec<&dyn aml::Aml> = Vec::new();
-        for notify_method in notify_methods.iter() {
-            notify_methods_inner.push(notify_method);
+        let mut cpu_notifies_refs: Vec<&dyn aml::Aml> = Vec::new();
+        for cpu_id in 0..self.max_vcpus {
+            cpu_notifies_refs.push(&cpu_notifies[usize::from(cpu_id)]);
         }
 
         bytes.extend_from_slice(
-            // Notify all vCPUs
-            &aml::Method::new("CTFY".into(), 0, true, notify_methods_inner).to_aml_bytes(),
+            &aml::Method::new("CTFY".into(), 2, true, cpu_notifies_refs).to_aml_bytes(),
+        );
+
+        bytes.extend_from_slice(
+            &aml::Method::new(
+                "CSCN".into(),
+                0,
+                true,
+                vec![
+                    &aml::Store::new(&aml::Local(0), &aml::ZERO),
+                    &aml::While::new(
+                        &aml::LessThan::new(&aml::Local(0), &self.max_vcpus),
+                        vec![
+                            &aml::MethodCall::new("CTFY".into(), vec![&aml::Local(0), &aml::ONE]),
+                            &aml::Add::new(&aml::Local(0), &aml::Local(0), &aml::ONE),
+                        ],
+                    ),
+                ],
+            )
+            .to_aml_bytes(),
         );
         bytes
     }
