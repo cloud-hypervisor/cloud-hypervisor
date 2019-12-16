@@ -388,6 +388,7 @@ pub struct CpuManager {
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
+const CPU_INSERTING_FLAG: usize = 1;
 
 const CPU_STATUS_OFFSET: u64 = 4;
 const CPU_SELECTION_OFFSET: u64 = 0;
@@ -400,6 +401,9 @@ impl BusDevice for CpuManager {
                     let state = &self.vcpu_states[usize::from(self.selected_cpu)];
                     if state.active() {
                         data[0] |= 1 << CPU_ENABLE_FLAG;
+                    }
+                    if state.inserting {
+                        data[0] |= 1 << CPU_INSERTING_FLAG;
                     }
                 }
             }
@@ -417,6 +421,15 @@ impl BusDevice for CpuManager {
             CPU_SELECTION_OFFSET => {
                 self.selected_cpu = data[0];
             }
+            CPU_STATUS_OFFSET => {
+                let state = &mut self.vcpu_states[usize::from(self.selected_cpu)];
+                // The ACPI code writes back a 1 to acknowledge the insertion
+                if (data[0] & (1 << CPU_INSERTING_FLAG) == 1 << CPU_INSERTING_FLAG)
+                    && state.inserting
+                {
+                    state.inserting = false;
+                }
+            }
             _ => {
                 warn!(
                     "Unexpected offset for accessing CPU manager device: {:#}",
@@ -428,6 +441,7 @@ impl BusDevice for CpuManager {
 }
 
 struct VcpuState {
+    inserting: bool,
     handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -592,7 +606,12 @@ impl CpuManager {
                     .map_err(Error::VcpuSpawn)?,
             );
 
-            self.vcpu_states.push(VcpuState { handle });
+            // On hot plug calls into this function entry_addr is None. It is for
+            // those hotplug CPU additions that we need to set the inserting flag.
+            self.vcpu_states.push(VcpuState {
+                handle,
+                inserting: entry_addr.is_none(),
+            });
         }
 
         // Unblock all CPU threads.
@@ -810,14 +829,35 @@ impl Aml for CPUMethods {
                 0,
                 true,
                 vec![
+                    // Take lock defined above
+                    &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xfff),
                     &aml::Store::new(&aml::Local(0), &aml::ZERO),
                     &aml::While::new(
                         &aml::LessThan::new(&aml::Local(0), &self.max_vcpus),
                         vec![
-                            &aml::MethodCall::new("CTFY".into(), vec![&aml::Local(0), &aml::ONE]),
+                            // Write CPU number (in first argument) to I/O port via field
+                            &aml::Store::new(&aml::Path::new("\\_SB_.PRES.CSEL"), &aml::Local(0)),
+                            // Check if CINS bit is set
+                            &aml::If::new(
+                                &aml::Equal::new(&aml::Path::new("\\_SB_.PRES.CINS"), &aml::ONE),
+                                // Notify device if it is
+                                vec![
+                                    &aml::MethodCall::new(
+                                        "CTFY".into(),
+                                        vec![&aml::Local(0), &aml::ONE],
+                                    ),
+                                    // Reset CINS bit
+                                    &aml::Store::new(
+                                        &aml::Path::new("\\_SB_.PRES.CINS"),
+                                        &aml::ONE,
+                                    ),
+                                ],
+                            ),
                             &aml::Add::new(&aml::Local(0), &aml::Local(0), &aml::ONE),
                         ],
                     ),
+                    // Release lock
+                    &aml::Release::new("\\_SB_.PRES.CPLK".into()),
                 ],
             )
             .to_aml_bytes(),
