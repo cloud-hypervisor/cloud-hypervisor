@@ -389,6 +389,7 @@ pub struct CpuManager {
 
 const CPU_ENABLE_FLAG: usize = 0;
 const CPU_INSERTING_FLAG: usize = 1;
+const CPU_REMOVING_FLAG: usize = 2;
 
 const CPU_STATUS_OFFSET: u64 = 4;
 const CPU_SELECTION_OFFSET: u64 = 0;
@@ -404,6 +405,9 @@ impl BusDevice for CpuManager {
                     }
                     if state.inserting {
                         data[0] |= 1 << CPU_INSERTING_FLAG;
+                    }
+                    if state.removing {
+                        data[0] |= 1 << CPU_REMOVING_FLAG;
                     }
                 }
             }
@@ -429,6 +433,11 @@ impl BusDevice for CpuManager {
                 {
                     state.inserting = false;
                 }
+                // Ditto for removal
+                if (data[0] & (1 << CPU_REMOVING_FLAG) == 1 << CPU_REMOVING_FLAG) && state.removing
+                {
+                    state.removing = false;
+                }
             }
             _ => {
                 warn!(
@@ -443,6 +452,7 @@ impl BusDevice for CpuManager {
 #[derive(Default)]
 struct VcpuState {
     inserting: bool,
+    removing: bool,
     handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -621,13 +631,27 @@ impl CpuManager {
         Ok(())
     }
 
+    fn mark_vcpus_for_removal(&mut self, desired_vcpus: u8) -> Result<()> {
+        // Mark vCPUs for removal, actual removal happens on ejection
+        for cpu_id in desired_vcpus..self.present_vcpus() {
+            self.vcpu_states[usize::from(cpu_id)].removing = true;
+        }
+        Ok(())
+    }
+
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
     pub fn start_boot_vcpus(&mut self, entry_addr: GuestAddress) -> Result<()> {
         self.activate_vcpus(self.boot_vcpus(), Some(entry_addr))
     }
 
     pub fn resize(&mut self, desired_vcpus: u8) -> Result<()> {
-        self.activate_vcpus(desired_vcpus, None)
+        if desired_vcpus > self.present_vcpus() {
+            self.activate_vcpus(desired_vcpus, None)?;
+        } else if desired_vcpus < self.present_vcpus() {
+            self.mark_vcpus_for_removal(desired_vcpus)?;
+        }
+
+        Ok(())
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
@@ -853,6 +877,22 @@ impl Aml for CPUMethods {
                                     // Reset CINS bit
                                     &aml::Store::new(
                                         &aml::Path::new("\\_SB_.PRES.CINS"),
+                                        &aml::ONE,
+                                    ),
+                                ],
+                            ),
+                            // Check if CRMV bit is set
+                            &aml::If::new(
+                                &aml::Equal::new(&aml::Path::new("\\_SB_.PRES.CRMV"), &aml::ONE),
+                                // Notify device if it is (with the eject constant 0x3)
+                                vec![
+                                    &aml::MethodCall::new(
+                                        "CTFY".into(),
+                                        vec![&aml::Local(0), &3u8],
+                                    ),
+                                    // Reset CRMV bit
+                                    &aml::Store::new(
+                                        &aml::Path::new("\\_SB_.PRES.CRMV"),
                                         &aml::ONE,
                                     ),
                                 ],
