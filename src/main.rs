@@ -4336,6 +4336,22 @@ mod tests {
                 u32::from(desired_vcpus)
             );
 
+            // Resize the VM
+            let desired_vcpus = 2;
+            let http_body = guest.api_resize_body(desired_vcpus);
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.resize",
+                Some(&http_body),
+            );
+            thread::sleep(std::time::Duration::new(10, 0));
+            aver_eq!(
+                tb,
+                guest.get_cpu_count().unwrap_or_default(),
+                u32::from(desired_vcpus)
+            );
+
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
             let _ = child.kill();
