@@ -390,6 +390,7 @@ pub struct CpuManager {
 const CPU_ENABLE_FLAG: usize = 0;
 const CPU_INSERTING_FLAG: usize = 1;
 const CPU_REMOVING_FLAG: usize = 2;
+const CPU_EJECT_FLAG: usize = 3;
 
 const CPU_STATUS_OFFSET: u64 = 4;
 const CPU_SELECTION_OFFSET: u64 = 0;
@@ -438,6 +439,12 @@ impl BusDevice for CpuManager {
                 {
                     state.removing = false;
                 }
+                // Trigger removal of vCPU
+                if data[0] & (1 << CPU_EJECT_FLAG) == 1 << CPU_EJECT_FLAG {
+                    if let Err(e) = self.remove_vcpu(self.selected_cpu) {
+                        error!("Error removing vCPU: {:?}", e);
+                    }
+                }
             }
             _ => {
                 warn!(
@@ -454,6 +461,7 @@ struct VcpuState {
     inserting: bool,
     removing: bool,
     handle: Option<thread::JoinHandle<()>>,
+    kill: Arc<AtomicBool>,
 }
 
 impl VcpuState {
@@ -568,6 +576,7 @@ impl CpuManager {
             let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
             let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
 
+            let vcpu_kill = self.vcpu_states[usize::from(cpu_id)].kill.clone();
             let vm_memory = self.vm_memory.clone();
             let cpuid = self.cpuid.clone();
 
@@ -601,7 +610,9 @@ impl CpuManager {
                             }
 
                             // We've been told to terminate
-                            if vcpu_kill_signalled.load(Ordering::SeqCst) {
+                            if vcpu_kill_signalled.load(Ordering::SeqCst)
+                                || vcpu_kill.load(Ordering::SeqCst)
+                            {
                                 break;
                             }
 
@@ -636,6 +647,15 @@ impl CpuManager {
         for cpu_id in desired_vcpus..self.present_vcpus() {
             self.vcpu_states[usize::from(cpu_id)].removing = true;
         }
+        Ok(())
+    }
+
+    fn remove_vcpu(&mut self, cpu_id: u8) -> Result<()> {
+        let mut state = &mut self.vcpu_states[usize::from(cpu_id)];
+        state.kill.store(true, Ordering::SeqCst);
+        state.signal_thread();
+        state.join_thread()?;
+        state.handle = None;
         Ok(())
     }
 
@@ -781,6 +801,17 @@ impl Aml for CPU {
                 // containing the LAPIC for this processor with the enabled bit set
                 // even it if is disabled in the MADT (non-boot CPU)
                 &aml::Name::new("_MAT".into(), &aml::Buffer::new(mat_data)),
+                // Trigger CPU ejection
+                &aml::Method::new(
+                    "_EJ0".into(),
+                    1,
+                    false,
+                    // Call into CEJ0 method which will actually eject device
+                    vec![&aml::Return::new(&aml::MethodCall::new(
+                        "CEJ0".into(),
+                        vec![&self.cpu_id],
+                    ))],
+                ),
             ],
         )
         .to_aml_bytes()
@@ -849,6 +880,23 @@ impl Aml for CPUMethods {
 
         bytes.extend_from_slice(
             &aml::Method::new("CTFY".into(), 2, true, cpu_notifies_refs).to_aml_bytes(),
+        );
+
+        bytes.extend_from_slice(
+            &aml::Method::new(
+                "CEJ0".into(),
+                1,
+                true,
+                vec![
+                    &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xfff),
+                    // Write CPU number (in first argument) to I/O port via field
+                    &aml::Store::new(&aml::Path::new("\\_SB_.PRES.CSEL"), &aml::Arg(0)),
+                    // Set CEJ0 bit
+                    &aml::Store::new(&aml::Path::new("\\_SB_.PRES.CEJ0"), &aml::ONE),
+                    &aml::Release::new("\\_SB_.PRES.CPLK".into()),
+                ],
+            )
+            .to_aml_bytes(),
         );
 
         bytes.extend_from_slice(
