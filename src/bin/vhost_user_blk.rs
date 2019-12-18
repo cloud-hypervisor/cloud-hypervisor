@@ -62,6 +62,8 @@ pub enum Error {
     ParseImageParam,
     /// Failed to parse sock parameter.
     ParseSockParam,
+    /// Failed to parse readonly parameter.
+    ParseReadOnlyParam,
 }
 
 struct VhostUserBlkBackend {
@@ -71,13 +73,14 @@ struct VhostUserBlkBackend {
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
     config: virtio_blk_config,
+    rdonly: bool,
 }
 
 impl VhostUserBlkBackend {
-    pub fn new(image_path: String) -> Result<Self> {
+    pub fn new(image_path: String, rdonly: bool) -> Result<Self> {
         let raw_img: File = OpenOptions::new()
             .read(true)
-            .write(true)
+            .write(!rdonly)
             .open(&image_path)
             .unwrap();
 
@@ -106,6 +109,7 @@ impl VhostUserBlkBackend {
             disk_image_id: image_id,
             disk_nsectors: nsectors,
             config,
+            rdonly,
         })
     }
 
@@ -162,9 +166,14 @@ impl VhostUserBackend for VhostUserBlkBackend {
     }
 
     fn features(&self) -> u64 {
-        1 << VIRTIO_BLK_F_MQ
+        let mut avail_features = 1 << VIRTIO_BLK_F_MQ
             | 1 << VIRTIO_F_VERSION_1
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+
+        if self.rdonly {
+            avail_features |= 1 << VIRTIO_BLK_F_RO;
+        }
+        avail_features
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
@@ -214,6 +223,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
 pub struct VhostUserBlkBackendConfig<'a> {
     pub image: &'a str,
     pub sock: &'a str,
+    pub readonly: bool,
 }
 
 impl<'a> VhostUserBlkBackendConfig<'a> {
@@ -222,12 +232,18 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
 
         let mut image: &str = "";
         let mut sock: &str = "";
+        let mut readonly: bool = false;
 
         for param in params_list.iter() {
             if param.starts_with("image=") {
                 image = &param[6..];
             } else if param.starts_with("sock=") {
                 sock = &param[5..];
+            } else if param.starts_with("readonly=") {
+                readonly = match param[9..].parse::<bool>() {
+                    Ok(b) => b,
+                    Err(_) => return Err(Error::ParseReadOnlyParam),
+                }
             }
         }
 
@@ -238,7 +254,11 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
             return Err(Error::ParseSockParam);
         }
 
-        Ok(VhostUserBlkBackendConfig { image, sock })
+        Ok(VhostUserBlkBackendConfig {
+            image,
+            sock,
+            readonly,
+        })
     }
 }
 
@@ -252,7 +272,7 @@ fn main() {
                 .long("backend")
                 .help(
                     "Backend parameters \"image=<image_path>,\
-                     sock=<socket_path>\"",
+                     sock=<socket_path>,readonly=true|false\"",
                 )
                 .takes_value(true)
                 .min_values(1),
@@ -270,7 +290,8 @@ fn main() {
     };
 
     let blk_backend = Arc::new(RwLock::new(
-        VhostUserBlkBackend::new(backend_config.image.to_string()).unwrap(),
+        VhostUserBlkBackend::new(backend_config.image.to_string(), backend_config.readonly)
+            .unwrap(),
     ));
 
     debug!("blk_backend is created!\n");
