@@ -16,7 +16,6 @@
     clippy::should_implement_trait,
     clippy::transmute_ptr_to_ptr
 )]
-pub mod bootparam;
 #[allow(non_camel_case_types)]
 #[allow(non_upper_case_globals)]
 #[allow(clippy::unreadable_literal, clippy::redundant_static_lifetimes)]
