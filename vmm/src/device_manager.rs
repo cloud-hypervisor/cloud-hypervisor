@@ -696,7 +696,7 @@ impl DeviceManager {
 
         address_manager
             .io_bus
-            .insert(acpi_device.clone(), 0x3c0, 0x4)
+            .insert(acpi_device, 0x3c0, 0x4)
             .map_err(DeviceManagerError::BusError)?;
 
         let ged_irq = address_manager
@@ -734,7 +734,7 @@ impl DeviceManager {
 
         address_manager
             .io_bus
-            .insert(i8042.clone(), 0x61, 0x4)
+            .insert(i8042, 0x61, 0x4)
             .map_err(DeviceManagerError::BusError)?;
         #[cfg(feature = "cmos")]
         {
@@ -751,7 +751,7 @@ impl DeviceManager {
 
             address_manager
                 .io_bus
-                .insert(cmos.clone(), 0x70, 0x2)
+                .insert(cmos, 0x70, 0x2)
                 .map_err(DeviceManagerError::BusError)?;
         }
 
