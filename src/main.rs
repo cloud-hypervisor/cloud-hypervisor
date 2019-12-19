@@ -1587,7 +1587,7 @@ mod tests {
             let mut osdisk_base_path = workload_path.clone();
             osdisk_base_path.push("clear-31310-cloudguest.img");
 
-            let mut osdisk_raw_base_path = workload_path.clone();
+            let mut osdisk_raw_base_path = workload_path;
             osdisk_raw_base_path.push("clear-31310-cloudguest-raw.img");
 
             let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
@@ -1677,7 +1677,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut osdisk_raw_base_path = workload_path.clone();
+            let mut osdisk_raw_base_path = workload_path;
             osdisk_raw_base_path.push(&self.image_name);
 
             let osdisk_raw_path =
@@ -1709,7 +1709,7 @@ mod tests {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
-        let mut virtiofsd_path = workload_path.clone();
+        let mut virtiofsd_path = workload_path;
         virtiofsd_path.push("virtiofsd");
         let virtiofsd_path = String::from(virtiofsd_path.to_str().unwrap());
 
@@ -1760,7 +1760,7 @@ mod tests {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
-        let mut blk_file_path = workload_path.clone();
+        let mut blk_file_path = workload_path;
         blk_file_path.push(blk_img);
         let blk_file_path = String::from(blk_file_path.to_str().unwrap());
 
@@ -1883,7 +1883,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut fw_path = workload_path.clone();
+            let mut fw_path = workload_path;
             fw_path.push("hypervisor-fw");
             let fw_path = String::from(fw_path.to_str().unwrap());
             let network = GuestNetworkConfig {
@@ -2342,7 +2342,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path.clone();
+            let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
             let mut child = Command::new("target/release/cloud-hypervisor")
@@ -2401,7 +2401,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path.clone();
+            let mut kernel_path = workload_path;
             kernel_path.push("bzImage");
 
             let mut child = Command::new("target/release/cloud-hypervisor")
@@ -2820,7 +2820,7 @@ mod tests {
             let mut shared_dir = workload_path.clone();
             shared_dir.push("shared_dir");
 
-            let mut kernel_path = workload_path.clone();
+            let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
             let (dax_vmm_param, dax_mount_param) = if dax { ("on", ",dax") } else { ("off", "") };
@@ -2963,7 +2963,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path.clone();
+            let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
             let mut child = Command::new("target/release/cloud-hypervisor")
@@ -3026,7 +3026,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path.clone();
+            let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
             let mut child = Command::new("target/release/cloud-hypervisor")
@@ -3489,7 +3489,7 @@ mod tests {
             let mut kernel_path = workload_path.clone();
             kernel_path.push("bzImage");
 
-            let mut vfio_path = workload_path.clone();
+            let mut vfio_path = workload_path;
             vfio_path.push("vfio");
 
             let mut cloud_init_vfio_base_path = vfio_path.clone();
@@ -3611,7 +3611,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path.clone();
+            let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
             let mut child = Command::new("target/release/cloud-hypervisor")
@@ -3744,7 +3744,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path.clone();
+            let mut kernel_path = workload_path;
             kernel_path.push("bzImage");
 
             let mut child = Command::new("target/release/cloud-hypervisor")
@@ -4039,7 +4039,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path.clone();
+            let mut kernel_path = workload_path;
             kernel_path.push("bzImage");
 
             let mut child = Command::new("target/release/cloud-hypervisor")
@@ -4349,7 +4349,7 @@ mod tests {
             let api_socket = temp_api_path(&guest.tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
-            let mut kernel_path = workload_path.clone();
+            let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
             let mut child = Command::new("target/release/cloud-hypervisor")
