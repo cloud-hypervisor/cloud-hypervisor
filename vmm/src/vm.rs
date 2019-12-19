@@ -27,8 +27,9 @@ extern crate vm_virtio;
 use crate::config::VmConfig;
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
+use crate::memory_manager::{get_host_cpu_phys_bits, Error as MemoryManagerError, MemoryManager};
 use anyhow::anyhow;
-use arch::RegionType;
+use arch::layout;
 use devices::{ioapic, HotPlugNotificationType};
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::*;
@@ -37,19 +38,16 @@ use linux_loader::cmdline::Cmdline;
 use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 use std::ffi::CString;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io;
 use std::ops::Deref;
-use std::os::unix::io::FromRawFd;
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_allocator::{GsiApic, SystemAllocator};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
-    Address, Bytes, Error as MmapError, GuestAddress, GuestMemory, GuestMemoryMmap,
-    GuestMemoryRegion, GuestUsize,
+    Address, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion, GuestUsize,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
@@ -77,9 +75,6 @@ pub enum Error {
 
     /// Cannot open the kernel image
     KernelFile(io::Error),
-
-    /// Mmap backed guest memory error
-    GuestMemory(MmapError),
 
     /// Cannot load the kernel in memory
     KernelLoad(linux_loader::loader::Error),
@@ -109,15 +104,6 @@ pub enum Error {
 
     /// Memory is overflow
     MemOverflow,
-
-    /// Failed to create shared file.
-    SharedFileCreate(io::Error),
-
-    /// Failed to set shared file length.
-    SharedFileSetLen(io::Error),
-
-    /// Failed to allocate a memory range.
-    MemoryRangeAllocation,
 
     /// Failed to allocate the IOAPIC memory range.
     IoapicRangeAllocation,
@@ -166,6 +152,9 @@ pub enum Error {
 
     /// Cannot resume VM
     Resume(MigratableError),
+
+    /// Memory manager error
+    MemoryManager(MemoryManagerError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -221,7 +210,6 @@ impl VmState {
 
 pub struct Vm {
     kernel: File,
-    memory: Arc<RwLock<GuestMemoryMmap>>,
     threads: Vec<thread::JoinHandle<()>>,
     devices: DeviceManager,
     config: Arc<Mutex<VmConfig>>,
@@ -229,34 +217,7 @@ pub struct Vm {
     signals: Option<Signals>,
     state: RwLock<VmState>,
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
-}
-
-fn get_host_cpu_phys_bits() -> u8 {
-    use core::arch::x86_64;
-    unsafe {
-        let leaf = x86_64::__cpuid(0x8000_0000);
-
-        // Detect and handle AMD SME (Secure Memory Encryption) properly.
-        // Some physical address bits may become reserved when the feature is enabled.
-        // See AMD64 Architecture Programmer's Manual Volume 2, Section 7.10.1
-        let reduced = if leaf.eax >= 0x8000_001f
-            && leaf.ebx == 0x6874_7541    // Vendor ID: AuthenticAMD
-            && leaf.ecx == 0x444d_4163
-            && leaf.edx == 0x6974_6e65
-            && x86_64::__cpuid(0x8000_001f).eax & 0x1 != 0
-        {
-            (x86_64::__cpuid(0x8000_001f).ebx >> 6) & 0x3f
-        } else {
-            0
-        };
-
-        if leaf.eax >= 0x8000_0008 {
-            let leaf = x86_64::__cpuid(0x8000_0008);
-            ((leaf.eax & 0xff) - reduced) as u8
-        } else {
-            36
-        }
-    }
+    memory_manager: Arc<Mutex<MemoryManager>>,
 }
 
 impl Vm {
@@ -284,111 +245,6 @@ impl Vm {
             .map_err(Error::KernelFile)?;
         let fd = kvm.create_vm().map_err(Error::VmCreate)?;
         let fd = Arc::new(fd);
-
-        // Init guest memory
-        let arch_mem_regions = arch::arch_memory_regions(config.lock().unwrap().memory.size);
-
-        let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
-            .iter()
-            .filter(|r| r.2 == RegionType::Ram)
-            .map(|r| (r.0, r.1))
-            .collect();
-        let sub_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
-            .iter()
-            .filter(|r| r.2 == RegionType::SubRegion)
-            .map(|r| (r.0, r.1))
-            .collect();
-
-        // Check the number of reserved regions, and only take the first one
-        // that's acrtually a 32-bit hole.
-        let mut mem_hole = (GuestAddress(0), 0);
-        for region in sub_regions.iter() {
-            if region.0.unchecked_add(region.1 as u64).raw_value() <= 0x1_0000_0000 {
-                mem_hole = (region.0, region.1);
-                break;
-            }
-        }
-
-        let guest_memory = match config.lock().unwrap().memory.file {
-            Some(ref file) => {
-                let mut mem_regions = Vec::<(GuestAddress, usize, Option<FileOffset>)>::new();
-                for region in ram_regions.iter() {
-                    if file.is_file() {
-                        let file = OpenOptions::new()
-                            .read(true)
-                            .write(true)
-                            .open(file)
-                            .map_err(Error::SharedFileCreate)?;
-
-                        file.set_len(region.1 as u64)
-                            .map_err(Error::SharedFileSetLen)?;
-
-                        mem_regions.push((region.0, region.1, Some(FileOffset::new(file, 0))));
-                    } else if file.is_dir() {
-                        let fs_str = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
-                        let fs = std::ffi::CString::new(fs_str).unwrap();
-                        let mut path = fs.as_bytes_with_nul().to_owned();
-                        let path_ptr = path.as_mut_ptr() as *mut _;
-                        let fd = unsafe { libc::mkstemp(path_ptr) };
-                        unsafe { libc::unlink(path_ptr) };
-
-                        let f = unsafe { File::from_raw_fd(fd) };
-                        f.set_len(region.1 as u64)
-                            .map_err(Error::SharedFileSetLen)?;
-
-                        mem_regions.push((region.0, region.1, Some(FileOffset::new(f, 0))));
-                    }
-                }
-
-                GuestMemoryMmap::with_files(&mem_regions).map_err(Error::GuestMemory)?
-            }
-            None => GuestMemoryMmap::new(&ram_regions).map_err(Error::GuestMemory)?,
-        };
-
-        guest_memory
-            .with_regions(|index, region| {
-                let mem_region = kvm_userspace_memory_region {
-                    slot: index as u32,
-                    guest_phys_addr: region.start_addr().raw_value(),
-                    memory_size: region.len() as u64,
-                    userspace_addr: region.as_ptr() as u64,
-                    flags: 0,
-                };
-
-                // Safe because the guest regions are guaranteed not to overlap.
-                unsafe {
-                    fd.set_user_memory_region(mem_region)
-                        .map_err(|e| io::Error::from_raw_os_error(e.errno()))
-                }?;
-
-                // Mark the pages as mergeable if explicitly asked for.
-                if config.lock().unwrap().memory.mergeable {
-                    // Safe because the address and size are valid since the
-                    // mmap succeeded.
-                    let ret = unsafe {
-                        libc::madvise(
-                            region.as_ptr() as *mut libc::c_void,
-                            region.len() as libc::size_t,
-                            libc::MADV_MERGEABLE,
-                        )
-                    };
-                    if ret != 0 {
-                        let err = io::Error::last_os_error();
-                        // Safe to unwrap because the error is constructed with
-                        // last_os_error(), which ensures the output will be Some().
-                        let errno = err.raw_os_error().unwrap();
-                        if errno == libc::EINVAL {
-                            warn!("kernel not configured with CONFIG_KSM");
-                        } else {
-                            warn!("madvise error: {}", err);
-                        }
-                        warn!("failed to mark pages as mergeable");
-                    }
-                }
-
-                Ok(())
-            })
-            .map_err(|_: io::Error| Error::GuestMemory(MmapError::NoMemoryRegion))?;
 
         // Set TSS
         fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize)
@@ -438,38 +294,34 @@ impl Vm {
         );
 
         // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
-        let mut allocator = SystemAllocator::new(
-            GuestAddress(0),
-            1 << 16 as GuestUsize,
-            GuestAddress(0),
-            1 << get_host_cpu_phys_bits(),
-            mem_hole.0,
-            mem_hole.1 as GuestUsize,
-            vec![ioapic],
+        let allocator = Arc::new(Mutex::new(
+            SystemAllocator::new(
+                GuestAddress(0),
+                1 << 16 as GuestUsize,
+                GuestAddress(0),
+                1 << get_host_cpu_phys_bits(),
+                layout::MEM_32BIT_RESERVED_START,
+                layout::MEM_32BIT_DEVICES_SIZE,
+                vec![ioapic],
+            )
+            .ok_or(Error::CreateSystemAllocator)?,
+        ));
+
+        let memory_config = config.lock().unwrap().memory.clone();
+
+        let memory_manager = MemoryManager::new(
+            allocator.clone(),
+            fd.clone(),
+            memory_config.size,
+            &memory_config.file,
+            memory_config.mergeable,
         )
-        .ok_or(Error::CreateSystemAllocator)?;
+        .map_err(Error::MemoryManager)?;
 
-        // Allocate RAM and Reserved address ranges.
-        for region in arch_mem_regions.iter() {
-            allocator
-                .allocate_mmio_addresses(Some(region.0), region.1 as GuestUsize, None)
-                .ok_or(Error::MemoryRangeAllocation)?;
-        }
-
-        let end_of_device_area = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
-        let mem_end = guest_memory.end_addr();
-        let start_of_device_area = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
-            arch::layout::RAM_64BIT_START
-        } else {
-            mem_end.unchecked_add(1)
-        };
-
-        // Convert the guest memory into an Arc. The point being able to use it
-        // anywhere in the code, no matter which thread might use it.
-        // Add the RwLock aspect to guest memory as we might want to perform
-        // additions to the memory during runtime.
-        let guest_memory = Arc::new(RwLock::new(guest_memory));
-
+        let start_of_device_area = memory_manager.lock().unwrap().start_of_device_area();
+        let end_of_device_area = memory_manager.lock().unwrap().end_of_device_area();
+        let ram_regions = memory_manager.lock().unwrap().ram_regions();
+        let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let vm_info = VmInfo {
             memory: &guest_memory,
             vm_fd: &fd,
@@ -478,14 +330,9 @@ impl Vm {
             end_of_device_area,
         };
 
-        let device_manager = DeviceManager::new(
-            &vm_info,
-            allocator,
-            ram_regions.len() as u32,
-            &exit_evt,
-            &reset_evt,
-        )
-        .map_err(Error::DeviceManager)?;
+        let device_manager =
+            DeviceManager::new(&vm_info, allocator, ram_regions, &exit_evt, &reset_evt)
+                .map_err(Error::DeviceManager)?;
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
 
@@ -504,7 +351,6 @@ impl Vm {
 
         Ok(Vm {
             kernel,
-            memory: guest_memory,
             devices: device_manager,
             config,
             on_tty,
@@ -512,6 +358,7 @@ impl Vm {
             signals: None,
             state: RwLock::new(VmState::Created),
             cpu_manager,
+            memory_manager,
         })
     }
 
@@ -525,7 +372,8 @@ impl Vm {
         }
 
         let cmdline_cstring = CString::new(cmdline).map_err(|_| Error::CmdLine)?;
-        let mem = self.memory.read().unwrap();
+        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+        let mem = guest_memory.read().unwrap();
         let entry_addr = match linux_loader::loader::Elf::load(
             mem.deref(),
             None,
@@ -718,11 +566,6 @@ impl Vm {
         *state = new_state;
 
         Ok(())
-    }
-
-    /// Gets an Arc to the guest memory owned by this VM.
-    pub fn get_memory(&self) -> Arc<RwLock<GuestMemoryMmap>> {
-        self.memory.clone()
     }
 
     pub fn handle_stdin(&self) -> Result<()> {
