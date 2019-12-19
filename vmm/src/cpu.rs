@@ -9,6 +9,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+use std::cmp;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock, Weak};
@@ -665,13 +666,11 @@ impl CpuManager {
     }
 
     pub fn resize(&mut self, desired_vcpus: u8) -> Result<()> {
-        if desired_vcpus > self.present_vcpus() {
-            self.activate_vcpus(desired_vcpus, None)?;
-        } else if desired_vcpus < self.present_vcpus() {
-            self.mark_vcpus_for_removal(desired_vcpus)?;
+        match desired_vcpus.cmp(&self.present_vcpus()) {
+            cmp::Ordering::Greater => self.activate_vcpus(desired_vcpus, None),
+            cmp::Ordering::Less => self.mark_vcpus_for_removal(desired_vcpus),
+            _ => Ok(()),
         }
-
-        Ok(())
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
