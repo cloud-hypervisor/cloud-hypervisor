@@ -178,8 +178,7 @@ fn build_device_id(disk_path: &PathBuf) -> result::Result<String, Error> {
         blk_metadata.st_dev(),
         blk_metadata.st_rdev(),
         blk_metadata.st_ino()
-    )
-    .to_owned();
+    );
     Ok(device_id)
 }
 
