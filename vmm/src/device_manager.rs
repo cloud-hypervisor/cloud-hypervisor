@@ -416,7 +416,7 @@ pub struct DeviceManager {
 impl DeviceManager {
     pub fn new(
         vm_info: &VmInfo,
-        allocator: SystemAllocator,
+        allocator: Arc<Mutex<SystemAllocator>>,
         mut mem_slots: u32,
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
@@ -435,7 +435,7 @@ impl DeviceManager {
         let mut virt_iommu: Option<(u32, Vec<u32>)> = None;
 
         let address_manager = Arc::new(AddressManager {
-            allocator: Arc::new(Mutex::new(allocator)),
+            allocator,
             io_bus: Arc::new(io_bus),
             mmio_bus: Arc::new(mmio_bus),
             #[cfg(feature = "pci_support")]
