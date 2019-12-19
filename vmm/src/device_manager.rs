@@ -34,6 +34,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
 
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
+use std::cmp;
 use std::collections::HashMap;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
@@ -1504,12 +1505,14 @@ impl DeviceManager {
                 return vm_fd_clone
                     .signal_msi(msi_queue)
                     .map_err(|e| io::Error::from_raw_os_error(e.errno()))
-                    .map(|ret| {
-                        if ret > 0 {
+                    .map(|ret| match ret.cmp(&0) {
+                        cmp::Ordering::Greater => {
                             debug!("MSI message successfully delivered");
-                        } else if ret == 0 {
+                        }
+                        cmp::Ordering::Equal => {
                             warn!("failed to deliver MSI message, blocked by guest");
                         }
+                        _ => {}
                     });
             }
 
