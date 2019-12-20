@@ -403,15 +403,14 @@ pub struct DeviceManager {
     #[cfg(feature = "acpi")]
     ged_notification_device: Option<Arc<Mutex<devices::AcpiGEDDevice>>>,
 
-    // Dimensions of the device area
-    start_of_device_area: GuestAddress,
-    end_of_device_area: GuestAddress,
-
     // VM configuration
     config: Arc<Mutex<VmConfig>>,
 
     // Migratable devices
     migratable_devices: Vec<Arc<Mutex<dyn Migratable>>>,
+
+    // Memory Manager
+    memory_manager: Arc<Mutex<MemoryManager>>,
 }
 
 impl DeviceManager {
@@ -497,8 +496,6 @@ impl DeviceManager {
             )?;
         }
 
-        let start_of_device_area = vm_info.start_of_device_area;
-        let end_of_device_area = vm_info.end_of_device_area;
         let config = vm_info.vm_cfg.clone();
 
         Ok(DeviceManager {
@@ -510,10 +507,9 @@ impl DeviceManager {
             virt_iommu,
             #[cfg(feature = "acpi")]
             ged_notification_device,
-            start_of_device_area,
-            end_of_device_area,
             config,
             migratable_devices,
+            memory_manager,
         })
     }
 
@@ -1695,6 +1691,8 @@ fn create_ged_device(ged_irq: u32) -> Vec<u8> {
 impl Aml for DeviceManager {
     fn to_aml_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
+        let start_of_device_area = self.memory_manager.lock().unwrap().start_of_device_area().0;
+        let end_of_device_area = self.memory_manager.lock().unwrap().end_of_device_area().0;
         let pci_dsdt_data = aml::Device::new(
             "_SB_.PCI0".into(),
             vec![
@@ -1721,8 +1719,8 @@ impl Aml for DeviceManager {
                         &aml::AddressSpace::new_memory(
                             aml::AddressSpaceCachable::NotCacheable,
                             true,
-                            self.start_of_device_area.0,
-                            self.end_of_device_area.0,
+                            start_of_device_area,
+                            end_of_device_area,
                         ),
                     ]),
                 ),

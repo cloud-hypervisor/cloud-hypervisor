@@ -162,8 +162,6 @@ pub struct VmInfo<'a> {
     pub memory: &'a Arc<RwLock<GuestMemoryMmap>>,
     pub vm_fd: &'a Arc<VmFd>,
     pub vm_cfg: Arc<Mutex<VmConfig>>,
-    pub start_of_device_area: GuestAddress,
-    pub end_of_device_area: GuestAddress,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
@@ -318,15 +316,11 @@ impl Vm {
         )
         .map_err(Error::MemoryManager)?;
 
-        let start_of_device_area = memory_manager.lock().unwrap().start_of_device_area();
-        let end_of_device_area = memory_manager.lock().unwrap().end_of_device_area();
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let vm_info = VmInfo {
             memory: &guest_memory,
             vm_fd: &fd,
             vm_cfg: config.clone(),
-            start_of_device_area,
-            end_of_device_area,
         };
 
         let device_manager = DeviceManager::new(
