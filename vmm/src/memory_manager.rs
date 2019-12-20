@@ -24,6 +24,7 @@ pub struct MemoryManager {
     next_kvm_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
+    fd: Arc<VmFd>,
 }
 
 #[derive(Debug)]
@@ -122,60 +123,6 @@ impl MemoryManager {
             None => GuestMemoryMmap::new(&ram_regions).map_err(Error::GuestMemory)?,
         };
 
-        guest_memory
-            .with_regions(|index, region| {
-                let mem_region = kvm_userspace_memory_region {
-                    slot: index as u32,
-                    guest_phys_addr: region.start_addr().raw_value(),
-                    memory_size: region.len() as u64,
-                    userspace_addr: region.as_ptr() as u64,
-                    flags: 0,
-                };
-
-                // Safe because the guest regions are guaranteed not to overlap.
-                unsafe {
-                    fd.set_user_memory_region(mem_region)
-                        .map_err(|e| io::Error::from_raw_os_error(e.errno()))
-                }?;
-
-                // Mark the pages as mergeable if explicitly asked for.
-                if mergeable {
-                    // Safe because the address and size are valid since the
-                    // mmap succeeded.
-                    let ret = unsafe {
-                        libc::madvise(
-                            region.as_ptr() as *mut libc::c_void,
-                            region.len() as libc::size_t,
-                            libc::MADV_MERGEABLE,
-                        )
-                    };
-                    if ret != 0 {
-                        let err = io::Error::last_os_error();
-                        // Safe to unwrap because the error is constructed with
-                        // last_os_error(), which ensures the output will be Some().
-                        let errno = err.raw_os_error().unwrap();
-                        if errno == libc::EINVAL {
-                            warn!("kernel not configured with CONFIG_KSM");
-                        } else {
-                            warn!("madvise error: {}", err);
-                        }
-                        warn!("failed to mark pages as mergeable");
-                    }
-                }
-
-                Ok(())
-            })
-            .map_err(|_: io::Error| Error::GuestMemory(MmapError::NoMemoryRegion))?;
-
-        // Allocate RAM and Reserved address ranges.
-        for region in arch_mem_regions.iter() {
-            allocator
-                .lock()
-                .unwrap()
-                .allocate_mmio_addresses(Some(region.0), region.1 as GuestUsize, None)
-                .ok_or(Error::MemoryRangeAllocation)?;
-        }
-
         let end_of_device_area = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
         let mem_end = guest_memory.end_addr();
         let start_of_device_area = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
@@ -190,12 +137,34 @@ impl MemoryManager {
         // additions to the memory during runtime.
         let guest_memory = Arc::new(RwLock::new(guest_memory));
 
-        Ok(Arc::new(Mutex::new(MemoryManager {
-            guest_memory,
+        let memory_manager = Arc::new(Mutex::new(MemoryManager {
+            guest_memory: guest_memory.clone(),
             next_kvm_memory_slot: ram_regions.len() as u32,
             start_of_device_area,
             end_of_device_area,
-        })))
+            fd,
+        }));
+
+        guest_memory.read().unwrap().with_regions(|_, region| {
+            let _ = memory_manager.lock().unwrap().create_userspace_mapping(
+                region.start_addr().raw_value(),
+                region.len() as u64,
+                region.as_ptr() as u64,
+                mergeable,
+            )?;
+            Ok(())
+        })?;
+
+        // Allocate RAM and Reserved address ranges.
+        for region in arch_mem_regions.iter() {
+            allocator
+                .lock()
+                .unwrap()
+                .allocate_mmio_addresses(Some(region.0), region.1 as GuestUsize, None)
+                .ok_or(Error::MemoryRangeAllocation)?;
+        }
+
+        Ok(memory_manager)
     }
 
     pub fn guest_memory(&self) -> Arc<RwLock<GuestMemoryMmap>> {
@@ -214,5 +183,57 @@ impl MemoryManager {
         let slot_id = self.next_kvm_memory_slot;
         self.next_kvm_memory_slot += 1;
         slot_id
+    }
+
+    pub fn create_userspace_mapping(
+        &mut self,
+        guest_phys_addr: u64,
+        memory_size: u64,
+        userspace_addr: u64,
+        mergeable: bool,
+    ) -> Result<u32, Error> {
+        let slot = self.allocate_kvm_memory_slot();
+        let mem_region = kvm_userspace_memory_region {
+            slot,
+            guest_phys_addr,
+            memory_size,
+            userspace_addr,
+            flags: 0,
+        };
+
+        // Safe because the guest regions are guaranteed not to overlap.
+        unsafe {
+            self.fd
+                .set_user_memory_region(mem_region)
+                .map_err(|e| io::Error::from_raw_os_error(e.errno()))
+        }
+        .map_err(|_: io::Error| Error::GuestMemory(MmapError::NoMemoryRegion))?;
+
+        // Mark the pages as mergeable if explicitly asked for.
+        if mergeable {
+            // Safe because the address and size are valid since the
+            // mmap succeeded.
+            let ret = unsafe {
+                libc::madvise(
+                    userspace_addr as *mut libc::c_void,
+                    memory_size as libc::size_t,
+                    libc::MADV_MERGEABLE,
+                )
+            };
+            if ret != 0 {
+                let err = io::Error::last_os_error();
+                // Safe to unwrap because the error is constructed with
+                // last_os_error(), which ensures the output will be Some().
+                let errno = err.raw_os_error().unwrap();
+                if errno == libc::EINVAL {
+                    warn!("kernel not configured with CONFIG_KSM");
+                } else {
+                    warn!("madvise error: {}", err);
+                }
+                warn!("failed to mark pages as mergeable");
+            }
+        }
+
+        Ok(slot)
     }
 }
