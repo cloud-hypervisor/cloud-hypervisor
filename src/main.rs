@@ -4311,7 +4311,7 @@ mod tests {
             let new_pss = new_pss as f32;
 
             if mergeable {
-                aver!(tb, new_pss < (old_pss * 0.9));
+                aver!(tb, new_pss < (old_pss * 0.95));
             } else {
                 aver!(tb, (old_pss * 0.95) < new_pss && new_pss < (old_pss * 1.05));
             }

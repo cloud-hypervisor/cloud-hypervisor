@@ -159,7 +159,7 @@ cp target/release/cloud-hypervisor $VFIO_DIR
 
 # Enable KSM with some reasonable parameters so that it won't take too long
 # for the memory to be merged between two processes.
-sudo bash -c "echo 10000 > /sys/kernel/mm/ksm/pages_to_scan"
+sudo bash -c "echo 1000000 > /sys/kernel/mm/ksm/pages_to_scan"
 sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
