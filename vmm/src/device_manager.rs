@@ -12,6 +12,7 @@
 extern crate vm_device;
 
 use crate::config::{ConsoleOutputMode, VmConfig};
+use crate::memory_manager::MemoryManager;
 use crate::vm::VmInfo;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
@@ -417,7 +418,7 @@ impl DeviceManager {
     pub fn new(
         vm_info: &VmInfo,
         allocator: Arc<Mutex<SystemAllocator>>,
-        mut mem_slots: u32,
+        memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
     ) -> DeviceManagerResult<Self> {
@@ -455,7 +456,7 @@ impl DeviceManager {
         virtio_devices.append(&mut DeviceManager::make_virtio_devices(
             vm_info,
             &address_manager,
-            &mut mem_slots,
+            &memory_manager,
             &mut mmap_regions,
             &mut migratable_devices,
         )?);
@@ -479,7 +480,7 @@ impl DeviceManager {
             DeviceManager::add_pci_devices(
                 vm_info,
                 &address_manager,
-                mem_slots,
+                &memory_manager,
                 &mut virt_iommu,
                 virtio_devices,
                 &interrupt_info,
@@ -520,7 +521,7 @@ impl DeviceManager {
     fn add_pci_devices(
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
-        mem_slots: u32,
+        memory_manager: &Arc<Mutex<MemoryManager>>,
         virt_iommu: &mut Option<(u32, Vec<u32>)>,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
         interrupt_info: &InterruptInfo,
@@ -570,7 +571,7 @@ impl DeviceManager {
                 vm_info,
                 &address_manager,
                 &mut pci_bus,
-                mem_slots,
+                memory_manager,
                 &mut iommu_device,
             )?;
 
@@ -848,7 +849,7 @@ impl DeviceManager {
     fn make_virtio_devices(
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
-        mut mem_slots: &mut u32,
+        memory_manager: &Arc<Mutex<MemoryManager>>,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
@@ -873,7 +874,7 @@ impl DeviceManager {
         devices.append(&mut DeviceManager::make_virtio_fs_devices(
             vm_info,
             &mut allocator,
-            &mut mem_slots,
+            memory_manager,
             mmap_regions,
             migratable_devices,
         )?);
@@ -882,7 +883,7 @@ impl DeviceManager {
         devices.append(&mut DeviceManager::make_virtio_pmem_devices(
             vm_info,
             &mut allocator,
-            &mut mem_slots,
+            memory_manager,
             mmap_regions,
             migratable_devices,
         )?);
@@ -1036,7 +1037,7 @@ impl DeviceManager {
     fn make_virtio_fs_devices(
         vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        mem_slots: &mut u32,
+        memory_manager: &Arc<Mutex<MemoryManager>>,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
@@ -1074,7 +1075,7 @@ impl DeviceManager {
                         mmap_regions.push((addr, fs_cache as usize));
 
                         let mem_region = kvm_userspace_memory_region {
-                            slot: *mem_slots as u32,
+                            slot: memory_manager.lock().unwrap().allocate_kvm_memory_slot(),
                             guest_phys_addr: fs_guest_addr.raw_value(),
                             memory_size: fs_cache,
                             userspace_addr: addr as u64,
@@ -1082,9 +1083,6 @@ impl DeviceManager {
                         };
                         // Safe because the guest regions are guaranteed not to overlap.
                         let _ = unsafe { vm_info.vm_fd.set_user_memory_region(mem_region) };
-
-                        // Increment the KVM slot number
-                        *mem_slots += 1;
 
                         let mut region_list = Vec::new();
                         region_list.push(VirtioSharedMemory {
@@ -1132,7 +1130,7 @@ impl DeviceManager {
     fn make_virtio_pmem_devices(
         vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
-        mem_slots: &mut u32,
+        memory_manager: &Arc<Mutex<MemoryManager>>,
         mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
@@ -1180,7 +1178,7 @@ impl DeviceManager {
                 mmap_regions.push((addr, size as usize));
 
                 let mem_region = kvm_userspace_memory_region {
-                    slot: *mem_slots as u32,
+                    slot: memory_manager.lock().unwrap().allocate_kvm_memory_slot(),
                     guest_phys_addr: pmem_guest_addr.raw_value(),
                     memory_size: size,
                     userspace_addr: addr as u64,
@@ -1213,9 +1211,6 @@ impl DeviceManager {
                         warn!("failed to mark pages as mergeable");
                     }
                 }
-
-                // Increment the KVM slot number
-                *mem_slots += 1;
 
                 let virtio_pmem_device = Arc::new(Mutex::new(
                     vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize, pmem_cfg.iommu)
@@ -1347,10 +1342,10 @@ impl DeviceManager {
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
         pci: &mut PciBus,
-        mem_slots: u32,
+        memory_manager: &Arc<Mutex<MemoryManager>>,
         iommu_device: &mut Option<vm_virtio::Iommu>,
     ) -> DeviceManagerResult<Vec<u32>> {
-        let mut mem_slot = mem_slots;
+        let mut mem_slot = memory_manager.lock().unwrap().allocate_kvm_memory_slot();
         let mut iommu_attached_device_ids = Vec::new();
         let mut allocator = address_manager.allocator.lock().unwrap();
 
