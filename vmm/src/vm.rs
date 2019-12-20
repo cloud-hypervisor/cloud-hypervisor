@@ -320,7 +320,6 @@ impl Vm {
 
         let start_of_device_area = memory_manager.lock().unwrap().start_of_device_area();
         let end_of_device_area = memory_manager.lock().unwrap().end_of_device_area();
-        let ram_regions = memory_manager.lock().unwrap().ram_regions();
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let vm_info = VmInfo {
             memory: &guest_memory,
@@ -330,9 +329,14 @@ impl Vm {
             end_of_device_area,
         };
 
-        let device_manager =
-            DeviceManager::new(&vm_info, allocator, ram_regions, &exit_evt, &reset_evt)
-                .map_err(Error::DeviceManager)?;
+        let device_manager = DeviceManager::new(
+            &vm_info,
+            allocator,
+            memory_manager.clone(),
+            &exit_evt,
+            &reset_evt,
+        )
+        .map_err(Error::DeviceManager)?;
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
 

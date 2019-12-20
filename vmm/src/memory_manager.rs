@@ -21,7 +21,7 @@ use kvm_ioctls::*;
 
 pub struct MemoryManager {
     guest_memory: Arc<RwLock<GuestMemoryMmap>>,
-    ram_regions: u32,
+    next_kvm_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
 }
@@ -192,7 +192,7 @@ impl MemoryManager {
 
         Ok(Arc::new(Mutex::new(MemoryManager {
             guest_memory,
-            ram_regions: ram_regions.len() as u32,
+            next_kvm_memory_slot: ram_regions.len() as u32,
             start_of_device_area,
             end_of_device_area,
         })))
@@ -202,15 +202,17 @@ impl MemoryManager {
         self.guest_memory.clone()
     }
 
-    pub fn ram_regions(&self) -> u32 {
-        self.ram_regions
-    }
-
     pub fn start_of_device_area(&self) -> GuestAddress {
         self.start_of_device_area
     }
 
     pub fn end_of_device_area(&self) -> GuestAddress {
         self.end_of_device_area
+    }
+
+    pub fn allocate_kvm_memory_slot(&mut self) -> u32 {
+        let slot_id = self.next_kvm_memory_slot;
+        self.next_kvm_memory_slot += 1;
+        slot_id
     }
 }
