@@ -12,13 +12,13 @@
 extern crate vm_device;
 
 use crate::config::{ConsoleOutputMode, VmConfig};
-use crate::memory_manager::MemoryManager;
+use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::vm::VmInfo;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use arch::layout;
 use devices::{ioapic, HotPlugNotificationType};
-use kvm_bindings::{kvm_irq_routing_entry, kvm_userspace_memory_region};
+use kvm_bindings::kvm_irq_routing_entry;
 use kvm_ioctls::*;
 use libc::O_TMPFILE;
 use libc::TIOCGWINSZ;
@@ -180,6 +180,9 @@ pub enum DeviceManagerError {
 
     // Failed to make hotplug notification
     HotPlugNotification(io::Error),
+
+    // Error from a memory manager operation
+    MemoryManager(MemoryManagerError),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1070,15 +1073,16 @@ impl DeviceManager {
 
                         mmap_regions.push((addr, fs_cache as usize));
 
-                        let mem_region = kvm_userspace_memory_region {
-                            slot: memory_manager.lock().unwrap().allocate_kvm_memory_slot(),
-                            guest_phys_addr: fs_guest_addr.raw_value(),
-                            memory_size: fs_cache,
-                            userspace_addr: addr as u64,
-                            flags: 0,
-                        };
-                        // Safe because the guest regions are guaranteed not to overlap.
-                        let _ = unsafe { vm_info.vm_fd.set_user_memory_region(mem_region) };
+                        memory_manager
+                            .lock()
+                            .unwrap()
+                            .create_userspace_mapping(
+                                fs_guest_addr.raw_value(),
+                                fs_cache,
+                                addr as u64,
+                                false,
+                            )
+                            .map_err(DeviceManagerError::MemoryManager)?;
 
                         let mut region_list = Vec::new();
                         region_list.push(VirtioSharedMemory {
@@ -1173,40 +1177,16 @@ impl DeviceManager {
 
                 mmap_regions.push((addr, size as usize));
 
-                let mem_region = kvm_userspace_memory_region {
-                    slot: memory_manager.lock().unwrap().allocate_kvm_memory_slot(),
-                    guest_phys_addr: pmem_guest_addr.raw_value(),
-                    memory_size: size,
-                    userspace_addr: addr as u64,
-                    flags: 0,
-                };
-                // Safe because the guest regions are guaranteed not to overlap.
-                let _ = unsafe { vm_info.vm_fd.set_user_memory_region(mem_region) };
-
-                // Mark the pages as mergeable if explicitly asked for.
-                if pmem_cfg.mergeable {
-                    // Safe because the address and size are valid since the
-                    // mmap succeeded..
-                    let ret = unsafe {
-                        libc::madvise(
-                            addr as *mut libc::c_void,
-                            size as libc::size_t,
-                            libc::MADV_MERGEABLE,
-                        )
-                    };
-                    if ret != 0 {
-                        let err = io::Error::last_os_error();
-                        // Safe to unwrap because the error is constructed with
-                        // last_os_error(), which ensures the output will be Some().
-                        let errno = err.raw_os_error().unwrap();
-                        if errno == libc::EINVAL {
-                            warn!("kernel not configured with CONFIG_KSM");
-                        } else {
-                            warn!("madvise error: {}", err);
-                        }
-                        warn!("failed to mark pages as mergeable");
-                    }
-                }
+                memory_manager
+                    .lock()
+                    .unwrap()
+                    .create_userspace_mapping(
+                        pmem_guest_addr.raw_value(),
+                        size,
+                        addr as u64,
+                        pmem_cfg.mergeable,
+                    )
+                    .map_err(DeviceManagerError::MemoryManager)?;
 
                 let virtio_pmem_device = Arc::new(Mutex::new(
                     vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize, pmem_cfg.iommu)
