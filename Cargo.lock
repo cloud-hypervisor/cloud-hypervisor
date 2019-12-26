@@ -1080,7 +1080,7 @@ dependencies = [
 [[package]]
 name = "vm-memory"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vm-memory#3ef06beaeabab620cbbb898a6e130af59f26dd43"
+source = "git+https://github.com/rust-vmm/vm-memory#09c119f742410e3ee6cd9276bedfe31588cd239f"
 dependencies = [
  "cast 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
