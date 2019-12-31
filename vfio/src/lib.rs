@@ -5,6 +5,7 @@
 
 //#![deny(missing_docs)]
 //! Virtual Function I/O (VFIO) API
+extern crate arc_swap;
 extern crate byteorder;
 extern crate devices;
 extern crate kvm_bindings;

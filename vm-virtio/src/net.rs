@@ -5,9 +5,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use super::Error as DeviceError;
+use super::{
+    ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
+    VirtioInterruptType,
+};
+use crate::VirtioInterrupt;
+use arc_swap::ArcSwap;
 use epoll;
 use libc::EAGAIN;
 use libc::EFD_NONBLOCK;
+use net_gen;
+use net_util::{MacAddr, Tap, TapError, MAC_ADDR_LEN};
 use std::cmp;
 use std::io::Read;
 use std::io::{self, Write};
@@ -16,19 +25,9 @@ use std::net::Ipv4Addr;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread;
 use std::vec::Vec;
-
-use net_gen;
-
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    VirtioInterruptType,
-};
-use crate::VirtioInterrupt;
-use net_util::{MacAddr, Tap, TapError, MAC_ADDR_LEN};
 use virtio_bindings::bindings::virtio_net::*;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
@@ -119,7 +118,7 @@ fn vnet_hdr_len() -> usize {
 }
 
 struct NetEpollHandler {
-    mem: Arc<RwLock<GuestMemoryMmap>>,
+    mem: Arc<ArcSwap<GuestMemoryMmap>>,
     tap: Tap,
     rx: RxVirtio,
     tx: TxVirtio,
@@ -142,7 +141,7 @@ impl NetEpollHandler {
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
     fn rx_single_frame(&mut self) -> bool {
-        let mem = self.mem.read().unwrap();
+        let mem = self.mem.load();
         let mut next_desc = self.rx.queue.iter(&mem).next();
 
         if next_desc.is_none() {
@@ -251,7 +250,7 @@ impl NetEpollHandler {
     }
 
     fn process_tx(&mut self) -> result::Result<(), DeviceError> {
-        let mem = self.mem.read().unwrap();
+        let mem = self.mem.load();
         while let Some(avail_desc) = self.tx.queue.iter(&mem).next() {
             let head_index = avail_desc.index;
             let mut read_count = 0;
@@ -613,7 +612,7 @@ impl VirtioDevice for Net {
 
     fn activate(
         &mut self,
-        mem: Arc<RwLock<GuestMemoryMmap>>,
+        mem: Arc<ArcSwap<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

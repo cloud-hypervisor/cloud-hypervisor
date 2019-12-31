@@ -2,6 +2,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use super::Error as DeviceError;
+use super::{
+    ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
+    VirtioDeviceType, VIRTIO_F_VERSION_1,
+};
+use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
+use arc_swap::ArcSwap;
 use epoll;
 use libc::EFD_NONBLOCK;
 use std::cmp;
@@ -15,13 +22,6 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
-
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, VIRTIO_F_VERSION_1,
-};
-use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
 use vm_device::{ExternalDmaMapping, Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
@@ -531,7 +531,7 @@ impl Request {
 
 struct IommuEpollHandler {
     queues: Vec<Queue>,
-    mem: Arc<RwLock<GuestMemoryMmap>>,
+    mem: Arc<ArcSwap<GuestMemoryMmap>>,
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evts: Vec<EventFd>,
     kill_evt: EventFd,
@@ -545,7 +545,7 @@ impl IommuEpollHandler {
     fn request_queue(&mut self) -> bool {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.read().unwrap();
+        let mem = self.mem.load();
         for avail_desc in self.queues[0].iter(&mem) {
             let len = match Request::parse(
                 &avail_desc,
@@ -863,7 +863,7 @@ impl VirtioDevice for Iommu {
 
     fn activate(
         &mut self,
-        mem: Arc<RwLock<GuestMemoryMmap>>,
+        mem: Arc<ArcSwap<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,

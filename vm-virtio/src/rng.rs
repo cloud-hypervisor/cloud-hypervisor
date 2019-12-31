@@ -2,6 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+use super::Error as DeviceError;
+use super::{
+    ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
+    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+};
+use crate::{VirtioInterrupt, VirtioInterruptType};
+use arc_swap::ArcSwap;
 use epoll;
 use libc::EFD_NONBLOCK;
 use std;
@@ -10,15 +17,8 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread;
-
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
-};
-use crate::{VirtioInterrupt, VirtioInterruptType};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Bytes, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
@@ -36,7 +36,7 @@ const PAUSE_EVENT: DeviceEventT = 2;
 
 struct RngEpollHandler {
     queues: Vec<Queue>,
-    mem: Arc<RwLock<GuestMemoryMmap>>,
+    mem: Arc<ArcSwap<GuestMemoryMmap>>,
     random_file: File,
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evt: EventFd,
@@ -50,7 +50,7 @@ impl RngEpollHandler {
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.read().unwrap();
+        let mem = self.mem.load();
         for avail_desc in queue.iter(&mem) {
             let mut len = 0;
 
@@ -272,7 +272,7 @@ impl VirtioDevice for Rng {
 
     fn activate(
         &mut self,
-        mem: Arc<RwLock<GuestMemoryMmap>>,
+        mem: Arc<ArcSwap<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

@@ -6,6 +6,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use super::Error as DeviceError;
+use super::{
+    ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
+    VirtioDeviceType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+};
+use crate::{VirtioInterrupt, VirtioInterruptType};
+use arc_swap::ArcSwap;
 use epoll;
 use libc::EFD_NONBLOCK;
 use std::cmp;
@@ -16,15 +23,8 @@ use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread;
-
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
-};
-use crate::{VirtioInterrupt, VirtioInterruptType};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap, GuestUsize,
@@ -158,7 +158,7 @@ impl Request {
 
 struct PmemEpollHandler {
     queue: Queue,
-    mem: Arc<RwLock<GuestMemoryMmap>>,
+    mem: Arc<ArcSwap<GuestMemoryMmap>>,
     disk: File,
     interrupt_cb: Arc<VirtioInterrupt>,
     queue_evt: EventFd,
@@ -170,7 +170,7 @@ impl PmemEpollHandler {
     fn process_queue(&mut self) -> bool {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.read().unwrap();
+        let mem = self.mem.load();
         for avail_desc in self.queue.iter(&mem) {
             let len = match Request::parse(&avail_desc, &mem) {
                 Ok(ref req) if (req.type_ == RequestType::Flush) => {
@@ -421,7 +421,7 @@ impl VirtioDevice for Pmem {
 
     fn activate(
         &mut self,
-        mem: Arc<RwLock<GuestMemoryMmap>>,
+        mem: Arc<ArcSwap<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

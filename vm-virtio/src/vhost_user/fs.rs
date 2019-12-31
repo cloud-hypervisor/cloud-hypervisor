@@ -9,6 +9,7 @@ use crate::{
     ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
     VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
 };
+use arc_swap::ArcSwap;
 use libc::{self, EFD_NONBLOCK};
 use std::cmp;
 use std::io;
@@ -16,7 +17,7 @@ use std::io::Write;
 use std::os::unix::io::RawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use vhost_rs::vhost_user::message::{
     VhostUserFSSlaveMsg, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
@@ -295,7 +296,7 @@ impl VirtioDevice for Fs {
 
     fn activate(
         &mut self,
-        mem: Arc<RwLock<GuestMemoryMmap>>,
+        mem: Arc<ArcSwap<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
@@ -342,7 +343,7 @@ impl VirtioDevice for Fs {
 
         let vu_call_evt_queue_list = setup_vhost_user(
             &mut self.vu,
-            &mem.read().unwrap(),
+            mem.load().as_ref(),
             queues,
             queue_evts,
             self.acked_features,

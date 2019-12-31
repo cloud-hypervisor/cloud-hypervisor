@@ -7,12 +7,11 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 extern crate byteorder;
 
+use crate::{Queue, VirtioDevice};
 use byteorder::{ByteOrder, LittleEndian};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use vm_memory::GuestAddress;
-
-use crate::{Queue, VirtioDevice};
 
 /// Contains the data for reading and writing the common configuration structure of a virtio PCI
 /// device.
@@ -255,8 +254,8 @@ impl VirtioPciCommonConfig {
 mod tests {
     use super::*;
     use crate::{ActivateResult, VirtioInterrupt};
-
-    use std::sync::{Arc, RwLock};
+    use arc_swap::ArcSwap;
+    use std::sync::Arc;
     use vm_memory::GuestMemoryMmap;
     use vmm_sys_util::eventfd::EventFd;
 
@@ -273,7 +272,7 @@ mod tests {
         }
         fn activate(
             &mut self,
-            _mem: Arc<RwLock<GuestMemoryMmap>>,
+            _mem: Arc<ArcSwap<GuestMemoryMmap>>,
             _interrupt_evt: Arc<VirtioInterrupt>,
             _queues: Vec<Queue>,
             _queue_evts: Vec<EventFd>,

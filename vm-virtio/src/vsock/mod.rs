@@ -17,9 +17,8 @@ pub use self::device::Vsock;
 pub use self::unix::VsockUnixBackend;
 pub use self::unix::VsockUnixError;
 
-use std::os::unix::io::RawFd;
-
 use packet::VsockPacket;
+use std::os::unix::io::RawFd;
 
 mod defs {
 
@@ -158,22 +157,20 @@ pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {}
 
 #[cfg(test)]
 mod tests {
-    use libc::EFD_NONBLOCK;
-
     use super::device::{VsockEpollHandler, RX_QUEUE_EVENT, TX_QUEUE_EVENT};
     use super::packet::VSOCK_PKT_HDR_SIZE;
     use super::*;
-
-    use std::os::unix::io::AsRawFd;
-    use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, RwLock};
-    use vmm_sys_util::eventfd::EventFd;
-
     use crate::device::{VirtioInterrupt, VirtioInterruptType};
     use crate::queue::tests::VirtQueue as GuestQ;
     use crate::queue::Queue;
     use crate::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
+    use arc_swap::ArcSwap;
+    use libc::EFD_NONBLOCK;
+    use std::os::unix::io::AsRawFd;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, RwLock};
     use vm_memory::{GuestAddress, GuestMemoryMmap};
+    use vmm_sys_util::eventfd::EventFd;
 
     pub struct TestBackend {
         pub evfd: EventFd,
@@ -303,7 +300,7 @@ mod tests {
                 guest_txvq,
                 guest_evvq,
                 handler: VsockEpollHandler {
-                    mem: Arc::new(RwLock::new(self.mem.clone())),
+                    mem: Arc::new(ArcSwap::new(Arc::new(self.mem.clone()))),
                     queues,
                     queue_evts,
                     kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),

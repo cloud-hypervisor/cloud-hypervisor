@@ -2,20 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use std::result;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
-
-use byteorder::{ByteOrder, LittleEndian};
-use libc::EFD_NONBLOCK;
-
 use crate::transport::{VirtioTransport, NOTIFY_REG_OFFSET};
 use crate::{
     Queue, VirtioDevice, VirtioInterrupt, VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER,
     DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT,
     INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
 };
+use arc_swap::ArcSwap;
+use byteorder::{ByteOrder, LittleEndian};
 use devices::{BusDevice, Interrupt};
+use libc::EFD_NONBLOCK;
+use std::result;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{GuestAddress, GuestMemoryMmap};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
@@ -52,13 +51,13 @@ pub struct MmioDevice {
     config_generation: u32,
     queues: Vec<Queue>,
     queue_evts: Vec<EventFd>,
-    mem: Option<Arc<RwLock<GuestMemoryMmap>>>,
+    mem: Option<Arc<ArcSwap<GuestMemoryMmap>>>,
 }
 
 impl MmioDevice {
     /// Constructs a new MMIO transport for the given virtio device.
     pub fn new(
-        mem: Arc<RwLock<GuestMemoryMmap>>,
+        mem: Arc<ArcSwap<GuestMemoryMmap>>,
         device: Arc<Mutex<dyn VirtioDevice>>,
     ) -> Result<MmioDevice> {
         let device_clone = device.clone();
@@ -102,7 +101,7 @@ impl MmioDevice {
 
     fn are_queues_valid(&self) -> bool {
         if let Some(mem) = self.mem.as_ref() {
-            self.queues.iter().all(|q| q.is_valid(&mem.read().unwrap()))
+            self.queues.iter().all(|q| q.is_valid(mem.load().as_ref()))
         } else {
             false
         }

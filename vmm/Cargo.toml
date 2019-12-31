@@ -12,6 +12,7 @@ mmio_support = ["vm-virtio/mmio_support"]
 cmos = ["devices/cmos"]
 
 [dependencies]
+arc-swap = ">=0.4.4"
 clap = "2.33.0"
 acpi_tables = { path = "../acpi_tables", optional = true }
 anyhow = "1.0"

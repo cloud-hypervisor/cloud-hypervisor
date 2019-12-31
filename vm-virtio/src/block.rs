@@ -8,6 +8,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use super::Error as DeviceError;
+use super::{
+    ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
+    VirtioDeviceType, VirtioInterruptType,
+};
+use crate::VirtioInterrupt;
+use arc_swap::ArcSwap;
 use epoll;
 use libc::EFD_NONBLOCK;
 use std::cmp;
@@ -18,15 +25,8 @@ use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread;
-
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, VirtioInterruptType,
-};
-use crate::VirtioInterrupt;
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
@@ -324,7 +324,7 @@ impl Request {
 
 struct BlockEpollHandler<T: DiskFile> {
     queues: Vec<Queue>,
-    mem: Arc<RwLock<GuestMemoryMmap>>,
+    mem: Arc<ArcSwap<GuestMemoryMmap>>,
     disk_image: T,
     disk_nsectors: u64,
     interrupt_cb: Arc<VirtioInterrupt>,
@@ -339,7 +339,7 @@ impl<T: DiskFile> BlockEpollHandler<T> {
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.read().unwrap();
+        let mem = self.mem.load();
         for avail_desc in queue.iter(&mem) {
             let len;
             match Request::parse(&avail_desc, &mem) {
@@ -647,7 +647,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 
     fn activate(
         &mut self,
-        mem: Arc<RwLock<GuestMemoryMmap>>,
+        mem: Arc<ArcSwap<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

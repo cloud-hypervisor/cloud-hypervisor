@@ -9,6 +9,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 //! Implements virtio devices, queues, and transport mechanisms.
+
+extern crate arc_swap;
 extern crate epoll;
 #[macro_use]
 extern crate log;

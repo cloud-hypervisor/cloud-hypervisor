@@ -1,6 +1,13 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use super::Error as DeviceError;
+use super::{
+    ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
+    VirtioInterruptType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+};
+use crate::VirtioInterrupt;
+use arc_swap::ArcSwap;
 use epoll;
 use libc::EFD_NONBLOCK;
 use std;
@@ -11,16 +18,9 @@ use std::io::Write;
 use std::ops::DerefMut;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::{Arc, Mutex, RwLock};
-use std::thread;
-
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    VirtioInterruptType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
-};
-use crate::VirtioInterrupt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{ByteValued, Bytes, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
@@ -58,7 +58,7 @@ unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {
     queues: Vec<Queue>,
-    mem: Arc<RwLock<GuestMemoryMmap>>,
+    mem: Arc<ArcSwap<GuestMemoryMmap>>,
     interrupt_cb: Arc<VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
     out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
@@ -85,7 +85,7 @@ impl ConsoleEpollHandler {
         let mut used_count = 0;
         let mut write_count = 0;
 
-        let mem = self.mem.read().unwrap();
+        let mem = self.mem.load();
         for avail_desc in recv_queue.iter(&mem) {
             let len;
 
@@ -132,7 +132,7 @@ impl ConsoleEpollHandler {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
 
-        let mem = self.mem.read().unwrap();
+        let mem = self.mem.load();
         for avail_desc in trans_queue.iter(&mem) {
             let len;
             let mut out = self.out.lock().unwrap();
@@ -473,7 +473,7 @@ impl VirtioDevice for Console {
 
     fn activate(
         &mut self,
-        mem: Arc<RwLock<GuestMemoryMmap>>,
+        mem: Arc<ArcSwap<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
