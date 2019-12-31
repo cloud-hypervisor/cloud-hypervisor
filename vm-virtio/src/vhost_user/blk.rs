@@ -1,35 +1,32 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
+use super::handler::*;
+use super::vu_common_ctrl::*;
+use super::Error as DeviceError;
+use super::{Error, Result};
+use crate::VirtioInterrupt;
+use arc_swap::ArcSwap;
 use libc;
 use libc::EFD_NONBLOCK;
 use std::cmp;
 use std::io::Write;
+use std::mem;
 use std::ptr::null;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread;
 use std::vec::Vec;
-
-use crate::VirtioInterrupt;
-
-use super::Error as DeviceError;
-
-use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::GuestMemoryMmap;
-use vmm_sys_util::eventfd::EventFd;
-
-use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
-use super::handler::*;
-use super::vu_common_ctrl::*;
-use super::{Error, Result};
-use std::mem;
 use vhost_rs::vhost_user::message::VhostUserConfigFlags;
 use vhost_rs::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_rs::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost_rs::VhostBackend;
 use virtio_bindings::bindings::virtio_blk::*;
+use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
+use vm_memory::GuestMemoryMmap;
+use vmm_sys_util::eventfd::EventFd;
 
 macro_rules! offset_of {
     ($ty:ty, $field:ident) => {
@@ -222,7 +219,7 @@ impl VirtioDevice for Blk {
 
     fn activate(
         &mut self,
-        mem: Arc<RwLock<GuestMemoryMmap>>,
+        mem: Arc<ArcSwap<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
@@ -260,7 +257,7 @@ impl VirtioDevice for Blk {
 
         let vu_interrupt_list = setup_vhost_user(
             &mut self.vhost_user_blk,
-            &mem.read().unwrap(),
+            mem.load().as_ref(),
             queues,
             queue_evts,
             self.acked_features,

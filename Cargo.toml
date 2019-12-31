@@ -6,6 +6,7 @@ edition = "2018"
 default-run = "cloud-hypervisor"
 
 [dependencies]
+arc-swap = ">=0.4.4"
 clap = "2.33.0"
 epoll = ">=4.0.1"
 lazy_static = "1.4.0"

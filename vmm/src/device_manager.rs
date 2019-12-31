@@ -16,13 +16,14 @@ use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::vm::VmInfo;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
+use arc_swap::ArcSwap;
 use arch::layout;
+use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use devices::{ioapic, HotPlugNotificationType};
 use kvm_bindings::kvm_irq_routing_entry;
 use kvm_ioctls::*;
 use libc::O_TMPFILE;
 use libc::TIOCGWINSZ;
-
 use net_util::Tap;
 #[cfg(feature = "pci_support")]
 use pci::{
@@ -30,20 +31,17 @@ use pci::{
     PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
 };
 use qcow::{self, ImageType, QcowFile};
-
-use std::fs::{File, OpenOptions};
-use std::io::{self, sink, stdout};
-
-use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use std::cmp;
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{self, sink, stdout};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::result;
 #[cfg(feature = "pci_support")]
 use std::sync::Weak;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 #[cfg(feature = "pci_support")]
 use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
@@ -741,7 +739,7 @@ impl DeviceManager {
         {
             // Add a CMOS emulated device
             use vm_memory::GuestMemory;
-            let mem_size = _vm_info.memory.as_ref().read().unwrap().end_addr().0 + 1;
+            let mem_size = _vm_info.memory.load().end_addr().0 + 1;
             let mem_below_4g = std::cmp::min(arch::layout::MEM_32BIT_RESERVED_START.0, mem_size);
             let mem_above_4g = mem_size.saturating_sub(arch::layout::RAM_64BIT_START.0);
 
@@ -1402,7 +1400,7 @@ impl DeviceManager {
     #[allow(clippy::too_many_arguments)]
     fn add_virtio_pci_device(
         virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-        memory: &Arc<RwLock<GuestMemoryMmap>>,
+        memory: &Arc<ArcSwap<GuestMemoryMmap>>,
         address_manager: &Arc<AddressManager>,
         vm_fd: &Arc<VmFd>,
         pci: &mut PciBus,
@@ -1523,7 +1521,7 @@ impl DeviceManager {
     #[cfg(feature = "mmio_support")]
     fn add_virtio_mmio_device(
         virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-        memory: &Arc<RwLock<GuestMemoryMmap>>,
+        memory: &Arc<ArcSwap<GuestMemoryMmap>>,
         address_manager: &Arc<AddressManager>,
         vm_fd: &Arc<VmFd>,
         interrupt_info: &InterruptInfo,

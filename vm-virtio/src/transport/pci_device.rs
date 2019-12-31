@@ -13,19 +13,19 @@ extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vmm_sys_util;
 
-use libc::EFD_NONBLOCK;
-use std::any::Any;
-use std::result;
-use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
-
+use arc_swap::ArcSwap;
 use devices::BusDevice;
+use libc::EFD_NONBLOCK;
 use pci::{
     BarReprogrammingParams, InterruptDelivery, InterruptParameters, MsixCap, MsixConfig,
     PciBarConfiguration, PciBarRegionType, PciCapability, PciCapabilityID, PciClassCode,
     PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciInterruptPin,
     PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
 };
+use std::any::Any;
+use std::result;
+use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use vm_allocator::SystemAllocator;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
@@ -239,7 +239,7 @@ pub struct VirtioPciDevice {
     queue_evts: Vec<EventFd>,
 
     // Guest memory
-    memory: Option<Arc<RwLock<GuestMemoryMmap>>>,
+    memory: Option<Arc<ArcSwap<GuestMemoryMmap>>>,
 
     // Setting PCI BAR
     settings_bar: u8,
@@ -251,7 +251,7 @@ pub struct VirtioPciDevice {
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
     pub fn new(
-        memory: Arc<RwLock<GuestMemoryMmap>>,
+        memory: Arc<ArcSwap<GuestMemoryMmap>>,
         device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
         iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
@@ -361,7 +361,7 @@ impl VirtioPciDevice {
 
     fn are_queues_valid(&self) -> bool {
         if let Some(mem) = self.memory.as_ref() {
-            self.queues.iter().all(|q| q.is_valid(&mem.read().unwrap()))
+            self.queues.iter().all(|q| q.is_valid(mem.load().as_ref()))
         } else {
             false
         }

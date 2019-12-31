@@ -29,19 +29,17 @@ use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{get_host_cpu_phys_bits, Error as MemoryManagerError, MemoryManager};
 use anyhow::anyhow;
+use arc_swap::ArcSwap;
 use arch::layout;
 use devices::{ioapic, HotPlugNotificationType};
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::*;
-
 use linux_loader::cmdline::Cmdline;
 use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 use std::ffi::CString;
 use std::fs::File;
 use std::io;
-use std::ops::Deref;
-
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_allocator::{GsiApic, SystemAllocator};
@@ -159,7 +157,7 @@ pub enum Error {
 pub type Result<T> = result::Result<T, Error>;
 
 pub struct VmInfo<'a> {
-    pub memory: &'a Arc<RwLock<GuestMemoryMmap>>,
+    pub memory: &'a Arc<ArcSwap<GuestMemoryMmap>>,
     pub vm_fd: &'a Arc<VmFd>,
     pub vm_cfg: Arc<Mutex<VmConfig>>,
 }
@@ -371,9 +369,9 @@ impl Vm {
 
         let cmdline_cstring = CString::new(cmdline).map_err(|_| Error::CmdLine)?;
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
-        let mem = guest_memory.read().unwrap();
+        let mem = guest_memory.load_full();
         let entry_addr = match linux_loader::loader::Elf::load(
-            mem.deref(),
+            mem.as_ref(),
             None,
             &mut self.kernel,
             Some(arch::layout::HIGH_RAM_START),
@@ -381,7 +379,7 @@ impl Vm {
             Ok(entry_addr) => entry_addr,
             Err(linux_loader::loader::Error::InvalidElfMagicNumber) => {
                 linux_loader::loader::BzImage::load(
-                    mem.deref(),
+                    mem.as_ref(),
                     None,
                     &mut self.kernel,
                     Some(arch::layout::HIGH_RAM_START),
@@ -392,7 +390,7 @@ impl Vm {
         };
 
         linux_loader::loader::load_cmdline(
-            mem.deref(),
+            mem.as_ref(),
             arch::layout::CMDLINE_START,
             &cmdline_cstring,
         )

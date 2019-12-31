@@ -8,6 +8,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use super::{VsockBackend, VsockPacket};
+use crate::Error as DeviceError;
+use crate::VirtioInterrupt;
+use crate::{
+    ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
+    VirtioInterruptType, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+};
 /// This is the `VirtioDevice` implementation for our vsock device. It handles the virtio-level
 /// device logic: feature negociation, device configuration, and device activation.
 /// The run-time device logic (i.e. event-driven data handling) is implemented by
@@ -27,6 +34,8 @@
 /// - an event queue FD; and
 /// - a backend FD.
 ///
+use arc_swap::ArcSwap;
+use byteorder::{ByteOrder, LittleEndian};
 use epoll;
 use libc::EFD_NONBLOCK;
 use std;
@@ -36,15 +45,6 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
-
-use super::{VsockBackend, VsockPacket};
-use crate::Error as DeviceError;
-use crate::VirtioInterrupt;
-use crate::{
-    ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    VirtioInterruptType, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
-};
-use byteorder::{ByteOrder, LittleEndian};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::eventfd::EventFd;
@@ -86,7 +86,7 @@ pub const EVENTS_LEN: usize = 6;
 ///   - again, attempt to fetch any incoming packets queued by the backend into virtio RX buffers.
 ///
 pub struct VsockEpollHandler<B: VsockBackend> {
-    pub mem: Arc<RwLock<GuestMemoryMmap>>,
+    pub mem: Arc<ArcSwap<GuestMemoryMmap>>,
     pub queues: Vec<Queue>,
     pub queue_evts: Vec<EventFd>,
     pub kill_evt: EventFd,
@@ -119,7 +119,7 @@ where
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.read().unwrap();
+        let mem = self.mem.load();
         for avail_desc in self.queues[0].iter(&mem) {
             let used_len = match VsockPacket::from_rx_virtq_head(&avail_desc) {
                 Ok(mut pkt) => {
@@ -161,7 +161,7 @@ where
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.read().unwrap();
+        let mem = self.mem.load();
         for avail_desc in self.queues[1].iter(&mem) {
             let pkt = match VsockPacket::from_tx_virtq_head(&avail_desc) {
                 Ok(pkt) => pkt,
@@ -496,7 +496,7 @@ where
 
     fn activate(
         &mut self,
-        mem: Arc<RwLock<GuestMemoryMmap>>,
+        mem: Arc<ArcSwap<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
@@ -664,7 +664,7 @@ mod tests {
 
         // Test a bad activation.
         let bad_activate = ctx.device.activate(
-            Arc::new(RwLock::new(ctx.mem.clone())),
+            Arc::new(ArcSwap::from(Arc::new(ctx.mem.clone()))),
             Arc::new(
                 Box::new(move |_: &VirtioInterruptType, _: Option<&Queue>| Ok(()))
                     as VirtioInterrupt,
@@ -680,7 +680,7 @@ mod tests {
         // Test a correct activation.
         ctx.device
             .activate(
-                Arc::new(RwLock::new(ctx.mem.clone())),
+                Arc::new(ArcSwap::new(Arc::new(ctx.mem.clone()))),
                 Arc::new(
                     Box::new(move |_: &VirtioInterruptType, _: Option<&Queue>| Ok(()))
                         as VirtioInterrupt,

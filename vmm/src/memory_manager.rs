@@ -3,12 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use arc_swap::ArcSwap;
 use arch::RegionType;
+use kvm_bindings::kvm_userspace_memory_region;
+use kvm_ioctls::*;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::unix::io::FromRawFd;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use vm_allocator::SystemAllocator;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
@@ -16,11 +19,8 @@ use vm_memory::{
     GuestUsize,
 };
 
-use kvm_bindings::kvm_userspace_memory_region;
-use kvm_ioctls::*;
-
 pub struct MemoryManager {
-    guest_memory: Arc<RwLock<GuestMemoryMmap>>,
+    guest_memory: Arc<ArcSwap<GuestMemoryMmap>>,
     next_kvm_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
@@ -131,11 +131,7 @@ impl MemoryManager {
             mem_end.unchecked_add(1)
         };
 
-        // Convert the guest memory into an Arc. The point being able to use it
-        // anywhere in the code, no matter which thread might use it.
-        // Add the RwLock aspect to guest memory as we might want to perform
-        // additions to the memory during runtime.
-        let guest_memory = Arc::new(RwLock::new(guest_memory));
+        let guest_memory = Arc::new(ArcSwap::new(Arc::new(guest_memory)));
 
         let memory_manager = Arc::new(Mutex::new(MemoryManager {
             guest_memory: guest_memory.clone(),
@@ -145,7 +141,7 @@ impl MemoryManager {
             fd,
         }));
 
-        guest_memory.read().unwrap().with_regions(|_, region| {
+        guest_memory.load().with_regions(|_, region| {
             let _ = memory_manager.lock().unwrap().create_userspace_mapping(
                 region.start_addr().raw_value(),
                 region.len() as u64,
@@ -167,7 +163,7 @@ impl MemoryManager {
         Ok(memory_manager)
     }
 
-    pub fn guest_memory(&self) -> Arc<RwLock<GuestMemoryMmap>> {
+    pub fn guest_memory(&self) -> Arc<ArcSwap<GuestMemoryMmap>> {
         self.guest_memory.clone()
     }
 
