@@ -15,8 +15,8 @@ use std::sync::{Arc, Mutex};
 use vm_allocator::SystemAllocator;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
-    Address, Error as MmapError, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion,
-    GuestUsize,
+    mmap::MmapRegionError, Address, Error as MmapError, GuestAddress, GuestMemory, GuestMemoryMmap,
+    GuestMemoryRegion, GuestRegionMmap, GuestUsize, MmapRegion,
 };
 
 pub struct MemoryManager {
@@ -40,6 +40,12 @@ pub enum Error {
 
     /// Failed to allocate a memory range.
     MemoryRangeAllocation,
+
+    /// Failed to create map region
+    MmapRegion(),
+
+    /// Error from region creation
+    GuestMemoryRegion(MmapRegionError),
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
@@ -87,41 +93,46 @@ impl MemoryManager {
             .map(|r| (r.0, r.1))
             .collect();
 
-        let guest_memory = match backing_file {
-            Some(ref file) => {
-                let mut mem_regions = Vec::<(GuestAddress, usize, Option<FileOffset>)>::new();
-                for region in ram_regions.iter() {
-                    if file.is_file() {
-                        let file = OpenOptions::new()
-                            .read(true)
-                            .write(true)
-                            .open(file)
-                            .map_err(Error::SharedFileCreate)?;
-
-                        file.set_len(region.1 as u64)
-                            .map_err(Error::SharedFileSetLen)?;
-
-                        mem_regions.push((region.0, region.1, Some(FileOffset::new(file, 0))));
-                    } else if file.is_dir() {
+        let mut mem_regions = Vec::new();
+        for region in ram_regions.iter() {
+            mem_regions.push(Arc::new(match backing_file {
+                Some(ref file) => {
+                    let f = if file.is_dir() {
                         let fs_str = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
                         let fs = std::ffi::CString::new(fs_str).unwrap();
                         let mut path = fs.as_bytes_with_nul().to_owned();
                         let path_ptr = path.as_mut_ptr() as *mut _;
                         let fd = unsafe { libc::mkstemp(path_ptr) };
                         unsafe { libc::unlink(path_ptr) };
+                        unsafe { File::from_raw_fd(fd) }
+                    } else {
+                        OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .open(file)
+                            .map_err(Error::SharedFileCreate)?
+                    };
 
-                        let f = unsafe { File::from_raw_fd(fd) };
-                        f.set_len(region.1 as u64)
-                            .map_err(Error::SharedFileSetLen)?;
+                    f.set_len(region.1 as u64)
+                        .map_err(Error::SharedFileSetLen)?;
 
-                        mem_regions.push((region.0, region.1, Some(FileOffset::new(f, 0))));
-                    }
+                    GuestRegionMmap::new(
+                        MmapRegion::from_file(FileOffset::new(f, 0), region.1)
+                            .map_err(Error::GuestMemoryRegion)?,
+                        region.0,
+                    )
+                    .map_err(Error::GuestMemory)?
                 }
+                None => GuestRegionMmap::new(
+                    MmapRegion::new(region.1).map_err(Error::GuestMemoryRegion)?,
+                    region.0,
+                )
+                .map_err(Error::GuestMemory)?,
+            }))
+        }
 
-                GuestMemoryMmap::with_files(&mem_regions).map_err(Error::GuestMemory)?
-            }
-            None => GuestMemoryMmap::new(&ram_regions).map_err(Error::GuestMemory)?,
-        };
+        let guest_memory =
+            GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
 
         let end_of_device_area = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
         let mem_end = guest_memory.end_addr();
