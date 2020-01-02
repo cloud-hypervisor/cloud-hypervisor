@@ -2823,7 +2823,7 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
-            let (dax_vmm_param, dax_mount_param) = if dax { ("on", ",dax") } else { ("off", "") };
+            let (dax_vmm_param, dax_mount_param) = if dax { ("on", "-o dax") } else { ("off", "") };
             let cache_size_vmm_param = if let Some(cache) = cache_size {
                 format!(",cache_size={}", cache)
             } else {
@@ -2857,7 +2857,7 @@ mod tests {
                 .args(&[
                     "--fs",
                     format!(
-                        "tag=virtiofs,sock={},num_queues=1,queue_size=1024,dax={}{}",
+                        "tag=myfs,sock={},num_queues=1,queue_size=1024,dax={}{}",
                         virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
                     )
                     .as_str(),
@@ -2878,8 +2878,7 @@ mod tests {
             // Mount shared directory through virtio_fs filesystem
             let mount_cmd = format!(
                 "mkdir -p mount_dir && \
-                 sudo mount -t virtio_fs virtiofs mount_dir/ -o \
-                 rootmode=040000,user_id=1001,group_id=1001{} && \
+                 sudo mount -t virtiofs {} myfs mount_dir/ && \
                  echo ok",
                 dax_mount_param
             );
@@ -3546,7 +3545,7 @@ mod tests {
                 .args(&[
                     "--fs",
                     format!(
-                        "tag=virtiofs,sock={},num_queues=1,queue_size=1024,dax=on",
+                        "tag=myfs,sock={},num_queues=1,queue_size=1024,dax=on",
                         virtiofsd_socket_path,
                     )
                     .as_str(),
