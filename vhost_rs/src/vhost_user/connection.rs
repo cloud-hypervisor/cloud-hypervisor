@@ -525,6 +525,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn send_data() {
         let listener = Listener::new(UNIX_SOCKET_DATA, true).unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -550,6 +551,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn send_fd() {
         let listener = Listener::new(UNIX_SOCKET_FD, true).unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -703,6 +705,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn send_recv() {
         let listener = Listener::new(UNIX_SOCKET_SEND, true).unwrap();
         listener.set_nonblocking(true).unwrap();
