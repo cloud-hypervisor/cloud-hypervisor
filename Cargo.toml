@@ -48,5 +48,20 @@ integration_tests = []
 
 [workspace]
 members = [
+    "arch",
+    "devices",
+    "vhost_rs",
+    "qcow",
+    "pci",
+    "vmm",
+    "vm-virtio",
+    "vm-device",
     "vhost_user_backend",
+    "vhost_user_fs",
+    "vfio",
+    "net_util",
+    "acpi_tables",
+    "arch_gen",
+    "net_gen",
+    "vm-allocator",
 ]
