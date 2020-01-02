@@ -782,6 +782,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn check_user_config_msg() {
         let mut msg = VhostUserConfig::new(
             VHOST_USER_CONFIG_OFFSET,

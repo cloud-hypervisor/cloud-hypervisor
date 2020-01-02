@@ -631,6 +631,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn create_master() {
         let listener = Listener::new(UNIX_SOCKET_MASTER, true).unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -656,6 +657,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_create_failure() {
         let _ = Listener::new(UNIX_SOCKET_MASTER2, true).unwrap();
         let _ = Listener::new(UNIX_SOCKET_MASTER2, false).is_err();
@@ -670,6 +672,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_features() {
         let (mut master, mut peer) = create_pair(UNIX_SOCKET_MASTER3);
 
@@ -701,6 +704,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_protocol_features() {
         let (mut master, mut peer) = create_pair(UNIX_SOCKET_MASTER4);
 
