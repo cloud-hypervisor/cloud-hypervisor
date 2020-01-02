@@ -60,7 +60,7 @@ Assuming you have `clear-kvm.img` and `custom-vmlinux.bin` on your system, here 
     --disk path=clear-kvm.img \
     --kernel custom-vmlinux.bin \
     --cmdline "console=ttyS0 reboot=k panic=1 nomodules root=/dev/vda3" \ 
-    --fs tag=virtiofs,sock=/tmp/virtiofs,num_queues=1,queue_size=512
+    --fs tag=myfs,sock=/tmp/virtiofs,num_queues=1,queue_size=512
 ```
 
 By default, DAX is enabled with a cache window of 8GiB. You can specify a custom size (let's say 4GiB for this example) for the cache by explicitly setting DAX and the cache size:
@@ -78,13 +78,11 @@ In case you don't want to use a shared window of cache to pass the shared files 
 ```
 
 ### Mount the shared directory
-The last step is to mount the shared directory inside the guest, using the `virtio_fs` filesystem type.
+The last step is to mount the shared directory inside the guest, using the `virtiofs` filesystem type.
 ```bash
 mkdir mount_dir
-mount \
-    -t virtio_fs virtiofs mount_dir/ \
-    -o rootmode=040000,user_id=0,group_id=0,dax
+mount -t virtiofs -o dax myfs mount_dir/
 ```
-The `tag` needs to be consistent with what has been provided through the __cloud-hypervisor__ command line, which happens to be `virtiofs` in this example.
+The `tag` needs to be consistent with what has been provided through the __cloud-hypervisor__ command line, which happens to be `myfs` in this example.
 
-The `dax` option must be removed in case the shared cache region is not enabled from the VMM.
+The `-o dax` option must be removed in case the shared cache region is not enabled from the VMM.
