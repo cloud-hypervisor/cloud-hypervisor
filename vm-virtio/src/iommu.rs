@@ -44,6 +44,17 @@ const KILL_EVENT: DeviceEventT = 2;
 /// The device should be paused.
 const PAUSE_EVENT: DeviceEventT = 3;
 
+/// PROBE properties size.
+/// This is the minimal size to provide at least one RESV_MEM property.
+/// Because virtio-iommu expects one MSI reserved region, we must provide it,
+/// otherwise the driver in the guest will define a predefined one between
+/// 0x8000000 and 0x80FFFFF, which is only relevant for ARM architecture, but
+/// will conflict with x86.
+const PROBE_PROP_SIZE: u32 =
+    (size_of::<VirtioIommuProbeProperty>() + size_of::<VirtioIommuProbeResvMem>()) as u32;
+const MSI_IOVA_START: u64 = 0xfee0_0000;
+const MSI_IOVA_END: u64 = 0xfeef_ffff;
+
 /// Virtio IOMMU features
 #[allow(unused)]
 const VIRTIO_IOMMU_F_INPUT_RANGE: u32 = 0;
@@ -53,31 +64,47 @@ const VIRTIO_IOMMU_F_DOMAIN_BITS: u32 = 1;
 const VIRTIO_IOMMU_F_MAP_UNMAP: u32 = 2;
 #[allow(unused)]
 const VIRTIO_IOMMU_F_BYPASS: u32 = 3;
-#[allow(unused)]
 const VIRTIO_IOMMU_F_PROBE: u32 = 4;
 
 // Support 2MiB and 4KiB page sizes.
-#[allow(unused)]
 const VIRTIO_IOMMU_PAGE_SIZE_MASK: u64 = (2 << 20) | (4 << 10);
 
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
-struct VirtioIommuRange {
+struct VirtioIommuRange32 {
+    start: u32,
+    end: u32,
+}
+
+unsafe impl ByteValued for VirtioIommuRange32 {}
+
+#[derive(Copy, Clone, Debug, Default)]
+#[repr(packed)]
+struct VirtioIommuRange64 {
     start: u64,
     end: u64,
 }
 
-unsafe impl ByteValued for VirtioIommuRange {}
+unsafe impl ByteValued for VirtioIommuRange64 {}
+
+#[derive(Copy, Clone, Debug, Default)]
+#[repr(packed)]
+struct VirtioIommuTopoConfig {
+    offset: u32,
+    num_items: u32,
+    item_length: u32,
+}
+
+unsafe impl ByteValued for VirtioIommuTopoConfig {}
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuConfig {
     page_size_mask: u64,
-    input_range: VirtioIommuRange,
-    domain_bits: u8,
-    padding: [u8; 3],
+    input_range: VirtioIommuRange64,
+    domain_range: VirtioIommuRange32,
     probe_size: u32,
+    topo_config: VirtioIommuTopoConfig,
 }
 
 unsafe impl ByteValued for VirtioIommuConfig {}
@@ -89,7 +116,6 @@ const VIRTIO_IOMMU_T_MAP: u8 = 3;
 const VIRTIO_IOMMU_T_UNMAP: u8 = 4;
 const VIRTIO_IOMMU_T_PROBE: u8 = 5;
 
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuReqHead {
@@ -116,7 +142,6 @@ const VIRTIO_IOMMU_S_NOENT: u8 = 6;
 #[allow(unused)]
 const VIRTIO_IOMMU_S_FAULT: u8 = 7;
 
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuReqTail {
@@ -127,7 +152,6 @@ struct VirtioIommuReqTail {
 unsafe impl ByteValued for VirtioIommuReqTail {}
 
 /// ATTACH request
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuReqAttach {
@@ -139,7 +163,6 @@ struct VirtioIommuReqAttach {
 unsafe impl ByteValued for VirtioIommuReqAttach {}
 
 /// DETACH request
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuReqDetach {
@@ -161,7 +184,6 @@ const VIRTIO_IOMMU_MAP_F_EXEC: u32 = 1 << 2;
 const VIRTIO_IOMMU_MAP_F_MMIO: u32 = 1 << 3;
 
 /// MAP request
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuReqMap {
@@ -175,7 +197,6 @@ struct VirtioIommuReqMap {
 unsafe impl ByteValued for VirtioIommuReqMap {}
 
 /// UNMAP request
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuReqUnmap {
@@ -189,14 +210,12 @@ unsafe impl ByteValued for VirtioIommuReqUnmap {}
 
 /// Virtio IOMMU request PROBE types
 #[allow(unused)]
-const VIRTIO_IOMMU_PROBE_T_MASK: u32 = 0xfff;
+const VIRTIO_IOMMU_PROBE_T_MASK: u16 = 0xfff;
 #[allow(unused)]
-const VIRTIO_IOMMU_PROBE_T_NONE: u32 = 0;
-#[allow(unused)]
-const VIRTIO_IOMMU_PROBE_T_RESV_MEM: u32 = 1;
+const VIRTIO_IOMMU_PROBE_T_NONE: u16 = 0;
+const VIRTIO_IOMMU_PROBE_T_RESV_MEM: u16 = 1;
 
 /// PROBE request
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuReqProbe {
@@ -206,7 +225,6 @@ struct VirtioIommuReqProbe {
 
 unsafe impl ByteValued for VirtioIommuReqProbe {}
 
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuProbeProperty {
@@ -218,15 +236,12 @@ unsafe impl ByteValued for VirtioIommuProbeProperty {}
 
 /// Virtio IOMMU request PROBE property RESV_MEM subtypes
 #[allow(unused)]
-const VIRTIO_IOMMU_RESV_MEM_T_RESERVED: u32 = 0;
-#[allow(unused)]
-const VIRTIO_IOMMU_RESV_MEM_T_MSI: u32 = 1;
+const VIRTIO_IOMMU_RESV_MEM_T_RESERVED: u8 = 0;
+const VIRTIO_IOMMU_RESV_MEM_T_MSI: u8 = 1;
 
-#[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuProbeResvMem {
-    head: VirtioIommuProbeProperty,
     subtype: u8,
     reserved: [u8; 3],
     start: u64,
@@ -320,20 +335,7 @@ impl Display for Error {
     }
 }
 
-#[derive(Debug, PartialEq)]
-enum RequestType {
-    Attach,
-    Detach,
-    Map,
-    Unmap,
-    Probe,
-}
-
-struct Request {
-    #[allow(unused)]
-    type_: RequestType,
-    status_addr: GuestAddress,
-}
+struct Request {}
 
 impl Request {
     // Parse the available vring buffer. Based on the hashmap table of external
@@ -350,7 +352,7 @@ impl Request {
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         ext_domain_mapping: &mut BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
-    ) -> result::Result<Request, Error> {
+    ) -> result::Result<usize, Error> {
         // The head contains the request type which MUST be readable.
         if avail_desc.is_write_only() {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
@@ -370,7 +372,10 @@ impl Request {
             return Err(Error::InvalidRequest);
         };
 
-        let request_type = match req_head.type_ {
+        // Create the reply
+        let mut reply: Vec<u8> = Vec::new();
+
+        let hdr_len = match req_head.type_ {
             VIRTIO_IOMMU_T_ATTACH => {
                 if desc_size_left != size_of::<VirtioIommuReqAttach>() {
                     return Err(Error::InvalidAttachRequest);
@@ -401,7 +406,7 @@ impl Request {
                     mappings.insert(domain, BTreeMap::new());
                 }
 
-                RequestType::Attach
+                0
             }
             VIRTIO_IOMMU_T_DETACH => {
                 if desc_size_left != size_of::<VirtioIommuReqDetach>() {
@@ -427,7 +432,7 @@ impl Request {
                 // Remove endpoint associated with specific domain
                 mapping.endpoints.write().unwrap().remove(&endpoint);
 
-                RequestType::Detach
+                0
             }
             VIRTIO_IOMMU_T_MAP => {
                 if desc_size_left != size_of::<VirtioIommuReqMap>() {
@@ -463,7 +468,7 @@ impl Request {
                     return Err(Error::InvalidMapRequest);
                 }
 
-                RequestType::Map
+                0
             }
             VIRTIO_IOMMU_T_UNMAP => {
                 if desc_size_left != size_of::<VirtioIommuReqUnmap>() {
@@ -492,7 +497,7 @@ impl Request {
                     entry.remove(&virt_start);
                 }
 
-                RequestType::Unmap
+                0
             }
             VIRTIO_IOMMU_T_PROBE => {
                 if desc_size_left != size_of::<VirtioIommuReqProbe>() {
@@ -504,7 +509,21 @@ impl Request {
                     .map_err(Error::GuestMemory)?;
                 debug!("Probe request {:?}", req);
 
-                RequestType::Probe
+                let probe_prop = VirtioIommuProbeProperty {
+                    type_: VIRTIO_IOMMU_PROBE_T_RESV_MEM,
+                    length: size_of::<VirtioIommuProbeResvMem>() as u16,
+                };
+                reply.extend_from_slice(probe_prop.as_slice());
+
+                let resv_mem = VirtioIommuProbeResvMem {
+                    subtype: VIRTIO_IOMMU_RESV_MEM_T_MSI,
+                    start: MSI_IOVA_START,
+                    end: MSI_IOVA_END,
+                    ..Default::default()
+                };
+                reply.extend_from_slice(resv_mem.as_slice());
+
+                PROBE_PROP_SIZE
             }
             _ => return Err(Error::InvalidRequest),
         };
@@ -518,14 +537,20 @@ impl Request {
             return Err(Error::UnexpectedReadOnlyDescriptor);
         }
 
-        if (status_desc.len as usize) < size_of::<VirtioIommuReqTail>() {
+        if status_desc.len < hdr_len + size_of::<VirtioIommuReqTail>() as u32 {
             return Err(Error::BufferLengthTooSmall);
         }
 
-        Ok(Request {
-            type_: request_type,
-            status_addr: status_desc.addr,
-        })
+        let tail = VirtioIommuReqTail {
+            status: VIRTIO_IOMMU_S_OK,
+            ..Default::default()
+        };
+        reply.extend_from_slice(tail.as_slice());
+
+        mem.write_slice(reply.as_slice(), status_desc.addr)
+            .map_err(Error::GuestMemory)?;
+
+        Ok((hdr_len as usize) + size_of::<VirtioIommuReqTail>())
     }
 }
 
@@ -554,22 +579,9 @@ impl IommuEpollHandler {
                 &self.ext_mapping,
                 &mut self.ext_domain_mapping,
             ) {
-                Ok(ref req) => {
-                    let reply = VirtioIommuReqTail {
-                        status: VIRTIO_IOMMU_S_OK,
-                        ..Default::default()
-                    };
-
-                    match mem.write_obj(reply, req.status_addr) {
-                        Ok(_) => size_of::<VirtioIommuReqTail>() as u32,
-                        Err(e) => {
-                            error!("bad guest memory address: {}", e);
-                            0
-                        }
-                    }
-                }
+                Ok(len) => len as u32,
                 Err(e) => {
-                    error!("Failed to parse available descriptor chain: {:?}", e);
+                    error!("failed parsing descriptor: {}", e);
                     0
                 }
             };
@@ -759,6 +771,7 @@ impl Iommu {
     pub fn new() -> io::Result<(Self, Arc<IommuMapping>)> {
         let config = VirtioIommuConfig {
             page_size_mask: VIRTIO_IOMMU_PAGE_SIZE_MASK,
+            probe_size: PROBE_PROP_SIZE,
             ..Default::default()
         };
 
@@ -771,7 +784,9 @@ impl Iommu {
             Iommu {
                 kill_evt: None,
                 pause_evt: None,
-                avail_features: 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP,
+                avail_features: 1u64 << VIRTIO_F_VERSION_1
+                    | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
+                    | 1u64 << VIRTIO_IOMMU_F_PROBE,
                 acked_features: 0u64,
                 config,
                 mapping: mapping.clone(),
