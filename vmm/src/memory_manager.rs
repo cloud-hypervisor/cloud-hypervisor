@@ -95,40 +95,11 @@ impl MemoryManager {
 
         let mut mem_regions = Vec::new();
         for region in ram_regions.iter() {
-            mem_regions.push(Arc::new(match backing_file {
-                Some(ref file) => {
-                    let f = if file.is_dir() {
-                        let fs_str = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
-                        let fs = std::ffi::CString::new(fs_str).unwrap();
-                        let mut path = fs.as_bytes_with_nul().to_owned();
-                        let path_ptr = path.as_mut_ptr() as *mut _;
-                        let fd = unsafe { libc::mkstemp(path_ptr) };
-                        unsafe { libc::unlink(path_ptr) };
-                        unsafe { File::from_raw_fd(fd) }
-                    } else {
-                        OpenOptions::new()
-                            .read(true)
-                            .write(true)
-                            .open(file)
-                            .map_err(Error::SharedFileCreate)?
-                    };
-
-                    f.set_len(region.1 as u64)
-                        .map_err(Error::SharedFileSetLen)?;
-
-                    GuestRegionMmap::new(
-                        MmapRegion::from_file(FileOffset::new(f, 0), region.1)
-                            .map_err(Error::GuestMemoryRegion)?,
-                        region.0,
-                    )
-                    .map_err(Error::GuestMemory)?
-                }
-                None => GuestRegionMmap::new(
-                    MmapRegion::new(region.1).map_err(Error::GuestMemoryRegion)?,
-                    region.0,
-                )
-                .map_err(Error::GuestMemory)?,
-            }))
+            mem_regions.push(MemoryManager::create_ram_region(
+                backing_file,
+                region.0,
+                region.1,
+            )?);
         }
 
         let guest_memory =
@@ -172,6 +143,46 @@ impl MemoryManager {
         }
 
         Ok(memory_manager)
+    }
+
+    fn create_ram_region(
+        backing_file: &Option<PathBuf>,
+        start_addr: GuestAddress,
+        size: usize,
+    ) -> Result<Arc<GuestRegionMmap>, Error> {
+        Ok(Arc::new(match backing_file {
+            Some(ref file) => {
+                let f = if file.is_dir() {
+                    let fs_str = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
+                    let fs = std::ffi::CString::new(fs_str).unwrap();
+                    let mut path = fs.as_bytes_with_nul().to_owned();
+                    let path_ptr = path.as_mut_ptr() as *mut _;
+                    let fd = unsafe { libc::mkstemp(path_ptr) };
+                    unsafe { libc::unlink(path_ptr) };
+                    unsafe { File::from_raw_fd(fd) }
+                } else {
+                    OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open(file)
+                        .map_err(Error::SharedFileCreate)?
+                };
+
+                f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
+
+                GuestRegionMmap::new(
+                    MmapRegion::from_file(FileOffset::new(f, 0), size)
+                        .map_err(Error::GuestMemoryRegion)?,
+                    start_addr,
+                )
+                .map_err(Error::GuestMemory)?
+            }
+            None => GuestRegionMmap::new(
+                MmapRegion::new(size).map_err(Error::GuestMemoryRegion)?,
+                start_addr,
+            )
+            .map_err(Error::GuestMemory)?,
+        }))
     }
 
     pub fn guest_memory(&self) -> Arc<ArcSwap<GuestMemoryMmap>> {
