@@ -28,12 +28,12 @@ _Run virtiofsd_
     -d \
     -o vhost_user_socket=/tmp/virtiofs \
     -o source=/tmp/shared_dir \
-    -o cache=always
+    -o cache=none
 ```
 
-The `cache=always` option should be the default when using `virtiofsd` with the __cloud-hypervisor__ VMM. This allows the daemon to memory map the shared files, which gives better I/O performance.
+The `cache=none` option should be the default when using `virtiofsd` with the __cloud-hypervisor__ VMM. This prevents from using the guest page cache, which reduces the memory footprint of the guest. When running multiple virtual machines on the same host, this will let the host deal with page cache, which will increase the density of virtual machines which can be launched.
 
-The `cache=none` option is another way to run the daemon but because the _virtqueues_ are used to convey the files content in this case, the I/O performance is impacted.
+The `cache=always` option will allow for the guest page cache to be used, which will increase the memory footprint of the guest. This option should be used only for specific use cases where a single VM is going to be running on a host.
 
 ### The kernel
 
