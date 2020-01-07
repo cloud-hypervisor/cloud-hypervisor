@@ -94,7 +94,8 @@ fn create_app<'a, 'b>(
                 .long("memory")
                 .help(
                     "Memory parameters \"size=<guest_memory_size>,\
-                     file=<backing_file_path>,mergeable=on|off\"",
+                     file=<backing_file_path>,mergeable=on|off,\
+                     hotplug_size=<hotpluggable_memory_size>\"",
                 )
                 .default_value(&default_memory)
                 .group("vm-config"),
@@ -451,6 +452,7 @@ mod unit_tests {
                     size: 536_870_912,
                     file: None,
                     mergeable: false,
+                    hotplug_size: None,
                 },
                 kernel: None,
                 cmdline: CmdlineConfig {
