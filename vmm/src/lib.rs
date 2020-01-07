@@ -330,7 +330,7 @@ impl Vmm {
         self.vm_delete()
     }
 
-    fn vm_resize(&mut self, desired_vcpus: u8) -> result::Result<(), VmError> {
+    fn vm_resize(&mut self, desired_vcpus: Option<u8>) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
             vm.resize(desired_vcpus)
         } else {
