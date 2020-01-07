@@ -631,7 +631,7 @@ bitflags! {
 }
 
 /// Max entries in one virtio-fs slave request.
-const VHOST_USER_FS_SLAVE_ENTRIES: usize = 8;
+pub const VHOST_USER_FS_SLAVE_ENTRIES: usize = 8;
 
 /// Slave request message to update the MMIO window.
 #[repr(packed)]
