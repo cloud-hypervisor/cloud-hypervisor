@@ -309,6 +309,7 @@ impl Vm {
             allocator.clone(),
             fd.clone(),
             memory_config.size,
+            memory_config.hotplug_size,
             &memory_config.file,
             memory_config.mergeable,
         )

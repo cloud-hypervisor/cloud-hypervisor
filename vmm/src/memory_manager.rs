@@ -81,6 +81,7 @@ impl MemoryManager {
         allocator: Arc<Mutex<SystemAllocator>>,
         fd: Arc<VmFd>,
         boot_ram: u64,
+        hotplug_size: Option<u64>,
         backing_file: &Option<PathBuf>,
         mergeable: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
@@ -107,11 +108,15 @@ impl MemoryManager {
 
         let end_of_device_area = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
         let mem_end = guest_memory.end_addr();
-        let start_of_device_area = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
+        let mut start_of_device_area = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
             arch::layout::RAM_64BIT_START
         } else {
             mem_end.unchecked_add(1)
         };
+
+        if let Some(size) = hotplug_size {
+            start_of_device_area = start_of_device_area.unchecked_add(size);
+        }
 
         let guest_memory = Arc::new(ArcSwap::new(Arc::new(guest_memory)));
 

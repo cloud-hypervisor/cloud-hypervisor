@@ -248,6 +248,8 @@ pub struct MemoryConfig {
     pub file: Option<PathBuf>,
     #[serde(default)]
     pub mergeable: bool,
+    #[serde(default)]
+    pub hotplug_size: Option<u64>,
 }
 
 impl MemoryConfig {
@@ -259,6 +261,7 @@ impl MemoryConfig {
         let mut file_str: &str = "";
         let mut mergeable_str: &str = "";
         let mut backed = false;
+        let mut hotplug_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("size=") {
@@ -268,6 +271,8 @@ impl MemoryConfig {
                 file_str = &param[5..];
             } else if param.starts_with("mergeable=") {
                 mergeable_str = &param[10..];
+            } else if param.starts_with("hotplug_size=") {
+                hotplug_str = &param[13..]
             }
         }
 
@@ -285,6 +290,11 @@ impl MemoryConfig {
             size: parse_size(size_str)?,
             file,
             mergeable: parse_on_off(mergeable_str)?,
+            hotplug_size: if hotplug_str == "" {
+                None
+            } else {
+                Some(parse_size(hotplug_str)?)
+            },
         })
     }
 }
@@ -295,6 +305,7 @@ impl Default for MemoryConfig {
             size: DEFAULT_MEMORY_MB << 20,
             file: None,
             mergeable: false,
+            hotplug_size: None,
         }
     }
 }
