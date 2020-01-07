@@ -2935,12 +2935,12 @@ mod tests {
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_on_default_cache_size() {
-        test_virtio_fs(true, None, "always", &prepare_virtiofsd)
+        test_virtio_fs(true, None, "none", &prepare_virtiofsd)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_on_cache_size_1_gib() {
-        test_virtio_fs(true, Some(0x4000_0000), "always", &prepare_virtiofsd)
+        test_virtio_fs(true, Some(0x4000_0000), "none", &prepare_virtiofsd)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
@@ -3507,7 +3507,7 @@ mod tests {
             let vfio_tap2 = "vfio-tap2";
 
             let (mut daemon_child, virtiofsd_socket_path) =
-                prepare_virtiofsd(&guest.tmp_dir, vfio_path.to_str().unwrap(), "always");
+                prepare_virtiofsd(&guest.tmp_dir, vfio_path.to_str().unwrap(), "none");
 
             let mut child = Command::new("target/release/cloud-hypervisor")
                 .args(&["--cpus", "boot=4"])
