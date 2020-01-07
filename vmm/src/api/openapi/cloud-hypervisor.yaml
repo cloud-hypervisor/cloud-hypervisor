@@ -427,11 +427,8 @@ components:
           default: false
 
     VmResize:
-      required:
-      - desired_vcpus
       type: object
       properties:
         desired_vcpus:
           minimum: 1
-          default: 1
           type: integer

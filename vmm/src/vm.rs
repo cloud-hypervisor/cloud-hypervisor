@@ -481,16 +481,19 @@ impl Vm {
         Ok(())
     }
 
-    pub fn resize(&mut self, desired_vcpus: u8) -> Result<()> {
-        self.cpu_manager
-            .lock()
-            .unwrap()
-            .resize(desired_vcpus)
-            .map_err(Error::CpuManager)?;
-        self.devices
-            .notify_hotplug(HotPlugNotificationType::CPUDevicesChanged)
-            .map_err(Error::DeviceManager)?;
-        self.config.lock().unwrap().cpus.boot_vcpus = desired_vcpus;
+    pub fn resize(&mut self, desired_vcpus: Option<u8>) -> Result<()> {
+        if let Some(desired_vcpus) = desired_vcpus {
+            self.cpu_manager
+                .lock()
+                .unwrap()
+                .resize(desired_vcpus)
+                .map_err(Error::CpuManager)?;
+            self.devices
+                .notify_hotplug(HotPlugNotificationType::CPUDevicesChanged)
+                .map_err(Error::DeviceManager)?;
+            self.config.lock().unwrap().cpus.boot_vcpus = desired_vcpus;
+        }
+
         Ok(())
     }
 

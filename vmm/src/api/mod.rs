@@ -115,7 +115,7 @@ pub struct VmmPingResponse {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct VmResizeData {
-    pub desired_vcpus: u8,
+    pub desired_vcpus: Option<u8>,
 }
 
 pub enum ApiResponsePayload {
