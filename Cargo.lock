@@ -178,7 +178,7 @@ dependencies = [
  "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "credibility 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "dirs 2.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "epoll 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -235,7 +235,7 @@ name = "devices"
 version = "0.1.0"
 dependencies = [
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "epoll 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-ioctls 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "epoll"
-version = "4.0.1"
+version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -430,7 +430,7 @@ name = "micro_http"
 version = "0.1.0"
 source = "git+https://github.com/firecracker-microvm/firecracker#29533658e51ff6de88444fbbd37534b343404bc3"
 dependencies = [
- "epoll 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1039,7 +1039,7 @@ dependencies = [
 name = "vhost_user_backend"
 version = "0.1.0"
 dependencies = [
- "epoll 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
  "vhost_rs 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
@@ -1105,7 +1105,7 @@ dependencies = [
  "arc-swap 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "devices 0.1.0",
- "epoll 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "net_gen 0.1.0",
@@ -1130,7 +1130,7 @@ dependencies = [
  "arch 0.1.0",
  "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "devices 0.1.0",
- "epoll 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-ioctls 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1239,7 +1239,7 @@ dependencies = [
 "checksum crossbeam-utils 0.6.6 (registry+https://github.com/rust-lang/crates.io-index)" = "04973fa96e96579258a5091af6003abde64af786b860f18622b82e026cca60e6"
 "checksum dirs 2.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "13aea89a5c93364a98e9b37b2fa237effbb694d5cfe01c5b70941f7eb087d5e3"
 "checksum dirs-sys 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)" = "afa0b23de8fd801745c471deffa6e12d248f962c9fd4b4c33787b055599bde7b"
-"checksum epoll 4.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "f3f0680f2a6f2a17fa7a8668a27c54e45e1ad1cf8a632f56a7c19b9e4e3bbe8a"
+"checksum epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "990bcfe26bea89669ede68c3f970f61d02568dbc8660317c98d805ea4e710685"
 "checksum failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "f8273f13c977665c5db7eb2b99ae520952fe5ac831ae4cd09d80c4c7042b5ed9"
 "checksum failure_derive 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "0bc225b78e0391e4b8683440bf2e63c2deeeb2ce5189eab46e2b68c6d3725d08"
 "checksum fuchsia-cprng 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "a06f77d526c1a601b7c4cdd98f54b5eaabffc14d5f2f0296febdc7f357c6d3ba"
