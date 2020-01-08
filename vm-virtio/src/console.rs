@@ -93,6 +93,7 @@ impl ConsoleEpollHandler {
             let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
             if let Err(e) = mem.write_slice(&source_slice[..], avail_desc.addr) {
                 error!("Failed to write slice: {:?}", e);
+                recv_queue.go_to_previous_position();
                 break;
             }
 
