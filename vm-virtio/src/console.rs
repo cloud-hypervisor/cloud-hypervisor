@@ -79,37 +79,27 @@ impl ConsoleEpollHandler {
      */
     fn process_input_queue(&mut self) -> bool {
         let mut in_buffer = self.in_buffer.lock().unwrap();
-        let count = in_buffer.len();
         let recv_queue = &mut self.queues[0]; //receiveq
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mut write_count = 0;
+
+        if in_buffer.is_empty() {
+            return false;
+        }
 
         let mem = self.mem.load();
         for avail_desc in recv_queue.iter(&mem) {
-            let len;
-
-            let limit = cmp::min(write_count + avail_desc.len as u32, count as u32);
-            let source_slice = in_buffer
-                .drain(write_count as usize..limit as usize)
-                .collect::<Vec<u8>>();
-            let write_result = mem.write_slice(&source_slice[..], avail_desc.addr);
-
-            match write_result {
-                Ok(_) => {
-                    len = limit - write_count; //avail_desc.len;
-                    write_count = limit;
-                }
-                Err(e) => {
-                    error!("Failed to write slice: {:?}", e);
-                    break;
-                }
+            let len = cmp::min(avail_desc.len as u32, in_buffer.len() as u32);
+            let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
+            if let Err(e) = mem.write_slice(&source_slice[..], avail_desc.addr) {
+                error!("Failed to write slice: {:?}", e);
+                break;
             }
 
             used_desc_heads[used_count] = (avail_desc.index, len);
             used_count += 1;
 
-            if write_count >= count as u32 {
+            if in_buffer.is_empty() {
                 break;
             }
         }
@@ -117,6 +107,7 @@ impl ConsoleEpollHandler {
         for &(desc_index, len) in &used_desc_heads[..used_count] {
             recv_queue.add_used(&mem, desc_index, len);
         }
+
         used_count > 0
     }
 
