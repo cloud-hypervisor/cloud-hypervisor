@@ -231,6 +231,11 @@ impl ConsoleEpollHandler {
                         if let Err(e) = self.input_queue_evt.read() {
                             error!("Failed to get queue event: {:?}", e);
                             break 'epoll;
+                        } else if self.process_input_queue() {
+                            if let Err(e) = self.signal_used_queue() {
+                                error!("Failed to signal used queue: {:?}", e);
+                                break 'epoll;
+                            }
                         }
                     }
                     OUTPUT_QUEUE_EVENT => {
