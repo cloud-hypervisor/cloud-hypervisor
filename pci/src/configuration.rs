@@ -674,10 +674,6 @@ impl PciConfiguration {
 
         let value = LittleEndian::read_u32(data);
 
-        if value == 0xffff_ffff {
-            return None;
-        }
-
         let mask = self.writable_bits[reg_idx];
         if reg_idx >= BAR0_REG && reg_idx < BAR0_REG + NUM_BAR_REGS {
             let bar_idx = reg_idx - 4;
@@ -689,6 +685,12 @@ impl PciConfiguration {
                     match bar_type {
                         PciBarRegionType::Memory64BitRegion => {}
                         _ => {
+                            // Ignore the case where the BAR size is being
+                            // asked for.
+                            if value == 0xffff_ffff {
+                                return None;
+                            }
+
                             debug!(
                                 "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
                                 self.registers[reg_idx], value
@@ -712,6 +714,17 @@ impl PciConfiguration {
                     && (self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1])
                         != (self.bar_addr[bar_idx - 1] & self.writable_bits[reg_idx - 1])
                 {
+                    // Ignore the case where the BAR size is being asked for.
+                    // Because we are in the 64bits case here, we have to check
+                    // if the lower 32bits of the current BAR have already been
+                    // asked for the BAR size too.
+                    if value == 0xffff_ffff
+                        && self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1]
+                            == self.bar_size[bar_idx - 1] & self.writable_bits[reg_idx - 1]
+                    {
+                        return None;
+                    }
+
                     debug!(
                         "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
                         self.registers[reg_idx], value
