@@ -399,12 +399,17 @@ impl PciConfiguration {
     pub fn write_reg(&mut self, reg_idx: usize, value: u32) {
         let mut mask = self.writable_bits[reg_idx];
 
-        if value == 0xffff_ffff {
-            if reg_idx >= BAR0_REG && reg_idx < BAR0_REG + NUM_BAR_REGS {
-                // Handle very specific case where the BAR is being written with
-                // all 1's to retrieve the BAR size on next BAR reading.
+        if reg_idx >= BAR0_REG && reg_idx < BAR0_REG + NUM_BAR_REGS {
+            // Handle very specific case where the BAR is being written with
+            // all 1's to retrieve the BAR size during next BAR reading.
+            if value == 0xffff_ffff {
                 mask = self.bar_size[reg_idx - 4];
-            } else if reg_idx == ROM_BAR_REG {
+            }
+        } else if reg_idx == ROM_BAR_REG {
+            // Handle very specific case where the BAR is being written with
+            // all 1's on bits 31-11 to retrieve the BAR size during next BAR
+            // reading.
+            if value & ROM_BAR_ADDR_MASK == ROM_BAR_ADDR_MASK {
                 mask = self.rom_bar_size;
             }
         }
@@ -731,6 +736,11 @@ impl PciConfiguration {
                 }
             }
         } else if reg_idx == ROM_BAR_REG && (value & mask) != (self.rom_bar_addr & mask) {
+            // Ignore the case where the BAR size is being asked for.
+            if value & ROM_BAR_ADDR_MASK == ROM_BAR_ADDR_MASK {
+                return None;
+            }
+
             debug!(
                 "DETECT ROM BAR REPROG: current 0x{:x}, new 0x{:x}",
                 self.registers[reg_idx], value
