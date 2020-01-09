@@ -29,6 +29,8 @@ use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::eventfd::EventFd;
 
+const DEFAULT_QUEUE_NUMBER: usize = 2;
+
 struct SlaveReqHandler {}
 impl VhostUserMasterReqHandler for SlaveReqHandler {}
 
@@ -43,12 +45,13 @@ pub struct Net {
     queue_sizes: Vec<u16>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
-    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    epoll_thread: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), CtrlError>>>,
     paused: Arc<AtomicBool>,
 }
 
 impl Net {
+    /// Create a new vhost-user-net device
     /// Create a new vhost-user-net device
     pub fn new(mac_addr: MacAddr, vu_cfg: VhostUserConfig) -> Result<Net> {
         let mut vhost_user_net = Master::connect(&vu_cfg.sock, vu_cfg.num_queues as u64)
@@ -87,24 +90,39 @@ impl Net {
             .set_features(avail_features)
             .map_err(Error::VhostUserSetFeatures)?;
 
+        let protocol_features;
         let mut acked_features = 0;
         if avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
             acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
-            let mut protocol_features = vhost_user_net
+            protocol_features = vhost_user_net
                 .get_protocol_features()
                 .map_err(Error::VhostUserGetProtocolFeatures)?;
-            protocol_features &= VhostUserProtocolFeatures::MQ;
-            vhost_user_net
-                .set_protocol_features(protocol_features)
-                .map_err(Error::VhostUserSetProtocolFeatures)?;
         } else {
             return Err(Error::VhostUserProtocolNotSupport);
+        }
+
+        let max_queue_number =
+            if protocol_features.bits() & VhostUserProtocolFeatures::MQ.bits() != 0 {
+                vhost_user_net
+                    .set_protocol_features(protocol_features & VhostUserProtocolFeatures::MQ)
+                    .map_err(Error::VhostUserSetProtocolFeatures)?;
+                match vhost_user_net.get_queue_num() {
+                    Ok(qn) => qn,
+                    Err(_) => DEFAULT_QUEUE_NUMBER as u64,
+                }
+            } else {
+                DEFAULT_QUEUE_NUMBER as u64
+            };
+        if vu_cfg.num_queues > max_queue_number as usize {
+            error!("vhost-user-net has queue number: {} larger than the max queue number: {} backend allowed\n",
+                vu_cfg.num_queues, max_queue_number);
+            return Err(Error::BadQueueNum);
         }
 
         avail_features |= 1 << virtio_net::VIRTIO_NET_F_CTRL_VQ;
         let queue_num = vu_cfg.num_queues + 1;
 
-        let config_space = build_net_config_space(mac_addr, &mut avail_features);
+        let config_space = build_net_config_space(mac_addr, vu_cfg.num_queues, &mut avail_features);
 
         // Send set_vring_base here, since it could tell backends, like OVS + DPDK,
         // how many virt queues to be handled, which backend required to know at early stage.
@@ -279,7 +297,7 @@ impl VirtioDevice for Net {
                 })?;
         }
 
-        let vu_interrupt_list = setup_vhost_user(
+        let mut vu_interrupt_list = setup_vhost_user(
             &mut self.vhost_user_net,
             mem.load().as_ref(),
             queues,
@@ -288,23 +306,32 @@ impl VirtioDevice for Net {
         )
         .map_err(ActivateError::VhostUserNetSetup)?;
 
-        let mut handler = VhostUserEpollHandler::<SlaveReqHandler>::new(VhostUserEpollConfig {
-            interrupt_cb,
-            kill_evt,
-            pause_evt,
-            vu_interrupt_list,
-            slave_req_handler: None,
-        });
+        let mut epoll_thread = Vec::new();
+        for _ in 0..vu_interrupt_list.len() / 2 {
+            let mut interrupt_list_sub: Vec<(EventFd, Queue)> = Vec::with_capacity(2);
+            interrupt_list_sub.push(vu_interrupt_list.remove(0));
+            interrupt_list_sub.push(vu_interrupt_list.remove(0));
 
-        let paused = self.paused.clone();
-        thread::Builder::new()
-            .name("vhost_user_net".to_string())
-            .spawn(move || handler.run(paused))
-            .map(|thread| self.epoll_thread = Some(thread))
-            .map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?;
+            let mut handler = VhostUserEpollHandler::<SlaveReqHandler>::new(VhostUserEpollConfig {
+                interrupt_cb: interrupt_cb.clone(),
+                kill_evt: kill_evt.try_clone().unwrap(),
+                pause_evt: pause_evt.try_clone().unwrap(),
+                vu_interrupt_list: interrupt_list_sub,
+                slave_req_handler: None,
+            });
+
+            let paused = self.paused.clone();
+            thread::Builder::new()
+                .name("vhost_user_net".to_string())
+                .spawn(move || handler.run(paused))
+                .map(|thread| epoll_thread.push(thread))
+                .map_err(|e| {
+                    error!("failed to clone queue EventFd: {}", e);
+                    ActivateError::BadActivate
+                })?;
+        }
+
+        self.epoll_thread = Some(epoll_thread);
 
         Ok(())
     }
@@ -333,6 +360,6 @@ impl VirtioDevice for Net {
     }
 }
 
-virtio_pausable!(Net, true);
+virtio_pausable!(Net, true, true);
 impl Snapshotable for Net {}
 impl Migratable for Net {}

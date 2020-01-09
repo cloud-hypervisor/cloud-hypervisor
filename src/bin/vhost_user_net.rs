@@ -19,6 +19,7 @@ use epoll;
 use libc::{self, EAGAIN, EFD_NONBLOCK};
 use log::*;
 use net_util::Tap;
+use std::convert::TryFrom;
 use std::fmt;
 use std::io::Read;
 use std::io::{self};
@@ -32,14 +33,9 @@ use vhost_rs::vhost_user::Error as VhostUserError;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::GuestMemoryMmap;
-use vm_virtio::net_util::{
-    open_tap, RxVirtio, TxVirtio, KILL_EVENT, RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
-};
+use vm_virtio::net_util::{open_tap, RxVirtio, TxVirtio};
 use vm_virtio::Queue;
 use vmm_sys_util::eventfd::EventFd;
-
-const QUEUE_SIZE: usize = 1024;
-const NUM_QUEUES: usize = 2;
 
 pub type VhostUserResult<T> = std::result::Result<T, VhostUserError>;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -77,6 +73,10 @@ pub enum Error {
     ParseIpParam,
     /// Failed to parse mask parameter.
     ParseMaskParam,
+    /// Failed to parse queue number.
+    ParseQueueNumParam,
+    /// Failed to parse queue size.
+    ParseQueueSizeParam,
     /// Open tap device failed.
     OpenTap(vm_virtio::net_util::Error),
 }
@@ -99,10 +99,12 @@ struct VhostUserNetBackend {
     mem: Option<GuestMemoryMmap>,
     vring_worker: Option<Arc<VringWorker>>,
     kill_evt: EventFd,
-    tap: Tap,
-    rx: RxVirtio,
-    tx: TxVirtio,
-    rx_tap_listening: bool,
+    taps: Vec<(Tap, usize)>,
+    rxs: Vec<RxVirtio>,
+    txs: Vec<TxVirtio>,
+    rx_tap_listenings: Vec<bool>,
+    num_queues: usize,
+    queue_size: u16,
 }
 
 impl std::clone::Clone for VhostUserNetBackend {
@@ -111,76 +113,101 @@ impl std::clone::Clone for VhostUserNetBackend {
             mem: self.mem.clone(),
             vring_worker: self.vring_worker.clone(),
             kill_evt: self.kill_evt.try_clone().unwrap(),
-            tap: self.tap.clone(),
-            rx: self.rx.clone(),
-            tx: self.tx.clone(),
-            rx_tap_listening: self.rx_tap_listening,
+            taps: self.taps.clone(),
+            rxs: self.rxs.clone(),
+            txs: self.txs.clone(),
+            rx_tap_listenings: self.rx_tap_listenings.clone(),
+            num_queues: self.num_queues,
+            queue_size: self.queue_size,
         }
     }
 }
 
 impl VhostUserNetBackend {
     /// Create a new virtio network device with the given TAP interface.
-    pub fn new_with_tap(tap: Tap) -> Result<Self> {
-        let rx = RxVirtio::new();
-        let tx = TxVirtio::new();
+    pub fn new_with_tap(taps: Vec<Tap>, num_queues: usize, queue_size: u16) -> Result<Self> {
+        let mut taps_v: Vec<(Tap, usize)> = Vec::new();
+        for (i, tap) in taps.iter().enumerate() {
+            taps_v.push((tap.clone(), num_queues + i));
+        }
+
+        let mut rxs: Vec<RxVirtio> = Vec::new();
+        let mut txs: Vec<TxVirtio> = Vec::new();
+        let mut rx_tap_listenings: Vec<bool> = Vec::new();
+
+        for _ in 0..taps.len() {
+            let rx = RxVirtio::new();
+            rxs.push(rx);
+            let tx = TxVirtio::new();
+            txs.push(tx);
+            rx_tap_listenings.push(false);
+        }
 
         Ok(VhostUserNetBackend {
             mem: None,
             vring_worker: None,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::CreateKillEventFd)?,
-            tap,
-            rx,
-            tx,
-            rx_tap_listening: false,
+            taps: taps_v,
+            rxs,
+            txs,
+            rx_tap_listenings,
+            num_queues,
+            queue_size,
         })
     }
 
     /// Create a new virtio network device with the given IP address and
     /// netmask.
-    pub fn new(ip_addr: Ipv4Addr, netmask: Ipv4Addr) -> Result<Self> {
-        let tap = open_tap(ip_addr, netmask).map_err(Error::OpenTap)?;
+    pub fn new(
+        ip_addr: Ipv4Addr,
+        netmask: Ipv4Addr,
+        num_queues: usize,
+        queue_size: u16,
+    ) -> Result<Self> {
+        let taps =
+            open_tap(None, Some(ip_addr), Some(netmask), num_queues / 2).map_err(Error::OpenTap)?;
 
-        Self::new_with_tap(tap)
+        Self::new_with_tap(taps, num_queues, queue_size)
     }
 
     // Copies a single frame from `self.rx.frame_buf` into the guest. Returns true
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
-    fn rx_single_frame(&mut self, mut queue: &mut Queue) -> Result<bool> {
+    fn rx_single_frame(&mut self, mut queue: &mut Queue, index: usize) -> Result<bool> {
         let mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
 
         let next_desc = queue.iter(&mem).next();
 
         if next_desc.is_none() {
             // Queue has no available descriptors
-            if self.rx_tap_listening {
+            if self.rx_tap_listenings[index] {
                 self.vring_worker
                     .as_ref()
                     .unwrap()
                     .unregister_listener(
-                        self.tap.as_raw_fd(),
+                        self.taps[index].0.as_raw_fd(),
                         epoll::Events::EPOLLIN,
-                        u64::from(RX_TAP_EVENT),
+                        u64::try_from(self.taps[index].1).unwrap(),
                     )
                     .unwrap();
-                self.rx_tap_listening = false;
+                self.rx_tap_listenings[index] = false;
             }
             return Ok(false);
         }
-        let write_complete = self.rx.process_desc_chain(&mem, next_desc, &mut queue);
+
+        let write_complete = self.rxs[index].process_desc_chain(&mem, next_desc, &mut queue);
 
         Ok(write_complete)
     }
 
-    fn process_rx(&mut self, vring: &mut Vring) -> Result<()> {
+    fn process_rx(&mut self, vring: &mut Vring, index: usize) -> Result<()> {
         // Read as many frames as possible.
         loop {
-            match self.read_tap() {
+            match self.read_tap(index) {
                 Ok(count) => {
-                    self.rx.bytes_read = count;
-                    if !self.rx_single_frame(&mut vring.mut_queue())? {
-                        self.rx.deferred_frame = true;
+                    self.rxs[index].bytes_read = count;
+                    if !self.rx_single_frame(&mut vring.mut_queue(), index)? {
+                        self.rxs[index].deferred_frame = true;
                         break;
                     }
                 }
@@ -198,8 +225,8 @@ impl VhostUserNetBackend {
                 }
             }
         }
-        if self.rx.deferred_irqs {
-            self.rx.deferred_irqs = false;
+        if self.rxs[index].deferred_irqs {
+            self.rxs[index].deferred_irqs = false;
             vring.signal_used_queue().unwrap();
             Ok(())
         } else {
@@ -207,15 +234,15 @@ impl VhostUserNetBackend {
         }
     }
 
-    fn resume_rx(&mut self, vring: &mut Vring) -> Result<()> {
-        if self.rx.deferred_frame {
-            if self.rx_single_frame(&mut vring.mut_queue())? {
-                self.rx.deferred_frame = false;
+    fn resume_rx(&mut self, vring: &mut Vring, index: usize) -> Result<()> {
+        if self.rxs[index].deferred_frame {
+            if self.rx_single_frame(&mut vring.mut_queue(), index)? {
+                self.rxs[index].deferred_frame = false;
                 // process_rx() was interrupted possibly before consuming all
                 // packets in the tap; try continuing now.
-                self.process_rx(vring)
-            } else if self.rx.deferred_irqs {
-                self.rx.deferred_irqs = false;
+                self.process_rx(vring, index)
+            } else if self.rxs[index].deferred_irqs {
+                self.rxs[index].deferred_irqs = false;
                 vring.signal_used_queue().unwrap();
                 Ok(())
             } else {
@@ -226,26 +253,26 @@ impl VhostUserNetBackend {
         }
     }
 
-    fn process_tx(&mut self, mut queue: &mut Queue) -> Result<()> {
+    fn process_tx(&mut self, mut queue: &mut Queue, index: usize) -> Result<()> {
         let mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
 
-        self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
+        self.txs[index].process_desc_chain(&mem, &mut self.taps[index].0, &mut queue);
 
         Ok(())
     }
 
-    fn read_tap(&mut self) -> io::Result<usize> {
-        self.tap.read(&mut self.rx.frame_buf)
+    fn read_tap(&mut self, index: usize) -> io::Result<usize> {
+        self.taps[index].0.read(&mut self.rxs[index].frame_buf)
     }
 }
 
 impl VhostUserBackend for VhostUserNetBackend {
     fn num_queues(&self) -> usize {
-        NUM_QUEUES
+        self.num_queues
     }
 
     fn max_queue_size(&self) -> usize {
-        QUEUE_SIZE
+        self.queue_size as usize
     }
 
     fn features(&self) -> u64 {
@@ -278,42 +305,49 @@ impl VhostUserBackend for VhostUserNetBackend {
             return Err(Error::HandleEventNotEpollIn.into());
         }
 
-        match device_event {
-            RX_QUEUE_EVENT => {
-                let mut vring = vrings[0].write().unwrap();
-                self.resume_rx(&mut vring)?;
+        let tap_start_index = self.num_queues as u16;
+        let tap_end_index = (self.num_queues + self.num_queues / 2 - 1) as u16;
+        let kill_index = tap_end_index + 1;
 
-                if !self.rx_tap_listening {
+        match device_event {
+            x if ((x < self.num_queues as u16) && (x % 2 == 0)) => {
+                let index = (x / 2) as usize;
+                let mut vring = vrings[x as usize].write().unwrap();
+                self.resume_rx(&mut vring, index)?;
+
+                if !self.rx_tap_listenings[index] {
                     self.vring_worker.as_ref().unwrap().register_listener(
-                        self.tap.as_raw_fd(),
+                        self.taps[index].0.as_raw_fd(),
                         epoll::Events::EPOLLIN,
-                        u64::from(RX_TAP_EVENT),
+                        u64::try_from(self.taps[index].1).unwrap(),
                     )?;
-                    self.rx_tap_listening = true;
+                    self.rx_tap_listenings[index] = true;
                 }
             }
-            TX_QUEUE_EVENT => {
-                let mut vring = vrings[1].write().unwrap();
-                self.process_tx(&mut vring.mut_queue())?;
+            x if ((x < self.num_queues as u16) && (x % 2 != 0)) => {
+                let index = ((x - 1) / 2) as usize;
+                let mut vring = vrings[x as usize].write().unwrap();
+                self.process_tx(&mut vring.mut_queue(), index)?;
             }
-            RX_TAP_EVENT => {
-                let mut vring = vrings[0].write().unwrap();
-                if self.rx.deferred_frame
+            x if x >= tap_start_index && x <= tap_end_index => {
+                let index = x as usize - self.num_queues;
+                let mut vring = vrings[2 * index].write().unwrap();
+                if self.rxs[index].deferred_frame
                 // Process a deferred frame first if available. Don't read from tap again
                 // until we manage to receive this deferred frame.
                 {
-                    if self.rx_single_frame(&mut vring.mut_queue())? {
-                        self.rx.deferred_frame = false;
-                        self.process_rx(&mut vring)?;
-                    } else if self.rx.deferred_irqs {
-                        self.rx.deferred_irqs = false;
+                    if self.rx_single_frame(&mut vring.mut_queue(), index)? {
+                        self.rxs[index].deferred_frame = false;
+                        self.process_rx(&mut vring, index)?;
+                    } else if self.rxs[index].deferred_irqs {
+                        self.rxs[index].deferred_irqs = false;
                         vring.signal_used_queue()?;
                     }
                 } else {
-                    self.process_rx(&mut vring)?;
+                    self.process_rx(&mut vring, index)?;
                 }
             }
-            KILL_EVENT => {
+            x if x == kill_index => {
                 self.kill_evt.read().unwrap();
                 return Ok(true);
             }
@@ -328,6 +362,8 @@ pub struct VhostUserNetBackendConfig<'a> {
     pub ip: Ipv4Addr,
     pub mask: Ipv4Addr,
     pub sock: &'a str,
+    pub num_queues: usize,
+    pub queue_size: u16,
 }
 
 impl<'a> VhostUserNetBackendConfig<'a> {
@@ -337,6 +373,8 @@ impl<'a> VhostUserNetBackendConfig<'a> {
         let mut ip_str: &str = "";
         let mut mask_str: &str = "";
         let mut sock: &str = "";
+        let mut num_queues_str: &str = "";
+        let mut queue_size_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("ip=") {
@@ -345,11 +383,17 @@ impl<'a> VhostUserNetBackendConfig<'a> {
                 mask_str = &param[5..];
             } else if param.starts_with("sock=") {
                 sock = &param[5..];
+            } else if param.starts_with("num_queues=") {
+                num_queues_str = &param[11..];
+            } else if param.starts_with("queue_size=") {
+                queue_size_str = &param[11..];
             }
         }
 
         let mut ip: Ipv4Addr = Ipv4Addr::new(192, 168, 100, 1);
         let mut mask: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
+        let mut num_queues: usize = 2;
+        let mut queue_size: u16 = 256;
 
         if sock.is_empty() {
             return Err(Error::ParseSockParam);
@@ -360,8 +404,24 @@ impl<'a> VhostUserNetBackendConfig<'a> {
         if !mask_str.is_empty() {
             mask = mask_str.parse().map_err(|_| Error::ParseMaskParam)?;
         }
+        if !num_queues_str.is_empty() {
+            num_queues = num_queues_str
+                .parse()
+                .map_err(|_| Error::ParseQueueNumParam)?;
+        }
+        if !queue_size_str.is_empty() {
+            queue_size = queue_size_str
+                .parse()
+                .map_err(|_| Error::ParseQueueSizeParam)?;
+        }
 
-        Ok(VhostUserNetBackendConfig { ip, mask, sock })
+        Ok(VhostUserNetBackendConfig {
+            ip,
+            mask,
+            sock,
+            num_queues,
+            queue_size,
+        })
     }
 }
 
@@ -375,7 +435,9 @@ fn main() {
                 .long("backend")
                 .help(
                     "Backend parameters \"ip=<ip_addr>,\
-                     mask=<net_mask>,sock=<socket_path>\"",
+                     mask=<net_mask>,sock=<socket_path>,\
+                     num_queues=<number_of_queues>,\
+                     queue_size=<size_of_each_queue>\"",
                 )
                 .takes_value(true)
                 .min_values(1),
@@ -393,7 +455,13 @@ fn main() {
     };
 
     let net_backend = Arc::new(RwLock::new(
-        VhostUserNetBackend::new(backend_config.ip, backend_config.mask).unwrap(),
+        VhostUserNetBackend::new(
+            backend_config.ip,
+            backend_config.mask,
+            backend_config.num_queues,
+            backend_config.queue_size,
+        )
+        .unwrap(),
     ));
     let name = "vhost-user-net-backend";
     let mut net_daemon = VhostUserDaemon::new(
@@ -404,10 +472,12 @@ fn main() {
     .unwrap();
     let vring_worker = net_daemon.get_vring_worker();
 
+    let kill_index = (net_backend.read().unwrap().num_queues
+        + net_backend.read().unwrap().num_queues / 2) as u16;
     if let Err(e) = vring_worker.register_listener(
         net_backend.read().unwrap().kill_evt.as_raw_fd(),
         epoll::Events::EPOLLIN,
-        u64::from(KILL_EVENT),
+        u64::from(kill_index),
     ) {
         println!("failed to register listener for kill event: {:?}", e);
         process::exit(1);

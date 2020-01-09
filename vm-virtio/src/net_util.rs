@@ -25,6 +25,11 @@ type Result<T> = std::result::Result<T, Error>;
 const MAX_BUFFER_SIZE: usize = 65562;
 const QUEUE_SIZE: usize = 256;
 
+const CONFIG_SPACE_MAC: usize = MAC_ADDR_LEN;
+const CONFIG_SPACE_STATUS: usize = 2;
+const CONFIG_SPACE_QUEUE_PAIRS: usize = 2;
+const CONFIG_SPACE_NET: usize = CONFIG_SPACE_MAC + CONFIG_SPACE_STATUS + CONFIG_SPACE_QUEUE_PAIRS;
+
 // The guest has made a buffer available to receive a frame into.
 pub const RX_QUEUE_EVENT: DeviceEventT = 0;
 // The transmit queue has a frame that is ready to send from the guest.
@@ -408,13 +413,36 @@ impl RxVirtio {
     }
 }
 
-pub fn build_net_config_space(mac: MacAddr, avail_features: &mut u64) -> Vec<u8> {
+pub fn build_net_config_space(
+    mac: MacAddr,
+    num_queues: usize,
+    mut avail_features: &mut u64,
+) -> Vec<u8> {
     let mut config_space = Vec::with_capacity(MAC_ADDR_LEN);
     unsafe { config_space.set_len(MAC_ADDR_LEN) }
     config_space[..].copy_from_slice(mac.get_bytes());
     *avail_features |= 1 << VIRTIO_NET_F_MAC;
 
+    build_net_config_space_with_mq(num_queues, &mut config_space, &mut avail_features);
+
     config_space
+}
+
+pub fn build_net_config_space_with_mq(
+    num_queues: usize,
+    config_space: &mut Vec<u8>,
+    avail_features: &mut u64,
+) {
+    let num_queue_pairs = (num_queues / 2) as u16;
+    if (num_queue_pairs >= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
+        && (num_queue_pairs <= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
+    {
+        config_space.resize(CONFIG_SPACE_NET, 0);
+        let max_queue_pairs = num_queue_pairs.to_le_bytes();
+        config_space[CONFIG_SPACE_MAC + CONFIG_SPACE_STATUS..CONFIG_SPACE_NET]
+            .copy_from_slice(&max_queue_pairs);
+        *avail_features |= 1 << VIRTIO_NET_F_MQ;
+    }
 }
 
 fn vnet_hdr_len() -> usize {
@@ -423,17 +451,45 @@ fn vnet_hdr_len() -> usize {
 
 /// Create a new virtio network device with the given IP address and
 /// netmask.
-pub fn open_tap(ip_addr: Ipv4Addr, netmask: Ipv4Addr) -> Result<Tap> {
+pub fn open_tap(
+    if_name: Option<&str>,
+    ip_addr: Option<Ipv4Addr>,
+    netmask: Option<Ipv4Addr>,
+    num_rx_q: usize,
+) -> Result<Vec<Tap>> {
+    let mut taps: Vec<Tap> = Vec::new();
+    let mut ifname: String = String::new();
     let vnet_hdr_size = vnet_hdr_len() as i32;
     let flag = net_gen::TUN_F_CSUM | net_gen::TUN_F_UFO | net_gen::TUN_F_TSO4 | net_gen::TUN_F_TSO6;
 
-    let tap = Tap::new(1).map_err(Error::TapOpen)?;
-    tap.set_ip_addr(ip_addr).map_err(Error::TapSetIp)?;
-    tap.set_netmask(netmask).map_err(Error::TapSetNetmask)?;
-    tap.enable().map_err(Error::TapEnable)?;
-    tap.set_offload(flag).map_err(Error::TapSetOffload)?;
-    tap.set_vnet_hdr_size(vnet_hdr_size)
-        .map_err(Error::TapSetVnetHdrSize)?;
+    for i in 0..num_rx_q {
+        let tap: Tap;
+        if i == 0 {
+            tap = match if_name {
+                Some(name) => Tap::open_named(name, num_rx_q).map_err(Error::TapOpen)?,
+                None => Tap::new(num_rx_q).map_err(Error::TapOpen)?,
+            };
+            if let Some(ip) = ip_addr {
+                tap.set_ip_addr(ip).map_err(Error::TapSetIp)?;
+            }
+            if let Some(mask) = netmask {
+                tap.set_netmask(mask).map_err(Error::TapSetNetmask)?;
+            }
+            tap.enable().map_err(Error::TapEnable)?;
+            tap.set_offload(flag).map_err(Error::TapSetOffload)?;
 
-    Ok(tap)
+            tap.set_vnet_hdr_size(vnet_hdr_size)
+                .map_err(Error::TapSetVnetHdrSize)?;
+
+            ifname = String::from_utf8(tap.get_if_name()).unwrap();
+        } else {
+            tap = Tap::open_named(ifname.as_str(), num_rx_q).map_err(Error::TapOpen)?;
+            tap.set_offload(flag).map_err(Error::TapSetOffload)?;
+
+            tap.set_vnet_hdr_size(vnet_hdr_size)
+                .map_err(Error::TapSetVnetHdrSize)?;
+        }
+        taps.push(tap);
+    }
+    Ok(taps)
 }

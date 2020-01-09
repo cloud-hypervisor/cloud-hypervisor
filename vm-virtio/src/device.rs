@@ -134,7 +134,7 @@ macro_rules! virtio_pausable_inner {
             Ok(())
         }
     };
-    ($ctrl_q:expr) => {
+    ($ctrl_q:expr, $mq:expr) => {
         fn pause(&mut self) -> result::Result<(), MigratableError> {
             debug!(
                 "Pausing virtio-{}",
@@ -158,7 +158,9 @@ macro_rules! virtio_pausable_inner {
             self.paused.store(false, Ordering::SeqCst);
 
             if let Some(epoll_thread) = &self.epoll_thread {
-                epoll_thread.thread().unpark();
+                for i in 0..epoll_thread.len() {
+                    epoll_thread[i].thread().unpark();
+                }
             }
 
             if let Some(ctrl_queue_epoll_thread) = &self.ctrl_queue_epoll_thread {
@@ -177,9 +179,9 @@ macro_rules! virtio_pausable {
             virtio_pausable_inner!();
         }
     };
-    ($name:ident, $ctrl_q:expr) => {
+    ($name:ident, $ctrl_q:expr, $mq:expr) => {
         impl Pausable for $name {
-            virtio_pausable_inner!($ctrl_q);
+            virtio_pausable_inner!($ctrl_q, $mq);
         }
     };
 }
