@@ -978,7 +978,7 @@ impl DeviceManager {
         if let Some(net_list_cfg) = &vm_info.vm_cfg.lock().unwrap().net {
             for net_cfg in net_list_cfg.iter() {
                 let virtio_net_device = if let Some(ref tap_if_name) = net_cfg.tap {
-                    let tap = Tap::open_named(tap_if_name).map_err(DeviceManagerError::OpenTap)?;
+                    let tap = Tap::open_named(tap_if_name, 1).map_err(DeviceManagerError::OpenTap)?;
                     Arc::new(Mutex::new(
                         vm_virtio::Net::new_with_tap(tap, Some(net_cfg.mac), net_cfg.iommu)
                             .map_err(DeviceManagerError::CreateVirtioNet)?,

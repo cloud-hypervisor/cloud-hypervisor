@@ -40,7 +40,7 @@ pub type Result<T> = ::std::result::Result<T, Error>;
 #[derive(Debug)]
 pub struct Tap {
     tap_file: File,
-    if_name: [u8; 16usize],
+    if_name: Vec<u8>,
 }
 
 impl PartialEq for Tap {
@@ -53,7 +53,7 @@ impl std::clone::Clone for Tap {
     fn clone(&self) -> Self {
         Tap {
             tap_file: self.tap_file.try_clone().unwrap(),
-            if_name: self.if_name,
+            if_name: self.if_name.clone(),
         }
     }
 }
@@ -78,7 +78,7 @@ fn build_terminated_if_name(if_name: &str) -> Result<Vec<u8>> {
 }
 
 impl Tap {
-    pub fn open_named(if_name: &str) -> Result<Tap> {
+    pub fn open_named(if_name: &str, num_queue_pairs: usize) -> Result<Tap> {
         let terminated_if_name = build_terminated_if_name(if_name)?;
 
         let fd = unsafe {
@@ -107,6 +107,9 @@ impl Tap {
             name_slice.copy_from_slice(terminated_if_name.as_slice());
             *ifru_flags =
                 (net_gen::IFF_TAP | net_gen::IFF_NO_PI | net_gen::IFF_VNET_HDR) as c_short;
+            if num_queue_pairs > 1 {
+                *ifru_flags |= net_gen::IFF_MULTI_QUEUE as c_short;
+            }
         }
 
         // ioctl is safe since we call it with a valid tap fd and check the return
@@ -117,16 +120,19 @@ impl Tap {
             return Err(Error::CreateTap(IoError::last_os_error()));
         }
 
+        let if_name_temp = unsafe { *ifreq.ifr_ifrn.ifrn_name.as_ref() };
+        let mut if_name = if_name_temp.to_vec();
+        if_name.truncate(terminated_if_name.len() - 1);
         // Safe since only the name is accessed, and it's cloned out.
         Ok(Tap {
             tap_file: tuntap,
-            if_name: unsafe { *ifreq.ifr_ifrn.ifrn_name.as_ref() },
+            if_name,
         })
     }
 
     /// Create a new tap interface.
-    pub fn new() -> Result<Tap> {
-        Self::open_named("vmtap%d")
+    pub fn new(num_queue_pairs: usize) -> Result<Tap> {
+        Self::open_named("vmtap%d", num_queue_pairs)
     }
 
     /// Set the host-side IP address for the tap interface.
@@ -232,10 +238,15 @@ impl Tap {
         // in a single-field union.
         unsafe {
             let ifrn_name = ifreq.ifr_ifrn.ifrn_name.as_mut();
-            ifrn_name.clone_from_slice(&self.if_name);
+            let name_slice = &mut ifrn_name[..self.if_name.len()];
+            name_slice.copy_from_slice(&self.if_name);
         }
 
         ifreq
+    }
+
+    pub fn get_if_name(&self) -> Vec<u8> {
+        self.if_name.clone()
     }
 }
 
@@ -423,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_tap_create() {
-        let t = Tap::new().unwrap();
+        let t = Tap::new(1).unwrap();
         println!("created tap: {:?}", t);
     }
 
@@ -435,7 +446,7 @@ mod tests {
         // the end of the function.
         let tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
 
-        let tap = Tap::new().unwrap();
+        let tap = Tap::new(1).unwrap();
         let ip_addr: net::Ipv4Addr = (*tap_ip_guard).parse().unwrap();
         let netmask: net::Ipv4Addr = SUBNET_MASK.parse().unwrap();
 
@@ -448,21 +459,21 @@ mod tests {
     #[test]
     fn test_set_options() {
         // This line will fail to provide an initialized FD if the test is not run as root.
-        let tap = Tap::new().unwrap();
+        let tap = Tap::new(1).unwrap();
         tap.set_vnet_hdr_size(16).unwrap();
         tap.set_offload(0).unwrap();
     }
 
     #[test]
     fn test_tap_enable() {
-        let tap = Tap::new().unwrap();
+        let tap = Tap::new(1).unwrap();
         let ret = tap.enable();
         assert!(ret.is_ok());
     }
 
     #[test]
     fn test_tap_get_ifreq() {
-        let tap = Tap::new().unwrap();
+        let tap = Tap::new(1).unwrap();
         let ret = tap.get_ifreq();
         assert_eq!(
             "__BindgenUnionField",
@@ -472,7 +483,7 @@ mod tests {
 
     #[test]
     fn test_raw_fd() {
-        let tap = Tap::new().unwrap();
+        let tap = Tap::new(1).unwrap();
         assert_eq!(tap.as_raw_fd(), tap.tap_file.as_raw_fd());
     }
 
@@ -480,7 +491,7 @@ mod tests {
     fn test_read() {
         let tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
 
-        let mut tap = Tap::new().unwrap();
+        let mut tap = Tap::new(1).unwrap();
         tap.set_ip_addr((*tap_ip_guard).parse().unwrap()).unwrap();
         tap.set_netmask(SUBNET_MASK.parse().unwrap()).unwrap();
         tap.enable().unwrap();
@@ -541,7 +552,7 @@ mod tests {
     fn test_write() {
         let tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
 
-        let mut tap = Tap::new().unwrap();
+        let mut tap = Tap::new(1).unwrap();
         tap.set_ip_addr((*tap_ip_guard).parse().unwrap()).unwrap();
         tap.set_netmask(SUBNET_MASK.parse().unwrap()).unwrap();
         tap.enable().unwrap();
