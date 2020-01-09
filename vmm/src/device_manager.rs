@@ -31,6 +31,7 @@ use pci::{
 };
 use qcow::{self, ImageType, QcowFile};
 use std::cmp;
+#[cfg(feature = "pci_support")]
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
@@ -544,6 +545,13 @@ impl DeviceManager {
                 Arc::downgrade(&address_manager) as Weak<dyn DeviceRelocation>,
             );
 
+            // Create a shared list of GSI that can be shared through all PCI
+            // devices. This way, we can maintain the full list of used GSI,
+            // preventing one device from overriding interrupts setting from
+            // another one.
+            let gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>> =
+                Arc::new(Mutex::new(HashMap::new()));
+
             let (mut iommu_device, iommu_mapping) = if vm_info.vm_cfg.lock().unwrap().iommu {
                 let (device, mapping) =
                     vm_virtio::Iommu::new().map_err(DeviceManagerError::CreateVirtioIommu)?;
@@ -582,6 +590,7 @@ impl DeviceManager {
                 &mut pci_bus,
                 memory_manager,
                 &mut iommu_device,
+                gsi_msi_routes,
             )?;
 
             iommu_attached_devices.append(&mut vfio_iommu_device_ids);
@@ -1340,17 +1349,11 @@ impl DeviceManager {
         pci: &mut PciBus,
         memory_manager: &Arc<Mutex<MemoryManager>>,
         iommu_device: &mut Option<vm_virtio::Iommu>,
+        gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
     ) -> DeviceManagerResult<Vec<u32>> {
         let mut mem_slot = memory_manager.lock().unwrap().allocate_kvm_memory_slot();
         let mut iommu_attached_device_ids = Vec::new();
         let mut allocator = address_manager.allocator.lock().unwrap();
-
-        // Create a shared list of GSI that can be shared through all VFIO
-        // devices. This way, we can maintain the full list of used GSI,
-        // preventing one device from overriding interrupts setting from
-        // another one.
-        let gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>> =
-            Arc::new(Mutex::new(HashMap::new()));
 
         if let Some(device_list_cfg) = &vm_info.vm_cfg.lock().unwrap().devices {
             // Create the KVM VFIO device
