@@ -113,6 +113,12 @@ impl MsixConfig {
             let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
             if self.enabled && !self.masked {
                 for (idx, table_entry) in self.table_entries.iter().enumerate() {
+                    if !old_enabled || old_masked {
+                        if let Err(e) = self.irq_routes[idx].enable(&self.vm_fd) {
+                            error!("Failed enabling irq_fd: {:?}", e);
+                        }
+                    }
+
                     // Ignore MSI-X vector if masked.
                     if table_entry.masked() {
                         continue;
@@ -134,6 +140,12 @@ impl MsixConfig {
                 }
             } else {
                 for route in self.irq_routes.iter() {
+                    if old_enabled || !old_masked {
+                        if let Err(e) = route.disable(&self.vm_fd) {
+                            error!("Failed disabling irq_fd: {:?}", e);
+                        }
+                    }
+
                     gsi_msi_routes.remove(&route.gsi);
                 }
             }
