@@ -24,7 +24,6 @@ use kvm_bindings::kvm_irq_routing_entry;
 use kvm_ioctls::*;
 use libc::O_TMPFILE;
 use libc::TIOCGWINSZ;
-use net_util::Tap;
 #[cfg(feature = "pci_support")]
 use pci::{
     DeviceRelocation, InterruptDelivery, InterruptParameters, PciBarRegionType, PciBus,
@@ -991,18 +990,28 @@ impl DeviceManager {
         if let Some(net_list_cfg) = &vm_info.vm_cfg.lock().unwrap().net {
             for net_cfg in net_list_cfg.iter() {
                 let virtio_net_device = if let Some(ref tap_if_name) = net_cfg.tap {
-                    let tap = Tap::open_named(tap_if_name, 1).map_err(DeviceManagerError::OpenTap)?;
                     Arc::new(Mutex::new(
-                        vm_virtio::Net::new_with_tap(tap, Some(net_cfg.mac), net_cfg.iommu)
-                            .map_err(DeviceManagerError::CreateVirtioNet)?,
+                        vm_virtio::Net::new(
+                            Some(tap_if_name),
+                            None,
+                            None,
+                            Some(net_cfg.mac),
+                            net_cfg.iommu,
+                            net_cfg.num_queues,
+                            net_cfg.queue_size,
+                        )
+                        .map_err(DeviceManagerError::CreateVirtioNet)?,
                     ))
                 } else {
                     Arc::new(Mutex::new(
                         vm_virtio::Net::new(
-                            net_cfg.ip,
-                            net_cfg.mask,
+                            None,
+                            Some(net_cfg.ip),
+                            Some(net_cfg.mask),
                             Some(net_cfg.mac),
                             net_cfg.iommu,
+                            net_cfg.num_queues,
+                            net_cfg.queue_size,
                         )
                         .map_err(DeviceManagerError::CreateVirtioNet)?,
                     ))

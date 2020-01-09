@@ -6,9 +6,9 @@
 // found in the THIRD-PARTY file.
 
 use super::net_util::{
-    build_net_config_space, open_tap, register_listener, unregister_listener, CtrlVirtio,
-    NetCtrlEpollHandler, RxVirtio, TxVirtio, KILL_EVENT, NET_EVENTS_COUNT, PAUSE_EVENT,
-    RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
+    build_net_config_space, build_net_config_space_with_mq, open_tap, register_listener,
+    unregister_listener, CtrlVirtio, NetCtrlEpollHandler, RxVirtio, TxVirtio, KILL_EVENT,
+    NET_EVENTS_COUNT, PAUSE_EVENT, RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
 };
 use super::Error as DeviceError;
 use super::{
@@ -34,10 +34,6 @@ use virtio_bindings::bindings::virtio_net::*;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::eventfd::EventFd;
-
-const QUEUE_SIZE: u16 = 256;
-const NUM_QUEUES: usize = 3;
-const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
 
 #[derive(Debug)]
 pub enum Error {
@@ -296,7 +292,7 @@ impl NetEpollHandler {
 pub struct Net {
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
-    tap: Option<Tap>,
+    taps: Option<Vec<Tap>>,
     avail_features: u64,
     acked_features: u64,
     // The config space will only consist of the MAC address specified by the user,
@@ -304,14 +300,21 @@ pub struct Net {
     config_space: Vec<u8>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
-    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    epoll_thread: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
     paused: Arc<AtomicBool>,
+    queue_size: Vec<u16>,
 }
 
 impl Net {
     /// Create a new virtio network device with the given TAP interface.
-    pub fn new_with_tap(tap: Tap, guest_mac: Option<MacAddr>, iommu: bool) -> Result<Self> {
+    pub fn new_with_tap(
+        taps: Vec<Tap>,
+        guest_mac: Option<MacAddr>,
+        iommu: bool,
+        num_queues: usize,
+        queue_size: u16,
+    ) -> Result<Self> {
         let mut avail_features = 1 << VIRTIO_NET_F_GUEST_CSUM
             | 1 << VIRTIO_NET_F_CSUM
             | 1 << VIRTIO_NET_F_GUEST_TSO4
@@ -325,18 +328,20 @@ impl Net {
         }
 
         avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
+        let queue_num = num_queues + 1;
 
-        let config_space;
+        let mut config_space;
         if let Some(mac) = guest_mac {
-            config_space = build_net_config_space(mac, &mut avail_features);
+            config_space = build_net_config_space(mac, num_queues, &mut avail_features);
         } else {
             config_space = Vec::new();
+            build_net_config_space_with_mq(num_queues, &mut config_space, &mut avail_features);
         }
 
         Ok(Net {
             kill_evt: None,
             pause_evt: None,
-            tap: Some(tap),
+            taps: Some(taps),
             avail_features,
             acked_features: 0u64,
             config_space,
@@ -345,20 +350,24 @@ impl Net {
             epoll_thread: None,
             ctrl_queue_epoll_thread: None,
             paused: Arc::new(AtomicBool::new(false)),
+            queue_size: vec![queue_size; queue_num],
         })
     }
 
     /// Create a new virtio network device with the given IP address and
     /// netmask.
     pub fn new(
-        ip_addr: Ipv4Addr,
-        netmask: Ipv4Addr,
+        if_name: Option<&str>,
+        ip_addr: Option<Ipv4Addr>,
+        netmask: Option<Ipv4Addr>,
         guest_mac: Option<MacAddr>,
         iommu: bool,
+        num_queues: usize,
+        queue_size: u16,
     ) -> Result<Self> {
-        let tap = open_tap(ip_addr, netmask).map_err(Error::OpenTap)?;
+        let taps = open_tap(if_name, ip_addr, netmask, num_queues / 2).map_err(Error::OpenTap)?;
 
-        Self::new_with_tap(tap, guest_mac, iommu)
+        Self::new_with_tap(taps, guest_mac, iommu, num_queues, queue_size)
     }
 }
 
@@ -377,7 +386,7 @@ impl VirtioDevice for Net {
     }
 
     fn queue_max_sizes(&self) -> &[u16] {
-        QUEUE_SIZES
+        &self.queue_size.as_slice()
     }
 
     fn features(&self, page: u32) -> u32 {
@@ -444,10 +453,10 @@ impl VirtioDevice for Net {
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
-        if queues.len() != NUM_QUEUES || queue_evts.len() != NUM_QUEUES {
+        if queues.len() != self.queue_size.len() || queue_evts.len() != self.queue_size.len() {
             error!(
                 "Cannot perform activate. Expected {} queue(s), got {}",
-                NUM_QUEUES,
+                self.queue_size.len(),
                 queues.len()
             );
             return Err(ActivateError::BadActivate);
@@ -469,7 +478,7 @@ impl VirtioDevice for Net {
             })?;
         self.pause_evt = Some(self_pause_evt);
 
-        if let Some(tap) = self.tap.clone() {
+        if let Some(mut taps) = self.taps.clone() {
             // Save the interrupt EventFD as we need to return it on reset
             // but clone it to pass into the thread.
             self.interrupt_cb = Some(interrupt_cb.clone());
@@ -509,33 +518,44 @@ impl VirtioDevice for Net {
                     })?;
             }
 
-            let mut queues_v = Vec::new();
-            let mut queue_evts_v = Vec::new();
-            queues_v.push(queues.remove(0));
-            queues_v.push(queues.remove(0));
-            queue_evts_v.push(queue_evts.remove(0));
-            queue_evts_v.push(queue_evts.remove(0));
-            let mut handler = NetEpollHandler {
-                mem: mem.clone(),
-                tap,
-                rx: RxVirtio::new(),
-                tx: TxVirtio::new(),
-                interrupt_cb,
-                kill_evt,
-                pause_evt,
-                epoll_fd: 0,
-                rx_tap_listening: false,
-            };
+            let mut epoll_thread = Vec::new();
+            for _ in 0..taps.len() {
+                let rx = RxVirtio::new();
+                let tx = TxVirtio::new();
+                let rx_tap_listening = false;
 
-            let paused = self.paused.clone();
-            thread::Builder::new()
-                .name("virtio_net".to_string())
-                .spawn(move || handler.run(paused, queues_v, queue_evts_v))
-                .map(|thread| self.epoll_thread = Some(thread))
-                .map_err(|e| {
-                    error!("failed to clone the virtio-net epoll thread: {}", e);
-                    ActivateError::BadActivate
-                })?;
+                let mut queue_pair = Vec::new();
+                queue_pair.push(queues.remove(0));
+                queue_pair.push(queues.remove(0));
+
+                let mut queue_evt_pair = Vec::new();
+                queue_evt_pair.push(queue_evts.remove(0));
+                queue_evt_pair.push(queue_evts.remove(0));
+
+                let mut handler = NetEpollHandler {
+                    mem: mem.clone(),
+                    tap: taps.remove(0),
+                    rx,
+                    tx,
+                    interrupt_cb: interrupt_cb.clone(),
+                    kill_evt: kill_evt.try_clone().unwrap(),
+                    pause_evt: pause_evt.try_clone().unwrap(),
+                    epoll_fd: 0,
+                    rx_tap_listening,
+                };
+
+                let paused = self.paused.clone();
+                thread::Builder::new()
+                    .name("virtio_net".to_string())
+                    .spawn(move || handler.run(paused, queue_pair, queue_evt_pair))
+                    .map(|thread| epoll_thread.push(thread))
+                    .map_err(|e| {
+                        error!("failed to clone queue EventFd: {}", e);
+                        ActivateError::BadActivate
+                    })?;
+            }
+
+            self.epoll_thread = Some(epoll_thread);
 
             return Ok(());
         }
@@ -561,6 +581,6 @@ impl VirtioDevice for Net {
     }
 }
 
-virtio_pausable!(Net, true);
+virtio_pausable!(Net, true, true);
 impl Snapshotable for Net {}
 impl Migratable for Net {}
