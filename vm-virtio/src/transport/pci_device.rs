@@ -256,6 +256,7 @@ impl VirtioPciDevice {
         device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
         iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
+        allocator: &mut SystemAllocator,
     ) -> Result<Self> {
         let device_clone = device.clone();
         let locked_device = device_clone.lock().unwrap();
@@ -276,7 +277,7 @@ impl VirtioPciDevice {
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + locked_device.device_type() as u16;
 
         let (msix_config, msix_config_clone) = if msix_num > 0 {
-            let msix_config = Arc::new(Mutex::new(MsixConfig::new(msix_num)));
+            let msix_config = Arc::new(Mutex::new(MsixConfig::new(msix_num, allocator)));
             let msix_config_clone = msix_config.clone();
             (Some(msix_config), Some(msix_config_clone))
         } else {

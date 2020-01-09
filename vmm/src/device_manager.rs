@@ -1464,11 +1464,16 @@ impl DeviceManager {
                 None
             };
 
-        let mut virtio_pci_device =
-            VirtioPciDevice::new(memory.clone(), virtio_device, msix_num, iommu_mapping_cb)
-                .map_err(DeviceManagerError::VirtioDevice)?;
-
         let mut allocator = address_manager.allocator.lock().unwrap();
+
+        let mut virtio_pci_device = VirtioPciDevice::new(
+            memory.clone(),
+            virtio_device,
+            msix_num,
+            iommu_mapping_cb,
+            &mut allocator,
+        )
+        .map_err(DeviceManagerError::VirtioDevice)?;
 
         let bars = virtio_pci_device
             .allocate_bars(&mut allocator)
