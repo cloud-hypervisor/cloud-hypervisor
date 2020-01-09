@@ -113,14 +113,14 @@ struct VfioMsix {
 
 impl VfioMsix {
     fn update(&mut self, offset: u64, data: &[u8]) -> Option<InterruptUpdateAction> {
-        let old_enabled = self.cap.enabled();
+        let old_enabled = self.bar.enabled();
 
         // Update "Message Control" word
         if offset == 2 && data.len() == 2 {
-            self.cap.set_msg_ctl(LittleEndian::read_u16(data));
+            self.bar.set_msg_ctl(LittleEndian::read_u16(data));
         }
 
-        let new_enabled = self.cap.enabled();
+        let new_enabled = self.bar.enabled();
 
         if !old_enabled && new_enabled {
             return Some(InterruptUpdateAction::EnableMsix);
@@ -507,53 +507,12 @@ impl VfioPciDevice {
         self.set_kvm_routes()
     }
 
-    fn update_msix_interrupt_routes(&self, msix: &VfioMsix) -> Result<()> {
-        if msix.cap.enabled() && !msix.cap.masked() {
-            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
-
-            for (idx, table_entry) in msix.bar.table_entries.iter().enumerate() {
-                // Ignore MSI-X vector if masked.
-                if table_entry.masked() {
-                    continue;
-                }
-
-                let gsi = self.interrupt_routes[idx].gsi;
-
-                let mut entry = kvm_irq_routing_entry {
-                    gsi,
-                    type_: KVM_IRQ_ROUTING_MSI,
-                    ..Default::default()
-                };
-
-                entry.u.msi.address_lo = table_entry.msg_addr_lo;
-                entry.u.msi.address_hi = table_entry.msg_addr_hi;
-                entry.u.msi.data = table_entry.msg_data;
-
-                gsi_msi_routes.insert(gsi, entry);
-            }
-        } else {
-            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
-
-            for route in self.interrupt_routes.iter() {
-                gsi_msi_routes.remove(&route.gsi);
-            }
-        }
-
-        self.set_kvm_routes()
-    }
-
     fn read_msix_table(&mut self, offset: u64, data: &mut [u8]) {
         self.interrupt.msix_read_table(offset, data);
     }
 
     fn write_msix_table(&mut self, offset: u64, data: &[u8]) {
         self.interrupt.msix_write_table(offset, data);
-
-        if let Some(msix) = &self.interrupt.msix {
-            if let Err(e) = self.update_msix_interrupt_routes(&msix) {
-                error!("Could not update MSI-X interrupt routes: {}", e);
-            }
-        }
     }
 
     fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
@@ -610,14 +569,7 @@ impl VfioPciDevice {
             _ => {}
         }
 
-        // Update the gsi_msi_routes table because the state of the enable bit
-        // changed.
-        if let Some(msix) = &self.interrupt.msix {
-            return self.update_msix_interrupt_routes(&msix);
-        }
-
-        // If the code reach this point, something went wrong.
-        Err(VfioPciError::MsixNotConfigured)
+        Ok(())
     }
 
     fn find_region(&self, addr: u64) -> Option<MmioRegion> {
@@ -734,7 +686,7 @@ impl Drop for VfioPciDevice {
         self.unmap_mmio_regions();
 
         if let Some(msix) = &self.interrupt.msix {
-            if msix.cap.enabled() && self.device.disable_msix().is_err() {
+            if msix.bar.enabled() && self.device.disable_msix().is_err() {
                 error!("Could not disable MSI-X");
             }
         }

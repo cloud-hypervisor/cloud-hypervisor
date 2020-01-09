@@ -9,9 +9,9 @@ extern crate vm_memory;
 use std::sync::Arc;
 
 use crate::device::InterruptParameters;
-use crate::{InterruptDelivery, InterruptRoute, PciCapability, PciCapabilityID};
+use crate::{set_kvm_routes, InterruptDelivery, InterruptRoute, PciCapability, PciCapabilityID};
 use byteorder::{ByteOrder, LittleEndian};
-use kvm_bindings::kvm_irq_routing_entry;
+use kvm_bindings::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
 use kvm_ioctls::VmFd;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -57,8 +57,8 @@ pub struct MsixConfig {
     pub table_entries: Vec<MsixTableEntry>,
     pub pba_entries: Vec<u64>,
     pub irq_routes: Vec<InterruptRoute>,
-    _vm_fd: Arc<VmFd>,
-    _gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+    vm_fd: Arc<VmFd>,
+    gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
     interrupt_cb: Option<Arc<InterruptDelivery>>,
     masked: bool,
     enabled: bool,
@@ -88,8 +88,8 @@ impl MsixConfig {
             table_entries,
             pba_entries,
             irq_routes,
-            _vm_fd: vm_fd,
-            _gsi_msi_routes: gsi_msi_routes,
+            vm_fd,
+            gsi_msi_routes,
             interrupt_cb: None,
             masked: false,
             enabled: false,
@@ -110,9 +110,44 @@ impl MsixConfig {
 
     pub fn set_msg_ctl(&mut self, reg: u16) {
         let old_masked = self.masked;
+        let old_enabled = self.enabled;
 
         self.masked = ((reg >> FUNCTION_MASK_BIT) & 1u16) == 1u16;
         self.enabled = ((reg >> MSIX_ENABLE_BIT) & 1u16) == 1u16;
+
+        // Update KVM routes
+        if old_masked != self.masked || old_enabled != self.enabled {
+            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
+            if self.enabled && !self.masked {
+                for (idx, table_entry) in self.table_entries.iter().enumerate() {
+                    // Ignore MSI-X vector if masked.
+                    if table_entry.masked() {
+                        continue;
+                    }
+
+                    let gsi = self.irq_routes[idx].gsi;
+
+                    let mut entry = kvm_irq_routing_entry {
+                        gsi,
+                        type_: KVM_IRQ_ROUTING_MSI,
+                        ..Default::default()
+                    };
+
+                    entry.u.msi.address_lo = table_entry.msg_addr_lo;
+                    entry.u.msi.address_hi = table_entry.msg_addr_hi;
+                    entry.u.msi.data = table_entry.msg_data;
+
+                    gsi_msi_routes.insert(gsi, entry);
+                }
+            } else {
+                for route in self.irq_routes.iter() {
+                    gsi_msi_routes.remove(&route.gsi);
+                }
+            }
+            if let Err(e) = set_kvm_routes(&self.vm_fd, &gsi_msi_routes) {
+                error!("Failed updating KVM routes: {:?}", e);
+            }
+        }
 
         // If the Function Mask bit was set, and has just been cleared, it's
         // important to go through the entire PBA to check if there was any
@@ -218,6 +253,31 @@ impl MsixConfig {
             }
             _ => error!("invalid data length"),
         };
+
+        // Update interrupt routes
+        if self.enabled && !self.masked {
+            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
+            let table_entry = &self.table_entries[index];
+            let gsi = self.irq_routes[index].gsi;
+            if !table_entry.masked() {
+                let mut entry = kvm_irq_routing_entry {
+                    gsi,
+                    type_: KVM_IRQ_ROUTING_MSI,
+                    ..Default::default()
+                };
+
+                entry.u.msi.address_lo = table_entry.msg_addr_lo;
+                entry.u.msi.address_hi = table_entry.msg_addr_hi;
+                entry.u.msi.data = table_entry.msg_data;
+
+                gsi_msi_routes.insert(gsi, entry);
+            } else {
+                gsi_msi_routes.remove(&gsi);
+            }
+            if let Err(e) = set_kvm_routes(&self.vm_fd, &gsi_msi_routes) {
+                error!("Failed updating KVM routes: {:?}", e);
+            }
+        }
 
         // After the MSI-X table entry has been updated, it is necessary to
         // check if the vector control masking bit has changed. In case the

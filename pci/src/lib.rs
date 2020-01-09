@@ -32,7 +32,7 @@ use kvm_ioctls::*;
 use std::collections::HashMap;
 use std::io;
 use std::mem::size_of;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use vm_allocator::SystemAllocator;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -89,11 +89,11 @@ pub fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
 }
 
 pub fn set_kvm_routes<S: ::std::hash::BuildHasher>(
-    vm_fd: VmFd,
-    gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry, S>>>,
+    vm_fd: &Arc<VmFd>,
+    gsi_msi_routes: &HashMap<u32, kvm_irq_routing_entry, S>,
 ) -> Result<(), Error> {
     let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
-    for (_, entry) in gsi_msi_routes.lock().unwrap().iter() {
+    for (_, entry) in gsi_msi_routes.iter() {
         entry_vec.push(*entry);
     }
 
@@ -114,8 +114,8 @@ pub fn set_kvm_routes<S: ::std::hash::BuildHasher>(
 }
 
 pub struct InterruptRoute {
-    gsi: u32,
-    irq_fd: EventFd,
+    pub gsi: u32,
+    pub irq_fd: EventFd,
 }
 
 impl InterruptRoute {
