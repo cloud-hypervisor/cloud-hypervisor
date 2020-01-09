@@ -15,6 +15,7 @@ extern crate vmm_sys_util;
 
 use arc_swap::ArcSwap;
 use devices::BusDevice;
+use kvm_ioctls::VmFd;
 use libc::EFD_NONBLOCK;
 use pci::{
     BarReprogrammingParams, InterruptDelivery, InterruptParameters, MsixCap, MsixConfig,
@@ -257,6 +258,7 @@ impl VirtioPciDevice {
         msix_num: u16,
         iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
         allocator: &mut SystemAllocator,
+        vm_fd: &Arc<VmFd>,
     ) -> Result<Self> {
         let device_clone = device.clone();
         let locked_device = device_clone.lock().unwrap();
@@ -277,7 +279,11 @@ impl VirtioPciDevice {
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + locked_device.device_type() as u16;
 
         let (msix_config, msix_config_clone) = if msix_num > 0 {
-            let msix_config = Arc::new(Mutex::new(MsixConfig::new(msix_num, allocator)));
+            let msix_config = Arc::new(Mutex::new(MsixConfig::new(
+                msix_num,
+                allocator,
+                vm_fd.clone(),
+            )));
             let msix_config_clone = msix_config.clone();
             (Some(msix_config), Some(msix_config_clone))
         } else {
