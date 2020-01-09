@@ -2,14 +2,20 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use super::Error as DeviceError;
 use super::{DescriptorChain, DeviceEventT, Queue};
+use arc_swap::ArcSwap;
 use net_util::{MacAddr, Tap, TapError, MAC_ADDR_LEN};
 use std::cmp;
-use std::io::Write;
+use std::io::{self, Write};
 use std::mem;
 use std::net::Ipv4Addr;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use virtio_bindings::bindings::virtio_net::*;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap};
+use vmm_sys_util::eventfd::EventFd;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -17,6 +23,7 @@ type Result<T> = std::result::Result<T, Error>;
 /// includes the 12-byte virtio net header.
 /// http://docs.oasis-open.org/virtio/virtio/v1.0/virtio-v1.0.html#x1-1740003
 const MAX_BUFFER_SIZE: usize = 65562;
+const QUEUE_SIZE: usize = 256;
 
 // The guest has made a buffer available to receive a frame into.
 pub const RX_QUEUE_EVENT: DeviceEventT = 0;
@@ -30,9 +37,27 @@ pub const KILL_EVENT: DeviceEventT = 3;
 pub const PAUSE_EVENT: DeviceEventT = 4;
 // Number of DeviceEventT events supported by this implementation.
 pub const NET_EVENTS_COUNT: usize = 5;
+// The device has been dropped.
+const CTRL_QUEUE_EVENT: DeviceEventT = 0;
+// Number of DeviceEventT events supported by this implementation.
+const CTRL_EVENT_COUNT: usize = 3;
 
 #[derive(Debug)]
 pub enum Error {
+    /// Read process MQ.
+    FailedProcessMQ,
+    /// Read queue failed.
+    GuestMemory(GuestMemoryError),
+    /// Invalid ctrl command
+    InvalidCtlCmd,
+    /// Invalid descriptor
+    InvalidDesc,
+    /// Invalid queue pairs number
+    InvalidQueuePairsNum,
+    /// No memory passed in.
+    NoMemory,
+    /// No ueue pairs nummber.
+    NoQueuePairsNum,
     /// Open tap device failed.
     TapOpen(TapError),
     /// Setting tap IP failed.
@@ -45,6 +70,157 @@ pub enum Error {
     TapSetVnetHdrSize(TapError),
     /// Enabling tap interface failed.
     TapEnable(TapError),
+}
+
+pub struct CtrlVirtio {
+    pub queue_evt: EventFd,
+    pub queue: Queue,
+}
+
+impl std::clone::Clone for CtrlVirtio {
+    fn clone(&self) -> Self {
+        CtrlVirtio {
+            queue_evt: self.queue_evt.try_clone().unwrap(),
+            queue: self.queue.clone(),
+        }
+    }
+}
+
+impl CtrlVirtio {
+    pub fn new(queue: Queue, queue_evt: EventFd) -> Self {
+        CtrlVirtio { queue_evt, queue }
+    }
+
+    pub fn process_cvq(&mut self, mem: &GuestMemoryMmap) -> Result<()> {
+        let mut used_desc_heads = [(0, 0); QUEUE_SIZE];
+        let mut used_count = 0;
+        if let Some(avail_desc) = self.queue.iter(&mem).next() {
+            used_desc_heads[used_count] = (avail_desc.index, avail_desc.len);
+            used_count += 1;
+            let _ = mem
+                .read_obj::<u8>(avail_desc.addr)
+                .map_err(Error::GuestMemory)?;
+        } else {
+            return Err(Error::InvalidDesc);
+        }
+        for &(desc_index, len) in &used_desc_heads[..used_count] {
+            self.queue.add_used(&mem, desc_index, len);
+        }
+
+        Ok(())
+    }
+}
+
+pub fn register_listener(
+    epoll_fd: RawFd,
+    fd: RawFd,
+    ev_type: epoll::Events,
+    data: u64,
+) -> std::result::Result<(), io::Error> {
+    epoll::ctl(
+        epoll_fd,
+        epoll::ControlOptions::EPOLL_CTL_ADD,
+        fd,
+        epoll::Event::new(ev_type, data),
+    )
+}
+
+pub fn unregister_listener(
+    epoll_fd: RawFd,
+    fd: RawFd,
+    ev_type: epoll::Events,
+    data: u64,
+) -> std::result::Result<(), io::Error> {
+    epoll::ctl(
+        epoll_fd,
+        epoll::ControlOptions::EPOLL_CTL_DEL,
+        fd,
+        epoll::Event::new(ev_type, data),
+    )
+}
+
+pub struct NetCtrlEpollHandler {
+    pub mem: Arc<ArcSwap<GuestMemoryMmap>>,
+    pub kill_evt: EventFd,
+    pub pause_evt: EventFd,
+    pub ctrl_q: CtrlVirtio,
+    pub epoll_fd: RawFd,
+}
+
+impl NetCtrlEpollHandler {
+    pub fn run_ctrl(&mut self, paused: Arc<AtomicBool>) -> std::result::Result<(), DeviceError> {
+        // Create the epoll file descriptor
+        self.epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
+
+        register_listener(
+            self.epoll_fd,
+            self.ctrl_q.queue_evt.as_raw_fd(),
+            epoll::Events::EPOLLIN,
+            u64::from(CTRL_QUEUE_EVENT),
+        )
+        .unwrap();
+        register_listener(
+            self.epoll_fd,
+            self.kill_evt.as_raw_fd(),
+            epoll::Events::EPOLLIN,
+            u64::from(KILL_EVENT),
+        )
+        .unwrap();
+        register_listener(
+            self.epoll_fd,
+            self.pause_evt.as_raw_fd(),
+            epoll::Events::EPOLLIN,
+            u64::from(PAUSE_EVENT),
+        )
+        .unwrap();
+
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); CTRL_EVENT_COUNT];
+
+        'epoll: loop {
+            let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
+                Ok(res) => res,
+                Err(e) => {
+                    if e.kind() == std::io::ErrorKind::Interrupted {
+                        continue;
+                    }
+                    return Err(DeviceError::EpollWait(e));
+                }
+            };
+
+            for event in events.iter().take(num_events) {
+                let ev_type = event.data as u16;
+
+                match ev_type {
+                    CTRL_QUEUE_EVENT => {
+                        let mem = self.mem.load();
+                        if let Err(e) = self.ctrl_q.queue_evt.read() {
+                            error!("failed to get ctl queue event: {:?}", e);
+                        }
+                        if let Err(e) = self.ctrl_q.process_cvq(&mem) {
+                            error!("failed to process ctrl queue: {:?}", e);
+                        }
+                    }
+                    KILL_EVENT => {
+                        break 'epoll;
+                    }
+                    PAUSE_EVENT => {
+                        debug!("PAUSE_EVENT received, pausing vhost-user epoll loop");
+                        // We loop here to handle spurious park() returns.
+                        // Until we have not resumed, the paused boolean will
+                        // be true.
+                        while paused.load(Ordering::SeqCst) {
+                            std::thread::park();
+                        }
+                    }
+                    _ => {
+                        error!("Unknown event for virtio-net");
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
