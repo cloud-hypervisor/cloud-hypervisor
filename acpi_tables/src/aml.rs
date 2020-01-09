@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::marker::PhantomData;
+
 pub trait Aml {
     fn to_aml_bytes(&self) -> Vec<u8>;
 }
@@ -1158,6 +1160,46 @@ impl Aml for Buffer {
     }
 }
 
+pub struct CreateField<'a, T> {
+    buffer: &'a dyn Aml,
+    offset: &'a dyn Aml,
+    field: Path,
+    phantom: PhantomData<&'a T>,
+}
+
+impl<'a, T> CreateField<'a, T> {
+    pub fn new(buffer: &'a dyn Aml, offset: &'a dyn Aml, field: Path) -> Self {
+        CreateField::<T> {
+            buffer,
+            offset,
+            field,
+            phantom: PhantomData::default(),
+        }
+    }
+}
+
+impl<'a> Aml for CreateField<'a, u64> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x8f); /* CreateQWordFieldOp */
+        bytes.extend_from_slice(&self.buffer.to_aml_bytes());
+        bytes.extend_from_slice(&self.offset.to_aml_bytes());
+        bytes.extend_from_slice(&self.field.to_aml_bytes());
+        bytes
+    }
+}
+
+impl<'a> Aml for CreateField<'a, u32> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(0x8a); /* CreateDWordFieldOp */
+        bytes.extend_from_slice(&self.buffer.to_aml_bytes());
+        bytes.extend_from_slice(&self.offset.to_aml_bytes());
+        bytes.extend_from_slice(&self.field.to_aml_bytes());
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1887,5 +1929,60 @@ mod tests {
             .to_aml_bytes(),
             &buffer_data[..]
         )
+    }
+
+    #[test]
+    fn test_create_field() {
+        /*
+        Method (MCRS, 0, Serialized)
+        {
+            Name (MR64, ResourceTemplate ()
+            {
+                QWordMemory (ResourceProducer, PosDecode, MinFixed, MaxFixed, Cacheable, ReadWrite,
+                    0x0000000000000000, // Granularity
+                    0x0000000000000000, // Range Minimum
+                    0xFFFFFFFFFFFFFFFE, // Range Maximum
+                    0x0000000000000000, // Translation Offset
+                    0xFFFFFFFFFFFFFFFF, // Length
+                    ,, _Y00, AddressRangeMemory, TypeStatic)
+            })
+            CreateQWordField (MR64, \_SB.MHPC.MCRS._Y00._MIN, MIN)  // _MIN: Minimum Base Address
+            CreateQWordField (MR64, \_SB.MHPC.MCRS._Y00._MAX, MAX)  // _MAX: Maximum Base Address
+            CreateQWordField (MR64, \_SB.MHPC.MCRS._Y00._LEN, LEN)  // _LEN: Length
+        }
+        */
+        let data = [
+            0x14, 0x41, 0x06, 0x4D, 0x43, 0x52, 0x53, 0x08, 0x08, 0x4D, 0x52, 0x36, 0x34, 0x11,
+            0x33, 0x0A, 0x30, 0x8A, 0x2B, 0x00, 0x00, 0x0C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFE, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x79, 0x00, 0x8F, 0x4D, 0x52, 0x36, 0x34,
+            0x0A, 0x0E, 0x4D, 0x49, 0x4E, 0x5F, 0x8F, 0x4D, 0x52, 0x36, 0x34, 0x0A, 0x16, 0x4D,
+            0x41, 0x58, 0x5F, 0x8F, 0x4D, 0x52, 0x36, 0x34, 0x0A, 0x26, 0x4C, 0x45, 0x4E, 0x5F,
+        ];
+
+        assert_eq!(
+            Method::new(
+                "MCRS".into(),
+                0,
+                true,
+                vec![
+                    &Name::new(
+                        "MR64".into(),
+                        &ResourceTemplate::new(vec![&AddressSpace::new_memory(
+                            AddressSpaceCachable::Cacheable,
+                            true,
+                            0x0000_0000_0000_0000u64,
+                            0xFFFF_FFFF_FFFF_FFFEu64
+                        )])
+                    ),
+                    &CreateField::<u64>::new(&Path::new("MR64"), &14usize, "MIN_".into()),
+                    &CreateField::<u64>::new(&Path::new("MR64"), &22usize, "MAX_".into()),
+                    &CreateField::<u64>::new(&Path::new("MR64"), &38usize, "LEN_".into()),
+                ]
+            )
+            .to_aml_bytes(),
+            &data[..]
+        );
     }
 }
