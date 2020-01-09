@@ -13,8 +13,17 @@ extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vmm_sys_util;
 
+use super::VirtioPciCommonConfig;
+use crate::transport::VirtioTransport;
+use crate::{
+    Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
+    VirtioIommuRemapping, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
+    DEVICE_FEATURES_OK, DEVICE_INIT, INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
+    VIRTIO_MSI_NO_VECTOR,
+};
 use arc_swap::ArcSwap;
 use devices::BusDevice;
+use kvm_bindings::kvm_irq_routing_entry;
 use kvm_ioctls::VmFd;
 use libc::EFD_NONBLOCK;
 use pci::{
@@ -24,6 +33,7 @@ use pci::{
     PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
 };
 use std::any::Any;
+use std::collections::HashMap;
 use std::result;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -31,15 +41,6 @@ use vm_allocator::SystemAllocator;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
-
-use super::VirtioPciCommonConfig;
-use crate::transport::VirtioTransport;
-use crate::{
-    Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
-    VirtioIommuRemapping, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
-    DEVICE_FEATURES_OK, DEVICE_INIT, INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
-    VIRTIO_MSI_NO_VECTOR,
-};
 
 #[allow(clippy::enum_variant_names)]
 enum PciCapabilityType {
@@ -259,6 +260,7 @@ impl VirtioPciDevice {
         iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
         allocator: &mut SystemAllocator,
         vm_fd: &Arc<VmFd>,
+        gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
     ) -> Result<Self> {
         let device_clone = device.clone();
         let locked_device = device_clone.lock().unwrap();
@@ -283,6 +285,7 @@ impl VirtioPciDevice {
                 msix_num,
                 allocator,
                 vm_fd.clone(),
+                gsi_msi_routes,
             )));
             let msix_config_clone = msix_config.clone();
             (Some(msix_config), Some(msix_config_clone))

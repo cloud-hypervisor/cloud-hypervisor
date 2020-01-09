@@ -11,7 +11,10 @@ use std::sync::Arc;
 use crate::device::InterruptParameters;
 use crate::{InterruptDelivery, InterruptRoute, PciCapability, PciCapabilityID};
 use byteorder::{ByteOrder, LittleEndian};
+use kvm_bindings::kvm_irq_routing_entry;
 use kvm_ioctls::VmFd;
+use std::collections::HashMap;
+use std::sync::Mutex;
 use vm_allocator::SystemAllocator;
 use vm_memory::ByteValued;
 
@@ -55,13 +58,19 @@ pub struct MsixConfig {
     pub pba_entries: Vec<u64>,
     pub irq_routes: Vec<InterruptRoute>,
     _vm_fd: Arc<VmFd>,
+    _gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
     interrupt_cb: Option<Arc<InterruptDelivery>>,
     masked: bool,
     enabled: bool,
 }
 
 impl MsixConfig {
-    pub fn new(msix_vectors: u16, allocator: &mut SystemAllocator, vm_fd: Arc<VmFd>) -> Self {
+    pub fn new(
+        msix_vectors: u16,
+        allocator: &mut SystemAllocator,
+        vm_fd: Arc<VmFd>,
+        gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+    ) -> Self {
         assert!(msix_vectors <= MAX_MSIX_VECTORS_PER_DEVICE);
 
         let mut table_entries: Vec<MsixTableEntry> = Vec::new();
@@ -80,6 +89,7 @@ impl MsixConfig {
             pba_entries,
             irq_routes,
             _vm_fd: vm_fd,
+            _gsi_msi_routes: gsi_msi_routes,
             interrupt_cb: None,
             masked: false,
             enabled: false,
