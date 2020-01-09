@@ -708,11 +708,63 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,iommu=on",
+                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4",
                 ],
                 r#"{
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "iommu": true}
+                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4}
+                    ]
+                }"#,
+                true,
+            ),
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--net",
+                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4,queue_size=128",
+                ],
+                r#"{
+                    "net": [
+                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4, "queue_size": 128}
+                    ]
+                }"#,
+                true,
+            ),
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--net",
+                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256",
+                ],
+                r#"{
+                    "net": [
+                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8"}
+                    ]
+                }"#,
+                true,
+            ),
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--net",
+                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8",
+                ],
+                r#"{
+                    "net": [
+                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256}
+                    ]
+                }"#,
+                true,
+            ),
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--net",
+                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=on",
+                ],
+                r#"{
+                    "net": [
+                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": true}
                     ]
                 }"#,
                 false,
@@ -721,11 +773,11 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,iommu=on",
+                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=on",
                 ],
                 r#"{
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "iommu": true}
+                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": true}
                     ],
                     "iommu": true
                 }"#,
@@ -735,11 +787,11 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,iommu=off",
+                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=off",
                 ],
                 r#"{
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "iommu": false}
+                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": false}
                     ]
                 }"#,
                 true,
