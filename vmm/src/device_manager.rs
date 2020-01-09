@@ -1473,6 +1473,7 @@ impl DeviceManager {
             msix_num,
             iommu_mapping_cb,
             &mut allocator,
+            vm_fd,
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 

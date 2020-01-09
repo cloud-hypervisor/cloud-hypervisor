@@ -412,7 +412,7 @@ impl VfioPciDevice {
             table,
             pba,
         };
-        let msix_config = MsixConfig::new(msix_cap.table_size(), allocator);
+        let msix_config = MsixConfig::new(msix_cap.table_size(), allocator, self.vm_fd.clone());
 
         self.interrupt.msix = Some(VfioMsix {
             bar: msix_config,
