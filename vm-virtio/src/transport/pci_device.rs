@@ -498,11 +498,6 @@ impl PciDevice for VirtioPciDevice {
 
     fn assign_msix(&mut self, msi_cb: Arc<InterruptDelivery>) {
         if let Some(msix_config) = &self.msix_config {
-            msix_config
-                .lock()
-                .unwrap()
-                .register_interrupt_cb(msi_cb.clone());
-
             let msix_config_clone = msix_config.clone();
 
             let common_config_msi_vector = self.common_config.msix_config.clone();
