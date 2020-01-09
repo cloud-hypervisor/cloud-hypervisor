@@ -340,7 +340,7 @@ impl VfioPciDevice {
             gsi_msi_routes,
         };
 
-        vfio_pci_device.parse_capabilities();
+        vfio_pci_device.parse_capabilities(allocator);
 
         // Allocate temporary interrupt routes for now.
         // The MSI vectors will be filled when the guest driver programs the device.
@@ -394,7 +394,7 @@ impl VfioPciDevice {
             .map_err(VfioPciError::SetGsiRouting)
     }
 
-    fn parse_msix_capabilities(&mut self, cap: u8) {
+    fn parse_msix_capabilities(&mut self, cap: u8, allocator: &mut SystemAllocator) {
         let msg_ctl = self
             .vfio_pci_configuration
             .read_config_word((cap + 2).into());
@@ -412,7 +412,7 @@ impl VfioPciDevice {
             table,
             pba,
         };
-        let msix_config = MsixConfig::new(msix_cap.table_size());
+        let msix_config = MsixConfig::new(msix_cap.table_size(), allocator);
 
         self.interrupt.msix = Some(VfioMsix {
             bar: msix_config,
@@ -435,7 +435,7 @@ impl VfioPciDevice {
         });
     }
 
-    fn parse_capabilities(&mut self) {
+    fn parse_capabilities(&mut self, allocator: &mut SystemAllocator) {
         let mut cap_next = self
             .vfio_pci_configuration
             .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
@@ -450,7 +450,7 @@ impl VfioPciDevice {
                     self.parse_msi_capabilities(cap_next);
                 }
                 PciCapabilityID::MSIX => {
-                    self.parse_msix_capabilities(cap_next);
+                    self.parse_msix_capabilities(cap_next, allocator);
                 }
                 _ => {}
             };

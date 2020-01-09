@@ -9,8 +9,9 @@ extern crate vm_memory;
 use std::sync::Arc;
 
 use crate::device::InterruptParameters;
-use crate::{InterruptDelivery, PciCapability, PciCapabilityID};
+use crate::{InterruptDelivery, InterruptRoute, PciCapability, PciCapabilityID};
 use byteorder::{ByteOrder, LittleEndian};
+use vm_allocator::SystemAllocator;
 use vm_memory::ByteValued;
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
@@ -51,13 +52,14 @@ impl Default for MsixTableEntry {
 pub struct MsixConfig {
     pub table_entries: Vec<MsixTableEntry>,
     pub pba_entries: Vec<u64>,
+    pub irq_routes: Vec<InterruptRoute>,
     interrupt_cb: Option<Arc<InterruptDelivery>>,
     masked: bool,
     enabled: bool,
 }
 
 impl MsixConfig {
-    pub fn new(msix_vectors: u16) -> Self {
+    pub fn new(msix_vectors: u16, allocator: &mut SystemAllocator) -> Self {
         assert!(msix_vectors <= MAX_MSIX_VECTORS_PER_DEVICE);
 
         let mut table_entries: Vec<MsixTableEntry> = Vec::new();
@@ -66,9 +68,15 @@ impl MsixConfig {
         let num_pba_entries: usize = ((msix_vectors as usize) / BITS_PER_PBA_ENTRY) + 1;
         pba_entries.resize_with(num_pba_entries, Default::default);
 
+        let mut irq_routes: Vec<InterruptRoute> = Vec::new();
+        for _ in 0..msix_vectors {
+            irq_routes.push(InterruptRoute::new(allocator).unwrap());
+        }
+
         MsixConfig {
             table_entries,
             pba_entries,
+            irq_routes,
             interrupt_cb: None,
             masked: false,
             enabled: false,
