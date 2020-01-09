@@ -8,8 +8,7 @@ extern crate vm_memory;
 
 use std::sync::Arc;
 
-use crate::device::InterruptParameters;
-use crate::{set_kvm_routes, InterruptDelivery, InterruptRoute, PciCapability, PciCapabilityID};
+use crate::{set_kvm_routes, InterruptRoute, PciCapability, PciCapabilityID};
 use byteorder::{ByteOrder, LittleEndian};
 use kvm_bindings::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
 use kvm_ioctls::VmFd;
@@ -59,7 +58,6 @@ pub struct MsixConfig {
     pub irq_routes: Vec<InterruptRoute>,
     vm_fd: Arc<VmFd>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
-    interrupt_cb: Option<Arc<InterruptDelivery>>,
     masked: bool,
     enabled: bool,
 }
@@ -90,14 +88,9 @@ impl MsixConfig {
             irq_routes,
             vm_fd,
             gsi_msi_routes,
-            interrupt_cb: None,
             masked: false,
             enabled: false,
         }
-    }
-
-    pub fn register_interrupt_cb(&mut self, cb: Arc<InterruptDelivery>) {
-        self.interrupt_cb = Some(cb);
     }
 
     pub fn masked(&self) -> bool {
@@ -366,13 +359,9 @@ impl MsixConfig {
 
     fn inject_msix_and_clear_pba(&mut self, vector: usize) {
         // Inject the MSI message
-        if let Some(cb) = &self.interrupt_cb {
-            match (cb)(InterruptParameters {
-                msix: Some(&self.table_entries[vector]),
-            }) {
-                Ok(_) => debug!("MSI-X injected on vector control flip"),
-                Err(e) => error!("failed to inject MSI-X: {}", e),
-            };
+        match self.irq_routes[vector].irq_fd.write(1) {
+            Ok(_) => debug!("MSI-X injected on vector control flip"),
+            Err(e) => error!("failed to inject MSI-X: {}", e),
         }
 
         // Clear the bit from PBA
