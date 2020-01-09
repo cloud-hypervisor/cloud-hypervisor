@@ -577,6 +577,7 @@ impl DeviceManager {
                     &mut pci_bus,
                     mapping,
                     migratable_devices,
+                    &gsi_msi_routes,
                 )?;
 
                 if let Some(dev_id) = virtio_iommu_attach_dev {
@@ -590,7 +591,7 @@ impl DeviceManager {
                 &mut pci_bus,
                 memory_manager,
                 &mut iommu_device,
-                gsi_msi_routes,
+                &gsi_msi_routes,
             )?;
 
             iommu_attached_devices.append(&mut vfio_iommu_device_ids);
@@ -614,6 +615,7 @@ impl DeviceManager {
                     &mut pci_bus,
                     &None,
                     migratable_devices,
+                    &gsi_msi_routes,
                 )?;
 
                 *virt_iommu = Some((iommu_id, iommu_attached_devices));
@@ -1349,7 +1351,7 @@ impl DeviceManager {
         pci: &mut PciBus,
         memory_manager: &Arc<Mutex<MemoryManager>>,
         iommu_device: &mut Option<vm_virtio::Iommu>,
-        gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+        gsi_msi_routes: &Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
     ) -> DeviceManagerResult<Vec<u32>> {
         let mut mem_slot = memory_manager.lock().unwrap().allocate_kvm_memory_slot();
         let mut iommu_attached_device_ids = Vec::new();
@@ -1431,6 +1433,7 @@ impl DeviceManager {
         pci: &mut PciBus,
         iommu_mapping: &Option<Arc<IommuMapping>>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
+        gsi_msi_routes: &Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
     ) -> DeviceManagerResult<Option<u32>> {
         // Allows support for one MSI-X vector per queue. It also adds 1
         // as we need to take into account the dedicated vector to notify
@@ -1473,6 +1476,7 @@ impl DeviceManager {
             iommu_mapping_cb,
             &mut allocator,
             vm_fd,
+            gsi_msi_routes.clone(),
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 
