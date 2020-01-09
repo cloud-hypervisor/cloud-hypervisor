@@ -427,7 +427,7 @@ pub fn open_tap(ip_addr: Ipv4Addr, netmask: Ipv4Addr) -> Result<Tap> {
     let vnet_hdr_size = vnet_hdr_len() as i32;
     let flag = net_gen::TUN_F_CSUM | net_gen::TUN_F_UFO | net_gen::TUN_F_TSO4 | net_gen::TUN_F_TSO6;
 
-    let tap = Tap::new().map_err(Error::TapOpen)?;
+    let tap = Tap::new(1).map_err(Error::TapOpen)?;
     tap.set_ip_addr(ip_addr).map_err(Error::TapSetIp)?;
     tap.set_netmask(netmask).map_err(Error::TapSetNetmask)?;
     tap.enable().map_err(Error::TapEnable)?;
