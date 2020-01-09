@@ -1,6 +1,7 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use super::super::net_util::build_net_config_space;
 use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
 use super::handler::*;
 use super::vu_common_ctrl::*;
@@ -10,7 +11,7 @@ use crate::VirtioInterrupt;
 use arc_swap::ArcSwap;
 use libc;
 use libc::EFD_NONBLOCK;
-use net_util::{MacAddr, MAC_ADDR_LEN};
+use net_util::MacAddr;
 use std::cmp;
 use std::io::Write;
 use std::result;
@@ -98,10 +99,7 @@ impl Net {
             return Err(Error::VhostUserProtocolNotSupport);
         }
 
-        let mut config_space = Vec::with_capacity(MAC_ADDR_LEN);
-        unsafe { config_space.set_len(MAC_ADDR_LEN) }
-        config_space[..].copy_from_slice(mac_addr.get_bytes());
-        avail_features |= 1 << virtio_net::VIRTIO_NET_F_MAC;
+        let config_space = build_net_config_space(mac_addr, &mut avail_features);
 
         // Send set_vring_base here, since it could tell backends, like OVS + DPDK,
         // how many virt queues to be handled, which backend required to know at early stage.

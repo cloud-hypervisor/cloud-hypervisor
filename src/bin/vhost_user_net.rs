@@ -18,43 +18,28 @@ use clap::{App, Arg};
 use epoll;
 use libc::{self, EAGAIN, EFD_NONBLOCK};
 use log::*;
-use std::cmp;
+use net_util::Tap;
 use std::fmt;
 use std::io::Read;
-use std::io::{self, Write};
-use std::mem;
+use std::io::{self};
 use std::net::Ipv4Addr;
 use std::os::unix::io::AsRawFd;
 use std::process;
 use std::sync::{Arc, RwLock};
 use std::vec::Vec;
-
 use vhost_rs::vhost_user::message::*;
 use vhost_rs::vhost_user::Error as VhostUserError;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
-
-use net_gen;
-
-use net_util::{Tap, TapError};
 use virtio_bindings::bindings::virtio_net::*;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
+use vm_memory::GuestMemoryMmap;
+use vm_virtio::net_util::{
+    open_tap, RxVirtio, TxVirtio, KILL_EVENT, RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
+};
+use vm_virtio::Queue;
 use vmm_sys_util::eventfd::EventFd;
 
-/// The maximum buffer size when segmentation offload is enabled. This
-/// includes the 12-byte virtio net header.
-/// http://docs.oasis-open.org/virtio/virtio/v1.0/virtio-v1.0.html#x1-1740003
-const MAX_BUFFER_SIZE: usize = 65562;
 const QUEUE_SIZE: usize = 1024;
 const NUM_QUEUES: usize = 2;
-
-// The guest has made a buffer available to receive a frame into.
-const RX_QUEUE_EVENT: u16 = 0;
-// The transmit queue has a frame that is ready to send from the guest.
-const TX_QUEUE_EVENT: u16 = 1;
-// A frame is available for reading from the tap device to receive in the guest.
-const RX_TAP_EVENT: u16 = 2;
-// The device has been dropped.
-const KILL_EVENT: u16 = 3;
 
 pub type VhostUserResult<T> = std::result::Result<T, VhostUserError>;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -93,17 +78,7 @@ pub enum Error {
     /// Failed to parse mask parameter.
     ParseMaskParam,
     /// Open tap device failed.
-    TapOpen(TapError),
-    /// Setting tap IP failed.
-    TapSetIp(TapError),
-    /// Setting tap netmask failed.
-    TapSetNetmask(TapError),
-    /// Setting tap interface offload flags failed.
-    TapSetOffload(TapError),
-    /// Setting vnet header size failed.
-    TapSetVnetHdrSize(TapError),
-    /// Enabling tap interface failed.
-    TapEnable(TapError),
+    OpenTap(vm_virtio::net_util::Error),
 }
 
 impl fmt::Display for Error {
@@ -118,44 +93,6 @@ impl std::convert::From<Error> for std::io::Error {
     fn from(e: Error) -> Self {
         std::io::Error::new(io::ErrorKind::Other, e)
     }
-}
-
-#[derive(Clone)]
-struct TxVirtio {
-    iovec: Vec<(GuestAddress, usize)>,
-    frame_buf: [u8; MAX_BUFFER_SIZE],
-}
-
-impl TxVirtio {
-    fn new() -> Self {
-        TxVirtio {
-            iovec: Vec::new(),
-            frame_buf: [0u8; MAX_BUFFER_SIZE],
-        }
-    }
-}
-
-#[derive(Clone)]
-struct RxVirtio {
-    deferred_frame: bool,
-    deferred_irqs: bool,
-    bytes_read: usize,
-    frame_buf: [u8; MAX_BUFFER_SIZE],
-}
-
-impl RxVirtio {
-    fn new() -> Self {
-        RxVirtio {
-            deferred_frame: false,
-            deferred_irqs: false,
-            bytes_read: 0,
-            frame_buf: [0u8; MAX_BUFFER_SIZE],
-        }
-    }
-}
-
-fn vnet_hdr_len() -> usize {
-    mem::size_of::<virtio_net_hdr_v1>()
 }
 
 struct VhostUserNetBackend {
@@ -185,16 +122,6 @@ impl std::clone::Clone for VhostUserNetBackend {
 impl VhostUserNetBackend {
     /// Create a new virtio network device with the given TAP interface.
     pub fn new_with_tap(tap: Tap) -> Result<Self> {
-        // Set offload flags to match the virtio features below.
-        tap.set_offload(
-            net_gen::TUN_F_CSUM | net_gen::TUN_F_UFO | net_gen::TUN_F_TSO4 | net_gen::TUN_F_TSO6,
-        )
-        .map_err(Error::TapSetOffload)?;
-
-        let vnet_hdr_size = vnet_hdr_len() as i32;
-        tap.set_vnet_hdr_size(vnet_hdr_size)
-            .map_err(Error::TapSetVnetHdrSize)?;
-
         let rx = RxVirtio::new();
         let tx = TxVirtio::new();
 
@@ -212,10 +139,7 @@ impl VhostUserNetBackend {
     /// Create a new virtio network device with the given IP address and
     /// netmask.
     pub fn new(ip_addr: Ipv4Addr, netmask: Ipv4Addr) -> Result<Self> {
-        let tap = Tap::new().map_err(Error::TapOpen)?;
-        tap.set_ip_addr(ip_addr).map_err(Error::TapSetIp)?;
-        tap.set_netmask(netmask).map_err(Error::TapSetNetmask)?;
-        tap.enable().map_err(Error::TapEnable)?;
+        let tap = open_tap(ip_addr, netmask).map_err(Error::OpenTap)?;
 
         Self::new_with_tap(tap)
     }
@@ -223,10 +147,10 @@ impl VhostUserNetBackend {
     // Copies a single frame from `self.rx.frame_buf` into the guest. Returns true
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
-    fn rx_single_frame(&mut self, vring: &mut Vring) -> Result<bool> {
+    fn rx_single_frame(&mut self, mut queue: &mut Queue) -> Result<bool> {
         let mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
 
-        let mut next_desc = vring.mut_queue().iter(&mem).next();
+        let next_desc = queue.iter(&mem).next();
 
         if next_desc.is_none() {
             // Queue has no available descriptors
@@ -244,52 +168,9 @@ impl VhostUserNetBackend {
             }
             return Ok(false);
         }
+        let write_complete = self.rx.process_desc_chain(&mem, next_desc, &mut queue);
 
-        // We just checked that the head descriptor exists.
-        let head_index = next_desc.as_ref().unwrap().index;
-        let mut write_count = 0;
-
-        // Copy from frame into buffer, which may span multiple descriptors.
-        loop {
-            match next_desc {
-                Some(desc) => {
-                    if !desc.is_write_only() {
-                        break;
-                    }
-                    let limit = cmp::min(write_count + desc.len as usize, self.rx.bytes_read);
-                    let source_slice = &self.rx.frame_buf[write_count..limit];
-                    let write_result = mem.write_slice(source_slice, desc.addr);
-
-                    match write_result {
-                        Ok(_) => {
-                            write_count = limit;
-                        }
-                        Err(e) => {
-                            error!("Failed to write slice: {:?}", e);
-                            break;
-                        }
-                    };
-
-                    if write_count >= self.rx.bytes_read {
-                        break;
-                    }
-                    next_desc = desc.next_descriptor();
-                }
-                None => {
-                    warn!("Receiving buffer is too small to hold frame of current size");
-                    break;
-                }
-            }
-        }
-
-        vring
-            .mut_queue()
-            .add_used(&mem, head_index, write_count as u32);
-
-        // Mark that we have at least one pending packet and we need to interrupt the guest.
-        self.rx.deferred_irqs = true;
-
-        Ok(write_count >= self.rx.bytes_read)
+        Ok(write_complete)
     }
 
     fn process_rx(&mut self, vring: &mut Vring) -> Result<()> {
@@ -298,7 +179,7 @@ impl VhostUserNetBackend {
             match self.read_tap() {
                 Ok(count) => {
                     self.rx.bytes_read = count;
-                    if !self.rx_single_frame(vring)? {
+                    if !self.rx_single_frame(&mut vring.mut_queue())? {
                         self.rx.deferred_frame = true;
                         break;
                     }
@@ -328,7 +209,7 @@ impl VhostUserNetBackend {
 
     fn resume_rx(&mut self, vring: &mut Vring) -> Result<()> {
         if self.rx.deferred_frame {
-            if self.rx_single_frame(vring)? {
+            if self.rx_single_frame(&mut vring.mut_queue())? {
                 self.rx.deferred_frame = false;
                 // process_rx() was interrupted possibly before consuming all
                 // packets in the tap; try continuing now.
@@ -345,65 +226,10 @@ impl VhostUserNetBackend {
         }
     }
 
-    fn process_tx(&mut self, vring: &mut Vring) -> Result<()> {
+    fn process_tx(&mut self, mut queue: &mut Queue) -> Result<()> {
         let mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
 
-        let mut used_desc_heads = [(0, 0); QUEUE_SIZE];
-        let mut used_count = 0;
-        while let Some(avail_desc) = vring.mut_queue().iter(&mem).next() {
-            let head_index = avail_desc.index;
-            let mut read_count = 0;
-            let mut next_desc = Some(avail_desc);
-
-            self.tx.iovec.clear();
-            while let Some(desc) = next_desc {
-                if desc.is_write_only() {
-                    break;
-                }
-                self.tx.iovec.push((desc.addr, desc.len as usize));
-                read_count += desc.len as usize;
-                next_desc = desc.next_descriptor();
-            }
-            used_desc_heads[used_count] = (head_index, read_count);
-            used_count += 1;
-            read_count = 0;
-            // Copy buffer from across multiple descriptors.
-            // TODO(performance - Issue #420): change this to use `writev()` instead of `write()`
-            // and get rid of the intermediate buffer.
-            for (desc_addr, desc_len) in self.tx.iovec.drain(..) {
-                let limit = cmp::min((read_count + desc_len) as usize, self.tx.frame_buf.len());
-
-                let read_result = mem.read_slice(
-                    &mut self.tx.frame_buf[read_count..limit as usize],
-                    desc_addr,
-                );
-                match read_result {
-                    Ok(_) => {
-                        // Increment by number of bytes actually read
-                        read_count += limit - read_count;
-                    }
-                    Err(e) => {
-                        error!("Failed to read slice: {:?}", e);
-                        break;
-                    }
-                }
-            }
-
-            let write_result = self.tap.write(&self.tx.frame_buf[..read_count as usize]);
-            match write_result {
-                Ok(_) => {}
-                Err(e) => {
-                    error!("net: tx: error failed to write to tap: {}", e);
-                }
-            };
-        }
-
-        if used_count > 0 {
-            for &(desc_index, _) in &used_desc_heads[..used_count] {
-                vring.mut_queue().add_used(&mem, desc_index, 0);
-            }
-            vring.signal_used_queue().unwrap();
-        }
+        self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
 
         Ok(())
     }
@@ -468,7 +294,7 @@ impl VhostUserBackend for VhostUserNetBackend {
             }
             TX_QUEUE_EVENT => {
                 let mut vring = vrings[1].write().unwrap();
-                self.process_tx(&mut vring)?;
+                self.process_tx(&mut vring.mut_queue())?;
             }
             RX_TAP_EVENT => {
                 let mut vring = vrings[0].write().unwrap();
@@ -476,7 +302,7 @@ impl VhostUserBackend for VhostUserNetBackend {
                 // Process a deferred frame first if available. Don't read from tap again
                 // until we manage to receive this deferred frame.
                 {
-                    if self.rx_single_frame(&mut vring)? {
+                    if self.rx_single_frame(&mut vring.mut_queue())? {
                         self.rx.deferred_frame = false;
                         self.process_rx(&mut vring)?;
                     } else if self.rx.deferred_irqs {
