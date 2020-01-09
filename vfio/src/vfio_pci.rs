@@ -550,20 +550,21 @@ impl VfioPciDevice {
 
     fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
         match self.interrupt.update_msix(offset, data) {
-            Some(InterruptUpdateAction::EnableMsix) => match self.enable_irq_fds() {
-                Ok(fds) => {
-                    if let Err(e) = self.device.enable_msix(fds) {
+            Some(InterruptUpdateAction::EnableMsix) => {
+                if let Some(msix) = &self.interrupt.msix {
+                    let mut irq_fds: Vec<&EventFd> = Vec::new();
+                    for r in msix.bar.irq_routes.iter() {
+                        irq_fds.push(&r.irq_fd);
+                    }
+
+                    if let Err(e) = self.device.enable_msix(irq_fds) {
                         warn!("Could not enable MSI-X: {}", e);
                     }
                 }
-                Err(e) => warn!("Could not get IRQ fds: {}", e),
-            },
+            }
             Some(InterruptUpdateAction::DisableMsix) => {
                 if let Err(e) = self.device.disable_msix() {
                     warn!("Could not disable MSI-X: {}", e);
-                }
-                if let Err(e) = self.disable_irq_fds() {
-                    warn!("Could not disable MSI: {}", e);
                 }
             }
             _ => {}
