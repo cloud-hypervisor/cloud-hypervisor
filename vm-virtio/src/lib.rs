@@ -85,6 +85,7 @@ impl From<u32> for VirtioDeviceType {
         match t {
             1 => VirtioDeviceType::TYPE_NET,
             2 => VirtioDeviceType::TYPE_BLOCK,
+            3 => VirtioDeviceType::TYPE_CONSOLE,
             4 => VirtioDeviceType::TYPE_RNG,
             5 => VirtioDeviceType::TYPE_BALLOON,
             9 => VirtioDeviceType::TYPE_9P,
@@ -107,14 +108,17 @@ impl fmt::Display for VirtioDeviceType {
         let output = match *self {
             VirtioDeviceType::TYPE_NET => "net",
             VirtioDeviceType::TYPE_BLOCK => "block",
+            VirtioDeviceType::TYPE_CONSOLE => "console",
             VirtioDeviceType::TYPE_RNG => "rng",
             VirtioDeviceType::TYPE_BALLOON => "balloon",
             VirtioDeviceType::TYPE_GPU => "gpu",
             VirtioDeviceType::TYPE_9P => "9p",
+            VirtioDeviceType::TYPE_INPUT => "input",
             VirtioDeviceType::TYPE_VSOCK => "vsock",
+            VirtioDeviceType::TYPE_IOMMU => "iommu",
             VirtioDeviceType::TYPE_FS => "fs",
             VirtioDeviceType::TYPE_PMEM => "pmem",
-            _ => return Err(std::fmt::Error),
+            VirtioDeviceType::TYPE_UNKNOWN => "UNKNOWN",
         };
         write!(f, "{}", output)
     }
