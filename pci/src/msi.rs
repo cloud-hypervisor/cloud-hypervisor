@@ -6,7 +6,13 @@
 extern crate byteorder;
 extern crate vm_memory;
 
+use crate::InterruptRoute;
 use byteorder::{ByteOrder, LittleEndian};
+use kvm_bindings::kvm_irq_routing_entry;
+use kvm_ioctls::VmFd;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use vm_allocator::SystemAllocator;
 
 // MSI control masks
 const MSI_CTL_ENABLE: u16 = 0x1;
@@ -58,11 +64,11 @@ impl MsiCap {
         self.msg_ctl & MSI_CTL_PER_VECTOR == MSI_CTL_PER_VECTOR
     }
 
-    pub fn enabled(&self) -> bool {
+    fn enabled(&self) -> bool {
         self.msg_ctl & MSI_CTL_ENABLE == MSI_CTL_ENABLE
     }
 
-    pub fn num_enabled_vectors(&self) -> usize {
+    fn num_enabled_vectors(&self) -> usize {
         let field = (self.msg_ctl >> 4) & 0x7;
 
         if field > 5 {
@@ -72,7 +78,7 @@ impl MsiCap {
         1 << field
     }
 
-    pub fn vector_masked(&self, vector: usize) -> bool {
+    fn vector_masked(&self, vector: usize) -> bool {
         if !self.per_vector_mask() {
             return false;
         }
@@ -80,7 +86,7 @@ impl MsiCap {
         (self.mask_bits >> vector) & 0x1 == 0x1
     }
 
-    pub fn size(&self) -> u64 {
+    fn size(&self) -> u64 {
         let mut size: u64 = 0xa;
 
         if self.addr_64_bits() {
@@ -93,7 +99,7 @@ impl MsiCap {
         size
     }
 
-    pub fn update(&mut self, offset: u64, data: &[u8]) {
+    fn update(&mut self, offset: u64, data: &[u8]) {
         // Calculate message data offset depending on the address being 32 or
         // 64 bits.
         // Calculate upper address offset if the address is 64 bits.
@@ -149,5 +155,58 @@ impl MsiCap {
             }
             _ => error!("invalid data length"),
         }
+    }
+}
+
+pub struct MsiConfig {
+    pub cap: MsiCap,
+    pub irq_routes: Vec<InterruptRoute>,
+    _vm_fd: Arc<VmFd>,
+    _gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+}
+
+impl MsiConfig {
+    pub fn new(
+        msg_ctl: u16,
+        allocator: &mut SystemAllocator,
+        vm_fd: Arc<VmFd>,
+        gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+    ) -> Self {
+        let cap = MsiCap {
+            msg_ctl,
+            ..Default::default()
+        };
+
+        let mut irq_routes: Vec<InterruptRoute> = Vec::new();
+        for _ in 0..cap.num_enabled_vectors() {
+            irq_routes.push(InterruptRoute::new(allocator).unwrap());
+        }
+
+        MsiConfig {
+            cap,
+            irq_routes,
+            _vm_fd: vm_fd,
+            _gsi_msi_routes: gsi_msi_routes,
+        }
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.cap.enabled()
+    }
+
+    pub fn update(&mut self, offset: u64, data: &[u8]) {
+        self.cap.update(offset, data)
+    }
+
+    pub fn size(&self) -> u64 {
+        self.cap.size()
+    }
+
+    pub fn num_enabled_vectors(&self) -> usize {
+        self.cap.num_enabled_vectors()
+    }
+
+    pub fn vector_masked(&self, vector: usize) -> bool {
+        self.cap.vector_masked(vector)
     }
 }

@@ -16,7 +16,7 @@ use kvm_bindings::{
 };
 use kvm_ioctls::*;
 use pci::{
-    BarReprogrammingParams, MsiCap, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
+    BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
     PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
     PciSubclass, MSIX_TABLE_ENTRY_SIZE,
 };
@@ -79,19 +79,18 @@ enum InterruptUpdateAction {
     DisableMsix,
 }
 
-#[derive(Copy, Clone)]
 struct VfioMsi {
-    cap: MsiCap,
+    cfg: MsiConfig,
     cap_offset: u32,
 }
 
 impl VfioMsi {
     fn update(&mut self, offset: u64, data: &[u8]) -> Option<InterruptUpdateAction> {
-        let old_enabled = self.cap.enabled();
+        let old_enabled = self.cfg.enabled();
 
-        self.cap.update(offset, data);
+        self.cfg.update(offset, data);
 
-        let new_enabled = self.cap.enabled();
+        let new_enabled = self.cfg.enabled();
 
         if !old_enabled && new_enabled {
             return Some(InterruptUpdateAction::EnableMsi);
@@ -169,7 +168,7 @@ impl Interrupt {
     fn accessed(&self, offset: u64) -> Option<(PciCapabilityID, u64)> {
         if let Some(msi) = &self.msi {
             if offset >= u64::from(msi.cap_offset)
-                && offset < u64::from(msi.cap_offset) + msi.cap.size()
+                && offset < u64::from(msi.cap_offset) + msi.cfg.size()
             {
                 return Some((
                     PciCapabilityID::MessageSignalledInterrupts,
@@ -426,16 +425,18 @@ impl VfioPciDevice {
         });
     }
 
-    fn parse_msi_capabilities(&mut self, cap: u8) {
+    fn parse_msi_capabilities(&mut self, cap: u8, allocator: &mut SystemAllocator) {
         let msg_ctl = self
             .vfio_pci_configuration
             .read_config_word((cap + 2).into());
 
         self.interrupt.msi = Some(VfioMsi {
-            cap: MsiCap {
+            cfg: MsiConfig::new(
                 msg_ctl,
-                ..Default::default()
-            },
+                allocator,
+                self.vm_fd.clone(),
+                self.gsi_msi_routes.clone(),
+            ),
             cap_offset: cap.into(),
         });
     }
@@ -452,7 +453,7 @@ impl VfioPciDevice {
 
             match PciCapabilityID::from(cap_id) {
                 PciCapabilityID::MessageSignalledInterrupts => {
-                    self.parse_msi_capabilities(cap_next);
+                    self.parse_msi_capabilities(cap_next, allocator);
                 }
                 PciCapabilityID::MSIX => {
                     self.parse_msix_capabilities(cap_next, allocator);
@@ -467,7 +468,7 @@ impl VfioPciDevice {
     }
 
     fn update_msi_interrupt_routes(&self, msi: &VfioMsi) -> Result<()> {
-        if msi.cap.enabled() {
+        if msi.cfg.enabled() {
             let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
 
             for (idx, route) in self.interrupt_routes.iter().enumerate() {
@@ -475,12 +476,12 @@ impl VfioPciDevice {
                 // guest OS does not match the expected amount. This is related
                 // to "Multiple Message Capable" and "Multiple Message Enable"
                 // fields from the "Message Control" register.
-                if idx >= msi.cap.num_enabled_vectors() {
+                if idx >= msi.cfg.num_enabled_vectors() {
                     continue;
                 }
 
                 // Ignore MSI vector if masked.
-                if msi.cap.vector_masked(idx) {
+                if msi.cfg.vector_masked(idx) {
                     continue;
                 }
 
@@ -490,9 +491,9 @@ impl VfioPciDevice {
                     ..Default::default()
                 };
 
-                entry.u.msi.address_lo = msi.cap.msg_addr_lo;
-                entry.u.msi.address_hi = msi.cap.msg_addr_hi;
-                entry.u.msi.data = u32::from(msi.cap.msg_data) | (idx as u32);
+                entry.u.msi.address_lo = msi.cfg.cap.msg_addr_lo;
+                entry.u.msi.address_hi = msi.cfg.cap.msg_addr_hi;
+                entry.u.msi.data = u32::from(msi.cfg.cap.msg_data) | (idx as u32);
 
                 gsi_msi_routes.insert(route.gsi, entry);
             }
@@ -693,7 +694,7 @@ impl Drop for VfioPciDevice {
         }
 
         if let Some(msi) = &self.interrupt.msi {
-            if msi.cap.enabled() && self.device.disable_msi().is_err() {
+            if msi.cfg.enabled() && self.device.disable_msi().is_err() {
                 error!("Could not disable MSI");
             }
         }
