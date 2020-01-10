@@ -497,6 +497,14 @@ impl Vm {
         }
 
         if let Some(desired_memory) = desired_memory {
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .resize(desired_memory)
+                .map_err(Error::MemoryManager)?;
+            self.devices
+                .notify_hotplug(HotPlugNotificationType::MemoryDevicesChanged)
+                .map_err(Error::DeviceManager)?;
             self.config.lock().unwrap().memory.size = desired_memory;
         }
         Ok(())
