@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#[cfg(feature = "acpi")]
+use acpi_tables::{aml, aml::Aml};
 use arc_swap::ArcSwap;
 use arch::RegionType;
 use devices::BusDevice;
@@ -457,4 +459,333 @@ impl MemoryManager {
         Ok(())
     }
 }
+
+struct MemoryNotify {
+    slot_id: usize,
+}
+
+#[cfg(feature = "acpi")]
+impl Aml for MemoryNotify {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let object = aml::Path::new(&format!("M{:03}", self.slot_id));
+        aml::If::new(
+            &aml::Equal::new(&aml::Arg(0), &self.slot_id),
+            vec![&aml::Notify::new(&object, &aml::Arg(1))],
+        )
+        .to_aml_bytes()
+    }
+}
+
+struct MemorySlot {
+    slot_id: usize,
+}
+
+#[cfg(feature = "acpi")]
+impl Aml for MemorySlot {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        aml::Device::new(
+            format!("M{:03}", self.slot_id).as_str().into(),
+            vec![
+                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C80")),
+                &aml::Name::new("_UID".into(), &self.slot_id),
+                /*
+                _STA return value:
+                Bit [0] – Set if the device is present.
+                Bit [1] – Set if the device is enabled and decoding its resources.
+                Bit [2] – Set if the device should be shown in the UI.
+                Bit [3] – Set if the device is functioning properly (cleared if device failed its diagnostics).
+                Bit [4] – Set if the battery is present.
+                Bits [31:5] – Reserved (must be cleared).
+                */
+                &aml::Method::new(
+                    "_STA".into(),
+                    0,
+                    false,
+                    // Call into MSTA method which will interrogate device
+                    vec![&aml::Return::new(&aml::MethodCall::new(
+                        "MSTA".into(),
+                        vec![&self.slot_id],
+                    ))],
+                ),
+                // Get details of memory
+                &aml::Method::new(
+                    "_CRS".into(),
+                    0,
+                    false,
+                    // Call into MCRS which provides actual memory details
+                    vec![&aml::Return::new(&aml::MethodCall::new(
+                        "MCRS".into(),
+                        vec![&self.slot_id],
+                    ))],
+                ),
+                // We don't expose any NUMA characteristics so all memory is in the same "proximity domain"
+                &aml::Method::new(
+                    "_PXM".into(),
+                    0,
+                    false,
+                    // We aren't NUMA so associate all RAM into the same proximity region (zero)
+                    vec![&aml::Return::new(&0u32)],
+                ),
+            ],
+        )
+        .to_aml_bytes()
+    }
+}
+
+struct MemorySlots {
+    slots: usize,
+}
+
+#[cfg(feature = "acpi")]
+impl Aml for MemorySlots {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        for slot_id in 0..self.slots {
+            bytes.extend_from_slice(&MemorySlot { slot_id }.to_aml_bytes());
+        }
+
+        bytes
+    }
+}
+
+struct MemoryMethods {
+    slots: usize,
+}
+
+#[cfg(feature = "acpi")]
+impl Aml for MemoryMethods {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        // Add "MTFY" notification method
+        let mut memory_notifies = Vec::new();
+        for slot_id in 0..self.slots {
+            memory_notifies.push(MemoryNotify { slot_id });
+        }
+
+        let mut memory_notifies_refs: Vec<&dyn aml::Aml> = Vec::new();
+        for memory_notifier in memory_notifies.iter() {
+            memory_notifies_refs.push(memory_notifier);
+        }
+
+        bytes.extend_from_slice(
+            &aml::Method::new("MTFY".into(), 2, true, memory_notifies_refs).to_aml_bytes(),
+        );
+
+        // MSCN method
+        bytes.extend_from_slice(
+            &aml::Method::new(
+                "MSCN".into(),
+                0,
+                true,
+                vec![
+                    // Take lock defined above
+                    &aml::Acquire::new("MLCK".into(), 0xfff),
+                    &aml::Store::new(&aml::Local(0), &aml::ZERO),
+                    &aml::While::new(
+                        &aml::LessThan::new(&aml::Local(0), &self.slots),
+                        vec![
+                            // Write slot number (in first argument) to I/O port via field
+                            &aml::Store::new(&aml::Path::new("\\_SB_.MHPC.MSEL"), &aml::Local(0)),
+                            // Check if MINS bit is set (inserting)
+                            &aml::If::new(
+                                &aml::Equal::new(&aml::Path::new("\\_SB_.MHPC.MINS"), &aml::ONE),
+                                // Notify device if it is
+                                vec![
+                                    &aml::MethodCall::new(
+                                        "MTFY".into(),
+                                        vec![&aml::Local(0), &aml::ONE],
+                                    ),
+                                    // Reset MINS bit
+                                    &aml::Store::new(
+                                        &aml::Path::new("\\_SB_.MHPC.MINS"),
+                                        &aml::ONE,
+                                    ),
+                                ],
+                            ),
+                            // Check if MRMV bit is set
+                            &aml::If::new(
+                                &aml::Equal::new(&aml::Path::new("\\_SB_.MHPC.MRMV"), &aml::ONE),
+                                // Notify device if it is (with the eject constant 0x3)
+                                vec![
+                                    &aml::MethodCall::new(
+                                        "MTFY".into(),
+                                        vec![&aml::Local(0), &3u8],
+                                    ),
+                                    // Reset MRMV bit
+                                    &aml::Store::new(
+                                        &aml::Path::new("\\_SB_.MHPC.MRMV"),
+                                        &aml::ONE,
+                                    ),
+                                ],
+                            ),
+                            &aml::Add::new(&aml::Local(0), &aml::Local(0), &aml::ONE),
+                        ],
+                    ),
+                    // Release lock
+                    &aml::Release::new("MLCK".into()),
+                ],
+            )
+            .to_aml_bytes(),
+        );
+
+        bytes.extend_from_slice(
+            // Memory status method
+            &aml::Method::new(
+                "MSTA".into(),
+                1,
+                true,
+                vec![
+                    // Take lock defined above
+                    &aml::Acquire::new("MLCK".into(), 0xfff),
+                    // Write slot number (in first argument) to I/O port via field
+                    &aml::Store::new(&aml::Path::new("\\_SB_.MHPC.MSEL"), &aml::Arg(0)),
+                    &aml::Store::new(&aml::Local(0), &aml::ZERO),
+                    // Check if MEN_ bit is set, if so make the local variable 0xf (see _STA for details of meaning)
+                    &aml::If::new(
+                        &aml::Equal::new(&aml::Path::new("\\_SB_.MHPC.MEN_"), &aml::ONE),
+                        vec![&aml::Store::new(&aml::Local(0), &0xfu8)],
+                    ),
+                    // Release lock
+                    &aml::Release::new("MLCK".into()),
+                    // Return 0 or 0xf
+                    &aml::Return::new(&aml::Local(0)),
+                ],
+            )
+            .to_aml_bytes(),
+        );
+
+        bytes.extend_from_slice(
+            // Memory range method
+            &aml::Method::new(
+                "MCRS".into(),
+                1,
+                true,
+                vec![
+                    // Take lock defined above
+                    &aml::Acquire::new("MLCK".into(), 0xfff),
+                    // Write slot number (in first argument) to I/O port via field
+                    &aml::Store::new(&aml::Path::new("\\_SB_.MHPC.MSEL"), &aml::Arg(0)),
+                    &aml::Name::new(
+                        "MR64".into(),
+                        &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
+                            aml::AddressSpaceCachable::Cacheable,
+                            true,
+                            0x0000_0000_0000_0000u64,
+                            0xFFFF_FFFF_FFFF_FFFEu64,
+                        )]),
+                    ),
+                    &aml::CreateField::<u32>::new(&aml::Path::new("MR64"), &14usize, "MINL".into()),
+                    &aml::CreateField::<u32>::new(&aml::Path::new("MR64"), &18usize, "MINH".into()),
+                    &aml::CreateField::<u32>::new(&aml::Path::new("MR64"), &22usize, "MAXL".into()),
+                    &aml::CreateField::<u32>::new(&aml::Path::new("MR64"), &26usize, "MAXH".into()),
+                    &aml::CreateField::<u32>::new(&aml::Path::new("MR64"), &38usize, "LENL".into()),
+                    &aml::CreateField::<u32>::new(&aml::Path::new("MR64"), &42usize, "LENH".into()),
+                    &aml::Store::new(&aml::Path::new("MINL"), &aml::Path::new("\\_SB_.MHPC.MHBL")),
+                    &aml::Store::new(&aml::Path::new("MINH"), &aml::Path::new("\\_SB_.MHPC.MHBH")),
+                    &aml::Store::new(&aml::Path::new("LENL"), &aml::Path::new("\\_SB_.MHPC.MHLL")),
+                    &aml::Store::new(&aml::Path::new("LENH"), &aml::Path::new("\\_SB_.MHPC.MHLH")),
+                    &aml::Add::new(
+                        &aml::Path::new("MAXL"),
+                        &aml::Path::new("MINL"),
+                        &aml::Path::new("LENL"),
+                    ),
+                    &aml::Add::new(
+                        &aml::Path::new("MAXH"),
+                        &aml::Path::new("MINH"),
+                        &aml::Path::new("LENH"),
+                    ),
+                    &aml::Subtract::new(
+                        &aml::Path::new("MAXH"),
+                        &aml::Path::new("MAXH"),
+                        &aml::ONE,
+                    ),
+                    // Release lock
+                    &aml::Release::new("MLCK".into()),
+                    &aml::Return::new(&aml::Path::new("MR64")),
+                ],
+            )
+            .to_aml_bytes(),
+        );
+        bytes
+    }
+}
+
+#[cfg(feature = "acpi")]
+impl Aml for MemoryManager {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        // Memory Hotplug Controller
+        bytes.extend_from_slice(
+            &aml::Device::new(
+                "_SB_.MHPC".into(),
+                vec![
+                    &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
+                    // Mutex to protect concurrent access as we write to choose slot and then read back status
+                    &aml::Mutex::new("MLCK".into(), 0),
+                    // I/O port for memory controller
+                    &aml::Name::new(
+                        "_CRS".into(),
+                        &aml::ResourceTemplate::new(vec![&aml::IO::new(
+                            0x0a00, 0x0a00, 0x01, 0x18,
+                        )]),
+                    ),
+                    // OpRegion and Fields map I/O port into individual field values
+                    &aml::OpRegion::new("MHPR".into(), aml::OpRegionSpace::SystemIO, 0xa00, 0x18),
+                    &aml::Field::new(
+                        "MHPR".into(),
+                        aml::FieldAccessType::DWord,
+                        aml::FieldUpdateRule::Preserve,
+                        vec![
+                            aml::FieldEntry::Named(*b"MHBL", 32), // Base (low 4 bytes)
+                            aml::FieldEntry::Named(*b"MHBH", 32), // Base (high 4 bytes)
+                            aml::FieldEntry::Named(*b"MHLL", 32), // Length (low 4 bytes)
+                            aml::FieldEntry::Named(*b"MHLH", 32), // Length (high 4 bytes)
+                        ],
+                    ),
+                    &aml::Field::new(
+                        "MHPR".into(),
+                        aml::FieldAccessType::DWord,
+                        aml::FieldUpdateRule::Preserve,
+                        vec![
+                            aml::FieldEntry::Reserved(128),
+                            aml::FieldEntry::Named(*b"MHPX", 32), // PXM
+                        ],
+                    ),
+                    &aml::Field::new(
+                        "MHPR".into(),
+                        aml::FieldAccessType::Byte,
+                        aml::FieldUpdateRule::WriteAsZeroes,
+                        vec![
+                            aml::FieldEntry::Reserved(160),
+                            aml::FieldEntry::Named(*b"MEN_", 1), // Enabled
+                            aml::FieldEntry::Named(*b"MINS", 1), // Inserting
+                            aml::FieldEntry::Named(*b"MRMV", 1), // Removing
+                            aml::FieldEntry::Named(*b"MEJ0", 1), // Ejecting
+                        ],
+                    ),
+                    &aml::Field::new(
+                        "MHPR".into(),
+                        aml::FieldAccessType::DWord,
+                        aml::FieldUpdateRule::Preserve,
+                        vec![
+                            aml::FieldEntry::Named(*b"MSEL", 32), // Selector
+                            aml::FieldEntry::Named(*b"MOEV", 32), // Event
+                            aml::FieldEntry::Named(*b"MOSC", 32), // OSC
+                        ],
+                    ),
+                    &MemoryMethods {
+                        slots: self.hotplug_slots.len(),
+                    },
+                    &MemorySlots {
+                        slots: self.hotplug_slots.len(),
+                    },
+                ],
+            )
+            .to_aml_bytes(),
+        );
+
+        bytes
+    }
 }

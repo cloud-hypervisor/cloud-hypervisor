@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::cpu::CpuManager;
 use crate::device_manager::DeviceManager;
+use crate::memory_manager::MemoryManager;
 use arch::layout;
 
 #[repr(packed)]
@@ -82,12 +83,14 @@ struct IortIdMapping {
 pub fn create_dsdt_table(
     device_manager: &DeviceManager,
     cpu_manager: &Arc<Mutex<CpuManager>>,
+    memory_manager: &Arc<Mutex<MemoryManager>>,
 ) -> SDT {
     // DSDT
     let mut dsdt = SDT::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
 
     dsdt.append_slice(device_manager.to_aml_bytes().as_slice());
     dsdt.append_slice(cpu_manager.lock().unwrap().to_aml_bytes().as_slice());
+    dsdt.append_slice(memory_manager.lock().unwrap().to_aml_bytes().as_slice());
 
     dsdt
 }
@@ -96,13 +99,14 @@ pub fn create_acpi_tables(
     guest_mem: &GuestMemoryMmap,
     device_manager: &DeviceManager,
     cpu_manager: &Arc<Mutex<CpuManager>>,
+    memory_manager: &Arc<Mutex<MemoryManager>>,
 ) -> GuestAddress {
     // RSDP is at the EBDA
     let rsdp_offset = layout::RSDP_POINTER;
     let mut tables: Vec<u64> = Vec::new();
 
     // DSDT
-    let dsdt = create_dsdt_table(device_manager, cpu_manager);
+    let dsdt = create_dsdt_table(device_manager, cpu_manager, memory_manager);
     let dsdt_offset = rsdp_offset.checked_add(RSDP::len() as u64).unwrap();
     guest_mem
         .write_slice(dsdt.as_slice(), dsdt_offset)

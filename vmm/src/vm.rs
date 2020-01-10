@@ -408,6 +408,7 @@ impl Vm {
                 &mem,
                 &self.devices,
                 &self.cpu_manager,
+                &self.memory_manager,
             ));
         }
 
