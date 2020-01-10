@@ -7,6 +7,7 @@ use arc_swap::ArcSwap;
 use arch::RegionType;
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::*;
+use std::convert::TryInto;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::unix::io::FromRawFd;
@@ -19,12 +20,28 @@ use vm_memory::{
     GuestMemoryRegion, GuestRegionMmap, GuestUsize, MmapRegion,
 };
 
+const HOTPLUG_COUNT: usize = 8;
+
+#[derive(Default)]
+struct HotPlugState {
+    base: u64,
+    length: u64,
+    active: bool,
+}
+
 pub struct MemoryManager {
     guest_memory: Arc<ArcSwap<GuestMemoryMmap>>,
     next_kvm_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
     fd: Arc<VmFd>,
+    mem_regions: Vec<Arc<GuestRegionMmap>>,
+    hotplug_slots: Vec<HotPlugState>,
+    backing_file: Option<PathBuf>,
+    mergeable: bool,
+    allocator: Arc<Mutex<SystemAllocator>>,
+    current_ram: u64,
+    next_hotplug_slot: usize,
 }
 
 #[derive(Debug)]
@@ -46,6 +63,15 @@ pub enum Error {
 
     /// Error from region creation
     GuestMemoryRegion(MmapRegionError),
+
+    /// No ACPI slot available
+    NoSlotAvailable,
+
+    /// Not enough space in the hotplug RAM region
+    InsufficientHotplugRAM,
+
+    /// The requested hotplug memory addition is not a valid size
+    InvalidSize,
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
@@ -104,7 +130,7 @@ impl MemoryManager {
         }
 
         let guest_memory =
-            GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
+            GuestMemoryMmap::from_arc_regions(mem_regions.clone()).map_err(Error::GuestMemory)?;
 
         let end_of_device_area = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
         let mem_end = guest_memory.end_addr();
@@ -120,12 +146,22 @@ impl MemoryManager {
 
         let guest_memory = Arc::new(ArcSwap::new(Arc::new(guest_memory)));
 
+        let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
+        hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
+
         let memory_manager = Arc::new(Mutex::new(MemoryManager {
             guest_memory: guest_memory.clone(),
             next_kvm_memory_slot: ram_regions.len() as u32,
             start_of_device_area,
             end_of_device_area,
             fd,
+            mem_regions,
+            hotplug_slots,
+            backing_file: backing_file.clone(),
+            mergeable,
+            allocator: allocator.clone(),
+            current_ram: boot_ram,
+            next_hotplug_slot: 0,
         }));
 
         guest_memory.load().with_regions(|_, region| {
@@ -188,6 +224,68 @@ impl MemoryManager {
             )
             .map_err(Error::GuestMemory)?,
         }))
+    }
+
+    fn hotplug_ram_region(&mut self, size: usize) -> Result<(), Error> {
+        info!("Hotplugging new RAM: {}", size);
+
+        // Check that there is a free slot
+        if self.next_hotplug_slot >= HOTPLUG_COUNT {
+            return Err(Error::NoSlotAvailable);
+        }
+
+        // "Inserted" DIMM must have a size that is a multiple of 128MiB
+        if size % (128 << 20) != 0 {
+            return Err(Error::InvalidSize);
+        }
+
+        // Start address needs to be non-contiguous with last memory added (leaving a gap of 256MiB)
+        // and also aligned to 128MiB boundary. It must also start at the 64bit start.
+        let mem_end = self.guest_memory.load().end_addr();
+        let start_addr = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
+            arch::layout::RAM_64BIT_START
+        } else {
+            GuestAddress((mem_end.0 + 1 + (256 << 20)) & !((128 << 20) - 1))
+        };
+
+        if start_addr.checked_add(size.try_into().unwrap()).unwrap() >= self.start_of_device_area()
+        {
+            return Err(Error::InsufficientHotplugRAM);
+        }
+
+        // Allocate memory for the region
+        let region = MemoryManager::create_ram_region(&self.backing_file, start_addr, size)?;
+
+        // Map it into the guest
+        self.create_userspace_mapping(
+            region.start_addr().0,
+            region.len() as u64,
+            region.as_ptr() as u64,
+            self.mergeable,
+        )?;
+
+        // Tell the allocator
+        self.allocator
+            .lock()
+            .unwrap()
+            .allocate_mmio_addresses(Some(start_addr), size as GuestUsize, None)
+            .ok_or(Error::MemoryRangeAllocation)?;
+
+        // Update the slot so that it can be queried via the I/O port
+        let mut slot = &mut self.hotplug_slots[self.next_hotplug_slot];
+        slot.active = true;
+        slot.base = region.start_addr().0;
+        slot.length = region.len() as u64;
+
+        self.next_hotplug_slot += 1;
+
+        // Update the GuestMemoryMmap with the new range
+        self.mem_regions.push(region);
+        let guest_memory = GuestMemoryMmap::from_arc_regions(self.mem_regions.clone())
+            .map_err(Error::GuestMemory)?;
+        self.guest_memory.store(Arc::new(guest_memory));
+
+        Ok(())
     }
 
     pub fn guest_memory(&self) -> Arc<ArcSwap<GuestMemoryMmap>> {
@@ -257,6 +355,20 @@ impl MemoryManager {
             }
         }
 
+        info!(
+            "Created userspace mapping: {:x} -> {:x} {:x}",
+            guest_phys_addr, userspace_addr, memory_size
+        );
+
         Ok(slot)
     }
+
+    pub fn resize(&mut self, desired_ram: u64) -> Result<(), Error> {
+        if desired_ram >= self.current_ram {
+            self.hotplug_ram_region((desired_ram - self.current_ram) as usize)?;
+            self.current_ram = desired_ram;
+        }
+        Ok(())
+    }
+}
 }
