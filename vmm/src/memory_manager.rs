@@ -5,6 +5,7 @@
 
 use arc_swap::ArcSwap;
 use arch::RegionType;
+use devices::BusDevice;
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::*;
 use std::convert::TryInto;
@@ -27,6 +28,8 @@ struct HotPlugState {
     base: u64,
     length: u64,
     active: bool,
+    inserting: bool,
+    removing: bool,
 }
 
 pub struct MemoryManager {
@@ -37,6 +40,7 @@ pub struct MemoryManager {
     fd: Arc<VmFd>,
     mem_regions: Vec<Arc<GuestRegionMmap>>,
     hotplug_slots: Vec<HotPlugState>,
+    selected_slot: usize,
     backing_file: Option<PathBuf>,
     mergeable: bool,
     allocator: Arc<Mutex<SystemAllocator>>,
@@ -102,6 +106,86 @@ pub fn get_host_cpu_phys_bits() -> u8 {
     }
 }
 
+const ENABLE_FLAG: usize = 0;
+const INSERTING_FLAG: usize = 1;
+const REMOVING_FLAG: usize = 2;
+const EJECT_FLAG: usize = 3;
+
+const BASE_OFFSET_LOW: u64 = 0;
+const BASE_OFFSET_HIGH: u64 = 0x4;
+const LENGTH_OFFSET_LOW: u64 = 0x8;
+const LENGTH_OFFSET_HIGH: u64 = 0xA;
+const STATUS_OFFSET: u64 = 0x14;
+const SELECTION_OFFSET: u64 = 0;
+
+impl BusDevice for MemoryManager {
+    fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
+        if self.selected_slot < self.hotplug_slots.len() {
+            let state = &self.hotplug_slots[self.selected_slot];
+            match offset {
+                BASE_OFFSET_LOW => {
+                    data.copy_from_slice(&state.base.to_le_bytes()[..4]);
+                }
+                BASE_OFFSET_HIGH => {
+                    data.copy_from_slice(&state.base.to_le_bytes()[4..]);
+                }
+                LENGTH_OFFSET_LOW => {
+                    data.copy_from_slice(&state.length.to_le_bytes()[..4]);
+                }
+                LENGTH_OFFSET_HIGH => {
+                    data.copy_from_slice(&state.length.to_le_bytes()[4..]);
+                }
+                STATUS_OFFSET => {
+                    if state.active {
+                        data[0] |= 1 << ENABLE_FLAG;
+                    }
+                    if state.inserting {
+                        data[0] |= 1 << INSERTING_FLAG;
+                    }
+                    if state.removing {
+                        data[0] |= 1 << REMOVING_FLAG;
+                    }
+                }
+                _ => {
+                    warn!(
+                        "Unexpected offset for accessing memory manager device: {:#}",
+                        offset
+                    );
+                }
+            }
+        }
+    }
+
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
+        match offset {
+            SELECTION_OFFSET => {
+                self.selected_slot = usize::from(data[0]);
+            }
+            STATUS_OFFSET => {
+                let state = &mut self.hotplug_slots[self.selected_slot];
+                // The ACPI code writes back a 1 to acknowledge the insertion
+                if (data[0] & (1 << INSERTING_FLAG) == 1 << INSERTING_FLAG) && state.inserting {
+                    state.inserting = false;
+                }
+                // Ditto for removal
+                if (data[0] & (1 << REMOVING_FLAG) == 1 << REMOVING_FLAG) && state.removing {
+                    state.removing = false;
+                }
+                // Trigger removal of "DIMM"
+                if data[0] & (1 << EJECT_FLAG) == 1 << EJECT_FLAG {
+                    warn!("Ejection of memory not currently supported");
+                }
+            }
+            _ => {
+                warn!(
+                    "Unexpected offset for accessing memory manager device: {:#}",
+                    offset
+                );
+            }
+        }
+    }
+}
+
 impl MemoryManager {
     pub fn new(
         allocator: Arc<Mutex<SystemAllocator>>,
@@ -157,6 +241,7 @@ impl MemoryManager {
             fd,
             mem_regions,
             hotplug_slots,
+            selected_slot: 0,
             backing_file: backing_file.clone(),
             mergeable,
             allocator: allocator.clone(),
@@ -274,6 +359,7 @@ impl MemoryManager {
         // Update the slot so that it can be queried via the I/O port
         let mut slot = &mut self.hotplug_slots[self.next_hotplug_slot];
         slot.active = true;
+        slot.inserting = true;
         slot.base = region.start_addr().0;
         slot.length = region.len() as u64;
 
