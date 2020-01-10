@@ -75,4 +75,5 @@ pub trait Interrupt: Send + Sync {
 pub enum HotPlugNotificationType {
     NoDevicesChanged,
     CPUDevicesChanged,
+    MemoryDevicesChanged,
 }
