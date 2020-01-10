@@ -1674,6 +1674,10 @@ fn create_ged_device(ged_irq: u32) -> Vec<u8> {
                         &aml::Equal::new(&aml::Local(0), &aml::ONE),
                         vec![&aml::MethodCall::new("\\_SB_.CPUS.CSCN".into(), vec![])],
                     ),
+                    &aml::If::new(
+                        &aml::Equal::new(&aml::Local(0), &2usize),
+                        vec![&aml::MethodCall::new("\\_SB_.MHPC.MSCN".into(), vec![])],
+                    ),
                 ],
             ),
         ],
