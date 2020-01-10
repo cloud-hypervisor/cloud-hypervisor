@@ -482,7 +482,7 @@ impl Vm {
         Ok(())
     }
 
-    pub fn resize(&mut self, desired_vcpus: Option<u8>) -> Result<()> {
+    pub fn resize(&mut self, desired_vcpus: Option<u8>, desired_memory: Option<u64>) -> Result<()> {
         if let Some(desired_vcpus) = desired_vcpus {
             self.cpu_manager
                 .lock()
@@ -495,6 +495,9 @@ impl Vm {
             self.config.lock().unwrap().cpus.boot_vcpus = desired_vcpus;
         }
 
+        if let Some(desired_memory) = desired_memory {
+            self.config.lock().unwrap().memory.size = desired_memory;
+        }
         Ok(())
     }
 

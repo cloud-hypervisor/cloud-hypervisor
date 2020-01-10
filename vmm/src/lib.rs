@@ -330,9 +330,13 @@ impl Vmm {
         self.vm_delete()
     }
 
-    fn vm_resize(&mut self, desired_vcpus: Option<u8>) -> result::Result<(), VmError> {
+    fn vm_resize(
+        &mut self,
+        desired_vcpus: Option<u8>,
+        desired_ram: Option<u64>,
+    ) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            vm.resize(desired_vcpus)
+            vm.resize(desired_vcpus, desired_ram)
         } else {
             Err(VmError::VmNotRunning)
         }
@@ -485,7 +489,10 @@ impl Vmm {
                                 }
                                 ApiRequest::VmResize(resize_data, sender) => {
                                     let response = self
-                                        .vm_resize(resize_data.desired_vcpus)
+                                        .vm_resize(
+                                            resize_data.desired_vcpus,
+                                            resize_data.desired_ram,
+                                        )
                                         .map_err(ApiError::VmResize)
                                         .map(|_| ApiResponsePayload::Empty);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;

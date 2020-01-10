@@ -432,3 +432,5 @@ components:
         desired_vcpus:
           minimum: 1
           type: integer
+        desired_ram:
+          type: integer
