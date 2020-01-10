@@ -500,6 +500,18 @@ impl DeviceManager {
 
         let config = vm_info.vm_cfg.clone();
 
+        address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_io_addresses(Some(GuestAddress(0x0a00)), 0x18, None)
+            .ok_or(DeviceManagerError::AllocateIOPort)?;
+
+        address_manager
+            .io_bus
+            .insert(memory_manager.clone(), 0xa00, 0x18)
+            .map_err(DeviceManagerError::BusError)?;
+
         Ok(DeviceManager {
             address_manager,
             console,
