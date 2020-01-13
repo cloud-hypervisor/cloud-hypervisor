@@ -517,6 +517,26 @@ impl VirtioInterrupt for VirtioInterruptMsix {
 
         config.irq_routes[vector as usize].irq_fd.write(1)
     }
+
+    fn notifier(&self, int_type: &VirtioInterruptType, queue: Option<&Queue>) -> Option<EventFd> {
+        let vector = match int_type {
+            VirtioInterruptType::Config => self.config_vector.load(Ordering::SeqCst),
+            VirtioInterruptType::Queue => {
+                if let Some(q) = queue {
+                    q.vector
+                } else {
+                    0
+                }
+            }
+        };
+
+        Some(
+            self.msix_config.lock().unwrap().irq_routes[vector as usize]
+                .irq_fd
+                .try_clone()
+                .unwrap(),
+        )
+    }
 }
 
 impl PciDevice for VirtioPciDevice {
