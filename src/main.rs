@@ -1975,8 +1975,12 @@ mod tests {
             }
         }
 
-        fn api_resize_body(&self, desired_vcpus: u8) -> String {
-            format!("{{\"desired_vcpus\":{}}}", desired_vcpus)
+        fn api_resize_body(&self, desired_vcpus: Option<u8>, desired_ram: Option<u64>) -> String {
+            let resize = vmm::api::VmResizeData {
+                desired_vcpus,
+                desired_ram,
+            };
+            serde_json::to_string(&resize).unwrap()
         }
 
         fn get_cpu_count(&self) -> Result<u32, Error> {
@@ -4379,7 +4383,7 @@ mod tests {
 
             // Resize the VM
             let desired_vcpus = 4;
-            let http_body = guest.api_resize_body(desired_vcpus);
+            let http_body = guest.api_resize_body(Some(desired_vcpus), None);
             curl_command(
                 &api_socket,
                 "PUT",
@@ -4423,7 +4427,7 @@ mod tests {
 
             // Resize the VM
             let desired_vcpus = 2;
-            let http_body = guest.api_resize_body(desired_vcpus);
+            let http_body = guest.api_resize_body(Some(desired_vcpus), None);
             curl_command(
                 &api_socket,
                 "PUT",
@@ -4436,6 +4440,131 @@ mod tests {
                 guest.get_cpu_count().unwrap_or_default(),
                 u32::from(desired_vcpus)
             );
+
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_memory_hotplug() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let api_socket = temp_api_path(&guest.tmp_dir);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+            let mut kernel_path = workload_path;
+            kernel_path.push("vmlinux");
+
+            let mut child = Command::new("target/release/cloud-hypervisor")
+                .args(&["--cpus", "boot=2,max=4"])
+                .args(&["--memory", "size=512M,hotplug_size=8192M"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--api-socket", &api_socket])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+
+            guest
+                .ssh_command("echo online | sudo tee /sys/devices/system/memory/auto_online_blocks")
+                .unwrap_or_default();
+
+            // Add RAM to the VM
+            let desired_ram = 1024 << 20;
+            let http_body = guest.api_resize_body(None, Some(desired_ram));
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.resize",
+                Some(&http_body),
+            );
+
+            thread::sleep(std::time::Duration::new(10, 0));
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1);
+
+            aver_eq!(tb, reboot_count, 0);
+            guest.ssh_command("sudo reboot").unwrap_or_default();
+
+            thread::sleep(std::time::Duration::new(30, 0));
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            aver_eq!(tb, reboot_count, 1);
+
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+
+            guest
+                .ssh_command("echo online | sudo tee /sys/devices/system/memory/auto_online_blocks")
+                .unwrap_or_default();
+
+            // Add RAM to the VM
+            let desired_ram = 2048 << 20;
+            let http_body = guest.api_resize_body(None, Some(desired_ram));
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.resize",
+                Some(&http_body),
+            );
+
+            thread::sleep(std::time::Duration::new(10, 0));
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 1_964_000);
+
+            // Remove RAM to the VM (only applies after reboot)
+            let desired_ram = 1024 << 20;
+            let http_body = guest.api_resize_body(None, Some(desired_ram));
+            curl_command(
+                &api_socket,
+                "PUT",
+                "http://localhost/api/v1/vm.resize",
+                Some(&http_body),
+            );
+
+            guest.ssh_command("sudo reboot").unwrap_or_default();
+
+            thread::sleep(std::time::Duration::new(30, 0));
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            aver_eq!(tb, reboot_count, 2);
+
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() < 1_964_000);
 
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(10, 0));
