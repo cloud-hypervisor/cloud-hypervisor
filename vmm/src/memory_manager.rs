@@ -219,7 +219,7 @@ impl MemoryManager {
             GuestMemoryMmap::from_arc_regions(mem_regions.clone()).map_err(Error::GuestMemory)?;
 
         let end_of_device_area = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
-        let mem_end = guest_memory.end_addr();
+        let mem_end = guest_memory.last_addr();
         let mut start_of_device_area = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
             arch::layout::RAM_64BIT_START
         } else {
@@ -328,7 +328,7 @@ impl MemoryManager {
 
         // Start address needs to be non-contiguous with last memory added (leaving a gap of 256MiB)
         // and also aligned to 128MiB boundary. It must also start at the 64bit start.
-        let mem_end = self.guest_memory.load().end_addr();
+        let mem_end = self.guest_memory.load().last_addr();
         let start_addr = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
             arch::layout::RAM_64BIT_START
         } else {

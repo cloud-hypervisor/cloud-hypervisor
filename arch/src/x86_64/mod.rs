@@ -135,7 +135,7 @@ pub fn configure_system(
 
     add_e820_entry(&mut params.0, 0, layout::EBDA_START.raw_value(), E820_RAM)?;
 
-    let mem_end = guest_mem.end_addr();
+    let mem_end = guest_mem.last_addr();
     if mem_end < layout::MEM_32BIT_RESERVED_START {
         add_e820_entry(
             &mut params.0,

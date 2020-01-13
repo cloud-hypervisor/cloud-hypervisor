@@ -752,7 +752,7 @@ impl DeviceManager {
         {
             // Add a CMOS emulated device
             use vm_memory::GuestMemory;
-            let mem_size = _vm_info.memory.load().end_addr().0 + 1;
+            let mem_size = _vm_info.memory.load().last_addr().0 + 1;
             let mem_below_4g = std::cmp::min(arch::layout::MEM_32BIT_RESERVED_START.0, mem_size);
             let mem_above_4g = mem_size.saturating_sub(arch::layout::RAM_64BIT_START.0);
 
