@@ -453,6 +453,7 @@ impl DeviceManager {
             &mut virtio_devices,
         )?;
 
+        #[cfg(any(feature = "pci_support", feature = "mmio_support"))]
         virtio_devices.append(&mut DeviceManager::make_virtio_devices(
             vm_info,
             &address_manager,
