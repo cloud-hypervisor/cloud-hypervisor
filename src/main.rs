@@ -1718,10 +1718,7 @@ mod tests {
 
         // Start the daemon
         let child = Command::new(virtiofsd_path.as_str())
-            .args(&[
-                "-o",
-                format!("vhost_user_socket={}", virtiofsd_socket_path).as_str(),
-            ])
+            .args(&[format!("--socket-path={}", virtiofsd_socket_path).as_str()])
             .args(&["-o", format!("source={}", shared_dir).as_str()])
             .args(&["-o", format!("cache={}", cache).as_str()])
             .spawn()
