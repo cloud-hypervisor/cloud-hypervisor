@@ -400,7 +400,7 @@ dependencies = [
 [[package]]
 name = "linux-loader"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/linux-loader#6cf23a8bca79b5517fa11f90f7f9d828a8290e9d"
+source = "git+https://github.com/rust-vmm/linux-loader#e5c6d66d3121421672c9b25b02e8954f0ed5f58d"
 dependencies = [
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
 ]
@@ -1092,7 +1092,7 @@ dependencies = [
 [[package]]
 name = "vm-memory"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vm-memory#218afddd4f0e95d3d1da9bd1e0068fa5b929dbce"
+source = "git+https://github.com/rust-vmm/vm-memory#beaf2159056de76bfd5091ab49c24293e6e47a39"
 dependencies = [
  "cast 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
