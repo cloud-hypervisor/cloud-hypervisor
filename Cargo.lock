@@ -428,7 +428,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/firecracker#0987cdc52b77487431d1c921c2ba98f264ef5e31"
+source = "git+https://github.com/firecracker-microvm/firecracker#edbff4ce6207a4fec08239babf9b5355cf572552"
 dependencies = [
  "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
