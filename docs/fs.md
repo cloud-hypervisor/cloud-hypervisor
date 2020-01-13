@@ -26,7 +26,7 @@ _Run virtiofsd_
 ```bash
 ./virtiofsd \
     -d \
-    -o vhost_user_socket=/tmp/virtiofs \
+    --socket-path=/tmp/virtiofs \
     -o source=/tmp/shared_dir \
     -o cache=none
 ```
