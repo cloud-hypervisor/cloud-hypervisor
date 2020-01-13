@@ -937,7 +937,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::DetectImageType)?;
                 match image_type {
                     ImageType::Raw => {
-                        let raw_img = vm_virtio::RawFile::new(raw_img);
+                        let raw_img = vm_virtio::RawFile::new(raw_img, false);
                         let dev = vm_virtio::Block::new(
                             raw_img,
                             disk_cfg.path.clone(),

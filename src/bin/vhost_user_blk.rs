@@ -87,7 +87,9 @@ impl VhostUserBlkBackend {
         let image_id = build_disk_image_id(&PathBuf::from(&image_path));
         let image_type = qcow::detect_image_type(&raw_img).unwrap();
         let mut image = match image_type {
-            ImageType::Raw => Box::new(vm_virtio::RawFile::new(raw_img)) as Box<dyn DiskFile>,
+            ImageType::Raw => {
+                Box::new(vm_virtio::RawFile::new(raw_img, false)) as Box<dyn DiskFile>
+            }
             ImageType::Qcow2 => Box::new(QcowFile::from(raw_img).unwrap()) as Box<dyn DiskFile>,
         };
 
