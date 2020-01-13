@@ -91,7 +91,7 @@ pub struct VsockEpollHandler<B: VsockBackend> {
     pub queue_evts: Vec<EventFd>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
-    pub interrupt_cb: Arc<VirtioInterrupt>,
+    pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub backend: Arc<RwLock<B>>,
 }
 
@@ -105,10 +105,12 @@ where
     fn signal_used_queue(&self, queue: &Queue) -> result::Result<(), DeviceError> {
         debug!("vsock: raising IRQ");
 
-        (self.interrupt_cb)(&VirtioInterruptType::Queue, Some(queue)).map_err(|e| {
-            error!("Failed to signal used queue: {:?}", e);
-            DeviceError::FailedSignalingUsedQueue(e)
-        })
+        self.interrupt_cb
+            .trigger(&VirtioInterruptType::Queue, Some(queue))
+            .map_err(|e| {
+                error!("Failed to signal used queue: {:?}", e);
+                DeviceError::FailedSignalingUsedQueue(e)
+            })
     }
 
     /// Walk the driver-provided RX queue buffers and attempt to fill them up with any data that we
@@ -380,7 +382,7 @@ pub struct Vsock<B: VsockBackend> {
     avail_features: u64,
     acked_features: u64,
     queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
     paused: Arc<AtomicBool>,
 }
@@ -497,7 +499,7 @@ where
     fn activate(
         &mut self,
         mem: Arc<ArcSwap<GuestMemoryMmap>>,
-        interrupt_cb: Arc<VirtioInterrupt>,
+        interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -564,7 +566,7 @@ where
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
         // We first must resume the virtio thread if it was paused.
         if self.pause_evt.take().is_some() {
             self.resume().ok()?;
@@ -595,7 +597,7 @@ impl<B> Migratable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::TestContext;
+    use super::super::tests::{NoopVirtioInterrupt, TestContext};
     use super::super::*;
     use super::*;
     use crate::vsock::device::{BACKEND_EVENT, EVT_QUEUE_EVENT, RX_QUEUE_EVENT, TX_QUEUE_EVENT};
@@ -665,10 +667,7 @@ mod tests {
         // Test a bad activation.
         let bad_activate = ctx.device.activate(
             Arc::new(ArcSwap::from(Arc::new(ctx.mem.clone()))),
-            Arc::new(
-                Box::new(move |_: &VirtioInterruptType, _: Option<&Queue>| Ok(()))
-                    as VirtioInterrupt,
-            ),
+            Arc::new(NoopVirtioInterrupt {}),
             Vec::new(),
             Vec::new(),
         );
@@ -681,10 +680,7 @@ mod tests {
         ctx.device
             .activate(
                 Arc::new(ArcSwap::new(Arc::new(ctx.mem.clone()))),
-                Arc::new(
-                    Box::new(move |_: &VirtioInterruptType, _: Option<&Queue>| Ok(()))
-                        as VirtioInterrupt,
-                ),
+                Arc::new(NoopVirtioInterrupt {}),
                 vec![Queue::new(256), Queue::new(256), Queue::new(256)],
                 vec![
                     EventFd::new(EFD_NONBLOCK).unwrap(),

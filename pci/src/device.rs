@@ -67,7 +67,7 @@ pub trait PciDevice: BusDevice {
     }
 
     /// Assign MSI-X to this device.
-    fn assign_msix(&mut self, _msi_cb: Arc<InterruptDelivery>) {}
+    fn assign_msix(&mut self) {}
 
     /// Allocates the needed PCI BARs space using the `allocate` function which takes a size and
     /// returns an address. Returns a Vec of (GuestAddress, GuestUsize) tuples.

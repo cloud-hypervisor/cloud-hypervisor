@@ -160,7 +160,7 @@ struct PmemEpollHandler {
     queue: Queue,
     mem: Arc<ArcSwap<GuestMemoryMmap>>,
     disk: File,
-    interrupt_cb: Arc<VirtioInterrupt>,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
     kill_evt: EventFd,
     pause_evt: EventFd,
@@ -213,10 +213,12 @@ impl PmemEpollHandler {
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
-        (self.interrupt_cb)(&VirtioInterruptType::Queue, Some(&self.queue)).map_err(|e| {
-            error!("Failed to signal used queue: {:?}", e);
-            DeviceError::FailedSignalingUsedQueue(e)
-        })
+        self.interrupt_cb
+            .trigger(&VirtioInterruptType::Queue, Some(&self.queue))
+            .map_err(|e| {
+                error!("Failed to signal used queue: {:?}", e);
+                DeviceError::FailedSignalingUsedQueue(e)
+            })
     }
 
     fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
@@ -315,7 +317,7 @@ pub struct Pmem {
     acked_features: u64,
     config: VirtioPmemConfig,
     queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
     paused: Arc<AtomicBool>,
 }
@@ -422,7 +424,7 @@ impl VirtioDevice for Pmem {
     fn activate(
         &mut self,
         mem: Arc<ArcSwap<GuestMemoryMmap>>,
-        interrupt_cb: Arc<VirtioInterrupt>,
+        interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -496,7 +498,7 @@ impl VirtioDevice for Pmem {
         Err(ActivateError::BadActivate)
     }
 
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
         // We first must resume the virtio thread if it was paused.
         if self.pause_evt.take().is_some() {
             self.resume().ok()?;

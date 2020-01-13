@@ -26,11 +26,9 @@ use libc::O_TMPFILE;
 use libc::TIOCGWINSZ;
 #[cfg(feature = "pci_support")]
 use pci::{
-    DeviceRelocation, InterruptDelivery, InterruptParameters, PciBarRegionType, PciBus,
-    PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
+    DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
 };
 use qcow::{self, ImageType, QcowFile};
-use std::cmp;
 #[cfg(feature = "pci_support")]
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -1492,41 +1490,7 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
-        let vm_fd_clone = vm_fd.clone();
-
-        let msi_cb = Arc::new(Box::new(move |p: InterruptParameters| {
-            if let Some(entry) = p.msix {
-                use kvm_bindings::kvm_msi;
-                let msi_queue = kvm_msi {
-                    address_lo: entry.msg_addr_lo,
-                    address_hi: entry.msg_addr_hi,
-                    data: entry.msg_data,
-                    flags: 0u32,
-                    devid: 0u32,
-                    pad: [0u8; 12],
-                };
-
-                return vm_fd_clone
-                    .signal_msi(msi_queue)
-                    .map_err(|e| io::Error::from_raw_os_error(e.errno()))
-                    .map(|ret| match ret.cmp(&0) {
-                        cmp::Ordering::Greater => {
-                            debug!("MSI message successfully delivered");
-                        }
-                        cmp::Ordering::Equal => {
-                            warn!("failed to deliver MSI message, blocked by guest");
-                        }
-                        _ => {}
-                    });
-            }
-
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "missing MSI-X entry",
-            ))
-        }) as InterruptDelivery);
-
-        virtio_pci_device.assign_msix(msi_cb);
+        virtio_pci_device.assign_msix();
 
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
 

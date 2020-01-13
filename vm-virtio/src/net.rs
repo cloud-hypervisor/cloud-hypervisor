@@ -48,7 +48,7 @@ struct NetEpollHandler {
     tap: Tap,
     rx: RxVirtio,
     tx: TxVirtio,
-    interrupt_cb: Arc<VirtioInterrupt>,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
     kill_evt: EventFd,
     pause_evt: EventFd,
     epoll_fd: RawFd,
@@ -57,10 +57,12 @@ struct NetEpollHandler {
 
 impl NetEpollHandler {
     fn signal_used_queue(&self, queue: &Queue) -> result::Result<(), DeviceError> {
-        (self.interrupt_cb)(&VirtioInterruptType::Queue, Some(queue)).map_err(|e| {
-            error!("Failed to signal used queue: {:?}", e);
-            DeviceError::FailedSignalingUsedQueue(e)
-        })
+        self.interrupt_cb
+            .trigger(&VirtioInterruptType::Queue, Some(queue))
+            .map_err(|e| {
+                error!("Failed to signal used queue: {:?}", e);
+                DeviceError::FailedSignalingUsedQueue(e)
+            })
     }
 
     // Copies a single frame from `self.rx.frame_buf` into the guest. Returns true
@@ -299,7 +301,7 @@ pub struct Net {
     // or nothing, if no such address if provided.
     config_space: Vec<u8>,
     queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_thread: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
     paused: Arc<AtomicBool>,
@@ -449,7 +451,7 @@ impl VirtioDevice for Net {
     fn activate(
         &mut self,
         mem: Arc<ArcSwap<GuestMemoryMmap>>,
-        interrupt_cb: Arc<VirtioInterrupt>,
+        interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -562,7 +564,7 @@ impl VirtioDevice for Net {
         Err(ActivateError::BadActivate)
     }
 
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
         // We first must resume the virtio thread if it was paused.
         if self.pause_evt.take().is_some() {
             self.resume().ok()?;
