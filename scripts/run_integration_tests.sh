@@ -91,7 +91,7 @@ VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
 QEMU_DIR="qemu_build"
 if [ ! -f "$VIRTIOFSD" ]; then
     pushd $WORKLOADS_DIR
-    git clone --depth 1 "https://gitlab.com/virtio-fs/qemu.git" -b "virtio-fs-dev" $QEMU_DIR
+    git clone --depth 1 "https://github.com/sboeuf/qemu.git" -b "virtio-fs" $QEMU_DIR
     pushd $QEMU_DIR
     time ./configure --prefix=$PWD --target-list=x86_64-softmmu
     time make virtiofsd -j `nproc`
