@@ -172,6 +172,18 @@ mod tests {
     use vm_memory::{GuestAddress, GuestMemoryMmap};
     use vmm_sys_util::eventfd::EventFd;
 
+    pub struct NoopVirtioInterrupt {}
+
+    impl VirtioInterrupt for NoopVirtioInterrupt {
+        fn trigger(
+            &self,
+            _int_type: &VirtioInterruptType,
+            _queue: Option<&Queue>,
+        ) -> std::result::Result<(), std::io::Error> {
+            Ok(())
+        }
+    }
+
     pub struct TestBackend {
         pub evfd: EventFd,
         pub rx_err: Option<VsockError>,
@@ -291,9 +303,7 @@ mod tests {
                 EventFd::new(EFD_NONBLOCK).unwrap(),
                 EventFd::new(EFD_NONBLOCK).unwrap(),
             ];
-            let interrupt_cb = Arc::new(Box::new(
-                move |_: &VirtioInterruptType, _: Option<&Queue>| Ok(()),
-            ) as VirtioInterrupt);
+            let interrupt_cb = Arc::new(NoopVirtioInterrupt {});
 
             EpollHandlerContext {
                 guest_rxvq,

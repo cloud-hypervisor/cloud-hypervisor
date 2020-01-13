@@ -24,6 +24,37 @@ const VENDOR_ID: u32 = 0;
 const MMIO_MAGIC_VALUE: u32 = 0x7472_6976;
 const MMIO_VERSION: u32 = 2;
 
+pub struct VirtioInterruptIntx {
+    interrupt_status: Arc<AtomicUsize>,
+    interrupt: Box<dyn Interrupt>,
+}
+
+impl VirtioInterruptIntx {
+    pub fn new(interrupt_status: Arc<AtomicUsize>, interrupt: Box<dyn Interrupt>) -> Self {
+        VirtioInterruptIntx {
+            interrupt_status,
+            interrupt,
+        }
+    }
+}
+
+impl VirtioInterrupt for VirtioInterruptIntx {
+    fn trigger(
+        &self,
+        int_type: &VirtioInterruptType,
+        _queue: Option<&Queue>,
+    ) -> std::result::Result<(), std::io::Error> {
+        let status = match int_type {
+            VirtioInterruptType::Config => INTERRUPT_STATUS_CONFIG_CHANGED,
+            VirtioInterruptType::Queue => INTERRUPT_STATUS_USED_RING,
+        };
+        self.interrupt_status
+            .fetch_or(status as usize, Ordering::SeqCst);
+
+        self.interrupt.deliver()
+    }
+}
+
 /// Implements the
 /// [MMIO](http://docs.oasis-open.org/virtio/virtio/v1.0/cs04/virtio-v1.0-cs04.html#x1-1090002)
 /// transport for virtio devices.
@@ -46,7 +77,7 @@ pub struct MmioDevice {
     acked_features_select: u32,
     queue_select: u32,
     interrupt_status: Arc<AtomicUsize>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     driver_status: u32,
     config_generation: u32,
     queues: Vec<Queue>,
@@ -127,20 +158,10 @@ impl MmioDevice {
     }
 
     pub fn assign_interrupt(&mut self, interrupt: Box<dyn Interrupt>) {
-        let interrupt_status = self.interrupt_status.clone();
-        let cb = Arc::new(Box::new(
-            move |int_type: &VirtioInterruptType, _queue: Option<&Queue>| {
-                let status = match int_type {
-                    VirtioInterruptType::Config => INTERRUPT_STATUS_CONFIG_CHANGED,
-                    VirtioInterruptType::Queue => INTERRUPT_STATUS_USED_RING,
-                };
-                interrupt_status.fetch_or(status as usize, Ordering::SeqCst);
-
-                interrupt.deliver()
-            },
-        ) as VirtioInterrupt);
-
-        self.interrupt_cb = Some(cb);
+        self.interrupt_cb = Some(Arc::new(VirtioInterruptIntx::new(
+            self.interrupt_status.clone(),
+            interrupt,
+        )));
     }
 }
 

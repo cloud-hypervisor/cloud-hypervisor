@@ -17,11 +17,13 @@ pub enum VirtioInterruptType {
     Queue,
 }
 
-pub type VirtioInterrupt = Box<
-    dyn Fn(&VirtioInterruptType, Option<&Queue>) -> std::result::Result<(), std::io::Error>
-        + Send
-        + Sync,
->;
+pub trait VirtioInterrupt: Send + Sync {
+    fn trigger(
+        &self,
+        int_type: &VirtioInterruptType,
+        queue: Option<&Queue>,
+    ) -> std::result::Result<(), std::io::Error>;
+}
 
 pub type VirtioIommuRemapping =
     Box<dyn Fn(u64) -> std::result::Result<u64, std::io::Error> + Send + Sync>;
@@ -72,14 +74,14 @@ pub trait VirtioDevice: Send {
     fn activate(
         &mut self,
         mem: Arc<ArcSwap<GuestMemoryMmap>>,
-        interrupt_evt: Arc<VirtioInterrupt>,
+        interrupt_evt: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult;
 
     /// Optionally deactivates this device and returns ownership of the guest memory map, interrupt
     /// event, and queue events.
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
         None
     }
 

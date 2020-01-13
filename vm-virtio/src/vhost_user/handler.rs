@@ -28,7 +28,7 @@ use vhost_rs::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 /// * `kill_evt` - EventFd used to kill the vhost-user device.
 /// * `vu_interrupt_list` - virtqueue and EventFd to signal when buffer used.
 pub struct VhostUserEpollConfig<S: VhostUserMasterReqHandler> {
-    pub interrupt_cb: Arc<VirtioInterrupt>,
+    pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub vu_interrupt_list: Vec<(EventFd, Queue)>,
@@ -52,7 +52,9 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
     }
 
     fn signal_used_queue(&self, queue: &Queue) -> Result<()> {
-        (self.vu_epoll_cfg.interrupt_cb)(&VirtioInterruptType::Queue, Some(queue))
+        self.vu_epoll_cfg
+            .interrupt_cb
+            .trigger(&VirtioInterruptType::Queue, Some(queue))
             .map_err(Error::FailedSignalingUsedQueue)
     }
 

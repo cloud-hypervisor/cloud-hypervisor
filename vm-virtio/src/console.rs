@@ -59,7 +59,7 @@ unsafe impl ByteValued for VirtioConsoleConfig {}
 struct ConsoleEpollHandler {
     queues: Vec<Queue>,
     mem: Arc<ArcSwap<GuestMemoryMmap>>,
-    interrupt_cb: Arc<VirtioInterrupt>,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
     out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
     input_queue_evt: EventFd,
@@ -147,10 +147,12 @@ impl ConsoleEpollHandler {
     }
 
     fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
-        (self.interrupt_cb)(&VirtioInterruptType::Queue, Some(&self.queues[0])).map_err(|e| {
-            error!("Failed to signal used queue: {:?}", e);
-            DeviceError::FailedSignalingUsedQueue(e)
-        })
+        self.interrupt_cb
+            .trigger(&VirtioInterruptType::Queue, Some(&self.queues[0]))
+            .map_err(|e| {
+                error!("Failed to signal used queue: {:?}", e);
+                DeviceError::FailedSignalingUsedQueue(e)
+            })
     }
 
     fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
@@ -261,8 +263,9 @@ impl ConsoleEpollHandler {
                         if let Err(e) = self.config_evt.read() {
                             error!("Failed to get config event: {:?}", e);
                             break 'epoll;
-                        } else if let Err(e) =
-                            (self.interrupt_cb)(&VirtioInterruptType::Config, None)
+                        } else if let Err(e) = self
+                            .interrupt_cb
+                            .trigger(&VirtioInterruptType::Config, None)
                         {
                             error!("Failed to signal console driver: {:?}", e);
                         }
@@ -347,7 +350,7 @@ pub struct Console {
     input: Arc<ConsoleInput>,
     out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
     queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
     paused: Arc<AtomicBool>,
 }
@@ -471,7 +474,7 @@ impl VirtioDevice for Console {
     fn activate(
         &mut self,
         mem: Arc<ArcSwap<GuestMemoryMmap>>,
-        interrupt_cb: Arc<VirtioInterrupt>,
+        interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -521,7 +524,7 @@ impl VirtioDevice for Console {
             .store(self.acked_features, Ordering::Relaxed);
 
         if (self.acked_features & (1u64 << VIRTIO_CONSOLE_F_SIZE)) != 0 {
-            if let Err(e) = (interrupt_cb)(&VirtioInterruptType::Config, None) {
+            if let Err(e) = interrupt_cb.trigger(&VirtioInterruptType::Config, None) {
                 error!("Failed to signal console driver: {:?}", e);
             }
         }
@@ -553,7 +556,7 @@ impl VirtioDevice for Console {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
         // We first must resume the virtio thread if it was paused.
         if self.pause_evt.take().is_some() {
             self.resume().ok()?;

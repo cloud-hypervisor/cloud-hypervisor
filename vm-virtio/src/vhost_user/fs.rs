@@ -161,7 +161,7 @@ pub struct Fs {
     cache: Option<(VirtioSharedMemoryList, u64)>,
     slave_req_support: bool,
     queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
     paused: Arc<AtomicBool>,
 }
@@ -333,7 +333,7 @@ impl VirtioDevice for Fs {
     fn activate(
         &mut self,
         mem: Arc<ArcSwap<GuestMemoryMmap>>,
-        interrupt_cb: Arc<VirtioInterrupt>,
+        interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -431,7 +431,7 @@ impl VirtioDevice for Fs {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
         // We first must resume the virtio thread if it was paused.
         if self.pause_evt.take().is_some() {
             self.resume().ok()?;

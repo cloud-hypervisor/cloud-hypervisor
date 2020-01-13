@@ -18,8 +18,7 @@ use crate::transport::VirtioTransport;
 use crate::{
     Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
     VirtioIommuRemapping, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
-    DEVICE_FEATURES_OK, DEVICE_INIT, INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
-    VIRTIO_MSI_NO_VECTOR,
+    DEVICE_FEATURES_OK, DEVICE_INIT, VIRTIO_MSI_NO_VECTOR,
 };
 use arc_swap::ArcSwap;
 use devices::BusDevice;
@@ -27,10 +26,10 @@ use kvm_bindings::kvm_irq_routing_entry;
 use kvm_ioctls::VmFd;
 use libc::EFD_NONBLOCK;
 use pci::{
-    BarReprogrammingParams, InterruptDelivery, InterruptParameters, MsixCap, MsixConfig,
-    PciBarConfiguration, PciBarRegionType, PciCapability, PciCapabilityID, PciClassCode,
-    PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciInterruptPin,
-    PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
+    BarReprogrammingParams, InterruptDelivery, MsixCap, MsixConfig, PciBarConfiguration,
+    PciBarRegionType, PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice,
+    PciDeviceError, PciHeaderType, PciInterruptPin, PciMassStorageSubclass,
+    PciNetworkControllerSubclass, PciSubclass,
 };
 use std::any::Any;
 use std::collections::HashMap;
@@ -235,7 +234,7 @@ pub struct VirtioPciDevice {
 
     // PCI interrupts.
     interrupt_status: Arc<AtomicUsize>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
 
     // virtio queues
     queues: Vec<Queue>,
@@ -342,7 +341,7 @@ impl VirtioPciDevice {
             device,
             device_activated: false,
             interrupt_status: Arc::new(AtomicUsize::new(0)),
-            interrupt_cb: None,
+            virtio_interrupt: None,
             queues,
             queue_evts,
             memory: Some(memory),
@@ -469,81 +468,74 @@ impl VirtioTransport for VirtioPciDevice {
     }
 }
 
+pub struct VirtioInterruptMsix {
+    msix_config: Arc<Mutex<MsixConfig>>,
+    config_vector: Arc<AtomicU16>,
+}
+
+impl VirtioInterruptMsix {
+    pub fn new(msix_config: Arc<Mutex<MsixConfig>>, config_vector: Arc<AtomicU16>) -> Self {
+        VirtioInterruptMsix {
+            msix_config,
+            config_vector,
+        }
+    }
+}
+
+impl VirtioInterrupt for VirtioInterruptMsix {
+    fn trigger(
+        &self,
+        int_type: &VirtioInterruptType,
+        queue: Option<&Queue>,
+    ) -> std::result::Result<(), std::io::Error> {
+        let vector = match int_type {
+            VirtioInterruptType::Config => self.config_vector.load(Ordering::SeqCst),
+            VirtioInterruptType::Queue => {
+                if let Some(q) = queue {
+                    q.vector
+                } else {
+                    0
+                }
+            }
+        };
+
+        if vector == VIRTIO_MSI_NO_VECTOR {
+            return Ok(());
+        }
+
+        let config = &mut self.msix_config.lock().unwrap();
+        let entry = &config.table_entries[vector as usize];
+        // In case the vector control register associated with the entry
+        // has its first bit set, this means the vector is masked and the
+        // device should not inject the interrupt.
+        // Instead, the Pending Bit Array table is updated to reflect there
+        // is a pending interrupt for this specific vector.
+        if config.masked() || entry.masked() {
+            config.set_pba_bit(vector, false);
+            return Ok(());
+        }
+
+        config.irq_routes[vector as usize].irq_fd.write(1)
+    }
+}
+
 impl PciDevice for VirtioPciDevice {
     fn assign_pin_irq(
         &mut self,
-        irq_cb: Arc<InterruptDelivery>,
-        irq_num: u32,
-        irq_pin: PciInterruptPin,
+        _irq_cb: Arc<InterruptDelivery>,
+        _irq_num: u32,
+        _irq_pin: PciInterruptPin,
     ) {
-        self.configuration.set_irq(irq_num as u8, irq_pin);
-
-        let interrupt_status = self.interrupt_status.clone();
-        let cb = Arc::new(Box::new(
-            move |int_type: &VirtioInterruptType, _queue: Option<&Queue>| {
-                let param = InterruptParameters { msix: None };
-
-                let status = match int_type {
-                    VirtioInterruptType::Config => INTERRUPT_STATUS_CONFIG_CHANGED,
-                    VirtioInterruptType::Queue => INTERRUPT_STATUS_USED_RING,
-                };
-                interrupt_status.fetch_or(status as usize, Ordering::SeqCst);
-
-                (irq_cb)(param)
-            },
-        ) as VirtioInterrupt);
-
-        self.interrupt_cb = Some(cb);
     }
 
-    fn assign_msix(&mut self, msi_cb: Arc<InterruptDelivery>) {
+    fn assign_msix(&mut self) {
         if let Some(msix_config) = &self.msix_config {
-            let msix_config_clone = msix_config.clone();
+            let virtio_interrupt_msix = Arc::new(VirtioInterruptMsix::new(
+                msix_config.clone(),
+                self.common_config.msix_config.clone(),
+            ));
 
-            let common_config_msi_vector = self.common_config.msix_config.clone();
-            let cb = Arc::new(Box::new(
-                move |int_type: &VirtioInterruptType, queue: Option<&Queue>| {
-                    let vector = match int_type {
-                        VirtioInterruptType::Config => {
-                            common_config_msi_vector.load(Ordering::SeqCst)
-                        }
-                        VirtioInterruptType::Queue => {
-                            if let Some(q) = queue {
-                                q.vector
-                            } else {
-                                0
-                            }
-                        }
-                    };
-
-                    if vector == VIRTIO_MSI_NO_VECTOR {
-                        return Ok(());
-                    }
-
-                    let config = &mut msix_config_clone.lock().unwrap();
-                    let entry = &config.table_entries[vector as usize];
-
-                    // If MSI-X interrupts are not enabled for this device, then simply
-                    // ignore the interrupt.
-                    if !config.enabled() {
-                        return Ok(());
-                    }
-
-                    // In case the vector control register associated with the entry
-                    // has its first bit set, this means the vector is masked and the
-                    // device should not inject the interrupt.
-                    // Instead, the Pending Bit Array table is updated to reflect there
-                    // is a pending interrupt for this specific vector.
-                    if config.masked() || entry.masked() {
-                        config.set_pba_bit(vector, false);
-                        return Ok(());
-                    }
-
-                    (msi_cb)(InterruptParameters { msix: Some(entry) })
-                },
-            ) as VirtioInterrupt);
-
-            self.interrupt_cb = Some(cb);
+            self.virtio_interrupt = Some(virtio_interrupt_msix);
         }
     }
 
@@ -722,14 +714,14 @@ impl PciDevice for VirtioPciDevice {
         };
 
         if !self.device_activated && self.is_driver_ready() && self.are_queues_valid() {
-            if let Some(interrupt_cb) = self.interrupt_cb.take() {
+            if let Some(virtio_interrupt) = self.virtio_interrupt.take() {
                 if self.memory.is_some() {
                     let mem = self.memory.as_ref().unwrap().clone();
                     let mut device = self.device.lock().unwrap();
                     device
                         .activate(
                             mem,
-                            interrupt_cb,
+                            virtio_interrupt,
                             self.queues.clone(),
                             self.queue_evts.split_off(0),
                         )
@@ -742,9 +734,9 @@ impl PciDevice for VirtioPciDevice {
         // Device has been reset by the driver
         if self.device_activated && self.is_driver_init() {
             let mut device = self.device.lock().unwrap();
-            if let Some((interrupt_cb, mut queue_evts)) = device.reset() {
+            if let Some((virtio_interrupt, mut queue_evts)) = device.reset() {
                 // Upon reset the device returns its interrupt EventFD and it's queue EventFDs
-                self.interrupt_cb = Some(interrupt_cb);
+                self.virtio_interrupt = Some(virtio_interrupt);
                 self.queue_evts.append(&mut queue_evts);
 
                 self.device_activated = false;

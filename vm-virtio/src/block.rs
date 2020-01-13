@@ -596,7 +596,7 @@ struct BlockEpollHandler<T: DiskFile> {
     mem: Arc<ArcSwap<GuestMemoryMmap>>,
     disk_image: T,
     disk_nsectors: u64,
-    interrupt_cb: Arc<VirtioInterrupt>,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
     disk_image_id: Vec<u8>,
     kill_evt: EventFd,
     pause_evt: EventFd,
@@ -649,12 +649,12 @@ impl<T: DiskFile> BlockEpollHandler<T> {
     }
 
     fn signal_used_queue(&self, queue_index: usize) -> result::Result<(), DeviceError> {
-        (self.interrupt_cb)(&VirtioInterruptType::Queue, Some(&self.queues[queue_index])).map_err(
-            |e| {
+        self.interrupt_cb
+            .trigger(&VirtioInterruptType::Queue, Some(&self.queues[queue_index]))
+            .map_err(|e| {
                 error!("Failed to signal used queue: {:?}", e);
                 DeviceError::FailedSignalingUsedQueue(e)
-            },
-        )
+            })
     }
 
     #[allow(dead_code)]
@@ -774,7 +774,7 @@ pub struct Block<T: DiskFile> {
     acked_features: u64,
     config_space: Vec<u8>,
     queue_evt: Option<EventFd>,
-    interrupt_cb: Option<Arc<VirtioInterrupt>>,
+    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
     pause_evt: Option<EventFd>,
     paused: Arc<AtomicBool>,
@@ -917,7 +917,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
     fn activate(
         &mut self,
         mem: Arc<ArcSwap<GuestMemoryMmap>>,
-        interrupt_cb: Arc<VirtioInterrupt>,
+        interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
@@ -989,7 +989,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         Err(ActivateError::BadActivate)
     }
 
-    fn reset(&mut self) -> Option<(Arc<VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
         // We first must resume the virtio thread if it was paused.
         if self.pause_evt.take().is_some() {
             self.resume().ok()?;
