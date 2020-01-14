@@ -2,6 +2,8 @@ extern crate serde;
 extern crate thiserror;
 extern crate vm_memory;
 
+pub mod interrupt;
+
 use vm_memory::{
     Address, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
     MemoryRegionAddress,
