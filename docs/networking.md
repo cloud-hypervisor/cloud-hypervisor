@@ -2,6 +2,21 @@
 
 cloud-hypervisor can emulate one or more virtual network interfaces, represented at the hypervisor host by [tap devices](https://www.kernel.org/doc/Documentation/networking/tuntap.txt). This guide briefly describes, in a manual and distribution neutral way, how to setup and use networking with cloud-hypevisor.
 
+## Multiple queue support for net devices ##
+
+While multiple vcpus defined for guest, to gain the benefit of vcpu scalable to improve performance, it suggests to define multiple queue pairs for net devices, one Tx/Rx queue pair per one vcpu, that means the number of queue pairs at least is equal to the vcpu count. In that case, after virtnet driver set cpu affinity for virtqueues in guest kernel, vcpus could handle interrupt from different virtqueue pairs in parallel.
+
+It will gain better performance for guest that has multiple queues defined for net devices while it has multiple net sessions running in userspace.
+
+To enable multiple queue support in cloud-hypervisor, multiple queue pairs will be defined, while multiple tap fds will be opened for the same tap device, it will also have multiple threads started, each thread will monitor and handle the events from each virtqueue pairs and the associated tap fd.
+
+Note:
+
+- Currently, it does not support to use ethtool to change the combined queue numbers in guest.
+- Multiple queue is enabled for vhost-user-net backend in cloud-hypervisor, however, multiple thread is not added to handle mq, thus, the performance for vhost-user-net backend is not supposed to be improved. The multiple thread will be added for backend later.
+- Performance test for vhost-user-net will be covered once vhost-user-net backend has mulitple thread supported.
+- Performance test for virtio-net is done by comparing 2 queue pairs with 1 queue pairs, that to run 2 iperf3 sessions in the same test environments, throughput is improved about 37%.
+
 ## Start cloud-hypervisor with net devices
 
 Use one `--net` command-line argument from cloud-hypervisor to specify the emulation of one or more virtual NIC's. The example below instructs cloud-hypervisor to emulate for instance 2 virtual NIC's:
@@ -13,18 +28,29 @@ Use one `--net` command-line argument from cloud-hypervisor to specify the emula
     --disk path=my-root-disk.img \
     --kernel my-vmlinux.bin \
     --cmdline "console=ttyS0 reboot=k panic=1 nomodules root=/dev/vda3" \
-    --net tap=ich0,mac=a4:a1:c2:00:00:01,ip=192.168.4.2,mask=255.255.255.0 \
-          tap=ich1,mac=a4:a1:c2:00:00:02,ip=10.0.1.2,mask=255.255.255.0
+    --net tap=ich0,mac=a4:a1:c2:00:00:01,ip=192.168.4.2,mask=255.255.255.0,num_queues=2,queue_size=256 \
+          tap=ich1,mac=a4:a1:c2:00:00:02,ip=10.0.1.2,mask=255.255.255.0,num_queues=2,queue_size=256
 ```
- 
+
 The `--net` argument takes 1 or more space-separated strings of key value pairs containing the following 4 keys or fields:
 
-| Name     | Purpose                    | Optional  |
-| -------- |----------------------------| ----------|
-| tap      | tap device name            | Yes       |
-| mac      | vNIC mac address           | Yes       |
-| ip       | tap IP IP address          | yes       |
-| mask     | tap IP netmask             | Yes       |
+| Name       | Purpose                    | Optional  |
+| -----------|----------------------------| ----------|
+| tap        | tap device name            | Yes       |
+| mac        | vNIC mac address           | Yes       |
+| ip         | tap IP IP address          | yes       |
+| mask       | tap IP netmask             | Yes       |
+| num_queues | the number of queues       | yes       |
+| queue_size | the size of each queue     | Yes       |
+
+num_queues is the total number of tx and rx queues, the default value is 2, and it could be increased by multiples of 2. Additionally, num_queues is suggested to be as 2 times of vcpu count. The default value for queue_size is 256.
+
+If the tap device is pre-created on host before guest boot up. To use multiple queue support for net device in guest, the tap device should be opened like this from host.
+
+```bash
+[root@localhost ~]# ip tuntap add name ich0 mode tap multi_queue
+```
+
 
 ## Configure the tap devices
 
