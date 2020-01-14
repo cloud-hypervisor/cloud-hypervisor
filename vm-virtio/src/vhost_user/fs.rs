@@ -382,6 +382,7 @@ impl VirtioDevice for Fs {
             mem.load().as_ref(),
             queues,
             queue_evts,
+            &interrupt_cb,
             self.acked_features,
         )
         .map_err(ActivateError::VhostUserSetup)?;

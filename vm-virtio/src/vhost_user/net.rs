@@ -302,13 +302,14 @@ impl VirtioDevice for Net {
             mem.load().as_ref(),
             queues,
             queue_evts,
+            &interrupt_cb,
             self.acked_features & self.backend_features,
         )
         .map_err(ActivateError::VhostUserNetSetup)?;
 
         let mut epoll_thread = Vec::new();
         for _ in 0..vu_interrupt_list.len() / 2 {
-            let mut interrupt_list_sub: Vec<(EventFd, Queue)> = Vec::with_capacity(2);
+            let mut interrupt_list_sub: Vec<(Option<EventFd>, Queue)> = Vec::with_capacity(2);
             interrupt_list_sub.push(vu_interrupt_list.remove(0));
             interrupt_list_sub.push(vu_interrupt_list.remove(0));
 
