@@ -12,5 +12,6 @@ kvm-bindings = "0.2.0"
 kvm-ioctls = "0.4.0"
 libc = "0.2.60"
 log = "0.4.8"
+vm-device = { path = "../vm-device" }
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
 vmm-sys-util = ">=0.3.1"

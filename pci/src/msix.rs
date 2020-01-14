@@ -8,13 +8,11 @@ extern crate vm_memory;
 
 use std::sync::Arc;
 
-use crate::{set_kvm_routes, InterruptRoute, PciCapability, PciCapabilityID};
+use crate::{PciCapability, PciCapabilityID};
 use byteorder::{ByteOrder, LittleEndian};
-use kvm_bindings::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
-use kvm_ioctls::VmFd;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use vm_allocator::SystemAllocator;
+use vm_device::interrupt::{
+    InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
+};
 use vm_memory::ByteValued;
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
@@ -55,9 +53,7 @@ impl Default for MsixTableEntry {
 pub struct MsixConfig {
     pub table_entries: Vec<MsixTableEntry>,
     pub pba_entries: Vec<u64>,
-    pub irq_routes: Vec<InterruptRoute>,
-    vm_fd: Arc<VmFd>,
-    gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
     masked: bool,
     enabled: bool,
 }
@@ -65,9 +61,7 @@ pub struct MsixConfig {
 impl MsixConfig {
     pub fn new(
         msix_vectors: u16,
-        allocator: &mut SystemAllocator,
-        vm_fd: Arc<VmFd>,
-        gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+        interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
     ) -> Self {
         assert!(msix_vectors <= MAX_MSIX_VECTORS_PER_DEVICE);
 
@@ -77,17 +71,10 @@ impl MsixConfig {
         let num_pba_entries: usize = ((msix_vectors as usize) / BITS_PER_PBA_ENTRY) + 1;
         pba_entries.resize_with(num_pba_entries, Default::default);
 
-        let mut irq_routes: Vec<InterruptRoute> = Vec::new();
-        for _ in 0..msix_vectors {
-            irq_routes.push(InterruptRoute::new(allocator).unwrap());
-        }
-
         MsixConfig {
             table_entries,
             pba_entries,
-            irq_routes,
-            vm_fd,
-            gsi_msi_routes,
+            interrupt_source_group,
             masked: false,
             enabled: false,
         }
@@ -110,47 +97,37 @@ impl MsixConfig {
 
         // Update KVM routes
         if old_masked != self.masked || old_enabled != self.enabled {
-            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
             if self.enabled && !self.masked {
                 for (idx, table_entry) in self.table_entries.iter().enumerate() {
-                    if !old_enabled || old_masked {
-                        if let Err(e) = self.irq_routes[idx].enable(&self.vm_fd) {
-                            error!("Failed enabling irq_fd: {:?}", e);
-                        }
-                    }
-
-                    // Ignore MSI-X vector if masked.
-                    if table_entry.masked() {
-                        continue;
-                    }
-
-                    let gsi = self.irq_routes[idx].gsi;
-
-                    let mut entry = kvm_irq_routing_entry {
-                        gsi,
-                        type_: KVM_IRQ_ROUTING_MSI,
-                        ..Default::default()
+                    let config = MsiIrqSourceConfig {
+                        high_addr: table_entry.msg_addr_hi,
+                        low_addr: table_entry.msg_addr_lo,
+                        data: table_entry.msg_data,
                     };
 
-                    entry.u.msi.address_lo = table_entry.msg_addr_lo;
-                    entry.u.msi.address_hi = table_entry.msg_addr_hi;
-                    entry.u.msi.data = table_entry.msg_data;
-
-                    gsi_msi_routes.insert(gsi, entry);
-                }
-            } else {
-                for route in self.irq_routes.iter() {
-                    if old_enabled || !old_masked {
-                        if let Err(e) = route.disable(&self.vm_fd) {
-                            error!("Failed disabling irq_fd: {:?}", e);
-                        }
+                    if let Err(e) = self
+                        .interrupt_source_group
+                        .update(idx as InterruptIndex, InterruptSourceConfig::MsiIrq(config))
+                    {
+                        error!("Failed updating vector: {:?}", e);
                     }
 
-                    gsi_msi_routes.remove(&route.gsi);
+                    if table_entry.masked() {
+                        if let Err(e) = self.interrupt_source_group.mask(idx as InterruptIndex) {
+                            error!("Failed masking vector: {:?}", e);
+                        }
+                    }
                 }
-            }
-            if let Err(e) = set_kvm_routes(&self.vm_fd, &gsi_msi_routes) {
-                error!("Failed updating KVM routes: {:?}", e);
+
+                if !old_enabled || old_masked {
+                    if let Err(e) = self.interrupt_source_group.enable() {
+                        error!("Failed enabling irq_fd: {:?}", e);
+                    }
+                }
+            } else if old_enabled || !old_masked {
+                if let Err(e) = self.interrupt_source_group.disable() {
+                    error!("Failed disabling irq_fd: {:?}", e);
+                }
             }
         }
 
@@ -261,26 +238,27 @@ impl MsixConfig {
 
         // Update interrupt routes
         if self.enabled && !self.masked {
-            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
             let table_entry = &self.table_entries[index];
-            let gsi = self.irq_routes[index].gsi;
-            if !table_entry.masked() {
-                let mut entry = kvm_irq_routing_entry {
-                    gsi,
-                    type_: KVM_IRQ_ROUTING_MSI,
-                    ..Default::default()
-                };
 
-                entry.u.msi.address_lo = table_entry.msg_addr_lo;
-                entry.u.msi.address_hi = table_entry.msg_addr_hi;
-                entry.u.msi.data = table_entry.msg_data;
+            let config = MsiIrqSourceConfig {
+                high_addr: table_entry.msg_addr_hi,
+                low_addr: table_entry.msg_addr_lo,
+                data: table_entry.msg_data,
+            };
 
-                gsi_msi_routes.insert(gsi, entry);
-            } else {
-                gsi_msi_routes.remove(&gsi);
+            if let Err(e) = self.interrupt_source_group.update(
+                index as InterruptIndex,
+                InterruptSourceConfig::MsiIrq(config),
+            ) {
+                error!("Failed updating vector: {:?}", e);
             }
-            if let Err(e) = set_kvm_routes(&self.vm_fd, &gsi_msi_routes) {
-                error!("Failed updating KVM routes: {:?}", e);
+
+            if table_entry.masked() {
+                if let Err(e) = self.interrupt_source_group.mask(index as InterruptIndex) {
+                    error!("Failed masking vector: {:?}", e);
+                }
+            } else if let Err(e) = self.interrupt_source_group.unmask(index as InterruptIndex) {
+                error!("Failed unmasking vector: {:?}", e);
             }
         }
 
@@ -371,7 +349,10 @@ impl MsixConfig {
 
     fn inject_msix_and_clear_pba(&mut self, vector: usize) {
         // Inject the MSI message
-        match self.irq_routes[vector].irq_fd.write(1) {
+        match self
+            .interrupt_source_group
+            .trigger(vector as InterruptIndex)
+        {
             Ok(_) => debug!("MSI-X injected on vector control flip"),
             Err(e) => error!("failed to inject MSI-X: {}", e),
         }

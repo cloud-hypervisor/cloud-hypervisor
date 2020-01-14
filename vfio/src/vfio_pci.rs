@@ -10,21 +10,21 @@ extern crate vm_allocator;
 use crate::vfio_device::VfioDevice;
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
-use kvm_bindings::{kvm_irq_routing_entry, kvm_userspace_memory_region};
+use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::*;
 use pci::{
-    BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
-    PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
-    PciSubclass, MSIX_TABLE_ENTRY_SIZE,
+    msi_num_enabled_vectors, BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig,
+    PciBarConfiguration, PciBarRegionType, PciCapabilityID, PciClassCode, PciConfiguration,
+    PciDevice, PciDeviceError, PciHeaderType, PciSubclass, MSIX_TABLE_ENTRY_SIZE,
 };
 use std::any::Any;
-use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{fmt, io, result};
 use vfio_bindings::bindings::vfio::*;
 use vm_allocator::SystemAllocator;
+use vm_device::interrupt::{InterruptIndex, InterruptManager, InterruptSourceGroup, PCI_MSI_IRQ};
 use vm_memory::{Address, GuestAddress, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -32,12 +32,15 @@ use vmm_sys_util::eventfd::EventFd;
 pub enum VfioPciError {
     AllocateGsi,
     EventFd(io::Error),
+    InterruptSourceGroupCreate(io::Error),
     IrqFd(kvm_ioctls::Error),
     NewVfioPciDevice,
     MapRegionGuest(kvm_ioctls::Error),
     SetGsiRouting(kvm_ioctls::Error),
     MsiNotConfigured,
     MsixNotConfigured,
+    UpdateMsiEventFd,
+    UpdateMsixEventFd,
 }
 pub type Result<T> = std::result::Result<T, VfioPciError>;
 
@@ -46,6 +49,9 @@ impl fmt::Display for VfioPciError {
         match self {
             VfioPciError::AllocateGsi => write!(f, "failed to allocate GSI"),
             VfioPciError::EventFd(e) => write!(f, "failed to create eventfd: {}", e),
+            VfioPciError::InterruptSourceGroupCreate(e) => {
+                write!(f, "failed to create interrupt source group: {}", e)
+            }
             VfioPciError::IrqFd(e) => write!(f, "failed to register irqfd: {}", e),
             VfioPciError::NewVfioPciDevice => write!(f, "failed to create VFIO PCI device"),
             VfioPciError::MapRegionGuest(e) => {
@@ -54,6 +60,8 @@ impl fmt::Display for VfioPciError {
             VfioPciError::SetGsiRouting(e) => write!(f, "failed to set GSI routes for KVM: {}", e),
             VfioPciError::MsiNotConfigured => write!(f, "MSI interrupt not yet configured"),
             VfioPciError::MsixNotConfigured => write!(f, "MSI-X interrupt not yet configured"),
+            VfioPciError::UpdateMsiEventFd => write!(f, "failed to update MSI eventfd"),
+            VfioPciError::UpdateMsixEventFd => write!(f, "failed to update MSI-X eventfd"),
         }
     }
 }
@@ -79,6 +87,7 @@ enum InterruptUpdateAction {
 struct VfioMsi {
     cfg: MsiConfig,
     cap_offset: u32,
+    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
 }
 
 impl VfioMsi {
@@ -105,6 +114,7 @@ struct VfioMsix {
     bar: MsixConfig,
     cap: MsixCap,
     cap_offset: u32,
+    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
 }
 
 impl VfioMsix {
@@ -269,16 +279,14 @@ pub struct VfioPciDevice {
     configuration: PciConfiguration,
     mmio_regions: Vec<MmioRegion>,
     interrupt: Interrupt,
-    gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
 }
 
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
     pub fn new(
         vm_fd: &Arc<VmFd>,
-        allocator: &mut SystemAllocator,
         device: VfioDevice,
-        gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+        interrupt_manager: &Arc<dyn InterruptManager>,
     ) -> Result<Self> {
         let device = Arc::new(device);
         device.reset();
@@ -307,15 +315,14 @@ impl VfioPciDevice {
                 msi: None,
                 msix: None,
             },
-            gsi_msi_routes,
         };
 
-        vfio_pci_device.parse_capabilities(allocator);
+        vfio_pci_device.parse_capabilities(interrupt_manager);
 
         Ok(vfio_pci_device)
     }
 
-    fn parse_msix_capabilities(&mut self, cap: u8, allocator: &mut SystemAllocator) {
+    fn parse_msix_capabilities(&mut self, cap: u8, interrupt_manager: &Arc<dyn InterruptManager>) {
         let msg_ctl = self
             .vfio_pci_configuration
             .read_config_word((cap + 2).into());
@@ -333,37 +340,44 @@ impl VfioPciDevice {
             table,
             pba,
         };
-        let msix_config = MsixConfig::new(
-            msix_cap.table_size(),
-            allocator,
-            self.vm_fd.clone(),
-            self.gsi_msi_routes.clone(),
-        );
+
+        let interrupt_source_group = interrupt_manager
+            .create_group(PCI_MSI_IRQ, 0, msix_cap.table_size() as InterruptIndex)
+            .unwrap();
+
+        let msix_config = MsixConfig::new(msix_cap.table_size(), interrupt_source_group.clone());
 
         self.interrupt.msix = Some(VfioMsix {
             bar: msix_config,
             cap: msix_cap,
             cap_offset: cap.into(),
+            interrupt_source_group,
         });
     }
 
-    fn parse_msi_capabilities(&mut self, cap: u8, allocator: &mut SystemAllocator) {
+    fn parse_msi_capabilities(&mut self, cap: u8, interrupt_manager: &Arc<dyn InterruptManager>) {
         let msg_ctl = self
             .vfio_pci_configuration
             .read_config_word((cap + 2).into());
 
+        let interrupt_source_group = interrupt_manager
+            .create_group(
+                PCI_MSI_IRQ,
+                0,
+                msi_num_enabled_vectors(msg_ctl) as InterruptIndex,
+            )
+            .unwrap();
+
+        let msi_config = MsiConfig::new(msg_ctl, interrupt_source_group.clone());
+
         self.interrupt.msi = Some(VfioMsi {
-            cfg: MsiConfig::new(
-                msg_ctl,
-                allocator,
-                self.vm_fd.clone(),
-                self.gsi_msi_routes.clone(),
-            ),
+            cfg: msi_config,
             cap_offset: cap.into(),
+            interrupt_source_group,
         });
     }
 
-    fn parse_capabilities(&mut self, allocator: &mut SystemAllocator) {
+    fn parse_capabilities(&mut self, interrupt_manager: &Arc<dyn InterruptManager>) {
         let mut cap_next = self
             .vfio_pci_configuration
             .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
@@ -375,10 +389,10 @@ impl VfioPciDevice {
 
             match PciCapabilityID::from(cap_id) {
                 PciCapabilityID::MessageSignalledInterrupts => {
-                    self.parse_msi_capabilities(cap_next, allocator);
+                    self.parse_msi_capabilities(cap_next, interrupt_manager);
                 }
                 PciCapabilityID::MSIX => {
-                    self.parse_msix_capabilities(cap_next, allocator);
+                    self.parse_msix_capabilities(cap_next, interrupt_manager);
                 }
                 _ => {}
             };
@@ -394,8 +408,14 @@ impl VfioPciDevice {
             Some(InterruptUpdateAction::EnableMsi) => {
                 if let Some(msi) = &self.interrupt.msi {
                     let mut irq_fds: Vec<&EventFd> = Vec::new();
-                    for r in msi.cfg.irq_routes.iter() {
-                        irq_fds.push(&r.irq_fd);
+                    for i in 0..msi.cfg.num_enabled_vectors() {
+                        if let Some(eventfd) =
+                            msi.interrupt_source_group.notifier(i as InterruptIndex)
+                        {
+                            irq_fds.push(eventfd);
+                        } else {
+                            return Err(VfioPciError::UpdateMsiEventFd);
+                        }
                     }
 
                     if let Err(e) = self.device.enable_msi(irq_fds) {
@@ -419,8 +439,14 @@ impl VfioPciDevice {
             Some(InterruptUpdateAction::EnableMsix) => {
                 if let Some(msix) = &self.interrupt.msix {
                     let mut irq_fds: Vec<&EventFd> = Vec::new();
-                    for r in msix.bar.irq_routes.iter() {
-                        irq_fds.push(&r.irq_fd);
+                    for i in 0..msix.bar.table_entries.len() {
+                        if let Some(eventfd) =
+                            msix.interrupt_source_group.notifier(i as InterruptIndex)
+                        {
+                            irq_fds.push(eventfd);
+                        } else {
+                            return Err(VfioPciError::UpdateMsiEventFd);
+                        }
                     }
 
                     if let Err(e) = self.device.enable_msix(irq_fds) {

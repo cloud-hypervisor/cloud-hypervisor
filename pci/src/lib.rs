@@ -25,7 +25,7 @@ pub use self::device::{
     BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError, InterruptDelivery,
     InterruptParameters, PciDevice,
 };
-pub use self::msi::{MsiCap, MsiConfig};
+pub use self::msi::{msi_num_enabled_vectors, MsiCap, MsiConfig};
 pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry, MSIX_TABLE_ENTRY_SIZE};
 use kvm_bindings::{kvm_irq_routing, kvm_irq_routing_entry};
 use kvm_ioctls::*;
