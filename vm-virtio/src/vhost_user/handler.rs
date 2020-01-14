@@ -31,7 +31,7 @@ pub struct VhostUserEpollConfig<S: VhostUserMasterReqHandler> {
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
-    pub vu_interrupt_list: Vec<(EventFd, Queue)>,
+    pub vu_interrupt_list: Vec<(Option<EventFd>, Queue)>,
     pub slave_req_handler: Option<MasterReqHandler<S>>,
 }
 
@@ -64,14 +64,16 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
 
         for (index, vhost_user_interrupt) in self.vu_epoll_cfg.vu_interrupt_list.iter().enumerate()
         {
-            // Add events
-            epoll::ctl(
-                epoll_fd,
-                epoll::ControlOptions::EPOLL_CTL_ADD,
-                vhost_user_interrupt.0.as_raw_fd(),
-                epoll::Event::new(epoll::Events::EPOLLIN, index as u64),
-            )
-            .map_err(Error::EpollCtl)?;
+            if let Some(eventfd) = &vhost_user_interrupt.0 {
+                // Add events
+                epoll::ctl(
+                    epoll_fd,
+                    epoll::ControlOptions::EPOLL_CTL_ADD,
+                    eventfd.as_raw_fd(),
+                    epoll::Event::new(epoll::Events::EPOLLIN, index as u64),
+                )
+                .map_err(Error::EpollCtl)?;
+            }
         }
 
         let kill_evt_index = self.vu_epoll_cfg.vu_interrupt_list.len();
@@ -136,15 +138,14 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
 
                 match ev_type {
                     x if x < kill_evt_index => {
-                        self.vu_epoll_cfg.vu_interrupt_list[x]
-                            .0
-                            .read()
-                            .map_err(Error::FailedReadingQueue)?;
-                        if let Err(e) =
-                            self.signal_used_queue(&self.vu_epoll_cfg.vu_interrupt_list[x].1)
-                        {
-                            error!("Failed to signal used queue: {:?}", e);
-                            break 'poll;
+                        if let Some(eventfd) = &self.vu_epoll_cfg.vu_interrupt_list[x].0 {
+                            eventfd.read().map_err(Error::FailedReadingQueue)?;
+                            if let Err(e) =
+                                self.signal_used_queue(&self.vu_epoll_cfg.vu_interrupt_list[x].1)
+                            {
+                                error!("Failed to signal used queue: {:?}", e);
+                                break 'poll;
+                            }
                         }
                     }
                     x if kill_evt_index == x => {

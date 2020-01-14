@@ -260,6 +260,7 @@ impl VirtioDevice for Blk {
             mem.load().as_ref(),
             queues,
             queue_evts,
+            &interrupt_cb,
             self.acked_features,
         )
         .map_err(ActivateError::VhostUserBlkSetup)?;

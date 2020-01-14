@@ -5,9 +5,11 @@ use libc;
 use libc::EFD_NONBLOCK;
 use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
+use std::sync::Arc;
 use std::vec::Vec;
 
 use crate::queue::Descriptor;
+use crate::{VirtioInterrupt, VirtioInterruptType};
 
 use vm_device::get_host_address_range;
 use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
@@ -30,7 +32,8 @@ pub fn setup_vhost_user_vring(
     mem: &GuestMemoryMmap,
     queues: Vec<Queue>,
     queue_evts: Vec<EventFd>,
-) -> Result<Vec<(EventFd, Queue)>> {
+    virtio_interrupt: &Arc<dyn VirtioInterrupt>,
+) -> Result<Vec<(Option<EventFd>, Queue)>> {
     let mut regions: Vec<VhostUserMemoryRegionInfo> = Vec::new();
     mem.with_regions_mut(|_, region| {
         let (mmap_handle, mmap_offset) = match region.file_offset() {
@@ -89,10 +92,17 @@ pub fn setup_vhost_user_vring(
         vu.set_vring_base(queue_index, 0u16)
             .map_err(Error::VhostUserSetVringBase)?;
 
-        let vhost_user_interrupt = EventFd::new(EFD_NONBLOCK).map_err(Error::VhostIrqCreate)?;
-        vu.set_vring_call(queue_index, &vhost_user_interrupt)
-            .map_err(Error::VhostUserSetVringCall)?;
-        vu_interrupt_list.push((vhost_user_interrupt, queue));
+        if let Some(eventfd) = virtio_interrupt.notifier(&VirtioInterruptType::Queue, Some(&queue))
+        {
+            vu.set_vring_call(queue_index, &eventfd)
+                .map_err(Error::VhostUserSetVringCall)?;
+            vu_interrupt_list.push((None, queue));
+        } else {
+            let eventfd = EventFd::new(EFD_NONBLOCK).map_err(Error::VhostIrqCreate)?;
+            vu.set_vring_call(queue_index, &eventfd)
+                .map_err(Error::VhostUserSetVringCall)?;
+            vu_interrupt_list.push((Some(eventfd), queue));
+        }
 
         vu.set_vring_kick(queue_index, &queue_evts[queue_index])
             .map_err(Error::VhostUserSetVringKick)?;
@@ -109,13 +119,14 @@ pub fn setup_vhost_user(
     mem: &GuestMemoryMmap,
     queues: Vec<Queue>,
     queue_evts: Vec<EventFd>,
+    virtio_interrupt: &Arc<dyn VirtioInterrupt>,
     acked_features: u64,
-) -> Result<Vec<(EventFd, Queue)>> {
+) -> Result<Vec<(Option<EventFd>, Queue)>> {
     // Set features based on the acked features from the guest driver.
     vu.set_features(acked_features)
         .map_err(Error::VhostUserSetFeatures)?;
 
-    setup_vhost_user_vring(vu, mem, queues, queue_evts)
+    setup_vhost_user_vring(vu, mem, queues, queue_evts, virtio_interrupt)
 }
 
 pub fn reset_vhost_user(vu: &mut Master, num_queues: usize) -> Result<()> {
