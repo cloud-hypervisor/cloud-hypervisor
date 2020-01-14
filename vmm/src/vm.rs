@@ -31,7 +31,7 @@ use crate::memory_manager::{get_host_cpu_phys_bits, Error as MemoryManagerError,
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use arch::layout;
-use devices::{ioapic, HotPlugNotificationType};
+use devices::{ioapic, HotPlugNotificationFlags};
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::*;
 use linux_loader::cmdline::Cmdline;
@@ -491,7 +491,7 @@ impl Vm {
                 .resize(desired_vcpus)
                 .map_err(Error::CpuManager)?;
             self.devices
-                .notify_hotplug(HotPlugNotificationType::CPUDevicesChanged)
+                .notify_hotplug(HotPlugNotificationFlags::CPU_DEVICES_CHANGED)
                 .map_err(Error::DeviceManager)?;
             self.config.lock().unwrap().cpus.boot_vcpus = desired_vcpus;
         }
@@ -503,7 +503,7 @@ impl Vm {
                 .resize(desired_memory)
                 .map_err(Error::MemoryManager)?;
             self.devices
-                .notify_hotplug(HotPlugNotificationType::MemoryDevicesChanged)
+                .notify_hotplug(HotPlugNotificationFlags::MEMORY_DEVICES_CHANGED)
                 .map_err(Error::DeviceManager)?;
             self.config.lock().unwrap().memory.size = desired_memory;
         }

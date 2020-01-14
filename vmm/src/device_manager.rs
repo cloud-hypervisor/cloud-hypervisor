@@ -19,7 +19,7 @@ use acpi_tables::{aml, aml::Aml};
 use arc_swap::ArcSwap;
 use arch::layout;
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
-use devices::{ioapic, HotPlugNotificationType};
+use devices::{ioapic, HotPlugNotificationFlags};
 use kvm_bindings::kvm_irq_routing_entry;
 use kvm_ioctls::*;
 use libc::O_TMPFILE;
@@ -1618,7 +1618,7 @@ impl DeviceManager {
 
     pub fn notify_hotplug(
         &self,
-        _notification_type: HotPlugNotificationType,
+        _notification_type: HotPlugNotificationFlags,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "acpi")]
         return self
@@ -1670,12 +1670,14 @@ fn create_ged_device(ged_irq: u32) -> Vec<u8> {
                 true,
                 vec![
                     &aml::Store::new(&aml::Local(0), &aml::Path::new("GDAT")),
+                    &aml::And::new(&aml::Local(1), &aml::Local(0), &aml::ONE),
                     &aml::If::new(
-                        &aml::Equal::new(&aml::Local(0), &aml::ONE),
+                        &aml::Equal::new(&aml::Local(1), &aml::ONE),
                         vec![&aml::MethodCall::new("\\_SB_.CPUS.CSCN".into(), vec![])],
                     ),
+                    &aml::And::new(&aml::Local(1), &aml::Local(0), &2usize),
                     &aml::If::new(
-                        &aml::Equal::new(&aml::Local(0), &2usize),
+                        &aml::Equal::new(&aml::Local(1), &2usize),
                         vec![&aml::MethodCall::new("\\_SB_.MHPC.MSCN".into(), vec![])],
                     ),
                 ],
