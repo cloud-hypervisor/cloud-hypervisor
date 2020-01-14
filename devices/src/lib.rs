@@ -6,6 +6,8 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 //! Emulates virtual and hardware devices.
+#[macro_use]
+extern crate bitflags;
 extern crate byteorder;
 extern crate epoll;
 extern crate kvm_bindings;
@@ -71,9 +73,10 @@ pub trait Interrupt: Send + Sync {
     fn deliver(&self) -> result::Result<(), std::io::Error>;
 }
 
-#[derive(Clone, Copy)]
-pub enum HotPlugNotificationType {
-    NoDevicesChanged,
-    CPUDevicesChanged,
-    MemoryDevicesChanged,
+bitflags! {
+    pub struct HotPlugNotificationFlags: u8 {
+        const NO_DEVICES_CHANGED = 0;
+        const CPU_DEVICES_CHANGED = 0b1;
+        const MEMORY_DEVICES_CHANGED = 0b10;
+    }
 }
