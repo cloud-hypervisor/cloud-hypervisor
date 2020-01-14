@@ -22,8 +22,6 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use devices::BusDevice;
-use kvm_bindings::kvm_irq_routing_entry;
-use kvm_ioctls::VmFd;
 use libc::EFD_NONBLOCK;
 use pci::{
     BarReprogrammingParams, InterruptDelivery, MsixCap, MsixConfig, PciBarConfiguration,
@@ -32,11 +30,11 @@ use pci::{
     PciNetworkControllerSubclass, PciSubclass,
 };
 use std::any::Any;
-use std::collections::HashMap;
 use std::result;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use vm_allocator::SystemAllocator;
+use vm_device::interrupt::{InterruptIndex, InterruptManager, InterruptSourceGroup, PCI_MSI_IRQ};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
@@ -235,6 +233,7 @@ pub struct VirtioPciDevice {
     // PCI interrupts.
     interrupt_status: Arc<AtomicUsize>,
     virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
+    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
 
     // virtio queues
     queues: Vec<Queue>,
@@ -257,9 +256,7 @@ impl VirtioPciDevice {
         device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
         iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
-        allocator: &mut SystemAllocator,
-        vm_fd: &Arc<VmFd>,
-        gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+        interrupt_manager: &Arc<dyn InterruptManager>,
     ) -> Result<Self> {
         let device_clone = device.clone();
         let locked_device = device_clone.lock().unwrap();
@@ -279,12 +276,13 @@ impl VirtioPciDevice {
 
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + locked_device.device_type() as u16;
 
+        let interrupt_source_group =
+            interrupt_manager.create_group(PCI_MSI_IRQ, 0, msix_num as InterruptIndex)?;
+
         let (msix_config, msix_config_clone) = if msix_num > 0 {
             let msix_config = Arc::new(Mutex::new(MsixConfig::new(
                 msix_num,
-                allocator,
-                vm_fd.clone(),
-                gsi_msi_routes,
+                interrupt_source_group.clone(),
             )));
             let msix_config_clone = msix_config.clone();
             (Some(msix_config), Some(msix_config_clone))
@@ -347,6 +345,7 @@ impl VirtioPciDevice {
             memory: Some(memory),
             settings_bar: 0,
             use_64bit_bar,
+            interrupt_source_group,
         })
     }
 
@@ -471,13 +470,19 @@ impl VirtioTransport for VirtioPciDevice {
 pub struct VirtioInterruptMsix {
     msix_config: Arc<Mutex<MsixConfig>>,
     config_vector: Arc<AtomicU16>,
+    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
 }
 
 impl VirtioInterruptMsix {
-    pub fn new(msix_config: Arc<Mutex<MsixConfig>>, config_vector: Arc<AtomicU16>) -> Self {
+    pub fn new(
+        msix_config: Arc<Mutex<MsixConfig>>,
+        config_vector: Arc<AtomicU16>,
+        interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    ) -> Self {
         VirtioInterruptMsix {
             msix_config,
             config_vector,
+            interrupt_source_group,
         }
     }
 }
@@ -515,10 +520,11 @@ impl VirtioInterrupt for VirtioInterruptMsix {
             return Ok(());
         }
 
-        config.irq_routes[vector as usize].irq_fd.write(1)
+        self.interrupt_source_group
+            .trigger(vector as InterruptIndex)
     }
 
-    fn notifier(&self, int_type: &VirtioInterruptType, queue: Option<&Queue>) -> Option<EventFd> {
+    fn notifier(&self, int_type: &VirtioInterruptType, queue: Option<&Queue>) -> Option<&EventFd> {
         let vector = match int_type {
             VirtioInterruptType::Config => self.config_vector.load(Ordering::SeqCst),
             VirtioInterruptType::Queue => {
@@ -530,12 +536,8 @@ impl VirtioInterrupt for VirtioInterruptMsix {
             }
         };
 
-        Some(
-            self.msix_config.lock().unwrap().irq_routes[vector as usize]
-                .irq_fd
-                .try_clone()
-                .unwrap(),
-        )
+        self.interrupt_source_group
+            .notifier(vector as InterruptIndex)
     }
 }
 
@@ -553,6 +555,7 @@ impl PciDevice for VirtioPciDevice {
             let virtio_interrupt_msix = Arc::new(VirtioInterruptMsix::new(
                 msix_config.clone(),
                 self.common_config.msix_config.clone(),
+                self.interrupt_source_group.clone(),
             ));
 
             self.virtio_interrupt = Some(virtio_interrupt_msix);

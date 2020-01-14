@@ -12,6 +12,8 @@
 extern crate vm_device;
 
 use crate::config::{ConsoleOutputMode, VmConfig};
+#[cfg(feature = "pci_support")]
+use crate::interrupt::{KvmInterruptManager, KvmRoutingEntry};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::vm::VmInfo;
 #[cfg(feature = "acpi")]
@@ -20,7 +22,6 @@ use arc_swap::ArcSwap;
 use arch::layout;
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use devices::{ioapic, HotPlugNotificationFlags};
-use kvm_bindings::kvm_irq_routing_entry;
 use kvm_ioctls::*;
 use libc::O_TMPFILE;
 use libc::TIOCGWINSZ;
@@ -43,6 +44,8 @@ use std::sync::{Arc, Mutex};
 #[cfg(feature = "pci_support")]
 use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
+#[cfg(feature = "pci_support")]
+use vm_device::interrupt::InterruptManager;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::GuestAddress;
 use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
@@ -547,8 +550,14 @@ impl DeviceManager {
             // devices. This way, we can maintain the full list of used GSI,
             // preventing one device from overriding interrupts setting from
             // another one.
-            let gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>> =
+            let kvm_gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>> =
                 Arc::new(Mutex::new(HashMap::new()));
+
+            let interrupt_manager: Arc<dyn InterruptManager> = Arc::new(KvmInterruptManager::new(
+                address_manager.allocator.clone(),
+                vm_info.vm_fd.clone(),
+                kvm_gsi_msi_routes,
+            ));
 
             let (mut iommu_device, iommu_mapping) = if vm_info.vm_cfg.lock().unwrap().iommu {
                 let (device, mapping) =
@@ -575,7 +584,7 @@ impl DeviceManager {
                     &mut pci_bus,
                     mapping,
                     migratable_devices,
-                    &gsi_msi_routes,
+                    &interrupt_manager,
                 )?;
 
                 if let Some(dev_id) = virtio_iommu_attach_dev {
@@ -589,7 +598,7 @@ impl DeviceManager {
                 &mut pci_bus,
                 memory_manager,
                 &mut iommu_device,
-                &gsi_msi_routes,
+                &interrupt_manager,
             )?;
 
             iommu_attached_devices.append(&mut vfio_iommu_device_ids);
@@ -613,7 +622,7 @@ impl DeviceManager {
                     &mut pci_bus,
                     &None,
                     migratable_devices,
-                    &gsi_msi_routes,
+                    &interrupt_manager,
                 )?;
 
                 *virt_iommu = Some((iommu_id, iommu_attached_devices));
@@ -1350,11 +1359,10 @@ impl DeviceManager {
         pci: &mut PciBus,
         memory_manager: &Arc<Mutex<MemoryManager>>,
         iommu_device: &mut Option<vm_virtio::Iommu>,
-        gsi_msi_routes: &Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+        interrupt_manager: &Arc<dyn InterruptManager>,
     ) -> DeviceManagerResult<Vec<u32>> {
         let mut mem_slot = memory_manager.lock().unwrap().allocate_kvm_memory_slot();
         let mut iommu_attached_device_ids = Vec::new();
-        let mut allocator = address_manager.allocator.lock().unwrap();
 
         if let Some(device_list_cfg) = &vm_info.vm_cfg.lock().unwrap().devices {
             // Create the KVM VFIO device
@@ -1389,16 +1397,12 @@ impl DeviceManager {
                     }
                 }
 
-                let mut vfio_pci_device = VfioPciDevice::new(
-                    vm_info.vm_fd,
-                    &mut allocator,
-                    vfio_device,
-                    gsi_msi_routes.clone(),
-                )
-                .map_err(DeviceManagerError::VfioPciCreate)?;
+                let mut vfio_pci_device =
+                    VfioPciDevice::new(vm_info.vm_fd, vfio_device, &interrupt_manager)
+                        .map_err(DeviceManagerError::VfioPciCreate)?;
 
                 let bars = vfio_pci_device
-                    .allocate_bars(&mut allocator)
+                    .allocate_bars(&mut address_manager.allocator.lock().unwrap())
                     .map_err(DeviceManagerError::AllocateBars)?;
 
                 mem_slot = vfio_pci_device
@@ -1432,7 +1436,7 @@ impl DeviceManager {
         pci: &mut PciBus,
         iommu_mapping: &Option<Arc<IommuMapping>>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
-        gsi_msi_routes: &Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+        interrupt_manager: &Arc<dyn InterruptManager>,
     ) -> DeviceManagerResult<Option<u32>> {
         // Allows support for one MSI-X vector per queue. It also adds 1
         // as we need to take into account the dedicated vector to notify
@@ -1466,19 +1470,16 @@ impl DeviceManager {
                 None
             };
 
-        let mut allocator = address_manager.allocator.lock().unwrap();
-
         let mut virtio_pci_device = VirtioPciDevice::new(
             memory.clone(),
             virtio_device,
             msix_num,
             iommu_mapping_cb,
-            &mut allocator,
-            vm_fd,
-            gsi_msi_routes.clone(),
+            interrupt_manager,
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 
+        let mut allocator = address_manager.allocator.lock().unwrap();
         let bars = virtio_pci_device
             .allocate_bars(&mut allocator)
             .map_err(DeviceManagerError::AllocateBars)?;
