@@ -12,6 +12,7 @@ mod vec_cache;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use libc::{EINVAL, ENOSPC, ENOTSUP};
 use remain::sorted;
+use vm_virtio::RawFile;
 use vmm_sys_util::{
     file_traits::FileSetLen, file_traits::FileSync, seek_hole::SeekHole, write_zeroes::PunchHole,
     write_zeroes::WriteZeroes,
@@ -19,10 +20,8 @@ use vmm_sys_util::{
 
 use std::cmp::{max, min};
 use std::fmt::{self, Display};
-use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
-use std::os::unix::io::{AsRawFd, RawFd};
 
 use crate::qcow_raw_file::QcowRawFile;
 use crate::refcount::RefCount;
@@ -190,7 +189,7 @@ pub struct QcowHeader {
 
 impl QcowHeader {
     /// Creates a QcowHeader from a reference to a file.
-    pub fn new(f: &mut File) -> Result<QcowHeader> {
+    pub fn new(f: &mut RawFile) -> Result<QcowHeader> {
         f.seek(SeekFrom::Start(0)).map_err(Error::ReadingHeader)?;
         let magic = f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
         if magic != QCOW_MAGIC {
@@ -198,12 +197,12 @@ impl QcowHeader {
         }
 
         // Reads the next u32 from the file.
-        fn read_u32_from_file(f: &mut File) -> Result<u32> {
+        fn read_u32_from_file(f: &mut RawFile) -> Result<u32> {
             f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)
         }
 
         // Reads the next u64 from the file.
-        fn read_u64_from_file(f: &mut File) -> Result<u64> {
+        fn read_u64_from_file(f: &mut RawFile) -> Result<u64> {
             f.read_u64::<BigEndian>().map_err(Error::ReadingHeader)
         }
 
@@ -368,9 +367,11 @@ fn max_refcount_clusters(refcount_order: u32, cluster_size: u32, num_clusters: u
 ///
 /// ```
 /// # use std::io::{Read, Seek, SeekFrom};
+/// # use vm_virtio::RawFile;
 /// # use qcow::{self, QcowFile};
 /// # fn test(file: std::fs::File) -> std::io::Result<()> {
-///     let mut q = QcowFile::from(file).expect("Can't open qcow file");
+///     let mut raw_img = RawFile::new(file, false);
+///     let mut q = QcowFile::from(raw_img).expect("Can't open qcow file");
 ///     let mut buf = [0u8; 12];
 ///     q.seek(SeekFrom::Start(10 as u64))?;
 ///     q.read(&mut buf[..])?;
@@ -395,7 +396,7 @@ pub struct QcowFile {
 
 impl QcowFile {
     /// Creates a QcowFile from `file`. File must be a valid qcow2 image.
-    pub fn from(mut file: File) -> Result<QcowFile> {
+    pub fn from(mut file: RawFile) -> Result<QcowFile> {
         let header = QcowHeader::new(&mut file)?;
 
         // Only v2 and v3 files are supported.
@@ -544,7 +545,7 @@ impl QcowFile {
     }
 
     /// Creates a new QcowFile at the given path.
-    pub fn new(mut file: File, version: u32, virtual_size: u64) -> Result<QcowFile> {
+    pub fn new(mut file: RawFile, version: u32, virtual_size: u64) -> Result<QcowFile> {
         let header = QcowHeader::create_for_size(version, virtual_size);
         file.seek(SeekFrom::Start(0)).map_err(Error::SeekingFile)?;
         header.write_to(&mut file)?;
@@ -1394,12 +1395,6 @@ impl Drop for QcowFile {
     }
 }
 
-impl AsRawFd for QcowFile {
-    fn as_raw_fd(&self) -> RawFd {
-        self.raw_file.file().as_raw_fd()
-    }
-}
-
 impl Read for QcowFile {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let address: u64 = self.current_offset as u64;
@@ -1634,7 +1629,7 @@ where
     Ok(())
 }
 
-fn convert_reader<R>(reader: &mut R, dst_file: File, dst_type: ImageType) -> Result<()>
+fn convert_reader<R>(reader: &mut R, dst_file: RawFile, dst_type: ImageType) -> Result<()>
 where
     R: Read + Seek + SeekHole,
 {
@@ -1666,8 +1661,8 @@ where
 /// Copy the contents of a disk image in `src_file` into `dst_file`.
 /// The type of `src_file` is automatically detected, and the output file type is
 /// determined by `dst_type`.
-pub fn convert(src_file: File, dst_file: File, dst_type: ImageType) -> Result<()> {
-    let src_type = detect_image_type(&src_file)?;
+pub fn convert(mut src_file: RawFile, dst_file: RawFile, dst_type: ImageType) -> Result<()> {
+    let src_type = detect_image_type(&mut src_file)?;
     match src_type {
         ImageType::Qcow2 => {
             let mut src_reader = QcowFile::from(src_file)?;
@@ -1682,17 +1677,18 @@ pub fn convert(src_file: File, dst_file: File, dst_type: ImageType) -> Result<()
 }
 
 /// Detect the type of an image file by checking for a valid qcow2 header.
-pub fn detect_image_type(file: &File) -> Result<ImageType> {
-    let mut f = file;
-    let orig_seek = f.seek(SeekFrom::Current(0)).map_err(Error::SeekingFile)?;
-    f.seek(SeekFrom::Start(0)).map_err(Error::SeekingFile)?;
-    let magic = f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
+pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
+    let orig_seek = file
+        .seek(SeekFrom::Current(0))
+        .map_err(Error::SeekingFile)?;
+    file.seek(SeekFrom::Start(0)).map_err(Error::SeekingFile)?;
+    let magic = file.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
     let image_type = if magic == QCOW_MAGIC {
         ImageType::Qcow2
     } else {
         ImageType::Raw
     };
-    f.seek(SeekFrom::Start(orig_seek))
+    file.seek(SeekFrom::Start(orig_seek))
         .map_err(Error::SeekingFile)?;
     Ok(image_type)
 }
@@ -1700,9 +1696,9 @@ pub fn detect_image_type(file: &File) -> Result<ImageType> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
     use std::io::{Read, Seek, SeekFrom, Write};
     use tempfile::tempfile;
+    use vm_virtio::RawFile;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![
@@ -1771,9 +1767,9 @@ mod tests {
 
     fn with_basic_file<F>(header: &[u8], mut testfn: F)
     where
-        F: FnMut(File),
+        F: FnMut(RawFile),
     {
-        let mut disk_file: File = tempfile().unwrap();
+        let mut disk_file: RawFile = RawFile::new(tempfile().unwrap(), false);
         disk_file.write_all(&header).unwrap();
         disk_file.set_len(0x1_0000_0000).unwrap();
         disk_file.seek(SeekFrom::Start(0)).unwrap();
@@ -1781,11 +1777,11 @@ mod tests {
         testfn(disk_file); // File closed when the function exits.
     }
 
-    fn with_default_file<F>(file_size: u64, mut testfn: F)
+    fn with_default_file<F>(file_size: u64, direct: bool, mut testfn: F)
     where
         F: FnMut(QcowFile),
     {
-        let tmp = tempfile().unwrap();
+        let tmp: RawFile = RawFile::new(tempfile().unwrap(), direct);
         let qcow_file = QcowFile::new(tmp, 3, file_size).unwrap();
 
         testfn(qcow_file); // File closed when the function exits.
@@ -1794,7 +1790,7 @@ mod tests {
     #[test]
     fn default_header_v2() {
         let header = QcowHeader::create_for_size(2, 0x10_0000);
-        let mut disk_file: File = tempfile().unwrap();
+        let mut disk_file: RawFile = RawFile::new(tempfile().unwrap(), false);
         header
             .write_to(&mut disk_file)
             .expect("Failed to write header to temporary file.");
@@ -1805,7 +1801,7 @@ mod tests {
     #[test]
     fn default_header_v3() {
         let header = QcowHeader::create_for_size(3, 0x10_0000);
-        let mut disk_file: File = tempfile().unwrap();
+        let mut disk_file: RawFile = RawFile::new(tempfile().unwrap(), false);
         header
             .write_to(&mut disk_file)
             .expect("Failed to write header to temporary file.");
@@ -1815,13 +1811,13 @@ mod tests {
 
     #[test]
     fn header_read() {
-        with_basic_file(&valid_header_v2(), |mut disk_file: File| {
+        with_basic_file(&valid_header_v2(), |mut disk_file: RawFile| {
             let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
             assert_eq!(header.version, 2);
             assert_eq!(header.refcount_order, DEFAULT_REFCOUNT_ORDER);
             assert_eq!(header.header_size, V2_BARE_HEADER_SIZE);
         });
-        with_basic_file(&valid_header_v3(), |mut disk_file: File| {
+        with_basic_file(&valid_header_v3(), |mut disk_file: RawFile| {
             let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
             assert_eq!(header.version, 3);
             assert_eq!(header.refcount_order, DEFAULT_REFCOUNT_ORDER);
@@ -1832,7 +1828,7 @@ mod tests {
     #[test]
     fn invalid_magic() {
         let invalid_header = vec![0x51u8, 0x46, 0x4a, 0xfb];
-        with_basic_file(&invalid_header, |mut disk_file: File| {
+        with_basic_file(&invalid_header, |mut disk_file: RawFile| {
             QcowHeader::new(&mut disk_file).expect_err("Invalid header worked.");
         });
     }
@@ -1841,7 +1837,7 @@ mod tests {
     fn invalid_refcount_order() {
         let mut header = valid_header_v3();
         header[99] = 2;
-        with_basic_file(&header, |disk_file: File| {
+        with_basic_file(&header, |disk_file: RawFile| {
             QcowFile::from(disk_file).expect_err("Invalid refcount order worked.");
         });
     }
@@ -1850,7 +1846,7 @@ mod tests {
     fn invalid_cluster_bits() {
         let mut header = valid_header_v3();
         header[23] = 3;
-        with_basic_file(&header, |disk_file: File| {
+        with_basic_file(&header, |disk_file: RawFile| {
             QcowFile::from(disk_file).expect_err("Failed to create file.");
         });
     }
@@ -1858,7 +1854,7 @@ mod tests {
     #[test]
     fn test_header_huge_file() {
         let header = test_huge_header();
-        with_basic_file(&header, |disk_file: File| {
+        with_basic_file(&header, |disk_file: RawFile| {
             QcowFile::from(disk_file).expect_err("Failed to create file.");
         });
     }
@@ -1867,7 +1863,7 @@ mod tests {
     fn test_header_crazy_file_size_rejected() {
         let mut header = valid_header_v3();
         &mut header[24..32].copy_from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1e]);
-        with_basic_file(&header, |disk_file: File| {
+        with_basic_file(&header, |disk_file: RawFile| {
             QcowFile::from(disk_file).expect_err("Failed to create file.");
         });
     }
@@ -1876,7 +1872,7 @@ mod tests {
     fn test_huge_l1_table() {
         let mut header = valid_header_v3();
         header[36] = 0x12;
-        with_basic_file(&header, |disk_file: File| {
+        with_basic_file(&header, |disk_file: RawFile| {
             QcowFile::from(disk_file).expect_err("Failed to create file.");
         });
     }
@@ -1888,7 +1884,7 @@ mod tests {
         header[26] = 1;
         header[31] = 0;
         // 1 TB with the min cluster size makes the arrays too big, it should fail.
-        with_basic_file(&header, |disk_file: File| {
+        with_basic_file(&header, |disk_file: RawFile| {
             QcowFile::from(disk_file).expect_err("Failed to create file.");
         });
     }
@@ -1902,7 +1898,7 @@ mod tests {
         header[31] = 0;
         // set cluster_bits
         header[23] = 16;
-        with_basic_file(&header, |disk_file: File| {
+        with_basic_file(&header, |disk_file: RawFile| {
             let mut qcow = QcowFile::from(disk_file).expect("Failed to create file.");
             qcow.seek(SeekFrom::Start(0x100_0000_0000 - 8))
                 .expect("Failed to seek.");
@@ -1916,7 +1912,7 @@ mod tests {
     fn test_header_huge_num_refcounts() {
         let mut header = valid_header_v3();
         &mut header[56..60].copy_from_slice(&[0x02, 0x00, 0xe8, 0xff]);
-        with_basic_file(&header, |disk_file: File| {
+        with_basic_file(&header, |disk_file: RawFile| {
             QcowFile::from(disk_file).expect_err("Created disk with crazy refcount clusters");
         });
     }
@@ -1925,14 +1921,14 @@ mod tests {
     fn test_header_huge_refcount_offset() {
         let mut header = valid_header_v3();
         &mut header[48..56].copy_from_slice(&[0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x02, 0x00]);
-        with_basic_file(&header, |disk_file: File| {
+        with_basic_file(&header, |disk_file: RawFile| {
             QcowFile::from(disk_file).expect_err("Created disk with crazy refcount offset");
         });
     }
 
     #[test]
     fn write_read_start() {
-        with_basic_file(&valid_header_v3(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
             let mut q = QcowFile::from(disk_file).unwrap();
             q.write(b"test first bytes")
                 .expect("Failed to write test string.");
@@ -1945,7 +1941,7 @@ mod tests {
 
     #[test]
     fn offset_write_read() {
-        with_basic_file(&valid_header_v3(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
             let mut q = QcowFile::from(disk_file).unwrap();
             let b = [0x55u8; 0x1000];
             q.seek(SeekFrom::Start(0xfff2000)).expect("Failed to seek.");
@@ -1959,7 +1955,7 @@ mod tests {
 
     #[test]
     fn write_zeroes_read() {
-        with_basic_file(&valid_header_v3(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
             let mut q = QcowFile::from(disk_file).unwrap();
             // Write some test data.
             let b = [0x55u8; 0x1000];
@@ -1985,7 +1981,7 @@ mod tests {
         // Choose a size that is larger than a cluster.
         // valid_header uses cluster_bits = 12, which corresponds to a cluster size of 4096.
         const CHUNK_SIZE: usize = 4096 * 2 + 512;
-        with_basic_file(&valid_header_v3(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
             let mut q = QcowFile::from(disk_file).unwrap();
             // Write some test data.
             let b = [0x55u8; CHUNK_SIZE];
@@ -2006,11 +2002,11 @@ mod tests {
 
     #[test]
     fn test_header() {
-        with_basic_file(&valid_header_v2(), |disk_file: File| {
+        with_basic_file(&valid_header_v2(), |disk_file: RawFile| {
             let q = QcowFile::from(disk_file).unwrap();
             assert_eq!(q.virtual_size(), 0x20_0000_0000);
         });
-        with_basic_file(&valid_header_v3(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
             let q = QcowFile::from(disk_file).unwrap();
             assert_eq!(q.virtual_size(), 0x20_0000_0000);
         });
@@ -2018,7 +2014,7 @@ mod tests {
 
     #[test]
     fn read_small_buffer() {
-        with_basic_file(&valid_header_v3(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
             let mut q = QcowFile::from(disk_file).unwrap();
             let mut b = [5u8; 16];
             q.seek(SeekFrom::Start(1000)).expect("Failed to seek.");
@@ -2030,7 +2026,7 @@ mod tests {
 
     #[test]
     fn replay_ext4() {
-        with_basic_file(&valid_header_v3(), |disk_file: File| {
+        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
             let mut q = QcowFile::from(disk_file).unwrap();
             const BUF_SIZE: usize = 0x1000;
             let mut b = [0u8; BUF_SIZE];
@@ -2406,7 +2402,16 @@ mod tests {
 
     #[test]
     fn combo_write_read() {
-        with_default_file(1024 * 1024 * 1024 * 256, |mut qcow_file| {
+        combo_write_read_common(false);
+    }
+
+    #[test]
+    fn combo_write_read_direct() {
+        combo_write_read_common(true);
+    }
+
+    fn combo_write_read_common(direct: bool) {
+        with_default_file(1024 * 1024 * 1024 * 256, direct, |mut qcow_file| {
             const NUM_BLOCKS: usize = 555;
             const BLOCK_SIZE: usize = 0x1_0000;
             const OFFSET: usize = 0x1_0000_0020;
@@ -2459,7 +2464,16 @@ mod tests {
 
     #[test]
     fn seek_data() {
-        with_default_file(0x30000, |mut file| {
+        seek_data_common(false);
+    }
+
+    #[test]
+    fn seek_data_direct() {
+        seek_data_common(true);
+    }
+
+    fn seek_data_common(direct: bool) {
+        with_default_file(0x30000, direct, |mut file| {
             // seek_data at or after the end of the file should return None
             assert_eq!(file.seek_data(0x10000).unwrap(), None);
             assert_eq!(seek_cur(&mut file), 0);
@@ -2492,7 +2506,16 @@ mod tests {
 
     #[test]
     fn seek_hole() {
-        with_default_file(0x30000, |mut file| {
+        seek_hole_common(false);
+    }
+
+    #[test]
+    fn seek_hole_direct() {
+        seek_hole_common(true);
+    }
+
+    fn seek_hole_common(direct: bool) {
+        with_default_file(0x30000, direct, |mut file| {
             // File consisting entirely of a hole
             assert_eq!(file.seek_hole(0).unwrap(), Some(0));
             assert_eq!(seek_cur(&mut file), 0);
@@ -2566,7 +2589,7 @@ mod tests {
 
     #[test]
     fn rebuild_refcounts() {
-        with_basic_file(&valid_header_v3(), |mut disk_file: File| {
+        with_basic_file(&valid_header_v3(), |mut disk_file: RawFile| {
             let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
             let cluster_size = 65536;
             let mut raw_file =

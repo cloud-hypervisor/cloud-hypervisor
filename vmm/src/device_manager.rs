@@ -927,17 +927,18 @@ impl DeviceManager {
         if let Some(disk_list_cfg) = &vm_info.vm_cfg.lock().unwrap().disks {
             for disk_cfg in disk_list_cfg.iter() {
                 // Open block device path
-                let raw_img: File = OpenOptions::new()
+                let image: File = OpenOptions::new()
                     .read(true)
                     .write(true)
                     .open(&disk_cfg.path)
                     .map_err(DeviceManagerError::Disk)?;
 
-                let image_type = qcow::detect_image_type(&raw_img)
+                let mut raw_img = vm_virtio::RawFile::new(image, false);
+
+                let image_type = qcow::detect_image_type(&mut raw_img)
                     .map_err(DeviceManagerError::DetectImageType)?;
                 match image_type {
                     ImageType::Raw => {
-                        let raw_img = vm_virtio::RawFile::new(raw_img, false);
                         let dev = vm_virtio::Block::new(
                             raw_img,
                             disk_cfg.path.clone(),
