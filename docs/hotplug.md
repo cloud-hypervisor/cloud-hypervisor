@@ -11,7 +11,7 @@ This patch is integrated into the Clear Linux KVM and cloudguest images.
 
 ## CPU Hot Plug
 
-Extra vCPUs can be added (but not removed [1]) from a running Cloud Hypervisor instance. This is controlled by two mechanisms:
+Extra vCPUs can be added and removed from a running Cloud Hypervisor instance. This is controlled by two mechanisms:
 
 1. Specifying a number of maximum potential vCPUs that is greater than the number of default (boot) vCPUs.
 2. Making a HTTP API request to the VM to ask for the additional vCPUs to be added.
@@ -40,7 +40,7 @@ To ask the VMM to add additional vCPUs then use the resize API:
 curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"desired_vcpus\":8}" http://localhost/api/v1/vm.resize
 ```
 
-The extra vCPU threads will be created and advertised to the running kernel. The kernel does not bring up the CPUs immediately and instead the user must "on-line" them from inside the VM:
+The extra vCPU threads will be created and advertised to the running kernel. The kernel does not bring up the CPUs immediately and instead the user must "online" them from inside the VM:
 
 ```shell
 root@ch-guest ~ # lscpu | grep list:
@@ -54,4 +54,10 @@ On-line CPU(s) list:             0-7
 
 After a reboot the added CPUs will remain.
 
-[1]: It is not currently possible to remove CPUs after they are added however CPU hot unplug is included in our roadmap for a future version.
+Removing CPUs works similarly by reducing the number in the "desired_vcpus" field of the reisze API. The CPUs will be automatically offlined inside the guest so there is no need to run any commands inside the guest:
+
+```shell
+curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"desired_vcpus\":2}" http://localhost/api/v1/vm.resize
+```
+
+As per adding CPUs to the guest, after a reboot the VM will be running with the reduced number of vCPUs.
