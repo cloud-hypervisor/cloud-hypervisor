@@ -2,17 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use std::fs::File;
 use std::io::{self, BufWriter, Seek, SeekFrom};
 use std::mem::size_of;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use vm_virtio::RawFile;
 use vmm_sys_util::write_zeroes::WriteZeroes;
 
 /// A qcow file. Allows reading/writing clusters and appending clusters.
 #[derive(Debug)]
 pub struct QcowRawFile {
-    file: File,
+    file: RawFile,
     cluster_size: u64,
     cluster_mask: u64,
 }
@@ -20,7 +20,7 @@ pub struct QcowRawFile {
 impl QcowRawFile {
     /// Creates a `QcowRawFile` from the given `File`, `None` is returned if `cluster_size` is not
     /// a power of two.
-    pub fn from(file: File, cluster_size: u64) -> Option<Self> {
+    pub fn from(file: RawFile, cluster_size: u64) -> Option<Self> {
         if cluster_size.count_ones() != 1 {
             return None;
         }
@@ -67,7 +67,7 @@ impl QcowRawFile {
         non_zero_flags: u64,
     ) -> io::Result<()> {
         self.file.seek(SeekFrom::Start(offset))?;
-        let mut buffer = BufWriter::with_capacity(table.len() * size_of::<u64>(), &self.file);
+        let mut buffer = BufWriter::with_capacity(table.len() * size_of::<u64>(), &mut self.file);
         for addr in table {
             let val = if *addr == 0 {
                 0
@@ -92,7 +92,7 @@ impl QcowRawFile {
     /// Writes a refcount block to the file.
     pub fn write_refcount_block(&mut self, offset: u64, table: &[u16]) -> io::Result<()> {
         self.file.seek(SeekFrom::Start(offset))?;
-        let mut buffer = BufWriter::with_capacity(table.len() * size_of::<u16>(), &self.file);
+        let mut buffer = BufWriter::with_capacity(table.len() * size_of::<u16>(), &mut self.file);
         for count in table {
             buffer.write_u16::<BigEndian>(*count)?;
         }
@@ -115,13 +115,8 @@ impl QcowRawFile {
         Ok(Some(new_cluster_address))
     }
 
-    /// Returns a reference to the underlying file.
-    pub fn file(&self) -> &File {
-        &self.file
-    }
-
     /// Returns a mutable reference to the underlying file.
-    pub fn file_mut(&mut self) -> &mut File {
+    pub fn file_mut(&mut self) -> &mut RawFile {
         &mut self.file
     }
 

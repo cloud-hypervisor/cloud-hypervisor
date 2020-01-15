@@ -78,18 +78,17 @@ struct VhostUserBlkBackend {
 
 impl VhostUserBlkBackend {
     pub fn new(image_path: String, rdonly: bool) -> Result<Self> {
-        let raw_img: File = OpenOptions::new()
+        let image: File = OpenOptions::new()
             .read(true)
             .write(!rdonly)
             .open(&image_path)
             .unwrap();
+        let mut raw_img = vm_virtio::RawFile::new(image, false);
 
         let image_id = build_disk_image_id(&PathBuf::from(&image_path));
-        let image_type = qcow::detect_image_type(&raw_img).unwrap();
+        let image_type = qcow::detect_image_type(&mut raw_img).unwrap();
         let mut image = match image_type {
-            ImageType::Raw => {
-                Box::new(vm_virtio::RawFile::new(raw_img, false)) as Box<dyn DiskFile>
-            }
+            ImageType::Raw => Box::new(raw_img) as Box<dyn DiskFile>,
             ImageType::Qcow2 => Box::new(QcowFile::from(raw_img).unwrap()) as Box<dyn DiskFile>,
         };
 
