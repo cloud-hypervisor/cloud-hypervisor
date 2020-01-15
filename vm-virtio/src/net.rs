@@ -6,8 +6,9 @@
 // found in the THIRD-PARTY file.
 
 use super::net_util::{
-    build_net_config_space, open_tap, RxVirtio, TxVirtio, KILL_EVENT, NET_EVENTS_COUNT,
-    PAUSE_EVENT, RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
+    build_net_config_space, open_tap, register_listener, unregister_listener, CtrlVirtio,
+    NetCtrlEpollHandler, RxVirtio, TxVirtio, KILL_EVENT, NET_EVENTS_COUNT, PAUSE_EVENT,
+    RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
 };
 use super::Error as DeviceError;
 use super::{
@@ -35,7 +36,7 @@ use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
-const NUM_QUEUES: usize = 2;
+const NUM_QUEUES: usize = 3;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
 
 #[derive(Debug)]
@@ -292,34 +293,6 @@ impl NetEpollHandler {
     }
 }
 
-pub fn register_listener(
-    epoll_fd: RawFd,
-    fd: RawFd,
-    ev_type: epoll::Events,
-    data: u64,
-) -> result::Result<(), io::Error> {
-    epoll::ctl(
-        epoll_fd,
-        epoll::ControlOptions::EPOLL_CTL_ADD,
-        fd,
-        epoll::Event::new(ev_type, data),
-    )
-}
-
-pub fn unregister_listener(
-    epoll_fd: RawFd,
-    fd: RawFd,
-    ev_type: epoll::Events,
-    data: u64,
-) -> result::Result<(), io::Error> {
-    epoll::ctl(
-        epoll_fd,
-        epoll::ControlOptions::EPOLL_CTL_DEL,
-        fd,
-        epoll::Event::new(ev_type, data),
-    )
-}
-
 pub struct Net {
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
@@ -332,6 +305,7 @@ pub struct Net {
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
     epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
     paused: Arc<AtomicBool>,
 }
 
@@ -350,6 +324,8 @@ impl Net {
             avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
         }
 
+        avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
+
         let config_space;
         if let Some(mac) = guest_mac {
             config_space = build_net_config_space(mac, &mut avail_features);
@@ -367,6 +343,7 @@ impl Net {
             queue_evts: None,
             interrupt_cb: None,
             epoll_thread: None,
+            ctrl_queue_epoll_thread: None,
             paused: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -508,6 +485,30 @@ impl VirtioDevice for Net {
             }
             self.queue_evts = Some(tmp_queue_evts);
 
+            let queue_num = queues.len();
+            if (self.acked_features & 1 << VIRTIO_NET_F_CTRL_VQ) != 0 && queue_num % 2 != 0 {
+                let cvq_queue = queues.remove(queue_num - 1);
+                let cvq_queue_evt = queue_evts.remove(queue_num - 1);
+
+                let mut ctrl_handler = NetCtrlEpollHandler {
+                    mem: mem.clone(),
+                    kill_evt: kill_evt.try_clone().unwrap(),
+                    pause_evt: pause_evt.try_clone().unwrap(),
+                    ctrl_q: CtrlVirtio::new(cvq_queue, cvq_queue_evt),
+                    epoll_fd: 0,
+                };
+
+                let paused = self.paused.clone();
+                thread::Builder::new()
+                    .name("virtio_net".to_string())
+                    .spawn(move || ctrl_handler.run_ctrl(paused))
+                    .map(|thread| self.ctrl_queue_epoll_thread = Some(thread))
+                    .map_err(|e| {
+                        error!("failed to clone queue EventFd: {}", e);
+                        ActivateError::BadActivate
+                    })?;
+            }
+
             let mut queues_v = Vec::new();
             let mut queue_evts_v = Vec::new();
             queues_v.push(queues.remove(0));
@@ -515,7 +516,7 @@ impl VirtioDevice for Net {
             queue_evts_v.push(queue_evts.remove(0));
             queue_evts_v.push(queue_evts.remove(0));
             let mut handler = NetEpollHandler {
-                mem,
+                mem: mem.clone(),
                 tap,
                 rx: RxVirtio::new(),
                 tx: TxVirtio::new(),
@@ -560,6 +561,6 @@ impl VirtioDevice for Net {
     }
 }
 
-virtio_pausable!(Net);
+virtio_pausable!(Net, true);
 impl Snapshotable for Net {}
 impl Migratable for Net {}

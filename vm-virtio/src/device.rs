@@ -133,7 +133,41 @@ macro_rules! virtio_pausable_inner {
 
             Ok(())
         }
-    }
+    };
+    ($ctrl_q:expr) => {
+        fn pause(&mut self) -> result::Result<(), MigratableError> {
+            debug!(
+                "Pausing virtio-{}",
+                VirtioDeviceType::from(self.device_type())
+            );
+            self.paused.store(true, Ordering::SeqCst);
+            if let Some(pause_evt) = &self.pause_evt {
+                pause_evt
+                    .write(1)
+                    .map_err(|e| MigratableError::Pause(e.into()))?;
+            }
+
+            Ok(())
+        }
+
+        fn resume(&mut self) -> result::Result<(), MigratableError> {
+            debug!(
+                "Resuming virtio-{}",
+                VirtioDeviceType::from(self.device_type())
+            );
+            self.paused.store(false, Ordering::SeqCst);
+
+            if let Some(epoll_thread) = &self.epoll_thread {
+                epoll_thread.thread().unpark();
+            }
+
+            if let Some(ctrl_queue_epoll_thread) = &self.ctrl_queue_epoll_thread {
+                ctrl_queue_epoll_thread.thread().unpark();
+            }
+
+            Ok(())
+        }
+    };
 }
 
 #[macro_export]
@@ -141,6 +175,11 @@ macro_rules! virtio_pausable {
     ($name:ident) => {
         impl Pausable for $name {
             virtio_pausable_inner!();
+        }
+    };
+    ($name:ident, $ctrl_q:expr) => {
+        impl Pausable for $name {
+            virtio_pausable_inner!($ctrl_q);
         }
     };
 }
