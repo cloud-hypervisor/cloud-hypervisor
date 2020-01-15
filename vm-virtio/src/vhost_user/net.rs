@@ -1,7 +1,8 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::net_util::build_net_config_space;
+use super::super::net_util::{build_net_config_space, CtrlVirtio, NetCtrlEpollHandler};
+use super::super::Error as CtrlError;
 use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
 use super::handler::*;
 use super::vu_common_ctrl::*;
@@ -43,6 +44,7 @@ pub struct Net {
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<VirtioInterrupt>>,
     epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), CtrlError>>>,
     paused: Arc<AtomicBool>,
 }
 
@@ -99,6 +101,9 @@ impl Net {
             return Err(Error::VhostUserProtocolNotSupport);
         }
 
+        avail_features |= 1 << virtio_net::VIRTIO_NET_F_CTRL_VQ;
+        let queue_num = vu_cfg.num_queues + 1;
+
         let config_space = build_net_config_space(mac_addr, &mut avail_features);
 
         // Send set_vring_base here, since it could tell backends, like OVS + DPDK,
@@ -117,10 +122,11 @@ impl Net {
             acked_features,
             backend_features,
             config_space,
-            queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
+            queue_sizes: vec![vu_cfg.queue_size; queue_num],
             queue_evts: None,
             interrupt_cb: None,
             epoll_thread: None,
+            ctrl_queue_epoll_thread: None,
             paused: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -204,9 +210,18 @@ impl VirtioDevice for Net {
         &mut self,
         mem: Arc<ArcSwap<GuestMemoryMmap>>,
         interrupt_cb: Arc<VirtioInterrupt>,
-        queues: Vec<Queue>,
-        queue_evts: Vec<EventFd>,
+        mut queues: Vec<Queue>,
+        mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
+        if queues.len() != self.queue_sizes.len() || queue_evts.len() != self.queue_sizes.len() {
+            error!(
+                "Cannot perform activate. Expected {} queue(s), got {}",
+                self.queue_sizes.len(),
+                queues.len()
+            );
+            return Err(ActivateError::BadActivate);
+        }
+
         let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
             .and_then(|e| Ok((e.try_clone()?, e)))
             .map_err(|e| {
@@ -237,6 +252,32 @@ impl VirtioDevice for Net {
             })?);
         }
         self.queue_evts = Some(tmp_queue_evts);
+
+        let queue_num = queue_evts.len();
+
+        if (self.acked_features & 1 << virtio_net::VIRTIO_NET_F_CTRL_VQ) != 0 && queue_num % 2 != 0
+        {
+            let cvq_queue = queues.remove(queue_num - 1);
+            let cvq_queue_evt = queue_evts.remove(queue_num - 1);
+
+            let mut ctrl_handler = NetCtrlEpollHandler {
+                mem: mem.clone(),
+                kill_evt: kill_evt.try_clone().unwrap(),
+                pause_evt: pause_evt.try_clone().unwrap(),
+                ctrl_q: CtrlVirtio::new(cvq_queue, cvq_queue_evt),
+                epoll_fd: 0,
+            };
+
+            let paused = self.paused.clone();
+            thread::Builder::new()
+                .name("virtio_net".to_string())
+                .spawn(move || ctrl_handler.run_ctrl(paused))
+                .map(|thread| self.ctrl_queue_epoll_thread = Some(thread))
+                .map_err(|e| {
+                    error!("failed to clone queue EventFd: {}", e);
+                    ActivateError::BadActivate
+                })?;
+        }
 
         let vu_interrupt_list = setup_vhost_user(
             &mut self.vhost_user_net,
@@ -292,6 +333,6 @@ impl VirtioDevice for Net {
     }
 }
 
-virtio_pausable!(Net);
+virtio_pausable!(Net, true);
 impl Snapshotable for Net {}
 impl Migratable for Net {}
