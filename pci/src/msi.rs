@@ -6,9 +6,9 @@
 extern crate byteorder;
 extern crate vm_memory;
 
-use crate::InterruptRoute;
+use crate::{set_kvm_routes, InterruptRoute};
 use byteorder::{ByteOrder, LittleEndian};
-use kvm_bindings::kvm_irq_routing_entry;
+use kvm_bindings::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
 use kvm_ioctls::VmFd;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -161,8 +161,8 @@ impl MsiCap {
 pub struct MsiConfig {
     pub cap: MsiCap,
     pub irq_routes: Vec<InterruptRoute>,
-    _vm_fd: Arc<VmFd>,
-    _gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
+    vm_fd: Arc<VmFd>,
+    gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
 }
 
 impl MsiConfig {
@@ -185,17 +185,13 @@ impl MsiConfig {
         MsiConfig {
             cap,
             irq_routes,
-            _vm_fd: vm_fd,
-            _gsi_msi_routes: gsi_msi_routes,
+            vm_fd,
+            gsi_msi_routes,
         }
     }
 
     pub fn enabled(&self) -> bool {
         self.cap.enabled()
-    }
-
-    pub fn update(&mut self, offset: u64, data: &[u8]) {
-        self.cap.update(offset, data)
     }
 
     pub fn size(&self) -> u64 {
@@ -208,5 +204,54 @@ impl MsiConfig {
 
     pub fn vector_masked(&self, vector: usize) -> bool {
         self.cap.vector_masked(vector)
+    }
+
+    pub fn update(&mut self, offset: u64, data: &[u8]) {
+        let old_enabled = self.cap.enabled();
+
+        self.cap.update(offset, data);
+
+        let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
+
+        if self.cap.enabled() {
+            for (idx, route) in self.irq_routes.iter().enumerate() {
+                if !old_enabled {
+                    if let Err(e) = self.irq_routes[idx].enable(&self.vm_fd) {
+                        error!("Failed enabling irq_fd: {:?}", e);
+                    }
+                }
+
+                // Ignore MSI vector if masked.
+                if self.cap.vector_masked(idx) {
+                    continue;
+                }
+
+                let mut entry = kvm_irq_routing_entry {
+                    gsi: route.gsi,
+                    type_: KVM_IRQ_ROUTING_MSI,
+                    ..Default::default()
+                };
+
+                entry.u.msi.address_lo = self.cap.msg_addr_lo;
+                entry.u.msi.address_hi = self.cap.msg_addr_hi;
+                entry.u.msi.data = u32::from(self.cap.msg_data) | (idx as u32);
+
+                gsi_msi_routes.insert(route.gsi, entry);
+            }
+        } else {
+            for route in self.irq_routes.iter() {
+                if old_enabled {
+                    if let Err(e) = route.disable(&self.vm_fd) {
+                        error!("Failed disabling irq_fd: {:?}", e);
+                    }
+                }
+
+                gsi_msi_routes.remove(&route.gsi);
+            }
+        }
+
+        if let Err(e) = set_kvm_routes(&self.vm_fd, &gsi_msi_routes) {
+            error!("Failed updating KVM routes: {:?}", e);
+        }
     }
 }
