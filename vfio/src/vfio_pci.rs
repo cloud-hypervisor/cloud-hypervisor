@@ -7,13 +7,10 @@ extern crate devices;
 extern crate pci;
 extern crate vm_allocator;
 
-use crate::vec_with_array_field;
 use crate::vfio_device::VfioDevice;
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
-use kvm_bindings::{
-    kvm_irq_routing, kvm_irq_routing_entry, kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI,
-};
+use kvm_bindings::{kvm_irq_routing_entry, kvm_userspace_memory_region};
 use kvm_ioctls::*;
 use pci::{
     BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
@@ -209,32 +206,6 @@ impl Interrupt {
     }
 }
 
-#[allow(dead_code)]
-struct InterruptRoute {
-    gsi: u32,
-    irq_fd: EventFd,
-}
-
-#[allow(dead_code)]
-impl InterruptRoute {
-    fn new(allocator: &mut SystemAllocator) -> Result<Self> {
-        let irq_fd = EventFd::new(libc::EFD_NONBLOCK).map_err(VfioPciError::EventFd)?;
-        let gsi = allocator.allocate_gsi().ok_or(VfioPciError::AllocateGsi)?;
-
-        Ok(InterruptRoute { gsi, irq_fd })
-    }
-
-    fn enable(&self, vm: &Arc<VmFd>) -> Result<()> {
-        vm.register_irqfd(&self.irq_fd, self.gsi)
-            .map_err(VfioPciError::IrqFd)
-    }
-
-    fn disable(&self, vm: &Arc<VmFd>) -> Result<()> {
-        vm.unregister_irqfd(&self.irq_fd, self.gsi)
-            .map_err(VfioPciError::IrqFd)
-    }
-}
-
 #[derive(Copy, Clone)]
 struct MmioRegion {
     start: GuestAddress,
@@ -298,11 +269,9 @@ pub struct VfioPciDevice {
     configuration: PciConfiguration,
     mmio_regions: Vec<MmioRegion>,
     interrupt: Interrupt,
-    interrupt_routes: Vec<InterruptRoute>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
 }
 
-#[allow(dead_code)]
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
     pub fn new(
@@ -338,62 +307,12 @@ impl VfioPciDevice {
                 msi: None,
                 msix: None,
             },
-            interrupt_routes: Vec::new(),
             gsi_msi_routes,
         };
 
         vfio_pci_device.parse_capabilities(allocator);
 
-        // Allocate temporary interrupt routes for now.
-        // The MSI vectors will be filled when the guest driver programs the device.
-        let max_interrupts = vfio_pci_device.device.max_interrupts();
-        for _ in 0..max_interrupts {
-            let route = InterruptRoute::new(allocator)?;
-            vfio_pci_device.interrupt_routes.push(route);
-        }
-
         Ok(vfio_pci_device)
-    }
-
-    fn enable_irq_fds(&self) -> Result<Vec<&EventFd>> {
-        let mut irq_fds: Vec<&EventFd> = Vec::new();
-
-        for r in &self.interrupt_routes {
-            r.enable(&self.vm_fd)?;
-            irq_fds.push(&r.irq_fd);
-        }
-
-        Ok(irq_fds)
-    }
-
-    fn disable_irq_fds(&self) -> Result<()> {
-        for r in &self.interrupt_routes {
-            r.disable(&self.vm_fd)?;
-        }
-
-        Ok(())
-    }
-
-    fn set_kvm_routes(&self) -> Result<()> {
-        let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
-        for (_, entry) in self.gsi_msi_routes.lock().unwrap().iter() {
-            entry_vec.push(*entry);
-        }
-
-        let mut irq_routing =
-            vec_with_array_field::<kvm_irq_routing, kvm_irq_routing_entry>(entry_vec.len());
-        irq_routing[0].nr = entry_vec.len() as u32;
-        irq_routing[0].flags = 0;
-
-        unsafe {
-            let entries: &mut [kvm_irq_routing_entry] =
-                irq_routing[0].entries.as_mut_slice(entry_vec.len());
-            entries.copy_from_slice(&entry_vec);
-        }
-
-        self.vm_fd
-            .set_gsi_routing(&irq_routing[0])
-            .map_err(VfioPciError::SetGsiRouting)
     }
 
     fn parse_msix_capabilities(&mut self, cap: u8, allocator: &mut SystemAllocator) {
@@ -468,55 +387,6 @@ impl VfioPciDevice {
                 .vfio_pci_configuration
                 .read_config_byte((cap_next + 1).into());
         }
-    }
-
-    fn update_msi_interrupt_routes(&self, msi: &VfioMsi) -> Result<()> {
-        if msi.cfg.enabled() {
-            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
-
-            for (idx, route) in self.interrupt_routes.iter().enumerate() {
-                // Ignore MSI vector if the amount of vectors supported by the
-                // guest OS does not match the expected amount. This is related
-                // to "Multiple Message Capable" and "Multiple Message Enable"
-                // fields from the "Message Control" register.
-                if idx >= msi.cfg.num_enabled_vectors() {
-                    continue;
-                }
-
-                // Ignore MSI vector if masked.
-                if msi.cfg.vector_masked(idx) {
-                    continue;
-                }
-
-                let mut entry = kvm_irq_routing_entry {
-                    gsi: route.gsi,
-                    type_: KVM_IRQ_ROUTING_MSI,
-                    ..Default::default()
-                };
-
-                entry.u.msi.address_lo = msi.cfg.cap.msg_addr_lo;
-                entry.u.msi.address_hi = msi.cfg.cap.msg_addr_hi;
-                entry.u.msi.data = u32::from(msi.cfg.cap.msg_data) | (idx as u32);
-
-                gsi_msi_routes.insert(route.gsi, entry);
-            }
-        } else {
-            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
-
-            for route in self.interrupt_routes.iter() {
-                gsi_msi_routes.remove(&route.gsi);
-            }
-        }
-
-        self.set_kvm_routes()
-    }
-
-    fn read_msix_table(&mut self, offset: u64, data: &mut [u8]) {
-        self.interrupt.msix_read_table(offset, data);
-    }
-
-    fn write_msix_table(&mut self, offset: u64, data: &[u8]) {
-        self.interrupt.msix_write_table(offset, data);
     }
 
     fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
@@ -1004,7 +874,7 @@ impl PciDevice for VfioPciDevice {
             let offset = addr - region.start.raw_value();
 
             if self.interrupt.msix_table_accessed(region.index, offset) {
-                self.read_msix_table(offset, data);
+                self.interrupt.msix_read_table(offset, data);
             } else {
                 self.device.region_read(region.index, data, offset);
             }
@@ -1018,7 +888,7 @@ impl PciDevice for VfioPciDevice {
 
             // If the MSI-X table is written to, we need to update our cache.
             if self.interrupt.msix_table_accessed(region.index, offset) {
-                self.write_msix_table(offset, data);
+                self.interrupt.msix_write_table(offset, data);
             } else {
                 self.device.region_write(region.index, data, offset);
             }
