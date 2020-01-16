@@ -159,7 +159,7 @@ impl MsiCap {
 }
 
 pub struct MsiConfig {
-    pub cap: MsiCap,
+    cap: MsiCap,
     pub irq_routes: Vec<InterruptRoute>,
     vm_fd: Arc<VmFd>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
@@ -196,14 +196,6 @@ impl MsiConfig {
 
     pub fn size(&self) -> u64 {
         self.cap.size()
-    }
-
-    pub fn num_enabled_vectors(&self) -> usize {
-        self.cap.num_enabled_vectors()
-    }
-
-    pub fn vector_masked(&self, vector: usize) -> bool {
-        self.cap.vector_masked(vector)
     }
 
     pub fn update(&mut self, offset: u64, data: &[u8]) {
