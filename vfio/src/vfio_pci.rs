@@ -209,11 +209,13 @@ impl Interrupt {
     }
 }
 
+#[allow(dead_code)]
 struct InterruptRoute {
     gsi: u32,
     irq_fd: EventFd,
 }
 
+#[allow(dead_code)]
 impl InterruptRoute {
     fn new(allocator: &mut SystemAllocator) -> Result<Self> {
         let irq_fd = EventFd::new(libc::EFD_NONBLOCK).map_err(VfioPciError::EventFd)?;
@@ -300,6 +302,7 @@ pub struct VfioPciDevice {
     gsi_msi_routes: Arc<Mutex<HashMap<u32, kvm_irq_routing_entry>>>,
 }
 
+#[allow(dead_code)]
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
     pub fn new(
@@ -518,35 +521,27 @@ impl VfioPciDevice {
 
     fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
         match self.interrupt.update_msi(offset, data) {
-            Some(InterruptUpdateAction::EnableMsi) => match self.enable_irq_fds() {
-                Ok(fds) => {
-                    if let Err(e) = self.device.enable_msi(fds) {
+            Some(InterruptUpdateAction::EnableMsi) => {
+                if let Some(msi) = &self.interrupt.msi {
+                    let mut irq_fds: Vec<&EventFd> = Vec::new();
+                    for r in msi.cfg.irq_routes.iter() {
+                        irq_fds.push(&r.irq_fd);
+                    }
+
+                    if let Err(e) = self.device.enable_msi(irq_fds) {
                         warn!("Could not enable MSI: {}", e);
                     }
                 }
-                Err(e) => warn!("Could not get IRQ fds: {}", e),
-            },
+            }
             Some(InterruptUpdateAction::DisableMsi) => {
                 if let Err(e) = self.device.disable_msi() {
-                    warn!("Could not disable MSI: {}", e);
-                }
-                if let Err(e) = self.disable_irq_fds() {
                     warn!("Could not disable MSI: {}", e);
                 }
             }
             _ => {}
         }
 
-        // Update the gsi_msi_routes table now that the MSI cache has been
-        // updated. The point is to always update the table based on latest
-        // changes to the cache, and based on the state of masking flags, the
-        // KVM GSI routes should be configured.
-        if let Some(msi) = &self.interrupt.msi {
-            return self.update_msi_interrupt_routes(&msi);
-        }
-
-        // If the code reach this point, something went wrong.
-        Err(VfioPciError::MsiNotConfigured)
+        Ok(())
     }
 
     fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
