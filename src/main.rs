@@ -1808,6 +1808,7 @@ mod tests {
         tmp_dir: &TempDir,
         blk_img: &str,
         rdonly: bool,
+        direct: bool,
     ) -> (std::process::Child, String) {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
@@ -1823,8 +1824,8 @@ mod tests {
             .args(&[
                 "--backend",
                 format!(
-                    "image={},sock={},readonly={}",
-                    blk_file_path, vubd_socket_path, rdonly
+                    "image={},sock={},readonly={},direct={}",
+                    blk_file_path, vubd_socket_path, rdonly, direct
                 )
                 .as_str(),
             ])
@@ -2617,7 +2618,7 @@ mod tests {
             let guest = Guest::new(&mut clear);
 
             let (mut daemon_child, vubd_socket_path) =
-                prepare_vubd(&guest.tmp_dir, "blk.img", false);
+                prepare_vubd(&guest.tmp_dir, "blk.img", false, false);
 
             let mut cloud_child = Command::new("target/release/cloud-hypervisor")
                 .args(&["--cpus", "boot=1"])
@@ -2701,7 +2702,7 @@ mod tests {
             let guest = Guest::new(&mut clear);
 
             let (mut daemon_child, vubd_socket_path) =
-                prepare_vubd(&guest.tmp_dir, "blk.img", true);
+                prepare_vubd(&guest.tmp_dir, "blk.img", true, false);
 
             let mut cloud_child = Command::new("target/release/cloud-hypervisor")
                 .args(&["--cpus", "boot=1"])
@@ -2772,6 +2773,71 @@ mod tests {
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_vhost_user_blk_direct() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let (mut daemon_child, vubd_socket_path) =
+                prepare_vubd(&guest.tmp_dir, "blk.img", false, true);
+
+            let mut cloud_child = Command::new("target/release/cloud-hypervisor")
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&[
+                    "--vhost-user-blk",
+                    format!(
+                        "sock={},num_queues=1,queue_size=128,wce=true",
+                        vubd_socket_path
+                    )
+                    .as_str(),
+                ])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Check both if /dev/vdc exists and if the block size is 16M.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = cloud_child.kill();
+            let _ = cloud_child.wait();
+
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = daemon_child.kill();
+            let _ = daemon_child.wait();
+
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_boot_from_vhost_user_blk() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -2784,6 +2850,7 @@ mod tests {
                     .disk(DiskType::RawOperatingSystem)
                     .unwrap()
                     .as_str(),
+                false,
                 false,
             );
 
