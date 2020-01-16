@@ -107,6 +107,7 @@ impl VhostUserBlkBackend {
         config.min_io_size = 1;
         config.opt_io_size = 1;
         config.num_queues = 1;
+        config.wce = 1;
 
         Ok(VhostUserBlkBackend {
             mem: None,
@@ -173,6 +174,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
     fn features(&self) -> u64 {
         let mut avail_features = 1 << VIRTIO_BLK_F_MQ
+            | 1 << VIRTIO_BLK_F_CONFIG_WCE
             | 1 << VIRTIO_F_VERSION_1
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
