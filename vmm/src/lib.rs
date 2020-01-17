@@ -336,7 +336,12 @@ impl Vmm {
         desired_ram: Option<u64>,
     ) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            vm.resize(desired_vcpus, desired_ram)
+            if let Err(e) = vm.resize(desired_vcpus, desired_ram) {
+                error!("Error when resizing VM: {:?}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
         } else {
             Err(VmError::VmNotRunning)
         }
