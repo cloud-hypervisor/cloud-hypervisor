@@ -451,12 +451,14 @@ impl MemoryManager {
         Ok(slot)
     }
 
-    pub fn resize(&mut self, desired_ram: u64) -> Result<(), Error> {
-        if desired_ram >= self.current_ram {
+    pub fn resize(&mut self, desired_ram: u64) -> Result<bool, Error> {
+        if desired_ram > self.current_ram {
             self.hotplug_ram_region((desired_ram - self.current_ram) as usize)?;
             self.current_ram = desired_ram;
+            Ok(true)
+        } else {
+            Ok(false)
         }
-        Ok(())
     }
 }
 
