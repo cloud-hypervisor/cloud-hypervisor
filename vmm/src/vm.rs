@@ -485,14 +485,17 @@ impl Vm {
 
     pub fn resize(&mut self, desired_vcpus: Option<u8>, desired_memory: Option<u64>) -> Result<()> {
         if let Some(desired_vcpus) = desired_vcpus {
-            self.cpu_manager
+            if self
+                .cpu_manager
                 .lock()
                 .unwrap()
                 .resize(desired_vcpus)
-                .map_err(Error::CpuManager)?;
-            self.devices
-                .notify_hotplug(HotPlugNotificationFlags::CPU_DEVICES_CHANGED)
-                .map_err(Error::DeviceManager)?;
+                .map_err(Error::CpuManager)?
+            {
+                self.devices
+                    .notify_hotplug(HotPlugNotificationFlags::CPU_DEVICES_CHANGED)
+                    .map_err(Error::DeviceManager)?;
+            }
             self.config.lock().unwrap().cpus.boot_vcpus = desired_vcpus;
         }
 

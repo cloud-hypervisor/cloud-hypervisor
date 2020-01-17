@@ -661,11 +661,11 @@ impl CpuManager {
         self.activate_vcpus(self.boot_vcpus(), Some(entry_addr))
     }
 
-    pub fn resize(&mut self, desired_vcpus: u8) -> Result<()> {
+    pub fn resize(&mut self, desired_vcpus: u8) -> Result<bool> {
         match desired_vcpus.cmp(&self.present_vcpus()) {
-            cmp::Ordering::Greater => self.activate_vcpus(desired_vcpus, None),
-            cmp::Ordering::Less => self.mark_vcpus_for_removal(desired_vcpus),
-            _ => Ok(()),
+            cmp::Ordering::Greater => self.activate_vcpus(desired_vcpus, None).and(Ok(true)),
+            cmp::Ordering::Less => self.mark_vcpus_for_removal(desired_vcpus).and(Ok(true)),
+            _ => Ok(false),
         }
     }
 
