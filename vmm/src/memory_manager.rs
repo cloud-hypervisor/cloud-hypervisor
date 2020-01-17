@@ -237,7 +237,7 @@ impl MemoryManager {
 
         let memory_manager = Arc::new(Mutex::new(MemoryManager {
             guest_memory: guest_memory.clone(),
-            next_kvm_memory_slot: ram_regions.len() as u32,
+            next_kvm_memory_slot: 0,
             start_of_device_area,
             end_of_device_area,
             fd,
