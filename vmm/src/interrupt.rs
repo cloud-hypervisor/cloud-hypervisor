@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup, InterruptType,
-    PCI_MSI_IRQ,
+    PCI_MSI_IRQ, PIN_IRQ,
 };
 use vmm_sys_util::eventfd::EventFd;
 
@@ -241,6 +241,24 @@ impl InterruptSourceGroup for MsiInterruptGroup {
     }
 }
 
+pub struct LegacyUserspaceInterruptGroup {}
+
+impl LegacyUserspaceInterruptGroup {
+    fn new() -> Self {
+        LegacyUserspaceInterruptGroup {}
+    }
+}
+
+impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
+    fn trigger(&self, _index: InterruptIndex) -> Result<()> {
+        Ok(())
+    }
+
+    fn update(&self, _index: InterruptIndex, _config: InterruptSourceConfig) -> Result<()> {
+        Ok(())
+    }
+}
+
 pub struct KvmInterruptManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     vm_fd: Arc<VmFd>,
@@ -269,6 +287,7 @@ impl InterruptManager for KvmInterruptManager {
         count: InterruptIndex,
     ) -> Result<Arc<Box<dyn InterruptSourceGroup>>> {
         let interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>> = match interrupt_type {
+            PIN_IRQ => Arc::new(Box::new(LegacyUserspaceInterruptGroup::new())),
             PCI_MSI_IRQ => {
                 let mut allocator = self.allocator.lock().unwrap();
                 let mut irq_routes: HashMap<InterruptIndex, InterruptRoute> =
