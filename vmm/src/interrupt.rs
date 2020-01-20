@@ -272,7 +272,7 @@ impl InterruptManager for KvmInterruptManager {
 
         let mut irq_routes: HashMap<InterruptIndex, InterruptRoute> =
             HashMap::with_capacity(count as usize);
-        for i in base..count {
+        for i in base..base + count {
             irq_routes.insert(i, InterruptRoute::new(&mut allocator)?);
         }
 
