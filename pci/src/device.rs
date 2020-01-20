@@ -4,11 +4,9 @@
 
 use crate::configuration::{self, PciBarRegionType};
 use crate::msix::MsixTableEntry;
-use crate::PciInterruptPin;
 use devices::BusDevice;
 use std::any::Any;
 use std::fmt::{self, Display};
-use std::sync::Arc;
 use std::{self, io, result};
 use vm_allocator::SystemAllocator;
 use vm_memory::{GuestAddress, GuestUsize};
@@ -56,19 +54,6 @@ pub struct BarReprogrammingParams {
 }
 
 pub trait PciDevice: BusDevice {
-    /// Assign a legacy PCI IRQ to this device.
-    /// The device may write to `irq_evt` to trigger an interrupt.
-    fn assign_pin_irq(
-        &mut self,
-        _irq_cb: Arc<InterruptDelivery>,
-        _irq_num: u32,
-        _irq_pin: PciInterruptPin,
-    ) {
-    }
-
-    /// Assign MSI-X to this device.
-    fn assign_msix(&mut self) {}
-
     /// Allocates the needed PCI BARs space using the `allocate` function which takes a size and
     /// returns an address. Returns a Vec of (GuestAddress, GuestUsize) tuples.
     fn allocate_bars(

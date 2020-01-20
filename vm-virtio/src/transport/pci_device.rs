@@ -24,10 +24,9 @@ use arc_swap::ArcSwap;
 use devices::BusDevice;
 use libc::EFD_NONBLOCK;
 use pci::{
-    BarReprogrammingParams, InterruptDelivery, MsixCap, MsixConfig, PciBarConfiguration,
-    PciBarRegionType, PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice,
-    PciDeviceError, PciHeaderType, PciInterruptPin, PciMassStorageSubclass,
-    PciNetworkControllerSubclass, PciSubclass,
+    BarReprogrammingParams, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
+    PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
+    PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
 };
 use std::any::Any;
 use std::result;
@@ -324,7 +323,7 @@ impl VirtioPciDevice {
             msix_config_clone,
         );
 
-        Ok(VirtioPciDevice {
+        let mut virtio_pci_device = VirtioPciDevice {
             configuration,
             common_config: VirtioPciCommonConfig {
                 driver_status: 0,
@@ -346,7 +345,17 @@ impl VirtioPciDevice {
             settings_bar: 0,
             use_64bit_bar,
             interrupt_source_group,
-        })
+        };
+
+        if let Some(msix_config) = &virtio_pci_device.msix_config {
+            virtio_pci_device.virtio_interrupt = Some(Arc::new(VirtioInterruptMsix::new(
+                msix_config.clone(),
+                virtio_pci_device.common_config.msix_config.clone(),
+                virtio_pci_device.interrupt_source_group.clone(),
+            )));
+        }
+
+        Ok(virtio_pci_device)
     }
 
     /// Gets the list of queue events that must be triggered whenever the VM writes to
@@ -542,26 +551,6 @@ impl VirtioInterrupt for VirtioInterruptMsix {
 }
 
 impl PciDevice for VirtioPciDevice {
-    fn assign_pin_irq(
-        &mut self,
-        _irq_cb: Arc<InterruptDelivery>,
-        _irq_num: u32,
-        _irq_pin: PciInterruptPin,
-    ) {
-    }
-
-    fn assign_msix(&mut self) {
-        if let Some(msix_config) = &self.msix_config {
-            let virtio_interrupt_msix = Arc::new(VirtioInterruptMsix::new(
-                msix_config.clone(),
-                self.common_config.msix_config.clone(),
-                self.interrupt_source_group.clone(),
-            ));
-
-            self.virtio_interrupt = Some(virtio_interrupt_msix);
-        }
-    }
-
     fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
         self.configuration
             .write_config_register(reg_idx, offset, data);
