@@ -12,7 +12,6 @@
 extern crate vm_device;
 
 use crate::config::{ConsoleOutputMode, VmConfig};
-#[cfg(feature = "pci_support")]
 use crate::interrupt::{KvmInterruptManager, KvmRoutingEntry};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::vm::VmInfo;
@@ -30,7 +29,6 @@ use pci::{
     DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
 };
 use qcow::{self, ImageType, QcowFile};
-#[cfg(feature = "pci_support")]
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
@@ -44,8 +42,9 @@ use std::sync::{Arc, Mutex};
 #[cfg(feature = "pci_support")]
 use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
-#[cfg(feature = "pci_support")]
 use vm_device::interrupt::InterruptManager;
+#[cfg(feature = "mmio_support")]
+use vm_device::interrupt::{InterruptIndex, PIN_IRQ};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::GuestAddress;
 use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
@@ -182,14 +181,16 @@ pub enum DeviceManagerError {
 
     // Error from a memory manager operation
     MemoryManager(MemoryManagerError),
+
+    /// Failed to create new interrupt source group.
+    CreateInterruptGroup(io::Error),
+
+    /// Failed to update interrupt source group.
+    UpdateInterruptGroup(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 type VirtioDeviceArc = Arc<Mutex<dyn vm_virtio::VirtioDevice>>;
-
-struct InterruptInfo<'a> {
-    _ioapic: &'a Arc<Mutex<ioapic::Ioapic>>,
-}
 
 struct UserIoapicIrq {
     ioapic: Arc<Mutex<ioapic::Ioapic>>,
@@ -445,7 +446,6 @@ impl DeviceManager {
         });
 
         let ioapic = DeviceManager::add_ioapic(vm_info, &address_manager)?;
-        let interrupt_info = InterruptInfo { _ioapic: &ioapic };
 
         // Create a shared list of GSI that can be shared through all PCI
         // devices. This way, we can maintain the full list of used GSI,
@@ -507,7 +507,7 @@ impl DeviceManager {
                 vm_info,
                 &address_manager,
                 virtio_devices,
-                &interrupt_info,
+                &interrupt_manager,
                 &mut cmdline_additions,
                 &mut migratable_devices,
             )?;
@@ -654,7 +654,7 @@ impl DeviceManager {
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
-        interrupt_info: &InterruptInfo,
+        interrupt_manager: &Arc<dyn InterruptManager>,
         mut cmdline_additions: &mut Vec<String>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<()> {
@@ -672,7 +672,7 @@ impl DeviceManager {
                         vm_info.memory,
                         &address_manager,
                         vm_info.vm_fd,
-                        &interrupt_info,
+                        interrupt_manager,
                         addr,
                         &mut cmdline_additions,
                         migratable_devices,
@@ -1526,7 +1526,7 @@ impl DeviceManager {
         memory: &Arc<ArcSwap<GuestMemoryMmap>>,
         address_manager: &Arc<AddressManager>,
         vm_fd: &Arc<VmFd>,
-        interrupt_info: &InterruptInfo,
+        interrupt_manager: &Arc<dyn InterruptManager>,
         mmio_base: GuestAddress,
         cmdline_additions: &mut Vec<String>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
@@ -1548,12 +1548,11 @@ impl DeviceManager {
             .allocate_irq()
             .ok_or(DeviceManagerError::AllocateIrq)?;
 
-        let interrupt: Box<dyn devices::Interrupt> = Box::new(UserIoapicIrq::new(
-            interrupt_info._ioapic.clone(),
-            irq_num as usize,
-        ));
+        let interrupt_group = interrupt_manager
+            .create_group(PIN_IRQ, irq_num as InterruptIndex, 1 as InterruptIndex)
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
 
-        mmio_device.assign_interrupt(interrupt);
+        mmio_device.assign_interrupt(interrupt_group);
 
         let mmio_device_arc = Arc::new(Mutex::new(mmio_device));
         address_manager
