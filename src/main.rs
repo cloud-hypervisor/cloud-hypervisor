@@ -289,8 +289,6 @@ fn main() {
     )
     .get_matches();
 
-    let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
-
     let log_level = match cmd_arguments.occurrences_of("v") {
         0 => LevelFilter::Error,
         1 => LevelFilter::Warn,
@@ -315,6 +313,7 @@ fn main() {
     .map(|()| log::set_max_level(log_level))
     .expect("Expected to be able to setup logger");
 
+    let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
     let vm_config = match config::VmConfig::parse(vm_params) {
         Ok(config) => config,
         Err(e) => {
