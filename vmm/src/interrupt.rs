@@ -242,17 +242,29 @@ impl InterruptSourceGroup for MsiInterruptGroup {
     }
 }
 
-pub struct LegacyUserspaceInterruptGroup {}
+pub struct LegacyUserspaceInterruptGroup {
+    ioapic: Arc<Mutex<ioapic::Ioapic>>,
+    irq: u32,
+}
 
 impl LegacyUserspaceInterruptGroup {
-    fn new() -> Self {
-        LegacyUserspaceInterruptGroup {}
+    fn new(ioapic: Arc<Mutex<ioapic::Ioapic>>, irq: u32) -> Self {
+        LegacyUserspaceInterruptGroup { ioapic, irq }
     }
 }
 
 impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
     fn trigger(&self, _index: InterruptIndex) -> Result<()> {
-        Ok(())
+        self.ioapic
+            .lock()
+            .unwrap()
+            .service_irq(self.irq as usize)
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to inject IRQ #{}: {:?}", self.irq, e),
+                )
+            })
     }
 
     fn update(&self, _index: InterruptIndex, _config: InterruptSourceConfig) -> Result<()> {
@@ -264,7 +276,7 @@ pub struct KvmInterruptManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     vm_fd: Arc<VmFd>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
-    _ioapic: Arc<Mutex<ioapic::Ioapic>>,
+    ioapic: Arc<Mutex<ioapic::Ioapic>>,
 }
 
 impl KvmInterruptManager {
@@ -278,7 +290,7 @@ impl KvmInterruptManager {
             allocator,
             vm_fd,
             gsi_msi_routes,
-            _ioapic: ioapic,
+            ioapic,
         }
     }
 }
@@ -291,7 +303,19 @@ impl InterruptManager for KvmInterruptManager {
         count: InterruptIndex,
     ) -> Result<Arc<Box<dyn InterruptSourceGroup>>> {
         let interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>> = match interrupt_type {
-            PIN_IRQ => Arc::new(Box::new(LegacyUserspaceInterruptGroup::new())),
+            PIN_IRQ => {
+                if count > 1 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "Legacy cannot support more than one interrupt",
+                    ));
+                }
+
+                Arc::new(Box::new(LegacyUserspaceInterruptGroup::new(
+                    self.ioapic.clone(),
+                    base as u32,
+                )))
+            }
             PCI_MSI_IRQ => {
                 let mut allocator = self.allocator.lock().unwrap();
                 let mut irq_routes: HashMap<InterruptIndex, InterruptRoute> =
