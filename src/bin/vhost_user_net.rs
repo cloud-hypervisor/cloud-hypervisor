@@ -431,10 +431,10 @@ fn main() {
         .author(crate_authors!())
         .about("Launch a vhost-user-net backend.")
         .arg(
-            Arg::with_name("backend")
-                .long("backend")
+            Arg::with_name("net-backend")
+                .long("net-backend")
                 .help(
-                    "Backend parameters \"ip=<ip_addr>,\
+                    "vhost-user-net backend parameters \"ip=<ip_addr>,\
                      mask=<net_mask>,sock=<socket_path>,\
                      num_queues=<number_of_queues>,\
                      queue_size=<size_of_each_queue>\"",
@@ -444,7 +444,7 @@ fn main() {
         )
         .get_matches();
 
-    let vhost_user_net_backend = cmd_arguments.value_of("backend").unwrap();
+    let vhost_user_net_backend = cmd_arguments.value_of("net-backend").unwrap();
 
     let backend_config = match VhostUserNetBackendConfig::parse(vhost_user_net_backend) {
         Ok(config) => config,

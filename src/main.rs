@@ -2638,7 +2638,7 @@ mod tests {
             // Start the daemon
             let mut daemon_child = Command::new("target/release/vhost_user_net")
                 .args(&[
-                    "--backend",
+                    "--net-backend",
                     format!(
                         "ip={},mask=255.255.255.0,sock=/tmp/vunet.sock,num_queues=4,queue_size=1024",
                         guest.network.host_ip
