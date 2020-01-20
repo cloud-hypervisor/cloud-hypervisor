@@ -5,9 +5,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use crate::{BusDevice, Interrupt};
+use crate::BusDevice;
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::{io, result};
+use vm_device::interrupt::InterruptSourceGroup;
 use vmm_sys_util::errno::Result;
 
 const LOOP_SIZE: usize = 0x40;
@@ -55,7 +57,7 @@ const DEFAULT_BAUD_DIVISOR: u16 = 12; // 9600 bps
 pub struct Serial {
     interrupt_enable: u8,
     interrupt_identification: u8,
-    interrupt: Box<dyn Interrupt>,
+    interrupt: Arc<Box<dyn InterruptSourceGroup>>,
     line_control: u8,
     line_status: u8,
     modem_control: u8,
@@ -67,7 +69,10 @@ pub struct Serial {
 }
 
 impl Serial {
-    pub fn new(interrupt: Box<dyn Interrupt>, out: Option<Box<dyn io::Write + Send>>) -> Serial {
+    pub fn new(
+        interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+        out: Option<Box<dyn io::Write + Send>>,
+    ) -> Serial {
         Serial {
             interrupt_enable: 0,
             interrupt_identification: DEFAULT_INTERRUPT_IDENTIFICATION,
@@ -84,12 +89,15 @@ impl Serial {
     }
 
     /// Constructs a Serial port ready for output.
-    pub fn new_out(interrupt: Box<dyn Interrupt>, out: Box<dyn io::Write + Send>) -> Serial {
+    pub fn new_out(
+        interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+        out: Box<dyn io::Write + Send>,
+    ) -> Serial {
         Self::new(interrupt, Some(out))
     }
 
     /// Constructs a Serial port with no connected output.
-    pub fn new_sink(interrupt: Box<dyn Interrupt>) -> Serial {
+    pub fn new_sink(interrupt: Arc<Box<dyn InterruptSourceGroup>>) -> Serial {
         Self::new(interrupt, None)
     }
 
@@ -149,7 +157,7 @@ impl Serial {
     }
 
     fn trigger_interrupt(&mut self) -> result::Result<(), io::Error> {
-        self.interrupt.deliver()
+        self.interrupt.trigger(0)
     }
 
     fn iir_reset(&mut self) {
@@ -233,15 +241,23 @@ mod tests {
     use super::*;
     use std::io;
     use std::sync::{Arc, Mutex};
+    use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
 
     struct TestInterrupt {
         event_fd: EventFd,
     }
 
-    impl Interrupt for TestInterrupt {
-        fn deliver(&self) -> result::Result<(), std::io::Error> {
+    impl InterruptSourceGroup for TestInterrupt {
+        fn trigger(&self, _index: InterruptIndex) -> result::Result<(), std::io::Error> {
             self.event_fd.write(1)
+        }
+        fn update(
+            &self,
+            _index: InterruptIndex,
+            _config: InterruptSourceConfig,
+        ) -> result::Result<(), std::io::Error> {
+            Ok(())
         }
     }
 
@@ -278,7 +294,7 @@ mod tests {
         let intr_evt = EventFd::new(0).unwrap();
         let serial_out = SharedBuffer::new();
         let mut serial = Serial::new_out(
-            Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
+            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
             Box::new(serial_out.clone()),
         );
 
@@ -297,7 +313,7 @@ mod tests {
         let intr_evt = EventFd::new(0).unwrap();
         let serial_out = SharedBuffer::new();
         let mut serial = Serial::new_out(
-            Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap())),
+            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
             Box::new(serial_out.clone()),
         );
 
@@ -334,8 +350,9 @@ mod tests {
     #[test]
     fn serial_thr() {
         let intr_evt = EventFd::new(0).unwrap();
-        let mut serial =
-            Serial::new_sink(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap())));
+        let mut serial = Serial::new_sink(Arc::new(Box::new(TestInterrupt::new(
+            intr_evt.try_clone().unwrap(),
+        ))));
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
         // counter doesn't change (for 0 it blocks)
@@ -354,8 +371,9 @@ mod tests {
     #[test]
     fn serial_dlab() {
         let intr_evt = EventFd::new(0).unwrap();
-        let mut serial =
-            Serial::new_sink(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap())));
+        let mut serial = Serial::new_sink(Arc::new(Box::new(TestInterrupt::new(
+            intr_evt.try_clone().unwrap(),
+        ))));
 
         serial.write(0, LCR as u64, &[LCR_DLAB_BIT as u8]);
         serial.write(0, DLAB_LOW as u64, &[0x12 as u8]);
@@ -373,8 +391,9 @@ mod tests {
     #[test]
     fn serial_modem() {
         let intr_evt = EventFd::new(0).unwrap();
-        let mut serial =
-            Serial::new_sink(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap())));
+        let mut serial = Serial::new_sink(Arc::new(Box::new(TestInterrupt::new(
+            intr_evt.try_clone().unwrap(),
+        ))));
 
         serial.write(0, MCR as u64, &[MCR_LOOP_BIT as u8]);
         serial.write(0, DATA as u64, &['a' as u8]);
@@ -397,8 +416,9 @@ mod tests {
     #[test]
     fn serial_scratch() {
         let intr_evt = EventFd::new(0).unwrap();
-        let mut serial =
-            Serial::new_sink(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap())));
+        let mut serial = Serial::new_sink(Arc::new(Box::new(TestInterrupt::new(
+            intr_evt.try_clone().unwrap(),
+        ))));
 
         serial.write(0, SCR as u64, &[0x12 as u8]);
 

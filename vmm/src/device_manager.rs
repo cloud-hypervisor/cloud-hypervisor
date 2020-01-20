@@ -43,7 +43,6 @@ use std::sync::{Arc, Mutex};
 use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::InterruptManager;
-#[cfg(feature = "mmio_support")]
 use vm_device::interrupt::{InterruptIndex, PIN_IRQ};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::GuestAddress;
@@ -464,7 +463,7 @@ impl DeviceManager {
         let console = DeviceManager::add_console_device(
             vm_info,
             &address_manager,
-            &ioapic,
+            &interrupt_manager,
             &mut virtio_devices,
         )?;
 
@@ -791,7 +790,7 @@ impl DeviceManager {
     fn add_console_device(
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
-        ioapic: &Arc<Mutex<ioapic::Ioapic>>,
+        interrupt_manager: &Arc<dyn InterruptManager>,
         virtio_devices: &mut Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
     ) -> DeviceManagerResult<Arc<Console>> {
         let serial_config = vm_info.vm_cfg.lock().unwrap().serial.clone();
@@ -806,11 +805,13 @@ impl DeviceManager {
         let serial = if serial_config.mode != ConsoleOutputMode::Off {
             // Serial is tied to IRQ #4
             let serial_irq = 4;
-            let interrupt: Box<dyn devices::Interrupt> =
-                Box::new(UserIoapicIrq::new(ioapic.clone(), serial_irq));
+
+            let interrupt_group = interrupt_manager
+                .create_group(PIN_IRQ, serial_irq as InterruptIndex, 1 as InterruptIndex)
+                .map_err(DeviceManagerError::CreateInterruptGroup)?;
 
             let serial = Arc::new(Mutex::new(devices::legacy::Serial::new(
-                interrupt,
+                interrupt_group,
                 serial_writer,
             )));
 
