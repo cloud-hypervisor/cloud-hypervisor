@@ -191,32 +191,6 @@ pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 type VirtioDeviceArc = Arc<Mutex<dyn vm_virtio::VirtioDevice>>;
 
-struct UserIoapicIrq {
-    ioapic: Arc<Mutex<ioapic::Ioapic>>,
-    irq: usize,
-}
-
-impl UserIoapicIrq {
-    fn new(ioapic: Arc<Mutex<ioapic::Ioapic>>, irq: usize) -> Self {
-        UserIoapicIrq { ioapic, irq }
-    }
-}
-
-impl devices::Interrupt for UserIoapicIrq {
-    fn deliver(&self) -> result::Result<(), io::Error> {
-        self.ioapic
-            .lock()
-            .unwrap()
-            .service_irq(self.irq)
-            .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("failed to inject IRQ #{}: {:?}", self.irq, e),
-                )
-            })
-    }
-}
-
 pub fn get_win_size() -> (u16, u16) {
     #[repr(C)]
     struct WS {
@@ -486,9 +460,9 @@ impl DeviceManager {
         let ged_notification_device = DeviceManager::add_acpi_devices(
             vm_info,
             &address_manager,
+            &interrupt_manager,
             reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-            &ioapic,
         )?;
 
         if cfg!(feature = "pci_support") {
@@ -708,9 +682,9 @@ impl DeviceManager {
     fn add_acpi_devices(
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
+        interrupt_manager: &Arc<dyn InterruptManager>,
         reset_evt: EventFd,
         exit_evt: EventFd,
-        ioapic: &Arc<Mutex<ioapic::Ioapic>>,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGEDDevice>>>> {
         let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
             exit_evt, reset_evt,
@@ -734,10 +708,15 @@ impl DeviceManager {
             .unwrap()
             .allocate_irq()
             .unwrap();
-        let interrupt: Box<dyn devices::Interrupt> =
-            Box::new(UserIoapicIrq::new(ioapic.clone(), ged_irq as usize));
 
-        let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(interrupt, ged_irq)));
+        let interrupt_group = interrupt_manager
+            .create_group(PIN_IRQ, ged_irq as InterruptIndex, 1 as InterruptIndex)
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+
+        let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(
+            interrupt_group,
+            ged_irq,
+        )));
 
         address_manager
             .allocator
