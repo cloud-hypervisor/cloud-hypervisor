@@ -3,20 +3,12 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use crate::configuration::{self, PciBarRegionType};
-use crate::msix::MsixTableEntry;
 use devices::BusDevice;
 use std::any::Any;
 use std::fmt::{self, Display};
 use std::{self, io, result};
 use vm_allocator::SystemAllocator;
 use vm_memory::{GuestAddress, GuestUsize};
-
-pub struct InterruptParameters<'a> {
-    pub msix: Option<&'a MsixTableEntry>,
-}
-
-pub type InterruptDelivery =
-    Box<dyn Fn(InterruptParameters) -> result::Result<(), io::Error> + Send + Sync>;
 
 #[derive(Debug)]
 pub enum Error {
