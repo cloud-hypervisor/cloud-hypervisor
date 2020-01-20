@@ -284,10 +284,10 @@ fn main() {
         .author(crate_authors!())
         .about("Launch a vhost-user-blk backend.")
         .arg(
-            Arg::with_name("backend")
-                .long("backend")
+            Arg::with_name("block-backend")
+                .long("block-backend")
                 .help(
-                    "Backend parameters \"image=<image_path>,\
+                    "vhost-user-block backend parameters \"image=<image_path>,\
                      sock=<socket_path>,readonly=true|false,\
                      direct=true|false\"",
                 )
@@ -296,7 +296,7 @@ fn main() {
         )
         .get_matches();
 
-    let vhost_user_blk_backend = cmd_arguments.value_of("backend").unwrap();
+    let vhost_user_blk_backend = cmd_arguments.value_of("block-backend").unwrap();
 
     let backend_config = match VhostUserBlkBackendConfig::parse(vhost_user_blk_backend) {
         Ok(config) => config,
