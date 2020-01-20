@@ -447,6 +447,19 @@ impl DeviceManager {
         let ioapic = DeviceManager::add_ioapic(vm_info, &address_manager)?;
         let interrupt_info = InterruptInfo { _ioapic: &ioapic };
 
+        // Create a shared list of GSI that can be shared through all PCI
+        // devices. This way, we can maintain the full list of used GSI,
+        // preventing one device from overriding interrupts setting from
+        // another one.
+        let kvm_gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
+        let interrupt_manager: Arc<dyn InterruptManager> = Arc::new(KvmInterruptManager::new(
+            address_manager.allocator.clone(),
+            vm_info.vm_fd.clone(),
+            kvm_gsi_msi_routes,
+        ));
+
         let console = DeviceManager::add_console_device(
             vm_info,
             &address_manager,
@@ -485,7 +498,7 @@ impl DeviceManager {
                 &memory_manager,
                 &mut virt_iommu,
                 virtio_devices,
-                &interrupt_info,
+                interrupt_manager.clone(),
                 &mut migratable_devices,
             )?;
         } else if cfg!(feature = "mmio_support") {
@@ -535,7 +548,7 @@ impl DeviceManager {
         memory_manager: &Arc<Mutex<MemoryManager>>,
         virt_iommu: &mut Option<(u32, Vec<u32>)>,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
-        interrupt_info: &InterruptInfo,
+        interrupt_manager: Arc<dyn InterruptManager>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "pci_support")]
@@ -545,19 +558,6 @@ impl DeviceManager {
                 pci_root,
                 Arc::downgrade(&address_manager) as Weak<dyn DeviceRelocation>,
             );
-
-            // Create a shared list of GSI that can be shared through all PCI
-            // devices. This way, we can maintain the full list of used GSI,
-            // preventing one device from overriding interrupts setting from
-            // another one.
-            let kvm_gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>> =
-                Arc::new(Mutex::new(HashMap::new()));
-
-            let interrupt_manager: Arc<dyn InterruptManager> = Arc::new(KvmInterruptManager::new(
-                address_manager.allocator.clone(),
-                vm_info.vm_fd.clone(),
-                kvm_gsi_msi_routes,
-            ));
 
             let (mut iommu_device, iommu_mapping) = if vm_info.vm_cfg.lock().unwrap().iommu {
                 let (device, mapping) =
