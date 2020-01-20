@@ -185,6 +185,7 @@ dependencies = [
  "tempdir 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "vhost_rs 0.1.0",
  "vhost_user_backend 0.1.0",
+ "vhost_user_block 0.1.0",
  "vhost_user_fs 0.1.0",
  "vhost_user_net 0.1.0",
  "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1024,6 +1025,23 @@ dependencies = [
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
  "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "vhost_user_block"
+version = "0.1.0"
+dependencies = [
+ "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "qcow 0.1.0",
+ "vhost_rs 0.1.0",
+ "vhost_user_backend 0.1.0",
+ "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
+ "vm-virtio 0.1.0",
+ "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
