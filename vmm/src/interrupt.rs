@@ -268,20 +268,21 @@ impl InterruptManager for KvmInterruptManager {
         base: InterruptIndex,
         count: InterruptIndex,
     ) -> Result<Arc<Box<dyn InterruptSourceGroup>>> {
-        let mut allocator = self.allocator.lock().unwrap();
-
-        let mut irq_routes: HashMap<InterruptIndex, InterruptRoute> =
-            HashMap::with_capacity(count as usize);
-        for i in base..base + count {
-            irq_routes.insert(i, InterruptRoute::new(&mut allocator)?);
-        }
-
         let interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>> = match interrupt_type {
-            PCI_MSI_IRQ => Arc::new(Box::new(MsiInterruptGroup::new(
-                self.vm_fd.clone(),
-                self.gsi_msi_routes.clone(),
-                irq_routes,
-            ))),
+            PCI_MSI_IRQ => {
+                let mut allocator = self.allocator.lock().unwrap();
+                let mut irq_routes: HashMap<InterruptIndex, InterruptRoute> =
+                    HashMap::with_capacity(count as usize);
+                for i in base..base + count {
+                    irq_routes.insert(i, InterruptRoute::new(&mut allocator)?);
+                }
+
+                Arc::new(Box::new(MsiInterruptGroup::new(
+                    self.vm_fd.clone(),
+                    self.gsi_msi_routes.clone(),
+                    irq_routes,
+                )))
+            }
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
