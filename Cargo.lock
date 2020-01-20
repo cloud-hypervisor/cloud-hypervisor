@@ -179,8 +179,6 @@ dependencies = [
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
- "net_gen 0.1.0",
- "net_util 0.1.0",
  "qcow 0.1.0",
  "serde_json 1.0.45 (registry+https://github.com/rust-lang/crates.io-index)",
  "ssh2 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -188,6 +186,7 @@ dependencies = [
  "vhost_rs 0.1.0",
  "vhost_user_backend 0.1.0",
  "vhost_user_fs 0.1.0",
+ "vhost_user_net 0.1.0",
  "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-device 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
@@ -1036,6 +1035,24 @@ dependencies = [
  "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
+]
+
+[[package]]
+name = "vhost_user_net"
+version = "0.1.0"
+dependencies = [
+ "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "net_util 0.1.0",
+ "vhost_rs 0.1.0",
+ "vhost_user_backend 0.1.0",
+ "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
+ "vm-virtio 0.1.0",
+ "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
