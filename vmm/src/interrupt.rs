@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+use devices::ioapic;
 use kvm_bindings::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
 use kvm_ioctls::VmFd;
 use std::collections::HashMap;
@@ -263,6 +264,7 @@ pub struct KvmInterruptManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     vm_fd: Arc<VmFd>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
+    _ioapic: Arc<Mutex<ioapic::Ioapic>>,
 }
 
 impl KvmInterruptManager {
@@ -270,11 +272,13 @@ impl KvmInterruptManager {
         allocator: Arc<Mutex<SystemAllocator>>,
         vm_fd: Arc<VmFd>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
+        ioapic: Arc<Mutex<ioapic::Ioapic>>,
     ) -> Self {
         KvmInterruptManager {
             allocator,
             vm_fd,
             gsi_msi_routes,
+            _ioapic: ioapic,
         }
     }
 }
