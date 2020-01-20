@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::sync::Arc;
+use vm_device::interrupt::InterruptSourceGroup;
 use vmm_sys_util::eventfd::EventFd;
 use BusDevice;
 use HotPlugNotificationFlags;
-use Interrupt;
 
 /// A device for handling ACPI shutdown and reboot
 pub struct AcpiShutdownDevice {
@@ -56,13 +57,13 @@ impl BusDevice for AcpiShutdownDevice {
 
 /// A device for handling ACPI GED event generation
 pub struct AcpiGEDDevice {
-    interrupt: Box<dyn Interrupt>,
+    interrupt: Arc<Box<dyn InterruptSourceGroup>>,
     notification_type: HotPlugNotificationFlags,
     ged_irq: u32,
 }
 
 impl AcpiGEDDevice {
-    pub fn new(interrupt: Box<dyn Interrupt>, ged_irq: u32) -> AcpiGEDDevice {
+    pub fn new(interrupt: Arc<Box<dyn InterruptSourceGroup>>, ged_irq: u32) -> AcpiGEDDevice {
         AcpiGEDDevice {
             interrupt,
             notification_type: HotPlugNotificationFlags::NO_DEVICES_CHANGED,
@@ -75,7 +76,7 @@ impl AcpiGEDDevice {
         notification_type: HotPlugNotificationFlags,
     ) -> Result<(), std::io::Error> {
         self.notification_type |= notification_type;
-        self.interrupt.deliver()
+        self.interrupt.trigger(0)
     }
 
     pub fn irq(&self) -> u32 {

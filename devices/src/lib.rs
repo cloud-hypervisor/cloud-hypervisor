@@ -20,7 +20,7 @@ extern crate vm_memory;
 extern crate vmm_sys_util;
 
 use std::fs::File;
-use std::{io, result};
+use std::io;
 
 #[cfg(feature = "acpi")]
 mod acpi;
@@ -68,10 +68,6 @@ pub enum Error {
         event: DeviceEventT,
     },
     IoError(io::Error),
-}
-
-pub trait Interrupt: Send + Sync {
-    fn deliver(&self) -> result::Result<(), std::io::Error>;
 }
 
 bitflags! {
