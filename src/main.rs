@@ -1822,7 +1822,7 @@ mod tests {
         // Start the daemon
         let child = Command::new("target/release/vhost_user_blk")
             .args(&[
-                "--backend",
+                "--block-backend",
                 format!(
                     "image={},sock={},readonly={},direct={}",
                     blk_file_path, vubd_socket_path, rdonly, direct
