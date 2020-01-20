@@ -458,6 +458,7 @@ impl DeviceManager {
             address_manager.allocator.clone(),
             vm_info.vm_fd.clone(),
             kvm_gsi_msi_routes,
+            ioapic.clone(),
         ));
 
         let console = DeviceManager::add_console_device(
