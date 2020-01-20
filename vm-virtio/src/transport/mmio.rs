@@ -10,11 +10,12 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use byteorder::{ByteOrder, LittleEndian};
-use devices::{BusDevice, Interrupt};
+use devices::BusDevice;
 use libc::EFD_NONBLOCK;
 use std::result;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{GuestAddress, GuestMemoryMmap};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
@@ -26,11 +27,14 @@ const MMIO_VERSION: u32 = 2;
 
 pub struct VirtioInterruptIntx {
     interrupt_status: Arc<AtomicUsize>,
-    interrupt: Box<dyn Interrupt>,
+    interrupt: Arc<Box<dyn InterruptSourceGroup>>,
 }
 
 impl VirtioInterruptIntx {
-    pub fn new(interrupt_status: Arc<AtomicUsize>, interrupt: Box<dyn Interrupt>) -> Self {
+    pub fn new(
+        interrupt_status: Arc<AtomicUsize>,
+        interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+    ) -> Self {
         VirtioInterruptIntx {
             interrupt_status,
             interrupt,
@@ -51,7 +55,7 @@ impl VirtioInterrupt for VirtioInterruptIntx {
         self.interrupt_status
             .fetch_or(status as usize, Ordering::SeqCst);
 
-        self.interrupt.deliver()
+        self.interrupt.trigger(0)
     }
 }
 
@@ -157,7 +161,7 @@ impl MmioDevice {
         }
     }
 
-    pub fn assign_interrupt(&mut self, interrupt: Box<dyn Interrupt>) {
+    pub fn assign_interrupt(&mut self, interrupt: Arc<Box<dyn InterruptSourceGroup>>) {
         self.interrupt_cb = Some(Arc::new(VirtioInterruptIntx::new(
             self.interrupt_status.clone(),
             interrupt,
