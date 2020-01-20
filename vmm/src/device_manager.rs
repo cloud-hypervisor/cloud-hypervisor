@@ -472,7 +472,7 @@ impl DeviceManager {
                 &memory_manager,
                 &mut virt_iommu,
                 virtio_devices,
-                interrupt_manager.clone(),
+                &interrupt_manager,
                 &mut migratable_devices,
             )?;
         } else if cfg!(feature = "mmio_support") {
@@ -522,7 +522,7 @@ impl DeviceManager {
         memory_manager: &Arc<Mutex<MemoryManager>>,
         virt_iommu: &mut Option<(u32, Vec<u32>)>,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
-        interrupt_manager: Arc<dyn InterruptManager>,
+        interrupt_manager: &Arc<dyn InterruptManager>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "pci_support")]
@@ -558,7 +558,7 @@ impl DeviceManager {
                     &mut pci_bus,
                     mapping,
                     migratable_devices,
-                    &interrupt_manager,
+                    interrupt_manager,
                 )?;
 
                 if let Some(dev_id) = virtio_iommu_attach_dev {
@@ -572,7 +572,7 @@ impl DeviceManager {
                 &mut pci_bus,
                 memory_manager,
                 &mut iommu_device,
-                &interrupt_manager,
+                interrupt_manager,
             )?;
 
             iommu_attached_devices.append(&mut vfio_iommu_device_ids);
@@ -596,7 +596,7 @@ impl DeviceManager {
                     &mut pci_bus,
                     &None,
                     migratable_devices,
-                    &interrupt_manager,
+                    interrupt_manager,
                 )?;
 
                 *virt_iommu = Some((iommu_id, iommu_attached_devices));
@@ -1379,7 +1379,7 @@ impl DeviceManager {
                 }
 
                 let mut vfio_pci_device =
-                    VfioPciDevice::new(vm_info.vm_fd, vfio_device, &interrupt_manager)
+                    VfioPciDevice::new(vm_info.vm_fd, vfio_device, interrupt_manager)
                         .map_err(DeviceManagerError::VfioPciCreate)?;
 
                 let bars = vfio_pci_device
