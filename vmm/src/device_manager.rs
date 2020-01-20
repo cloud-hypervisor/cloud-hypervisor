@@ -1473,8 +1473,6 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
-        virtio_pci_device.assign_msix();
-
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
 
         pci.add_device(virtio_pci_device.clone())
