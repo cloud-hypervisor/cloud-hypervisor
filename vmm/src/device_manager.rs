@@ -938,7 +938,7 @@ impl DeviceManager {
                 // Open block device path
                 let image: File = OpenOptions::new()
                     .read(true)
-                    .write(true)
+                    .write(!disk_cfg.readonly)
                     .open(&disk_cfg.path)
                     .map_err(DeviceManagerError::Disk)?;
 
@@ -951,7 +951,7 @@ impl DeviceManager {
                         let dev = vm_virtio::Block::new(
                             raw_img,
                             disk_cfg.path.clone(),
-                            false,
+                            disk_cfg.readonly,
                             disk_cfg.iommu,
                         )
                         .map_err(DeviceManagerError::CreateVirtioBlock)?;
@@ -970,7 +970,7 @@ impl DeviceManager {
                         let dev = vm_virtio::Block::new(
                             qcow_img,
                             disk_cfg.path.clone(),
-                            false,
+                            disk_cfg.readonly,
                             disk_cfg.iommu,
                         )
                         .map_err(DeviceManagerError::CreateVirtioBlock)?;

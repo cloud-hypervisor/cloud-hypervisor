@@ -338,6 +338,8 @@ impl CmdlineConfig {
 pub struct DiskConfig {
     pub path: PathBuf,
     #[serde(default)]
+    pub readonly: bool,
+    #[serde(default)]
     pub iommu: bool,
 }
 
@@ -347,11 +349,14 @@ impl DiskConfig {
         let params_list: Vec<&str> = disk.split(',').collect();
 
         let mut path_str: &str = "";
+        let mut readonly_str: &str = "";
         let mut iommu_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("path=") {
                 path_str = &param[5..];
+            } else if param.starts_with("readonly=") {
+                readonly_str = &param[9..];
             } else if param.starts_with("iommu=") {
                 iommu_str = &param[6..];
             }
@@ -359,6 +364,7 @@ impl DiskConfig {
 
         Ok(DiskConfig {
             path: PathBuf::from(path_str),
+            readonly: parse_on_off(readonly_str)?,
             iommu: parse_on_off(iommu_str)?,
         })
     }
