@@ -340,6 +340,8 @@ pub struct DiskConfig {
     #[serde(default)]
     pub readonly: bool,
     #[serde(default)]
+    pub direct: bool,
+    #[serde(default)]
     pub iommu: bool,
 }
 
@@ -350,6 +352,7 @@ impl DiskConfig {
 
         let mut path_str: &str = "";
         let mut readonly_str: &str = "";
+        let mut direct_str: &str = "";
         let mut iommu_str: &str = "";
 
         for param in params_list.iter() {
@@ -357,6 +360,8 @@ impl DiskConfig {
                 path_str = &param[5..];
             } else if param.starts_with("readonly=") {
                 readonly_str = &param[9..];
+            } else if param.starts_with("direct=") {
+                direct_str = &param[7..];
             } else if param.starts_with("iommu=") {
                 iommu_str = &param[6..];
             }
@@ -365,6 +370,7 @@ impl DiskConfig {
         Ok(DiskConfig {
             path: PathBuf::from(path_str),
             readonly: parse_on_off(readonly_str)?,
+            direct: parse_on_off(direct_str)?,
             iommu: parse_on_off(iommu_str)?,
         })
     }
