@@ -11,13 +11,16 @@
 
 extern crate vm_device;
 
-use crate::config::{ConsoleOutputMode, VmConfig};
+use crate::config::ConsoleOutputMode;
+#[cfg(feature = "acpi")]
+use crate::config::VmConfig;
 use crate::interrupt::{KvmInterruptManager, KvmRoutingEntry};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::vm::VmInfo;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use arc_swap::ArcSwap;
+#[cfg(feature = "acpi")]
 use arch::layout;
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use devices::{ioapic, HotPlugNotificationFlags};
@@ -380,12 +383,14 @@ pub struct DeviceManager {
     ged_notification_device: Option<Arc<Mutex<devices::AcpiGEDDevice>>>,
 
     // VM configuration
+    #[cfg(feature = "acpi")]
     config: Arc<Mutex<VmConfig>>,
 
     // Migratable devices
     migratable_devices: Vec<Arc<Mutex<dyn Migratable>>>,
 
     // Memory Manager
+    #[cfg(feature = "acpi")]
     memory_manager: Arc<Mutex<MemoryManager>>,
 }
 
@@ -486,7 +491,10 @@ impl DeviceManager {
             )?;
         }
 
+        #[cfg(feature = "acpi")]
         let config = vm_info.vm_cfg.clone();
+        #[cfg(feature = "acpi")]
+        let memory_manager_clone = memory_manager.clone();
 
         address_manager
             .allocator
@@ -497,7 +505,7 @@ impl DeviceManager {
 
         address_manager
             .io_bus
-            .insert(memory_manager.clone(), 0xa00, 0x18)
+            .insert(memory_manager, 0xa00, 0x18)
             .map_err(DeviceManagerError::BusError)?;
 
         Ok(DeviceManager {
@@ -509,9 +517,11 @@ impl DeviceManager {
             virt_iommu,
             #[cfg(feature = "acpi")]
             ged_notification_device,
+            #[cfg(feature = "acpi")]
             config,
             migratable_devices,
-            memory_manager,
+            #[cfg(feature = "acpi")]
+            memory_manager: memory_manager_clone,
         })
     }
 

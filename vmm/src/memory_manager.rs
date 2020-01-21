@@ -462,6 +462,7 @@ impl MemoryManager {
     }
 }
 
+#[cfg(feature = "acpi")]
 struct MemoryNotify {
     slot_id: usize,
 }
@@ -478,6 +479,7 @@ impl Aml for MemoryNotify {
     }
 }
 
+#[cfg(feature = "acpi")]
 struct MemorySlot {
     slot_id: usize,
 }
@@ -534,6 +536,7 @@ impl Aml for MemorySlot {
     }
 }
 
+#[cfg(feature = "acpi")]
 struct MemorySlots {
     slots: usize,
 }
@@ -551,6 +554,7 @@ impl Aml for MemorySlots {
     }
 }
 
+#[cfg(feature = "acpi")]
 struct MemoryMethods {
     slots: usize,
 }
