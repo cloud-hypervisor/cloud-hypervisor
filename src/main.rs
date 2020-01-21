@@ -262,57 +262,7 @@ fn create_app<'a, 'b>(
         )
 }
 
-fn main() {
-    let pid = unsafe { libc::getpid() };
-    let uid = unsafe { libc::getuid() };
-
-    let mut api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", uid, pid};
-    if uid == 0 {
-        // If we're running as root, we try to get the real user ID if we've been sudo'ed
-        // or else create our socket directly under /run.
-        let key = "SUDO_UID";
-        match env::var(key) {
-            Ok(sudo_uid) => {
-                api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", sudo_uid, pid}
-            }
-            Err(_) => api_server_path = format! {"/run/cloud-hypervisor.{}", pid},
-        }
-    }
-
-    let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-
-    let cmd_arguments = create_app(
-        &default_vcpus,
-        &default_memory,
-        &default_rng,
-        &api_server_path,
-    )
-    .get_matches();
-
-    let log_level = match cmd_arguments.occurrences_of("v") {
-        0 => LevelFilter::Error,
-        1 => LevelFilter::Warn,
-        2 => LevelFilter::Info,
-        3 => LevelFilter::Debug,
-        _ => LevelFilter::Trace,
-    };
-
-    let log_file: Box<dyn std::io::Write + Send> =
-        if let Some(file) = cmd_arguments.value_of("log-file") {
-            Box::new(
-                std::fs::File::create(std::path::Path::new(file)).expect("Error creating log file"),
-            )
-        } else {
-            Box::new(std::io::stderr())
-        };
-
-    log::set_boxed_logger(Box::new(Logger {
-        output: Mutex::new(log_file),
-        start: std::time::Instant::now(),
-    }))
-    .map(|()| log::set_max_level(log_level))
-    .expect("Expected to be able to setup logger");
-
+fn start_vmm(cmd_arguments: clap::ArgMatches) {
     let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
     let vm_config = match config::VmConfig::parse(vm_params) {
         Ok(config) => config,
@@ -380,6 +330,60 @@ fn main() {
             process::exit(1);
         }
     }
+}
+
+fn main() {
+    let pid = unsafe { libc::getpid() };
+    let uid = unsafe { libc::getuid() };
+
+    let mut api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", uid, pid};
+    if uid == 0 {
+        // If we're running as root, we try to get the real user ID if we've been sudo'ed
+        // or else create our socket directly under /run.
+        let key = "SUDO_UID";
+        match env::var(key) {
+            Ok(sudo_uid) => {
+                api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", sudo_uid, pid}
+            }
+            Err(_) => api_server_path = format! {"/run/cloud-hypervisor.{}", pid},
+        }
+    }
+
+    let (default_vcpus, default_memory, default_rng) = prepare_default_values();
+
+    let cmd_arguments = create_app(
+        &default_vcpus,
+        &default_memory,
+        &default_rng,
+        &api_server_path,
+    )
+    .get_matches();
+
+    let log_level = match cmd_arguments.occurrences_of("v") {
+        0 => LevelFilter::Error,
+        1 => LevelFilter::Warn,
+        2 => LevelFilter::Info,
+        3 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    };
+
+    let log_file: Box<dyn std::io::Write + Send> =
+        if let Some(file) = cmd_arguments.value_of("log-file") {
+            Box::new(
+                std::fs::File::create(std::path::Path::new(file)).expect("Error creating log file"),
+            )
+        } else {
+            Box::new(std::io::stderr())
+        };
+
+    log::set_boxed_logger(Box::new(Logger {
+        output: Mutex::new(log_file),
+        start: std::time::Instant::now(),
+    }))
+    .map(|()| log::set_max_level(log_level))
+    .expect("Expected to be able to setup logger");
+
+    start_vmm(cmd_arguments);
 }
 
 #[cfg(test)]
