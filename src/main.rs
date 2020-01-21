@@ -9,12 +9,13 @@ extern crate vmm_sys_util;
 #[macro_use(crate_version, crate_authors)]
 extern crate clap;
 
-use clap::{App, Arg, ArgGroup};
+use clap::{App, Arg, ArgGroup, ArgMatches};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::{env, process};
+use vhost_user_net::start_net_backend;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -260,9 +261,32 @@ fn create_app<'a, 'b>(
                 .default_value(&api_server_path)
                 .group("vmm-config"),
         )
+        .arg(
+            Arg::with_name("net-backend")
+                .long("net-backend")
+                .help(
+                    "vhost-user-net backend parameters \"ip=<ip_addr>,\
+                     mask=<net_mask>,sock=<socket_path>,\
+                     num_queues=<number_of_queues>,\
+                     queue_size=<size_of_each_queue>\"",
+                )
+                .takes_value(true)
+                .min_values(1),
+        )
+        .arg(
+            Arg::with_name("block-backend")
+                .long("block-backend")
+                .help(
+                    "vhost-user-block backend parameters \"image=<image_path>,\
+                     sock=<socket_path>,readonly=true|false,\
+                     direct=true|false\"",
+                )
+                .takes_value(true)
+                .min_values(1),
+        )
 }
 
-fn start_vmm(cmd_arguments: clap::ArgMatches) {
+fn start_vmm(cmd_arguments: ArgMatches) {
     let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
     let vm_config = match config::VmConfig::parse(vm_params) {
         Ok(config) => config,
@@ -383,7 +407,13 @@ fn main() {
     .map(|()| log::set_max_level(log_level))
     .expect("Expected to be able to setup logger");
 
-    start_vmm(cmd_arguments);
+    if let Some(backend_command) = cmd_arguments.value_of("net-backend") {
+        start_net_backend(backend_command);
+    } else if let Some(backend_command) = cmd_arguments.value_of("block-backend") {
+        start_net_backend(backend_command);
+    } else {
+        start_vmm(cmd_arguments);
+    }
 }
 
 #[cfg(test)]
