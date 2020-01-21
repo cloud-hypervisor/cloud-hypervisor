@@ -23,11 +23,12 @@ use std::io::{Seek, SeekFrom, Write};
 use std::mem;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
+use std::process;
 use std::slice;
 use std::sync::{Arc, RwLock};
 use std::vec::Vec;
 use vhost_rs::vhost_user::message::*;
-use vhost_user_backend::{VhostUserBackend, Vring, VringWorker};
+use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{Bytes, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::block::{build_disk_image_id, Request};
@@ -273,4 +274,51 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
             direct,
         })
     }
+}
+
+pub fn start_block_backend(backend_command: &str) {
+    let backend_config = match VhostUserBlkBackendConfig::parse(backend_command) {
+        Ok(config) => config,
+        Err(e) => {
+            println!("Failed parsing parameters {:?}", e);
+            process::exit(1);
+        }
+    };
+
+    let blk_backend = Arc::new(RwLock::new(
+        VhostUserBlkBackend::new(
+            backend_config.image.to_string(),
+            backend_config.readonly,
+            backend_config.direct,
+        )
+        .unwrap(),
+    ));
+
+    debug!("blk_backend is created!\n");
+
+    let name = "vhost-user-blk-backend";
+    let mut blk_daemon = VhostUserDaemon::new(
+        name.to_string(),
+        backend_config.sock.to_string(),
+        blk_backend.clone(),
+    )
+    .unwrap();
+    debug!("blk_daemon is created!\n");
+
+    let vring_worker = blk_daemon.get_vring_worker();
+
+    blk_backend
+        .write()
+        .unwrap()
+        .set_vring_worker(Some(vring_worker));
+
+    if let Err(e) = blk_daemon.start() {
+        println!(
+            "failed to start daemon for vhost-user-blk with error: {:?}\n",
+            e
+        );
+        process::exit(1);
+    }
+
+    blk_daemon.wait().unwrap();
 }

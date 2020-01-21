@@ -10,16 +10,10 @@
 
 #[macro_use(crate_version, crate_authors)]
 extern crate clap;
-extern crate log;
-extern crate vhost_user_backend;
 extern crate vhost_user_block;
 
 use clap::{App, Arg};
-use log::*;
-use std::process;
-use std::sync::{Arc, RwLock};
-use vhost_user_backend::VhostUserDaemon;
-use vhost_user_block::{VhostUserBlkBackend, VhostUserBlkBackendConfig};
+use vhost_user_block::start_block_backend;
 
 fn main() {
     let cmd_arguments = App::new("vhost-user-blk backend")
@@ -39,50 +33,6 @@ fn main() {
         )
         .get_matches();
 
-    let vhost_user_blk_backend = cmd_arguments.value_of("block-backend").unwrap();
-
-    let backend_config = match VhostUserBlkBackendConfig::parse(vhost_user_blk_backend) {
-        Ok(config) => config,
-        Err(e) => {
-            println!("Failed parsing parameters {:?}", e);
-            process::exit(1);
-        }
-    };
-
-    let blk_backend = Arc::new(RwLock::new(
-        VhostUserBlkBackend::new(
-            backend_config.image.to_string(),
-            backend_config.readonly,
-            backend_config.direct,
-        )
-        .unwrap(),
-    ));
-
-    debug!("blk_backend is created!\n");
-
-    let name = "vhost-user-blk-backend";
-    let mut blk_daemon = VhostUserDaemon::new(
-        name.to_string(),
-        backend_config.sock.to_string(),
-        blk_backend.clone(),
-    )
-    .unwrap();
-    debug!("blk_daemon is created!\n");
-
-    let vring_worker = blk_daemon.get_vring_worker();
-
-    blk_backend
-        .write()
-        .unwrap()
-        .set_vring_worker(Some(vring_worker));
-
-    if let Err(e) = blk_daemon.start() {
-        println!(
-            "failed to start daemon for vhost-user-blk with error: {:?}\n",
-            e
-        );
-        process::exit(1);
-    }
-
-    blk_daemon.wait().unwrap();
+    let backend_command = cmd_arguments.value_of("block-backend").unwrap();
+    start_block_backend(backend_command);
 }
