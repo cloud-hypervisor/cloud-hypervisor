@@ -23,11 +23,12 @@ use std::io::{self};
 use std::net::Ipv4Addr;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::io::RawFd;
+use std::process;
 use std::sync::{Arc, RwLock};
 use std::vec::Vec;
 use vhost_rs::vhost_user::message::*;
 use vhost_rs::vhost_user::Error as VhostUserError;
-use vhost_user_backend::{VhostUserBackend, Vring, VringWorker};
+use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::GuestMemoryMmap;
 use vm_virtio::net_util::{open_tap, RxVirtio, TxVirtio};
@@ -431,4 +432,56 @@ impl<'a> VhostUserNetBackendConfig<'a> {
             queue_size,
         })
     }
+}
+
+pub fn start_net_backend(backend_command: &str) {
+    let backend_config = match VhostUserNetBackendConfig::parse(backend_command) {
+        Ok(config) => config,
+        Err(e) => {
+            println!("Failed parsing parameters {:?}", e);
+            process::exit(1);
+        }
+    };
+
+    let net_backend = Arc::new(RwLock::new(
+        VhostUserNetBackend::new(
+            backend_config.ip,
+            backend_config.mask,
+            backend_config.num_queues,
+            backend_config.queue_size,
+        )
+        .unwrap(),
+    ));
+
+    let mut net_daemon = VhostUserDaemon::new(
+        "vhost-user-net-backend".to_string(),
+        backend_config.sock.to_string(),
+        net_backend.clone(),
+    )
+    .unwrap();
+
+    let (kill_index, kill_evt_fd) = net_backend.read().unwrap().get_kill_event();
+    let vring_worker = net_daemon.get_vring_worker();
+
+    if let Err(e) =
+        vring_worker.register_listener(kill_evt_fd, epoll::Events::EPOLLIN, u64::from(kill_index))
+    {
+        println!("failed to register listener for kill event: {:?}", e);
+        process::exit(1);
+    }
+
+    net_backend
+        .write()
+        .unwrap()
+        .set_vring_worker(Some(vring_worker));
+
+    if let Err(e) = net_daemon.start() {
+        println!(
+            "failed to start daemon for vhost-user-net with error: {:?}",
+            e
+        );
+        process::exit(1);
+    }
+
+    net_daemon.wait().unwrap();
 }
