@@ -116,7 +116,7 @@ const EJECT_FLAG: usize = 3;
 const BASE_OFFSET_LOW: u64 = 0;
 const BASE_OFFSET_HIGH: u64 = 0x4;
 const LENGTH_OFFSET_LOW: u64 = 0x8;
-const LENGTH_OFFSET_HIGH: u64 = 0xA;
+const LENGTH_OFFSET_HIGH: u64 = 0xC;
 const STATUS_OFFSET: u64 = 0x14;
 const SELECTION_OFFSET: u64 = 0;
 
