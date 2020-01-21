@@ -12,6 +12,7 @@ use crate::device_manager::DeviceManager;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
 use arc_swap::ArcSwap;
+#[cfg(feature = "acpi")]
 use arch::layout;
 use devices::{ioapic, BusDevice};
 use kvm_bindings::CpuId;
@@ -197,6 +198,7 @@ impl CpuidPatch {
     }
 }
 
+#[cfg(feature = "acpi")]
 #[repr(packed)]
 struct LocalAPIC {
     pub r#type: u8,
@@ -747,10 +749,12 @@ impl CpuManager {
     }
 }
 
+#[cfg(feature = "acpi")]
 struct CPU {
     cpu_id: u8,
 }
 
+#[cfg(feature = "acpi")]
 const MADT_CPU_ENABLE_FLAG: usize = 0;
 
 #[cfg(feature = "acpi")]
@@ -813,6 +817,7 @@ impl Aml for CPU {
     }
 }
 
+#[cfg(feature = "acpi")]
 struct CPUNotify {
     cpu_id: u8,
 }
@@ -829,6 +834,7 @@ impl Aml for CPUNotify {
     }
 }
 
+#[cfg(feature = "acpi")]
 struct CPUMethods {
     max_vcpus: u8,
 }

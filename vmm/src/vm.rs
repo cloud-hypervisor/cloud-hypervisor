@@ -695,7 +695,6 @@ mod tests {
                 assert!(state.valid_transition(VmState::Shutdown).is_ok());
                 assert!(state.valid_transition(VmState::Paused).is_err());
             }
-            _ => {}
         }
     }
 
