@@ -15,6 +15,7 @@ use log::LevelFilter;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::{env, process};
+use vhost_user_block::start_block_backend;
 use vhost_user_net::start_net_backend;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
@@ -410,7 +411,7 @@ fn main() {
     if let Some(backend_command) = cmd_arguments.value_of("net-backend") {
         start_net_backend(backend_command);
     } else if let Some(backend_command) = cmd_arguments.value_of("block-backend") {
-        start_net_backend(backend_command);
+        start_block_backend(backend_command);
     } else {
         start_vmm(cmd_arguments);
     }
@@ -1853,7 +1854,7 @@ mod tests {
         let vubd_socket_path = String::from(tmp_dir.path().join("vub.sock").to_str().unwrap());
 
         // Start the daemon
-        let child = Command::new("target/release/vhost_user_blk")
+        let child = Command::new("target/release/cloud-hypervisor")
             .args(&[
                 "--block-backend",
                 format!(
@@ -2669,7 +2670,7 @@ mod tests {
             let guest = Guest::new(&mut clear);
 
             // Start the daemon
-            let mut daemon_child = Command::new("target/release/vhost_user_net")
+            let mut daemon_child = Command::new("target/release/cloud-hypervisor")
                 .args(&[
                     "--net-backend",
                     format!(
