@@ -11,18 +11,17 @@
 
 use crate::BusDevice;
 use byteorder::{ByteOrder, LittleEndian};
-use kvm_bindings::kvm_msi;
-use kvm_ioctls::VmFd;
 use std::io;
 use std::result;
 use std::sync::Arc;
-use vm_device::interrupt::{InterruptIndex, InterruptManager, InterruptSourceGroup, PCI_MSI_IRQ};
+use vm_device::interrupt::{
+    InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
+    MsiIrqSourceConfig, PCI_MSI_IRQ,
+};
 use vm_memory::GuestAddress;
 
 #[derive(Debug)]
 pub enum Error {
-    /// Failed to send an interrupt.
-    InterruptFailed(kvm_ioctls::Error),
     /// Invalid destination mode.
     InvalidDestinationMode,
     /// Invalid trigger mode.
@@ -31,6 +30,16 @@ pub enum Error {
     InvalidDeliveryMode,
     /// Failed creating the interrupt source group.
     CreateInterruptSourceGroup(io::Error),
+    /// Failed triggering the interrupt.
+    TriggerInterrupt(io::Error),
+    /// Failed masking the interrupt.
+    MaskInterrupt(io::Error),
+    /// Failed unmasking the interrupt.
+    UnmaskInterrupt(io::Error),
+    /// Failed updating the interrupt.
+    UpdateInterrupt(io::Error),
+    /// Failed enabling the interrupt.
+    EnableInterrupt(io::Error),
 }
 
 type Result<T> = result::Result<T, Error>;
@@ -160,9 +169,8 @@ pub struct Ioapic {
     id: u32,
     reg_sel: u32,
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
-    vm_fd: Arc<VmFd>,
     apic_address: GuestAddress,
-    _interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
 }
 
 impl BusDevice for Ioapic {
@@ -202,7 +210,6 @@ impl BusDevice for Ioapic {
 
 impl Ioapic {
     pub fn new(
-        vm_fd: Arc<VmFd>,
         apic_address: GuestAddress,
         interrupt_manager: Arc<dyn InterruptManager>,
     ) -> Result<Ioapic> {
@@ -214,13 +221,16 @@ impl Ioapic {
             )
             .map_err(Error::CreateInterruptSourceGroup)?;
 
+        interrupt_source_group
+            .enable()
+            .map_err(Error::EnableInterrupt)?;
+
         Ok(Ioapic {
             id: 0,
             reg_sel: 0,
             reg_entries: [0; NUM_IOAPIC_PINS],
-            vm_fd,
             apic_address,
-            _interrupt_source_group: interrupt_source_group,
+            interrupt_source_group,
         })
     }
 
@@ -241,16 +251,30 @@ impl Ioapic {
     pub fn service_irq(&mut self, irq: usize) -> Result<()> {
         let entry = &mut self.reg_entries[irq];
 
-        // Don't inject the interrupt if the IRQ is masked
-        if interrupt_mask(*entry) == 1 {
-            return Ok(());
+        self.interrupt_source_group
+            .trigger(irq as InterruptIndex)
+            .map_err(Error::TriggerInterrupt)?;
+        debug!("Interrupt successfully delivered");
+
+        // If trigger mode is level sensitive, set the Remote IRR bit.
+        // It will be cleared when the EOI is received.
+        if trigger_mode(*entry) == 1 {
+            set_remote_irr(entry, 1);
         }
+        // Clear the Delivery Status bit
+        set_delivery_status(entry, 0);
+
+        Ok(())
+    }
+
+    fn update_entry(&self, irq: usize) -> Result<()> {
+        let entry = self.reg_entries[irq];
 
         // Validate Destination Mode value, and retrieve Destination ID
-        let destination_mode = destination_mode(*entry);
+        let destination_mode = destination_mode(entry);
         let destination_id: u8 = match destination_mode {
-            x if x == DestinationMode::Physical as u8 => destination_field_physical(*entry),
-            x if x == DestinationMode::Logical as u8 => destination_field_logical(*entry),
+            x if x == DestinationMode::Physical as u8 => destination_field_physical(entry),
+            x if x == DestinationMode::Logical as u8 => destination_field_logical(entry),
             _ => return Err(Error::InvalidDestinationMode),
         };
 
@@ -260,20 +284,20 @@ impl Ioapic {
         let redirection_hint: u8 = 1;
 
         // Generate MSI message address
-        let address_lo: u32 = self.apic_address.0 as u32
+        let low_addr: u32 = self.apic_address.0 as u32
             | u32::from(destination_id) << 12
             | u32::from(redirection_hint) << 3
             | u32::from(destination_mode) << 2;
 
         // Validate Trigger Mode value
-        let trigger_mode = trigger_mode(*entry);
+        let trigger_mode = trigger_mode(entry);
         match trigger_mode {
             x if (x == TriggerMode::Edge as u8) || (x == TriggerMode::Level as u8) => {}
             _ => return Err(Error::InvalidTriggerMode),
         }
 
         // Validate Delivery Mode value
-        let delivery_mode = delivery_mode(*entry);
+        let delivery_mode = delivery_mode(entry);
         match delivery_mode {
             x if (x == DeliveryMode::Fixed as u8)
                 || (x == DeliveryMode::Lowest as u8)
@@ -288,37 +312,31 @@ impl Ioapic {
 
         // Generate MSI message data
         let data: u32 = u32::from(trigger_mode) << 15
-            | u32::from(remote_irr(*entry)) << 14
+            | u32::from(remote_irr(entry)) << 14
             | u32::from(delivery_mode) << 8
-            | u32::from(vector(*entry));
+            | u32::from(vector(entry));
 
-        let msi = kvm_msi {
-            address_lo,
-            address_hi: 0x0,
+        let config = MsiIrqSourceConfig {
+            high_addr: 0x0,
+            low_addr,
             data,
-            flags: 0u32,
-            devid: 0u32,
-            pad: [0u8; 12],
         };
 
-        match self.vm_fd.signal_msi(msi) {
-            Ok(ret) => {
-                if ret > 0 {
-                    debug!("MSI message successfully delivered");
-                    // If trigger mode is level sensitive, set the Remote IRR bit.
-                    // It will be cleared when the EOI is received.
-                    if trigger_mode == 1 {
-                        set_remote_irr(entry, 1);
-                    }
-                    // Clear the Delivery Status bit
-                    set_delivery_status(entry, 0);
-                } else {
-                    warn!("failed to deliver MSI message, blocked by guest");
-                }
-                Ok(())
-            }
-            Err(e) => Err(Error::InterruptFailed(e)),
+        self.interrupt_source_group
+            .update(irq as InterruptIndex, InterruptSourceConfig::MsiIrq(config))
+            .map_err(Error::UpdateInterrupt)?;
+
+        if interrupt_mask(entry) == 1 {
+            self.interrupt_source_group
+                .mask(irq as InterruptIndex)
+                .map_err(Error::MaskInterrupt)?;
+        } else {
+            self.interrupt_source_group
+                .unmask(irq as InterruptIndex)
+                .map_err(Error::UnmaskInterrupt)?;
         }
+
+        Ok(())
     }
 
     fn ioapic_write(&mut self, val: u32) {
@@ -337,6 +355,11 @@ impl Ioapic {
                     // - Remote IRR (bit 14)
                     self.reg_entries[index] &= 0xffff_ffff_0000_5000;
                     self.reg_entries[index] |= u64::from(val) & 0xffff_afff;
+                }
+                // The entry must be updated through the interrupt source
+                // group.
+                if let Err(e) = self.update_entry(index) {
+                    error!("Failed updating IOAPIC entry: {:?}", e);
                 }
             }
             _ => error!("IOAPIC: invalid write to register offset"),
