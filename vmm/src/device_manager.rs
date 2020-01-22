@@ -423,8 +423,6 @@ impl DeviceManager {
             vm_fd: vm_info.vm_fd.clone(),
         });
 
-        let ioapic = DeviceManager::add_ioapic(vm_info, &address_manager)?;
-
         // Create a shared list of GSI that can be shared through all PCI
         // devices. This way, we can maintain the full list of used GSI,
         // preventing one device from overriding interrupts setting from
@@ -432,11 +430,38 @@ impl DeviceManager {
         let kvm_gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
+        // Here we create a first interrupt manager that will be directly
+        // passed down to the Ioapic. The reason we need this extra interrupt
+        // manager is because the more global one will need a handler onto the
+        // Ioapic itself. We didn't want to solve this problem by adding some
+        // setter to the KvmInterruptManager as this would have required the
+        // interrupt manager to be mutable.
+        //
+        // One thing to note, it is safe to create two interrupt managers
+        // without risking some concurrency between the two since the list
+        // of GSI routes is shared and protected by a Mutex.
+        let ioapic_interrupt_manager: Arc<dyn InterruptManager> =
+            Arc::new(KvmInterruptManager::new(
+                Arc::clone(&address_manager.allocator),
+                Arc::clone(&vm_info.vm_fd),
+                Arc::clone(&kvm_gsi_msi_routes),
+                None,
+            ));
+
+        let ioapic =
+            DeviceManager::add_ioapic(vm_info, &address_manager, ioapic_interrupt_manager)?;
+
+        // Creation of the global interrupt manager, which can take a hold onto
+        // the brand new Ioapic.
+        //
+        // Note the list of GSI routes is Arc cloned, the same way it was Arc
+        // cloned for the interrupt manager dedicated to the Ioapic. That's how
+        // both interrupt managers are going to share the list correctly.
         let interrupt_manager: Arc<dyn InterruptManager> = Arc::new(KvmInterruptManager::new(
-            address_manager.allocator.clone(),
-            vm_info.vm_fd.clone(),
-            kvm_gsi_msi_routes,
-            ioapic.clone(),
+            Arc::clone(&address_manager.allocator),
+            Arc::clone(&vm_info.vm_fd),
+            Arc::clone(&kvm_gsi_msi_routes),
+            Some(ioapic.clone()),
         ));
 
         let console = DeviceManager::add_console_device(
@@ -672,6 +697,7 @@ impl DeviceManager {
     fn add_ioapic(
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
+        _ioapic_interrupt_manager: Arc<dyn InterruptManager>,
     ) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
         // Create IOAPIC
         let ioapic = Arc::new(Mutex::new(ioapic::Ioapic::new(
