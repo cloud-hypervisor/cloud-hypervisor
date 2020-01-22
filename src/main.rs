@@ -84,6 +84,7 @@ fn create_app<'a, 'b>(
         .about("Launch a cloud-hypervisor VMM.")
         .group(ArgGroup::with_name("vm-config").multiple(true))
         .group(ArgGroup::with_name("vmm-config").multiple(true))
+        .group(ArgGroup::with_name("logging").multiple(true))
         .arg(
             Arg::with_name("cpus")
                 .long("cpus")
@@ -244,7 +245,7 @@ fn create_app<'a, 'b>(
                 .short("v")
                 .multiple(true)
                 .help("Sets the level of debugging output")
-                .group("vmm-config"),
+                .group("logging"),
         )
         .arg(
             Arg::with_name("log-file")
@@ -252,7 +253,7 @@ fn create_app<'a, 'b>(
                 .help("Log file. Standard error is used if not specified")
                 .takes_value(true)
                 .min_values(1)
-                .group("vmm-config"),
+                .group("logging"),
         )
         .arg(
             Arg::with_name("api-socket")
