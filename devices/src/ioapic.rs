@@ -13,8 +13,10 @@ use crate::BusDevice;
 use byteorder::{ByteOrder, LittleEndian};
 use kvm_bindings::kvm_msi;
 use kvm_ioctls::VmFd;
+use std::io;
 use std::result;
 use std::sync::Arc;
+use vm_device::interrupt::{InterruptIndex, InterruptManager, InterruptSourceGroup, PCI_MSI_IRQ};
 use vm_memory::GuestAddress;
 
 #[derive(Debug)]
@@ -27,6 +29,8 @@ pub enum Error {
     InvalidTriggerMode,
     /// Invalid delivery mode.
     InvalidDeliveryMode,
+    /// Failed creating the interrupt source group.
+    CreateInterruptSourceGroup(io::Error),
 }
 
 type Result<T> = result::Result<T, Error>;
@@ -158,6 +162,7 @@ pub struct Ioapic {
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
     vm_fd: Arc<VmFd>,
     apic_address: GuestAddress,
+    _interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
 }
 
 impl BusDevice for Ioapic {
@@ -196,14 +201,27 @@ impl BusDevice for Ioapic {
 }
 
 impl Ioapic {
-    pub fn new(vm_fd: Arc<VmFd>, apic_address: GuestAddress) -> Ioapic {
-        Ioapic {
+    pub fn new(
+        vm_fd: Arc<VmFd>,
+        apic_address: GuestAddress,
+        interrupt_manager: Arc<dyn InterruptManager>,
+    ) -> Result<Ioapic> {
+        let interrupt_source_group = interrupt_manager
+            .create_group(
+                PCI_MSI_IRQ,
+                0 as InterruptIndex,
+                NUM_IOAPIC_PINS as InterruptIndex,
+            )
+            .map_err(Error::CreateInterruptSourceGroup)?;
+
+        Ok(Ioapic {
             id: 0,
             reg_sel: 0,
             reg_entries: [0; NUM_IOAPIC_PINS],
             vm_fd,
             apic_address,
-        }
+            _interrupt_source_group: interrupt_source_group,
+        })
     }
 
     // The ioapic must be informed about EOIs in order to deassert interrupts

@@ -189,6 +189,9 @@ pub enum DeviceManagerError {
 
     /// Failed to update interrupt source group.
     UpdateInterruptGroup(io::Error),
+
+    /// Failed creating IOAPIC.
+    CreateIoapic(ioapic::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -697,13 +700,13 @@ impl DeviceManager {
     fn add_ioapic(
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
-        _ioapic_interrupt_manager: Arc<dyn InterruptManager>,
+        interrupt_manager: Arc<dyn InterruptManager>,
     ) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
         // Create IOAPIC
-        let ioapic = Arc::new(Mutex::new(ioapic::Ioapic::new(
-            vm_info.vm_fd.clone(),
-            APIC_START,
-        )));
+        let ioapic = Arc::new(Mutex::new(
+            ioapic::Ioapic::new(vm_info.vm_fd.clone(), APIC_START, interrupt_manager)
+                .map_err(DeviceManagerError::CreateIoapic)?,
+        ));
 
         address_manager
             .mmio_bus
