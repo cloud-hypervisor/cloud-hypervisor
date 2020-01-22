@@ -274,6 +274,7 @@ fn create_app<'a, 'b>(
                      queue_size=<size_of_each_queue>\"",
                 )
                 .takes_value(true)
+                .conflicts_with_all(&["block-backend", "kernel"])
                 .min_values(1),
         )
         .arg(
@@ -285,6 +286,7 @@ fn create_app<'a, 'b>(
                      direct=true|false\"",
                 )
                 .takes_value(true)
+                .conflicts_with_all(&["net-backend", "kernel"])
                 .min_values(1),
         )
 }
