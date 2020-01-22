@@ -11,7 +11,7 @@
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, VirtioInterruptType,
+    VirtioDeviceType, VirtioInterruptType, VIRTIO_DEFAULT_QUEUE_SIZE,
 };
 use crate::VirtioInterrupt;
 use arc_swap::ArcSwap;
@@ -38,7 +38,7 @@ use vmm_sys_util::{eventfd::EventFd, seek_hole::SeekHole, write_zeroes::PunchHol
 const CONFIG_SPACE_SIZE: usize = 8;
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = (0x01 as u64) << SECTOR_SHIFT;
-const QUEUE_SIZE: u16 = 256;
+const QUEUE_SIZE: u16 = VIRTIO_DEFAULT_QUEUE_SIZE;
 const NUM_QUEUES: usize = 1;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
 

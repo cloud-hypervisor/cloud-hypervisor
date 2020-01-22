@@ -12,14 +12,15 @@ use std::net::AddrParseError;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::result;
+use vm_virtio::VIRTIO_DEFAULT_QUEUE_SIZE;
 
 pub const DEFAULT_VCPUS: u8 = 1;
 pub const DEFAULT_MEMORY_MB: u64 = 512;
 pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
 pub const DEFAULT_NUM_QUEUES_VUNET: usize = 2;
-pub const DEFAULT_QUEUE_SIZE_VUNET: u16 = 256;
+pub const DEFAULT_QUEUE_SIZE_VUNET: u16 = VIRTIO_DEFAULT_QUEUE_SIZE;
 pub const DEFAULT_NUM_QUEUES_VUBLK: usize = 1;
-pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = 128;
+pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = VIRTIO_DEFAULT_QUEUE_SIZE;
 
 /// Errors associated with VM configuration parameters.
 #[derive(Debug)]

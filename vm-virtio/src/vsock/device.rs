@@ -13,7 +13,8 @@ use crate::Error as DeviceError;
 use crate::VirtioInterrupt;
 use crate::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    VirtioInterruptType, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    VirtioInterruptType, VIRTIO_DEFAULT_QUEUE_SIZE, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM,
+    VIRTIO_F_VERSION_1,
 };
 /// This is the `VirtioDevice` implementation for our vsock device. It handles the virtio-level
 /// device logic: feature negociation, device configuration, and device activation.
@@ -49,7 +50,7 @@ use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::eventfd::EventFd;
 
-const QUEUE_SIZE: u16 = 256;
+const QUEUE_SIZE: u16 = VIRTIO_DEFAULT_QUEUE_SIZE;
 const NUM_QUEUES: usize = 3;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
 

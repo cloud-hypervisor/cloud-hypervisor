@@ -61,6 +61,8 @@ const VIRTIO_F_VERSION_1: u32 = 32;
 const VIRTIO_F_IOMMU_PLATFORM: u32 = 33;
 const VIRTIO_F_IN_ORDER: u32 = 35;
 
+pub const VIRTIO_DEFAULT_QUEUE_SIZE: u16 = 1024;
+
 // Types taken from linux/virtio_ids.h
 #[derive(Copy, Clone)]
 #[allow(dead_code)]

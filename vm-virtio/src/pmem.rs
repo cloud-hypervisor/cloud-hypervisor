@@ -9,7 +9,7 @@
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    VirtioDeviceType, VIRTIO_DEFAULT_QUEUE_SIZE, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use arc_swap::ArcSwap;
@@ -31,7 +31,7 @@ use vm_memory::{
 };
 use vmm_sys_util::eventfd::EventFd;
 
-const QUEUE_SIZE: u16 = 256;
+const QUEUE_SIZE: u16 = VIRTIO_DEFAULT_QUEUE_SIZE;
 const NUM_QUEUES: usize = 1;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
 

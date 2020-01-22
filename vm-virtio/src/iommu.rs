@@ -5,7 +5,7 @@
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, VIRTIO_F_VERSION_1,
+    VirtioDeviceType, VIRTIO_DEFAULT_QUEUE_SIZE, VIRTIO_F_VERSION_1,
 };
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
 use arc_swap::ArcSwap;
@@ -27,7 +27,7 @@ use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryError, Gues
 use vmm_sys_util::eventfd::EventFd;
 
 /// Queues sizes
-const QUEUE_SIZE: u16 = 256;
+const QUEUE_SIZE: u16 = VIRTIO_DEFAULT_QUEUE_SIZE;
 const NUM_QUEUES: usize = 2;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
 

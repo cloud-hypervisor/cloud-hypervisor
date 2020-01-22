@@ -736,7 +736,7 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256",
+                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=1024",
                 ],
                 r#"{
                     "net": [
@@ -753,7 +753,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256}
+                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 1024}
                     ]
                 }"#,
                 true,
@@ -1230,7 +1230,7 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor",
                     "--vhost-user-net",
-                    "sock=/path/to/sock,mac=12:34:56:78:90:ab,num_queues=2,queue_size=256",
+                    "sock=/path/to/sock,mac=12:34:56:78:90:ab,num_queues=2,queue_size=1024",
                 ],
                 r#"{
                     "vhost_user_net": [
@@ -1247,7 +1247,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "vhost_user_net": [
-                        {"sock": "/path/to/sock", "mac": "12:34:56:78:90:ab", "num_queues": 2, "queue_size": 256}
+                        {"sock": "/path/to/sock", "mac": "12:34:56:78:90:ab", "num_queues": 2, "queue_size": 1024}
                     ]
                 }"#,
                 true,
@@ -1308,11 +1308,11 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor",
                     "--vhost-user-blk",
-                    "sock=/path/to/sock/1,num_queues=4,queue_size=1024",
+                    "sock=/path/to/sock/1,num_queues=4,queue_size=128",
                 ],
                 r#"{
                     "vhost_user_blk": [
-                        {"sock": "/path/to/sock/1", "num_queues": 4, "queue_size": 1024}
+                        {"sock": "/path/to/sock/1", "num_queues": 4, "queue_size": 128}
                     ]
                 }"#,
                 true,
@@ -1321,11 +1321,11 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor",
                     "--vhost-user-blk",
-                    "sock=/path/to/sock/1,num_queues=4,queue_size=1024,wce=true",
+                    "sock=/path/to/sock/1,num_queues=4,queue_size=128,wce=true",
                 ],
                 r#"{
                     "vhost_user_blk": [
-                        {"sock": "/path/to/sock/1", "num_queues": 4, "queue_size": 1024, "wce": true}
+                        {"sock": "/path/to/sock/1", "num_queues": 4, "queue_size": 128, "wce": true}
                     ]
                 }"#,
                 true,
@@ -1334,7 +1334,7 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor",
                     "--vhost-user-blk",
-                    "sock=/path/to/sock/1,num_queues=1,queue_size=128,wce=true",
+                    "sock=/path/to/sock/1,num_queues=1,queue_size=1024,wce=true",
                 ],
                 r#"{
                     "vhost_user_blk": [
@@ -1351,7 +1351,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "vhost_user_blk": [
-                        {"sock": "/path/to/sock/1", "num_queues": 1, "queue_size": 128, "wce": true}
+                        {"sock": "/path/to/sock/1", "num_queues": 1, "queue_size": 1024, "wce": true}
                     ]
                 }"#,
                 true,
