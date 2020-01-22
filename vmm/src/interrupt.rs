@@ -276,7 +276,7 @@ pub struct KvmInterruptManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     vm_fd: Arc<VmFd>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
-    ioapic: Arc<Mutex<ioapic::Ioapic>>,
+    ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
 }
 
 impl KvmInterruptManager {
@@ -284,7 +284,7 @@ impl KvmInterruptManager {
         allocator: Arc<Mutex<SystemAllocator>>,
         vm_fd: Arc<VmFd>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
-        ioapic: Arc<Mutex<ioapic::Ioapic>>,
+        ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
     ) -> Self {
         KvmInterruptManager {
             allocator,
@@ -311,10 +311,17 @@ impl InterruptManager for KvmInterruptManager {
                     ));
                 }
 
-                Arc::new(Box::new(LegacyUserspaceInterruptGroup::new(
-                    self.ioapic.clone(),
-                    base as u32,
-                )))
+                if let Some(ioapic) = &self.ioapic {
+                    Arc::new(Box::new(LegacyUserspaceInterruptGroup::new(
+                        ioapic.clone(),
+                        base as u32,
+                    )))
+                } else {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "No IOAPIC configured, cannot create legacy interrupt group",
+                    ));
+                }
             }
             PCI_MSI_IRQ => {
                 let mut allocator = self.allocator.lock().unwrap();
