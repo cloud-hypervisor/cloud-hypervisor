@@ -451,8 +451,7 @@ impl DeviceManager {
                 None,
             ));
 
-        let ioapic =
-            DeviceManager::add_ioapic(vm_info, &address_manager, ioapic_interrupt_manager)?;
+        let ioapic = DeviceManager::add_ioapic(&address_manager, ioapic_interrupt_manager)?;
 
         // Creation of the global interrupt manager, which can take a hold onto
         // the brand new Ioapic.
@@ -698,13 +697,12 @@ impl DeviceManager {
     }
 
     fn add_ioapic(
-        vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
         interrupt_manager: Arc<dyn InterruptManager>,
     ) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
         // Create IOAPIC
         let ioapic = Arc::new(Mutex::new(
-            ioapic::Ioapic::new(vm_info.vm_fd.clone(), APIC_START, interrupt_manager)
+            ioapic::Ioapic::new(APIC_START, interrupt_manager)
                 .map_err(DeviceManagerError::CreateIoapic)?,
         ));
 
