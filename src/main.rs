@@ -236,7 +236,8 @@ fn create_app<'a, 'b>(
                      wce=<true|false, default true>\"",
                 )
                 .takes_value(true)
-                .min_values(1),
+                .min_values(1)
+                .group("vm-config"),
         )
         .arg(
             Arg::with_name("v")
