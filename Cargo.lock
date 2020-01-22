@@ -193,7 +193,7 @@ dependencies = [
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
  "vmm 0.1.0",
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -234,7 +234,7 @@ dependencies = [
  "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-device 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -341,7 +341,7 @@ name = "kvm-bindings"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -351,7 +351,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "kvm-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -429,7 +429,7 @@ dependencies = [
 name = "net_gen"
 version = "0.1.0"
 dependencies = [
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -443,7 +443,7 @@ dependencies = [
  "rand 0.7.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.104 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.44 (registry+https://github.com/rust-lang/crates.io-index)",
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -580,7 +580,7 @@ dependencies = [
  "remain 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-virtio 0.1.0",
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -993,7 +993,7 @@ dependencies = [
  "vm-allocator 0.1.0",
  "vm-device 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1012,7 +1012,7 @@ dependencies = [
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1024,7 +1024,7 @@ dependencies = [
  "vhost_rs 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1066,7 +1066,7 @@ dependencies = [
  "serde_json 1.0.44 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 1.0.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1098,7 +1098,7 @@ dependencies = [
  "vm-allocator 0.1.0",
  "vm-device 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1131,7 +1131,7 @@ dependencies = [
  "vm-device 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
- "vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1144,7 +1144,7 @@ dependencies = [
 
 [[package]]
 name = "vmm-sys-util"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1305,7 +1305,7 @@ dependencies = [
 "checksum virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
 "checksum vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)" = "<none>"
 "checksum vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "46996f56aeae31fbc0532ae57a944e00089302f03b18c10c76eebfd9249f4a6c"
-"checksum vmm-sys-util 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "f4588e216e77682850f4ae35ec855c2517f93d671a2578d2a32d20bf8a73de38"
+"checksum vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "048b10a74f061d87dacca196a1964052a7135651641ab8d100aef21e58f33571"
 "checksum wasi 0.9.0+wasi-snapshot-preview1 (registry+https://github.com/rust-lang/crates.io-index)" = "cccddf32554fecc6acb585f82a32a72e28b48f8c4c1883ddfeeeaa96f7d8e519"
 "checksum winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)" = "167dc9d6949a9b857f3451275e911c3f44255842c1f7a76f33c55103a909087a"
 "checksum winapi 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)" = "f10e386af2b13e47c89e7236a7a14a086791a2b88ebad6df9bf42040195cf770"
