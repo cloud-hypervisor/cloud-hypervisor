@@ -164,7 +164,7 @@ impl VirtioPciCommonConfig {
                 // Only 64 bits of features (2 pages) are defined for now, so limit
                 // device_feature_select to avoid shifting by 64 or more bits.
                 if self.device_feature_select < 2 {
-                    locked_device.features(self.device_feature_select)
+                    (locked_device.features() >> (self.device_feature_select * 32)) as u32
                 } else {
                     0
                 }
@@ -199,7 +199,8 @@ impl VirtioPciCommonConfig {
             0x0c => {
                 if self.driver_feature_select < 2 {
                     let mut locked_device = device.lock().unwrap();
-                    locked_device.ack_features(self.driver_feature_select, value);
+                    locked_device
+                        .ack_features(u64::from(value) << (self.driver_feature_select * 32));
                 } else {
                     warn!(
                         "invalid ack_features (page {}, value 0x{:x})",
@@ -280,11 +281,11 @@ mod tests {
             Ok(())
         }
 
-        fn features(&self, _page: u32) -> u32 {
-            DUMMY_FEATURES as u32
+        fn features(&self) -> u64 {
+            DUMMY_FEATURES
         }
 
-        fn ack_features(&mut self, _page: u32, _value: u32) {}
+        fn ack_features(&mut self, _value: u64) {}
 
         fn read_config(&self, _offset: u64, _data: &mut [u8]) {}
 
