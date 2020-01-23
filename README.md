@@ -129,18 +129,19 @@ Multiple arguments can be given to the `--disk` parameter.
 #### Building your kernel
 
 `cloud-hypervisor` also supports direct kernel boot into a `vmlinux` ELF kernel
-image. You want to build such an image first:
+image. In order to support virtio-fs and virtio-iommu we have our own development branch. You are of course able to use your own kernel but these instructions will continue with the version that we develop and test against.
+
+To build the kernel:
 
 ```shell
 
-# Clone a 5.0 Linux kernel
+# Clone the Cloud Hypervisor Linux branch
 $ pushd $CLOUDH
-$ git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux-cloud-hypervisor
-$ cd linux-cloud-hypervisor
-$ git reset --hard v5.0
+$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b virtio-fs-virtio-iommu-5.5-rc1 linux-cloud-hypervisor
+$ pushd linux-cloud-hypervisor
 
 # Use the cloud-hypervisor kernel config to build your kernel
-$ cp $CLOUDH/cloud-hypervisor/resources/linux-5.0-config .config
+$ cp $CLOUDH/cloud-hypervisor/resources/linux-virtio-fs-virtio-iommu-config .config
 $ make bzImage -j `nproc`
 $ popd
 ```
