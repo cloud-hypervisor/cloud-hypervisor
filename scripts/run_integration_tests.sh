@@ -66,6 +66,13 @@ if [ ! -f "$EOAN_OS_RAW_IMAGE" ]; then
     popd
 fi
 
+pushd $WORKLOADS_DIR
+curl --silent "https://cloudhypervisorstorage.blob.core.windows.net/images/sha1sums" | sha1sum --check
+if [ $? -ne 0 ]; then
+    echo "sha1sum validation of images failed, remove invalid images to fix the issue."
+    exit 1
+fi
+popd
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
