@@ -284,29 +284,12 @@ impl VirtioDevice for Fs {
         &self.queue_sizes.as_slice()
     }
 
-    fn features(&self, page: u32) -> u32 {
-        match page {
-            // Get the lower 32-bits of the features bitfield.
-            0 => self.avail_features as u32,
-            // Get the upper 32-bits of the features bitfield.
-            1 => (self.avail_features >> 32) as u32,
-            _ => {
-                warn!("fs: Received request for unknown features page: {}", page);
-                0u32
-            }
-        }
+    fn features(&self) -> u64 {
+        self.avail_features
     }
 
-    fn ack_features(&mut self, page: u32, value: u32) {
-        let mut v = match page {
-            0 => u64::from(value),
-            1 => u64::from(value) << 32,
-            _ => {
-                warn!("fs: Cannot acknowledge unknown features page: {}", page);
-                0u64
-            }
-        };
-
+    fn ack_features(&mut self, value: u64) {
+        let mut v = value;
         // Check if the guest is ACK'ing a feature that we didn't claim to have.
         let unrequested_features = v & !self.avail_features;
         if unrequested_features != 0 {

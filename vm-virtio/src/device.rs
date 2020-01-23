@@ -62,14 +62,15 @@ pub trait VirtioDevice: Send {
     /// The maximum size of each queue that this device supports.
     fn queue_max_sizes(&self) -> &[u16];
 
-    /// The set of feature bits shifted by `page * 32`.
-    fn features(&self, page: u32) -> u32 {
-        let _ = page;
+    /// The set of feature bits that this device supports.
+    fn features(&self) -> u64 {
         0
     }
 
     /// Acknowledges that this set of features should be enabled.
-    fn ack_features(&mut self, page: u32, value: u32);
+    fn ack_features(&mut self, value: u64) {
+        let _ = value;
+    }
 
     /// Reads this device configuration space at `offset`.
     fn read_config(&self, offset: u64, data: &mut [u8]);

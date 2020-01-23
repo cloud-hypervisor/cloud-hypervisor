@@ -189,8 +189,12 @@ impl BusDevice for MmioDevice {
                     0x08 => self.device.lock().unwrap().device_type(),
                     0x0c => VENDOR_ID, // vendor id
                     0x10 => {
-                        self.device.lock().unwrap().features(self.features_select)
-                            | if self.features_select == 1 { 0x1 } else { 0x0 }
+                        if self.features_select < 2 {
+                            (self.device.lock().unwrap().features() >> (self.features_select * 32))
+                                as u32
+                        } else {
+                            0
+                        }
                     }
                     0x34 => self.with_queue(0, |q| u32::from(q.get_max_size())),
                     0x44 => self.with_queue(0, |q| q.ready as u32),
@@ -234,11 +238,19 @@ impl BusDevice for MmioDevice {
                 let v = LittleEndian::read_u32(data);
                 match offset {
                     0x14 => self.features_select = v,
-                    0x20 => self
-                        .device
-                        .lock()
-                        .unwrap()
-                        .ack_features(self.acked_features_select, v),
+                    0x20 => {
+                        if self.acked_features_select < 2 {
+                            self.device
+                                .lock()
+                                .unwrap()
+                                .ack_features(u64::from(v) << (self.acked_features_select * 32));
+                        } else {
+                            warn!(
+                                "invalid ack_features (page {}, value 0x{:x})",
+                                self.acked_features_select, v
+                            );
+                        }
+                    }
                     0x24 => self.acked_features_select = v,
                     0x30 => self.queue_select = v,
                     0x38 => mut_q = self.with_queue_mut(|q| q.size = v as u16),

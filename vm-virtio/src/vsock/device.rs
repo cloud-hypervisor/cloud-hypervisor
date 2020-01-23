@@ -439,29 +439,12 @@ where
         QUEUE_SIZES
     }
 
-    fn features(&self, page: u32) -> u32 {
-        match page {
-            // Get the lower 32-bits of the features bitfield.
-            0 => self.avail_features as u32,
-            // Get the upper 32-bits of the features bitfield.
-            1 => (self.avail_features >> 32) as u32,
-            _ => {
-                warn!("Received request for unknown features page.");
-                0u32
-            }
-        }
+    fn features(&self) -> u64 {
+        self.avail_features
     }
 
-    fn ack_features(&mut self, page: u32, value: u32) {
-        let mut v = match page {
-            0 => u64::from(value),
-            1 => u64::from(value) << 32,
-            _ => {
-                warn!("Cannot acknowledge unknown features page.");
-                0u64
-            }
-        };
-
+    fn ack_features(&mut self, value: u64) {
+        let mut v = value;
         // Check if the guest is ACK'ing a feature that we didn't claim to have.
         let unrequested_features = v & !self.avail_features;
         if unrequested_features != 0 {
@@ -619,18 +602,15 @@ mod tests {
             VirtioDeviceType::TYPE_VSOCK as u32
         );
         assert_eq!(ctx.device.queue_max_sizes(), QUEUE_SIZES);
-        assert_eq!(ctx.device.features(0), device_pages[0]);
-        assert_eq!(ctx.device.features(1), device_pages[1]);
-        assert_eq!(ctx.device.features(2), 0);
+        assert_eq!((ctx.device.features() >> (0 * 32)) as u32, device_pages[0]);
+        assert_eq!((ctx.device.features() >> (1 * 32)) as u32, device_pages[1]);
 
         // Ack device features, page 0.
-        ctx.device.ack_features(0, driver_pages[0]);
+        ctx.device
+            .ack_features(u64::from(driver_pages[0]) << (0 * 32));
         // Ack device features, page 1.
-        ctx.device.ack_features(1, driver_pages[1]);
-        // Ack some bogus page (i.e. 2). This should have no side effect.
-        ctx.device.ack_features(2, 0);
-        // Attempt to un-ack the first feature page. This should have no side effect.
-        ctx.device.ack_features(0, !driver_pages[0]);
+        ctx.device
+            .ack_features(u64::from(driver_pages[1]) << (1 * 32));
         // Check that no side effect are present, and that the acked features are exactly the same
         // as the device features.
         assert_eq!(ctx.device.acked_features, device_features & driver_features);
