@@ -48,6 +48,7 @@ pub struct MemoryManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     current_ram: u64,
     next_hotplug_slot: usize,
+    device_base: GuestAddress,
 }
 
 #[derive(Debug)]
@@ -189,6 +190,8 @@ impl BusDevice for MemoryManager {
 }
 
 impl MemoryManager {
+    pub const DEVICE_SIZE: u64 = 0x18;
+
     pub fn new(
         allocator: Arc<Mutex<SystemAllocator>>,
         fd: Arc<VmFd>,
@@ -235,6 +238,13 @@ impl MemoryManager {
         let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
         hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
 
+        // Allocate some MMIO space for the device to be acessible from
+        let device_base = allocator
+            .lock()
+            .unwrap()
+            .allocate_mmio_addresses(None, MemoryManager::DEVICE_SIZE, None)
+            .ok_or(Error::MemoryRangeAllocation)?;
+
         let memory_manager = Arc::new(Mutex::new(MemoryManager {
             guest_memory: guest_memory.clone(),
             next_kvm_memory_slot: 0,
@@ -249,6 +259,7 @@ impl MemoryManager {
             allocator: allocator.clone(),
             current_ram: boot_ram,
             next_hotplug_slot: 0,
+            device_base,
         }));
 
         guest_memory.load().with_regions(|_, region| {
@@ -358,7 +369,7 @@ impl MemoryManager {
             .allocate_mmio_addresses(Some(start_addr), size as GuestUsize, None)
             .ok_or(Error::MemoryRangeAllocation)?;
 
-        // Update the slot so that it can be queried via the I/O port
+        // Update the slot so that it can be queried via the MMIO region
         let mut slot = &mut self.hotplug_slots[self.next_hotplug_slot];
         slot.active = true;
         slot.inserting = true;
@@ -459,6 +470,10 @@ impl MemoryManager {
         } else {
             Ok(false)
         }
+    }
+
+    pub fn device_base(&self) -> GuestAddress {
+        self.device_base
     }
 }
 
@@ -591,7 +606,7 @@ impl Aml for MemoryMethods {
                     &aml::While::new(
                         &aml::LessThan::new(&aml::Local(0), &self.slots),
                         vec![
-                            // Write slot number (in first argument) to I/O port via field
+                            // Write slot number (in first argument) to MMIO region via field
                             &aml::Store::new(&aml::Path::new("\\_SB_.MHPC.MSEL"), &aml::Local(0)),
                             // Check if MINS bit is set (inserting)
                             &aml::If::new(
@@ -644,7 +659,7 @@ impl Aml for MemoryMethods {
                 vec![
                     // Take lock defined above
                     &aml::Acquire::new("MLCK".into(), 0xfff),
-                    // Write slot number (in first argument) to I/O port via field
+                    // Write slot number (in first argument) to MMIO region via field
                     &aml::Store::new(&aml::Path::new("\\_SB_.MHPC.MSEL"), &aml::Arg(0)),
                     &aml::Store::new(&aml::Local(0), &aml::ZERO),
                     // Check if MEN_ bit is set, if so make the local variable 0xf (see _STA for details of meaning)
@@ -670,7 +685,7 @@ impl Aml for MemoryMethods {
                 vec![
                     // Take lock defined above
                     &aml::Acquire::new("MLCK".into(), 0xfff),
-                    // Write slot number (in first argument) to I/O port via field
+                    // Write slot number (in first argument) to MMIO region via field
                     &aml::Store::new(&aml::Path::new("\\_SB_.MHPC.MSEL"), &aml::Arg(0)),
                     &aml::Name::new(
                         "MR64".into(),
@@ -733,12 +748,20 @@ impl Aml for MemoryManager {
                     // I/O port for memory controller
                     &aml::Name::new(
                         "_CRS".into(),
-                        &aml::ResourceTemplate::new(vec![&aml::IO::new(
-                            0x0a00, 0x0a00, 0x01, 0x18,
+                        &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
+                            aml::AddressSpaceCachable::NotCacheable,
+                            true,
+                            self.device_base.0,
+                            self.device_base.0 + MemoryManager::DEVICE_SIZE - 1,
                         )]),
                     ),
-                    // OpRegion and Fields map I/O port into individual field values
-                    &aml::OpRegion::new("MHPR".into(), aml::OpRegionSpace::SystemIO, 0xa00, 0x18),
+                    // OpRegion and Fields map MMIO data into individual field values
+                    &aml::OpRegion::new(
+                        "MHPR".into(),
+                        aml::OpRegionSpace::SystemMemory,
+                        self.device_base.0 as usize,
+                        MemoryManager::DEVICE_SIZE as usize,
+                    ),
                     &aml::Field::new(
                         "MHPR".into(),
                         aml::FieldAccessType::DWord,
