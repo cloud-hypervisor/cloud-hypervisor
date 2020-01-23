@@ -114,8 +114,8 @@ pub enum Error {
     /// Cannot add legacy device to Bus.
     BusError(devices::BusError),
 
-    /// Failed to allocate IO port
-    AllocateIOPort,
+    /// Failed to allocate MMIO range
+    AllocateMMIO,
 
     /// Asking for more vCPUs that we can have
     DesiredVCPUCountExceedsMax,
@@ -373,8 +373,8 @@ impl Vcpu {
 pub struct CpuManager {
     boot_vcpus: u8,
     max_vcpus: u8,
-    io_bus: Weak<devices::Bus>,
-    mmio_bus: Arc<devices::Bus>,
+    io_bus: Arc<devices::Bus>,
+    mmio_bus: Weak<devices::Bus>,
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
     vm_memory: Arc<ArcSwap<GuestMemoryMmap>>,
     cpuid: CpuId,
@@ -384,6 +384,8 @@ pub struct CpuManager {
     reset_evt: EventFd,
     vcpu_states: Vec<VcpuState>,
     selected_cpu: u8,
+    #[cfg(feature = "acpi")]
+    device_base: GuestAddress,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -492,6 +494,8 @@ impl VcpuState {
 }
 
 impl CpuManager {
+    pub const DEVICE_SIZE: u64 = 0xc;
+
     pub fn new(
         boot_vcpus: u8,
         max_vcpus: u8,
@@ -504,11 +508,19 @@ impl CpuManager {
         let mut vcpu_states = Vec::with_capacity(usize::from(max_vcpus));
         vcpu_states.resize_with(usize::from(max_vcpus), VcpuState::default);
 
+        #[cfg(feature = "acpi")]
+        let device_base = device_manager
+            .allocator()
+            .lock()
+            .unwrap()
+            .allocate_mmio_addresses(None, CpuManager::DEVICE_SIZE, None)
+            .ok_or(Error::AllocateMMIO)?;
+
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus,
             max_vcpus,
-            io_bus: Arc::downgrade(&device_manager.io_bus().clone()),
-            mmio_bus: device_manager.mmio_bus().clone(),
+            io_bus: device_manager.io_bus().clone(),
+            mmio_bus: Arc::downgrade(&device_manager.mmio_bus().clone()),
             ioapic: device_manager.ioapic().clone(),
             vm_memory: guest_memory,
             cpuid,
@@ -518,22 +530,18 @@ impl CpuManager {
             vcpu_states,
             reset_evt,
             selected_cpu: 0,
+            #[cfg(feature = "acpi")]
+            device_base,
         }));
 
-        device_manager
-            .allocator()
-            .lock()
-            .unwrap()
-            .allocate_io_addresses(Some(GuestAddress(0x0cd8)), 0x8, None)
-            .ok_or(Error::AllocateIOPort)?;
-
+        #[cfg(feature = "acpi")]
         cpu_manager
             .lock()
             .unwrap()
-            .io_bus
+            .mmio_bus
             .upgrade()
             .unwrap()
-            .insert(cpu_manager.clone(), 0x0cd8, 0xc)
+            .insert(cpu_manager.clone(), device_base.0, CpuManager::DEVICE_SIZE)
             .map_err(Error::BusError)?;
 
         Ok(cpu_manager)
@@ -563,8 +571,8 @@ impl CpuManager {
             let mut vcpu = Vcpu::new(
                 cpu_id,
                 &self.fd,
-                self.io_bus.clone().upgrade().unwrap(),
-                self.mmio_bus.clone(),
+                self.io_bus.clone(),
+                self.mmio_bus.clone().upgrade().unwrap(),
                 ioapic,
                 creation_ts,
             )?;
@@ -852,7 +860,7 @@ impl Aml for CPUMethods {
                 vec![
                     // Take lock defined above
                     &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xfff),
-                    // Write CPU number (in first argument) to I/O port via field
+                    // Write CPU number (in first argument) to MMIO region via field
                     &aml::Store::new(&aml::Path::new("\\_SB_.PRES.CSEL"), &aml::Arg(0)),
                     &aml::Store::new(&aml::Local(0), &aml::ZERO),
                     // Check if CPEN bit is set, if so make the local variable 0xf (see _STA for details of meaning)
@@ -890,7 +898,7 @@ impl Aml for CPUMethods {
                 true,
                 vec![
                     &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xfff),
-                    // Write CPU number (in first argument) to I/O port via field
+                    // Write CPU number (in first argument) to MMIO region via field
                     &aml::Store::new(&aml::Path::new("\\_SB_.PRES.CSEL"), &aml::Arg(0)),
                     // Set CEJ0 bit
                     &aml::Store::new(&aml::Path::new("\\_SB_.PRES.CEJ0"), &aml::ONE),
@@ -912,7 +920,7 @@ impl Aml for CPUMethods {
                     &aml::While::new(
                         &aml::LessThan::new(&aml::Local(0), &self.max_vcpus),
                         vec![
-                            // Write CPU number (in first argument) to I/O port via field
+                            // Write CPU number (in first argument) to MMIO region via field
                             &aml::Store::new(&aml::Path::new("\\_SB_.PRES.CSEL"), &aml::Local(0)),
                             // Check if CINS bit is set
                             &aml::If::new(
@@ -971,15 +979,23 @@ impl Aml for CpuManager {
                     &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
                     // Mutex to protect concurrent access as we write to choose CPU and then read back status
                     &aml::Mutex::new("CPLK".into(), 0),
-                    // I/O port for CPU controller
+                    // MMIO region for CPU controller
                     &aml::Name::new(
                         "_CRS".into(),
-                        &aml::ResourceTemplate::new(vec![&aml::IO::new(
-                            0x0cd8, 0x0cd8, 0x01, 0x0c,
+                        &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
+                            aml::AddressSpaceCachable::NotCacheable,
+                            true,
+                            self.device_base.0,
+                            self.device_base.0 + CpuManager::DEVICE_SIZE - 1,
                         )]),
                     ),
-                    // OpRegion and Fields map I/O port into individual field values
-                    &aml::OpRegion::new("PRST".into(), aml::OpRegionSpace::SystemIO, 0x0cd8, 0x0c),
+                    // OpRegion and Fields map MMIO region into individual field values
+                    &aml::OpRegion::new(
+                        "PRST".into(),
+                        aml::OpRegionSpace::SystemMemory,
+                        self.device_base.0 as usize,
+                        CpuManager::DEVICE_SIZE as usize,
+                    ),
                     &aml::Field::new(
                         "PRST".into(),
                         aml::FieldAccessType::Byte,
