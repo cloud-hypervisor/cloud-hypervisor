@@ -714,7 +714,7 @@ impl PciDevice for VfioPciDevice {
                     let msb_bar_offset: u32 = PCI_CONFIG_BAR_OFFSET + (bar_id + 1) * 4;
 
                     self.vfio_pci_configuration
-                        .write_config_dword(msb_bar_offset, msb_size);
+                        .write_config_dword(msb_size, msb_bar_offset);
 
                     msb_size = self
                         .vfio_pci_configuration
