@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 use vm_device::interrupt::InterruptSourceGroup;
+use vm_memory::GuestAddress;
 use vmm_sys_util::eventfd::EventFd;
 use BusDevice;
 use HotPlugNotificationFlags;
@@ -60,14 +61,22 @@ pub struct AcpiGEDDevice {
     interrupt: Arc<Box<dyn InterruptSourceGroup>>,
     notification_type: HotPlugNotificationFlags,
     ged_irq: u32,
+    device_base: GuestAddress,
 }
 
 impl AcpiGEDDevice {
-    pub fn new(interrupt: Arc<Box<dyn InterruptSourceGroup>>, ged_irq: u32) -> AcpiGEDDevice {
+    pub const DEVICE_SIZE: u64 = 1;
+
+    pub fn new(
+        interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+        ged_irq: u32,
+        device_base: GuestAddress,
+    ) -> AcpiGEDDevice {
         AcpiGEDDevice {
             interrupt,
             notification_type: HotPlugNotificationFlags::NO_DEVICES_CHANGED,
             ged_irq,
+            device_base,
         }
     }
 
@@ -82,9 +91,13 @@ impl AcpiGEDDevice {
     pub fn irq(&self) -> u32 {
         self.ged_irq
     }
+
+    pub fn device_base(&self) -> GuestAddress {
+        self.device_base
+    }
 }
 
-// I/O port reports what type of notification was made
+// MMIO region reports what type of notification was made
 impl BusDevice for AcpiGEDDevice {
     // Spec has all fields as zero
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
