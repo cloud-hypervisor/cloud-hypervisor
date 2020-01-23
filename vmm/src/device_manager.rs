@@ -523,16 +523,15 @@ impl DeviceManager {
         #[cfg(feature = "acpi")]
         let memory_manager_clone = memory_manager.clone();
 
-        address_manager
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_io_addresses(Some(GuestAddress(0x0a00)), 0x18, None)
-            .ok_or(DeviceManagerError::AllocateIOPort)?;
+        let memory_manager_device_base = memory_manager.lock().unwrap().device_base();
 
         address_manager
-            .io_bus
-            .insert(memory_manager, 0xa00, 0x18)
+            .mmio_bus
+            .insert(
+                memory_manager,
+                memory_manager_device_base.0,
+                MemoryManager::DEVICE_SIZE,
+            )
             .map_err(DeviceManagerError::BusError)?;
 
         Ok(DeviceManager {
