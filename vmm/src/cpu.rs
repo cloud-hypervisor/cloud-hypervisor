@@ -109,7 +109,7 @@ pub enum Error {
     VcpuUnhandledKvmExit,
 
     /// Failed to join on vCPU threads
-    ThreadCleanup,
+    ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
     /// Cannot add legacy device to Bus.
     BusError(devices::BusError),
@@ -478,7 +478,7 @@ impl VcpuState {
 
     fn join_thread(&mut self) -> Result<()> {
         if let Some(handle) = self.handle.take() {
-            handle.join().map_err(|_| Error::ThreadCleanup)?
+            handle.join().map_err(Error::ThreadCleanup)?
         }
 
         Ok(())

@@ -78,6 +78,9 @@ pub enum Error {
 
     /// The requested hotplug memory addition is not a valid size
     InvalidSize,
+
+    /// Failed to set the user memory region.
+    SetUserMemoryRegion(kvm_ioctls::Error),
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
@@ -411,12 +414,8 @@ impl MemoryManager {
         };
 
         // Safe because the guest regions are guaranteed not to overlap.
-        unsafe {
-            self.fd
-                .set_user_memory_region(mem_region)
-                .map_err(|e| io::Error::from_raw_os_error(e.errno()))
-        }
-        .map_err(|_: io::Error| Error::GuestMemory(MmapError::NoMemoryRegion))?;
+        unsafe { self.fd.set_user_memory_region(mem_region) }
+            .map_err(Error::SetUserMemoryRegion)?;
 
         // Mark the pages as mergeable if explicitly asked for.
         if mergeable {
