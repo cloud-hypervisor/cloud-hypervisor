@@ -13,6 +13,7 @@ use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::mem;
+use std::num;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::prelude::FileExt;
 use std::path::{Path, PathBuf};
@@ -48,6 +49,8 @@ pub enum VfioError {
     IommuDmaUnmap,
     VfioDeviceGetIrqInfo,
     VfioDeviceSetIrq,
+    ReadLink(io::Error),
+    ParseInt(num::ParseIntError),
 }
 pub type Result<T> = std::result::Result<T, VfioError>;
 
@@ -96,6 +99,8 @@ impl fmt::Display for VfioError {
             }
             VfioError::VfioDeviceGetIrqInfo => write!(f, "failed to get vfio device irq info"),
             VfioError::VfioDeviceSetIrq => write!(f, "failed to set vfio deviece irq"),
+            VfioError::ReadLink(e) => write!(f, "failed to read link from path: {}", e),
+            VfioError::ParseInt(e) => write!(f, "failed to parse integer: {}", e),
         }
     }
 }
@@ -593,12 +598,10 @@ impl VfioDevice {
         iommu_attached: bool,
     ) -> Result<Self> {
         let uuid_path: PathBuf = [sysfspath, Path::new("iommu_group")].iter().collect();
-        let group_path = uuid_path.read_link().map_err(|_| VfioError::InvalidPath)?;
+        let group_path = uuid_path.read_link().map_err(VfioError::ReadLink)?;
         let group_osstr = group_path.file_name().ok_or(VfioError::InvalidPath)?;
         let group_str = group_osstr.to_str().ok_or(VfioError::InvalidPath)?;
-        let group_id = group_str
-            .parse::<u32>()
-            .map_err(|_| VfioError::InvalidPath)?;
+        let group_id = group_str.parse::<u32>().map_err(VfioError::ParseInt)?;
 
         let group = VfioGroup::new(group_id, device_fd)?;
         let device_info = group.get_device(sysfspath)?;
