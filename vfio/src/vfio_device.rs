@@ -21,10 +21,12 @@ use std::result;
 use std::sync::Arc;
 use std::u32;
 use vfio_bindings::bindings::vfio::*;
+use vfio_bindings::bindings::IrqSet;
 use vfio_ioctls::*;
 use vm_device::{get_host_address_range, ExternalDmaMapping};
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::fam::FamStruct;
 use vmm_sys_util::ioctl::*;
 
 #[derive(Debug)]
@@ -645,25 +647,19 @@ impl VfioDevice {
             return Err(VfioError::VfioDeviceSetIrq);
         }
 
-        let mut irq_set = vec_with_array_field::<vfio_irq_set, u32>(event_fds.len());
-        irq_set[0].argsz = mem::size_of::<vfio_irq_set>() as u32
+        let mut irq_set_wrapper = IrqSet::new(event_fds.len());
+        let mut irq_set = irq_set_wrapper.as_mut_fam_struct();
+
+        irq_set.argsz = mem::size_of::<vfio_irq_set>() as u32
             + (event_fds.len() * mem::size_of::<u32>()) as u32;
-        irq_set[0].flags = VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER;
-        irq_set[0].index = irq_index;
-        irq_set[0].start = 0;
-        irq_set[0].count = irq.count;
+        irq_set.flags = VFIO_IRQ_SET_DATA_EVENTFD | VFIO_IRQ_SET_ACTION_TRIGGER;
+        irq_set.index = irq_index;
+        irq_set.start = 0;
+        irq_set.count = irq.count;
 
         {
-            // irq_set.data could be none, bool or fd according to flags, so irq_set.data
-            // is u8 default, here irq_set.data is a vector of fds as u32, so 4 default u8
-            // are combined together as u32 for each fd.
-            // It is safe as enough space is reserved through
-            // vec_with_array_field(u32)<event_fds.len()>.
-            let fds = unsafe {
-                irq_set[0]
-                    .data
-                    .as_mut_slice(event_fds.len() * mem::size_of::<u32>())
-            };
+            let fds = irq_set.as_mut_slice();
+
             for (index, event_fd) in event_fds.iter().enumerate() {
                 let fds_offset = index * mem::size_of::<u32>();
                 let fd = &mut fds[fds_offset..fds_offset + mem::size_of::<u32>()];
@@ -672,7 +668,7 @@ impl VfioDevice {
         }
 
         // Safe as we are the owner of self and irq_set which are valid value
-        let ret = unsafe { ioctl_with_ref(self, VFIO_DEVICE_SET_IRQS(), &irq_set[0]) };
+        let ret = unsafe { ioctl_with_ref(self, VFIO_DEVICE_SET_IRQS(), &irq_set) };
         if ret < 0 {
             return Err(VfioError::VfioDeviceSetIrq);
         }
