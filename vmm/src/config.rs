@@ -8,6 +8,7 @@ extern crate vm_virtio;
 use clap::ArgMatches;
 use net_util::MacAddr;
 use std::convert::From;
+use std::io;
 use std::net::AddrParseError;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
@@ -23,7 +24,7 @@ pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = 128;
 
 /// Errors associated with VM configuration parameters.
 #[derive(Debug)]
-pub enum Error<'a> {
+pub enum Error {
     /// Failed parsing cpus parameters.
     ParseCpusParams(std::num::ParseIntError),
     /// Unexpected vCPU parameter
@@ -45,7 +46,7 @@ pub enum Error<'a> {
     /// Failed parsing network mask parameter.
     ParseNetMaskParam(AddrParseError),
     /// Failed parsing network mac parameter.
-    ParseNetMacParam(&'a str),
+    ParseNetMacParam(io::Error),
     /// Failed parsing network queue number parameter.
     ParseNetNumQueuesParam(std::num::ParseIntError),
     /// Failed parsing network queue size parameter.
@@ -71,7 +72,7 @@ pub enum Error<'a> {
     /// Both console and serial are tty.
     ParseTTYParam,
     /// Failed parsing vhost-user-net mac parameter.
-    ParseVuNetMacParam(&'a str),
+    ParseVuNetMacParam(io::Error),
     /// Failed parsing vhost-user sock parameter.
     ParseVuSockParam,
     /// Failed parsing vhost-user queue number parameter.
@@ -91,7 +92,7 @@ pub enum Error<'a> {
     /// Failed parsing generic on|off parameter.
     ParseOnOff,
 }
-pub type Result<'a, T> = result::Result<T, Error<'a>>;
+pub type Result<T> = result::Result<T, Error>;
 
 pub struct VmParams<'a> {
     pub cpus: &'a str,

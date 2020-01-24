@@ -7,6 +7,7 @@
 
 use rand::Rng;
 use std::fmt;
+use std::io;
 use std::result::Result;
 
 use serde::de::{Deserialize, Deserializer, Error};
@@ -20,23 +21,31 @@ pub struct MacAddr {
 }
 
 impl MacAddr {
-    // The error contains the str that failed to be parsed, for nicer error message generation.
-    pub fn parse_str<S>(s: &S) -> Result<MacAddr, &str>
+    pub fn parse_str<S>(s: &S) -> Result<MacAddr, io::Error>
     where
         S: AsRef<str> + ?Sized,
     {
         let v: Vec<&str> = s.as_ref().split(':').collect();
         let mut bytes = [0u8; MAC_ADDR_LEN];
+        let common_err = Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("parsing of {} into a MAC address failed", s.as_ref()),
+        ));
 
         if v.len() != MAC_ADDR_LEN {
-            return Err(s.as_ref());
+            return common_err;
         }
 
         for i in 0..MAC_ADDR_LEN {
             if v[i].len() != 2 {
-                return Err(s.as_ref());
+                return common_err;
             }
-            bytes[i] = u8::from_str_radix(v[i], 16).map_err(|_| s.as_ref())?;
+            bytes[i] = u8::from_str_radix(v[i], 16).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("parsing of {} into a MAC address failed: {}", s.as_ref(), e),
+                )
+            })?;
         }
 
         Ok(MacAddr { bytes })
@@ -106,7 +115,8 @@ impl<'de> Deserialize<'de> for MacAddr {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        MacAddr::parse_str(&s).map_err(|_| D::Error::custom("The provided MAC address is invalid."))
+        MacAddr::parse_str(&s)
+            .map_err(|e| D::Error::custom(format!("The provided MAC address is invalid: {}", e)))
     }
 }
 
