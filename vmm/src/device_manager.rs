@@ -991,6 +991,8 @@ impl DeviceManager {
                             disk_cfg.path.clone(),
                             disk_cfg.readonly,
                             disk_cfg.iommu,
+                            disk_cfg.num_queues,
+                            disk_cfg.queue_size,
                         )
                         .map_err(DeviceManagerError::CreateVirtioBlock)?;
 
@@ -1010,6 +1012,8 @@ impl DeviceManager {
                             disk_cfg.path.clone(),
                             disk_cfg.readonly,
                             disk_cfg.iommu,
+                            disk_cfg.num_queues,
+                            disk_cfg.queue_size,
                         )
                         .map_err(DeviceManagerError::CreateVirtioBlock)?;
 
