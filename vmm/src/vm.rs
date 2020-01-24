@@ -78,7 +78,16 @@ pub enum Error {
     KernelLoad(linux_loader::loader::Error),
 
     /// Cannot load the command line in memory
-    CmdLine,
+    LoadCmdLine(linux_loader::loader::Error),
+
+    /// Cannot modify the command line
+    CmdLineInsertStr(linux_loader::cmdline::Error),
+
+    /// Cannot convert command line into CString
+    CmdLineCString(std::ffi::NulError),
+
+    /// Cannot configure system
+    ConfigureSystem(arch::Error),
 
     PoisonedState,
 
@@ -110,7 +119,7 @@ pub enum Error {
     SignalHandlerSpawn(io::Error),
 
     /// Failed to join on vCPU threads
-    ThreadCleanup,
+    ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
     /// Failed to create a new KVM instance
     KvmNew(kvm_ioctls::Error),
@@ -363,12 +372,12 @@ impl Vm {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE);
         cmdline
             .insert_str(self.config.lock().unwrap().cmdline.args.clone())
-            .map_err(|_| Error::CmdLine)?;
+            .map_err(Error::CmdLineInsertStr)?;
         for entry in self.devices.cmdline_additions() {
-            cmdline.insert_str(entry).map_err(|_| Error::CmdLine)?;
+            cmdline.insert_str(entry).map_err(Error::CmdLineInsertStr)?;
         }
 
-        let cmdline_cstring = CString::new(cmdline).map_err(|_| Error::CmdLine)?;
+        let cmdline_cstring = CString::new(cmdline).map_err(Error::CmdLineCString)?;
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.load_full();
         let entry_addr = match linux_loader::loader::Elf::load(
@@ -395,7 +404,7 @@ impl Vm {
             arch::layout::CMDLINE_START,
             &cmdline_cstring,
         )
-        .map_err(|_| Error::CmdLine)?;
+        .map_err(Error::LoadCmdLine)?;
         let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
         let _max_vcpus = self.cpu_manager.lock().unwrap().max_vcpus();
 
@@ -422,7 +431,7 @@ impl Vm {
                     Some(hdr),
                     rsdp_addr,
                 )
-                .map_err(|_| Error::CmdLine)?;
+                .map_err(Error::ConfigureSystem)?;
 
                 let load_addr = entry_addr
                     .kernel_load
@@ -441,7 +450,7 @@ impl Vm {
                     None,
                     rsdp_addr,
                 )
-                .map_err(|_| Error::CmdLine)?;
+                .map_err(Error::ConfigureSystem)?;
 
                 Ok(entry_addr.kernel_load)
             }
@@ -476,7 +485,7 @@ impl Vm {
 
         // Wait for all the threads to finish
         for thread in self.threads.drain(..) {
-            thread.join().map_err(|_| Error::ThreadCleanup)?
+            thread.join().map_err(Error::ThreadCleanup)?
         }
         *state = new_state;
 
