@@ -22,7 +22,7 @@ extern crate vm_memory;
 
 use std::result;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Error {
     #[cfg(target_arch = "x86_64")]
     /// X86_64 specific error triggered during system configuration.
@@ -30,7 +30,7 @@ pub enum Error {
     /// The zero page extends past the end of guest_mem.
     ZeroPagePastRamEnd,
     /// Error writing the zero page of guest memory.
-    ZeroPageSetup,
+    ZeroPageSetup(vm_memory::GuestMemoryError),
 }
 pub type Result<T> = result::Result<T, Error>;
 

@@ -32,7 +32,7 @@ struct BootParamsWrapper(boot_params);
 // It is safe to initialize BootParamsWrap which is a wrapper over `boot_params` (a series of ints).
 unsafe impl ByteValued for BootParamsWrapper {}
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Error {
     /// Invalid e820 setup params.
     E820Configuration,
@@ -177,7 +177,7 @@ pub fn configure_system(
         .ok_or(super::Error::ZeroPagePastRamEnd)?;
     guest_mem
         .write_obj(params, zero_page_addr)
-        .map_err(|_| super::Error::ZeroPageSetup)?;
+        .map_err(super::Error::ZeroPageSetup)?;
 
     Ok(())
 }
@@ -229,12 +229,6 @@ mod tests {
         let gm = GuestMemoryMmap::new(&vec![(GuestAddress(0), 0x10000)]).unwrap();
         let config_err = configure_system(&gm, GuestAddress(0), 0, 1, None, None);
         assert!(config_err.is_err());
-        assert_eq!(
-            config_err.unwrap_err(),
-            super::super::Error::X86_64Setup(super::Error::MpTableSetup(
-                mptable::Error::NotEnoughMemory
-            ))
-        );
 
         // Now assigning some memory that falls before the 32bit memory hole.
         let mem_size = 128 << 20;

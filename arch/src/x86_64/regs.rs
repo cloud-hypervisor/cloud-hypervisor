@@ -12,7 +12,7 @@ use arch_gen::x86::msr_index;
 use kvm_bindings::{kvm_fpu, kvm_msr_entry, kvm_regs, kvm_sregs, Msrs};
 use kvm_ioctls::VcpuFd;
 use layout::{BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START};
-use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryMmap};
+use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 
 // MTRR constants
 const MTRR_ENABLE: u64 = 0x800; // IA32_MTRR_DEF_TYPE MSR: E (MTRRs enabled) flag, bit 11
@@ -30,16 +30,18 @@ pub enum Error {
     SetModelSpecificRegisters(kvm_ioctls::Error),
     /// Failed to set SREGs for this CPU.
     SetStatusRegisters(kvm_ioctls::Error),
+    /// Checking the GDT address failed.
+    CheckGDTAddr,
     /// Writing the GDT to RAM failed.
-    WriteGDT,
+    WriteGDT(GuestMemoryError),
     /// Writing the IDT to RAM failed.
-    WriteIDT,
+    WriteIDT(GuestMemoryError),
     /// Writing PDPTE to RAM failed.
-    WritePDPTEAddress,
+    WritePDPTEAddress(GuestMemoryError),
     /// Writing PDE to RAM failed.
-    WritePDEAddress,
+    WritePDEAddress(GuestMemoryError),
     /// Writing PML4 to RAM failed.
-    WritePML4Address,
+    WritePML4Address(GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -121,10 +123,8 @@ fn write_gdt_table(table: &[u64], guest_mem: &GuestMemoryMmap) -> Result<()> {
     for (index, entry) in table.iter().enumerate() {
         let addr = guest_mem
             .checked_offset(boot_gdt_addr, index * mem::size_of::<u64>())
-            .ok_or(Error::WriteGDT)?;
-        guest_mem
-            .write_obj(*entry, addr)
-            .map_err(|_| Error::WriteGDT)?;
+            .ok_or(Error::CheckGDTAddr)?;
+        guest_mem.write_obj(*entry, addr).map_err(Error::WriteGDT)?;
     }
     Ok(())
 }
@@ -133,7 +133,7 @@ fn write_idt_value(val: u64, guest_mem: &GuestMemoryMmap) -> Result<()> {
     let boot_idt_addr = BOOT_IDT_START;
     guest_mem
         .write_obj(val, boot_idt_addr)
-        .map_err(|_| Error::WriteIDT)
+        .map_err(Error::WriteIDT)
 }
 
 fn configure_segments_and_sregs(mem: &GuestMemoryMmap, sregs: &mut kvm_sregs) -> Result<()> {
@@ -177,16 +177,16 @@ fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut kvm_sregs) -> Result<()>
 
     // Entry covering VA [0..512GB)
     mem.write_obj(PDPTE_START.raw_value() | 0x03, PML4_START)
-        .map_err(|_| Error::WritePML4Address)?;
+        .map_err(Error::WritePML4Address)?;
 
     // Entry covering VA [0..1GB)
     mem.write_obj(PDE_START.raw_value() | 0x03, PDPTE_START)
-        .map_err(|_| Error::WritePDPTEAddress)?;
+        .map_err(Error::WritePDPTEAddress)?;
     // 512 2MB entries together covering VA [0..1GB). Note we are assuming
     // CPU supports 2MB pages (/proc/cpuinfo has 'pse'). All modern CPUs do.
     for i in 0..512 {
         mem.write_obj((i << 21) + 0x83u64, PDE_START.unchecked_add(i * 8))
-            .map_err(|_| Error::WritePDEAddress)?;
+            .map_err(Error::WritePDEAddress)?;
     }
 
     sregs.cr3 = PML4_START.raw_value();
