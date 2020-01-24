@@ -1040,7 +1040,7 @@ dependencies = [
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "pci 0.1.0",
- "vfio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vfio-bindings 0.1.0 (git+https://github.com/rust-vmm/vfio-bindings)",
  "vm-allocator 0.1.0",
  "vm-device 0.1.0",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
@@ -1050,9 +1050,9 @@ dependencies = [
 [[package]]
 name = "vfio-bindings"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/rust-vmm/vfio-bindings#46ef9d418e8d75b6a4b96f3bbc04e6eb47fef54b"
 dependencies = [
- "vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1221,14 +1221,6 @@ dependencies = [
 
 [[package]]
 name = "vmm-sys-util"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-dependencies = [
- "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "vmm-sys-util"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
@@ -1392,11 +1384,10 @@ dependencies = [
 "checksum utf8-ranges 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)" = "b4ae116fef2b7fea257ed6440d3cfcff7f190865f170cdad00bb6465bf18ecba"
 "checksum vcpkg 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)" = "3fc439f2794e98976c88a2a2dafce96b930fe8010b0a256b3c2199a773933168"
 "checksum vec_map 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)" = "05c78687fb1a80548ae3250346c3db86a80a7cdd77bda190189f2d0a0987c81a"
-"checksum vfio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "df0379abaedb35cac2636dd2ee75496ab921430fa5775b90f13bbda3e2abaf66"
+"checksum vfio-bindings 0.1.0 (git+https://github.com/rust-vmm/vfio-bindings)" = "<none>"
 "checksum virtio-bindings 0.1.0 (git+https://github.com/rust-vmm/virtio-bindings)" = "<none>"
 "checksum virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
 "checksum vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)" = "<none>"
-"checksum vmm-sys-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "46996f56aeae31fbc0532ae57a944e00089302f03b18c10c76eebfd9249f4a6c"
 "checksum vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "048b10a74f061d87dacca196a1964052a7135651641ab8d100aef21e58f33571"
 "checksum wasi 0.9.0+wasi-snapshot-preview1 (registry+https://github.com/rust-lang/crates.io-index)" = "cccddf32554fecc6acb585f82a32a72e28b48f8c4c1883ddfeeeaa96f7d8e519"
 "checksum winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)" = "167dc9d6949a9b857f3451275e911c3f44255842c1f7a76f33c55103a909087a"
