@@ -39,6 +39,10 @@ pub enum Error {
     ParseCmdlineParams,
     /// Failed parsing disks parameters.
     ParseDisksParams,
+    /// Failed parsing disk queue number parameter.
+    ParseDiskNumQueuesParam(std::num::ParseIntError),
+    /// Failed parsing disk queue size parameter.
+    ParseDiskQueueSizeParam(std::num::ParseIntError),
     /// Failed parsing random number generator parameters.
     ParseRngParams,
     /// Failed parsing network ip parameter.
@@ -344,6 +348,18 @@ pub struct DiskConfig {
     pub direct: bool,
     #[serde(default)]
     pub iommu: bool,
+    #[serde(default = "default_diskconfig_num_queues")]
+    pub num_queues: usize,
+    #[serde(default = "default_diskconfig_queue_size")]
+    pub queue_size: u16,
+}
+
+fn default_diskconfig_num_queues() -> usize {
+    DEFAULT_NUM_QUEUES_VUBLK
+}
+
+fn default_diskconfig_queue_size() -> u16 {
+    DEFAULT_QUEUE_SIZE_VUBLK
 }
 
 impl DiskConfig {
@@ -355,6 +371,8 @@ impl DiskConfig {
         let mut readonly_str: &str = "";
         let mut direct_str: &str = "";
         let mut iommu_str: &str = "";
+        let mut num_queues_str: &str = "";
+        let mut queue_size_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("path=") {
@@ -365,7 +383,25 @@ impl DiskConfig {
                 direct_str = &param[7..];
             } else if param.starts_with("iommu=") {
                 iommu_str = &param[6..];
+            } else if param.starts_with("num_queues=") {
+                num_queues_str = &param[11..];
+            } else if param.starts_with("queue_size=") {
+                queue_size_str = &param[11..];
             }
+        }
+
+        let mut num_queues: usize = default_diskconfig_num_queues();
+        let mut queue_size: u16 = default_diskconfig_queue_size();
+
+        if !num_queues_str.is_empty() {
+            num_queues = num_queues_str
+                .parse()
+                .map_err(Error::ParseDiskNumQueuesParam)?;
+        }
+        if !queue_size_str.is_empty() {
+            queue_size = queue_size_str
+                .parse()
+                .map_err(Error::ParseDiskQueueSizeParam)?;
         }
 
         Ok(DiskConfig {
@@ -373,6 +409,8 @@ impl DiskConfig {
             readonly: parse_on_off(readonly_str)?,
             direct: parse_on_off(direct_str)?,
             iommu: parse_on_off(iommu_str)?,
+            num_queues,
+            queue_size,
         })
     }
 }
