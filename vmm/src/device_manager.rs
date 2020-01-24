@@ -36,8 +36,6 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::AsRawFd;
-use std::ptr::null_mut;
 use std::result;
 #[cfg(feature = "pci_support")]
 use std::sync::Weak;
@@ -48,8 +46,8 @@ use vm_allocator::SystemAllocator;
 use vm_device::interrupt::InterruptManager;
 use vm_device::interrupt::{InterruptIndex, PIN_IRQ};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::GuestAddress;
-use vm_memory::{Address, GuestMemoryMmap, GuestUsize};
+use vm_memory::guest_memory::FileOffset;
+use vm_memory::{Address, GuestAddress, GuestMemoryMmap, GuestUsize, MmapRegion};
 #[cfg(feature = "pci_support")]
 use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::transport::VirtioTransport;
@@ -192,6 +190,12 @@ pub enum DeviceManagerError {
 
     /// Failed creating IOAPIC.
     CreateIoapic(ioapic::Error),
+
+    /// Failed creating a new MmapRegion instance.
+    NewMmapRegion(vm_memory::mmap::MmapRegionError),
+
+    /// Failed cloning a File.
+    CloneFile(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -371,8 +375,11 @@ pub struct DeviceManager {
     // IOAPIC
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
 
-    // mmap()ed region to unmap on drop
-    mmap_regions: Vec<(*mut libc::c_void, usize)>,
+    // List of mmap()ed regions managed through MmapRegion instances.
+    // Using MmapRegion will perform the unmapping automatically when
+    // the instance is dropped, which happens when the DeviceManager
+    // gets dropped.
+    _mmap_regions: Vec<MmapRegion>,
 
     // Things to be added to the commandline (i.e. for virtio-mmio)
     cmdline_additions: Vec<String>,
@@ -410,7 +417,7 @@ impl DeviceManager {
 
         let mut virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)> = Vec::new();
         let mut migratable_devices: Vec<Arc<Mutex<dyn Migratable>>> = Vec::new();
-        let mut mmap_regions = Vec::new();
+        let mut _mmap_regions = Vec::new();
 
         #[allow(unused_mut)]
         let mut cmdline_additions = Vec::new();
@@ -478,7 +485,7 @@ impl DeviceManager {
             vm_info,
             &address_manager,
             &memory_manager,
-            &mut mmap_regions,
+            &mut _mmap_regions,
             &mut migratable_devices,
         )?);
 
@@ -539,7 +546,7 @@ impl DeviceManager {
             address_manager,
             console,
             ioapic: Some(ioapic),
-            mmap_regions,
+            _mmap_regions,
             cmdline_additions,
             virt_iommu,
             #[cfg(feature = "acpi")]
@@ -895,7 +902,7 @@ impl DeviceManager {
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
-        mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
+        mmap_regions: &mut Vec<MmapRegion>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut allocator = address_manager.allocator.lock().unwrap();
@@ -1098,7 +1105,7 @@ impl DeviceManager {
         vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
         memory_manager: &Arc<Mutex<MemoryManager>>,
-        mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
+        mmap_regions: &mut Vec<MmapRegion>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
@@ -1118,21 +1125,11 @@ impl DeviceManager {
                             )
                             .ok_or(DeviceManagerError::FsRangeAllocation)?;
 
-                        let addr = unsafe {
-                            libc::mmap(
-                                null_mut(),
-                                fs_cache as usize,
-                                libc::PROT_READ | libc::PROT_WRITE,
-                                libc::MAP_NORESERVE | libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
-                                -1,
-                                0 as libc::off_t,
-                            )
-                        };
-                        if addr == libc::MAP_FAILED {
-                            return Err(DeviceManagerError::Mmap(io::Error::last_os_error()));
-                        }
+                        let mmap_region = MmapRegion::new(fs_cache as usize)
+                            .map_err(DeviceManagerError::NewMmapRegion)?;
+                        let addr: u64 = mmap_region.as_ptr() as u64;
 
-                        mmap_regions.push((addr, fs_cache as usize));
+                        mmap_regions.push(mmap_region);
 
                         memory_manager
                             .lock()
@@ -1140,7 +1137,7 @@ impl DeviceManager {
                             .create_userspace_mapping(
                                 fs_guest_addr.raw_value(),
                                 fs_cache,
-                                addr as u64,
+                                addr,
                                 false,
                             )
                             .map_err(DeviceManagerError::MemoryManager)?;
@@ -1157,7 +1154,7 @@ impl DeviceManager {
                                 len: fs_cache as GuestUsize,
                                 region_list,
                             },
-                            addr as u64,
+                            addr,
                         ))
                     } else {
                         None
@@ -1192,7 +1189,7 @@ impl DeviceManager {
         vm_info: &VmInfo,
         allocator: &mut SystemAllocator,
         memory_manager: &Arc<Mutex<MemoryManager>>,
-        mmap_regions: &mut Vec<(*mut libc::c_void, usize)>,
+        mmap_regions: &mut Vec<MmapRegion>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
@@ -1225,18 +1222,13 @@ impl DeviceManager {
                         .map_err(DeviceManagerError::PmemFileSetLen)?;
                 }
 
-                let addr = unsafe {
-                    libc::mmap(
-                        null_mut(),
-                        size as usize,
-                        libc::PROT_READ | libc::PROT_WRITE,
-                        libc::MAP_NORESERVE | libc::MAP_SHARED,
-                        file.as_raw_fd(),
-                        0 as libc::off_t,
-                    )
-                };
+                let cloned_file = file.try_clone().map_err(DeviceManagerError::CloneFile)?;
+                let mmap_region =
+                    MmapRegion::from_file(FileOffset::new(cloned_file, 0), size as usize)
+                        .map_err(DeviceManagerError::NewMmapRegion)?;
+                let addr: u64 = mmap_region.as_ptr() as u64;
 
-                mmap_regions.push((addr, size as usize));
+                mmap_regions.push(mmap_region);
 
                 memory_manager
                     .lock()
@@ -1244,7 +1236,7 @@ impl DeviceManager {
                     .create_userspace_mapping(
                         pmem_guest_addr.raw_value(),
                         size,
-                        addr as u64,
+                        addr,
                         pmem_cfg.mergeable,
                     )
                     .map_err(DeviceManagerError::MemoryManager)?;
@@ -1638,16 +1630,6 @@ impl DeviceManager {
             .map_err(DeviceManagerError::HotPlugNotification);
         #[cfg(not(feature = "acpi"))]
         return Ok(());
-    }
-}
-
-impl Drop for DeviceManager {
-    fn drop(&mut self) {
-        for (addr, size) in self.mmap_regions.drain(..) {
-            unsafe {
-                libc::munmap(addr, size);
-            }
-        }
     }
 }
 
