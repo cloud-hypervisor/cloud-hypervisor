@@ -192,9 +192,6 @@ pub enum DeviceManagerError {
 
     /// Failed creating IOAPIC.
     CreateIoapic(ioapic::Error),
-
-    /// Failed to allocate MMIO area
-    AllocateMMIO,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -752,28 +749,22 @@ impl DeviceManager {
             .create_group(PIN_IRQ, ged_irq as InterruptIndex, 1 as InterruptIndex)
             .map_err(DeviceManagerError::CreateInterruptGroup)?;
 
-        let ged_base = address_manager
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_mmio_addresses(None, devices::AcpiGEDDevice::DEVICE_SIZE, None)
-            .ok_or(DeviceManagerError::AllocateMMIO)?;
-
         let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(
             interrupt_group,
             ged_irq,
-            ged_base,
         )));
 
         address_manager
-            .mmio_bus
-            .insert(
-                ged_device.clone(),
-                ged_base.0,
-                devices::AcpiGEDDevice::DEVICE_SIZE,
-            )
-            .map_err(DeviceManagerError::BusError)?;
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_io_addresses(Some(GuestAddress(0xb000)), 0x1, None)
+            .ok_or(DeviceManagerError::AllocateIOPort)?;
 
+        address_manager
+            .io_bus
+            .insert(ged_device.clone(), 0xb000, 0x1)
+            .map_err(DeviceManagerError::BusError)?;
         Ok(Some(ged_device))
     }
 
@@ -1660,7 +1651,7 @@ impl Drop for DeviceManager {
 }
 
 #[cfg(feature = "acpi")]
-fn create_ged_device(ged_base: u64, ged_irq: u32) -> Vec<u8> {
+fn create_ged_device(ged_irq: u32) -> Vec<u8> {
     aml::Device::new(
         "_SB_.GED_".into(),
         vec![
@@ -1672,12 +1663,7 @@ fn create_ged_device(ged_base: u64, ged_irq: u32) -> Vec<u8> {
                     true, true, false, false, ged_irq,
                 )]),
             ),
-            &aml::OpRegion::new(
-                "GDST".into(),
-                aml::OpRegionSpace::SystemMemory,
-                ged_base as usize,
-                devices::AcpiGEDDevice::DEVICE_SIZE as usize,
-            ),
+            &aml::OpRegion::new("GDST".into(), aml::OpRegionSpace::SystemIO, 0xb000, 0x1),
             &aml::Field::new(
                 "GDST".into(),
                 aml::FieldAccessType::Byte,
@@ -1784,21 +1770,14 @@ impl Aml for DeviceManager {
         let s5_sleep_data =
             aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes();
 
-        let ged_irq = self
-            .ged_notification_device
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .irq();
-        let ged_base = self
-            .ged_notification_device
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .device_base();
-        let ged_data = create_ged_device(ged_base.0, ged_irq);
+        let ged_data = create_ged_device(
+            self.ged_notification_device
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .irq(),
+        );
 
         bytes.extend_from_slice(pci_dsdt_data.as_slice());
         bytes.extend_from_slice(mbrd_dsdt_data.as_slice());
