@@ -1221,7 +1221,12 @@ impl QcowFile {
         let refcount = self
             .refcounts
             .get_cluster_refcount(&mut self.raw_file, cluster_addr)
-            .map_err(|_| std::io::Error::from_raw_os_error(EINVAL))?;
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("failed to get cluster refcount: {}", e),
+                )
+            })?;
         if refcount == 0 {
             return Err(std::io::Error::from_raw_os_error(EINVAL));
         }
