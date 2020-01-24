@@ -122,7 +122,9 @@ fn create_app<'a, 'b>(
                 .long("disk")
                 .help(
                     "Disk parameters \"path=<disk_image_path>,\
-                     readonly=on|off,iommu=on|off\"",
+                     readonly=on|off,iommu=on|off,\
+                     num_queues=<number_of_queues>,\
+                     queue_size=<size_of_each_queue>\"",
                 )
                 .takes_value(true)
                 .min_values(1)

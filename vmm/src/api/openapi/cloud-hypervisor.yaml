@@ -277,6 +277,12 @@ components:
         iommu:
           type: boolean
           default: false
+        num_queues:
+          type: integer
+          default: 1
+        queue_size:
+          type: integer
+          default: 128
 
     NetConfig:
       type: object
