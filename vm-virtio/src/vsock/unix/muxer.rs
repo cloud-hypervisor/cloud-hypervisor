@@ -452,7 +452,7 @@ impl VsockMuxer {
         }
 
         let mut word_iter = std::str::from_utf8(&buf[..blen])
-            .map_err(|_| Error::InvalidPortRequest)?
+            .map_err(Error::ConvertFromUTF8)?
             .split_whitespace();
 
         word_iter
@@ -466,8 +466,8 @@ impl VsockMuxer {
                 }
             })
             .and_then(|_| word_iter.next().ok_or(Error::InvalidPortRequest))
-            .and_then(|word| word.parse::<u32>().map_err(|_| Error::InvalidPortRequest))
-            .map_err(|_| Error::InvalidPortRequest)
+            .and_then(|word| word.parse::<u32>().map_err(Error::ParseInteger))
+            .map_err(|e| Error::ReadStreamPort(Box::new(e)))
     }
 
     /// Add a new connection to the active connection pool.
