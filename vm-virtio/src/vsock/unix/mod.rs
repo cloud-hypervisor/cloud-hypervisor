@@ -28,12 +28,18 @@ mod defs {
 
 #[derive(Debug)]
 pub enum Error {
+    /// Error converting from UTF-8
+    ConvertFromUTF8(std::str::Utf8Error),
     /// Error registering a new epoll-listening FD.
     EpollAdd(std::io::Error),
     /// Error creating an epoll FD.
     EpollFdCreate(std::io::Error),
     /// The host made an invalid vsock port connection request.
     InvalidPortRequest,
+    /// Error parsing integer.
+    ParseInteger(std::num::ParseIntError),
+    /// Error reading stream port.
+    ReadStreamPort(Box<Error>),
     /// Error accepting a new connection from the host-side Unix socket.
     UnixAccept(std::io::Error),
     /// Error binding to the host-side Unix socket.
