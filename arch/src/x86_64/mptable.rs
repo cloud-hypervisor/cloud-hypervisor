@@ -14,7 +14,7 @@ use libc::c_char;
 
 use arch_gen::x86::mpspec;
 use layout::{APIC_START, IOAPIC_START, MPTABLE_START};
-use vm_memory::{Address, ByteValued, Bytes, GuestMemory, GuestMemoryMmap};
+use vm_memory::{Address, ByteValued, Bytes, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `ByteValued`) where:
@@ -45,30 +45,30 @@ unsafe impl ByteValued for MpcTableWrapper {}
 unsafe impl ByteValued for MpcLintsrcWrapper {}
 unsafe impl ByteValued for MpfIntelWrapper {}
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Error {
     /// There was too little guest memory to store the entire MP table.
     NotEnoughMemory,
     /// The MP table has too little address space to be stored.
     AddressOverflow,
     /// Failure while zeroing out the memory for the MP table.
-    Clear,
+    Clear(GuestMemoryError),
     /// Number of CPUs exceeds the maximum supported CPUs
     TooManyCpus,
     /// Failure to write the MP floating pointer.
-    WriteMpfIntel,
+    WriteMpfIntel(GuestMemoryError),
     /// Failure to write MP CPU entry.
-    WriteMpcCpu,
+    WriteMpcCpu(GuestMemoryError),
     /// Failure to write MP ioapic entry.
-    WriteMpcIoapic,
+    WriteMpcIoapic(GuestMemoryError),
     /// Failure to write MP bus entry.
-    WriteMpcBus,
+    WriteMpcBus(GuestMemoryError),
     /// Failure to write MP interrupt source entry.
-    WriteMpcIntsrc,
+    WriteMpcIntsrc(GuestMemoryError),
     /// Failure to write MP local interrupt source entry.
-    WriteMpcLintsrc,
+    WriteMpcLintsrc(GuestMemoryError),
     /// Failure to write MP table header.
-    WriteMpcTable,
+    WriteMpcTable(GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -145,7 +145,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
     }
 
     mem.read_exact_from(base_mp, &mut io::repeat(0), mp_size)
-        .map_err(|_| Error::Clear)?;
+        .map_err(Error::Clear)?;
 
     {
         let mut mpf_intel = MpfIntelWrapper(mpspec::mpf_intel::default());
@@ -156,7 +156,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
         mpf_intel.0.physptr = (base_mp.raw_value() + size) as u32;
         mpf_intel.0.checksum = mpf_intel_compute_checksum(&mpf_intel.0);
         mem.write_obj(mpf_intel, base_mp)
-            .map_err(|_| Error::WriteMpfIntel)?;
+            .map_err(Error::WriteMpfIntel)?;
         base_mp = base_mp.unchecked_add(size);
     }
 
@@ -181,7 +181,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
             mpc_cpu.0.cpufeature = CPU_STEPPING;
             mpc_cpu.0.featureflag = CPU_FEATURE_APIC | CPU_FEATURE_FPU;
             mem.write_obj(mpc_cpu, base_mp)
-                .map_err(|_| Error::WriteMpcCpu)?;
+                .map_err(Error::WriteMpcCpu)?;
             base_mp = base_mp.unchecked_add(size as u64);
             checksum = checksum.wrapping_add(compute_checksum(&mpc_cpu.0));
         }
@@ -193,7 +193,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
         mpc_bus.0.busid = 0;
         mpc_bus.0.bustype = BUS_TYPE_ISA;
         mem.write_obj(mpc_bus, base_mp)
-            .map_err(|_| Error::WriteMpcBus)?;
+            .map_err(Error::WriteMpcBus)?;
         base_mp = base_mp.unchecked_add(size as u64);
         checksum = checksum.wrapping_add(compute_checksum(&mpc_bus.0));
     }
@@ -206,7 +206,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
         mpc_ioapic.0.flags = mpspec::MPC_APIC_USABLE as u8;
         mpc_ioapic.0.apicaddr = IOAPIC_START.0 as u32;
         mem.write_obj(mpc_ioapic, base_mp)
-            .map_err(|_| Error::WriteMpcIoapic)?;
+            .map_err(Error::WriteMpcIoapic)?;
         base_mp = base_mp.unchecked_add(size as u64);
         checksum = checksum.wrapping_add(compute_checksum(&mpc_ioapic.0));
     }
@@ -222,7 +222,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
         mpc_intsrc.0.dstapic = ioapicid;
         mpc_intsrc.0.dstirq = i;
         mem.write_obj(mpc_intsrc, base_mp)
-            .map_err(|_| Error::WriteMpcIntsrc)?;
+            .map_err(Error::WriteMpcIntsrc)?;
         base_mp = base_mp.unchecked_add(size as u64);
         checksum = checksum.wrapping_add(compute_checksum(&mpc_intsrc.0));
     }
@@ -237,7 +237,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
         mpc_lintsrc.0.destapic = 0;
         mpc_lintsrc.0.destapiclint = 0;
         mem.write_obj(mpc_lintsrc, base_mp)
-            .map_err(|_| Error::WriteMpcLintsrc)?;
+            .map_err(Error::WriteMpcLintsrc)?;
         base_mp = base_mp.unchecked_add(size as u64);
         checksum = checksum.wrapping_add(compute_checksum(&mpc_lintsrc.0));
     }
@@ -252,7 +252,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
         mpc_lintsrc.0.destapic = 0xFF; /* to all local APICs */
         mpc_lintsrc.0.destapiclint = 1;
         mem.write_obj(mpc_lintsrc, base_mp)
-            .map_err(|_| Error::WriteMpcLintsrc)?;
+            .map_err(Error::WriteMpcLintsrc)?;
         base_mp = base_mp.unchecked_add(size as u64);
         checksum = checksum.wrapping_add(compute_checksum(&mpc_lintsrc.0));
     }
@@ -271,7 +271,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
         checksum = checksum.wrapping_add(compute_checksum(&mpc_table.0));
         mpc_table.0.checksum = (!checksum).wrapping_add(1) as i8;
         mem.write_obj(mpc_table, table_base)
-            .map_err(|_| Error::WriteMpcTable)?;
+            .map_err(Error::WriteMpcTable)?;
     }
 
     Ok(())
@@ -393,7 +393,7 @@ mod tests {
         let cpus = MAX_SUPPORTED_CPUS + 1;
         let mem = GuestMemoryMmap::new(&[(MPTABLE_START, compute_mp_size(cpus as u8))]).unwrap();
 
-        let result = setup_mptable(&mem, cpus as u8).unwrap_err();
-        assert_eq!(result, Error::TooManyCpus);
+        let result = setup_mptable(&mem, cpus as u8);
+        assert!(result.is_err());
     }
 }
