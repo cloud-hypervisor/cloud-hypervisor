@@ -44,7 +44,7 @@ type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 #[derive(Debug)]
 enum Error {
     /// Failed to create kill eventfd.
-    CreateKillEventFd,
+    CreateKillEventFd(io::Error),
     /// Failed to handle event other than input event.
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
@@ -89,7 +89,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
     fn new(fs: F) -> Result<Self> {
         Ok(VhostUserFsBackend {
             mem: None,
-            kill_evt: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::CreateKillEventFd)?,
+            kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             server: Arc::new(Server::new(fs)),
         })
     }

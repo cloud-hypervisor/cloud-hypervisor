@@ -1918,18 +1918,17 @@ mod tests {
         let mut counter = 0;
         loop {
             match (|| -> Result<(), Error> {
-                let tcp =
-                    TcpStream::connect(format!("{}:22", ip)).map_err(|_| Error::Connection)?;
+                let tcp = TcpStream::connect(format!("{}:22", ip)).map_err(Error::Connection)?;
                 let mut sess = Session::new().unwrap();
                 sess.set_tcp_stream(tcp);
-                sess.handshake().map_err(|_| Error::Connection)?;
+                sess.handshake().map_err(Error::Handshake)?;
 
                 sess.userauth_password("cloud", "cloud123")
-                    .map_err(|_| Error::Authentication)?;
+                    .map_err(Error::Authentication)?;
                 assert!(sess.authenticated());
 
-                let mut channel = sess.channel_session().map_err(|_| Error::Command)?;
-                channel.exec(command).map_err(|_| Error::Command)?;
+                let mut channel = sess.channel_session().map_err(Error::ChannelSession)?;
+                channel.exec(command).map_err(Error::Command)?;
 
                 // Intentionally ignore these results here as their failure
                 // does not precipitate a repeat
@@ -1953,10 +1952,12 @@ mod tests {
 
     #[derive(Debug)]
     enum Error {
-        Connection,
-        Authentication,
-        Command,
-        Parsing,
+        Connection(std::io::Error),
+        Handshake(ssh2::Error),
+        Authentication(ssh2::Error),
+        ChannelSession(ssh2::Error),
+        Command(ssh2::Error),
+        Parsing(std::num::ParseIntError),
     }
 
     impl std::error::Error for Error {}
@@ -2080,7 +2081,7 @@ mod tests {
                 .ssh_command("grep -c processor /proc/cpuinfo")?
                 .trim()
                 .parse()
-                .map_err(|_| Error::Parsing)?)
+                .map_err(Error::Parsing)?)
         }
 
         fn get_initial_apicid(&self) -> Result<u32, Error> {
@@ -2088,7 +2089,7 @@ mod tests {
                 .ssh_command("grep \"initial apicid\" /proc/cpuinfo | grep -o \"[0-9]*\"")?
                 .trim()
                 .parse()
-                .map_err(|_| Error::Parsing)?)
+                .map_err(Error::Parsing)?)
         }
 
         fn get_total_memory(&self) -> Result<u32, Error> {
@@ -2096,7 +2097,7 @@ mod tests {
                 .ssh_command("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")?
                 .trim()
                 .parse()
-                .map_err(|_| Error::Parsing)?)
+                .map_err(Error::Parsing)?)
         }
 
         fn get_entropy(&self) -> Result<u32, Error> {
@@ -2104,7 +2105,7 @@ mod tests {
                 .ssh_command("cat /proc/sys/kernel/random/entropy_avail")?
                 .trim()
                 .parse()
-                .map_err(|_| Error::Parsing)?)
+                .map_err(Error::Parsing)?)
         }
 
         fn get_pci_bridge_class(&self) -> Result<String, Error> {
@@ -2189,8 +2190,8 @@ mod tests {
                 return Ok(false);
             }
 
-            let start_addr = u64::from_str_radix(args[0], 16).map_err(|_| Error::Parsing)?;
-            let end_addr = u64::from_str_radix(args[1], 16).map_err(|_| Error::Parsing)?;
+            let start_addr = u64::from_str_radix(args[0], 16).map_err(Error::Parsing)?;
+            let end_addr = u64::from_str_radix(args[1], 16).map_err(Error::Parsing)?;
 
             Ok(cache == (end_addr - start_addr + 1))
         }
