@@ -44,7 +44,7 @@ pub enum Error {
     /// Failed to activate device.
     BadActivate,
     /// Failed to create kill eventfd
-    CreateKillEventFd,
+    CreateKillEventFd(io::Error),
     /// Failed to add event.
     EpollCtl(io::Error),
     /// Fail to wait event.
@@ -68,13 +68,13 @@ pub enum Error {
     /// Failed to parse sock parameter.
     ParseSockParam,
     /// Failed to parse ip parameter.
-    ParseIpParam,
+    ParseIpParam(std::net::AddrParseError),
     /// Failed to parse mask parameter.
-    ParseMaskParam,
+    ParseMaskParam(std::net::AddrParseError),
     /// Failed to parse queue number.
-    ParseQueueNumParam,
+    ParseQueueNumParam(std::num::ParseIntError),
     /// Failed to parse queue size.
-    ParseQueueSizeParam,
+    ParseQueueSizeParam(std::num::ParseIntError),
     /// Open tap device failed.
     OpenTap(vm_virtio::net_util::Error),
 }
@@ -144,7 +144,7 @@ impl VhostUserNetBackend {
         Ok(VhostUserNetBackend {
             mem: None,
             vring_worker: None,
-            kill_evt: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::CreateKillEventFd)?,
+            kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             taps: taps_v,
             rxs,
             txs,
@@ -408,20 +408,16 @@ impl<'a> VhostUserNetBackendConfig<'a> {
             return Err(Error::ParseSockParam);
         }
         if !ip_str.is_empty() {
-            ip = ip_str.parse().map_err(|_| Error::ParseIpParam)?;
+            ip = ip_str.parse().map_err(Error::ParseIpParam)?;
         }
         if !mask_str.is_empty() {
-            mask = mask_str.parse().map_err(|_| Error::ParseMaskParam)?;
+            mask = mask_str.parse().map_err(Error::ParseMaskParam)?;
         }
         if !num_queues_str.is_empty() {
-            num_queues = num_queues_str
-                .parse()
-                .map_err(|_| Error::ParseQueueNumParam)?;
+            num_queues = num_queues_str.parse().map_err(Error::ParseQueueNumParam)?;
         }
         if !queue_size_str.is_empty() {
-            queue_size = queue_size_str
-                .parse()
-                .map_err(|_| Error::ParseQueueSizeParam)?;
+            queue_size = queue_size_str.parse().map_err(Error::ParseQueueSizeParam)?;
         }
 
         Ok(VhostUserNetBackendConfig {
