@@ -36,7 +36,7 @@ vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
-signal-hook = "0.1.10"
+signal-hook = "0.1.13"
 
 [dependencies.linux-loader]
 git = "https://github.com/rust-vmm/linux-loader"
