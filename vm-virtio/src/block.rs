@@ -1011,9 +1011,6 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
     }
 }
 
-impl<T: 'static + DiskFile + Send> Pausable for Block<T> {
-    virtio_pausable_inner!();
-}
-
+virtio_pausable!(Block, T: 'static + DiskFile + Send);
 impl<T: 'static + DiskFile + Send> Snapshotable for Block<T> {}
 impl<T: 'static + DiskFile + Send> Migratable for Block<T> {}

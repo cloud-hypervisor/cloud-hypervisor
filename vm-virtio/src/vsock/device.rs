@@ -588,12 +588,7 @@ where
     }
 }
 
-impl<B> Pausable for Vsock<B>
-where
-    B: VsockBackend + Sync + 'static,
-{
-    virtio_pausable_inner!();
-}
+virtio_pausable!(Vsock, T: 'static + VsockBackend + Sync);
 
 impl<B> Snapshotable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 impl<B> Migratable for Vsock<B> where B: VsockBackend + Sync + 'static {}
