@@ -775,7 +775,7 @@ pub struct Block<T: DiskFile> {
     config_space: Vec<u8>,
     queue_evt: Option<EventFd>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    epoll_thread: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     pause_evt: Option<EventFd>,
     paused: Arc<AtomicBool>,
 }
@@ -975,14 +975,17 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
             };
 
             let paused = self.paused.clone();
+            let mut epoll_threads = Vec::new();
             thread::Builder::new()
                 .name("virtio_blk".to_string())
                 .spawn(move || handler.run(queue_evt, paused))
-                .map(|thread| self.epoll_thread = Some(thread))
+                .map(|thread| epoll_threads.push(thread))
                 .map_err(|e| {
                     error!("failed to clone the virtio-blk epoll thread: {}", e);
                     ActivateError::BadActivate
                 })?;
+
+            self.epoll_thread = Some(epoll_threads);
 
             return Ok(());
         }
