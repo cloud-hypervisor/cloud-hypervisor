@@ -113,9 +113,10 @@ pub trait DmaRemapping: Send + Sync {
 }
 
 #[macro_export]
-macro_rules! virtio_pausable_inner {
+macro_rules! virtio_pausable_trait_inner {
     () => {
-        fn pause(&mut self) -> result::Result<(), MigratableError> {
+        // This is the common Pausable trait implementation for virtio.
+        fn virtio_pause(&mut self) -> result::Result<(), MigratableError> {
             debug!(
                 "Pausing virtio-{}",
                 VirtioDeviceType::from(self.device_type())
@@ -130,7 +131,7 @@ macro_rules! virtio_pausable_inner {
             Ok(())
         }
 
-        fn resume(&mut self) -> result::Result<(), MigratableError> {
+        fn virtio_resume(&mut self) -> result::Result<(), MigratableError> {
             debug!(
                 "Resuming virtio-{}",
                 VirtioDeviceType::from(self.device_type())
@@ -140,42 +141,6 @@ macro_rules! virtio_pausable_inner {
                 for i in 0..epoll_threads.len() {
                     epoll_threads[i].thread().unpark();
                 }
-            }
-
-            Ok(())
-        }
-    };
-    ($ctrl_q:expr, $mq:expr) => {
-        fn pause(&mut self) -> result::Result<(), MigratableError> {
-            debug!(
-                "Pausing virtio-{}",
-                VirtioDeviceType::from(self.device_type())
-            );
-            self.paused.store(true, Ordering::SeqCst);
-            if let Some(pause_evt) = &self.pause_evt {
-                pause_evt
-                    .write(1)
-                    .map_err(|e| MigratableError::Pause(e.into()))?;
-            }
-
-            Ok(())
-        }
-
-        fn resume(&mut self) -> result::Result<(), MigratableError> {
-            debug!(
-                "Resuming virtio-{}",
-                VirtioDeviceType::from(self.device_type())
-            );
-            self.paused.store(false, Ordering::SeqCst);
-
-            if let Some(epoll_threads) = &self.epoll_threads {
-                for i in 0..epoll_threads.len() {
-                    epoll_threads[i].thread().unpark();
-                }
-            }
-
-            if let Some(ctrl_queue_epoll_thread) = &self.ctrl_queue_epoll_thread {
-                ctrl_queue_epoll_thread.thread().unpark();
             }
 
             Ok(())
@@ -184,15 +149,78 @@ macro_rules! virtio_pausable_inner {
 }
 
 #[macro_export]
-macro_rules! virtio_pausable {
-    ($name:ident) => {
-        impl Pausable for $name {
-            virtio_pausable_inner!();
+macro_rules! virtio_pausable_trait {
+    ($type:ident) => {
+        trait VirtioPausable {
+            fn virtio_pause(&mut self) -> std::result::Result<(), MigratableError>;
+            fn virtio_resume(&mut self) -> std::result::Result<(), MigratableError>;
+        }
+
+        impl VirtioPausable for $type {
+            virtio_pausable_trait_inner!();
         }
     };
-    ($name:ident, $ctrl_q:expr, $mq:expr) => {
-        impl Pausable for $name {
-            virtio_pausable_inner!($ctrl_q, $mq);
+
+    ($type:ident, T: $($bounds:tt)+) => {
+        trait VirtioPausable {
+            fn virtio_pause(&mut self) -> std::result::Result<(), MigratableError>;
+            fn virtio_resume(&mut self) -> std::result::Result<(), MigratableError>;
+        }
+
+        impl<T: $($bounds)+ > VirtioPausable for $type<T> {
+            virtio_pausable_trait_inner!();
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! virtio_pausable {
+    ($type:ident) => {
+        virtio_pausable_trait!($type);
+
+        impl Pausable for $type {
+            fn pause(&mut self) -> result::Result<(), MigratableError> {
+                self.virtio_pause()
+            }
+
+            fn resume(&mut self) -> result::Result<(), MigratableError> {
+                self.virtio_resume()
+            }
+        }
+    };
+
+    // For type bound virtio types
+    ($type:ident, T: $($bounds:tt)+) => {
+        virtio_pausable_trait!($type, T: $($bounds)+);
+
+        impl<T: $($bounds)+ > Pausable for $type<T> {
+            fn pause(&mut self) -> result::Result<(), MigratableError> {
+                self.virtio_pause()
+            }
+
+            fn resume(&mut self) -> result::Result<(), MigratableError> {
+                self.virtio_resume()
+            }
+        }
+    };
+
+    ($type:ident, $ctrl_q:expr, $mq: expr) => {
+        virtio_pausable_trait!($type);
+
+        impl Pausable for $type {
+            fn pause(&mut self) -> result::Result<(), MigratableError> {
+                self.virtio_pause()
+            }
+
+            fn resume(&mut self) -> result::Result<(), MigratableError> {
+                self.virtio_resume()?;
+
+                if let Some(ctrl_queue_epoll_thread) = &self.ctrl_queue_epoll_thread {
+                    ctrl_queue_epoll_thread.thread().unpark();
+                }
+
+                Ok(())
+            }
         }
     };
 }
