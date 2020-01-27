@@ -204,7 +204,7 @@ macro_rules! virtio_pausable {
         }
     };
 
-    ($type:ident, $ctrl_q:expr, $mq: expr) => {
+    ($type:ident, $ctrl_q:expr) => {
         virtio_pausable_trait!($type);
 
         impl Pausable for $type {
