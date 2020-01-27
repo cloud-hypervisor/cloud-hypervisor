@@ -1,7 +1,9 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::net_util::{build_net_config_space, CtrlVirtio, NetCtrlEpollHandler};
+use super::super::net_util::{
+    build_net_config_space, CtrlVirtio, NetCtrlEpollHandler, VirtioNetConfig,
+};
 use super::super::Error as CtrlError;
 use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
 use super::handler::*;
@@ -26,7 +28,7 @@ use vhost_rs::VhostBackend;
 use virtio_bindings::bindings::virtio_net;
 use virtio_bindings::bindings::virtio_ring;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::GuestMemoryMmap;
+use vm_memory::{ByteValued, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
 const DEFAULT_QUEUE_NUMBER: usize = 2;
@@ -41,7 +43,7 @@ pub struct Net {
     avail_features: u64,
     acked_features: u64,
     backend_features: u64,
-    config_space: Vec<u8>,
+    config: VirtioNetConfig,
     queue_sizes: Vec<u16>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
@@ -122,7 +124,13 @@ impl Net {
         avail_features |= 1 << virtio_net::VIRTIO_NET_F_CTRL_VQ;
         let queue_num = vu_cfg.num_queues + 1;
 
-        let config_space = build_net_config_space(mac_addr, vu_cfg.num_queues, &mut avail_features);
+        let mut config = VirtioNetConfig::default();
+        build_net_config_space(
+            &mut config,
+            mac_addr,
+            vu_cfg.num_queues,
+            &mut avail_features,
+        );
 
         // Send set_vring_base here, since it could tell backends, like OVS + DPDK,
         // how many virt queues to be handled, which backend required to know at early stage.
@@ -139,7 +147,7 @@ impl Net {
             avail_features,
             acked_features,
             backend_features,
-            config_space,
+            config,
             queue_sizes: vec![vu_cfg.queue_size; queue_num],
             queue_evts: None,
             interrupt_cb: None,
@@ -201,26 +209,28 @@ impl VirtioDevice for Net {
     }
 
     fn read_config(&self, offset: u64, mut data: &mut [u8]) {
-        let config_len = self.config_space.len() as u64;
+        let config_slice = self.config.as_slice();
+        let config_len = config_slice.len() as u64;
         if offset >= config_len {
             error!("Failed to read config space");
             return;
         }
         if let Some(end) = offset.checked_add(data.len() as u64) {
             // This write can't fail, offset and end are checked against config_len.
-            data.write_all(&self.config_space[offset as usize..cmp::min(end, config_len) as usize])
+            data.write_all(&config_slice[offset as usize..cmp::min(end, config_len) as usize])
                 .unwrap();
         }
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
+        let config_slice = self.config.as_mut_slice();
         let data_len = data.len() as u64;
-        let config_len = self.config_space.len() as u64;
+        let config_len = config_slice.len() as u64;
         if offset + data_len > config_len {
             error!("Failed to write config space");
             return;
         }
-        let (_, right) = self.config_space.split_at_mut(offset as usize);
+        let (_, right) = config_slice.split_at_mut(offset as usize);
         right.copy_from_slice(&data[..]);
     }
 

@@ -5,7 +5,7 @@
 use super::Error as DeviceError;
 use super::{DescriptorChain, DeviceEventT, Queue};
 use arc_swap::ArcSwap;
-use net_util::{MacAddr, Tap, TapError, MAC_ADDR_LEN};
+use net_util::{MacAddr, Tap, TapError};
 use std::cmp;
 use std::io::{self, Write};
 use std::mem;
@@ -25,11 +25,6 @@ type Result<T> = std::result::Result<T, Error>;
 const MAX_BUFFER_SIZE: usize = 65562;
 const QUEUE_SIZE: usize = 256;
 
-const CONFIG_SPACE_MAC: usize = MAC_ADDR_LEN;
-const CONFIG_SPACE_STATUS: usize = 2;
-const CONFIG_SPACE_QUEUE_PAIRS: usize = 2;
-const CONFIG_SPACE_NET: usize = CONFIG_SPACE_MAC + CONFIG_SPACE_STATUS + CONFIG_SPACE_QUEUE_PAIRS;
-
 // The guest has made a buffer available to receive a frame into.
 pub const RX_QUEUE_EVENT: DeviceEventT = 0;
 // The transmit queue has a frame that is ready to send from the guest.
@@ -46,6 +41,20 @@ pub const NET_EVENTS_COUNT: usize = 5;
 const CTRL_QUEUE_EVENT: DeviceEventT = 0;
 // Number of DeviceEventT events supported by this implementation.
 const CTRL_EVENT_COUNT: usize = 3;
+
+#[repr(C, packed)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct VirtioNetConfig {
+    pub mac: [u8; 6],
+    pub status: u16,
+    pub max_virtqueue_pairs: u16,
+    pub mtu: u16,
+    pub speed: u32,
+    pub duplex: u8,
+}
+
+// Safe because it only has data and has no implicit padding.
+unsafe impl ByteValued for VirtioNetConfig {}
 
 #[derive(Debug)]
 pub enum Error {
@@ -414,33 +423,27 @@ impl RxVirtio {
 }
 
 pub fn build_net_config_space(
+    mut config: &mut VirtioNetConfig,
     mac: MacAddr,
     num_queues: usize,
     mut avail_features: &mut u64,
-) -> Vec<u8> {
-    let mut config_space = Vec::with_capacity(MAC_ADDR_LEN);
-    unsafe { config_space.set_len(MAC_ADDR_LEN) }
-    config_space[..].copy_from_slice(mac.get_bytes());
+) {
+    config.mac.copy_from_slice(mac.get_bytes());
     *avail_features |= 1 << VIRTIO_NET_F_MAC;
 
-    build_net_config_space_with_mq(num_queues, &mut config_space, &mut avail_features);
-
-    config_space
+    build_net_config_space_with_mq(&mut config, num_queues, &mut avail_features);
 }
 
 pub fn build_net_config_space_with_mq(
+    config: &mut VirtioNetConfig,
     num_queues: usize,
-    config_space: &mut Vec<u8>,
     avail_features: &mut u64,
 ) {
     let num_queue_pairs = (num_queues / 2) as u16;
     if (num_queue_pairs >= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
         && (num_queue_pairs <= VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
     {
-        config_space.resize(CONFIG_SPACE_NET, 0);
-        let max_queue_pairs = num_queue_pairs.to_le_bytes();
-        config_space[CONFIG_SPACE_MAC + CONFIG_SPACE_STATUS..CONFIG_SPACE_NET]
-            .copy_from_slice(&max_queue_pairs);
+        config.max_virtqueue_pairs = num_queue_pairs;
         *avail_features |= 1 << VIRTIO_NET_F_MQ;
     }
 }
