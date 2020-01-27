@@ -188,8 +188,8 @@ processes, we added support for [vhost-user-net](https://access.redhat.com/solut
 backends. This enables `cloud-hypervisor` users to plug a `vhost-user` based
 networking device (e.g. DPDK) into the VMM as their virtio network backend.
 
-This device is always built-in, and it is enabled based on the presence of the
-flag `--vhost-user-net`.
+This device is always built-in, and it is enabled when `vhost_user=true` and
+`socket` are provided to the `--net` parameter.
 
 ## VFIO
 
