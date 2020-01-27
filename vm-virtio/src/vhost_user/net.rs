@@ -361,6 +361,6 @@ impl VirtioDevice for Net {
     }
 }
 
-virtio_pausable!(Net, true, true);
+virtio_pausable!(Net, true);
 impl Snapshotable for Net {}
 impl Migratable for Net {}
