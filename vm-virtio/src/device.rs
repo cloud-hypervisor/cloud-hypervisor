@@ -203,8 +203,11 @@ macro_rules! virtio_pausable {
             }
         }
     };
+}
 
-    ($type:ident, $ctrl_q:expr) => {
+#[macro_export]
+macro_rules! virtio_ctrl_q_pausable {
+    ($type:ident) => {
         virtio_pausable_trait!($type);
 
         impl Pausable for $type {
