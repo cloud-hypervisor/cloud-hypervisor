@@ -113,6 +113,15 @@ pub trait DmaRemapping: Send + Sync {
 }
 
 #[macro_export]
+macro_rules! virtio_pausable_trait_definition {
+    () => {
+        trait VirtioPausable {
+            fn virtio_pause(&mut self) -> std::result::Result<(), MigratableError>;
+            fn virtio_resume(&mut self) -> std::result::Result<(), MigratableError>;
+        }
+    };
+}
+#[macro_export]
 macro_rules! virtio_pausable_trait_inner {
     () => {
         // This is the common Pausable trait implementation for virtio.
@@ -151,10 +160,7 @@ macro_rules! virtio_pausable_trait_inner {
 #[macro_export]
 macro_rules! virtio_pausable_trait {
     ($type:ident) => {
-        trait VirtioPausable {
-            fn virtio_pause(&mut self) -> std::result::Result<(), MigratableError>;
-            fn virtio_resume(&mut self) -> std::result::Result<(), MigratableError>;
-        }
+        virtio_pausable_trait_definition!();
 
         impl VirtioPausable for $type {
             virtio_pausable_trait_inner!();
@@ -162,13 +168,23 @@ macro_rules! virtio_pausable_trait {
     };
 
     ($type:ident, T: $($bounds:tt)+) => {
-        trait VirtioPausable {
-            fn virtio_pause(&mut self) -> std::result::Result<(), MigratableError>;
-            fn virtio_resume(&mut self) -> std::result::Result<(), MigratableError>;
-        }
+        virtio_pausable_trait_definition!();
 
         impl<T: $($bounds)+ > VirtioPausable for $type<T> {
             virtio_pausable_trait_inner!();
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! virtio_pausable_inner {
+    ($type:ident) => {
+        fn pause(&mut self) -> result::Result<(), MigratableError> {
+            self.virtio_pause()
+        }
+
+        fn resume(&mut self) -> result::Result<(), MigratableError> {
+            self.virtio_resume()
         }
     };
 }
@@ -179,13 +195,7 @@ macro_rules! virtio_pausable {
         virtio_pausable_trait!($type);
 
         impl Pausable for $type {
-            fn pause(&mut self) -> result::Result<(), MigratableError> {
-                self.virtio_pause()
-            }
-
-            fn resume(&mut self) -> result::Result<(), MigratableError> {
-                self.virtio_resume()
-            }
+            virtio_pausable_inner!($type);
         }
     };
 
@@ -194,13 +204,7 @@ macro_rules! virtio_pausable {
         virtio_pausable_trait!($type, T: $($bounds)+);
 
         impl<T: $($bounds)+ > Pausable for $type<T> {
-            fn pause(&mut self) -> result::Result<(), MigratableError> {
-                self.virtio_pause()
-            }
-
-            fn resume(&mut self) -> result::Result<(), MigratableError> {
-                self.virtio_resume()
-            }
+            virtio_pausable_inner!($type);
         }
     };
 }
