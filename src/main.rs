@@ -2671,9 +2671,9 @@ mod tests {
                     .as_str(),
                 ])
                 .args(&[
-                    "--vhost-user-net",
+                    "--net",
                     format!(
-                        "mac={},sock=/tmp/vunet.sock,num_queues=4,queue_size=1024",
+                        "vhost_user=true,mac={},socket=/tmp/vunet.sock,num_queues=4,queue_size=1024",
                         guest.network.guest_mac
                     )
                     .as_str(),
