@@ -7,8 +7,8 @@
 
 use super::net_util::{
     build_net_config_space, build_net_config_space_with_mq, open_tap, register_listener,
-    unregister_listener, CtrlVirtio, NetCtrlEpollHandler, RxVirtio, TxVirtio, KILL_EVENT,
-    NET_EVENTS_COUNT, PAUSE_EVENT, RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
+    unregister_listener, CtrlVirtio, NetCtrlEpollHandler, RxVirtio, TxVirtio, VirtioNetConfig,
+    KILL_EVENT, NET_EVENTS_COUNT, PAUSE_EVENT, RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
 };
 use super::Error as DeviceError;
 use super::{
@@ -32,7 +32,7 @@ use std::thread;
 use std::vec::Vec;
 use virtio_bindings::bindings::virtio_net::*;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::GuestMemoryMmap;
+use vm_memory::{ByteValued, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]
@@ -297,9 +297,7 @@ pub struct Net {
     taps: Option<Vec<Tap>>,
     avail_features: u64,
     acked_features: u64,
-    // The config space will only consist of the MAC address specified by the user,
-    // or nothing, if no such address if provided.
-    config_space: Vec<u8>,
+    config: VirtioNetConfig,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
@@ -332,12 +330,11 @@ impl Net {
         avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
         let queue_num = num_queues + 1;
 
-        let mut config_space;
+        let mut config = VirtioNetConfig::default();
         if let Some(mac) = guest_mac {
-            config_space = build_net_config_space(mac, num_queues, &mut avail_features);
+            build_net_config_space(&mut config, mac, num_queues, &mut avail_features);
         } else {
-            config_space = Vec::new();
-            build_net_config_space_with_mq(num_queues, &mut config_space, &mut avail_features);
+            build_net_config_space_with_mq(&mut config, num_queues, &mut avail_features);
         }
 
         Ok(Net {
@@ -346,7 +343,7 @@ impl Net {
             taps: Some(taps),
             avail_features,
             acked_features: 0u64,
-            config_space,
+            config,
             queue_evts: None,
             interrupt_cb: None,
             epoll_threads: None,
@@ -425,26 +422,28 @@ impl VirtioDevice for Net {
     }
 
     fn read_config(&self, offset: u64, mut data: &mut [u8]) {
-        let config_len = self.config_space.len() as u64;
+        let config_slice = self.config.as_slice();
+        let config_len = config_slice.len() as u64;
         if offset >= config_len {
             error!("Failed to read config space");
             return;
         }
         if let Some(end) = offset.checked_add(data.len() as u64) {
             // This write can't fail, offset and end are checked against config_len.
-            data.write_all(&self.config_space[offset as usize..cmp::min(end, config_len) as usize])
+            data.write_all(&config_slice[offset as usize..cmp::min(end, config_len) as usize])
                 .unwrap();
         }
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
+        let config_slice = self.config.as_mut_slice();
         let data_len = data.len() as u64;
-        let config_len = self.config_space.len() as u64;
+        let config_len = config_slice.len() as u64;
         if offset + data_len > config_len {
             error!("Failed to write config space");
             return;
         }
-        let (_, right) = self.config_space.split_at_mut(offset as usize);
+        let (_, right) = config_slice.split_at_mut(offset as usize);
         right.copy_from_slice(&data[..]);
     }
 
