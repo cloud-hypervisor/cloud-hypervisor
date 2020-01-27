@@ -55,6 +55,10 @@ pub enum Error {
     ParseNetNumQueuesParam(std::num::ParseIntError),
     /// Failed parsing network queue size parameter.
     ParseNetQueueSizeParam(std::num::ParseIntError),
+    /// Failed to parse vhost parameters
+    ParseNetVhostParam(std::str::ParseBoolError),
+    /// Need a vhost socket
+    ParseNetVhostSocketRequired,
     /// Failed parsing fs tag parameter.
     ParseFsTagParam,
     /// Failed parsing fs socket path parameter.
@@ -431,6 +435,9 @@ pub struct NetConfig {
     pub num_queues: usize,
     #[serde(default = "default_netconfig_queue_size")]
     pub queue_size: u16,
+    #[serde(default)]
+    pub vhost_user: bool,
+    pub vhost_socket: Option<String>,
 }
 
 fn default_netconfig_tap() -> Option<String> {
@@ -469,6 +476,8 @@ impl NetConfig {
         let mut iommu_str: &str = "";
         let mut num_queues_str: &str = "";
         let mut queue_size_str: &str = "";
+        let mut vhost_socket_str: &str = "";
+        let mut vhost_user_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("tap=") {
@@ -485,6 +494,10 @@ impl NetConfig {
                 num_queues_str = &param[11..];
             } else if param.starts_with("queue_size=") {
                 queue_size_str = &param[11..];
+            } else if param.starts_with("vhost_user=") {
+                vhost_user_str = &param[11..];
+            } else if param.starts_with("socket=") {
+                vhost_socket_str = &param[7..];
             }
         }
 
@@ -495,6 +508,8 @@ impl NetConfig {
         let iommu = parse_on_off(iommu_str)?;
         let mut num_queues: usize = default_netconfig_num_queues();
         let mut queue_size: u16 = default_netconfig_queue_size();
+        let mut vhost_user = false;
+        let mut vhost_socket = None;
 
         if !tap_str.is_empty() {
             tap = Some(tap_str.to_string());
@@ -518,6 +533,17 @@ impl NetConfig {
                 .parse()
                 .map_err(Error::ParseNetQueueSizeParam)?;
         }
+        if !vhost_user_str.is_empty() {
+            vhost_user = vhost_user_str.parse().map_err(Error::ParseNetVhostParam)?;
+        }
+        if !vhost_socket_str.is_empty() {
+            vhost_socket = Some(vhost_socket_str.to_owned());
+        }
+
+        // For now we require a socket if vhost-user is turned on
+        if vhost_user && vhost_socket.is_none() {
+            return Err(Error::ParseNetVhostSocketRequired);
+        }
 
         Ok(NetConfig {
             tap,
@@ -527,6 +553,8 @@ impl NetConfig {
             iommu,
             num_queues,
             queue_size,
+            vhost_user,
+            vhost_socket,
         })
     }
 }

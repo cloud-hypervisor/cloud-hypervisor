@@ -1032,49 +1032,67 @@ impl DeviceManager {
         Ok(devices)
     }
 
+    /// Add virto-net and vhost-user-net devices
     fn make_virtio_net_devices(
         vm_info: &VmInfo,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
 
-        // Add virtio-net if required
         if let Some(net_list_cfg) = &vm_info.vm_cfg.lock().unwrap().net {
             for net_cfg in net_list_cfg.iter() {
-                let virtio_net_device = if let Some(ref tap_if_name) = net_cfg.tap {
-                    Arc::new(Mutex::new(
-                        vm_virtio::Net::new(
-                            Some(tap_if_name),
-                            None,
-                            None,
-                            Some(net_cfg.mac),
-                            net_cfg.iommu,
-                            net_cfg.num_queues,
-                            net_cfg.queue_size,
-                        )
-                        .map_err(DeviceManagerError::CreateVirtioNet)?,
-                    ))
+                if net_cfg.vhost_user {
+                    let vu_cfg = VhostUserConfig {
+                        sock: net_cfg.vhost_socket.clone().unwrap(),
+                        num_queues: net_cfg.num_queues,
+                        queue_size: net_cfg.queue_size,
+                    };
+                    let vhost_user_net_device = Arc::new(Mutex::new(
+                        vm_virtio::vhost_user::Net::new(net_cfg.mac, vu_cfg)
+                            .map_err(DeviceManagerError::CreateVhostUserNet)?,
+                    ));
+                    devices.push((
+                        Arc::clone(&vhost_user_net_device)
+                            as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
+                        net_cfg.iommu,
+                    ));
+                    migratable_devices
+                        .push(Arc::clone(&vhost_user_net_device) as Arc<Mutex<dyn Migratable>>);
                 } else {
-                    Arc::new(Mutex::new(
-                        vm_virtio::Net::new(
-                            None,
-                            Some(net_cfg.ip),
-                            Some(net_cfg.mask),
-                            Some(net_cfg.mac),
-                            net_cfg.iommu,
-                            net_cfg.num_queues,
-                            net_cfg.queue_size,
-                        )
-                        .map_err(DeviceManagerError::CreateVirtioNet)?,
-                    ))
-                };
-
-                devices.push((
-                    Arc::clone(&virtio_net_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-                    net_cfg.iommu,
-                ));
-                migratable_devices
-                    .push(Arc::clone(&virtio_net_device) as Arc<Mutex<dyn Migratable>>);
+                    let virtio_net_device = if let Some(ref tap_if_name) = net_cfg.tap {
+                        Arc::new(Mutex::new(
+                            vm_virtio::Net::new(
+                                Some(tap_if_name),
+                                None,
+                                None,
+                                Some(net_cfg.mac),
+                                net_cfg.iommu,
+                                net_cfg.num_queues,
+                                net_cfg.queue_size,
+                            )
+                            .map_err(DeviceManagerError::CreateVirtioNet)?,
+                        ))
+                    } else {
+                        Arc::new(Mutex::new(
+                            vm_virtio::Net::new(
+                                None,
+                                Some(net_cfg.ip),
+                                Some(net_cfg.mask),
+                                Some(net_cfg.mac),
+                                net_cfg.iommu,
+                                net_cfg.num_queues,
+                                net_cfg.queue_size,
+                            )
+                            .map_err(DeviceManagerError::CreateVirtioNet)?,
+                        ))
+                    };
+                    devices.push((
+                        Arc::clone(&virtio_net_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
+                        net_cfg.iommu,
+                    ));
+                    migratable_devices
+                        .push(Arc::clone(&virtio_net_device) as Arc<Mutex<dyn Migratable>>);
+                }
             }
         }
 

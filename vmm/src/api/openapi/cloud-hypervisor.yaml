@@ -307,6 +307,11 @@ components:
         queue_size:
           type: integer
           default: 256
+        vhost_user:
+          type: boolean
+          default: false
+        vhost_socket:
+          type: string
 
     RngConfig:
       required:
