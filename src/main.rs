@@ -137,7 +137,8 @@ fn create_app<'a, 'b>(
                     "Network parameters \"tap=<if_name>,\
                      ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,\
                      iommu=on|off,num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>\"",
+                     queue_size=<size_of_each_queue>,\
+                     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>\"",
                 )
                 .takes_value(true)
                 .min_values(1)
