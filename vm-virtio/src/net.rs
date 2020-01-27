@@ -302,7 +302,7 @@ pub struct Net {
     config_space: Vec<u8>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_thread: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
     paused: Arc<AtomicBool>,
     queue_size: Vec<u16>,
@@ -349,7 +349,7 @@ impl Net {
             config_space,
             queue_evts: None,
             interrupt_cb: None,
-            epoll_thread: None,
+            epoll_threads: None,
             ctrl_queue_epoll_thread: None,
             paused: Arc::new(AtomicBool::new(false)),
             queue_size: vec![queue_size; queue_num],
@@ -520,7 +520,7 @@ impl VirtioDevice for Net {
                     })?;
             }
 
-            let mut epoll_thread = Vec::new();
+            let mut epoll_threads = Vec::new();
             for _ in 0..taps.len() {
                 let rx = RxVirtio::new();
                 let tx = TxVirtio::new();
@@ -550,14 +550,14 @@ impl VirtioDevice for Net {
                 thread::Builder::new()
                     .name("virtio_net".to_string())
                     .spawn(move || handler.run(paused, queue_pair, queue_evt_pair))
-                    .map(|thread| epoll_thread.push(thread))
+                    .map(|thread| epoll_threads.push(thread))
                     .map_err(|e| {
                         error!("failed to clone queue EventFd: {}", e);
                         ActivateError::BadActivate
                     })?;
             }
 
-            self.epoll_thread = Some(epoll_thread);
+            self.epoll_threads = Some(epoll_threads);
 
             return Ok(());
         }

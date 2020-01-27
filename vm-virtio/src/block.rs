@@ -775,7 +775,7 @@ pub struct Block<T: DiskFile> {
     config_space: Vec<u8>,
     queue_evt: Option<EventFd>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_thread: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     pause_evt: Option<EventFd>,
     paused: Arc<AtomicBool>,
 }
@@ -831,7 +831,7 @@ impl<T: DiskFile> Block<T> {
             config_space: build_config_space(disk_size),
             queue_evt: None,
             interrupt_cb: None,
-            epoll_thread: None,
+            epoll_threads: None,
             pause_evt: None,
             paused: Arc::new(AtomicBool::new(false)),
         })
@@ -985,7 +985,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                     ActivateError::BadActivate
                 })?;
 
-            self.epoll_thread = Some(epoll_threads);
+            self.epoll_threads = Some(epoll_threads);
 
             return Ok(());
         }
