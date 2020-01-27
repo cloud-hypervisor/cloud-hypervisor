@@ -6,6 +6,7 @@ use super::handler::*;
 use super::vu_common_ctrl::*;
 use super::Error as DeviceError;
 use super::{Error, Result};
+use crate::block::VirtioBlockConfig;
 use crate::VirtioInterrupt;
 use arc_swap::ArcSwap;
 use libc;
@@ -13,7 +14,6 @@ use libc::EFD_NONBLOCK;
 use std::cmp;
 use std::io::Write;
 use std::mem;
-use std::ptr::null;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -25,14 +25,8 @@ use vhost_rs::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost_rs::VhostBackend;
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::GuestMemoryMmap;
+use vm_memory::{ByteValued, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
-
-macro_rules! offset_of {
-    ($ty:ty, $field:ident) => {
-        unsafe { &(*(null() as *const $ty)).$field as *const _ as usize }
-    };
-}
 
 struct SlaveReqHandler {}
 impl VhostUserMasterReqHandler for SlaveReqHandler {}
@@ -43,7 +37,7 @@ pub struct Blk {
     pause_evt: Option<EventFd>,
     avail_features: u64,
     acked_features: u64,
-    config_space: Vec<u8>,
+    config: VirtioBlockConfig,
     queue_sizes: Vec<u16>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
@@ -102,10 +96,9 @@ impl Blk {
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
         }
 
-        let config_len = mem::size_of::<virtio_blk_config>();
+        let config_len = mem::size_of::<VirtioBlockConfig>();
         let config_space: Vec<u8> = vec![0u8; config_len as usize];
-
-        let (_, mut config_space) = vhost_user_blk
+        let (_, config_space) = vhost_user_blk
             .get_config(
                 0,
                 config_len as u32,
@@ -113,12 +106,12 @@ impl Blk {
                 config_space.as_slice(),
             )
             .unwrap();
-
-        let queue_num_offset = offset_of!(virtio_blk_config, num_queues);
-        // Only set num_queues value(u16).
-        let num_queues_slice = (vu_cfg.num_queues as u16).to_le_bytes();
-        config_space[queue_num_offset..queue_num_offset + mem::size_of::<u16>()]
-            .copy_from_slice(&num_queues_slice);
+        let mut config = VirtioBlockConfig::default();
+        if let Some(backend_config) = VirtioBlockConfig::from_slice(config_space.as_slice()) {
+            config = *backend_config;
+            // Only set num_queues value(u16).
+            config.num_queues = vu_cfg.num_queues as u16;
+        }
 
         Ok(Blk {
             vhost_user_blk,
@@ -126,7 +119,7 @@ impl Blk {
             pause_evt: None,
             avail_features,
             acked_features,
-            config_space,
+            config,
             queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
             queue_evts: None,
             interrupt_cb: None,
@@ -187,34 +180,32 @@ impl VirtioDevice for Blk {
     }
 
     fn read_config(&self, offset: u64, mut data: &mut [u8]) {
-        let config_len = self.config_space.len() as u64;
+        let config_slice = self.config.as_slice();
+        let config_len = config_slice.len() as u64;
         if offset >= config_len {
             error!("Failed to read config space");
             return;
         }
         if let Some(end) = offset.checked_add(data.len() as u64) {
             // This write can't fail, offset and end are checked against config_len.
-            data.write_all(&self.config_space[offset as usize..cmp::min(end, config_len) as usize])
+            data.write_all(&config_slice[offset as usize..cmp::min(end, config_len) as usize])
                 .unwrap();
         }
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
+        let config_slice = self.config.as_mut_slice();
         let data_len = data.len() as u64;
-        let config_len = self.config_space.len() as u64;
+        let config_len = config_slice.len() as u64;
         if offset + data_len > config_len {
             error!("Failed to write config space");
-            return;
-        }
-        // In fact, write_config() only handle wce value in vhost-user-blk.
-        // so, we can only set wce value here.
-        if self.config_space[offset as usize] == data[0] {
             return;
         }
         self.vhost_user_blk
             .set_config(offset as u32, VhostUserConfigFlags::WRITABLE, data)
             .expect("Failed to set config");
-        self.config_space[offset as usize] = data[0];
+        let (_, right) = config_slice.split_at_mut(offset as usize);
+        right.copy_from_slice(&data[..]);
     }
 
     fn activate(
