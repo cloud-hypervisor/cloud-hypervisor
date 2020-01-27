@@ -1061,6 +1061,7 @@ fn default_vublkconfig_wce() -> bool {
 
 impl VhostUserBlkConfig {
     pub fn parse(vhost_user_blk: &str) -> Result<Self> {
+        error!("Using deprecated --vhost-user-blk syntax. Use --disk with vhost_user=true,socket=<socket path>");
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = vhost_user_blk.split(',').collect();
 
