@@ -383,7 +383,7 @@ pub struct Vsock<B: VsockBackend> {
     acked_features: u64,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_thread: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     paused: Arc<AtomicBool>,
 }
 
@@ -409,7 +409,7 @@ where
             acked_features: 0u64,
             queue_evts: None,
             interrupt_cb: None,
-            epoll_thread: None,
+            epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -564,7 +564,7 @@ where
                 ActivateError::BadActivate
             })?;
 
-        self.epoll_thread = Some(epoll_threads);
+        self.epoll_threads = Some(epoll_threads);
 
         Ok(())
     }

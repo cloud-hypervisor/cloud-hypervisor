@@ -136,9 +136,9 @@ macro_rules! virtio_pausable_inner {
                 VirtioDeviceType::from(self.device_type())
             );
             self.paused.store(false, Ordering::SeqCst);
-            if let Some(epoll_thread) = &self.epoll_thread {
-                for i in 0..epoll_thread.len() {
-                    epoll_thread[i].thread().unpark();
+            if let Some(epoll_threads) = &self.epoll_threads {
+                for i in 0..epoll_threads.len() {
+                    epoll_threads[i].thread().unpark();
                 }
             }
 
@@ -168,9 +168,9 @@ macro_rules! virtio_pausable_inner {
             );
             self.paused.store(false, Ordering::SeqCst);
 
-            if let Some(epoll_thread) = &self.epoll_thread {
-                for i in 0..epoll_thread.len() {
-                    epoll_thread[i].thread().unpark();
+            if let Some(epoll_threads) = &self.epoll_threads {
+                for i in 0..epoll_threads.len() {
+                    epoll_threads[i].thread().unpark();
                 }
             }
 
