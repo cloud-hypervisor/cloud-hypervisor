@@ -28,12 +28,9 @@ use vhost_rs::vhost_user::{
 };
 use vhost_rs::VhostBackend;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::GuestMemoryMmap;
+use vm_memory::{ByteValued, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
-const CONFIG_SPACE_TAG_SIZE: usize = 36;
-const CONFIG_SPACE_NUM_QUEUES_SIZE: usize = 4;
-const CONFIG_SPACE_SIZE: usize = CONFIG_SPACE_TAG_SIZE + CONFIG_SPACE_NUM_QUEUES_SIZE;
 const NUM_QUEUE_OFFSET: usize = 1;
 
 struct SlaveReqHandler {
@@ -150,12 +147,30 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
     }
 }
 
+#[derive(Copy, Clone)]
+#[repr(C, packed)]
+struct VirtioFsConfig {
+    tag: [u8; 36],
+    num_request_queues: u32,
+}
+
+impl Default for VirtioFsConfig {
+    fn default() -> Self {
+        VirtioFsConfig {
+            tag: [0; 36],
+            num_request_queues: 0,
+        }
+    }
+}
+
+unsafe impl ByteValued for VirtioFsConfig {}
+
 pub struct Fs {
     vu: Master,
     queue_sizes: Vec<u16>,
     avail_features: u64,
     acked_features: u64,
-    config_space: Vec<u8>,
+    config: VirtioFsConfig,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
     cache: Option<(VirtioSharedMemoryList, u64)>,
@@ -227,21 +242,18 @@ impl Fs {
             slave_req_support = true;
         }
 
-        // Create virtio device config space.
-        // First by adding the tag.
-        let mut config_space = tag.to_string().into_bytes();
-        config_space.resize(CONFIG_SPACE_SIZE, 0);
-
-        // And then by copying the number of queues.
-        let num_queues_slice = (req_num_queues as u32).to_le_bytes();
-        config_space[CONFIG_SPACE_TAG_SIZE..CONFIG_SPACE_SIZE].copy_from_slice(&num_queues_slice);
+        // Create virtio-fs device configuration.
+        let mut config = VirtioFsConfig::default();
+        let tag_bytes_vec = tag.to_string().into_bytes();
+        config.tag[..tag_bytes_vec.len()].copy_from_slice(tag_bytes_vec.as_slice());
+        config.num_request_queues = req_num_queues as u32;
 
         Ok(Fs {
             vu: master,
             queue_sizes: vec![queue_size; num_queues],
             avail_features,
             acked_features,
-            config_space,
+            config,
             kill_evt: None,
             pause_evt: None,
             cache,
@@ -307,26 +319,28 @@ impl VirtioDevice for Fs {
     }
 
     fn read_config(&self, offset: u64, mut data: &mut [u8]) {
-        let config_len = self.config_space.len() as u64;
+        let config_slice = self.config.as_slice();
+        let config_len = config_slice.len() as u64;
         if offset >= config_len {
             error!("Failed to read config space");
             return;
         }
         if let Some(end) = offset.checked_add(data.len() as u64) {
             // This write can't fail, offset and end are checked against config_len.
-            data.write_all(&self.config_space[offset as usize..cmp::min(end, config_len) as usize])
+            data.write_all(&config_slice[offset as usize..cmp::min(end, config_len) as usize])
                 .unwrap();
         }
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
+        let config_slice = self.config.as_mut_slice();
         let data_len = data.len() as u64;
-        let config_len = self.config_space.len() as u64;
+        let config_len = config_slice.len() as u64;
         if offset + data_len > config_len {
             error!("Failed to write config space");
             return;
         }
-        let (_, right) = self.config_space.split_at_mut(offset as usize);
+        let (_, right) = config_slice.split_at_mut(offset as usize);
         right.copy_from_slice(&data[..]);
     }
 
