@@ -166,8 +166,8 @@ processes, we added support for vhost-user-blk backends. This enables
 `cloud-hypervisor` users to plug a `vhost-user` based block device (e.g. SPDK)
 into the VMM as their virtio block backend.
 
-This device is always built-in, and it is enabled based on the presence of the
-flag `--vhost-user-blk`.
+This device is always built-in, and it is enabled when `vhost_user=true` and
+`socket` are provided to the `--disk` parameter.
 
 ### vhost-user-fs
 
