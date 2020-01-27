@@ -162,7 +162,7 @@ pub struct Fs {
     slave_req_support: bool,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    epoll_thread: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     paused: Arc<AtomicBool>,
 }
 
@@ -420,14 +420,17 @@ impl VirtioDevice for Fs {
         });
 
         let paused = self.paused.clone();
+        let mut epoll_threads = Vec::new();
         thread::Builder::new()
             .name("virtio_fs".to_string())
             .spawn(move || handler.run(paused))
-            .map(|thread| self.epoll_thread = Some(thread))
+            .map(|thread| epoll_threads.push(thread))
             .map_err(|e| {
                 error!("failed to clone queue EventFd: {}", e);
                 ActivateError::BadActivate
             })?;
+
+        self.epoll_thread = Some(epoll_threads);
 
         Ok(())
     }

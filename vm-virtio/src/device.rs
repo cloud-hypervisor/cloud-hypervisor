@@ -137,7 +137,9 @@ macro_rules! virtio_pausable_inner {
             );
             self.paused.store(false, Ordering::SeqCst);
             if let Some(epoll_thread) = &self.epoll_thread {
-                epoll_thread.thread().unpark();
+                for i in 0..epoll_thread.len() {
+                    epoll_thread[i].thread().unpark();
+                }
             }
 
             Ok(())
