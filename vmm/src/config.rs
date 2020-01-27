@@ -899,6 +899,7 @@ fn default_vunetconfig_mac() -> MacAddr {
 
 impl VhostUserNetConfig {
     pub fn parse(vhost_user_net: &str) -> Result<Self> {
+        error!("Using deprecated --vhost-user-net syntax. Use --net with vhost_user=true,socket=<socket path>");
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = vhost_user_net.split(',').collect();
 
