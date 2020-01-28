@@ -43,6 +43,12 @@ pub enum Error {
     ParseDiskNumQueuesParam(std::num::ParseIntError),
     /// Failed parsing disk queue size parameter.
     ParseDiskQueueSizeParam(std::num::ParseIntError),
+    /// Failed to parse vhost parameters
+    ParseDiskVhostParam(std::str::ParseBoolError),
+    /// Need a vhost socket
+    ParseDiskVhostSocketRequired,
+    /// Failed parsing disk wce parameter.
+    ParseDiskWceParam(std::str::ParseBoolError),
     /// Failed parsing random number generator parameters.
     ParseRngParams,
     /// Failed parsing network ip parameter.
@@ -356,6 +362,11 @@ pub struct DiskConfig {
     pub num_queues: usize,
     #[serde(default = "default_diskconfig_queue_size")]
     pub queue_size: u16,
+    #[serde(default)]
+    pub vhost_user: bool,
+    pub vhost_socket: Option<String>,
+    #[serde(default = "default_diskconfig_wce")]
+    pub wce: bool,
 }
 
 fn default_diskconfig_num_queues() -> usize {
@@ -364,6 +375,10 @@ fn default_diskconfig_num_queues() -> usize {
 
 fn default_diskconfig_queue_size() -> u16 {
     DEFAULT_QUEUE_SIZE_VUBLK
+}
+
+fn default_diskconfig_wce() -> bool {
+    true
 }
 
 impl DiskConfig {
@@ -377,6 +392,9 @@ impl DiskConfig {
         let mut iommu_str: &str = "";
         let mut num_queues_str: &str = "";
         let mut queue_size_str: &str = "";
+        let mut vhost_socket_str: &str = "";
+        let mut vhost_user_str: &str = "";
+        let mut wce_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("path=") {
@@ -391,11 +409,20 @@ impl DiskConfig {
                 num_queues_str = &param[11..];
             } else if param.starts_with("queue_size=") {
                 queue_size_str = &param[11..];
+            } else if param.starts_with("vhost_user=") {
+                vhost_user_str = &param[11..];
+            } else if param.starts_with("socket=") {
+                vhost_socket_str = &param[7..];
+            } else if param.starts_with("wce=") {
+                wce_str = &param[4..];
             }
         }
 
         let mut num_queues: usize = default_diskconfig_num_queues();
         let mut queue_size: u16 = default_diskconfig_queue_size();
+        let mut vhost_user = false;
+        let mut vhost_socket = None;
+        let mut wce: bool = default_diskconfig_wce();
 
         if !num_queues_str.is_empty() {
             num_queues = num_queues_str
@@ -407,6 +434,20 @@ impl DiskConfig {
                 .parse()
                 .map_err(Error::ParseDiskQueueSizeParam)?;
         }
+        if !vhost_user_str.is_empty() {
+            vhost_user = vhost_user_str.parse().map_err(Error::ParseDiskVhostParam)?;
+        }
+        if !vhost_socket_str.is_empty() {
+            vhost_socket = Some(vhost_socket_str.to_owned());
+        }
+        if !wce_str.is_empty() {
+            wce = wce_str.parse().map_err(Error::ParseDiskWceParam)?;
+        }
+
+        // For now we require a socket if vhost-user is turned on
+        if vhost_user && vhost_socket.is_none() {
+            return Err(Error::ParseDiskVhostSocketRequired);
+        }
 
         Ok(DiskConfig {
             path: PathBuf::from(path_str),
@@ -415,6 +456,9 @@ impl DiskConfig {
             iommu: parse_on_off(iommu_str)?,
             num_queues,
             queue_size,
+            vhost_socket,
+            vhost_user,
+            wce,
         })
     }
 }

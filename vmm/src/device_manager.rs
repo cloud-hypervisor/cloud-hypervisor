@@ -969,63 +969,86 @@ impl DeviceManager {
 
         if let Some(disk_list_cfg) = &vm_info.vm_cfg.lock().unwrap().disks {
             for disk_cfg in disk_list_cfg.iter() {
-                let mut options = OpenOptions::new();
-                options.read(true);
-                options.write(!disk_cfg.readonly);
-                if disk_cfg.direct {
-                    options.custom_flags(libc::O_DIRECT);
+                if disk_cfg.vhost_user {
+                    let vu_cfg = VhostUserConfig {
+                        sock: disk_cfg.vhost_socket.clone().unwrap(),
+                        num_queues: disk_cfg.num_queues,
+                        queue_size: disk_cfg.queue_size,
+                    };
+                    let vhost_user_block_device = Arc::new(Mutex::new(
+                        vm_virtio::vhost_user::Blk::new(disk_cfg.wce, vu_cfg)
+                            .map_err(DeviceManagerError::CreateVhostUserBlk)?,
+                    ));
+
+                    devices.push((
+                        Arc::clone(&vhost_user_block_device)
+                            as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
+                        false,
+                    ));
+
+                    migratable_devices
+                        .push(Arc::clone(&vhost_user_block_device) as Arc<Mutex<dyn Migratable>>);
+                } else {
+                    let mut options = OpenOptions::new();
+                    options.read(true);
+                    options.write(!disk_cfg.readonly);
+                    if disk_cfg.direct {
+                        options.custom_flags(libc::O_DIRECT);
+                    }
+                    // Open block device path
+                    let image: File = options
+                        .open(&disk_cfg.path)
+                        .map_err(DeviceManagerError::Disk)?;
+
+                    let mut raw_img = vm_virtio::RawFile::new(image, disk_cfg.direct);
+
+                    let image_type = qcow::detect_image_type(&mut raw_img)
+                        .map_err(DeviceManagerError::DetectImageType)?;
+                    match image_type {
+                        ImageType::Raw => {
+                            let dev = vm_virtio::Block::new(
+                                raw_img,
+                                disk_cfg.path.clone(),
+                                disk_cfg.readonly,
+                                disk_cfg.iommu,
+                                disk_cfg.num_queues,
+                                disk_cfg.queue_size,
+                            )
+                            .map_err(DeviceManagerError::CreateVirtioBlock)?;
+
+                            let block = Arc::new(Mutex::new(dev));
+
+                            devices.push((
+                                Arc::clone(&block) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
+                                disk_cfg.iommu,
+                            ));
+                            migratable_devices
+                                .push(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>);
+                        }
+                        ImageType::Qcow2 => {
+                            let qcow_img = QcowFile::from(raw_img)
+                                .map_err(DeviceManagerError::QcowDeviceCreate)?;
+                            let dev = vm_virtio::Block::new(
+                                qcow_img,
+                                disk_cfg.path.clone(),
+                                disk_cfg.readonly,
+                                disk_cfg.iommu,
+                                disk_cfg.num_queues,
+                                disk_cfg.queue_size,
+                            )
+                            .map_err(DeviceManagerError::CreateVirtioBlock)?;
+
+                            let block = Arc::new(Mutex::new(dev));
+
+                            devices.push((
+                                Arc::clone(&block) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
+                                disk_cfg.iommu,
+                            ));
+                            migratable_devices
+                                .push(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>);
+                        }
+                    };
                 }
-                // Open block device path
-                let image: File = options
-                    .open(&disk_cfg.path)
-                    .map_err(DeviceManagerError::Disk)?;
-
-                let mut raw_img = vm_virtio::RawFile::new(image, disk_cfg.direct);
-
-                let image_type = qcow::detect_image_type(&mut raw_img)
-                    .map_err(DeviceManagerError::DetectImageType)?;
-                match image_type {
-                    ImageType::Raw => {
-                        let dev = vm_virtio::Block::new(
-                            raw_img,
-                            disk_cfg.path.clone(),
-                            disk_cfg.readonly,
-                            disk_cfg.iommu,
-                            disk_cfg.num_queues,
-                            disk_cfg.queue_size,
-                        )
-                        .map_err(DeviceManagerError::CreateVirtioBlock)?;
-
-                        let block = Arc::new(Mutex::new(dev));
-
-                        devices.push((
-                            Arc::clone(&block) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-                            disk_cfg.iommu,
-                        ));
-                        migratable_devices.push(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>);
-                    }
-                    ImageType::Qcow2 => {
-                        let qcow_img = QcowFile::from(raw_img)
-                            .map_err(DeviceManagerError::QcowDeviceCreate)?;
-                        let dev = vm_virtio::Block::new(
-                            qcow_img,
-                            disk_cfg.path.clone(),
-                            disk_cfg.readonly,
-                            disk_cfg.iommu,
-                            disk_cfg.num_queues,
-                            disk_cfg.queue_size,
-                        )
-                        .map_err(DeviceManagerError::CreateVirtioBlock)?;
-
-                        let block = Arc::new(Mutex::new(dev));
-
-                        devices.push((
-                            Arc::clone(&block) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-                            disk_cfg.iommu,
-                        ));
-                        migratable_devices.push(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>);
-                    }
-                };
             }
         }
 
