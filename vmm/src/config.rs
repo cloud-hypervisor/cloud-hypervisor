@@ -441,6 +441,9 @@ impl DiskConfig {
             vhost_socket = Some(vhost_socket_str.to_owned());
         }
         if !wce_str.is_empty() {
+            if !vhost_user {
+                warn!("wce parameter currently only has effect when used vhost_user=true");
+            }
             wce = wce_str.parse().map_err(Error::ParseDiskWceParam)?;
         }
 
