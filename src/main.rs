@@ -2771,16 +2771,13 @@ mod tests {
                         guest.disk_config.disk(DiskType::CloudInit).unwrap()
                     )
                     .as_str(),
-                ])
-                .args(&["--net", guest.default_net_string().as_str()])
-                .args(&[
-                    "--vhost-user-blk",
                     format!(
-                        "sock={},num_queues=1,queue_size=128,wce=true",
+                        "vhost_user=true,socket={},num_queues=1,queue_size=128,wce=true",
                         vubd_socket_path
                     )
                     .as_str(),
                 ])
+                .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
                 .unwrap();
 
@@ -2855,16 +2852,13 @@ mod tests {
                         guest.disk_config.disk(DiskType::CloudInit).unwrap()
                     )
                     .as_str(),
-                ])
-                .args(&["--net", guest.default_net_string().as_str()])
-                .args(&[
-                    "--vhost-user-blk",
                     format!(
-                        "sock={},num_queues=1,queue_size=128,wce=true",
+                        "vhost_user=true,socket={},num_queues=1,queue_size=128,wce=true",
                         vubd_socket_path
                     )
                     .as_str(),
                 ])
+                .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
                 .unwrap();
 
@@ -2932,16 +2926,13 @@ mod tests {
                         guest.disk_config.disk(DiskType::CloudInit).unwrap()
                     )
                     .as_str(),
-                ])
-                .args(&["--net", guest.default_net_string().as_str()])
-                .args(&[
-                    "--vhost-user-blk",
                     format!(
-                        "sock={},num_queues=1,queue_size=128,wce=true",
+                        "vhost_user=true,socket={},num_queues=1,queue_size=128,wce=true",
                         vubd_socket_path
                     )
                     .as_str(),
                 ])
+                .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
                 .unwrap();
 
@@ -3000,16 +2991,13 @@ mod tests {
                         guest.disk_config.disk(DiskType::CloudInit).unwrap()
                     )
                     .as_str(),
-                ])
-                .args(&["--net", guest.default_net_string().as_str()])
-                .args(&[
-                    "--vhost-user-blk",
                     format!(
-                        "sock={},num_queues=1,queue_size=128,wce=true",
+                        "vhost_user=true,socket={},num_queues=1,queue_size=128,wce=true",
                         vubd_socket_path
                     )
                     .as_str(),
                 ])
+                .args(&["--net", guest.default_net_string().as_str()])
                 .spawn()
                 .unwrap();
 
