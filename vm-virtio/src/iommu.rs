@@ -65,6 +65,10 @@ const VIRTIO_IOMMU_F_MAP_UNMAP: u32 = 2;
 #[allow(unused)]
 const VIRTIO_IOMMU_F_BYPASS: u32 = 3;
 const VIRTIO_IOMMU_F_PROBE: u32 = 4;
+#[allow(unused)]
+const VIRTIO_IOMMU_F_MMIO: u32 = 5;
+#[allow(unused)]
+const VIRTIO_IOMMU_F_TOPOLOGY: u32 = 6;
 
 // Support 2MiB and 4KiB page sizes.
 const VIRTIO_IOMMU_PAGE_SIZE_MASK: u64 = (2 << 20) | (4 << 10);
@@ -108,6 +112,34 @@ struct VirtioIommuConfig {
 }
 
 unsafe impl ByteValued for VirtioIommuConfig {}
+
+#[allow(unused)]
+const VIRTIO_IOMMU_TOPO_PCI_RANGE: u32 = 1;
+#[allow(unused)]
+const VIRTIO_IOMMU_TOPO_ENDPOINT: u32 = 2;
+
+#[derive(Copy, Clone, Debug, Default)]
+#[repr(packed)]
+struct VirtioIommuTopoPciRange {
+    type_: u16,
+    hierarchy: u16,
+    requester_start: u16,
+    requester_end: u16,
+    endpoint_start: u32,
+}
+
+unsafe impl ByteValued for VirtioIommuTopoPciRange {}
+
+#[derive(Copy, Clone, Debug, Default)]
+#[repr(packed)]
+struct VirtioIommuTopoEndpoint {
+    type_: u16,
+    reserved: u16,
+    endpoint: u32,
+    address: u64,
+}
+
+unsafe impl ByteValued for VirtioIommuTopoEndpoint {}
 
 /// Virtio IOMMU request type
 const VIRTIO_IOMMU_T_ATTACH: u8 = 1;
