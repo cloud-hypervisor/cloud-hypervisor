@@ -114,9 +114,9 @@ struct VirtioIommuConfig {
 unsafe impl ByteValued for VirtioIommuConfig {}
 
 #[allow(unused)]
-const VIRTIO_IOMMU_TOPO_PCI_RANGE: u32 = 1;
+const VIRTIO_IOMMU_TOPO_PCI_RANGE: u16 = 1;
 #[allow(unused)]
-const VIRTIO_IOMMU_TOPO_ENDPOINT: u32 = 2;
+const VIRTIO_IOMMU_TOPO_ENDPOINT: u16 = 2;
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
@@ -793,6 +793,7 @@ pub struct Iommu {
     avail_features: u64,
     acked_features: u64,
     config: VirtioIommuConfig,
+    config_topo_pci_ranges: Vec<VirtioIommuTopoPciRange>,
     mapping: Arc<IommuMapping>,
     ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     queue_evts: Option<Vec<EventFd>>,
@@ -823,6 +824,7 @@ impl Iommu {
                     | 1u64 << VIRTIO_IOMMU_F_PROBE,
                 acked_features: 0u64,
                 config,
+                config_topo_pci_ranges: Vec::new(),
                 mapping: mapping.clone(),
                 ext_mapping: BTreeMap::new(),
                 queue_evts: None,
@@ -832,6 +834,44 @@ impl Iommu {
             },
             mapping,
         ))
+    }
+
+    // This function lets the caller specify a list of devices attached to the
+    // virtual IOMMU. This list is translated into a virtio-iommu configuration
+    // topology, so that it can be understood by the guest driver.
+    //
+    // The topology is overriden everytime this function is being invoked.
+    //
+    // This function is dedicated to PCI, which means it will exclusively
+    // create VIRTIO_IOMMU_TOPO_PCI_RANGE entries.
+    pub fn attach_pci_devices(&mut self, domain: u16, device_ids: Vec<u32>) {
+        if device_ids.is_empty() {
+            warn!("No device to attach to virtual IOMMU");
+            return;
+        }
+
+        // If there is at least one device attached to the virtual IOMMU, we
+        // need the topology feature to be enabled.
+        self.avail_features |= 1u64 << VIRTIO_IOMMU_F_TOPOLOGY;
+
+        // Update the topology.
+        let mut topo_pci_ranges = Vec::new();
+        for device_id in device_ids.iter() {
+            let dev_id = *device_id;
+            topo_pci_ranges.push(VirtioIommuTopoPciRange {
+                type_: VIRTIO_IOMMU_TOPO_PCI_RANGE,
+                hierarchy: domain,
+                requester_start: dev_id as u16,
+                requester_end: dev_id as u16,
+                endpoint_start: dev_id,
+            });
+        }
+        self.config_topo_pci_ranges = topo_pci_ranges;
+
+        // Update the configuration to include the topology.
+        self.config.topo_config.offset = size_of::<VirtioIommuConfig>() as u32;
+        self.config.topo_config.num_items = self.config_topo_pci_ranges.len() as u32;
+        self.config.topo_config.item_length = size_of::<VirtioIommuTopoPciRange>() as u32;
     }
 
     pub fn add_external_mapping(&mut self, device_id: u32, mapping: Arc<dyn ExternalDmaMapping>) {
@@ -892,7 +932,13 @@ impl VirtioDevice for Iommu {
     }
 
     fn read_config(&self, offset: u64, mut data: &mut [u8]) {
-        let config_slice = self.config.as_slice();
+        let mut config: Vec<u8> = Vec::new();
+        config.extend_from_slice(self.config.as_slice());
+        for config_topo_pci_range in self.config_topo_pci_ranges.iter() {
+            config.extend_from_slice(config_topo_pci_range.as_slice());
+        }
+
+        let config_slice = config.as_slice();
         let config_len = config_slice.len() as u64;
         if offset >= config_len {
             error!("Failed to read config space");
