@@ -681,6 +681,36 @@ mod unit_tests {
                 }"#,
                 false,
             ),
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--disk",
+                    "path=/path/to/disk/1,vhost_user=true,socket=/tmp/socket1",
+                    "path=/path/to/disk/2",
+                ],
+                r#"{
+                    "disks": [
+                        {"path": "/path/to/disk/1", "vhost_user":true, "vhost_socket":"/tmp/socket1"},
+                        {"path": "/path/to/disk/2"}
+                    ]
+                }"#,
+                true,
+            ),
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--disk",
+                    "path=/path/to/disk/1,vhost_user=true,socket=/tmp/socket1,wce=true",
+                    "path=/path/to/disk/2",
+                ],
+                r#"{
+                    "disks": [
+                        {"path": "/path/to/disk/1", "vhost_user":true, "vhost_socket":"/tmp/socket1", "wce":true},
+                        {"path": "/path/to/disk/2"}
+                    ]
+                }"#,
+                true,
+            ),
         ]
         .iter()
         .for_each(|(cli, openapi, equal)| {
