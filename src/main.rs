@@ -839,6 +839,15 @@ mod unit_tests {
                 }"#,
                 true,
             ),
+            (
+                vec!["cloud-hypervisor", "--net", "mac=12:34:56:78:90:ab,vhost_user=true,socket=/tmp/socket"],
+                r#"{
+                    "net": [
+                        {"mac": "12:34:56:78:90:ab", "vhost_user": true, "vhost_socket": "/tmp/socket"}
+                    ]
+                }"#,
+                true,
+            ),
         ]
         .iter()
         .for_each(|(cli, openapi, equal)| {
