@@ -396,15 +396,14 @@ pub struct DeviceManager {
     migratable_devices: Vec<Arc<Mutex<dyn Migratable>>>,
 
     // Memory Manager
-    #[cfg(feature = "acpi")]
-    memory_manager: Arc<Mutex<MemoryManager>>,
+    _memory_manager: Arc<Mutex<MemoryManager>>,
 }
 
 impl DeviceManager {
     pub fn new(
         vm_info: &VmInfo,
         allocator: Arc<Mutex<SystemAllocator>>,
-        memory_manager: Arc<Mutex<MemoryManager>>,
+        _memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
     ) -> DeviceManagerResult<Self> {
@@ -477,7 +476,7 @@ impl DeviceManager {
         virtio_devices.append(&mut DeviceManager::make_virtio_devices(
             vm_info,
             &address_manager,
-            &memory_manager,
+            &_memory_manager,
             &mut _mmap_regions,
             &mut migratable_devices,
         )?);
@@ -519,8 +518,6 @@ impl DeviceManager {
 
         #[cfg(feature = "acpi")]
         let config = vm_info.vm_cfg.clone();
-        #[cfg(feature = "acpi")]
-        let memory_manager_clone = memory_manager.clone();
 
         address_manager
             .allocator
@@ -531,7 +528,7 @@ impl DeviceManager {
 
         address_manager
             .io_bus
-            .insert(memory_manager, 0xa00, 0x18)
+            .insert(_memory_manager.clone(), 0xa00, 0x18)
             .map_err(DeviceManagerError::BusError)?;
 
         Ok(DeviceManager {
@@ -545,8 +542,7 @@ impl DeviceManager {
             #[cfg(feature = "acpi")]
             config,
             migratable_devices,
-            #[cfg(feature = "acpi")]
-            memory_manager: memory_manager_clone,
+            _memory_manager,
         })
     }
 
@@ -1700,8 +1696,13 @@ fn create_ged_device(ged_irq: u32) -> Vec<u8> {
 impl Aml for DeviceManager {
     fn to_aml_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-        let start_of_device_area = self.memory_manager.lock().unwrap().start_of_device_area().0;
-        let end_of_device_area = self.memory_manager.lock().unwrap().end_of_device_area().0;
+        let start_of_device_area = self
+            ._memory_manager
+            .lock()
+            .unwrap()
+            .start_of_device_area()
+            .0;
+        let end_of_device_area = self._memory_manager.lock().unwrap().end_of_device_area().0;
         let pci_dsdt_data = aml::Device::new(
             "_SB_.PCI0".into(),
             vec![
