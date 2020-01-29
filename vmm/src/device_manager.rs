@@ -466,12 +466,6 @@ impl DeviceManager {
             Some(ioapic.clone()),
         ));
 
-        DeviceManager::add_legacy_devices(
-            vm_info,
-            &address_manager,
-            reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-        )?;
-
         #[cfg(feature = "acpi")]
         let config = vm_info.vm_cfg.clone();
 
@@ -502,6 +496,11 @@ impl DeviceManager {
             migratable_devices,
             _memory_manager,
         };
+
+        device_manager.add_legacy_devices(
+            vm_info,
+            reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+        )?;
 
         #[cfg(feature = "acpi")]
         {
@@ -720,14 +719,14 @@ impl DeviceManager {
     }
 
     fn add_legacy_devices(
+        &mut self,
         _vm_info: &VmInfo,
-        address_manager: &Arc<AddressManager>,
         reset_evt: EventFd,
     ) -> DeviceManagerResult<()> {
         // Add a shutdown device (i8042)
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(reset_evt)));
 
-        address_manager
+        self.address_manager
             .io_bus
             .insert(i8042, 0x61, 0x4)
             .map_err(DeviceManagerError::BusError)?;
@@ -744,7 +743,7 @@ impl DeviceManager {
                 mem_above_4g,
             )));
 
-            address_manager
+            self.address_manager
                 .io_bus
                 .insert(cmos, 0x70, 0x2)
                 .map_err(DeviceManagerError::BusError)?;
