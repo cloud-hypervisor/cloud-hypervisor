@@ -29,6 +29,8 @@ use pci::{
     PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
 };
 use std::any::Any;
+use std::cmp;
+use std::io::Write;
 use std::result;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -47,6 +49,11 @@ enum PciCapabilityType {
     PciConfig = 5,
     SharedMemoryConfig = 8,
 }
+
+// This offset represents the 2 bytes omitted from the VirtioPciCap structure
+// as they are already handled through add_capability(). These 2 bytes are the
+// fields cap_vndr (1 byte) and cap_next (1 byte) defined in the virtio spec.
+const VIRTIO_PCI_CAP_OFFSET: usize = 2;
 
 #[allow(dead_code)]
 #[repr(packed)]
@@ -173,6 +180,41 @@ impl VirtioPciCap64 {
 }
 
 #[allow(dead_code)]
+#[repr(packed)]
+#[derive(Clone, Copy, Default)]
+struct VirtioPciCfgCap {
+    cap: VirtioPciCap,
+    pci_cfg_data: [u8; 4],
+}
+// It is safe to implement ByteValued. All members are simple numbers and any value is valid.
+unsafe impl ByteValued for VirtioPciCfgCap {}
+
+impl PciCapability for VirtioPciCfgCap {
+    fn bytes(&self) -> &[u8] {
+        self.as_slice()
+    }
+
+    fn id(&self) -> PciCapabilityID {
+        PciCapabilityID::VendorSpecific
+    }
+}
+
+impl VirtioPciCfgCap {
+    fn new() -> Self {
+        VirtioPciCfgCap {
+            cap: VirtioPciCap::new(PciCapabilityType::PciConfig, 0, 0, 0),
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct VirtioPciCfgCapInfo {
+    offset: usize,
+    cap: VirtioPciCfgCap,
+}
+
+#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub enum PciVirtioSubclass {
     NonTransitionalBase = 0xff,
@@ -246,6 +288,14 @@ pub struct VirtioPciDevice {
 
     // Whether to use 64-bit bar location or 32-bit
     use_64bit_bar: bool,
+
+    // Add a dedicated structure to hold information about the very specific
+    // virtio-pci capability VIRTIO_PCI_CAP_PCI_CFG. This is needed to support
+    // the legacy/backward compatible mechanism of letting the guest access the
+    // other virtio capabilities without mapping the PCI BARs. This can be
+    // needed when the guest tries to early access the virtio configuration of
+    // a device.
+    cap_pci_cfg_info: VirtioPciCfgCapInfo,
 }
 
 impl VirtioPciDevice {
@@ -345,6 +395,7 @@ impl VirtioPciDevice {
             settings_bar: 0,
             use_64bit_bar,
             interrupt_source_group,
+            cap_pci_cfg_info: VirtioPciCfgCapInfo::default(),
         };
 
         if let Some(msix_config) = &virtio_pci_device.msix_config {
@@ -436,11 +487,13 @@ impl VirtioPciDevice {
             .add_capability(&notify_cap)
             .map_err(PciDeviceError::CapabilitiesSetup)?;
 
-        //TODO(dgreid) - How will the configuration_cap work?
-        let configuration_cap = VirtioPciCap::new(PciCapabilityType::PciConfig, 0, 0, 0);
-        self.configuration
+        let configuration_cap = VirtioPciCfgCap::new();
+        self.cap_pci_cfg_info.offset = self
+            .configuration
             .add_capability(&configuration_cap)
-            .map_err(PciDeviceError::CapabilitiesSetup)?;
+            .map_err(PciDeviceError::CapabilitiesSetup)?
+            + VIRTIO_PCI_CAP_OFFSET;
+        self.cap_pci_cfg_info.cap = configuration_cap;
 
         if self.msix_config.is_some() {
             let msix_cap = MsixCap::new(
@@ -457,6 +510,49 @@ impl VirtioPciDevice {
 
         self.settings_bar = settings_bar;
         Ok(())
+    }
+
+    fn read_cap_pci_cfg(&mut self, offset: usize, mut data: &mut [u8]) {
+        let cap_slice = self.cap_pci_cfg_info.cap.as_slice();
+        let data_len = data.len();
+        let cap_len = cap_slice.len();
+        if offset + data_len > cap_len {
+            error!("Failed to read cap_pci_cfg from config space");
+            return;
+        }
+
+        if offset < std::mem::size_of::<VirtioPciCap>() {
+            if let Some(end) = offset.checked_add(data_len) {
+                // This write can't fail, offset and end are checked against config_len.
+                data.write_all(&cap_slice[offset..cmp::min(end, cap_len)])
+                    .unwrap();
+            }
+        } else {
+            // Safe since we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
+            let bar_offset: u32 =
+                unsafe { std::mem::transmute(self.cap_pci_cfg_info.cap.cap.offset) };
+            self.read_bar(0, bar_offset as u64, data)
+        }
+    }
+
+    fn write_cap_pci_cfg(&mut self, offset: usize, data: &[u8]) {
+        let cap_slice = self.cap_pci_cfg_info.cap.as_mut_slice();
+        let data_len = data.len();
+        let cap_len = cap_slice.len();
+        if offset + data_len > cap_len {
+            error!("Failed to write cap_pci_cfg to config space");
+            return;
+        }
+
+        if offset < std::mem::size_of::<VirtioPciCap>() {
+            let (_, right) = cap_slice.split_at_mut(offset);
+            right[..data_len].copy_from_slice(&data[..]);
+        } else {
+            // Safe since we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
+            let bar_offset: u32 =
+                unsafe { std::mem::transmute(self.cap_pci_cfg_info.cap.cap.offset) };
+            self.write_bar(0, bar_offset as u64, data)
+        }
     }
 }
 
@@ -552,12 +648,37 @@ impl VirtioInterrupt for VirtioInterruptMsix {
 
 impl PciDevice for VirtioPciDevice {
     fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
-        self.configuration
-            .write_config_register(reg_idx, offset, data);
+        // Handle the special case where the capability VIRTIO_PCI_CAP_PCI_CFG
+        // is accessed. This capability has a special meaning as it allows the
+        // guest to access other capabilities without mapping the PCI BAR.
+        let base = reg_idx * 4;
+        if base + offset as usize >= self.cap_pci_cfg_info.offset
+            && base + offset as usize + data.len()
+                <= self.cap_pci_cfg_info.offset + self.cap_pci_cfg_info.cap.bytes().len()
+        {
+            let offset = base + offset as usize - self.cap_pci_cfg_info.offset;
+            self.write_cap_pci_cfg(offset, data);
+        } else {
+            self.configuration
+                .write_config_register(reg_idx, offset, data);
+        }
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
-        self.configuration.read_reg(reg_idx)
+        // Handle the special case where the capability VIRTIO_PCI_CAP_PCI_CFG
+        // is accessed. This capability has a special meaning as it allows the
+        // guest to access other capabilities without mapping the PCI BAR.
+        let base = reg_idx * 4;
+        if base >= self.cap_pci_cfg_info.offset
+            && base + 4 <= self.cap_pci_cfg_info.offset + self.cap_pci_cfg_info.cap.bytes().len()
+        {
+            let offset = base - self.cap_pci_cfg_info.offset;
+            let mut data = [0u8; 4];
+            self.read_cap_pci_cfg(offset, &mut data);
+            u32::from_le_bytes(data)
+        } else {
+            self.configuration.read_reg(reg_idx)
+        }
     }
 
     fn detect_bar_reprogramming(
