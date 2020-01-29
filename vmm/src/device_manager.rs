@@ -621,7 +621,9 @@ impl DeviceManager {
 
             iommu_attached_devices.append(&mut vfio_iommu_device_ids);
 
-            if let Some(iommu_device) = iommu_device {
+            if let Some(mut iommu_device) = iommu_device {
+                iommu_device.attach_pci_devices(0, iommu_attached_devices.clone());
+
                 // We need to shift the device id since the 3 first bits
                 // are dedicated to the PCI function, and we know we don't
                 // do multifunction. Also, because we only support one PCI
