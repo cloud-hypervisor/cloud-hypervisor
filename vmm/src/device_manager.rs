@@ -218,6 +218,7 @@ pub fn get_win_size() -> (u16, u16) {
     (ws.cols, ws.rows)
 }
 
+#[derive(Default)]
 pub struct Console {
     // Serial port on 0x3f8
     serial: Option<Arc<Mutex<devices::legacy::Serial>>>,
@@ -465,13 +466,6 @@ impl DeviceManager {
             Some(ioapic.clone()),
         ));
 
-        let console = DeviceManager::add_console_device(
-            vm_info,
-            &address_manager,
-            &interrupt_manager,
-            &mut virtio_devices,
-        )?;
-
         DeviceManager::add_legacy_devices(
             vm_info,
             &address_manager,
@@ -506,7 +500,7 @@ impl DeviceManager {
 
         let mut device_manager = DeviceManager {
             address_manager,
-            console,
+            console: Arc::new(Console::default()),
             ioapic: Some(ioapic),
             _mmap_regions,
             cmdline_additions,
@@ -517,6 +511,9 @@ impl DeviceManager {
             migratable_devices,
             _memory_manager,
         };
+
+        device_manager.console =
+            device_manager.add_console_device(vm_info, &interrupt_manager, &mut virtio_devices)?;
 
         #[cfg(any(feature = "pci_support", feature = "mmio_support"))]
         virtio_devices.append(&mut device_manager.make_virtio_devices(vm_info)?);
@@ -758,8 +755,8 @@ impl DeviceManager {
     }
 
     fn add_console_device(
+        &mut self,
         vm_info: &VmInfo,
-        address_manager: &Arc<AddressManager>,
         interrupt_manager: &Arc<dyn InterruptManager>,
         virtio_devices: &mut Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
     ) -> DeviceManagerResult<Arc<Console>> {
@@ -785,14 +782,14 @@ impl DeviceManager {
                 serial_writer,
             )));
 
-            address_manager
+            self.address_manager
                 .allocator
                 .lock()
                 .unwrap()
                 .allocate_io_addresses(Some(GuestAddress(0x3f8)), 0x8, None)
                 .ok_or(DeviceManagerError::AllocateIOPort)?;
 
-            address_manager
+            self.address_manager
                 .io_bus
                 .insert(serial.clone(), 0x3f8, 0x8)
                 .map_err(DeviceManagerError::BusError)?;
