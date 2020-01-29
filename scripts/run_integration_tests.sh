@@ -83,7 +83,7 @@ LINUX_CUSTOM_DIR="linux-custom"
 if [ ! -f "$VMLINUX_IMAGE" ]; then
     SRCDIR=$PWD
     pushd $WORKLOADS_DIR
-    time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu-5.5-rc1" $LINUX_CUSTOM_DIR
+    time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu-topo-5.5-rc1" $LINUX_CUSTOM_DIR
     pushd $LINUX_CUSTOM_DIR
     cp $SRCDIR/resources/linux-virtio-fs-virtio-iommu-config .config
     time make bzImage -j `nproc`
