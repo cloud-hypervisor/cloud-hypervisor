@@ -384,10 +384,6 @@ pub struct DeviceManager {
     // Things to be added to the commandline (i.e. for virtio-mmio)
     cmdline_additions: Vec<String>,
 
-    // Virtual IOMMU ID along with the list of device IDs attached to the
-    // virtual IOMMU. This is useful for filling the ACPI IORT table.
-    virt_iommu: Option<(u32, Vec<u32>)>,
-
     // ACPI GED notification device
     #[cfg(feature = "acpi")]
     ged_notification_device: Option<Arc<Mutex<devices::AcpiGEDDevice>>>,
@@ -421,9 +417,6 @@ impl DeviceManager {
 
         #[allow(unused_mut)]
         let mut cmdline_additions = Vec::new();
-
-        #[allow(unused_mut)]
-        let mut virt_iommu: Option<(u32, Vec<u32>)> = None;
 
         let address_manager = Arc::new(AddressManager {
             allocator,
@@ -509,7 +502,6 @@ impl DeviceManager {
                 vm_info,
                 &address_manager,
                 &memory_manager,
-                &mut virt_iommu,
                 virtio_devices,
                 &interrupt_manager,
                 &mut migratable_devices,
@@ -548,7 +540,6 @@ impl DeviceManager {
             ioapic: Some(ioapic),
             _mmap_regions,
             cmdline_additions,
-            virt_iommu,
             #[cfg(feature = "acpi")]
             ged_notification_device,
             #[cfg(feature = "acpi")]
@@ -564,7 +555,6 @@ impl DeviceManager {
         vm_info: &VmInfo,
         address_manager: &Arc<AddressManager>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
-        virt_iommu: &mut Option<(u32, Vec<u32>)>,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
         interrupt_manager: &Arc<dyn InterruptManager>,
         migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
@@ -622,14 +612,7 @@ impl DeviceManager {
             iommu_attached_devices.append(&mut vfio_iommu_device_ids);
 
             if let Some(mut iommu_device) = iommu_device {
-                iommu_device.attach_pci_devices(0, iommu_attached_devices.clone());
-
-                // We need to shift the device id since the 3 first bits
-                // are dedicated to the PCI function, and we know we don't
-                // do multifunction. Also, because we only support one PCI
-                // bus, the bus 0, we don't need to add anything to the
-                // global device ID.
-                let iommu_id = pci_bus.next_device_id() << 3;
+                iommu_device.attach_pci_devices(0, iommu_attached_devices);
 
                 // Because we determined the virtio-iommu b/d/f, we have to
                 // add the device to the PCI topology now. Otherwise, the
@@ -644,8 +627,6 @@ impl DeviceManager {
                     migratable_devices,
                     interrupt_manager,
                 )?;
-
-                *virt_iommu = Some((iommu_id, iommu_attached_devices));
             }
 
             let pci_bus = Arc::new(Mutex::new(pci_bus));
@@ -1652,14 +1633,6 @@ impl DeviceManager {
 
     pub fn cmdline_additions(&self) -> &[String] {
         self.cmdline_additions.as_slice()
-    }
-
-    pub fn virt_iommu(&self) -> Option<(u32, &[u32])> {
-        if let Some((iommu_id, dev_ids)) = self.virt_iommu.as_ref() {
-            Some((*iommu_id, dev_ids.as_slice()))
-        } else {
-            None
-        }
     }
 
     pub fn notify_hotplug(
