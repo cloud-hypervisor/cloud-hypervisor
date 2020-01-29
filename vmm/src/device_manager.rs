@@ -519,6 +519,7 @@ impl DeviceManager {
         #[cfg(feature = "acpi")]
         let config = vm_info.vm_cfg.clone();
 
+        #[cfg(feature = "acpi")]
         address_manager
             .allocator
             .lock()
@@ -526,6 +527,7 @@ impl DeviceManager {
             .allocate_io_addresses(Some(GuestAddress(0x0a00)), 0x18, None)
             .ok_or(DeviceManagerError::AllocateIOPort)?;
 
+        #[cfg(feature = "acpi")]
         address_manager
             .io_bus
             .insert(_memory_manager.clone(), 0xa00, 0x18)
