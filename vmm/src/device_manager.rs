@@ -473,15 +473,6 @@ impl DeviceManager {
         )?;
 
         #[cfg(feature = "acpi")]
-        let ged_notification_device = DeviceManager::add_acpi_devices(
-            vm_info,
-            &address_manager,
-            &interrupt_manager,
-            reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-            _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-        )?;
-
-        #[cfg(feature = "acpi")]
         let config = vm_info.vm_cfg.clone();
 
         #[cfg(feature = "acpi")]
@@ -505,12 +496,21 @@ impl DeviceManager {
             _mmap_regions,
             cmdline_additions,
             #[cfg(feature = "acpi")]
-            ged_notification_device,
+            ged_notification_device: None,
             #[cfg(feature = "acpi")]
             config,
             migratable_devices,
             _memory_manager,
         };
+
+        #[cfg(feature = "acpi")]
+        {
+            device_manager.ged_notification_device = device_manager.add_acpi_devices(
+                &interrupt_manager,
+                reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+                _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            )?;
+        }
 
         device_manager.console =
             device_manager.add_console_device(vm_info, &interrupt_manager, &mut virtio_devices)?;
@@ -665,11 +665,9 @@ impl DeviceManager {
         Ok(ioapic)
     }
 
-    #[allow(unused_variables)]
     #[cfg(feature = "acpi")]
     fn add_acpi_devices(
-        vm_info: &VmInfo,
-        address_manager: &Arc<AddressManager>,
+        &mut self,
         interrupt_manager: &Arc<dyn InterruptManager>,
         reset_evt: EventFd,
         exit_evt: EventFd,
@@ -678,19 +676,20 @@ impl DeviceManager {
             exit_evt, reset_evt,
         )));
 
-        address_manager
+        self.address_manager
             .allocator
             .lock()
             .unwrap()
             .allocate_io_addresses(Some(GuestAddress(0x3c0)), 0x8, None)
             .ok_or(DeviceManagerError::AllocateIOPort)?;
 
-        address_manager
+        self.address_manager
             .io_bus
             .insert(acpi_device, 0x3c0, 0x4)
             .map_err(DeviceManagerError::BusError)?;
 
-        let ged_irq = address_manager
+        let ged_irq = self
+            .address_manager
             .allocator
             .lock()
             .unwrap()
@@ -706,14 +705,14 @@ impl DeviceManager {
             ged_irq,
         )));
 
-        address_manager
+        self.address_manager
             .allocator
             .lock()
             .unwrap()
             .allocate_io_addresses(Some(GuestAddress(0xb000)), 0x1, None)
             .ok_or(DeviceManagerError::AllocateIOPort)?;
 
-        address_manager
+        self.address_manager
             .io_bus
             .insert(ged_device.clone(), 0xb000, 0x1)
             .map_err(DeviceManagerError::BusError)?;
