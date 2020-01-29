@@ -11,7 +11,6 @@ use vm_memory::{GuestAddress, GuestMemoryMmap};
 
 use vm_memory::{Address, ByteValued, Bytes};
 
-use std::convert::TryInto;
 use std::sync::{Arc, Mutex};
 
 use crate::cpu::CpuManager;
@@ -171,75 +170,6 @@ pub fn create_acpi_tables(
         .expect("Error writing MCFG table");
     tables.push(mcfg_offset.0);
 
-    let (prev_tbl_len, prev_tbl_off) =
-        if let Some((iommu_id, dev_ids)) = &device_manager.virt_iommu() {
-            // VIOT
-            let mut viot = SDT::new(*b"VIOT", 36, 0, *b"CLOUDH", *b"CHVIOT  ", 0);
-            // VIOT reserved 12 bytes
-            viot.append_slice(&[0u8; 12]);
-
-            // IORT
-            let mut iort = SDT::new(*b"IORT", 36, 0, *b"CLOUDH", *b"CHIORT  ", 1);
-            // IORT number of nodes
-            iort.append(2u32);
-            // IORT offset to array of IORT nodes
-            iort.append(48u32);
-            // IORT reserved 4 bytes
-            iort.append(0u32);
-            // IORT paravirtualized IOMMU node
-            iort.append(IortParavirtIommuNode {
-                type_: 128,
-                length: 56,
-                revision: 0,
-                num_id_mappings: 0,
-                ref_id_mappings: 56,
-                device_id: *iommu_id,
-                model: 1,
-                ..Default::default()
-            });
-
-            let num_entries = dev_ids.len();
-            let length: u16 = (36 + (20 * num_entries)).try_into().unwrap();
-
-            // IORT PCI root complex node
-            iort.append(IortPciRootComplexNode {
-                type_: 2,
-                length,
-                revision: 0,
-                num_id_mappings: num_entries as u32,
-                ref_id_mappings: 36,
-                ats_attr: 0,
-                pci_seg_num: 0,
-                mem_addr_size_limit: 255,
-                ..Default::default()
-            });
-
-            for dev_id in dev_ids.iter() {
-                // IORT ID mapping
-                iort.append(IortIdMapping {
-                    input_base: *dev_id,
-                    num_of_ids: 1,
-                    ouput_base: *dev_id,
-                    output_ref: 48,
-                    flags: 0,
-                });
-            }
-
-            // Finalize VIOT by including the IORT table and all related
-            // subtables.
-            viot.append_slice(iort.as_slice());
-
-            let viot_offset = mcfg_offset.checked_add(mcfg.len() as u64).unwrap();
-            guest_mem
-                .write_slice(viot.as_slice(), viot_offset)
-                .expect("Error writing IORT table");
-            tables.push(viot_offset.0);
-
-            (viot.len(), viot_offset)
-        } else {
-            (mcfg.len(), mcfg_offset)
-        };
-
     // XSDT
     let mut xsdt = SDT::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
     for table in tables {
@@ -247,7 +177,7 @@ pub fn create_acpi_tables(
     }
     xsdt.update_checksum();
 
-    let xsdt_offset = prev_tbl_off.checked_add(prev_tbl_len as u64).unwrap();
+    let xsdt_offset = mcfg_offset.checked_add(mcfg.len() as u64).unwrap();
     guest_mem
         .write_slice(xsdt.as_slice(), xsdt_offset)
         .expect("Error writing XSDT table");
