@@ -411,7 +411,7 @@ impl DeviceManager {
         let mmio_bus = devices::Bus::new();
 
         let mut virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)> = Vec::new();
-        let mut migratable_devices: Vec<Arc<Mutex<dyn Migratable>>> = Vec::new();
+        let migratable_devices: Vec<Arc<Mutex<dyn Migratable>>> = Vec::new();
         let mut _mmap_regions = Vec::new();
 
         #[allow(unused_mut)]
@@ -472,15 +472,6 @@ impl DeviceManager {
             &mut virtio_devices,
         )?;
 
-        #[cfg(any(feature = "pci_support", feature = "mmio_support"))]
-        virtio_devices.append(&mut DeviceManager::make_virtio_devices(
-            vm_info,
-            &address_manager,
-            &_memory_manager,
-            &mut _mmap_regions,
-            &mut migratable_devices,
-        )?);
-
         DeviceManager::add_legacy_devices(
             vm_info,
             &address_manager,
@@ -526,6 +517,9 @@ impl DeviceManager {
             migratable_devices,
             _memory_manager,
         };
+
+        #[cfg(any(feature = "pci_support", feature = "mmio_support"))]
+        virtio_devices.append(&mut device_manager.make_virtio_devices(vm_info)?);
 
         if cfg!(feature = "pci_support") {
             device_manager.add_pci_devices(vm_info, virtio_devices, &interrupt_manager)?;
@@ -852,63 +846,60 @@ impl DeviceManager {
     }
 
     fn make_virtio_devices(
+        &mut self,
         vm_info: &VmInfo,
-        address_manager: &Arc<AddressManager>,
-        memory_manager: &Arc<Mutex<MemoryManager>>,
-        mmap_regions: &mut Vec<MmapRegion>,
-        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
-        let mut allocator = address_manager.allocator.lock().unwrap();
+        let mut allocator = self.address_manager.allocator.lock().unwrap();
         let mut devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)> = Vec::new();
 
         // Create "standard" virtio devices (net/block/rng)
         devices.append(&mut DeviceManager::make_virtio_block_devices(
             vm_info,
-            migratable_devices,
+            &mut self.migratable_devices,
         )?);
         devices.append(&mut DeviceManager::make_virtio_net_devices(
             vm_info,
-            migratable_devices,
+            &mut self.migratable_devices,
         )?);
         devices.append(&mut DeviceManager::make_virtio_rng_devices(
             vm_info,
-            migratable_devices,
+            &mut self.migratable_devices,
         )?);
 
         // Add virtio-fs if required
         devices.append(&mut DeviceManager::make_virtio_fs_devices(
             vm_info,
             &mut allocator,
-            memory_manager,
-            mmap_regions,
-            migratable_devices,
+            &self._memory_manager,
+            &mut self._mmap_regions,
+            &mut self.migratable_devices,
         )?);
 
         // Add virtio-pmem if required
         devices.append(&mut DeviceManager::make_virtio_pmem_devices(
             vm_info,
             &mut allocator,
-            memory_manager,
-            mmap_regions,
-            migratable_devices,
+            &self._memory_manager,
+            &mut self._mmap_regions,
+            &mut self.migratable_devices,
         )?);
 
         // Add virtio-vhost-user-net if required
         devices.append(&mut DeviceManager::make_virtio_vhost_user_net_devices(
             vm_info,
-            migratable_devices,
+            &mut self.migratable_devices,
         )?);
 
         // Add virtio-vhost-user-blk if required
         devices.append(&mut DeviceManager::make_virtio_vhost_user_blk_devices(
             vm_info,
-            migratable_devices,
+            &mut self.migratable_devices,
         )?);
 
         // Add virtio-vsock if required
         devices.append(&mut DeviceManager::make_virtio_vsock_devices(
             vm_info,
-            migratable_devices,
+            &mut self.migratable_devices,
         )?);
 
         Ok(devices)
