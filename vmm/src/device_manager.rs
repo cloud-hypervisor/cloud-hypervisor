@@ -582,14 +582,8 @@ impl DeviceManager {
                 }
             }
 
-            let mut vfio_iommu_device_ids = DeviceManager::add_vfio_devices(
-                vm_info,
-                &self.address_manager,
-                &mut pci_bus,
-                &self._memory_manager,
-                &mut iommu_device,
-                interrupt_manager,
-            )?;
+            let mut vfio_iommu_device_ids =
+                self.add_vfio_devices(vm_info, &mut pci_bus, &mut iommu_device, interrupt_manager)?;
 
             iommu_attached_devices.append(&mut vfio_iommu_device_ids);
 
@@ -1372,14 +1366,17 @@ impl DeviceManager {
 
     #[cfg(feature = "pci_support")]
     fn add_vfio_devices(
+        &mut self,
         vm_info: &VmInfo,
-        address_manager: &Arc<AddressManager>,
         pci: &mut PciBus,
-        memory_manager: &Arc<Mutex<MemoryManager>>,
         iommu_device: &mut Option<vm_virtio::Iommu>,
         interrupt_manager: &Arc<dyn InterruptManager>,
     ) -> DeviceManagerResult<Vec<u32>> {
-        let mut mem_slot = memory_manager.lock().unwrap().allocate_kvm_memory_slot();
+        let mut mem_slot = self
+            ._memory_manager
+            .lock()
+            .unwrap()
+            .allocate_kvm_memory_slot();
         let mut iommu_attached_device_ids = Vec::new();
 
         if let Some(device_list_cfg) = &vm_info.vm_cfg.lock().unwrap().devices {
@@ -1420,7 +1417,7 @@ impl DeviceManager {
                         .map_err(DeviceManagerError::VfioPciCreate)?;
 
                 let bars = vfio_pci_device
-                    .allocate_bars(&mut address_manager.allocator.lock().unwrap())
+                    .allocate_bars(&mut self.address_manager.allocator.lock().unwrap())
                     .map_err(DeviceManagerError::AllocateBars)?;
 
                 mem_slot = vfio_pci_device
@@ -1434,8 +1431,8 @@ impl DeviceManager {
 
                 pci.register_mapping(
                     vfio_pci_device.clone(),
-                    address_manager.io_bus.as_ref(),
-                    address_manager.mmio_bus.as_ref(),
+                    self.address_manager.io_bus.as_ref(),
+                    self.address_manager.mmio_bus.as_ref(),
                     bars,
                 )
                 .map_err(DeviceManagerError::AddPciDevice)?;
