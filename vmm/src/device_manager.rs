@@ -568,14 +568,12 @@ impl DeviceManager {
                     &None
                 };
 
-                let virtio_iommu_attach_dev = DeviceManager::add_virtio_pci_device(
+                let virtio_iommu_attach_dev = self.add_virtio_pci_device(
                     device,
                     vm_info.memory,
-                    &self.address_manager,
                     vm_info.vm_fd,
                     &mut pci_bus,
                     mapping,
-                    &mut self.migratable_devices,
                     interrupt_manager,
                 )?;
 
@@ -601,14 +599,12 @@ impl DeviceManager {
                 // Because we determined the virtio-iommu b/d/f, we have to
                 // add the device to the PCI topology now. Otherwise, the
                 // b/d/f won't match the virtio-iommu device as expected.
-                DeviceManager::add_virtio_pci_device(
+                self.add_virtio_pci_device(
                     Arc::new(Mutex::new(iommu_device)),
                     vm_info.memory,
-                    &self.address_manager,
                     vm_info.vm_fd,
                     &mut pci_bus,
                     &None,
-                    &mut self.migratable_devices,
                     interrupt_manager,
                 )?;
             }
@@ -1451,13 +1447,12 @@ impl DeviceManager {
     #[cfg(feature = "pci_support")]
     #[allow(clippy::too_many_arguments)]
     fn add_virtio_pci_device(
+        &mut self,
         virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
         memory: &Arc<ArcSwap<GuestMemoryMmap>>,
-        address_manager: &Arc<AddressManager>,
         vm_fd: &Arc<VmFd>,
         pci: &mut PciBus,
         iommu_mapping: &Option<Arc<IommuMapping>>,
-        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
         interrupt_manager: &Arc<dyn InterruptManager>,
     ) -> DeviceManagerResult<Option<u32>> {
         // Allows support for one MSI-X vector per queue. It also adds 1
@@ -1501,7 +1496,7 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 
-        let mut allocator = address_manager.allocator.lock().unwrap();
+        let mut allocator = self.address_manager.allocator.lock().unwrap();
         let bars = virtio_pci_device
             .allocate_bars(&mut allocator)
             .map_err(DeviceManagerError::AllocateBars)?;
@@ -1521,13 +1516,14 @@ impl DeviceManager {
 
         pci.register_mapping(
             virtio_pci_device.clone(),
-            address_manager.io_bus.as_ref(),
-            address_manager.mmio_bus.as_ref(),
+            self.address_manager.io_bus.as_ref(),
+            self.address_manager.mmio_bus.as_ref(),
             bars,
         )
         .map_err(DeviceManagerError::AddPciDevice)?;
 
-        migratable_devices.push(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
+        self.migratable_devices
+            .push(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
 
         let ret = if iommu_mapping.is_some() {
             Some(dev_id)
