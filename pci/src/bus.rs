@@ -67,7 +67,7 @@ impl PciDevice for PciRoot {
         self.config.write_config_register(reg_idx, offset, data);
     }
 
-    fn read_config_register(&self, reg_idx: usize) -> u32 {
+    fn read_config_register(&mut self, reg_idx: usize) -> u32 {
         self.config.read_reg(reg_idx)
     }
 

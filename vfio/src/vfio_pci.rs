@@ -852,7 +852,7 @@ impl PciDevice for VfioPciDevice {
             .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, reg + offset);
     }
 
-    fn read_config_register(&self, reg_idx: usize) -> u32 {
+    fn read_config_register(&mut self, reg_idx: usize) -> u32 {
         // When reading the BARs, we trap it and return what comes
         // from our local configuration space. We want the guest to
         // use that and not the VFIO device BARs as it does not map
