@@ -496,26 +496,6 @@ impl DeviceManager {
             _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         )?;
 
-        if cfg!(feature = "pci_support") {
-            DeviceManager::add_pci_devices(
-                vm_info,
-                &address_manager,
-                &memory_manager,
-                virtio_devices,
-                &interrupt_manager,
-                &mut migratable_devices,
-            )?;
-        } else if cfg!(feature = "mmio_support") {
-            DeviceManager::add_mmio_devices(
-                vm_info,
-                &address_manager,
-                virtio_devices,
-                &interrupt_manager,
-                &mut cmdline_additions,
-                &mut migratable_devices,
-            )?;
-        }
-
         #[cfg(feature = "acpi")]
         let config = vm_info.vm_cfg.clone();
 
@@ -533,7 +513,7 @@ impl DeviceManager {
             .insert(_memory_manager.clone(), 0xa00, 0x18)
             .map_err(DeviceManagerError::BusError)?;
 
-        Ok(DeviceManager {
+        let mut device_manager = DeviceManager {
             address_manager,
             console,
             ioapic: Some(ioapic),
@@ -545,24 +525,30 @@ impl DeviceManager {
             config,
             migratable_devices,
             _memory_manager,
-        })
+        };
+
+        if cfg!(feature = "pci_support") {
+            device_manager.add_pci_devices(vm_info, virtio_devices, &interrupt_manager)?;
+        } else if cfg!(feature = "mmio_support") {
+            device_manager.add_mmio_devices(vm_info, virtio_devices, &interrupt_manager)?;
+        }
+
+        Ok(device_manager)
     }
 
     #[allow(unused_variables)]
     fn add_pci_devices(
+        &mut self,
         vm_info: &VmInfo,
-        address_manager: &Arc<AddressManager>,
-        memory_manager: &Arc<Mutex<MemoryManager>>,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
         interrupt_manager: &Arc<dyn InterruptManager>,
-        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "pci_support")]
         {
             let pci_root = PciRoot::new(None);
             let mut pci_bus = PciBus::new(
                 pci_root,
-                Arc::downgrade(&address_manager) as Weak<dyn DeviceRelocation>,
+                Arc::downgrade(&self.address_manager) as Weak<dyn DeviceRelocation>,
             );
 
             let (mut iommu_device, iommu_mapping) = if vm_info.vm_cfg.lock().unwrap().iommu {
@@ -585,11 +571,11 @@ impl DeviceManager {
                 let virtio_iommu_attach_dev = DeviceManager::add_virtio_pci_device(
                     device,
                     vm_info.memory,
-                    &address_manager,
+                    &self.address_manager,
                     vm_info.vm_fd,
                     &mut pci_bus,
                     mapping,
-                    migratable_devices,
+                    &mut self.migratable_devices,
                     interrupt_manager,
                 )?;
 
@@ -600,9 +586,9 @@ impl DeviceManager {
 
             let mut vfio_iommu_device_ids = DeviceManager::add_vfio_devices(
                 vm_info,
-                &address_manager,
+                &self.address_manager,
                 &mut pci_bus,
-                memory_manager,
+                &self._memory_manager,
                 &mut iommu_device,
                 interrupt_manager,
             )?;
@@ -618,23 +604,23 @@ impl DeviceManager {
                 DeviceManager::add_virtio_pci_device(
                     Arc::new(Mutex::new(iommu_device)),
                     vm_info.memory,
-                    &address_manager,
+                    &self.address_manager,
                     vm_info.vm_fd,
                     &mut pci_bus,
                     &None,
-                    migratable_devices,
+                    &mut self.migratable_devices,
                     interrupt_manager,
                 )?;
             }
 
             let pci_bus = Arc::new(Mutex::new(pci_bus));
             let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(pci_bus.clone())));
-            address_manager
+            self.address_manager
                 .io_bus
                 .insert(pci_config_io, 0xcf8, 0x8)
                 .map_err(DeviceManagerError::BusError)?;
             let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(pci_bus)));
-            address_manager
+            self.address_manager
                 .mmio_bus
                 .insert(
                     pci_config_mmio,
@@ -649,17 +635,16 @@ impl DeviceManager {
 
     #[allow(unused_variables, unused_mut)]
     fn add_mmio_devices(
+        &mut self,
         vm_info: &VmInfo,
-        address_manager: &Arc<AddressManager>,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
         interrupt_manager: &Arc<dyn InterruptManager>,
-        mut cmdline_additions: &mut Vec<String>,
-        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "mmio_support")]
         {
             for (device, _) in virtio_devices {
-                let mmio_addr = address_manager
+                let mmio_addr = self
+                    .address_manager
                     .allocator
                     .lock()
                     .unwrap()
@@ -668,12 +653,12 @@ impl DeviceManager {
                     DeviceManager::add_virtio_mmio_device(
                         device,
                         vm_info.memory,
-                        &address_manager,
+                        &self.address_manager,
                         vm_info.vm_fd,
                         interrupt_manager,
                         addr,
-                        &mut cmdline_additions,
-                        migratable_devices,
+                        &mut self.cmdline_additions,
+                        &mut self.migratable_devices,
                     )?;
                 } else {
                     error!("Unable to allocate MMIO address!");
