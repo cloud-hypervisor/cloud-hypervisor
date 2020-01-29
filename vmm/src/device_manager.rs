@@ -650,15 +650,12 @@ impl DeviceManager {
                     .unwrap()
                     .allocate_mmio_addresses(None, MMIO_LEN, Some(MMIO_LEN));
                 if let Some(addr) = mmio_addr {
-                    DeviceManager::add_virtio_mmio_device(
+                    self.add_virtio_mmio_device(
                         device,
                         vm_info.memory,
-                        &self.address_manager,
                         vm_info.vm_fd,
                         interrupt_manager,
                         addr,
-                        &mut self.cmdline_additions,
-                        &mut self.migratable_devices,
                     )?;
                 } else {
                     error!("Unable to allocate MMIO address!");
@@ -1544,14 +1541,12 @@ impl DeviceManager {
     #[allow(clippy::too_many_arguments)]
     #[cfg(feature = "mmio_support")]
     fn add_virtio_mmio_device(
+        &mut self,
         virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
         memory: &Arc<ArcSwap<GuestMemoryMmap>>,
-        address_manager: &Arc<AddressManager>,
         vm_fd: &Arc<VmFd>,
         interrupt_manager: &Arc<dyn InterruptManager>,
         mmio_base: GuestAddress,
-        cmdline_additions: &mut Vec<String>,
-        migratable_devices: &mut Vec<Arc<Mutex<dyn Migratable>>>,
     ) -> DeviceManagerResult<()> {
         let mut mmio_device = vm_virtio::transport::MmioDevice::new(memory.clone(), virtio_device)
             .map_err(DeviceManagerError::VirtioDevice)?;
@@ -1563,7 +1558,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
-        let irq_num = address_manager
+        let irq_num = self
+            .address_manager
             .allocator
             .lock()
             .unwrap()
@@ -1577,19 +1573,20 @@ impl DeviceManager {
         mmio_device.assign_interrupt(interrupt_group);
 
         let mmio_device_arc = Arc::new(Mutex::new(mmio_device));
-        address_manager
+        self.address_manager
             .mmio_bus
             .insert(mmio_device_arc.clone(), mmio_base.0, MMIO_LEN)
             .map_err(DeviceManagerError::BusError)?;
 
-        cmdline_additions.push(format!(
+        self.cmdline_additions.push(format!(
             "virtio_mmio.device={}K@0x{:08x}:{}",
             MMIO_LEN / 1024,
             mmio_base.0,
             irq_num
         ));
 
-        migratable_devices.push(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn Migratable>>);
+        self.migratable_devices
+            .push(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn Migratable>>);
 
         Ok(())
     }
