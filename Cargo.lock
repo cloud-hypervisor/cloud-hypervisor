@@ -41,7 +41,7 @@ dependencies = [
  "arch_gen 0.1.0",
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "kvm-ioctls 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "kvm-ioctls 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
  "linux-loader 0.1.0 (git+https://github.com/rust-vmm/linux-loader)",
  "rand 0.7.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -351,7 +351,7 @@ dependencies = [
 
 [[package]]
 name = "kvm-ioctls"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "kvm-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1031,7 +1031,7 @@ dependencies = [
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "devices 0.1.0",
  "kvm-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "kvm-ioctls 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "kvm-ioctls 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "pci 0.1.0",
@@ -1193,7 +1193,7 @@ dependencies = [
  "devices 0.1.0",
  "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "kvm-ioctls 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "kvm-ioctls 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
  "linux-loader 0.1.0 (git+https://github.com/rust-vmm/linux-loader)",
@@ -1311,7 +1311,7 @@ dependencies = [
 "checksum itoa 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)" = "b8b7a7c0c47db5545ed3fef7468ee7bb5b74691498139e4b3f6a20685dc6dd8e"
 "checksum kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "7507624b29483431c0ba2d82aece8ca6cdba9382bff4ddd0f7490560c056098d"
 "checksum kvm-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "d381156ad52005b4655a9421401f02b80f9f049e653496e3ea6639a83fc12453"
-"checksum kvm-ioctls 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ac8a59db3c7098cc87f140eb7a4317decda01dd42e7979b1d4d789bd6f6c599a"
+"checksum kvm-ioctls 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "d99720f5df3814a7188f095ad6774775b7635dfdd62b7c091ce7e00a51c3c109"
 "checksum lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 "checksum libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)" = "d515b1f41455adea1313a4a2ac8a8a477634fbae63cc6100e3aebb207ce61558"
 "checksum libssh2-sys 0.2.14 (registry+https://github.com/rust-lang/crates.io-index)" = "36aa6e813339d3a063292b77091dfbbb6152ff9006a459895fa5bebed7d34f10"
