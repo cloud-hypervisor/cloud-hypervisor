@@ -86,6 +86,34 @@ $ popd
 
 This will build a `cloud-hypervisor` binary under `$CLOUDH/cloud-hypervisor/target/release/cloud-hypervisor`.
 
+### Containerized builds and tests
+
+If you want to build and test Cloud Hypervisor without having to install all the
+required dependencies (The rust toolchain, cargo tools, etc), you can also use
+Cloud Hypervisor's development script: `dev_cli.sh`. Please note that upon its
+first invocation, this script will pull a fairly large container image.
+
+For example, to build the Cloud Hypervisor release binary:
+
+```shell
+$ pushd $CLOUDH
+$ cd cloud-hypervisor
+$ ./scripts/dev_cli.sh build --release
+```
+
+With `dev_cli.sh`, one can also run the Cloud Hypervisor CI locally. This can be
+very convenient for debugging CI errors without having to fully rely on the
+Cloud Hypervisor CI infrastructure.
+
+For example, to run the Cloud Hypervisor unit tests:
+
+```shell
+$ ./scripts/dev_cli.sh tests --release
+```
+
+Run the `./scripts/dev_cli.sh --help` command to view all the supported
+development script commands and their related options.
+
 ## Run
 
 You can run a guest VM by either using an existing cloud image or booting into your own kernel and disk image.
