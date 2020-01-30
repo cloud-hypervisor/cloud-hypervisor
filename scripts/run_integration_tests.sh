@@ -15,7 +15,7 @@ if [ ! -f "$FW" ]; then
 fi
 
 CLEAR_OS_IMAGE_NAME="clear-31310-cloudguest.img"
-CLEAR_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$CLEAR_OS_IMAGE_NAME"
+CLEAR_OS_IMAGE_URL="https://cloudhypervisorimages.blob.core.windows.net/images/$CLEAR_OS_IMAGE_NAME"
 CLEAR_OS_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_IMAGE_NAME"
 if [ ! -f "$CLEAR_OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
@@ -32,7 +32,7 @@ if [ ! -f "$CLEAR_OS_RAW_IMAGE" ]; then
 fi
 
 BIONIC_OS_IMAGE_NAME="bionic-server-cloudimg-amd64.img"
-BIONIC_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$BIONIC_OS_IMAGE_NAME"
+BIONIC_OS_IMAGE_URL="https://cloudhypervisorimages.blob.core.windows.net/images/$BIONIC_OS_IMAGE_NAME"
 BIONIC_OS_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_IMAGE_NAME"
 if [ ! -f "$BIONIC_OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
@@ -50,7 +50,7 @@ fi
 
 
 EOAN_OS_IMAGE_NAME="eoan-server-cloudimg-amd64.img"
-EOAN_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$EOAN_OS_IMAGE_NAME"
+EOAN_OS_IMAGE_URL="https://cloudhypervisorimages.blob.core.windows.net/images/$EOAN_OS_IMAGE_NAME"
 EOAN_OS_IMAGE="$WORKLOADS_DIR/$EOAN_OS_IMAGE_NAME"
 if [ ! -f "$EOAN_OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
@@ -67,7 +67,7 @@ if [ ! -f "$EOAN_OS_RAW_IMAGE" ]; then
 fi
 
 pushd $WORKLOADS_DIR
-curl --silent "https://cloudhypervisorstorage.blob.core.windows.net/images/sha1sums" | sha1sum --check
+curl --silent "https://cloudhypervisorimages.blob.core.windows.net/images/sha1sums" | sha1sum --check
 if [ $? -ne 0 ]; then
     echo "sha1sum validation of images failed, remove invalid images to fix the issue."
     exit 1
