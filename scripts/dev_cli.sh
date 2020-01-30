@@ -135,6 +135,9 @@ cmd_help() {
     echo "        Build the Cloud Hypervisor container."
     echo "        --dev                Build dev container. This is the default."
     echo ""
+    echo "    clean [<cargo args>]]"
+    echo "        Remove the Cloud Hypervisor artifacts."
+    echo ""
     echo "    help"
     echo "        Display this help message."
     echo ""
@@ -179,6 +182,20 @@ cmd_build() {
         say "Binaries placed under $cargo_bin_dir"
     }
 }
+
+cmd_clean() {
+    cargo_args=("$@")
+
+    $DOCKER_RUNTIME run \
+	   -ti \
+	   --workdir "$CTR_CLH_ROOT_DIR" \
+	   --rm \
+	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	   "$CTR_IMAGE" \
+	   cargo clean \
+	         --target-dir "$CTR_CLH_CARGO_TARGET" \
+	         "${cargo_args[@]}"
+    }
 
 cmd_tests() {
     unit=false
