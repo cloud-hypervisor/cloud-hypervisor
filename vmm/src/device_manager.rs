@@ -18,7 +18,6 @@ use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::vm::VmInfo;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
-use arc_swap::ArcSwap;
 #[cfg(feature = "acpi")]
 use arch::layout;
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
@@ -46,7 +45,7 @@ use vm_device::interrupt::InterruptManager;
 use vm_device::interrupt::{InterruptIndex, PIN_IRQ};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{Address, GuestAddress, GuestMemoryMmap, GuestUsize, MmapRegion};
+use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
 #[cfg(feature = "pci_support")]
 use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::transport::VirtioTransport;
@@ -395,14 +394,14 @@ pub struct DeviceManager {
     migratable_devices: Vec<Arc<Mutex<dyn Migratable>>>,
 
     // Memory Manager
-    _memory_manager: Arc<Mutex<MemoryManager>>,
+    memory_manager: Arc<Mutex<MemoryManager>>,
 }
 
 impl DeviceManager {
     pub fn new(
         vm_info: &VmInfo,
         allocator: Arc<Mutex<SystemAllocator>>,
-        _memory_manager: Arc<Mutex<MemoryManager>>,
+        memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
     ) -> DeviceManagerResult<Self> {
@@ -475,7 +474,7 @@ impl DeviceManager {
         #[cfg(feature = "acpi")]
         address_manager
             .io_bus
-            .insert(_memory_manager.clone(), 0xa00, 0x18)
+            .insert(memory_manager.clone(), 0xa00, 0x18)
             .map_err(DeviceManagerError::BusError)?;
 
         let mut device_manager = DeviceManager {
@@ -488,13 +487,11 @@ impl DeviceManager {
             ged_notification_device: None,
             config: vm_info.vm_cfg.clone(),
             migratable_devices,
-            _memory_manager,
+            memory_manager,
         };
 
-        device_manager.add_legacy_devices(
-            vm_info,
-            reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-        )?;
+        device_manager
+            .add_legacy_devices(reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?)?;
 
         #[cfg(feature = "acpi")]
         {
@@ -554,7 +551,6 @@ impl DeviceManager {
 
                 let virtio_iommu_attach_dev = self.add_virtio_pci_device(
                     device,
-                    vm_info.memory,
                     vm_info.vm_fd,
                     &mut pci_bus,
                     mapping,
@@ -579,7 +575,6 @@ impl DeviceManager {
                 // b/d/f won't match the virtio-iommu device as expected.
                 self.add_virtio_pci_device(
                     Arc::new(Mutex::new(iommu_device)),
-                    vm_info.memory,
                     vm_info.vm_fd,
                     &mut pci_bus,
                     &None,
@@ -624,13 +619,7 @@ impl DeviceManager {
                     .unwrap()
                     .allocate_mmio_addresses(None, MMIO_LEN, Some(MMIO_LEN));
                 if let Some(addr) = mmio_addr {
-                    self.add_virtio_mmio_device(
-                        device,
-                        vm_info.memory,
-                        vm_info.vm_fd,
-                        interrupt_manager,
-                        addr,
-                    )?;
+                    self.add_virtio_mmio_device(device, vm_info.vm_fd, interrupt_manager, addr)?;
                 } else {
                     error!("Unable to allocate MMIO address!");
                 }
@@ -712,11 +701,7 @@ impl DeviceManager {
         Ok(Some(ged_device))
     }
 
-    fn add_legacy_devices(
-        &mut self,
-        _vm_info: &VmInfo,
-        reset_evt: EventFd,
-    ) -> DeviceManagerResult<()> {
+    fn add_legacy_devices(&mut self, reset_evt: EventFd) -> DeviceManagerResult<()> {
         // Add a shutdown device (i8042)
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(reset_evt)));
 
@@ -728,7 +713,15 @@ impl DeviceManager {
         {
             // Add a CMOS emulated device
             use vm_memory::GuestMemory;
-            let mem_size = _vm_info.memory.load().last_addr().0 + 1;
+            let mem_size = self
+                .memory_manager
+                .lock()
+                .unwrap()
+                .guest_memory()
+                .load()
+                .last_addr()
+                .0
+                + 1;
             let mem_below_4g = std::cmp::min(arch::layout::MEM_32BIT_RESERVED_START.0, mem_size);
             let mem_above_4g = mem_size.saturating_sub(arch::layout::RAM_64BIT_START.0);
 
@@ -1055,7 +1048,7 @@ impl DeviceManager {
 
                         self._mmap_regions.push(mmap_region);
 
-                        self._memory_manager
+                        self.memory_manager
                             .lock()
                             .unwrap()
                             .create_userspace_mapping(
@@ -1152,7 +1145,7 @@ impl DeviceManager {
 
                 self._mmap_regions.push(mmap_region);
 
-                self._memory_manager
+                self.memory_manager
                     .lock()
                     .unwrap()
                     .create_userspace_mapping(
@@ -1293,7 +1286,7 @@ impl DeviceManager {
         interrupt_manager: &Arc<dyn InterruptManager>,
     ) -> DeviceManagerResult<Vec<u32>> {
         let mut mem_slot = self
-            ._memory_manager
+            .memory_manager
             .lock()
             .unwrap()
             .allocate_kvm_memory_slot();
@@ -1312,10 +1305,11 @@ impl DeviceManager {
                 // global device ID.
                 let device_id = pci.next_device_id() << 3;
 
+                let memory = self.memory_manager.lock().unwrap().guest_memory();
                 let vfio_device = VfioDevice::new(
                     &device_cfg.path,
                     device_fd.clone(),
-                    vm_info.memory.clone(),
+                    memory.clone(),
                     device_cfg.iommu,
                 )
                 .map_err(DeviceManagerError::VfioCreate)?;
@@ -1324,7 +1318,7 @@ impl DeviceManager {
                     if let Some(iommu) = iommu_device {
                         let vfio_mapping = Arc::new(VfioDmaMapping::new(
                             vfio_device.get_container(),
-                            Arc::clone(vm_info.memory),
+                            memory.clone(),
                         ));
 
                         iommu_attached_device_ids.push(device_id);
@@ -1362,11 +1356,9 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
-    #[allow(clippy::too_many_arguments)]
     fn add_virtio_pci_device(
         &mut self,
         virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-        memory: &Arc<ArcSwap<GuestMemoryMmap>>,
         vm_fd: &Arc<VmFd>,
         pci: &mut PciBus,
         iommu_mapping: &Option<Arc<IommuMapping>>,
@@ -1404,8 +1396,9 @@ impl DeviceManager {
                 None
             };
 
+        let memory = self.memory_manager.lock().unwrap().guest_memory();
         let mut virtio_pci_device = VirtioPciDevice::new(
-            memory.clone(),
+            memory,
             virtio_device,
             msix_num,
             iommu_mapping_cb,
@@ -1451,17 +1444,16 @@ impl DeviceManager {
         Ok(ret)
     }
 
-    #[allow(clippy::too_many_arguments)]
     #[cfg(feature = "mmio_support")]
     fn add_virtio_mmio_device(
         &mut self,
         virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-        memory: &Arc<ArcSwap<GuestMemoryMmap>>,
         vm_fd: &Arc<VmFd>,
         interrupt_manager: &Arc<dyn InterruptManager>,
         mmio_base: GuestAddress,
     ) -> DeviceManagerResult<()> {
-        let mut mmio_device = vm_virtio::transport::MmioDevice::new(memory.clone(), virtio_device)
+        let memory = self.memory_manager.lock().unwrap().guest_memory();
+        let mut mmio_device = vm_virtio::transport::MmioDevice::new(memory, virtio_device)
             .map_err(DeviceManagerError::VirtioDevice)?;
 
         for (i, (event, addr)) in mmio_device.ioeventfds(mmio_base.0).iter().enumerate() {
@@ -1593,13 +1585,8 @@ fn create_ged_device(ged_irq: u32) -> Vec<u8> {
 impl Aml for DeviceManager {
     fn to_aml_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-        let start_of_device_area = self
-            ._memory_manager
-            .lock()
-            .unwrap()
-            .start_of_device_area()
-            .0;
-        let end_of_device_area = self._memory_manager.lock().unwrap().end_of_device_area().0;
+        let start_of_device_area = self.memory_manager.lock().unwrap().start_of_device_area().0;
+        let end_of_device_area = self.memory_manager.lock().unwrap().end_of_device_area().0;
         let pci_dsdt_data = aml::Device::new(
             "_SB_.PCI0".into(),
             vec![
