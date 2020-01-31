@@ -29,7 +29,6 @@ use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{get_host_cpu_phys_bits, Error as MemoryManagerError, MemoryManager};
 use anyhow::anyhow;
-use arc_swap::ArcSwap;
 use arch::layout;
 use devices::{ioapic, HotPlugNotificationFlags};
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
@@ -164,12 +163,6 @@ pub enum Error {
     MemoryManager(MemoryManagerError),
 }
 pub type Result<T> = result::Result<T, Error>;
-
-pub struct VmInfo<'a> {
-    pub memory: &'a Arc<ArcSwap<GuestMemoryMmap>>,
-    pub vm_fd: &'a Arc<VmFd>,
-    pub vm_cfg: Arc<Mutex<VmConfig>>,
-}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 pub enum VmState {
@@ -325,14 +318,10 @@ impl Vm {
         .map_err(Error::MemoryManager)?;
 
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
-        let vm_info = VmInfo {
-            memory: &guest_memory,
-            vm_fd: &fd,
-            vm_cfg: config.clone(),
-        };
 
         let device_manager = DeviceManager::new(
-            &vm_info,
+            fd.clone(),
+            config.clone(),
             allocator,
             memory_manager.clone(),
             &exit_evt,
@@ -348,7 +337,7 @@ impl Vm {
             boot_vcpus,
             max_vcpus,
             &device_manager,
-            guest_memory.clone(),
+            guest_memory,
             fd,
             cpuid,
             reset_evt,

@@ -15,7 +15,6 @@ use crate::config::ConsoleOutputMode;
 use crate::config::VmConfig;
 use crate::interrupt::{KvmInterruptManager, KvmRoutingEntry};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
-use crate::vm::VmInfo;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 #[cfg(feature = "acpi")]
@@ -398,7 +397,8 @@ pub struct DeviceManager {
 
 impl DeviceManager {
     pub fn new(
-        vm_info: &VmInfo,
+        vm_fd: Arc<VmFd>,
+        config: Arc<Mutex<VmConfig>>,
         allocator: Arc<Mutex<SystemAllocator>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
@@ -418,7 +418,7 @@ impl DeviceManager {
             allocator,
             io_bus: Arc::new(io_bus),
             mmio_bus: Arc::new(mmio_bus),
-            vm_fd: vm_info.vm_fd.clone(),
+            vm_fd: vm_fd.clone(),
         });
 
         // Create a shared list of GSI that can be shared through all PCI
@@ -441,7 +441,7 @@ impl DeviceManager {
         let ioapic_interrupt_manager: Arc<dyn InterruptManager> =
             Arc::new(KvmInterruptManager::new(
                 Arc::clone(&address_manager.allocator),
-                Arc::clone(&vm_info.vm_fd),
+                vm_fd.clone(),
                 Arc::clone(&kvm_gsi_msi_routes),
                 None,
             ));
@@ -456,7 +456,7 @@ impl DeviceManager {
         // both interrupt managers are going to share the list correctly.
         let interrupt_manager: Arc<dyn InterruptManager> = Arc::new(KvmInterruptManager::new(
             Arc::clone(&address_manager.allocator),
-            Arc::clone(&vm_info.vm_fd),
+            vm_fd,
             Arc::clone(&kvm_gsi_msi_routes),
             Some(ioapic.clone()),
         ));
@@ -483,7 +483,7 @@ impl DeviceManager {
             cmdline_additions,
             #[cfg(feature = "acpi")]
             ged_notification_device: None,
-            config: vm_info.vm_cfg.clone(),
+            config,
             migratable_devices,
             memory_manager,
         };
