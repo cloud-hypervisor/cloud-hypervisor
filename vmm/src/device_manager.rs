@@ -260,7 +260,6 @@ struct AddressManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
-    #[cfg(feature = "pci_support")]
     vm_fd: Arc<VmFd>,
 }
 
@@ -419,7 +418,6 @@ impl DeviceManager {
             allocator,
             io_bus: Arc::new(io_bus),
             mmio_bus: Arc::new(mmio_bus),
-            #[cfg(feature = "pci_support")]
             vm_fd: vm_info.vm_fd.clone(),
         });
 
@@ -509,9 +507,9 @@ impl DeviceManager {
         virtio_devices.append(&mut device_manager.make_virtio_devices()?);
 
         if cfg!(feature = "pci_support") {
-            device_manager.add_pci_devices(vm_info, virtio_devices, &interrupt_manager)?;
+            device_manager.add_pci_devices(virtio_devices, &interrupt_manager)?;
         } else if cfg!(feature = "mmio_support") {
-            device_manager.add_mmio_devices(vm_info, virtio_devices, &interrupt_manager)?;
+            device_manager.add_mmio_devices(virtio_devices, &interrupt_manager)?;
         }
 
         Ok(device_manager)
@@ -520,7 +518,6 @@ impl DeviceManager {
     #[allow(unused_variables)]
     fn add_pci_devices(
         &mut self,
-        vm_info: &VmInfo,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
         interrupt_manager: &Arc<dyn InterruptManager>,
     ) -> DeviceManagerResult<()> {
@@ -549,13 +546,8 @@ impl DeviceManager {
                     &None
                 };
 
-                let virtio_iommu_attach_dev = self.add_virtio_pci_device(
-                    device,
-                    vm_info.vm_fd,
-                    &mut pci_bus,
-                    mapping,
-                    interrupt_manager,
-                )?;
+                let virtio_iommu_attach_dev =
+                    self.add_virtio_pci_device(device, &mut pci_bus, mapping, interrupt_manager)?;
 
                 if let Some(dev_id) = virtio_iommu_attach_dev {
                     iommu_attached_devices.push(dev_id);
@@ -563,7 +555,7 @@ impl DeviceManager {
             }
 
             let mut vfio_iommu_device_ids =
-                self.add_vfio_devices(vm_info, &mut pci_bus, &mut iommu_device, interrupt_manager)?;
+                self.add_vfio_devices(&mut pci_bus, &mut iommu_device, interrupt_manager)?;
 
             iommu_attached_devices.append(&mut vfio_iommu_device_ids);
 
@@ -575,7 +567,6 @@ impl DeviceManager {
                 // b/d/f won't match the virtio-iommu device as expected.
                 self.add_virtio_pci_device(
                     Arc::new(Mutex::new(iommu_device)),
-                    vm_info.vm_fd,
                     &mut pci_bus,
                     &None,
                     interrupt_manager,
@@ -605,7 +596,6 @@ impl DeviceManager {
     #[allow(unused_variables, unused_mut)]
     fn add_mmio_devices(
         &mut self,
-        vm_info: &VmInfo,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
         interrupt_manager: &Arc<dyn InterruptManager>,
     ) -> DeviceManagerResult<()> {
@@ -619,7 +609,7 @@ impl DeviceManager {
                     .unwrap()
                     .allocate_mmio_addresses(None, MMIO_LEN, Some(MMIO_LEN));
                 if let Some(addr) = mmio_addr {
-                    self.add_virtio_mmio_device(device, vm_info.vm_fd, interrupt_manager, addr)?;
+                    self.add_virtio_mmio_device(device, interrupt_manager, addr)?;
                 } else {
                     error!("Unable to allocate MMIO address!");
                 }
@@ -1280,7 +1270,6 @@ impl DeviceManager {
     #[cfg(feature = "pci_support")]
     fn add_vfio_devices(
         &mut self,
-        vm_info: &VmInfo,
         pci: &mut PciBus,
         iommu_device: &mut Option<vm_virtio::Iommu>,
         interrupt_manager: &Arc<dyn InterruptManager>,
@@ -1294,7 +1283,7 @@ impl DeviceManager {
 
         if let Some(device_list_cfg) = &self.config.lock().unwrap().devices {
             // Create the KVM VFIO device
-            let device_fd = DeviceManager::create_kvm_device(vm_info.vm_fd)?;
+            let device_fd = DeviceManager::create_kvm_device(&self.address_manager.vm_fd)?;
             let device_fd = Arc::new(device_fd);
 
             for device_cfg in device_list_cfg.iter() {
@@ -1327,7 +1316,7 @@ impl DeviceManager {
                 }
 
                 let mut vfio_pci_device =
-                    VfioPciDevice::new(vm_info.vm_fd, vfio_device, interrupt_manager)
+                    VfioPciDevice::new(&self.address_manager.vm_fd, vfio_device, interrupt_manager)
                         .map_err(DeviceManagerError::VfioPciCreate)?;
 
                 let bars = vfio_pci_device
@@ -1335,7 +1324,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::AllocateBars)?;
 
                 mem_slot = vfio_pci_device
-                    .map_mmio_regions(vm_info.vm_fd, mem_slot)
+                    .map_mmio_regions(&self.address_manager.vm_fd, mem_slot)
                     .map_err(DeviceManagerError::VfioMapRegion)?;
 
                 let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
@@ -1359,7 +1348,6 @@ impl DeviceManager {
     fn add_virtio_pci_device(
         &mut self,
         virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-        vm_fd: &Arc<VmFd>,
         pci: &mut PciBus,
         iommu_mapping: &Option<Arc<IommuMapping>>,
         interrupt_manager: &Arc<dyn InterruptManager>,
@@ -1414,7 +1402,8 @@ impl DeviceManager {
         let bar_addr = virtio_pci_device.config_bar_addr();
         for (event, addr) in virtio_pci_device.ioeventfds(bar_addr) {
             let io_addr = IoEventAddress::Mmio(addr);
-            vm_fd
+            self.address_manager
+                .vm_fd
                 .register_ioevent(event, &io_addr, NoDatamatch)
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
@@ -1448,7 +1437,6 @@ impl DeviceManager {
     fn add_virtio_mmio_device(
         &mut self,
         virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-        vm_fd: &Arc<VmFd>,
         interrupt_manager: &Arc<dyn InterruptManager>,
         mmio_base: GuestAddress,
     ) -> DeviceManagerResult<()> {
@@ -1458,7 +1446,8 @@ impl DeviceManager {
 
         for (i, (event, addr)) in mmio_device.ioeventfds(mmio_base.0).iter().enumerate() {
             let io_addr = IoEventAddress::Mmio(*addr);
-            vm_fd
+            self.address_manager
+                .vm_fd
                 .register_ioevent(event, &io_addr, i as u32)
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
