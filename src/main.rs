@@ -4964,4 +4964,88 @@ mod tests {
             Ok(())
         });
     }
+
+    fn get_vmm_overhead(pid: u32, guest_memory_size: u32) -> u32 {
+        let smaps = fs::File::open(format!("/proc/{}/smaps", pid)).unwrap();
+        let reader = io::BufReader::new(smaps);
+
+        let mut total = 0;
+        let mut skip_map: bool = false;
+        for line in reader.lines() {
+            let l = line.unwrap();
+
+            // Each section begins with something that looks like:
+            // Size:               2184 kB
+            if l.starts_with("Size:") {
+                let values: Vec<&str> = l.split_whitespace().collect();
+                let map_size = values[1].parse::<u32>().unwrap();
+                // We skip the assigned guest RAM map, its RSS is only
+                // dependent on the guest actual memory usage.
+                // Everything else can be added to the VMM overhead.
+                skip_map = map_size >= guest_memory_size;
+                continue;
+            }
+
+            // If this is a map we're taking into account, then we only
+            // count the RSS. The sum of all counted RSS is the VMM overhead.
+            if !skip_map && l.starts_with("Rss") {
+                let values: Vec<&str> = l.split_whitespace().collect();
+                total += values[1].trim().parse::<u32>().unwrap();
+            }
+        }
+        total
+    }
+
+    // 10MB is our maximum accepted overhead.
+    const MAXIMUM_VMM_OVERHEAD_KB: u32 = 10 * 1024;
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_memory_overhead() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path;
+            kernel_path.push("vmlinux");
+
+            let guest_memory_size_kb = 512 * 1024;
+
+            let mut child = Command::new("target/release/cloud-hypervisor")
+                .args(&["--cpus","boot=1"])
+                .args(&["--memory", format!("size={}K", guest_memory_size_kb).as_str()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            aver!(
+                tb,
+                get_vmm_overhead(child.id(), guest_memory_size_kb) <= MAXIMUM_VMM_OVERHEAD_KB
+            );
+
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(10, 0));
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
 }
