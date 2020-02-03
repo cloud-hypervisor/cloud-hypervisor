@@ -1889,6 +1889,7 @@ mod tests {
     fn prepare_vubd(
         tmp_dir: &TempDir,
         blk_img: &str,
+        num_queues: usize,
         rdonly: bool,
         direct: bool,
     ) -> (std::process::Child, String) {
@@ -1906,8 +1907,8 @@ mod tests {
             .args(&[
                 "--block-backend",
                 format!(
-                    "image={},sock={},readonly={},direct={}",
-                    blk_file_path, vubd_socket_path, rdonly, direct
+                    "image={},sock={},num_queues={},readonly={},direct={}",
+                    blk_file_path, vubd_socket_path, num_queues, rdonly, direct
                 )
                 .as_str(),
             ])
@@ -2783,10 +2784,10 @@ mod tests {
             let guest = Guest::new(&mut clear);
 
             let (mut daemon_child, vubd_socket_path) =
-                prepare_vubd(&guest.tmp_dir, "blk.img", false, false);
+                prepare_vubd(&guest.tmp_dir, "blk.img", 2, false, false);
 
             let mut cloud_child = Command::new("target/release/cloud-hypervisor")
-                .args(&["--cpus", "boot=1"])
+                .args(&["--cpus", "boot=2"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
@@ -2802,7 +2803,7 @@ mod tests {
                     )
                     .as_str(),
                     format!(
-                        "vhost_user=true,socket={},num_queues=1,queue_size=128,wce=true",
+                        "vhost_user=true,socket={},num_queues=2,queue_size=128,wce=true",
                         vubd_socket_path
                     )
                     .as_str(),
@@ -2823,6 +2824,19 @@ mod tests {
                     .parse::<u32>()
                     .unwrap_or_default(),
                 1
+            );
+
+            thread::sleep(std::time::Duration::new(20, 0));
+            // Check if the queue number in /sys/block/vdc/mq is same to 2.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                2
             );
 
             // Mount the device
@@ -2864,7 +2878,7 @@ mod tests {
             let guest = Guest::new(&mut clear);
 
             let (mut daemon_child, vubd_socket_path) =
-                prepare_vubd(&guest.tmp_dir, "blk.img", true, false);
+                prepare_vubd(&guest.tmp_dir, "blk.img", 1, true, false);
 
             let mut cloud_child = Command::new("target/release/cloud-hypervisor")
                 .args(&["--cpus", "boot=1"])
@@ -2938,7 +2952,7 @@ mod tests {
             let guest = Guest::new(&mut clear);
 
             let (mut daemon_child, vubd_socket_path) =
-                prepare_vubd(&guest.tmp_dir, "blk.img", false, true);
+                prepare_vubd(&guest.tmp_dir, "blk.img", 1, false, true);
 
             let mut cloud_child = Command::new("target/release/cloud-hypervisor")
                 .args(&["--cpus", "boot=1"])
@@ -3006,6 +3020,7 @@ mod tests {
                     .disk(DiskType::RawOperatingSystem)
                     .unwrap()
                     .as_str(),
+                1,
                 false,
                 false,
             );
