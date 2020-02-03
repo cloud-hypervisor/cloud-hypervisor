@@ -34,7 +34,6 @@ use vm_memory::{Bytes, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::block::{build_disk_image_id, Request};
 
 const QUEUE_SIZE: usize = 1024;
-const NUM_QUEUES: usize = 1;
 const SECTOR_SHIFT: u8 = 9;
 const SECTOR_SIZE: u64 = (0x01 as u64) << SECTOR_SHIFT;
 const BLK_SIZE: u32 = 512;
@@ -61,6 +60,8 @@ pub enum Error {
     ParseSockParam,
     /// Failed to parse readonly parameter.
     ParseReadOnlyParam,
+    /// Failed parsing fs number of queues parameter.
+    ParseBlkNumQueuesParam(std::num::ParseIntError),
 }
 
 pub struct VhostUserBlkBackend {
@@ -74,7 +75,7 @@ pub struct VhostUserBlkBackend {
 }
 
 impl VhostUserBlkBackend {
-    pub fn new(image_path: String, rdonly: bool, direct: bool) -> Result<Self> {
+    pub fn new(image_path: String, num_queues: usize, rdonly: bool, direct: bool) -> Result<Self> {
         let mut options = OpenOptions::new();
         options.read(true);
         options.write(!rdonly);
@@ -100,7 +101,7 @@ impl VhostUserBlkBackend {
         config.seg_max = 128 - 2;
         config.min_io_size = 1;
         config.opt_io_size = 1;
-        config.num_queues = 1;
+        config.num_queues = num_queues as u16;
         config.wce = 1;
 
         Ok(VhostUserBlkBackend {
@@ -163,7 +164,7 @@ impl VhostUserBlkBackend {
 
 impl VhostUserBackend for VhostUserBlkBackend {
     fn num_queues(&self) -> usize {
-        NUM_QUEUES
+        self.config.num_queues as usize
     }
 
     fn max_queue_size(&self) -> usize {
@@ -204,7 +205,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
         debug!("event received: {:?}", device_event);
 
-        let mut vring = vrings[0].write().unwrap();
+        let mut vring = vrings[device_event as usize].write().unwrap();
         if self.process_queue(&mut vring) {
             debug!("signalling queue");
             vring.signal_used_queue().unwrap();
@@ -229,6 +230,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
 pub struct VhostUserBlkBackendConfig<'a> {
     pub image: &'a str,
     pub sock: &'a str,
+    pub num_queues: usize,
     pub readonly: bool,
     pub direct: bool,
 }
@@ -239,6 +241,7 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
 
         let mut image: &str = "";
         let mut sock: &str = "";
+        let mut num_queues_str: &str = "";
         let mut readonly: bool = false;
         let mut direct: bool = false;
 
@@ -247,6 +250,8 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
                 image = &param[6..];
             } else if param.starts_with("sock=") {
                 sock = &param[5..];
+            } else if param.starts_with("num_queues=") {
+                num_queues_str = &param[11..];
             } else if param.starts_with("readonly=") {
                 readonly = match param[9..].parse::<bool>() {
                     Ok(b) => b,
@@ -260,16 +265,22 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
             }
         }
 
+        let mut num_queues: usize = 1;
         if image.is_empty() {
             return Err(Error::ParseImageParam);
         }
         if sock.is_empty() {
             return Err(Error::ParseSockParam);
         }
-
+        if !num_queues_str.is_empty() {
+            num_queues = num_queues_str
+                .parse()
+                .map_err(Error::ParseBlkNumQueuesParam)?;
+        }
         Ok(VhostUserBlkBackendConfig {
             image,
             sock,
+            num_queues,
             readonly,
             direct,
         })
@@ -288,6 +299,7 @@ pub fn start_block_backend(backend_command: &str) {
     let blk_backend = Arc::new(RwLock::new(
         VhostUserBlkBackend::new(
             backend_config.image.to_string(),
+            backend_config.num_queues,
             backend_config.readonly,
             backend_config.direct,
         )
