@@ -55,6 +55,8 @@ pub enum Error {
     VhostUserConnect(vhost_rs::Error),
     /// Get features failed.
     VhostUserGetFeatures(VhostError),
+    /// Get queue max number failed.
+    VhostUserGetQueueMaxNum(VhostError),
     /// Get protocol features failed.
     VhostUserGetProtocolFeatures(VhostError),
     /// Vhost-user Backend not support vhost-user protocol.

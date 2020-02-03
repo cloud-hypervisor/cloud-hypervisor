@@ -64,6 +64,10 @@ impl Blk {
             avail_features |= 1 << VIRTIO_BLK_F_CONFIG_WCE;
         }
 
+        if vu_cfg.num_queues > 1 {
+            avail_features |= 1 << VIRTIO_BLK_F_MQ;
+        }
+
         // Set vhost-user owner.
         vhost_user_blk
             .set_owner()
@@ -95,7 +99,17 @@ impl Blk {
                 .set_protocol_features(protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
         }
+        // Get the max queues number from backend, and the queue number set
+        // should be less than this max queue number.
+        let max_queues_num = vhost_user_blk
+            .get_queue_num()
+            .map_err(Error::VhostUserGetQueueMaxNum)?;
 
+        if vu_cfg.num_queues > max_queues_num as usize {
+            error!("vhost-user-blk has queue number: {} larger than the max queue number: {} backend allowed\n",
+                vu_cfg.num_queues, max_queues_num);
+            return Err(Error::BadQueueNum);
+        }
         let config_len = mem::size_of::<VirtioBlockConfig>();
         let config_space: Vec<u8> = vec![0u8; config_len as usize];
         let (_, config_space) = vhost_user_blk
@@ -111,6 +125,15 @@ impl Blk {
             config = *backend_config;
             // Only set num_queues value(u16).
             config.num_queues = vu_cfg.num_queues as u16;
+        }
+
+        // Send set_vring_base here, since it could tell backends, like SPDK,
+        // how many virt queues to be handled, which backend required to know
+        // at early stage.
+        for i in 0..vu_cfg.num_queues {
+            vhost_user_blk
+                .set_vring_base(i, 0)
+                .map_err(Error::VhostUserSetVringBase)?;
         }
 
         Ok(Blk {
@@ -246,7 +269,7 @@ impl VirtioDevice for Blk {
         }
         self.queue_evts = Some(tmp_queue_evts);
 
-        let vu_interrupt_list = setup_vhost_user(
+        let mut vu_interrupt_list = setup_vhost_user(
             &mut self.vhost_user_blk,
             mem.load().as_ref(),
             queues,
@@ -256,25 +279,29 @@ impl VirtioDevice for Blk {
         )
         .map_err(ActivateError::VhostUserBlkSetup)?;
 
-        let mut handler = VhostUserEpollHandler::<SlaveReqHandler>::new(VhostUserEpollConfig {
-            interrupt_cb,
-            kill_evt,
-            pause_evt,
-            vu_interrupt_list,
-            slave_req_handler: None,
-        });
-
-        let paused = self.paused.clone();
         let mut epoll_threads = Vec::new();
-        thread::Builder::new()
-            .name("vhost_user_blk".to_string())
-            .spawn(move || handler.run(paused))
-            .map(|thread| epoll_threads.push(thread))
-            .map_err(|e| {
-                error!("failed to clone virtio epoll thread: {}", e);
-                ActivateError::BadActivate
-            })?;
+        for _ in 0..vu_interrupt_list.len() {
+            let mut interrupt_list_sub: Vec<(Option<EventFd>, Queue)> = Vec::with_capacity(1);
+            interrupt_list_sub.push(vu_interrupt_list.remove(0));
 
+            let mut handler = VhostUserEpollHandler::<SlaveReqHandler>::new(VhostUserEpollConfig {
+                interrupt_cb: interrupt_cb.clone(),
+                kill_evt: kill_evt.try_clone().unwrap(),
+                pause_evt: pause_evt.try_clone().unwrap(),
+                vu_interrupt_list: interrupt_list_sub,
+                slave_req_handler: None,
+            });
+
+            let paused = self.paused.clone();
+            thread::Builder::new()
+                .name("vhost_user_blk".to_string())
+                .spawn(move || handler.run(paused))
+                .map(|thread| epoll_threads.push(thread))
+                .map_err(|e| {
+                    error!("failed to clone virtio epoll thread: {}", e);
+                    ActivateError::BadActivate
+                })?;
+        }
         self.epoll_threads = Some(epoll_threads);
 
         Ok(())
