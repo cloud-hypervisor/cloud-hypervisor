@@ -54,10 +54,28 @@ pub struct Net {
 
 impl Net {
     /// Create a new vhost-user-net device
-    /// Create a new vhost-user-net device
     pub fn new(mac_addr: MacAddr, vu_cfg: VhostUserConfig) -> Result<Net> {
-        let mut vhost_user_net = Master::connect(&vu_cfg.sock, vu_cfg.num_queues as u64)
-            .map_err(Error::VhostUserCreateMaster)?;
+        let mut retry_count = 5;
+        let mut vhost_user_net = loop {
+            match Master::connect(&vu_cfg.sock, vu_cfg.num_queues as u64) {
+                Err(e) => match &e {
+                    vhost_rs::Error::VhostUserProtocol(
+                        vhost_rs::vhost_user::Error::SocketConnect(why),
+                    ) => {
+                        if why.kind() == std::io::ErrorKind::ConnectionRefused && retry_count > 0 {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            retry_count -= 1;
+                            continue;
+                        } else {
+                            break Err(e);
+                        }
+                    }
+                    _ => break Err(e),
+                },
+                Ok(vhost_user_net) => break Ok(vhost_user_net),
+            }
+        }
+        .map_err(Error::VhostUserCreateMaster)?;
 
         // Filling device and vring features VMM supports.
         let mut avail_features = 1 << virtio_net::VIRTIO_NET_F_GUEST_CSUM
