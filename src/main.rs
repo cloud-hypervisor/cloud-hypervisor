@@ -2779,6 +2779,86 @@ mod tests {
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_vhost_user_self_spawning() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let mut cloud_child = Command::new("target/release/cloud-hypervisor")
+                .args(&["--cpus", "boot=4"])
+                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                ])
+                .args(&[
+                    "--net",
+                    format!(
+                        "vhost_user=true,mac={},ip={},mask=255.255.255.0,num_queues=4,queue_size=1024",
+                        guest.network.guest_mac,
+                        guest.network.host_ip
+                    )
+                    .as_str(),
+                ])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(10, 0));
+            // 1 network interface + default localhost ==> 2 interfaces
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ip -o link | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                2
+            );
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // The following pci devices will appear on guest with PCI-MSI
+            // interrupt vectors assigned.
+            // 1 virtio-console with 3 vectors: config, Rx, Tx
+            // 1 virtio-blk     with 2 vectors: config, Request
+            // 1 virtio-blk     with 2 vectors: config, Request
+            // 1 virtio-rng     with 2 vectors: config, Request
+            // Since virtio-net has 2 queue pairs, its vectors is as follows:
+            // 1 virtio-net     with 5 vectors: config, Rx (2), Tx (2)
+            // Based on the above, the total vectors should 14.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("grep -c PCI-MSI /proc/interrupts")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                14
+            );
+
+            thread::sleep(std::time::Duration::new(10, 0));
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = cloud_child.kill();
+            let _ = cloud_child.wait();
+
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_vhost_user_blk() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
