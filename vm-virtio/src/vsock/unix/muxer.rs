@@ -32,7 +32,7 @@
 ///    mapping `RawFd`s to `EpollListener`s.
 ///
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
+use std::io::{self, Read};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 
@@ -285,22 +285,35 @@ impl VsockEpollListener for VsockMuxer {
         debug!("vsock: muxer received kick");
 
         let mut epoll_events = vec![epoll::Event::new(epoll::Events::empty(), 0); 32];
-        match epoll::wait(self.epoll_fd, 0, epoll_events.as_mut_slice()) {
-            Ok(ev_cnt) => {
-                #[allow(clippy::needless_range_loop)]
-                for i in 0..ev_cnt {
-                    self.handle_event(
-                        epoll_events[i].data as RawFd,
-                        // It's ok to unwrap here, since the `epoll_events[i].events` is filled
-                        // in by `epoll::wait()`, and therefore contains only valid epoll
-                        // flags.
-                        epoll::Events::from_bits(epoll_events[i].events).unwrap(),
-                    );
+        'epoll: loop {
+            match epoll::wait(self.epoll_fd, 0, epoll_events.as_mut_slice()) {
+                Ok(ev_cnt) => {
+                    #[allow(clippy::needless_range_loop)]
+                    for i in 0..ev_cnt {
+                        self.handle_event(
+                            epoll_events[i].data as RawFd,
+                            // It's ok to unwrap here, since the `epoll_events[i].events` is filled
+                            // in by `epoll::wait()`, and therefore contains only valid epoll
+                            // flags.
+                            epoll::Events::from_bits(epoll_events[i].events).unwrap(),
+                        );
+                    }
+                }
+                Err(e) => {
+                    if e.kind() == io::ErrorKind::Interrupted {
+                        // It's well defined from the epoll_wait() syscall
+                        // documentation that the epoll loop can be interrupted
+                        // before any of the requested events occurred or the
+                        // timeout expired. In both those cases, epoll_wait()
+                        // returns an error of type EINTR, but this should not
+                        // be considered as a regular error. Instead it is more
+                        // appropriate to retry, by calling into epoll_wait().
+                        continue;
+                    }
+                    warn!("vsock: failed to consume muxer epoll event: {}", e);
                 }
             }
-            Err(e) => {
-                warn!("vsock: failed to consume muxer epoll event: {}", e);
-            }
+            break 'epoll;
         }
     }
 }
