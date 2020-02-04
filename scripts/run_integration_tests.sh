@@ -157,7 +157,7 @@ sudo ip link set vfio-tap2 master vfio-br0
 sudo ip link set vfio-tap2 up
 
 cargo build --release
-sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
+sudo setcap cap_net_admin,cap_sys_ptrace+ep target/release/cloud-hypervisor
 sudo setcap cap_net_admin+ep target/release/vhost_user_net
 sudo setcap cap_dac_override,cap_sys_admin+epi target/release/vhost_user_fs
 
@@ -172,7 +172,7 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
 # Ensure test binary has the same caps as the cloud-hypervisor one
 time cargo test --no-run --features "integration_tests" -- --nocapture
-ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
+ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin,cap_sys_ptrace+ep
 
 sudo adduser $USER kvm
 newgrp kvm << EOF
@@ -184,7 +184,7 @@ RES=$?
 if [ $RES -eq 0 ]; then
     # virtio-mmio based testing
     cargo build --release --no-default-features --features "mmio"
-    sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
+    sudo setcap cap_net_admin,cap_sys_ptrace+ep target/release/cloud-hypervisor
 
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
