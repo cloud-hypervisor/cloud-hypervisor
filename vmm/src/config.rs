@@ -45,8 +45,6 @@ pub enum Error {
     ParseDiskQueueSizeParam(std::num::ParseIntError),
     /// Failed to parse vhost parameters
     ParseDiskVhostParam(std::str::ParseBoolError),
-    /// Need a vhost socket
-    ParseDiskVhostSocketRequired,
     /// Failed parsing disk wce parameter.
     ParseDiskWceParam(std::str::ParseBoolError),
     /// Failed parsing random number generator parameters.
@@ -445,11 +443,6 @@ impl DiskConfig {
                 warn!("wce parameter currently only has effect when used vhost_user=true");
             }
             wce = wce_str.parse().map_err(Error::ParseDiskWceParam)?;
-        }
-
-        // For now we require a socket if vhost-user is turned on
-        if vhost_user && vhost_socket.is_none() {
-            return Err(Error::ParseDiskVhostSocketRequired);
         }
 
         Ok(DiskConfig {
