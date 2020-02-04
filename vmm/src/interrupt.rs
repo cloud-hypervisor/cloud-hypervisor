@@ -272,30 +272,37 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
     }
 }
 
-pub struct KvmInterruptManager {
+pub struct KvmLegacyUserspaceInterruptManager {
+    ioapic: Arc<Mutex<ioapic::Ioapic>>,
+}
+
+pub struct KvmMsiInterruptManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     vm_fd: Arc<VmFd>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
-    ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
 }
 
-impl KvmInterruptManager {
+impl KvmLegacyUserspaceInterruptManager {
+    pub fn new(ioapic: Arc<Mutex<ioapic::Ioapic>>) -> Self {
+        KvmLegacyUserspaceInterruptManager { ioapic }
+    }
+}
+
+impl KvmMsiInterruptManager {
     pub fn new(
         allocator: Arc<Mutex<SystemAllocator>>,
         vm_fd: Arc<VmFd>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
-        ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
     ) -> Self {
-        KvmInterruptManager {
+        KvmMsiInterruptManager {
             allocator,
             vm_fd,
             gsi_msi_routes,
-            ioapic,
         }
     }
 }
 
-impl InterruptManager for KvmInterruptManager {
+impl InterruptManager for KvmLegacyUserspaceInterruptManager {
     fn create_group(
         &self,
         interrupt_type: InterruptType,
@@ -311,18 +318,35 @@ impl InterruptManager for KvmInterruptManager {
                     ));
                 }
 
-                if let Some(ioapic) = &self.ioapic {
-                    Arc::new(Box::new(LegacyUserspaceInterruptGroup::new(
-                        ioapic.clone(),
-                        base as u32,
-                    )))
-                } else {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "No IOAPIC configured, cannot create legacy interrupt group",
-                    ));
-                }
+                Arc::new(Box::new(LegacyUserspaceInterruptGroup::new(
+                    self.ioapic.clone(),
+                    base as u32,
+                )))
             }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "Interrupt type not supported",
+                ))
+            }
+        };
+
+        Ok(interrupt_source_group)
+    }
+
+    fn destroy_group(&self, _group: Arc<Box<dyn InterruptSourceGroup>>) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl InterruptManager for KvmMsiInterruptManager {
+    fn create_group(
+        &self,
+        interrupt_type: InterruptType,
+        base: InterruptIndex,
+        count: InterruptIndex,
+    ) -> Result<Arc<Box<dyn InterruptSourceGroup>>> {
+        let interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>> = match interrupt_type {
             PCI_MSI_IRQ => {
                 let mut allocator = self.allocator.lock().unwrap();
                 let mut irq_routes: HashMap<InterruptIndex, InterruptRoute> =
