@@ -287,8 +287,8 @@ fn create_app<'a, 'b>(
                 .long("block-backend")
                 .help(
                     "vhost-user-block backend parameters \"image=<image_path>,\
-                     sock=<socket_path>,readonly=true|false,\
-                     direct=true|false\"",
+                     sock=<socket_path>,num_queues=<number_of_queues>,\
+                     readonly=true|false,direct=true|false\"",
                 )
                 .takes_value(true)
                 .conflicts_with_all(&["net-backend", "kernel"])
