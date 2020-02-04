@@ -2779,7 +2779,7 @@ mod tests {
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
-    fn test_vhost_user_self_spawning() {
+    fn test_vhost_user_net_self_spawning() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
@@ -2947,6 +2947,44 @@ mod tests {
             thread::sleep(std::time::Duration::new(5, 0));
             let _ = daemon_child.kill();
             let _ = daemon_child.wait();
+
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_vhost_user_blk_self_spawning() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let mut cloud_child = Command::new("target/release/cloud-hypervisor")
+                .args(&["--cpus", "boot=2"])
+                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={},vhost_user=true",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={},vhost_user=true",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                ])
+                .args(&["--net", guest.default_net_string().as_str()])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            guest.ssh_command("sudo shutdown -h now")?;
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = cloud_child.kill();
+            let _ = cloud_child.wait();
 
             Ok(())
         });
