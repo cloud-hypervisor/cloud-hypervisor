@@ -57,7 +57,8 @@ impl log::Log for Logger {
                 record.target(),
                 record.args()
             )
-        }.ok();
+        }
+        .ok();
     }
     fn flush(&self) {}
 }
