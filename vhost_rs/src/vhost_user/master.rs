@@ -85,13 +85,31 @@ impl Master {
 
     /// Create a new vhost-user master endpoint.
     ///
+    /// Will retry as the backend may not be ready to accept the connection.
+    ///
     /// # Arguments
     /// * `path` - path of Unix domain socket listener to connect to
     pub fn connect(path: &str, max_queue_num: u64) -> Result<Self> {
-        Ok(Self::new(
-            Endpoint::<MasterReq>::connect(path)?,
-            max_queue_num,
-        ))
+        let mut retry_count = 5;
+        let endpoint = loop {
+            match Endpoint::<MasterReq>::connect(path) {
+                Ok(endpoint) => break Ok(endpoint),
+                Err(e) => match &e {
+                    VhostUserError::SocketConnect(why) => {
+                        if why.kind() == std::io::ErrorKind::ConnectionRefused && retry_count > 0 {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            retry_count -= 1;
+                            continue;
+                        } else {
+                            break Err(e);
+                        }
+                    }
+                    _ => break Err(e),
+                },
+            }
+        }?;
+
+        Ok(Self::new(endpoint, max_queue_num))
     }
 }
 
