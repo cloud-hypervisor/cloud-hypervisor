@@ -12,7 +12,7 @@
 extern crate vm_device;
 
 use crate::config::ConsoleOutputMode;
-use crate::config::{NetConfig, VmConfig};
+use crate::config::{DiskConfig, NetConfig, VmConfig};
 use crate::interrupt::{
     KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager, KvmRoutingEntry,
 };
@@ -204,6 +204,9 @@ pub enum DeviceManagerError {
 
     /// Failed to spawn the network backend
     SpawnNetBackend(io::Error),
+
+    /// Failed to spawn the block backend
+    SpawnBlockBackend(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -863,14 +866,48 @@ impl DeviceManager {
         Ok(devices)
     }
 
+    /// Launch block backend
+    fn start_block_backend(&mut self, disk_cfg: &DiskConfig) -> DeviceManagerResult<String> {
+        let _socket_file = NamedTempFile::new().map_err(DeviceManagerError::CreateSocketFile)?;
+        let sock = _socket_file.path().to_str().unwrap().to_owned();
+
+        let child = std::process::Command::new(&self.vmm_path)
+            .args(&[
+                "--block-backend",
+                &format!(
+                    "image={},sock={},num_queues={},queue_size={}",
+                    disk_cfg.path.to_str().unwrap(),
+                    &sock,
+                    disk_cfg.num_queues,
+                    disk_cfg.queue_size
+                ),
+            ])
+            .spawn()
+            .map_err(DeviceManagerError::SpawnBlockBackend)?;
+
+        // The ActivatedBackend::drop() will automatically reap the child
+        self.vhost_user_backends.push(ActivatedBackend {
+            child,
+            _socket_file,
+        });
+
+        Ok(sock)
+    }
+
     fn make_virtio_block_devices(&mut self) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
 
-        if let Some(disk_list_cfg) = &self.config.lock().unwrap().disks {
+        let block_devices = self.config.lock().unwrap().disks.clone();
+        if let Some(disk_list_cfg) = &block_devices {
             for disk_cfg in disk_list_cfg.iter() {
                 if disk_cfg.vhost_user {
+                    let sock = if let Some(sock) = disk_cfg.vhost_socket.clone() {
+                        sock
+                    } else {
+                        self.start_block_backend(disk_cfg)?
+                    };
                     let vu_cfg = VhostUserConfig {
-                        sock: disk_cfg.vhost_socket.clone().unwrap(),
+                        sock,
                         num_queues: disk_cfg.num_queues,
                         queue_size: disk_cfg.queue_size,
                     };
