@@ -38,7 +38,7 @@ impl log::Log for Logger {
         let now = std::time::Instant::now();
         let duration = now.duration_since(self.start);
 
-        if let Err(e) = if record.file().is_some() && record.line().is_some() {
+        if record.file().is_some() && record.line().is_some() {
             writeln!(
                 *(*(self.output.lock().unwrap())),
                 "cloud-hypervisor: {:?}: {}:{}:{} -- {}",
@@ -57,9 +57,7 @@ impl log::Log for Logger {
                 record.target(),
                 record.args()
             )
-        } {
-            eprintln!("Error writing log output: {:?}", e);
-        }
+        }.ok();
     }
     fn flush(&self) {}
 }
