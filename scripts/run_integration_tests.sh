@@ -177,7 +177,7 @@ ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+e
 sudo adduser $USER kvm
 newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --features "integration_tests" -- --nocapture
+time cargo test --features "integration_tests" "$@" -- --nocapture
 EOF
 RES=$?
 
@@ -188,7 +188,7 @@ if [ $RES -eq 0 ]; then
 
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --features "integration_tests,mmio" -- --nocapture
+time cargo test --features "integration_tests,mmio" "$@" -- --nocapture
 EOF
 
     RES=$?
