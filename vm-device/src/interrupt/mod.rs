@@ -66,12 +66,6 @@ pub type Result<T> = std::io::Result<T>;
 /// Data type to store an interrupt source identifier.
 pub type InterruptIndex = u32;
 
-/// Data type to store an interrupt source type.
-///
-/// The interrupt source type is a slim wrapper so that the `InterruptManager`
-/// can be implemented in external, non rust-vmm crates.
-pub type InterruptType = u32;
-
 /// Configuration data for legacy interrupts.
 ///
 /// On x86 platforms, legacy interrupts means those interrupts routed through PICs or IOAPICs.
@@ -100,14 +94,33 @@ pub enum InterruptSourceConfig {
     MsiIrq(MsiIrqSourceConfig),
 }
 
-pub const PIN_IRQ: InterruptType = 0;
-pub const PCI_MSI_IRQ: InterruptType = 1;
+/// Configuration data for legacy, pin based interrupt groups.
+///
+/// A legacy interrupt group only takes one irq number as its configuration.
+#[derive(Copy, Clone, Debug)]
+pub struct LegacyIrqGroupConfig {
+    /// Legacy irq number.
+    pub irq: InterruptIndex,
+}
+
+/// Configuration data for MSI/MSI-X interrupt groups
+///
+/// MSI/MSI-X interrupt groups are basically a set of vectors.
+#[derive(Copy, Clone, Debug)]
+pub struct MsiIrqGroupConfig {
+    /// First index of the MSI/MSI-X interrupt vectors
+    pub base: InterruptIndex,
+    /// Number of vectors in the MSI/MSI-X group.
+    pub count: InterruptIndex,
+}
 
 /// Trait to manage interrupt sources for virtual device backends.
 ///
 /// The InterruptManager implementations should protect itself from concurrent accesses internally,
 /// so it could be invoked from multi-threaded context.
 pub trait InterruptManager {
+    type GroupConfig;
+
     /// Create an [InterruptSourceGroup](trait.InterruptSourceGroup.html) object to manage
     /// interrupt sources for a virtual device
     ///
@@ -118,12 +131,8 @@ pub trait InterruptManager {
     /// * interrupt_type: type of interrupt source.
     /// * base: base Interrupt Source ID to be managed by the group object.
     /// * count: number of Interrupt Sources to be managed by the group object.
-    fn create_group(
-        &self,
-        interrupt_type: InterruptType,
-        base: InterruptIndex,
-        count: InterruptIndex,
-    ) -> Result<Arc<Box<dyn InterruptSourceGroup>>>;
+    fn create_group(&self, config: Self::GroupConfig)
+        -> Result<Arc<Box<dyn InterruptSourceGroup>>>;
 
     /// Destroy an [InterruptSourceGroup](trait.InterruptSourceGroup.html) object created by
     /// [create_group()](trait.InterruptManager.html#tymethod.create_group).

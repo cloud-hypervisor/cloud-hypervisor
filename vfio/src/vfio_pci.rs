@@ -24,7 +24,9 @@ use std::sync::Arc;
 use std::{fmt, io, result};
 use vfio_bindings::bindings::vfio::*;
 use vm_allocator::SystemAllocator;
-use vm_device::interrupt::{InterruptIndex, InterruptManager, InterruptSourceGroup, PCI_MSI_IRQ};
+use vm_device::interrupt::{
+    InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
+};
 use vm_memory::{Address, GuestAddress, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -286,7 +288,7 @@ impl VfioPciDevice {
     pub fn new(
         vm_fd: &Arc<VmFd>,
         device: VfioDevice,
-        interrupt_manager: &Arc<dyn InterruptManager>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> Result<Self> {
         let device = Arc::new(device);
         device.reset();
@@ -322,7 +324,11 @@ impl VfioPciDevice {
         Ok(vfio_pci_device)
     }
 
-    fn parse_msix_capabilities(&mut self, cap: u8, interrupt_manager: &Arc<dyn InterruptManager>) {
+    fn parse_msix_capabilities(
+        &mut self,
+        cap: u8,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+    ) {
         let msg_ctl = self
             .vfio_pci_configuration
             .read_config_word((cap + 2).into());
@@ -342,7 +348,10 @@ impl VfioPciDevice {
         };
 
         let interrupt_source_group = interrupt_manager
-            .create_group(PCI_MSI_IRQ, 0, msix_cap.table_size() as InterruptIndex)
+            .create_group(MsiIrqGroupConfig {
+                base: 0,
+                count: msix_cap.table_size() as InterruptIndex,
+            })
             .unwrap();
 
         let msix_config = MsixConfig::new(msix_cap.table_size(), interrupt_source_group.clone());
@@ -355,17 +364,20 @@ impl VfioPciDevice {
         });
     }
 
-    fn parse_msi_capabilities(&mut self, cap: u8, interrupt_manager: &Arc<dyn InterruptManager>) {
+    fn parse_msi_capabilities(
+        &mut self,
+        cap: u8,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+    ) {
         let msg_ctl = self
             .vfio_pci_configuration
             .read_config_word((cap + 2).into());
 
         let interrupt_source_group = interrupt_manager
-            .create_group(
-                PCI_MSI_IRQ,
-                0,
-                msi_num_enabled_vectors(msg_ctl) as InterruptIndex,
-            )
+            .create_group(MsiIrqGroupConfig {
+                base: 0,
+                count: msi_num_enabled_vectors(msg_ctl) as InterruptIndex,
+            })
             .unwrap();
 
         let msi_config = MsiConfig::new(msg_ctl, interrupt_source_group.clone());
@@ -377,7 +389,10 @@ impl VfioPciDevice {
         });
     }
 
-    fn parse_capabilities(&mut self, interrupt_manager: &Arc<dyn InterruptManager>) {
+    fn parse_capabilities(
+        &mut self,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+    ) {
         let mut cap_next = self
             .vfio_pci_configuration
             .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);

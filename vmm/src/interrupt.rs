@@ -12,8 +12,8 @@ use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup, InterruptType,
-    PCI_MSI_IRQ, PIN_IRQ,
+    InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
+    LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
 use vmm_sys_util::eventfd::EventFd;
 
@@ -303,35 +303,16 @@ impl KvmMsiInterruptManager {
 }
 
 impl InterruptManager for KvmLegacyUserspaceInterruptManager {
+    type GroupConfig = LegacyIrqGroupConfig;
+
     fn create_group(
         &self,
-        interrupt_type: InterruptType,
-        base: InterruptIndex,
-        count: InterruptIndex,
+        config: Self::GroupConfig,
     ) -> Result<Arc<Box<dyn InterruptSourceGroup>>> {
-        let interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>> = match interrupt_type {
-            PIN_IRQ => {
-                if count > 1 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "Legacy cannot support more than one interrupt",
-                    ));
-                }
-
-                Arc::new(Box::new(LegacyUserspaceInterruptGroup::new(
-                    self.ioapic.clone(),
-                    base as u32,
-                )))
-            }
-            _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Interrupt type not supported",
-                ))
-            }
-        };
-
-        Ok(interrupt_source_group)
+        Ok(Arc::new(Box::new(LegacyUserspaceInterruptGroup::new(
+            self.ioapic.clone(),
+            config.irq as u32,
+        ))))
     }
 
     fn destroy_group(&self, _group: Arc<Box<dyn InterruptSourceGroup>>) -> Result<()> {
@@ -340,36 +321,24 @@ impl InterruptManager for KvmLegacyUserspaceInterruptManager {
 }
 
 impl InterruptManager for KvmMsiInterruptManager {
+    type GroupConfig = MsiIrqGroupConfig;
+
     fn create_group(
         &self,
-        interrupt_type: InterruptType,
-        base: InterruptIndex,
-        count: InterruptIndex,
+        config: Self::GroupConfig,
     ) -> Result<Arc<Box<dyn InterruptSourceGroup>>> {
-        let interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>> = match interrupt_type {
-            PCI_MSI_IRQ => {
-                let mut allocator = self.allocator.lock().unwrap();
-                let mut irq_routes: HashMap<InterruptIndex, InterruptRoute> =
-                    HashMap::with_capacity(count as usize);
-                for i in base..base + count {
-                    irq_routes.insert(i, InterruptRoute::new(&mut allocator)?);
-                }
+        let mut allocator = self.allocator.lock().unwrap();
+        let mut irq_routes: HashMap<InterruptIndex, InterruptRoute> =
+            HashMap::with_capacity(config.count as usize);
+        for i in config.base..config.base + config.count {
+            irq_routes.insert(i, InterruptRoute::new(&mut allocator)?);
+        }
 
-                Arc::new(Box::new(MsiInterruptGroup::new(
-                    self.vm_fd.clone(),
-                    self.gsi_msi_routes.clone(),
-                    irq_routes,
-                )))
-            }
-            _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Interrupt type not supported",
-                ))
-            }
-        };
-
-        Ok(interrupt_source_group)
+        Ok(Arc::new(Box::new(MsiInterruptGroup::new(
+            self.vm_fd.clone(),
+            self.gsi_msi_routes.clone(),
+            irq_routes,
+        ))))
     }
 
     fn destroy_group(&self, _group: Arc<Box<dyn InterruptSourceGroup>>) -> Result<()> {
