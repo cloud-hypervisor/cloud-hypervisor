@@ -12,7 +12,7 @@
 extern crate vm_device;
 
 use crate::config::ConsoleOutputMode;
-use crate::config::VmConfig;
+use crate::config::{NetConfig, VmConfig};
 use crate::interrupt::{
     KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager, KvmRoutingEntry,
 };
@@ -40,6 +40,7 @@ use std::result;
 #[cfg(feature = "pci_support")]
 use std::sync::Weak;
 use std::sync::{Arc, Mutex};
+use tempfile::NamedTempFile;
 #[cfg(feature = "pci_support")]
 use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
@@ -197,6 +198,12 @@ pub enum DeviceManagerError {
 
     /// Failed cloning a File.
     CloneFile(io::Error),
+
+    /// Failed to create socket file
+    CreateSocketFile(io::Error),
+
+    /// Failed to spawn the network backend
+    SpawnNetBackend(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -366,6 +373,17 @@ impl DeviceRelocation for AddressManager {
     }
 }
 
+struct ActivatedBackend {
+    _socket_file: tempfile::NamedTempFile,
+    child: std::process::Child,
+}
+
+impl Drop for ActivatedBackend {
+    fn drop(&mut self) {
+        self.child.wait().ok();
+    }
+}
+
 pub struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
@@ -402,7 +420,10 @@ pub struct DeviceManager {
     virtio_devices: Vec<(VirtioDeviceArc, bool)>,
 
     // The path to the VMM for self spawning
-    _vmm_path: PathBuf,
+    vmm_path: PathBuf,
+
+    // Backends that have been spawned
+    vhost_user_backends: Vec<ActivatedBackend>,
 }
 
 impl DeviceManager {
@@ -413,7 +434,7 @@ impl DeviceManager {
         memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
-        _vmm_path: PathBuf,
+        vmm_path: PathBuf,
     ) -> DeviceManagerResult<Self> {
         let io_bus = devices::Bus::new();
         let mmio_bus = devices::Bus::new();
@@ -487,7 +508,8 @@ impl DeviceManager {
             migratable_devices,
             memory_manager,
             virtio_devices: Vec::new(),
-            _vmm_path,
+            vmm_path,
+            vhost_user_backends: Vec::new(),
         };
 
         device_manager
@@ -932,15 +954,45 @@ impl DeviceManager {
         Ok(devices)
     }
 
+    /// Launch network backend
+    fn start_net_backend(&mut self, net_cfg: &NetConfig) -> DeviceManagerResult<String> {
+        let _socket_file = NamedTempFile::new().map_err(DeviceManagerError::CreateSocketFile)?;
+        let sock = _socket_file.path().to_str().unwrap().to_owned();
+
+        let child = std::process::Command::new(&self.vmm_path)
+            .args(&[
+                "--net-backend",
+                &format!(
+                    "ip={},mask={},sock={},num_queues={},queue_size={}",
+                    net_cfg.ip, net_cfg.mask, &sock, net_cfg.num_queues, net_cfg.queue_size
+                ),
+            ])
+            .spawn()
+            .map_err(DeviceManagerError::SpawnNetBackend)?;
+
+        // The ActivatedBackend::drop() will automatically reap the child
+        self.vhost_user_backends.push(ActivatedBackend {
+            child,
+            _socket_file,
+        });
+
+        Ok(sock)
+    }
+
     /// Add virto-net and vhost-user-net devices
     fn make_virtio_net_devices(&mut self) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
-
-        if let Some(net_list_cfg) = &self.config.lock().unwrap().net {
+        let net_devices = self.config.lock().unwrap().net.clone();
+        if let Some(net_list_cfg) = &net_devices {
             for net_cfg in net_list_cfg.iter() {
                 if net_cfg.vhost_user {
+                    let sock = if let Some(sock) = net_cfg.vhost_socket.clone() {
+                        sock
+                    } else {
+                        self.start_net_backend(net_cfg)?
+                    };
                     let vu_cfg = VhostUserConfig {
-                        sock: net_cfg.vhost_socket.clone().unwrap(),
+                        sock,
                         num_queues: net_cfg.num_queues,
                         queue_size: net_cfg.queue_size,
                     };
