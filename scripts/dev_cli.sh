@@ -124,7 +124,7 @@ cmd_help() {
     echo "        --debug               Build the debug binaries. This is the default."
     echo "        --release             Build the release binaries."
     echo ""
-    echo "    tests [--unit|--cargo|--all]"
+    echo "    tests [--unit|--cargo|--all] [-- [<cargo test args>]]"
     echo "        Run the Cloud Hypervisor tests."
     echo "        --unit               Run the unit tests."
     echo "        --cargo              Run the cargo tests."
@@ -227,7 +227,7 @@ cmd_tests() {
 	       --volume /dev:/dev \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_unit_tests.sh
+	       ./scripts/run_unit_tests.sh "$@"
     fi
 
     if [ "$cargo" = true ] ;  then
@@ -252,7 +252,7 @@ cmd_tests() {
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_integration_tests.sh
+	       ./scripts/run_integration_tests.sh "$@"
     fi
 }
 

@@ -10,5 +10,5 @@ popd
 sudo adduser $USER kvm
 newgrp kvm << EOF || exit 1
   export RUST_BACKTRACE=1
-  cargo test --workspace || exit 1;
+  cargo test --workspace "$@" || exit 1;
 EOF
