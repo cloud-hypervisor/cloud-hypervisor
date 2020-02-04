@@ -587,11 +587,6 @@ impl NetConfig {
             vhost_socket = Some(vhost_socket_str.to_owned());
         }
 
-        // For now we require a socket if vhost-user is turned on
-        if vhost_user && vhost_socket.is_none() {
-            return Err(Error::ParseNetVhostSocketRequired);
-        }
-
         Ok(NetConfig {
             tap,
             ip,
