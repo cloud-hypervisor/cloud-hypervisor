@@ -13,7 +13,9 @@ extern crate vm_device;
 
 use crate::config::ConsoleOutputMode;
 use crate::config::VmConfig;
-use crate::interrupt::{KvmInterruptManager, KvmRoutingEntry};
+use crate::interrupt::{
+    KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager, KvmRoutingEntry,
+};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
@@ -428,38 +430,26 @@ impl DeviceManager {
         let kvm_gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
-        // Here we create a first interrupt manager that will be directly
-        // passed down to the Ioapic. The reason we need this extra interrupt
-        // manager is because the more global one will need a handler onto the
-        // Ioapic itself. We didn't want to solve this problem by adding some
-        // setter to the KvmInterruptManager as this would have required the
-        // interrupt manager to be mutable.
-        //
-        // One thing to note, it is safe to create two interrupt managers
-        // without risking some concurrency between the two since the list
-        // of GSI routes is shared and protected by a Mutex.
-        let ioapic_interrupt_manager: Arc<dyn InterruptManager> =
-            Arc::new(KvmInterruptManager::new(
+        // First we create the MSI interrupt manager, the legacy one is created
+        // later, after the IOAPIC device creation.
+        // The reason we create the MSI one first is because the IOAPIC needs it,
+        // and then the legacy interrupt manager needs an IOAPIC. So we're
+        // handling a linear dependency chain:
+        // msi_interrupt_manager <- IOAPIC <- legacy_interrupt_manager.
+        let msi_interrupt_manager: Arc<dyn InterruptManager> =
+            Arc::new(KvmMsiInterruptManager::new(
                 Arc::clone(&address_manager.allocator),
-                vm_fd.clone(),
+                vm_fd,
                 Arc::clone(&kvm_gsi_msi_routes),
-                None,
             ));
 
-        let ioapic = DeviceManager::add_ioapic(&address_manager, ioapic_interrupt_manager)?;
+        let ioapic =
+            DeviceManager::add_ioapic(&address_manager, Arc::clone(&msi_interrupt_manager))?;
 
-        // Creation of the global interrupt manager, which can take a hold onto
-        // the brand new Ioapic.
-        //
-        // Note the list of GSI routes is Arc cloned, the same way it was Arc
-        // cloned for the interrupt manager dedicated to the Ioapic. That's how
-        // both interrupt managers are going to share the list correctly.
-        let interrupt_manager: Arc<dyn InterruptManager> = Arc::new(KvmInterruptManager::new(
-            Arc::clone(&address_manager.allocator),
-            vm_fd,
-            Arc::clone(&kvm_gsi_msi_routes),
-            Some(ioapic.clone()),
-        ));
+        // Now we can create the legacy interrupt manager, which needs the freshly
+        // formed IOAPIC device.
+        let legacy_interrupt_manager: Arc<dyn InterruptManager> =
+            Arc::new(KvmLegacyUserspaceInterruptManager::new(ioapic.clone()));
 
         #[cfg(feature = "acpi")]
         address_manager
@@ -494,22 +484,22 @@ impl DeviceManager {
         #[cfg(feature = "acpi")]
         {
             device_manager.ged_notification_device = device_manager.add_acpi_devices(
-                &interrupt_manager,
+                &legacy_interrupt_manager,
                 reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
                 _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             )?;
         }
 
         device_manager.console =
-            device_manager.add_console_device(&interrupt_manager, &mut virtio_devices)?;
+            device_manager.add_console_device(&legacy_interrupt_manager, &mut virtio_devices)?;
 
         #[cfg(any(feature = "pci_support", feature = "mmio_support"))]
         virtio_devices.append(&mut device_manager.make_virtio_devices()?);
 
         if cfg!(feature = "pci_support") {
-            device_manager.add_pci_devices(virtio_devices, &interrupt_manager)?;
+            device_manager.add_pci_devices(virtio_devices, &msi_interrupt_manager)?;
         } else if cfg!(feature = "mmio_support") {
-            device_manager.add_mmio_devices(virtio_devices, &interrupt_manager)?;
+            device_manager.add_mmio_devices(virtio_devices, &legacy_interrupt_manager)?;
         }
 
         Ok(device_manager)
