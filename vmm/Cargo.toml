@@ -37,6 +37,7 @@ vm-device = { path = "../vm-device" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
 signal-hook = "0.1.13"
+tempfile = "3.1.0"
 
 [dependencies.linux-loader]
 git = "https://github.com/rust-vmm/linux-loader"

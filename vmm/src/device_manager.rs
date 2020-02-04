@@ -12,7 +12,7 @@
 extern crate vm_device;
 
 use crate::config::ConsoleOutputMode;
-use crate::config::VmConfig;
+use crate::config::{NetConfig, VmConfig};
 use crate::interrupt::{KvmInterruptManager, KvmRoutingEntry};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 #[cfg(feature = "acpi")]
@@ -33,10 +33,12 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
 use std::os::unix::fs::OpenOptionsExt;
+use std::process;
 use std::result;
 #[cfg(feature = "pci_support")]
 use std::sync::Weak;
 use std::sync::{Arc, Mutex};
+use tempfile::NamedTempFile;
 #[cfg(feature = "pci_support")]
 use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
@@ -193,6 +195,12 @@ pub enum DeviceManagerError {
 
     /// Failed cloning a File.
     CloneFile(io::Error),
+
+    /// Failed to create socket file
+    CreateSocketFile(io::Error),
+
+    /// Failed to spawn the network backend
+    SpawnNetBackend(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -362,6 +370,18 @@ impl DeviceRelocation for AddressManager {
     }
 }
 
+struct ActivatedBackend {
+    _socket_file: tempfile::NamedTempFile,
+    child: process::Child,
+}
+
+impl Drop for ActivatedBackend {
+    fn drop(&mut self) {
+        self.child.kill().ok();
+        self.child.wait().ok();
+    }
+}
+
 pub struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
@@ -393,6 +413,9 @@ pub struct DeviceManager {
 
     // Memory Manager
     memory_manager: Arc<Mutex<MemoryManager>>,
+
+    // Backends that have been spawned (at the start so dropped last)
+    vhost_user_backends: Vec<ActivatedBackend>,
 }
 
 impl DeviceManager {
@@ -486,6 +509,7 @@ impl DeviceManager {
             config,
             migratable_devices,
             memory_manager,
+            vhost_user_backends: Vec::new(),
         };
 
         device_manager
@@ -924,15 +948,46 @@ impl DeviceManager {
         Ok(devices)
     }
 
+    /// Launch network backend
+    fn start_net_backend(&mut self, net_cfg: &NetConfig) -> DeviceManagerResult<String> {
+        let _socket_file = NamedTempFile::new().map_err(DeviceManagerError::CreateSocketFile)?;
+        let sock = _socket_file.path().to_str().unwrap().to_owned();
+        let self_path = format!("/proc/{}/exe", process::id());
+
+        let child = process::Command::new(self_path)
+            .args(&[
+                "--net-backend",
+                &format!(
+                    "ip={},mask={},sock={},num_queues={},queue_size={}",
+                    net_cfg.ip, net_cfg.mask, &sock, net_cfg.num_queues, net_cfg.queue_size
+                ),
+            ])
+            .spawn()
+            .map_err(DeviceManagerError::SpawnNetBackend)?;
+
+        // The ActivatedBackend::drop() will automatically reap the child
+        self.vhost_user_backends.push(ActivatedBackend {
+            child,
+            _socket_file,
+        });
+
+        Ok(sock)
+    }
+
     /// Add virto-net and vhost-user-net devices
     fn make_virtio_net_devices(&mut self) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
-
-        if let Some(net_list_cfg) = &self.config.lock().unwrap().net {
+        let net_devices = self.config.lock().unwrap().net.clone();
+        if let Some(net_list_cfg) = &net_devices {
             for net_cfg in net_list_cfg.iter() {
                 if net_cfg.vhost_user {
+                    let sock = if let Some(sock) = net_cfg.vhost_socket.clone() {
+                        sock
+                    } else {
+                        self.start_net_backend(net_cfg)?
+                    };
                     let vu_cfg = VhostUserConfig {
-                        sock: net_cfg.vhost_socket.clone().unwrap(),
+                        sock,
                         num_queues: net_cfg.num_queues,
                         queue_size: net_cfg.queue_size,
                     };

@@ -12,6 +12,7 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
+extern crate tempfile;
 extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
