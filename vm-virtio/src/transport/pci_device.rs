@@ -35,7 +35,9 @@ use std::result;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use vm_allocator::SystemAllocator;
-use vm_device::interrupt::{InterruptIndex, InterruptManager, InterruptSourceGroup, PCI_MSI_IRQ};
+use vm_device::interrupt::{
+    InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
+};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
@@ -305,7 +307,7 @@ impl VirtioPciDevice {
         device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
         iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
-        interrupt_manager: &Arc<dyn InterruptManager>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> Result<Self> {
         let device_clone = device.clone();
         let locked_device = device_clone.lock().unwrap();
@@ -325,8 +327,10 @@ impl VirtioPciDevice {
 
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + locked_device.device_type() as u16;
 
-        let interrupt_source_group =
-            interrupt_manager.create_group(PCI_MSI_IRQ, 0, msix_num as InterruptIndex)?;
+        let interrupt_source_group = interrupt_manager.create_group(MsiIrqGroupConfig {
+            base: 0,
+            count: msix_num as InterruptIndex,
+        })?;
 
         let (msix_config, msix_config_clone) = if msix_num > 0 {
             let msix_config = Arc::new(Mutex::new(MsixConfig::new(

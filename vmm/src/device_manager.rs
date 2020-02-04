@@ -42,8 +42,9 @@ use std::sync::{Arc, Mutex};
 #[cfg(feature = "pci_support")]
 use vfio::{VfioDevice, VfioDmaMapping, VfioPciDevice, VfioPciError};
 use vm_allocator::SystemAllocator;
-use vm_device::interrupt::InterruptManager;
-use vm_device::interrupt::{InterruptIndex, PIN_IRQ};
+use vm_device::interrupt::{
+    InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
+};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
@@ -436,7 +437,7 @@ impl DeviceManager {
         // and then the legacy interrupt manager needs an IOAPIC. So we're
         // handling a linear dependency chain:
         // msi_interrupt_manager <- IOAPIC <- legacy_interrupt_manager.
-        let msi_interrupt_manager: Arc<dyn InterruptManager> =
+        let msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>> =
             Arc::new(KvmMsiInterruptManager::new(
                 Arc::clone(&address_manager.allocator),
                 vm_fd,
@@ -448,8 +449,9 @@ impl DeviceManager {
 
         // Now we can create the legacy interrupt manager, which needs the freshly
         // formed IOAPIC device.
-        let legacy_interrupt_manager: Arc<dyn InterruptManager> =
-            Arc::new(KvmLegacyUserspaceInterruptManager::new(ioapic.clone()));
+        let legacy_interrupt_manager: Arc<
+            dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
+        > = Arc::new(KvmLegacyUserspaceInterruptManager::new(ioapic.clone()));
 
         #[cfg(feature = "acpi")]
         address_manager
@@ -509,7 +511,7 @@ impl DeviceManager {
     fn add_pci_devices(
         &mut self,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
-        interrupt_manager: &Arc<dyn InterruptManager>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "pci_support")]
         {
@@ -587,7 +589,7 @@ impl DeviceManager {
     fn add_mmio_devices(
         &mut self,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
-        interrupt_manager: &Arc<dyn InterruptManager>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "mmio_support")]
         {
@@ -611,7 +613,7 @@ impl DeviceManager {
 
     fn add_ioapic(
         address_manager: &Arc<AddressManager>,
-        interrupt_manager: Arc<dyn InterruptManager>,
+        interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
         // Create IOAPIC
         let ioapic = Arc::new(Mutex::new(
@@ -630,7 +632,7 @@ impl DeviceManager {
     #[cfg(feature = "acpi")]
     fn add_acpi_devices(
         &mut self,
-        interrupt_manager: &Arc<dyn InterruptManager>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         reset_evt: EventFd,
         exit_evt: EventFd,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGEDDevice>>>> {
@@ -659,7 +661,9 @@ impl DeviceManager {
             .unwrap();
 
         let interrupt_group = interrupt_manager
-            .create_group(PIN_IRQ, ged_irq as InterruptIndex, 1 as InterruptIndex)
+            .create_group(LegacyIrqGroupConfig {
+                irq: ged_irq as InterruptIndex,
+            })
             .map_err(DeviceManagerError::CreateInterruptGroup)?;
 
         let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(
@@ -721,7 +725,7 @@ impl DeviceManager {
 
     fn add_console_device(
         &mut self,
-        interrupt_manager: &Arc<dyn InterruptManager>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         virtio_devices: &mut Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
     ) -> DeviceManagerResult<Arc<Console>> {
         let serial_config = self.config.lock().unwrap().serial.clone();
@@ -738,7 +742,9 @@ impl DeviceManager {
             let serial_irq = 4;
 
             let interrupt_group = interrupt_manager
-                .create_group(PIN_IRQ, serial_irq as InterruptIndex, 1 as InterruptIndex)
+                .create_group(LegacyIrqGroupConfig {
+                    irq: serial_irq as InterruptIndex,
+                })
                 .map_err(DeviceManagerError::CreateInterruptGroup)?;
 
             let serial = Arc::new(Mutex::new(devices::legacy::Serial::new(
@@ -1262,7 +1268,7 @@ impl DeviceManager {
         &mut self,
         pci: &mut PciBus,
         iommu_device: &mut Option<vm_virtio::Iommu>,
-        interrupt_manager: &Arc<dyn InterruptManager>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> DeviceManagerResult<Vec<u32>> {
         let mut mem_slot = self
             .memory_manager
@@ -1340,7 +1346,7 @@ impl DeviceManager {
         virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
         pci: &mut PciBus,
         iommu_mapping: &Option<Arc<IommuMapping>>,
-        interrupt_manager: &Arc<dyn InterruptManager>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> DeviceManagerResult<Option<u32>> {
         // Allows support for one MSI-X vector per queue. It also adds 1
         // as we need to take into account the dedicated vector to notify
@@ -1427,7 +1433,7 @@ impl DeviceManager {
     fn add_virtio_mmio_device(
         &mut self,
         virtio_device: Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-        interrupt_manager: &Arc<dyn InterruptManager>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         mmio_base: GuestAddress,
     ) -> DeviceManagerResult<()> {
         let memory = self.memory_manager.lock().unwrap().guest_memory();
@@ -1451,7 +1457,9 @@ impl DeviceManager {
             .ok_or(DeviceManagerError::AllocateIrq)?;
 
         let interrupt_group = interrupt_manager
-            .create_group(PIN_IRQ, irq_num as InterruptIndex, 1 as InterruptIndex)
+            .create_group(LegacyIrqGroupConfig {
+                irq: irq_num as InterruptIndex,
+            })
             .map_err(DeviceManagerError::CreateInterruptGroup)?;
 
         mmio_device.assign_interrupt(interrupt_group);

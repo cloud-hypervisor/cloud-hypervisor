@@ -16,7 +16,7 @@ use std::result;
 use std::sync::Arc;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
-    MsiIrqSourceConfig, PCI_MSI_IRQ,
+    MsiIrqGroupConfig, MsiIrqSourceConfig,
 };
 use vm_memory::GuestAddress;
 
@@ -211,14 +211,13 @@ impl BusDevice for Ioapic {
 impl Ioapic {
     pub fn new(
         apic_address: GuestAddress,
-        interrupt_manager: Arc<dyn InterruptManager>,
+        interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> Result<Ioapic> {
         let interrupt_source_group = interrupt_manager
-            .create_group(
-                PCI_MSI_IRQ,
-                0 as InterruptIndex,
-                NUM_IOAPIC_PINS as InterruptIndex,
-            )
+            .create_group(MsiIrqGroupConfig {
+                base: 0 as InterruptIndex,
+                count: NUM_IOAPIC_PINS as InterruptIndex,
+            })
             .map_err(Error::CreateInterruptSourceGroup)?;
 
         interrupt_source_group
