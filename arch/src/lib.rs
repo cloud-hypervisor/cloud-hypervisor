@@ -1,3 +1,5 @@
+// Copyright © 2020, Oracle and/or its affiliates.
+//
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -31,6 +33,14 @@ pub enum Error {
     ZeroPagePastRamEnd,
     /// Error writing the zero page of guest memory.
     ZeroPageSetup(vm_memory::GuestMemoryError),
+    /// The memory map table extends past the end of guest memory.
+    MemmapTablePastRamEnd,
+    /// Error writing memory map table to guest memory.
+    MemmapTableSetup,
+    /// The hvm_start_info structure extends past the end of guest memory.
+    StartInfoPastRamEnd,
+    /// Error writing hvm_start_info to guest memory.
+    StartInfoSetup,
 }
 pub type Result<T> = result::Result<T, Error>;
 

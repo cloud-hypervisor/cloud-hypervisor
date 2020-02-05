@@ -1,3 +1,5 @@
+// Copyright © 2020, Oracle and/or its affiliates.
+//
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -25,6 +27,13 @@ pub const LOW_RAM_START: GuestAddress = GuestAddress(0x0);
 // Initial GDT/IDT needed to boot kernel
 pub const BOOT_GDT_START: GuestAddress = GuestAddress(0x500);
 pub const BOOT_IDT_START: GuestAddress = GuestAddress(0x520);
+
+/// Address for the hvm_start_info struct used in PVH boot
+pub const PVH_INFO_START: GuestAddress = GuestAddress(0x6000);
+
+/// Address of memory map table used in PVH boot. Can overlap
+/// with the zero page address since they are mutually exclusive.
+pub const MEMMAP_START: GuestAddress = GuestAddress(0x7000);
 
 /// The 'zero page', a.k.a linux kernel bootparams.
 pub const ZERO_PAGE_START: GuestAddress = GuestAddress(0x7000);
