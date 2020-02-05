@@ -241,7 +241,24 @@ impl Vm {
 
         let kernel = File::open(&config.lock().unwrap().kernel.as_ref().unwrap().path)
             .map_err(Error::KernelFile)?;
-        let fd = kvm.create_vm().map_err(Error::VmCreate)?;
+
+        let fd: VmFd;
+        loop {
+            match kvm.create_vm() {
+                Ok(res) => fd = res,
+                Err(e) => {
+                    if e.errno() == libc::EINTR {
+                        // If the error returned is EINTR, which means the
+                        // ioctl has been interrupted, we have to retry as
+                        // this can't be considered as a regular error.
+                        continue;
+                    } else {
+                        return Err(Error::VmCreate(e));
+                    }
+                }
+            }
+            break;
+        }
         let fd = Arc::new(fd);
 
         // Set TSS
