@@ -1,3 +1,5 @@
+// Copyright © 2020, Oracle and/or its affiliates.
+//
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -13,6 +15,7 @@ pub mod regs;
 
 use crate::RegionType;
 use linux_loader::loader::bootparam::{boot_params, setup_header};
+use linux_loader::loader::start_info::{hvm_memmap_table_entry, hvm_start_info};
 use std::mem;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestUsize,
@@ -20,6 +23,22 @@ use vm_memory::{
 
 const E820_RAM: u32 = 1;
 const E820_RESERVED: u32 = 2;
+
+// This is a workaround to the Rust enforcement specifying that any implementation of a foreign
+// trait (in this case `DataInit`) where:
+// *    the type that is implementing the trait is foreign or
+// *    all of the parameters being passed to the trait (if there are any) are also foreign
+// is prohibited.
+#[derive(Copy, Clone, Default)]
+struct StartInfoWrapper(hvm_start_info);
+
+// It is safe to initialize StartInfoWrapper which is a wrapper over `hvm_start_info` (a series of ints).
+unsafe impl ByteValued for StartInfoWrapper {}
+
+#[derive(Copy, Clone, Default)]
+struct MemmapTableEntryWrapper(hvm_memmap_table_entry);
+
+unsafe impl ByteValued for MemmapTableEntryWrapper {}
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `DataInit`) where:
