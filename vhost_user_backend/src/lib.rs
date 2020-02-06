@@ -4,6 +4,9 @@
 // Copyright 2019 Alibaba Cloud Computing. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+#[macro_use]
+extern crate log;
+
 use std::error;
 use std::fs::File;
 use std::io;
@@ -398,6 +401,7 @@ struct VhostUserHandler<S: VhostUserBackend> {
     max_queue_size: usize,
     memory: Option<Memory>,
     vrings: Vec<Arc<RwLock<Vring>>>,
+    worker_thread: Option<thread::JoinHandle<VringWorkerResult<()>>>,
 }
 
 impl<S: VhostUserBackend> VhostUserHandler<S> {
@@ -421,10 +425,12 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
         let vring_worker = Arc::new(VringWorker { epoll_fd });
         let worker = vring_worker.clone();
 
-        thread::Builder::new()
-            .name("vring_worker".to_string())
-            .spawn(move || vring_worker.run(vring_handler))
-            .map_err(VhostUserHandlerError::SpawnVringWorker)?;
+        let worker_thread = Some(
+            thread::Builder::new()
+                .name("vring_worker".to_string())
+                .spawn(move || vring_worker.run(vring_handler))
+                .map_err(VhostUserHandlerError::SpawnVringWorker)?,
+        );
 
         Ok(VhostUserHandler {
             backend,
@@ -437,6 +443,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
             max_queue_size,
             memory: None,
             vrings,
+            worker_thread,
         })
     }
 
@@ -736,5 +743,15 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             .unwrap()
             .set_config(offset, buf)
             .map_err(VhostUserError::ReqHandlerError)
+    }
+}
+
+impl<S: VhostUserBackend> Drop for VhostUserHandler<S> {
+    fn drop(&mut self) {
+        if let Some(thread) = self.worker_thread.take() {
+            if let Err(e) = thread.join() {
+                error!("Error in vring worker: {:?}", e);
+            }
+        }
     }
 }
