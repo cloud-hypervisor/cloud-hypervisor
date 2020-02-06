@@ -27,12 +27,12 @@ use std::process;
 use std::slice;
 use std::sync::{Arc, RwLock};
 use std::vec::Vec;
+use std::{convert, error, fmt, io};
 use vhost_rs::vhost_user::message::*;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{Bytes, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::block::{build_disk_image_id, Request};
-use std::{fmt, error, convert,io};
 
 const QUEUE_SIZE: usize = 1024;
 const SECTOR_SHIFT: u8 = 9;
@@ -63,6 +63,8 @@ pub enum Error {
     ParseReadOnlyParam,
     /// Failed parsing fs number of queues parameter.
     ParseBlkNumQueuesParam(std::num::ParseIntError),
+    /// Failed to handle event other than input event.
+    HandleEventNotEpollIn,
 }
 
 impl fmt::Display for Error {
@@ -214,8 +216,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
         vrings: &[Arc<RwLock<Vring>>],
     ) -> VhostUserBackendResult<bool> {
         if evset != epoll::Events::EPOLLIN {
-            warn!("invalid events operation");
-            return Ok(false);
+            return Err(Error::HandleEventNotEpollIn.into());
         }
 
         debug!("event received: {:?}", device_event);
