@@ -269,7 +269,7 @@ mod tests {
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 
     fn create_guest_mem() -> GuestMemoryMmap {
-        GuestMemoryMmap::new(&vec![(GuestAddress(0), 0x10000)]).unwrap()
+        GuestMemoryMmap::from_ranges(&vec![(GuestAddress(0), 0x10000)]).unwrap()
     }
 
     fn read_u64(gm: &GuestMemoryMmap, offset: GuestAddress) -> u64 {

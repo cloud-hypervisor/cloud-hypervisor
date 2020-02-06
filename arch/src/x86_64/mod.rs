@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn test_system_configuration() {
         let no_vcpus = 4;
-        let gm = GuestMemoryMmap::new(&vec![(GuestAddress(0), 0x10000)]).unwrap();
+        let gm = GuestMemoryMmap::from_ranges(&vec![(GuestAddress(0), 0x10000)]).unwrap();
         let config_err = configure_system(&gm, GuestAddress(0), 0, 1, None, None);
         assert!(config_err.is_err());
 
@@ -238,7 +238,7 @@ mod tests {
             .filter(|r| r.2 == RegionType::Ram)
             .map(|r| (r.0, r.1))
             .collect();
-        let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
+        let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
         configure_system(&gm, GuestAddress(0), 0, no_vcpus, None, None).unwrap();
 
         // Now assigning some memory that is equal to the start of the 32bit memory hole.
@@ -249,7 +249,7 @@ mod tests {
             .filter(|r| r.2 == RegionType::Ram)
             .map(|r| (r.0, r.1))
             .collect();
-        let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
+        let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
         configure_system(&gm, GuestAddress(0), 0, no_vcpus, None, None).unwrap();
 
         // Now assigning some memory that falls after the 32bit memory hole.
@@ -260,7 +260,7 @@ mod tests {
             .filter(|r| r.2 == RegionType::Ram)
             .map(|r| (r.0, r.1))
             .collect();
-        let gm = GuestMemoryMmap::new(&ram_regions).unwrap();
+        let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
         configure_system(&gm, GuestAddress(0), 0, no_vcpus, None, None).unwrap();
     }
 

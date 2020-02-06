@@ -536,7 +536,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             });
         }
 
-        let mem = GuestMemoryMmap::with_files(regions).map_err(|e| {
+        let mem = GuestMemoryMmap::from_ranges_with_files(regions).map_err(|e| {
             VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
         })?;
         self.backend
