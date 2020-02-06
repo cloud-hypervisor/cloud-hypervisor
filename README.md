@@ -108,7 +108,7 @@ Cloud Hypervisor CI infrastructure.
 For example, to run the Cloud Hypervisor unit tests:
 
 ```shell
-$ ./scripts/dev_cli.sh tests --release
+$ ./scripts/dev_cli.sh tests --unit
 ```
 
 Run the `./scripts/dev_cli.sh --help` command to view all the supported
