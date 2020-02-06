@@ -264,7 +264,7 @@ mod tests {
             const MEM_SIZE: usize = 1024 * 1024 * 128;
             Self {
                 cid: CID,
-                mem: GuestMemoryMmap::new(&[(GuestAddress(0), MEM_SIZE)]).unwrap(),
+                mem: GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap(),
                 mem_size: MEM_SIZE,
                 device: Vsock::new(CID, TestBackend::new(), false).unwrap(),
             }

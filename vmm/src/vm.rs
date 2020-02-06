@@ -749,7 +749,7 @@ pub fn test_vm() {
 
     let mem_size = 0x1000;
     let load_addr = GuestAddress(0x1000);
-    let mem = GuestMemoryMmap::new(&[(load_addr, mem_size)]).unwrap();
+    let mem = GuestMemoryMmap::from_ranges(&[(load_addr, mem_size)]).unwrap();
 
     let kvm = Kvm::new().expect("new KVM instance creation failed");
     let vm_fd = kvm.create_vm().expect("new VM fd creation failed");
