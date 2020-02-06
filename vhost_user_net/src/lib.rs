@@ -22,7 +22,6 @@ use std::io::Read;
 use std::io::{self};
 use std::net::Ipv4Addr;
 use std::os::unix::io::AsRawFd;
-use std::os::unix::io::RawFd;
 use std::process;
 use std::sync::{Arc, RwLock};
 use std::vec::Vec;
@@ -267,10 +266,10 @@ impl VhostUserNetBackend {
         self.vring_worker = vring_worker;
     }
 
-    pub fn get_kill_event(&self) -> (u16, RawFd) {
+    pub fn get_kill_event(&self) -> (u16, EventFd) {
         (
             (self.num_queues + (self.num_queues / 2)) as u16,
-            self.kill_evt.as_raw_fd(),
+            self.kill_evt.try_clone().unwrap(),
         )
     }
 }
@@ -459,9 +458,11 @@ pub fn start_net_backend(backend_command: &str) {
     let (kill_index, kill_evt_fd) = net_backend.read().unwrap().get_kill_event();
     let vring_worker = net_daemon.get_vring_worker();
 
-    if let Err(e) =
-        vring_worker.register_listener(kill_evt_fd, epoll::Events::EPOLLIN, u64::from(kill_index))
-    {
+    if let Err(e) = vring_worker.register_listener(
+        kill_evt_fd.as_raw_fd(),
+        epoll::Events::EPOLLIN,
+        u64::from(kill_index),
+    ) {
         println!("failed to register listener for kill event: {:?}", e);
         process::exit(1);
     }
@@ -479,5 +480,11 @@ pub fn start_net_backend(backend_command: &str) {
         process::exit(1);
     }
 
-    net_daemon.wait().unwrap();
+    if let Err(e) = net_daemon.wait() {
+        error!("Error from the main thread: {:?}", e);
+    }
+
+    if let Err(e) = kill_evt_fd.write(1) {
+        error!("Error shutting down worker thread: {:?}", e)
+    }
 }
