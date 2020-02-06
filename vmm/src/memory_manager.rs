@@ -6,6 +6,7 @@
 use crate::config::{HotplugMethod, MemoryConfig};
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
+use anyhow::anyhow;
 use arch::{layout, RegionType};
 use devices::{ioapic, BusDevice};
 use kvm_bindings::{kvm_userspace_memory_region, KVM_MEM_READONLY};
@@ -20,10 +21,13 @@ use vm_allocator::{GsiApic, SystemAllocator};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     mmap::MmapRegionError, Address, Error as MmapError, GuestAddress, GuestAddressSpace,
-    GuestMemory, GuestMemoryAtomic, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
-    GuestUsize, MmapRegion,
+    GuestMemory, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, GuestMemoryRegion,
+    GuestRegionMmap, GuestUsize, MmapRegion,
 };
-use vm_migration::{Migratable, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 
 const X86_64_IRQ_BASE: u32 = 5;
 
@@ -55,6 +59,7 @@ pub struct MemoryManager {
     next_hotplug_slot: usize,
     pub virtiomem_region: Option<Arc<GuestRegionMmap>>,
     pub virtiomem_resize: Option<vm_virtio::Resize>,
+    snapshot: Mutex<Option<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
 }
 
 #[derive(Debug)]
@@ -302,6 +307,7 @@ impl MemoryManager {
             next_hotplug_slot: 0,
             virtiomem_region: virtiomem_region.clone(),
             virtiomem_resize,
+            snapshot: Mutex::new(None),
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -905,6 +911,65 @@ impl Aml for MemoryManager {
 }
 
 impl Pausable for MemoryManager {}
-impl Snapshottable for MemoryManager {}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "GuestAddress")]
+pub struct GuestAddressDef(pub u64);
+
+#[derive(Serialize, Deserialize)]
+pub struct MemoryRegion {
+    backing_file: PathBuf,
+    #[serde(with = "GuestAddressDef")]
+    start_addr: GuestAddress,
+    size: GuestUsize,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct MemoryManagerSnapshotData {
+    memory_regions: Vec<MemoryRegion>,
+}
+
+const MEMORY_MANAGER_SNAPSHOT_ID: &str = "memory-manager";
+impl Snapshottable for MemoryManager {
+    fn id(&self) -> String {
+        MEMORY_MANAGER_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let mut memory_manager_snapshot = Snapshot::new(MEMORY_MANAGER_SNAPSHOT_ID);
+        let guest_memory = self.guest_memory.memory();
+
+        let mut memory_regions: Vec<MemoryRegion> = Vec::with_capacity(10);
+
+        guest_memory.with_regions_mut(|index, region| {
+            if region.len() == 0 {
+                return Err(MigratableError::Snapshot(anyhow!("Zero length region")));
+            }
+
+            memory_regions.push(MemoryRegion {
+                backing_file: PathBuf::from(format!("memory-region-{}", index)),
+                start_addr: region.start_addr(),
+                size: region.len(),
+            });
+
+            Ok(())
+        })?;
+
+        let snapshot_data_section =
+            serde_json::to_vec(&MemoryManagerSnapshotData { memory_regions })
+                .map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        memory_manager_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", MEMORY_MANAGER_SNAPSHOT_ID),
+            snapshot: snapshot_data_section,
+        });
+
+        let mut memory_snapshot = self.snapshot.lock().unwrap();
+        *memory_snapshot = Some(guest_memory);
+
+        Ok(memory_manager_snapshot)
+    }
+}
+
 impl Transportable for MemoryManager {}
 impl Migratable for MemoryManager {}
