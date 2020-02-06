@@ -153,9 +153,10 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
     /// terminate.
     pub fn wait(&mut self) -> Result<()> {
         if let Some(handle) = self.main_thread.take() {
-            let _ = handle.join().map_err(Error::WaitDaemon)?;
+            handle.join().map_err(Error::WaitDaemon)?
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     /// Retrieve the vring worker. This is necessary to perform further
