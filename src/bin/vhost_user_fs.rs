@@ -230,17 +230,17 @@ fn main() {
         epoll::Events::EPOLLIN,
         u64::from(KILL_EVENT),
     ) {
-        println!("Failed to register listener for kill event: {:?}", e);
+        error!("Failed to register listener for kill event: {:?}", e);
         process::exit(1);
     }
 
     if let Err(e) = daemon.start() {
-        println!("Failed to start daemon: {:?}", e);
+        error!("Failed to start daemon: {:?}", e);
         process::exit(1);
     }
 
     if let Err(e) = daemon.wait() {
-        println!("Waiting for daemon failed: {:?}", e);
+        error!("Waiting for daemon failed: {:?}", e);
         process::exit(1);
     }
 }
