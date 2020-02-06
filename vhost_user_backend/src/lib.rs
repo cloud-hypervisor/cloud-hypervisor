@@ -262,6 +262,8 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
 enum VringWorkerError {
     /// Failed while waiting for events.
     EpollWait(io::Error),
+    /// Failed to handle the event.
+    HandleEvent(VringEpollHandlerError),
 }
 
 /// Result of vring worker operations.
@@ -306,11 +308,10 @@ impl VringWorker {
 
                 let ev_type = event.data as u16;
 
-                if let Err(e) = handler.handle_event(ev_type, evset) {
-                    println!(
-                        "vring handler handle event {} with error {:?}\n",
-                        ev_type, e
-                    );
+                if handler
+                    .handle_event(ev_type, evset)
+                    .map_err(VringWorkerError::HandleEvent)?
+                {
                     break 'epoll;
                 }
             }
