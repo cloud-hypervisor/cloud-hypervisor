@@ -241,6 +241,10 @@ fn main() {
 
     if let Err(e) = daemon.wait() {
         error!("Waiting for daemon failed: {:?}", e);
-        process::exit(1);
+    }
+
+    let kill_evt = &fs_backend.read().unwrap().kill_evt;
+    if let Err(e) = kill_evt.write(1) {
+        error!("Error shutting down worker thread: {:?}", e)
     }
 }
