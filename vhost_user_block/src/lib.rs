@@ -14,6 +14,7 @@ extern crate vhost_user_backend;
 extern crate vm_virtio;
 
 use epoll;
+use libc::EFD_NONBLOCK;
 use log::*;
 use qcow::{self, ImageType, QcowFile};
 use std::fs::File;
@@ -21,7 +22,7 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::{Seek, SeekFrom, Write};
 use std::mem;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::{fs::OpenOptionsExt, io::AsRawFd};
 use std::path::PathBuf;
 use std::process;
 use std::slice;
@@ -33,6 +34,7 @@ use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{Bytes, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::block::{build_disk_image_id, Request};
+use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: usize = 1024;
 const SECTOR_SHIFT: u8 = 9;
@@ -65,6 +67,10 @@ pub enum Error {
     ParseBlkNumQueuesParam(std::num::ParseIntError),
     /// Failed to handle event other than input event.
     HandleEventNotEpollIn,
+    /// Failed to create kill eventfd
+    CreateKillEventFd(io::Error),
+    /// Failed to handle unknown event.
+    HandleEventUnknownEvent,
 }
 
 impl fmt::Display for Error {
@@ -89,6 +95,7 @@ pub struct VhostUserBlkBackend {
     disk_nsectors: u64,
     config: virtio_blk_config,
     rdonly: bool,
+    kill_evt: EventFd,
 }
 
 impl VhostUserBlkBackend {
@@ -129,6 +136,7 @@ impl VhostUserBlkBackend {
             disk_nsectors: nsectors,
             config,
             rdonly,
+            kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
         })
     }
 
@@ -177,6 +185,13 @@ impl VhostUserBlkBackend {
     pub fn set_vring_worker(&mut self, vring_worker: Option<Arc<VringWorker>>) {
         self.vring_worker = vring_worker;
     }
+
+    pub fn get_kill_event(&self) -> (u16, EventFd) {
+        (
+            self.config.num_queues as u16,
+            self.kill_evt.try_clone().unwrap(),
+        )
+    }
 }
 
 impl VhostUserBackend for VhostUserBlkBackend {
@@ -221,13 +236,20 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
         debug!("event received: {:?}", device_event);
 
-        let mut vring = vrings[device_event as usize].write().unwrap();
-        if self.process_queue(&mut vring) {
-            debug!("signalling queue");
-            vring.signal_used_queue().unwrap();
+        // Kill event is the index after the last queue
+        let kill_index = self.config.num_queues;
+        match device_event {
+            event if event == kill_index => Ok(true),
+            q if device_event < self.config.num_queues => {
+                let mut vring = vrings[q as usize].write().unwrap();
+                if self.process_queue(&mut vring) {
+                    debug!("signalling queue");
+                    vring.signal_used_queue().unwrap();
+                }
+                Ok(false)
+            }
+            _ => Err(Error::HandleEventUnknownEvent.into()),
         }
-
-        Ok(false)
     }
 
     fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
@@ -334,6 +356,15 @@ pub fn start_block_backend(backend_command: &str) {
     debug!("blk_daemon is created!\n");
 
     let vring_worker = blk_daemon.get_vring_worker();
+    let (kill_index, kill_evt_fd) = blk_backend.read().unwrap().get_kill_event();
+    if let Err(e) = vring_worker.register_listener(
+        kill_evt_fd.as_raw_fd(),
+        epoll::Events::EPOLLIN,
+        u64::from(kill_index),
+    ) {
+        error!("Failed to register listener for kill event: {:?}", e);
+        process::exit(1);
+    }
 
     blk_backend
         .write()
@@ -341,12 +372,18 @@ pub fn start_block_backend(backend_command: &str) {
         .set_vring_worker(Some(vring_worker));
 
     if let Err(e) = blk_daemon.start() {
-        println!(
-            "failed to start daemon for vhost-user-blk with error: {:?}\n",
+        error!(
+            "Failed to start daemon for vhost-user-block with error: {:?}\n",
             e
         );
         process::exit(1);
     }
 
-    blk_daemon.wait().unwrap();
+    if let Err(e) = blk_daemon.wait() {
+        error!("Error from the main thread: {:?}", e);
+    }
+
+    if let Err(e) = kill_evt_fd.write(1) {
+        error!("Error shutting down worker thread: {:?}", e)
+    }
 }
