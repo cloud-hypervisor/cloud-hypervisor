@@ -104,22 +104,6 @@ pub struct VhostUserNetBackend {
     queue_size: u16,
 }
 
-impl std::clone::Clone for VhostUserNetBackend {
-    fn clone(&self) -> Self {
-        VhostUserNetBackend {
-            mem: self.mem.clone(),
-            vring_worker: self.vring_worker.clone(),
-            kill_evt: self.kill_evt.try_clone().unwrap(),
-            taps: self.taps.clone(),
-            rxs: self.rxs.clone(),
-            txs: self.txs.clone(),
-            rx_tap_listenings: self.rx_tap_listenings.clone(),
-            num_queues: self.num_queues,
-            queue_size: self.queue_size,
-        }
-    }
-}
-
 impl VhostUserNetBackend {
     /// Create a new virtio network device with the given TAP interface.
     pub fn new_with_tap(taps: Vec<Tap>, num_queues: usize, queue_size: u16) -> Result<Self> {
