@@ -163,6 +163,7 @@ cmd_build() {
     [ $build = "release" ] && cargo_args+=("--release")
 
     $DOCKER_RUNTIME run \
+	   --user "$(id -u):$(id -g)" \
 	   --workdir "$CTR_CLH_ROOT_DIR" \
 	   --rm \
 	   --volume /dev:/dev \
@@ -186,6 +187,7 @@ cmd_clean() {
     cargo_args=("$@")
 
     $DOCKER_RUNTIME run \
+	   --user "$(id -u):$(id -g)" \
 	   --workdir "$CTR_CLH_ROOT_DIR" \
 	   --rm \
 	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
@@ -230,6 +232,7 @@ cmd_tests() {
     if [ "$cargo" = true ] ;  then
 	say "Running cargo tests..."
 	$DOCKER_RUNTIME run \
+	       --user "$(id -u):$(id -g)" \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
