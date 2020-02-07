@@ -163,7 +163,6 @@ cmd_build() {
     [ $build = "release" ] && cargo_args+=("--release")
 
     $DOCKER_RUNTIME run \
-	   -ti \
 	   --workdir "$CTR_CLH_ROOT_DIR" \
 	   --rm \
 	   --volume /dev:/dev \
@@ -187,7 +186,6 @@ cmd_clean() {
     cargo_args=("$@")
 
     $DOCKER_RUNTIME run \
-	   -ti \
 	   --workdir "$CTR_CLH_ROOT_DIR" \
 	   --rm \
 	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
@@ -220,7 +218,6 @@ cmd_tests() {
     if [ "$unit" = true ] ;  then
 	say "Running unit tests..."
 	$DOCKER_RUNTIME run \
-	       -ti \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
 	       --privileged \
@@ -233,7 +230,6 @@ cmd_tests() {
     if [ "$cargo" = true ] ;  then
 	say "Running cargo tests..."
 	$DOCKER_RUNTIME run \
-	       -ti \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
@@ -244,7 +240,6 @@ cmd_tests() {
     if [ "$integration" = true ] ;  then
 	say "Running integration tests..."
 	$DOCKER_RUNTIME run \
-	       -ti \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
 	       --privileged \
