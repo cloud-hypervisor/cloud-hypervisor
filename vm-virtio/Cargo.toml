@@ -11,7 +11,7 @@ mmio_support = []
 
 [dependencies]
 arc-swap = ">=0.4.4"
-byteorder = "1.3.2"
+byteorder = "1.3.4"
 devices = { path = "../devices" }
 epoll = ">=4.0.1"
 libc = "0.2.60"
