@@ -224,7 +224,7 @@ cmd_tests() {
 	       --volume /dev:/dev \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_unit_tests.sh "$@"
+	       ./scripts/run_unit_tests.sh "$@" || exit $?
     fi
 
     if [ "$cargo" = true ] ;  then
@@ -234,7 +234,7 @@ cmd_tests() {
 	       --rm \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_cargo_tests.sh
+	       ./scripts/run_cargo_tests.sh || exit $?
     fi
 
     if [ "$integration" = true ] ;  then
@@ -248,7 +248,7 @@ cmd_tests() {
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_integration_tests.sh "$@"
+	       ./scripts/run_integration_tests.sh "$@" || exit $?
     fi
 }
 
