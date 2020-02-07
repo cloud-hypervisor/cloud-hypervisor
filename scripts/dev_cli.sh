@@ -248,6 +248,7 @@ cmd_tests() {
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
 	       --privileged \
+	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
