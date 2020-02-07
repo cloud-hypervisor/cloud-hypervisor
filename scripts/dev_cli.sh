@@ -191,16 +191,7 @@ cmd_build() {
 	   "$CTR_IMAGE" \
 	   cargo build \
 	         --target-dir "$CTR_CLH_CARGO_TARGET" \
-	         "${cargo_args[@]}"
-
-    ret=$?
-
-    # If `cargo build` was successful, let's copy the binaries to a more
-    # accessible location.
-    [ $ret -eq 0 ] && {
-        cargo_bin_dir="$CLH_CARGO_TARGET/$build"
-        say "Binaries placed under $cargo_bin_dir"
-    }
+	         "${cargo_args[@]}" && say "Binaries placed under $CLH_CARGO_TARGET/$build"
 }
 
 cmd_clean() {
