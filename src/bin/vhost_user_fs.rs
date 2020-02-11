@@ -13,7 +13,6 @@ use clap::{App, Arg};
 use epoll;
 use libc::EFD_NONBLOCK;
 use log::*;
-use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, RwLock};
 use std::{convert, error, fmt, io, process};
 
@@ -165,15 +164,14 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
                 let mut vring = vrings[1].write().unwrap();
                 self.process_queue(&mut vring)?;
             }
-            KILL_EVENT => {
-                debug!("KILL_EVENT");
-                self.kill_evt.read().unwrap();
-                return Ok(true);
-            }
             _ => return Err(Error::HandleEventUnknownEvent.into()),
         }
 
         Ok(false)
+    }
+
+    fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
+        Some((self.kill_evt.try_clone().unwrap(), Some(KILL_EVENT)))
     }
 }
 
@@ -222,17 +220,6 @@ fn main() {
         fs_backend.clone(),
     )
     .unwrap();
-
-    let vring_worker = daemon.get_vring_worker();
-
-    if let Err(e) = vring_worker.register_listener(
-        fs_backend.read().unwrap().kill_evt.as_raw_fd(),
-        epoll::Events::EPOLLIN,
-        u64::from(KILL_EVENT),
-    ) {
-        error!("Failed to register listener for kill event: {:?}", e);
-        process::exit(1);
-    }
 
     if let Err(e) = daemon.start() {
         error!("Failed to start daemon: {:?}", e);
