@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 use crate::vec_with_array_field;
-use arc_swap::ArcSwap;
 use byteorder::{ByteOrder, LittleEndian};
 use kvm_ioctls::*;
 use std::collections::HashMap;
@@ -24,7 +23,10 @@ use vfio_bindings::bindings::vfio::*;
 use vfio_bindings::bindings::IrqSet;
 use vfio_ioctls::*;
 use vm_device::{get_host_address_range, ExternalDmaMapping};
-use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
+use vm_memory::{
+    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap,
+    GuestMemoryRegion,
+};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::fam::FamStruct;
 use vmm_sys_util::ioctl::*;
@@ -522,11 +524,11 @@ impl VfioDeviceInfo {
 /// associated with a specific VFIO container.
 pub struct VfioDmaMapping {
     container: Arc<VfioContainer>,
-    memory: Arc<ArcSwap<GuestMemoryMmap>>,
+    memory: GuestMemoryAtomic<GuestMemoryMmap>,
 }
 
 impl VfioDmaMapping {
-    pub fn new(container: Arc<VfioContainer>, memory: Arc<ArcSwap<GuestMemoryMmap>>) -> Self {
+    pub fn new(container: Arc<VfioContainer>, memory: GuestMemoryAtomic<GuestMemoryMmap>) -> Self {
         VfioDmaMapping { container, memory }
     }
 }
@@ -534,7 +536,7 @@ impl VfioDmaMapping {
 impl ExternalDmaMapping for VfioDmaMapping {
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
         let user_addr = if let Some(addr) = get_host_address_range(
-            &self.memory.load(),
+            &self.memory.memory(),
             GuestAddress(gpa),
             size.try_into().unwrap(),
         ) {
@@ -585,7 +587,7 @@ pub struct VfioDevice {
     group: VfioGroup,
     regions: Vec<VfioRegion>,
     irqs: HashMap<u32, VfioIrq>,
-    mem: Arc<ArcSwap<GuestMemoryMmap>>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     iommu_attached: bool,
 }
 
@@ -596,7 +598,7 @@ impl VfioDevice {
     pub fn new(
         sysfspath: &Path,
         device_fd: Arc<DeviceFd>,
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         iommu_attached: bool,
     ) -> Result<Self> {
         let uuid_path: PathBuf = [sysfspath, Path::new("iommu_group")].iter().collect();
@@ -842,7 +844,7 @@ impl VfioDevice {
     /// then vfio kernel driver could access guest memory from gfn
     pub fn setup_dma_map(&self) -> Result<()> {
         if !self.iommu_attached {
-            self.mem.load().with_regions(|_index, region| {
+            self.mem.memory().with_regions(|_index, region| {
                 self.vfio_dma_map(
                     region.start_addr().raw_value(),
                     region.len() as u64,
@@ -857,7 +859,7 @@ impl VfioDevice {
     /// then vfio kernel driver couldn't access this guest memory
     pub fn unset_dma_map(&self) -> Result<()> {
         if !self.iommu_attached {
-            self.mem.load().with_regions(|_index, region| {
+            self.mem.memory().with_regions(|_index, region| {
                 self.vfio_dma_unmap(region.start_addr().raw_value(), region.len() as u64)
             })?;
         }

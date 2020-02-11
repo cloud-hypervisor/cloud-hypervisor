@@ -34,7 +34,6 @@ use crate::{
 /// - an event queue FD; and
 /// - a backend FD.
 ///
-use arc_swap::ArcSwap;
 use byteorder::{ByteOrder, LittleEndian};
 use epoll;
 use libc::EFD_NONBLOCK;
@@ -46,7 +45,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::GuestMemoryMmap;
+use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -86,7 +85,7 @@ pub const EVENTS_LEN: usize = 6;
 ///   - again, attempt to fetch any incoming packets queued by the backend into virtio RX buffers.
 ///
 pub struct VsockEpollHandler<B: VsockBackend> {
-    pub mem: Arc<ArcSwap<GuestMemoryMmap>>,
+    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub queues: Vec<Queue>,
     pub queue_evts: Vec<EventFd>,
     pub kill_evt: EventFd,
@@ -121,7 +120,7 @@ where
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.load();
+        let mem = self.mem.memory();
         for avail_desc in self.queues[0].iter(&mem) {
             let used_len = match VsockPacket::from_rx_virtq_head(&avail_desc) {
                 Ok(mut pkt) => {
@@ -163,7 +162,7 @@ where
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.load();
+        let mem = self.mem.memory();
         for avail_desc in self.queues[1].iter(&mem) {
             let pkt = match VsockPacket::from_tx_virtq_head(&avail_desc) {
                 Ok(pkt) => pkt,
@@ -481,7 +480,7 @@ where
 
     fn activate(
         &mut self,
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
@@ -644,7 +643,7 @@ mod tests {
 
         // Test a bad activation.
         let bad_activate = ctx.device.activate(
-            Arc::new(ArcSwap::from(Arc::new(ctx.mem.clone()))),
+            GuestMemoryAtomic::new(ctx.mem.clone()),
             Arc::new(NoopVirtioInterrupt {}),
             Vec::new(),
             Vec::new(),
@@ -657,7 +656,7 @@ mod tests {
         // Test a correct activation.
         ctx.device
             .activate(
-                Arc::new(ArcSwap::new(Arc::new(ctx.mem.clone()))),
+                GuestMemoryAtomic::new(ctx.mem.clone()),
                 Arc::new(NoopVirtioInterrupt {}),
                 vec![Queue::new(256), Queue::new(256), Queue::new(256)],
                 vec![

@@ -15,7 +15,6 @@ use super::{
     ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
 };
 use crate::VirtioInterrupt;
-use arc_swap::ArcSwap;
 use epoll;
 use libc::EAGAIN;
 use libc::EFD_NONBLOCK;
@@ -32,7 +31,7 @@ use std::thread;
 use std::vec::Vec;
 use virtio_bindings::bindings::virtio_net::*;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::{ByteValued, GuestMemoryMmap};
+use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]
@@ -44,7 +43,7 @@ pub enum Error {
 pub type Result<T> = result::Result<T, Error>;
 
 struct NetEpollHandler {
-    mem: Arc<ArcSwap<GuestMemoryMmap>>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     tap: Tap,
     rx: RxVirtio,
     tx: TxVirtio,
@@ -69,7 +68,7 @@ impl NetEpollHandler {
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
     fn rx_single_frame(&mut self, mut queue: &mut Queue) -> bool {
-        let mem = self.mem.load();
+        let mem = self.mem.memory();
         let next_desc = queue.iter(&mem).next();
 
         if next_desc.is_none() {
@@ -142,7 +141,7 @@ impl NetEpollHandler {
     }
 
     fn process_tx(&mut self, mut queue: &mut Queue) -> result::Result<(), DeviceError> {
-        let mem = self.mem.load();
+        let mem = self.mem.memory();
 
         self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
 
@@ -432,7 +431,7 @@ impl VirtioDevice for Net {
 
     fn activate(
         &mut self,
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

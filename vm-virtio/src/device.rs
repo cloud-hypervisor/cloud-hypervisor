@@ -7,9 +7,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use super::*;
-use arc_swap::ArcSwap;
 use std::sync::Arc;
-use vm_memory::{GuestAddress, GuestMemoryMmap, GuestUsize};
+use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
 
 pub enum VirtioInterruptType {
@@ -81,7 +80,7 @@ pub trait VirtioDevice: Send {
     /// Activates this device for real usage.
     fn activate(
         &mut self,
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_evt: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,

@@ -7,7 +7,6 @@ use super::{
     VirtioInterruptType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::VirtioInterrupt;
-use arc_swap::ArcSwap;
 use epoll;
 use libc::EFD_NONBLOCK;
 use std;
@@ -22,7 +21,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::{ByteValued, Bytes, GuestMemoryMmap};
+use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -58,7 +57,7 @@ unsafe impl ByteValued for VirtioConsoleConfig {}
 
 struct ConsoleEpollHandler {
     queues: Vec<Queue>,
-    mem: Arc<ArcSwap<GuestMemoryMmap>>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
     out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
@@ -87,7 +86,7 @@ impl ConsoleEpollHandler {
             return false;
         }
 
-        let mem = self.mem.load();
+        let mem = self.mem.memory();
         for avail_desc in recv_queue.iter(&mem) {
             let len = cmp::min(avail_desc.len as u32, in_buffer.len() as u32);
             let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
@@ -124,7 +123,7 @@ impl ConsoleEpollHandler {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
 
-        let mem = self.mem.load();
+        let mem = self.mem.memory();
         for avail_desc in trans_queue.iter(&mem) {
             let len;
             let mut out = self.out.lock().unwrap();
@@ -456,7 +455,7 @@ impl VirtioDevice for Console {
 
     fn activate(
         &mut self,
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

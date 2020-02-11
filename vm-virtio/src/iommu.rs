@@ -8,7 +8,6 @@ use super::{
     VirtioDeviceType, VIRTIO_F_VERSION_1,
 };
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
-use arc_swap::ArcSwap;
 use epoll;
 use libc::EFD_NONBLOCK;
 use std::cmp;
@@ -23,7 +22,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use vm_device::{ExternalDmaMapping, Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap};
+use vm_memory::{
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryMmap,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 /// Queues sizes
@@ -588,7 +590,7 @@ impl Request {
 
 struct IommuEpollHandler {
     queues: Vec<Queue>,
-    mem: Arc<ArcSwap<GuestMemoryMmap>>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evts: Vec<EventFd>,
     kill_evt: EventFd,
@@ -602,7 +604,7 @@ impl IommuEpollHandler {
     fn request_queue(&mut self) -> bool {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.load();
+        let mem = self.mem.memory();
         for avail_desc in self.queues[0].iter(&mem) {
             let len = match Request::parse(
                 &avail_desc,
@@ -941,7 +943,7 @@ impl VirtioDevice for Iommu {
 
     fn activate(
         &mut self,
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,

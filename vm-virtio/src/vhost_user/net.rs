@@ -11,7 +11,6 @@ use super::vu_common_ctrl::*;
 use super::Error as DeviceError;
 use super::{Error, Result};
 use crate::VirtioInterrupt;
-use arc_swap::ArcSwap;
 use libc;
 use libc::EFD_NONBLOCK;
 use net_util::MacAddr;
@@ -29,7 +28,7 @@ use vhost_rs::VhostBackend;
 use virtio_bindings::bindings::virtio_net;
 use virtio_bindings::bindings::virtio_ring;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::{ByteValued, GuestMemoryMmap};
+use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
 const DEFAULT_QUEUE_NUMBER: usize = 2;
@@ -222,7 +221,7 @@ impl VirtioDevice for Net {
 
     fn activate(
         &mut self,
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
@@ -295,7 +294,7 @@ impl VirtioDevice for Net {
 
         let mut vu_interrupt_list = setup_vhost_user(
             &mut self.vhost_user_net,
-            mem.load().as_ref(),
+            &mem.memory(),
             queues,
             queue_evts,
             &interrupt_cb,

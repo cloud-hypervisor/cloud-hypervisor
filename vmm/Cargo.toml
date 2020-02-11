@@ -45,4 +45,4 @@ features = ["elf", "bzimage"]
 
 [dependencies.vm-memory]
 git = "https://github.com/rust-vmm/vm-memory"
-features = ["backend-mmap"]
+features = ["backend-mmap", "backend-atomic"]

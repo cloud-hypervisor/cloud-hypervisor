@@ -9,7 +9,6 @@ use crate::{
     ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
     VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
 };
-use arc_swap::ArcSwap;
 use libc::{self, EFD_NONBLOCK};
 use std::cmp;
 use std::io;
@@ -28,7 +27,7 @@ use vhost_rs::vhost_user::{
 };
 use vhost_rs::VhostBackend;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::{ByteValued, GuestMemoryMmap};
+use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
 const NUM_QUEUE_OFFSET: usize = 1;
@@ -329,7 +328,7 @@ impl VirtioDevice for Fs {
 
     fn activate(
         &mut self,
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
@@ -376,7 +375,7 @@ impl VirtioDevice for Fs {
 
         let vu_call_evt_queue_list = setup_vhost_user(
             &mut self.vu,
-            mem.load().as_ref(),
+            &mem.memory(),
             queues,
             queue_evts,
             &interrupt_cb,
