@@ -95,6 +95,14 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     fn set_config(&mut self, _offset: u32, _buf: &[u8]) -> result::Result<(), io::Error> {
         Ok(())
     }
+
+    /// Provide an exit EventFd
+    /// When this EventFd is written to the worker thread will exit. An optional id may
+    /// also be provided, if it not provided then the exit event will be first event id
+    /// after the last queue
+    fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
+        None
+    }
 }
 
 /// This structure is the public API the backend is allowed to interact with
@@ -231,6 +239,7 @@ type VringEpollHandlerResult<T> = std::result::Result<T, VringEpollHandlerError>
 struct VringEpollHandler<S: VhostUserBackend> {
     backend: Arc<RwLock<S>>,
     vrings: Vec<Arc<RwLock<Vring>>>,
+    exit_event_id: Option<u16>,
 }
 
 impl<S: VhostUserBackend> VringEpollHandler<S> {
@@ -239,6 +248,10 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
         device_event: u16,
         evset: epoll::Events,
     ) -> VringEpollHandlerResult<bool> {
+        if self.exit_event_id == Some(device_event) {
+            return Ok(true);
+        }
+
         let num_queues = self.vrings.len();
         if (device_event as usize) < num_queues {
             if let Some(kick) = &self.vrings[device_event as usize].read().unwrap().kick {
@@ -371,6 +384,8 @@ pub enum VhostUserHandlerError {
     SpawnVringWorker(io::Error),
     /// Could not find the mapping from memory regions.
     MissingMemoryMapping,
+    /// Could not register exit event
+    RegisterExitEvent(io::Error),
 }
 
 impl std::fmt::Display for VhostUserHandlerError {
@@ -381,6 +396,9 @@ impl std::fmt::Display for VhostUserHandlerError {
                 write!(f, "failed spawning the vring worker: {}", e)
             }
             VhostUserHandlerError::MissingMemoryMapping => write!(f, "Missing memory mapping"),
+            VhostUserHandlerError::RegisterExitEvent(e) => {
+                write!(f, "Failed to register exit event: {}", e)
+            }
         }
     }
 }
@@ -418,12 +436,29 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(VhostUserHandlerError::EpollCreateFd)?;
 
+        let vring_worker = Arc::new(VringWorker { epoll_fd });
+        let worker = vring_worker.clone();
+
+        let exit_event_id =
+            if let Some((exit_event_fd, exit_event_id)) = backend.read().unwrap().exit_event() {
+                let exit_event_id = exit_event_id.unwrap_or(num_queues as u16);
+                worker
+                    .register_listener(
+                        exit_event_fd.as_raw_fd(),
+                        epoll::Events::EPOLLIN,
+                        u64::from(exit_event_id),
+                    )
+                    .map_err(VhostUserHandlerError::RegisterExitEvent)?;
+                Some(exit_event_id)
+            } else {
+                None
+            };
+
         let vring_handler = VringEpollHandler {
             backend: backend.clone(),
             vrings: vrings.clone(),
+            exit_event_id,
         };
-        let vring_worker = Arc::new(VringWorker { epoll_fd });
-        let worker = vring_worker.clone();
 
         let worker_thread = Some(
             thread::Builder::new()
