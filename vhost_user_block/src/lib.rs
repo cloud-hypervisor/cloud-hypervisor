@@ -22,7 +22,7 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::{Seek, SeekFrom, Write};
 use std::mem;
-use std::os::unix::{fs::OpenOptionsExt, io::AsRawFd};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process;
 use std::slice;
@@ -185,13 +185,6 @@ impl VhostUserBlkBackend {
     pub fn set_vring_worker(&mut self, vring_worker: Option<Arc<VringWorker>>) {
         self.vring_worker = vring_worker;
     }
-
-    pub fn get_kill_event(&self) -> (u16, EventFd) {
-        (
-            self.config.num_queues as u16,
-            self.kill_evt.try_clone().unwrap(),
-        )
-    }
 }
 
 impl VhostUserBackend for VhostUserBlkBackend {
@@ -236,10 +229,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
         debug!("event received: {:?}", device_event);
 
-        // Kill event is the index after the last queue
-        let kill_index = self.config.num_queues;
         match device_event {
-            event if event == kill_index => Ok(true),
             q if device_event < self.config.num_queues => {
                 let mut vring = vrings[q as usize].write().unwrap();
                 if self.process_queue(&mut vring) {
@@ -262,6 +252,10 @@ impl VhostUserBackend for VhostUserBlkBackend {
         };
 
         buf.to_vec()
+    }
+
+    fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
+        Some((self.kill_evt.try_clone().unwrap(), None))
     }
 }
 
@@ -356,16 +350,6 @@ pub fn start_block_backend(backend_command: &str) {
     debug!("blk_daemon is created!\n");
 
     let vring_worker = blk_daemon.get_vring_worker();
-    let (kill_index, kill_evt_fd) = blk_backend.read().unwrap().get_kill_event();
-    if let Err(e) = vring_worker.register_listener(
-        kill_evt_fd.as_raw_fd(),
-        epoll::Events::EPOLLIN,
-        u64::from(kill_index),
-    ) {
-        error!("Failed to register listener for kill event: {:?}", e);
-        process::exit(1);
-    }
-
     blk_backend
         .write()
         .unwrap()
@@ -383,7 +367,8 @@ pub fn start_block_backend(backend_command: &str) {
         error!("Error from the main thread: {:?}", e);
     }
 
-    if let Err(e) = kill_evt_fd.write(1) {
+    let kill_evt = &blk_backend.write().unwrap().kill_evt;
+    if let Err(e) = kill_evt.write(1) {
         error!("Error shutting down worker thread: {:?}", e)
     }
 }
