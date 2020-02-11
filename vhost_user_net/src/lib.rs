@@ -249,13 +249,6 @@ impl VhostUserNetBackend {
     pub fn set_vring_worker(&mut self, vring_worker: Option<Arc<VringWorker>>) {
         self.vring_worker = vring_worker;
     }
-
-    pub fn get_kill_event(&self) -> (u16, EventFd) {
-        (
-            (self.num_queues + (self.num_queues / 2)) as u16,
-            self.kill_evt.try_clone().unwrap(),
-        )
-    }
 }
 
 impl VhostUserBackend for VhostUserNetBackend {
@@ -299,7 +292,6 @@ impl VhostUserBackend for VhostUserNetBackend {
 
         let tap_start_index = self.num_queues as u16;
         let tap_end_index = (self.num_queues + self.num_queues / 2 - 1) as u16;
-        let kill_index = tap_end_index + 1;
 
         match device_event {
             x if ((x < self.num_queues as u16) && (x % 2 == 0)) => {
@@ -339,14 +331,16 @@ impl VhostUserBackend for VhostUserNetBackend {
                     self.process_rx(&mut vring, index)?;
                 }
             }
-            x if x == kill_index => {
-                self.kill_evt.read().unwrap();
-                return Ok(true);
-            }
             _ => return Err(Error::HandleEventUnknownEvent.into()),
         }
 
         Ok(false)
+    }
+
+    fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
+        let tap_end_index = (self.num_queues + self.num_queues / 2 - 1) as u16;
+        let kill_index = tap_end_index + 1;
+        Some((self.kill_evt.try_clone().unwrap(), Some(kill_index)))
     }
 }
 
@@ -439,17 +433,7 @@ pub fn start_net_backend(backend_command: &str) {
     )
     .unwrap();
 
-    let (kill_index, kill_evt_fd) = net_backend.read().unwrap().get_kill_event();
     let vring_worker = net_daemon.get_vring_worker();
-
-    if let Err(e) = vring_worker.register_listener(
-        kill_evt_fd.as_raw_fd(),
-        epoll::Events::EPOLLIN,
-        u64::from(kill_index),
-    ) {
-        println!("failed to register listener for kill event: {:?}", e);
-        process::exit(1);
-    }
 
     net_backend
         .write()
@@ -468,7 +452,8 @@ pub fn start_net_backend(backend_command: &str) {
         error!("Error from the main thread: {:?}", e);
     }
 
-    if let Err(e) = kill_evt_fd.write(1) {
+    let kill_evt = &net_backend.write().unwrap().kill_evt;
+    if let Err(e) = kill_evt.write(1) {
         error!("Error shutting down worker thread: {:?}", e)
     }
 }
