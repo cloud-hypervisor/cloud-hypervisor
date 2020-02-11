@@ -8,7 +8,6 @@ use crate::{
     DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT,
     INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
 };
-use arc_swap::ArcSwap;
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use libc::EFD_NONBLOCK;
@@ -17,7 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::{GuestAddress, GuestMemoryMmap};
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 const VENDOR_ID: u32 = 0;
@@ -86,13 +85,13 @@ pub struct MmioDevice {
     config_generation: u32,
     queues: Vec<Queue>,
     queue_evts: Vec<EventFd>,
-    mem: Option<Arc<ArcSwap<GuestMemoryMmap>>>,
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
 impl MmioDevice {
     /// Constructs a new MMIO transport for the given virtio device.
     pub fn new(
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         device: Arc<Mutex<dyn VirtioDevice>>,
     ) -> Result<MmioDevice> {
         let device_clone = device.clone();
@@ -136,7 +135,7 @@ impl MmioDevice {
 
     fn are_queues_valid(&self) -> bool {
         if let Some(mem) = self.mem.as_ref() {
-            self.queues.iter().all(|q| q.is_valid(mem.load().as_ref()))
+            self.queues.iter().all(|q| q.is_valid(&mem.memory()))
         } else {
             false
         }

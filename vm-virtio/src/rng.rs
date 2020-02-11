@@ -8,7 +8,6 @@ use super::{
     VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
-use arc_swap::ArcSwap;
 use epoll;
 use libc::EFD_NONBLOCK;
 use std;
@@ -20,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::{Bytes, GuestMemoryMmap};
+use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -36,7 +35,7 @@ const PAUSE_EVENT: DeviceEventT = 2;
 
 struct RngEpollHandler {
     queues: Vec<Queue>,
-    mem: Arc<ArcSwap<GuestMemoryMmap>>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     random_file: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
@@ -50,7 +49,7 @@ impl RngEpollHandler {
 
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.load();
+        let mem = self.mem.memory();
         for avail_desc in queue.iter(&mem) {
             let mut len = 0;
 
@@ -257,7 +256,7 @@ impl VirtioDevice for Rng {
 
     fn activate(
         &mut self,
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

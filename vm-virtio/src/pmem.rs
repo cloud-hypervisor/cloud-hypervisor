@@ -12,7 +12,6 @@ use super::{
     VirtioDeviceType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
-use arc_swap::ArcSwap;
 use epoll;
 use libc::EFD_NONBLOCK;
 use std::cmp;
@@ -27,7 +26,8 @@ use std::sync::Arc;
 use std::thread;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap, GuestUsize,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryMmap, GuestUsize,
 };
 use vmm_sys_util::eventfd::EventFd;
 
@@ -158,7 +158,7 @@ impl Request {
 
 struct PmemEpollHandler {
     queue: Queue,
-    mem: Arc<ArcSwap<GuestMemoryMmap>>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     disk: File,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     queue_evt: EventFd,
@@ -170,7 +170,7 @@ impl PmemEpollHandler {
     fn process_queue(&mut self) -> bool {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
-        let mem = self.mem.load();
+        let mem = self.mem.memory();
         for avail_desc in self.queue.iter(&mem) {
             let len = match Request::parse(&avail_desc, &mem) {
                 Ok(ref req) if (req.type_ == RequestType::Flush) => {
@@ -406,7 +406,7 @@ impl VirtioDevice for Pmem {
 
     fn activate(
         &mut self,
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

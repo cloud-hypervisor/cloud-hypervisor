@@ -255,9 +255,8 @@ impl VirtioPciCommonConfig {
 mod tests {
     use super::*;
     use crate::{ActivateResult, VirtioInterrupt};
-    use arc_swap::ArcSwap;
     use std::sync::Arc;
-    use vm_memory::GuestMemoryMmap;
+    use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
     use vmm_sys_util::eventfd::EventFd;
 
     struct DummyDevice(u32);
@@ -273,7 +272,7 @@ mod tests {
         }
         fn activate(
             &mut self,
-            _mem: Arc<ArcSwap<GuestMemoryMmap>>,
+            _mem: GuestMemoryAtomic<GuestMemoryMmap>,
             _interrupt_evt: Arc<dyn VirtioInterrupt>,
             _queues: Vec<Queue>,
             _queue_evts: Vec<EventFd>,

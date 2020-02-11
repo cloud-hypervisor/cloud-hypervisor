@@ -14,7 +14,6 @@ use super::{
     VirtioDeviceType, VirtioInterruptType,
 };
 use crate::VirtioInterrupt;
-use arc_swap::ArcSwap;
 use epoll;
 use libc::{c_void, EFD_NONBLOCK};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
@@ -33,7 +32,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
+use vm_memory::{
+    ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryMmap,
+};
 use vmm_sys_util::{eventfd::EventFd, seek_hole::SeekHole, write_zeroes::PunchHole};
 
 const SECTOR_SHIFT: u8 = 9;
@@ -590,7 +592,7 @@ impl Request {
 
 struct BlockEpollHandler<T: DiskFile> {
     queue: Queue,
-    mem: Arc<ArcSwap<GuestMemoryMmap>>,
+    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     disk_image: Arc<Mutex<T>>,
     disk_nsectors: u64,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
@@ -605,7 +607,7 @@ impl<T: DiskFile> BlockEpollHandler<T> {
 
         let mut used_desc_heads = Vec::new();
         let mut used_count = 0;
-        let mem = self.mem.load();
+        let mem = self.mem.memory();
         for avail_desc in queue.iter(&mem) {
             let len;
             match Request::parse(&avail_desc, &mem) {
@@ -938,7 +940,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 
     fn activate(
         &mut self,
-        mem: Arc<ArcSwap<GuestMemoryMmap>>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,

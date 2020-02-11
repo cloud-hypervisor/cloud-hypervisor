@@ -39,13 +39,15 @@ use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 use std::ffi::CString;
 use std::fs::File;
 use std::io;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_allocator::{GsiApic, SystemAllocator};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion, GuestUsize,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryMmap,
+    GuestMemoryRegion, GuestUsize,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
@@ -388,9 +390,9 @@ impl Vm {
 
         let cmdline_cstring = CString::new(cmdline).map_err(Error::CmdLineCString)?;
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
-        let mem = guest_memory.load_full();
+        let mem = guest_memory.memory();
         let entry_addr = match linux_loader::loader::Elf::load(
-            mem.as_ref(),
+            mem.deref(),
             None,
             &mut self.kernel,
             Some(arch::layout::HIGH_RAM_START),
@@ -398,7 +400,7 @@ impl Vm {
             Ok(entry_addr) => entry_addr,
             Err(linux_loader::loader::Error::InvalidElfMagicNumber) => {
                 linux_loader::loader::BzImage::load(
-                    mem.as_ref(),
+                    mem.deref(),
                     None,
                     &mut self.kernel,
                     Some(arch::layout::HIGH_RAM_START),
@@ -409,7 +411,7 @@ impl Vm {
         };
 
         linux_loader::loader::load_cmdline(
-            mem.as_ref(),
+            mem.deref(),
             arch::layout::CMDLINE_START,
             &cmdline_cstring,
         )
@@ -423,7 +425,7 @@ impl Vm {
         #[cfg(feature = "acpi")]
         {
             rsdp_addr = Some(crate::acpi::create_acpi_tables(
-                &mem,
+                mem.deref(),
                 &self.devices,
                 &self.cpu_manager,
                 &self.memory_manager,

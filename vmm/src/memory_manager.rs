@@ -5,7 +5,6 @@
 
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
-use arc_swap::ArcSwap;
 use arch::RegionType;
 use devices::BusDevice;
 use kvm_bindings::kvm_userspace_memory_region;
@@ -19,8 +18,9 @@ use std::sync::{Arc, Mutex};
 use vm_allocator::SystemAllocator;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
-    mmap::MmapRegionError, Address, Error as MmapError, GuestAddress, GuestMemory, GuestMemoryMmap,
-    GuestMemoryRegion, GuestRegionMmap, GuestUsize, MmapRegion,
+    mmap::MmapRegionError, Address, Error as MmapError, GuestAddress, GuestAddressSpace,
+    GuestMemory, GuestMemoryAtomic, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
+    GuestUsize, MmapRegion,
 };
 
 const HOTPLUG_COUNT: usize = 8;
@@ -35,12 +35,11 @@ struct HotPlugState {
 }
 
 pub struct MemoryManager {
-    guest_memory: Arc<ArcSwap<GuestMemoryMmap>>,
+    guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     next_kvm_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
     fd: Arc<VmFd>,
-    mem_regions: Vec<Arc<GuestRegionMmap>>,
     hotplug_slots: Vec<HotPlugState>,
     selected_slot: usize,
     backing_file: Option<PathBuf>,
@@ -219,7 +218,7 @@ impl MemoryManager {
         }
 
         let guest_memory =
-            GuestMemoryMmap::from_arc_regions(mem_regions.clone()).map_err(Error::GuestMemory)?;
+            GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
 
         let end_of_device_area = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
         let mem_end = guest_memory.last_addr();
@@ -233,7 +232,7 @@ impl MemoryManager {
             start_of_device_area = start_of_device_area.unchecked_add(size);
         }
 
-        let guest_memory = Arc::new(ArcSwap::new(Arc::new(guest_memory)));
+        let guest_memory = GuestMemoryAtomic::new(guest_memory);
 
         let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
         hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
@@ -244,7 +243,6 @@ impl MemoryManager {
             start_of_device_area,
             end_of_device_area,
             fd,
-            mem_regions,
             hotplug_slots,
             selected_slot: 0,
             backing_file: backing_file.clone(),
@@ -254,7 +252,7 @@ impl MemoryManager {
             next_hotplug_slot: 0,
         }));
 
-        guest_memory.load().with_regions(|_, region| {
+        guest_memory.memory().with_regions(|_, region| {
             let _ = memory_manager.lock().unwrap().create_userspace_mapping(
                 region.start_addr().raw_value(),
                 region.len() as u64,
@@ -331,7 +329,7 @@ impl MemoryManager {
 
         // Start address needs to be non-contiguous with last memory added (leaving a gap of 256MiB)
         // and also aligned to 128MiB boundary. It must also start at the 64bit start.
-        let mem_end = self.guest_memory.load().last_addr();
+        let mem_end = self.guest_memory.memory().last_addr();
         let start_addr = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
             arch::layout::RAM_64BIT_START
         } else {
@@ -371,15 +369,17 @@ impl MemoryManager {
         self.next_hotplug_slot += 1;
 
         // Update the GuestMemoryMmap with the new range
-        self.mem_regions.push(region);
-        let guest_memory = GuestMemoryMmap::from_arc_regions(self.mem_regions.clone())
+        let guest_memory = self
+            .guest_memory
+            .memory()
+            .insert_region(region)
             .map_err(Error::GuestMemory)?;
-        self.guest_memory.store(Arc::new(guest_memory));
+        self.guest_memory.lock().unwrap().replace(guest_memory);
 
         Ok(())
     }
 
-    pub fn guest_memory(&self) -> Arc<ArcSwap<GuestMemoryMmap>> {
+    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.guest_memory.clone()
     }
 

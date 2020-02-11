@@ -20,7 +20,6 @@ use crate::{
     VirtioIommuRemapping, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
     DEVICE_FEATURES_OK, DEVICE_INIT, VIRTIO_MSI_NO_VECTOR,
 };
-use arc_swap::ArcSwap;
 use devices::BusDevice;
 use libc::EFD_NONBLOCK;
 use pci::{
@@ -39,7 +38,10 @@ use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryMmap, GuestUsize, Le32};
+use vm_memory::{
+    Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+    GuestUsize, Le32,
+};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 #[allow(clippy::enum_variant_names)]
@@ -283,7 +285,7 @@ pub struct VirtioPciDevice {
     queue_evts: Vec<EventFd>,
 
     // Guest memory
-    memory: Option<Arc<ArcSwap<GuestMemoryMmap>>>,
+    memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 
     // Setting PCI BAR
     settings_bar: u8,
@@ -303,7 +305,7 @@ pub struct VirtioPciDevice {
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
     pub fn new(
-        memory: Arc<ArcSwap<GuestMemoryMmap>>,
+        memory: GuestMemoryAtomic<GuestMemoryMmap>,
         device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
         iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
@@ -434,7 +436,7 @@ impl VirtioPciDevice {
 
     fn are_queues_valid(&self) -> bool {
         if let Some(mem) = self.memory.as_ref() {
-            self.queues.iter().all(|q| q.is_valid(mem.load().as_ref()))
+            self.queues.iter().all(|q| q.is_valid(&mem.memory()))
         } else {
             false
         }

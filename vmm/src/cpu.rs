@@ -11,7 +11,6 @@
 use crate::device_manager::DeviceManager;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
-use arc_swap::ArcSwap;
 #[cfg(feature = "acpi")]
 use arch::layout;
 use devices::{ioapic, BusDevice};
@@ -25,7 +24,7 @@ use std::sync::{Arc, Barrier, Mutex, Weak};
 use std::thread;
 use std::{fmt, io, result};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::{Address, GuestAddress, GuestMemoryMmap};
+use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
@@ -277,7 +276,7 @@ impl Vcpu {
     pub fn configure(
         &mut self,
         kernel_start_addr: Option<GuestAddress>,
-        vm_memory: &Arc<ArcSwap<GuestMemoryMmap>>,
+        vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         cpuid: CpuId,
     ) -> Result<()> {
         let mut cpuid = cpuid;
@@ -297,7 +296,7 @@ impl Vcpu {
             )
             .map_err(Error::REGSConfiguration)?;
             arch::x86_64::regs::setup_fpu(&self.fd).map_err(Error::FPUConfiguration)?;
-            arch::x86_64::regs::setup_sregs(&vm_memory.load(), &self.fd)
+            arch::x86_64::regs::setup_sregs(&vm_memory.memory(), &self.fd)
                 .map_err(Error::SREGSConfiguration)?;
         }
         arch::x86_64::interrupts::set_lint(&self.fd).map_err(Error::LocalIntConfiguration)?;
@@ -376,7 +375,7 @@ pub struct CpuManager {
     io_bus: Weak<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
-    vm_memory: Arc<ArcSwap<GuestMemoryMmap>>,
+    vm_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     cpuid: CpuId,
     fd: Arc<VmFd>,
     vcpus_kill_signalled: Arc<AtomicBool>,
@@ -496,7 +495,7 @@ impl CpuManager {
         boot_vcpus: u8,
         max_vcpus: u8,
         device_manager: &DeviceManager,
-        guest_memory: Arc<ArcSwap<GuestMemoryMmap>>,
+        guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
         fd: Arc<VmFd>,
         cpuid: CpuId,
         reset_evt: EventFd,

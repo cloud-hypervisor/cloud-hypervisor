@@ -4,7 +4,6 @@
 
 use super::Error as DeviceError;
 use super::{DescriptorChain, DeviceEventT, Queue};
-use arc_swap::ArcSwap;
 use net_util::{MacAddr, Tap, TapError};
 use std::cmp;
 use std::fs;
@@ -15,7 +14,10 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use virtio_bindings::bindings::virtio_net::*;
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap};
+use vm_memory::{
+    ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError,
+    GuestMemoryMmap,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 type Result<T> = std::result::Result<T, Error>;
@@ -202,7 +204,7 @@ pub fn unregister_listener(
 }
 
 pub struct NetCtrlEpollHandler {
-    pub mem: Arc<ArcSwap<GuestMemoryMmap>>,
+    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub ctrl_q: CtrlVirtio,
@@ -254,7 +256,7 @@ impl NetCtrlEpollHandler {
 
                 match ev_type {
                     CTRL_QUEUE_EVENT => {
-                        let mem = self.mem.load();
+                        let mem = self.mem.memory();
                         if let Err(e) = self.ctrl_q.queue_evt.read() {
                             error!("failed to get ctl queue event: {:?}", e);
                         }

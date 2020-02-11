@@ -49,6 +49,8 @@ use vm_device::interrupt::{
 };
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::guest_memory::FileOffset;
+#[cfg(feature = "cmos")]
+use vm_memory::GuestAddressSpace;
 use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
 #[cfg(feature = "pci_support")]
 use vm_virtio::transport::VirtioPciDevice;
@@ -739,7 +741,7 @@ impl DeviceManager {
                 .lock()
                 .unwrap()
                 .guest_memory()
-                .load()
+                .memory()
                 .last_addr()
                 .0
                 + 1;

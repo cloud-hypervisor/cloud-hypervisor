@@ -164,12 +164,11 @@ mod tests {
     use crate::queue::tests::VirtQueue as GuestQ;
     use crate::queue::Queue;
     use crate::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
-    use arc_swap::ArcSwap;
     use libc::EFD_NONBLOCK;
     use std::os::unix::io::AsRawFd;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, RwLock};
-    use vm_memory::{GuestAddress, GuestMemoryMmap};
+    use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
     use vmm_sys_util::eventfd::EventFd;
 
     pub struct NoopVirtioInterrupt {}
@@ -310,7 +309,7 @@ mod tests {
                 guest_txvq,
                 guest_evvq,
                 handler: VsockEpollHandler {
-                    mem: Arc::new(ArcSwap::new(Arc::new(self.mem.clone()))),
+                    mem: GuestMemoryAtomic::new(self.mem.clone()),
                     queues,
                     queue_evts,
                     kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
