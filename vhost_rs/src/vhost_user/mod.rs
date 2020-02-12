@@ -41,6 +41,9 @@ pub use self::slave::SlaveListener;
 mod slave_req_handler;
 #[cfg(feature = "vhost-user-slave")]
 pub use self::slave_req_handler::{SlaveReqHandler, VhostUserSlaveReqHandler};
+#[cfg(feature = "vhost-user-slave")]
+mod slave_fs_cache;
+pub use self::slave_fs_cache::SlaveFsCacheReq;
 
 pub mod sock_ctrl_msg;
 
@@ -69,6 +72,8 @@ pub enum Error {
     SocketRetry(std::io::Error),
     /// Failure from the slave side.
     SlaveInternalError,
+    /// Failure from the master side.
+    MasterInternalError,
     /// Virtio/protocol features mismatch.
     FeatureMismatch,
     /// Error from request handler
@@ -89,6 +94,7 @@ impl std::fmt::Display for Error {
             Error::SocketBroken(e) => write!(f, "socket is broken: {}", e),
             Error::SocketRetry(e) => write!(f, "temporary socket error: {}", e),
             Error::SlaveInternalError => write!(f, "slave internal error"),
+            Error::MasterInternalError => write!(f, "Master internal error"),
             Error::FeatureMismatch => write!(f, "virtio/protocol features mismatch"),
             Error::ReqHandlerError(e) => write!(f, "handler failed to handle request: {}", e),
         }
@@ -105,6 +111,8 @@ impl Error {
             Error::SocketBroken(_) => true,
             // Slave internal error, hope it recovers on reconnect.
             Error::SlaveInternalError => true,
+            // Master internal error, hope it recovers on reconnect.
+            Error::MasterInternalError => true,
             // Should just retry the IO operation instead of rebuilding the underline connection.
             Error::SocketRetry(_) => false,
             Error::InvalidParam | Error::InvalidOperation => false,
