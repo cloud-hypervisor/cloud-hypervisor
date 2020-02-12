@@ -1,3 +1,5 @@
+// Copyright © 2020, Oracle and/or its affiliates.
+//
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 //
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
@@ -29,7 +31,7 @@ use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{get_host_cpu_phys_bits, Error as MemoryManagerError, MemoryManager};
 use anyhow::anyhow;
-use arch::layout;
+use arch::{layout, BootProtocol, EntryPoint};
 use devices::{ioapic, HotPlugNotificationFlags};
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::*;
@@ -382,7 +384,7 @@ impl Vm {
         })
     }
 
-    fn load_kernel(&mut self) -> Result<GuestAddress> {
+    fn load_kernel(&mut self) -> Result<EntryPoint> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE);
         cmdline
             .insert_str(self.config.lock().unwrap().cmdline.args.clone())
@@ -453,9 +455,24 @@ impl Vm {
                     .checked_add(KERNEL_64BIT_ENTRY_OFFSET)
                     .ok_or(Error::MemOverflow)?;
 
-                Ok(GuestAddress(load_addr))
+                Ok(EntryPoint {
+                    entry_addr: GuestAddress(load_addr),
+                    protocol: BootProtocol::LinuxBoot,
+                })
             }
             None => {
+                // Assume by default Linux boot protocol is used and not PVH
+                let mut entry_point_addr: GuestAddress = entry_addr.kernel_load;
+
+                let boot_prot = if cfg!(feature = "pvh_boot") && entry_addr.pvh_entry_addr.is_some()
+                {
+                    // entry_addr.pvh_entry_addr field is safe to unwrap here
+                    entry_point_addr = entry_addr.pvh_entry_addr.unwrap();
+                    BootProtocol::PvhBoot
+                } else {
+                    BootProtocol::LinuxBoot
+                };
+
                 arch::configure_system(
                     &mem,
                     arch::layout::CMDLINE_START,
@@ -466,7 +483,10 @@ impl Vm {
                 )
                 .map_err(Error::ConfigureSystem)?;
 
-                Ok(entry_addr.kernel_load)
+                Ok(EntryPoint {
+                    entry_addr: entry_point_addr,
+                    protocol: boot_prot,
+                })
             }
         }
     }
