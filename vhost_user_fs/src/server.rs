@@ -10,6 +10,7 @@ use std::mem::size_of;
 use libc;
 use vm_memory::ByteValued;
 
+use super::fs_cache_req_handler::FsCacheReqHandler;
 use crate::descriptor_utils::{Reader, Writer};
 use crate::filesystem::{
     Context, DirEntry, Entry, FileSystem, GetxattrReply, ListxattrReply, ZeroCopyReader,
@@ -63,7 +64,12 @@ impl<F: FileSystem + Sync> Server<F> {
     }
 
     #[allow(clippy::cognitive_complexity)]
-    pub fn handle_message(&self, mut r: Reader, w: Writer) -> Result<usize> {
+    pub fn handle_message<T: FsCacheReqHandler>(
+        &self,
+        mut r: Reader,
+        w: Writer,
+        vu_req: Option<&mut T>,
+    ) -> Result<usize> {
         let in_header: InHeader = r.read_obj().map_err(Error::DecodeMessage)?;
 
         if in_header.len > MAX_BUFFER_SIZE {
@@ -118,11 +124,101 @@ impl<F: FileSystem + Sync> Server<F> {
             x if x == Opcode::Readdirplus as u32 => self.readdirplus(in_header, r, w),
             x if x == Opcode::Rename2 as u32 => self.rename2(in_header, r, w),
             x if x == Opcode::Lseek as u32 => self.lseek(in_header, r, w),
+            x if x == Opcode::SetupMapping as u32 => self.setupmapping(in_header, r, w, vu_req),
+            x if x == Opcode::RemoveMapping as u32 => self.removemapping(in_header, r, w, vu_req),
             _ => reply_error(
                 io::Error::from_raw_os_error(libc::ENOSYS),
                 in_header.unique,
                 w,
             ),
+        }
+    }
+
+    fn setupmapping<T: FsCacheReqHandler>(
+        &self,
+        in_header: InHeader,
+        mut r: Reader,
+        w: Writer,
+        vu_req: Option<&mut T>,
+    ) -> Result<usize> {
+        if let Some(req) = vu_req {
+            let SetupmappingIn {
+                fh,
+                foffset,
+                len,
+                flags,
+                moffset,
+            } = r.read_obj().map_err(Error::DecodeMessage)?;
+
+            match self.fs.setupmapping(
+                Context::from(in_header),
+                in_header.nodeid.into(),
+                fh.into(),
+                foffset,
+                len,
+                flags,
+                moffset,
+                req,
+            ) {
+                Ok(()) => reply_ok(None::<u8>, None, in_header.unique, w),
+                Err(e) => reply_error(e, in_header.unique, w),
+            }
+        } else {
+            reply_error(
+                io::Error::from_raw_os_error(libc::EINVAL),
+                in_header.unique,
+                w,
+            )
+        }
+    }
+
+    fn removemapping<T: FsCacheReqHandler>(
+        &self,
+        in_header: InHeader,
+        mut r: Reader,
+        w: Writer,
+        vu_req: Option<&mut T>,
+    ) -> Result<usize> {
+        if let Some(req) = vu_req {
+            let RemovemappingIn { count } = r.read_obj().map_err(Error::DecodeMessage)?;
+
+            if let Some(size) = (count as usize).checked_mul(size_of::<RemovemappingOne>()) {
+                if size > MAX_BUFFER_SIZE as usize {
+                    return reply_error(
+                        io::Error::from_raw_os_error(libc::ENOMEM),
+                        in_header.unique,
+                        w,
+                    );
+                }
+            } else {
+                return reply_error(
+                    io::Error::from_raw_os_error(libc::EOVERFLOW),
+                    in_header.unique,
+                    w,
+                );
+            }
+
+            let mut requests = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                requests.push(
+                    r.read_obj::<RemovemappingOne>()
+                        .map_err(Error::DecodeMessage)?,
+                );
+            }
+
+            match self
+                .fs
+                .removemapping(Context::from(in_header), requests, req)
+            {
+                Ok(()) => reply_ok(None::<u8>, None, in_header.unique, w),
+                Err(e) => reply_error(e, in_header.unique, w),
+            }
+        } else {
+            reply_error(
+                io::Error::from_raw_os_error(libc::EINVAL),
+                in_header.unique,
+                w,
+            )
         }
     }
 
