@@ -12,7 +12,7 @@ name = "aho-corasick"
 version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "memchr 2.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "memchr 2.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "memchr"
-version = "2.3.0"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -722,7 +722,7 @@ version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "aho-corasick 0.6.10 (registry+https://github.com/rust-lang/crates.io-index)",
- "memchr 2.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "memchr 2.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex-syntax 0.6.14 (registry+https://github.com/rust-lang/crates.io-index)",
  "thread_local 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "utf8-ranges 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1319,7 +1319,7 @@ dependencies = [
 "checksum lock_api 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "79b2de95ecb4691949fea4716ca53cdbcfccb2c612e19644a8bad05edcf9f47b"
 "checksum log 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)" = "e19e8d5c34a3e0e2223db8e060f9e8264aeeb5c5fc64a4ee9965c062211c024b"
 "checksum log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)" = "1b9ad466a945c9c40f6f9a449c55675547e59bc75a2722d4689042ab3ae80c9c"
-"checksum memchr 2.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3197e20c7edb283f87c071ddfc7a2cca8f8e0b888c242959846a6fce03c72223"
+"checksum memchr 2.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "1406817d4e80bb8acc9f0219187396db83252515b51314771f26975e515b9e30"
 "checksum micro_http 0.1.0 (git+https://github.com/firecracker-microvm/firecracker)" = "<none>"
 "checksum openssl-sys 0.9.54 (registry+https://github.com/rust-lang/crates.io-index)" = "1024c0a59774200a555087a6da3f253a9095a5f344e353b212ac4c8b8e450986"
 "checksum parking_lot 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "92e98c49ab0b7ce5b222f2cc9193fc4efe11c6d0bd4f648e374684a6857b1cfc"
