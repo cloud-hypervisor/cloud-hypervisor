@@ -20,8 +20,12 @@ use vmm_sys_util::ioctl::{ioctl_with_mut_ref, ioctl_with_ref, ioctl_with_val};
 pub enum Error {
     /// Couldn't open /dev/net/tun.
     OpenTun(IoError),
-    /// Unable to create tap interface.
-    CreateTap(IoError),
+    /// Unable to configure tap interface.
+    ConfigureTap(IoError),
+    /// Unable to retrieve features.
+    GetFeatures(IoError),
+    /// Missing multiqueue support in the kernel.
+    MultiQueueKernelSupport,
     /// ioctl failed.
     IoctlError(IoError),
     /// Failed to create a socket.
@@ -96,6 +100,20 @@ impl Tap {
         // We just checked that the fd is valid.
         let tuntap = unsafe { File::from_raw_fd(fd) };
 
+        // Let's validate some features before going any further.
+        // ioctl is safe since we call it with a valid tap fd and check the return
+        // value.
+        let mut features = 0;
+        let ret = unsafe { ioctl_with_mut_ref(&tuntap, net_gen::TUNGETFEATURES(), &mut features) };
+        if ret < 0 {
+            return Err(Error::GetFeatures(IoError::last_os_error()));
+        }
+
+        // Check if the user parameters match the kernel support for MQ
+        if (features & net_gen::IFF_MULTI_QUEUE == 0) && num_queue_pairs > 1 {
+            return Err(Error::MultiQueueKernelSupport);
+        }
+
         // This is pretty messy because of the unions used by ifreq. Since we
         // don't call as_mut on the same union field more than once, this block
         // is safe.
@@ -115,9 +133,8 @@ impl Tap {
         // ioctl is safe since we call it with a valid tap fd and check the return
         // value.
         let ret = unsafe { ioctl_with_mut_ref(&tuntap, net_gen::TUNSETIFF(), &mut ifreq) };
-
         if ret < 0 {
-            return Err(Error::CreateTap(IoError::last_os_error()));
+            return Err(Error::ConfigureTap(IoError::last_os_error()));
         }
 
         let if_name_temp = unsafe { *ifreq.ifr_ifrn.ifrn_name.as_ref() };
