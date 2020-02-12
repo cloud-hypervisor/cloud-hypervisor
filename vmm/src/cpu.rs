@@ -1,3 +1,5 @@
+// Copyright © 2020, Oracle and/or its affiliates.
+//
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 //
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
@@ -13,6 +15,7 @@ use crate::device_manager::DeviceManager;
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
 #[cfg(feature = "acpi")]
 use arch::layout;
+use arch::EntryPoint;
 use devices::{ioapic, BusDevice};
 use kvm_bindings::CpuId;
 use kvm_ioctls::*;
@@ -271,11 +274,11 @@ impl Vcpu {
     /// # Arguments
     ///
     /// * `machine_config` - Specifies necessary info used for the CPUID configuration.
-    /// * `kernel_start_addr` - Offset from `guest_mem` at which the kernel starts.
+    /// * `kernel_entry_point` - Kernel entry point address in guest memory and boot protocol used.
     /// * `vm` - The virtual machine this vcpu will get attached to.
     pub fn configure(
         &mut self,
-        kernel_start_addr: Option<GuestAddress>,
+        kernel_entry_point: Option<EntryPoint>,
         vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         cpuid: CpuId,
     ) -> Result<()> {
@@ -286,11 +289,11 @@ impl Vcpu {
             .map_err(Error::SetSupportedCpusFailed)?;
 
         arch::x86_64::regs::setup_msrs(&self.fd).map_err(Error::MSRSConfiguration)?;
-        if let Some(kernel_start_addr) = kernel_start_addr {
+        if let Some(kernel_entry_point) = kernel_entry_point {
             // Safe to unwrap because this method is called after the VM is configured
             arch::x86_64::regs::setup_regs(
                 &self.fd,
-                kernel_start_addr.raw_value(),
+                kernel_entry_point.entry_addr.raw_value(),
                 arch::x86_64::layout::BOOT_STACK_POINTER.raw_value(),
                 arch::x86_64::layout::ZERO_PAGE_START.raw_value(),
             )
@@ -537,11 +540,7 @@ impl CpuManager {
         Ok(cpu_manager)
     }
 
-    fn activate_vcpus(
-        &mut self,
-        desired_vcpus: u8,
-        entry_addr: Option<GuestAddress>,
-    ) -> Result<()> {
+    fn activate_vcpus(&mut self, desired_vcpus: u8, entry_point: Option<EntryPoint>) -> Result<()> {
         if desired_vcpus > self.max_vcpus {
             return Err(Error::DesiredVCPUCountExceedsMax);
         }
@@ -586,7 +585,7 @@ impl CpuManager {
                         register_signal_handler(SIGRTMIN(), handle_signal)
                             .expect("Failed to register vcpu signal handler");
 
-                        vcpu.configure(entry_addr, &vm_memory, cpuid)
+                        vcpu.configure(entry_point, &vm_memory, cpuid)
                             .expect("Failed to configure vCPU");
 
                         // Block until all CPUs are ready.
@@ -628,10 +627,10 @@ impl CpuManager {
                     .map_err(Error::VcpuSpawn)?,
             );
 
-            // On hot plug calls into this function entry_addr is None. It is for
+            // On hot plug calls into this function entry_point is None. It is for
             // those hotplug CPU additions that we need to set the inserting flag.
             self.vcpu_states[usize::from(cpu_id)].handle = handle;
-            self.vcpu_states[usize::from(cpu_id)].inserting = entry_addr.is_none();
+            self.vcpu_states[usize::from(cpu_id)].inserting = entry_point.is_none();
         }
 
         // Unblock all CPU threads.
@@ -657,8 +656,8 @@ impl CpuManager {
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
-    pub fn start_boot_vcpus(&mut self, entry_addr: GuestAddress) -> Result<()> {
-        self.activate_vcpus(self.boot_vcpus(), Some(entry_addr))
+    pub fn start_boot_vcpus(&mut self, entry_point: EntryPoint) -> Result<()> {
+        self.activate_vcpus(self.boot_vcpus(), Some(entry_point))
     }
 
     pub fn resize(&mut self, desired_vcpus: u8) -> Result<bool> {

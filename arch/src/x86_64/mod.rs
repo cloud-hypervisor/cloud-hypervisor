@@ -21,6 +21,32 @@ use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestUsize,
 };
 
+#[derive(Debug, Copy, Clone)]
+pub enum BootProtocol {
+    LinuxBoot,
+    PvhBoot,
+}
+
+impl ::std::fmt::Display for BootProtocol {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        match self {
+            BootProtocol::LinuxBoot => write!(f, "Linux 64-bit boot protocol"),
+            BootProtocol::PvhBoot => write!(f, "PVH boot protocol"),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+/// Specifies the entry point address where the guest must start
+/// executing code, as well as which of the supported boot protocols
+/// is to be used to configure the guest initial state.
+pub struct EntryPoint {
+    /// Address in guest memory where the guest must start execution
+    pub entry_addr: GuestAddress,
+    /// Specifies which boot protocol to use
+    pub protocol: BootProtocol,
+}
+
 const E820_RAM: u32 = 1;
 const E820_RESERVED: u32 = 2;
 
