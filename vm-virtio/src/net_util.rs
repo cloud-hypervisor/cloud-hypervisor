@@ -7,6 +7,7 @@ use super::{DescriptorChain, DeviceEventT, Queue};
 use arc_swap::ArcSwap;
 use net_util::{MacAddr, Tap, TapError};
 use std::cmp;
+use std::fs;
 use std::io::{self, Write};
 use std::mem;
 use std::net::Ipv4Addr;
@@ -58,6 +59,8 @@ unsafe impl ByteValued for VirtioNetConfig {}
 
 #[derive(Debug)]
 pub enum Error {
+    /// Failed to convert an hexadecimal string into an integer.
+    ConvertHexStringToInt(std::num::ParseIntError),
     /// Read process MQ.
     FailedProcessMQ,
     /// Read queue failed.
@@ -70,10 +73,14 @@ pub enum Error {
     InvalidDesc,
     /// Invalid queue pairs number
     InvalidQueuePairsNum,
+    /// Error related to the multiqueue support.
+    MultiQueueSupport(String),
     /// No memory passed in.
     NoMemory,
     /// No ueue pairs nummber.
     NoQueuePairsNum,
+    /// Failed to read the TAP flags from sysfs.
+    ReadSysfsTunFlags(io::Error),
     /// Open tap device failed.
     TapOpen(TapError),
     /// Setting tap IP failed.
@@ -452,6 +459,26 @@ fn vnet_hdr_len() -> usize {
     mem::size_of::<virtio_net_hdr_v1>()
 }
 
+fn check_mq_support(if_name: &Option<&str>, queue_pairs: usize) -> Result<()> {
+    if let Some(tap_name) = if_name {
+        let mq = queue_pairs > 1;
+        let path = format!("/sys/class/net/{}/tun_flags", tap_name);
+        let tun_flags_str = fs::read_to_string(path).map_err(Error::ReadSysfsTunFlags)?;
+        let tun_flags = u32::from_str_radix(tun_flags_str.trim().trim_start_matches("0x"), 16)
+            .map_err(Error::ConvertHexStringToInt)?;
+        if (tun_flags & net_gen::IFF_MULTI_QUEUE != 0) && !mq {
+            return Err(Error::MultiQueueSupport(String::from(
+                "TAP interface supports MQ while device does not",
+            )));
+        } else if (tun_flags & net_gen::IFF_MULTI_QUEUE == 0) && mq {
+            return Err(Error::MultiQueueSupport(String::from(
+                "Device supports MQ while TAP interface does not",
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Create a new virtio network device with the given IP address and
 /// netmask.
 pub fn open_tap(
@@ -464,6 +491,13 @@ pub fn open_tap(
     let mut ifname: String = String::new();
     let vnet_hdr_size = vnet_hdr_len() as i32;
     let flag = net_gen::TUN_F_CSUM | net_gen::TUN_F_UFO | net_gen::TUN_F_TSO4 | net_gen::TUN_F_TSO6;
+
+    // In case the tap interface already exists, check if the number of
+    // queues is appropriate. The tap might not support multiqueue while
+    // the number of queues indicates the user expects multiple queues, or
+    // on the contrary, the tap might support multiqueue while the number
+    // of queues indicates the user doesn't expect multiple queues.
+    check_mq_support(&if_name, num_rx_q)?;
 
     for i in 0..num_rx_q {
         let tap: Tap;
