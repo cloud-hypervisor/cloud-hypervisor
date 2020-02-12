@@ -194,6 +194,12 @@ EOF
     RES=$?
 fi
 
+# Try the VFIO test but ignore the result
+newgrp kvm << EOF
+export RUST_BACKTRACE=1
+time cargo test --features "integration_tests" test_vfio -- --nocapture --ignored
+EOF
+
 # Tear VFIO test network down
 sudo ip link del vfio-br0
 sudo ip link del vfio-tap0
