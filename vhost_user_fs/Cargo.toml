@@ -10,3 +10,7 @@ libc = "0.2.65"
 log = "0.4.8"
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
 vm-virtio = { path = "../vm-virtio" }
+
+[dependencies.vhost_rs]
+path = "../vhost_rs"
+features = ["vhost-user-slave"]
