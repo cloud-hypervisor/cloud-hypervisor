@@ -513,6 +513,9 @@ pub enum Opcode {
     Readdirplus = 44,
     Rename2 = 45,
     Lseek = 46,
+    CopyFileRange = 47,
+    SetupMapping = 48,
+    RemoveMapping = 49,
 }
 
 #[repr(u32)]
@@ -1045,3 +1048,39 @@ pub struct LseekOut {
     pub offset: u64,
 }
 unsafe impl ByteValued for LseekOut {}
+
+bitflags! {
+    pub struct SetupmappingFlags: u64 {
+    const WRITE = 0x1;
+    const READ = 0x2;
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct SetupmappingIn {
+    pub fh: u64,
+    pub foffset: u64,
+    pub len: u64,
+    pub flags: u64,
+    pub moffset: u64,
+}
+
+unsafe impl ByteValued for SetupmappingIn {}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct RemovemappingIn {
+    pub count: u32,
+}
+
+unsafe impl ByteValued for RemovemappingIn {}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct RemovemappingOne {
+    pub moffset: u64,
+    pub len: u64,
+}
+
+unsafe impl ByteValued for RemovemappingOne {}
