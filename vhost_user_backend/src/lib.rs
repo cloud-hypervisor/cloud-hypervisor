@@ -20,7 +20,8 @@ use vhost_rs::vhost_user::message::{
     VhostUserVirtioFeatures, VhostUserVringAddrFlags, VhostUserVringState,
 };
 use vhost_rs::vhost_user::{
-    Error as VhostUserError, Result as VhostUserResult, SlaveListener, VhostUserSlaveReqHandler,
+    Error as VhostUserError, Result as VhostUserResult, SlaveFsCacheReq, SlaveListener,
+    VhostUserSlaveReqHandler,
 };
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{GuestAddress, GuestMemoryMmap};
@@ -103,6 +104,11 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
         None
     }
+
+    /// Set slave fd.
+    /// A default implementation is provided as we cannot expect all backends
+    /// to implement this function.
+    fn set_slave_req_fd(&mut self, _vu_req: SlaveFsCacheReq) {}
 }
 
 /// This structure is the public API the backend is allowed to interact with
@@ -778,6 +784,10 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             .unwrap()
             .set_config(offset, buf)
             .map_err(VhostUserError::ReqHandlerError)
+    }
+
+    fn set_slave_req_fd(&mut self, vu_req: SlaveFsCacheReq) {
+        self.backend.write().unwrap().set_slave_req_fd(vu_req);
     }
 }
 
