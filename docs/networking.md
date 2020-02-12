@@ -51,6 +51,11 @@ If the tap device is pre-created on host before guest boot up. To use multiple q
 [root@localhost ~]# ip tuntap add name ich0 mode tap multi_queue
 ```
 
+And the `--net` device should specify support for multiple queues. `num_queues` must be a multiple of 2 starting at least from 4 since multiple queues really means multiple queue pairs. We need at least 2 pairs for this configuration to be correct:
+
+```bash
+--net tap=ich0,mac=a4:a1:c2:00:00:01,ip=192.168.4.2,mask=255.255.255.0,num_queues=4,queue_size=256
+```
 
 ## Configure the tap devices
 
