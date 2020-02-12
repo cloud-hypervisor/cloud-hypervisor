@@ -256,10 +256,14 @@ cmd_tests() {
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
 	       --privileged \
+	       --security-opt seccomp=unconfined \
+	       --ipc=host \
+	       --net=host \
 	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+	       --env USER="root" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_integration_tests.sh "$@" || fix_build_dir_perms $? || exit $?
     fi
