@@ -296,11 +296,16 @@ impl Vcpu {
                 kernel_entry_point.entry_addr.raw_value(),
                 arch::x86_64::layout::BOOT_STACK_POINTER.raw_value(),
                 arch::x86_64::layout::ZERO_PAGE_START.raw_value(),
+                kernel_entry_point.protocol,
             )
             .map_err(Error::REGSConfiguration)?;
             arch::x86_64::regs::setup_fpu(&self.fd).map_err(Error::FPUConfiguration)?;
-            arch::x86_64::regs::setup_sregs(&vm_memory.memory(), &self.fd)
-                .map_err(Error::SREGSConfiguration)?;
+            arch::x86_64::regs::setup_sregs(
+                &vm_memory.memory(),
+                &self.fd,
+                kernel_entry_point.protocol,
+            )
+            .map_err(Error::SREGSConfiguration)?;
         }
         arch::x86_64::interrupts::set_lint(&self.fd).map_err(Error::LocalIntConfiguration)?;
         Ok(())
