@@ -4,12 +4,14 @@
 //! Traits and Structs to handle vhost-user requests from the master to the slave.
 
 use std::mem;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::net::UnixStream;
 use std::slice;
 use std::sync::{Arc, Mutex};
 
 use super::connection::Endpoint;
 use super::message::*;
+use super::slave_fs_cache::SlaveFsCacheReq;
 use super::{Error, Result};
 
 /// Trait to handle vhost-user requests from the master to the slave.
@@ -47,6 +49,7 @@ pub trait VhostUserSlaveReqHandler {
         flags: VhostUserConfigFlags,
     ) -> Result<Vec<u8>>;
     fn set_config(&mut self, offset: u32, buf: &[u8], flags: VhostUserConfigFlags) -> Result<()>;
+    fn set_slave_req_fd(&mut self, _vu_req: SlaveFsCacheReq) {}
 }
 
 /// A vhost-user slave endpoint which relays all received requests from the
@@ -274,6 +277,14 @@ impl<S: VhostUserSlaveReqHandler> SlaveReqHandler<S> {
                 self.check_request_size(&hdr, size, hdr.get_size() as usize)?;
                 self.set_config(&hdr, size, &buf)?;
             }
+            MasterReq::SET_SLAVE_REQ_FD => {
+                if self.acked_protocol_features & VhostUserProtocolFeatures::SLAVE_SEND_FD.bits()
+                    == 0
+                {
+                    return Err(Error::InvalidOperation);
+                }
+                self.set_slave_req_fd(&hdr, rfds)?;
+            }
             _ => {
                 return Err(Error::InvalidMessage);
             }
@@ -403,6 +414,25 @@ impl<S: VhostUserSlaveReqHandler> SlaveReqHandler<S> {
             .set_config(msg.offset, buf, flags);
         self.send_ack_message(&hdr, res)?;
         Ok(())
+    }
+
+    fn set_slave_req_fd(
+        &mut self,
+        hdr: &VhostUserMsgHeader<MasterReq>,
+        rfds: Option<Vec<RawFd>>,
+    ) -> Result<()> {
+        if let Some(fds) = rfds {
+            if fds.len() == 1 {
+                let sock = unsafe { UnixStream::from_raw_fd(fds[0]) };
+                let vu_req = SlaveFsCacheReq::from_stream(sock);
+                self.backend.lock().unwrap().set_slave_req_fd(vu_req);
+                self.send_ack_message(&hdr, Ok(()))
+            } else {
+                Err(Error::InvalidMessage)
+            }
+        } else {
+            Err(Error::InvalidMessage)
+        }
     }
 
     fn handle_vring_fd_request(
