@@ -446,6 +446,7 @@ impl Vm {
                     boot_vcpus,
                     Some(hdr),
                     rsdp_addr,
+                    BootProtocol::LinuxBoot,
                 )
                 .map_err(Error::ConfigureSystem)?;
 
@@ -480,6 +481,7 @@ impl Vm {
                     boot_vcpus,
                     None,
                     rsdp_addr,
+                    boot_prot,
                 )
                 .map_err(Error::ConfigureSystem)?;
 
