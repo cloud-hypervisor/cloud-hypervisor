@@ -131,12 +131,11 @@ if [ ! -d "$SHARED_DIR" ]; then
 fi
 
 VFIO_DIR="$WORKLOADS_DIR/vfio"
-if [ ! -d "$VFIO_DIR" ]; then
-    mkdir -p $VFIO_DIR
-    cp $CLEAR_OS_IMAGE $VFIO_DIR
-    cp $FW $VFIO_DIR
-    cp $VMLINUX_IMAGE $VFIO_DIR
-fi
+rm -rf $VFIO_DIR
+mkdir -p $VFIO_DIR
+cp $CLEAR_OS_IMAGE $VFIO_DIR
+cp $FW $VFIO_DIR
+cp $VMLINUX_IMAGE $VFIO_DIR
 
 # VFIO test network setup.
 # We reserve a different IP class for it: 172.17.0.0/24.
