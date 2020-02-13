@@ -184,12 +184,6 @@ time cargo test --features "integration_tests" "$@" -- --nocapture
 EOF
 RES=$?
 
-# Try the VFIO test but ignore the result
-newgrp kvm << EOF
-export RUST_BACKTRACE=1
-time cargo test --features "integration_tests" test_vfio -- --nocapture --ignored
-EOF
-
 if [ $RES -eq 0 ]; then
     # virtio-mmio based testing
     cargo build --release --no-default-features --features "mmio"
