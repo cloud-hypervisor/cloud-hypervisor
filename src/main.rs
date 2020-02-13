@@ -3878,7 +3878,6 @@ mod tests {
     // its cloud-hypervisor host, we should be able to ssh into it, and verify
     // that it's running with the right kernel command line (We tag the command
     // line from cloud-hypervisor for that purpose).
-    #[cfg_attr(not(feature = "mmio"), ignore)]
     fn test_vfio() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
