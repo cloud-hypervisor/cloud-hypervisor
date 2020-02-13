@@ -6,7 +6,7 @@
 extern crate vmm;
 extern crate vmm_sys_util;
 
-#[macro_use(crate_version, crate_authors)]
+#[macro_use(crate_authors)]
 extern crate clap;
 
 use clap::{App, Arg, ArgGroup, ArgMatches};
@@ -78,7 +78,9 @@ fn create_app<'a, 'b>(
     api_server_path: &'a str,
 ) -> App<'a, 'b> {
     App::new("cloud-hypervisor")
-        .version(crate_version!())
+        // 'BUILT_VERSION' is set by the build script 'build.rs' at
+        // compile time
+        .version(env!("BUILT_VERSION"))
         .author(crate_authors!())
         .about("Launch a cloud-hypervisor VMM.")
         .group(ArgGroup::with_name("vm-config").multiple(true))
