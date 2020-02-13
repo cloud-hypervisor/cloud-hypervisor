@@ -63,5 +63,7 @@ write_files:
         bash -c "echo 1af4 1041 > /sys/bus/pci/drivers/vfio-pci/new_id"
         bash -c "echo 0000:00:06.0 > /sys/bus/pci/devices/0000\:00\:06.0/driver/unbind"
         bash -c "echo 1af4 1041 > /sys/bus/pci/drivers/vfio-pci/new_id"
-
-        /mnt/cloud-hypervisor --kernel /mnt/vmlinux --cmdline "console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda2 VFIOTAG" --disk path=/mnt/clear-31310-cloudguest.img path=/mnt/cloudinit.img --cpus boot=1 --memory size=512M --device path=/sys/bus/pci/devices/0000:00:05.0/ path=/sys/bus/pci/devices/0000:00:06.0/
+        # 512M ram requires 256 pages
+        echo 256 | sudo tee /proc/sys/vm/nr_hugepages
+        sudo chmod a+rwX /dev/hugepages
+        /mnt/cloud-hypervisor --kernel /mnt/vmlinux --cmdline "console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda2 VFIOTAG" --disk path=/mnt/clear-31310-cloudguest.img path=/mnt/cloudinit.img --cpus boot=1 --memory size=512M,file=/dev/hugepages --device path=/sys/bus/pci/devices/0000:00:05.0/ path=/sys/bus/pci/devices/0000:00:06.0/

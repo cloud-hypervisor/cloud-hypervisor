@@ -3830,7 +3830,7 @@ mod tests {
 
             let mut child = Command::new("target/release/cloud-hypervisor")
                 .args(&["--cpus", "boot=4"])
-                .args(&["--memory", "size=1G,file=/dev/shm"])
+                .args(&["--memory", "size=1G,file=/dev/hugepages"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&[
                     "--disk",
