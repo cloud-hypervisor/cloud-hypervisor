@@ -173,6 +173,10 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 time cargo test --no-run --features "integration_tests" -- --nocapture
 ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
 
+# test_vfio relies on hugepages
+echo 4096 | sudo tee /proc/sys/vm/nr_hugepages
+sudo chmod a+rwX /dev/hugepages
+
 sudo adduser $USER kvm
 newgrp kvm << EOF
 export RUST_BACKTRACE=1
