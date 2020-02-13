@@ -113,12 +113,12 @@ ensure_build_dir() {
     done
 }
 
-# Fix build/ dir permissions after a container ran as root
+# Fix main directory permissions after a container ran as root.
 # Since the container ran as root, any files it creates will be owned by root.
-# This fixes that by recursively changing the ownership of build/ to the
+# This fixes that by recursively changing the ownership of /cloud-hypervisor to the
 # current user.
 #
-fix_build_dir_perms() {
+fix_dir_perms() {
     # Yes, running Docker to get elevated privileges, just to chown some files
     # is a dirty hack.
     $DOCKER_RUNTIME run \
@@ -127,7 +127,7 @@ fix_build_dir_perms() {
 	   --volume /dev:/dev \
 	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	   "$CTR_IMAGE" \
-           chown -R "$(id -u):$(id -g)" "$CTR_CLH_CARGO_BUILT_DIR"
+           chown -R "$(id -u):$(id -g)" "$CTR_CLH_ROOT_DIR"
 
     return $1
 }
@@ -237,7 +237,7 @@ cmd_tests() {
 	       --volume /dev:/dev \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_unit_tests.sh "$@" || fix_build_dir_perms $? || exit $?
+	       ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$cargo" = true ] ;  then
@@ -247,7 +247,7 @@ cmd_tests() {
 	       --rm \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_cargo_tests.sh || fix_build_dir_perms $? || exit $?
+	       ./scripts/run_cargo_tests.sh || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration" = true ] ;  then
@@ -261,10 +261,10 @@ cmd_tests() {
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_integration_tests.sh "$@" || fix_build_dir_perms $? || exit $?
+	       ./scripts/run_integration_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
-    fix_build_dir_perms $?
+    fix_dir_perms $?
 }
 
 cmd_build-container() {
