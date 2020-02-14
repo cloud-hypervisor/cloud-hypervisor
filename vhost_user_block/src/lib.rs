@@ -22,6 +22,7 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::{Seek, SeekFrom, Write};
 use std::mem;
+use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process;
@@ -32,6 +33,7 @@ use std::{convert, error, fmt, io};
 use vhost_rs::vhost_user::message::*;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_blk::*;
+use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{Bytes, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::block::{build_disk_image_id, Request};
 use vmm_sys_util::eventfd::EventFd;
@@ -95,6 +97,7 @@ pub struct VhostUserBlkBackend {
     disk_nsectors: u64,
     config: virtio_blk_config,
     rdonly: bool,
+    event_idx: bool,
     kill_evt: EventFd,
 }
 
@@ -136,6 +139,7 @@ impl VhostUserBlkBackend {
             disk_nsectors: nsectors,
             config,
             rdonly,
+            event_idx: false,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
         })
     }
@@ -175,8 +179,15 @@ impl VhostUserBlkBackend {
                     len = 0;
                 }
             }
-            vring.mut_queue().add_used(mem, head.index, len);
-            used_any = true;
+
+            if let Some(used_idx) = vring.mut_queue().add_used(mem, head.index, len) {
+                let used_event = vring.mut_queue().get_used_event(mem);
+                if vring.needs_notification(Wrapping(used_idx), used_event) {
+                    debug!("signalling queue");
+                    vring.signal_used_queue().unwrap();
+                }
+                used_any = true;
+            }
         }
 
         used_any
@@ -199,6 +210,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
     fn features(&self) -> u64 {
         let mut avail_features = 1 << VIRTIO_BLK_F_MQ
             | 1 << VIRTIO_BLK_F_CONFIG_WCE
+            | 1 << VIRTIO_RING_F_EVENT_IDX
             | 1 << VIRTIO_F_VERSION_1
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
@@ -212,7 +224,9 @@ impl VhostUserBackend for VhostUserBlkBackend {
         VhostUserProtocolFeatures::CONFIG
     }
 
-    fn set_event_idx(&mut self, _enabled: bool) {}
+    fn set_event_idx(&mut self, enabled: bool) {
+        self.event_idx = enabled;
+    }
 
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
         self.mem = Some(mem);
@@ -234,9 +248,12 @@ impl VhostUserBackend for VhostUserBlkBackend {
         match device_event {
             q if device_event < self.config.num_queues => {
                 let mut vring = vrings[q as usize].write().unwrap();
-                if self.process_queue(&mut vring) {
-                    debug!("signalling queue");
-                    vring.signal_used_queue().unwrap();
+                if self.process_queue(&mut vring) && self.event_idx {
+                    if let Some(mem) = self.mem.as_ref() {
+                        vring.mut_queue().update_avail_event(mem);
+                        // Check the queue again to ensure there are no pending request
+                        self.process_queue(&mut vring);
+                    }
                 }
                 Ok(false)
             }
