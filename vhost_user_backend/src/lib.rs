@@ -22,6 +22,7 @@ use vhost_rs::vhost_user::message::{
 use vhost_rs::vhost_user::{
     Error as VhostUserError, Result as VhostUserResult, SlaveListener, VhostUserSlaveReqHandler,
 };
+use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{GuestAddress, GuestMemoryMmap};
 use vm_virtio::Queue;
@@ -67,6 +68,9 @@ pub trait VhostUserBackend: Send + Sync + 'static {
 
     /// Virtio protocol features.
     fn protocol_features(&self) -> VhostUserProtocolFeatures;
+
+    /// Tell the backend if EVENT_IDX has been negotiated.
+    fn set_event_idx(&mut self, enabled: bool);
 
     /// Update guest memory regions.
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> result::Result<(), io::Error>;
@@ -194,6 +198,8 @@ pub struct Vring {
     call: Option<EventFd>,
     err: Option<EventFd>,
     enabled: bool,
+    event_idx: bool,
+    signalled_used: Option<Wrapping<u16>>,
 }
 
 impl Vring {
@@ -204,6 +210,8 @@ impl Vring {
             call: None,
             err: None,
             enabled: false,
+            event_idx: false,
+            signalled_used: None,
         }
     }
 
@@ -211,12 +219,41 @@ impl Vring {
         &mut self.queue
     }
 
-    pub fn signal_used_queue(&self) -> result::Result<(), io::Error> {
-        if let Some(call) = self.call.as_ref() {
-            return call.write(1);
+    pub fn set_event_idx(&mut self, enabled: bool) {
+        /* Also reset the last signalled event */
+        self.signalled_used = None;
+        self.event_idx = enabled;
+    }
+
+    pub fn needs_notification(
+        &mut self,
+        used_idx: Wrapping<u16>,
+        used_event: Option<Wrapping<u16>>,
+    ) -> bool {
+        if !self.event_idx {
+            return true;
         }
 
-        Ok(())
+        let mut notify = true;
+
+        if let Some(old_idx) = self.signalled_used {
+            if let Some(used_event) = used_event {
+                if (used_idx - used_event - Wrapping(1u16)) >= (used_idx - old_idx) {
+                    notify = false;
+                }
+            }
+        }
+
+        self.signalled_used = Some(used_idx);
+        notify
+    }
+
+    pub fn signal_used_queue(&mut self) -> result::Result<(), io::Error> {
+        if let Some(call) = self.call.as_ref() {
+            call.write(1)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -654,6 +691,13 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             .queue
             .next_avail = Wrapping(base as u16);
         self.vrings[index as usize].write().unwrap().queue.next_used = Wrapping(base as u16);
+
+        let event_idx: bool = (self.acked_features & (1 << VIRTIO_RING_F_EVENT_IDX)) != 0;
+        self.vrings[index as usize]
+            .write()
+            .unwrap()
+            .set_event_idx(event_idx);
+        self.backend.write().unwrap().set_event_idx(event_idx);
         Ok(())
     }
 

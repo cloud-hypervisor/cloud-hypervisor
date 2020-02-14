@@ -212,6 +212,8 @@ impl VhostUserBackend for VhostUserBlkBackend {
         VhostUserProtocolFeatures::CONFIG
     }
 
+    fn set_event_idx(&mut self, _enabled: bool) {}
+
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
         self.mem = Some(mem);
         Ok(())

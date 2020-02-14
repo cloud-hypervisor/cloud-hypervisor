@@ -140,6 +140,8 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
         VhostUserProtocolFeatures::all()
     }
 
+    fn set_event_idx(&mut self, _enabled: bool) {}
+
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
         self.mem = Some(mem);
         Ok(())
