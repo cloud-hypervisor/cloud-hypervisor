@@ -25,6 +25,7 @@ use vhost_rs::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFe
 use vhost_rs::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost_rs::VhostBackend;
 use virtio_bindings::bindings::virtio_blk::*;
+use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{ByteValued, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
@@ -58,6 +59,7 @@ impl Blk {
             | 1 << VIRTIO_BLK_F_BLK_SIZE
             | 1 << VIRTIO_BLK_F_FLUSH
             | 1 << VIRTIO_BLK_F_TOPOLOGY
+            | 1 << VIRTIO_RING_F_EVENT_IDX
             | 1 << VIRTIO_F_VERSION_1
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 

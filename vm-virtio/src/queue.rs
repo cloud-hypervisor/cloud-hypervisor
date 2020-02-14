@@ -447,14 +447,59 @@ impl Queue {
         }
     }
 
+    /// Update avail_event on the used ring with the last index in the avail ring.
+    pub fn update_avail_event(&mut self, mem: &GuestMemoryMmap) {
+        let index_addr = match mem.checked_offset(self.avail_ring, 2) {
+            Some(ret) => ret,
+            None => {
+                // TODO log address
+                warn!("Invalid offset");
+                return;
+            }
+        };
+        // Note that last_index has no invalid values
+        let last_index: u16 = match mem.read_obj::<u16>(index_addr) {
+            Ok(ret) => ret,
+            Err(_) => return,
+        };
+
+        match mem.checked_offset(self.used_ring, (4 + self.actual_size() * 8) as usize) {
+            Some(a) => {
+                mem.write_obj(last_index, a).unwrap();
+            }
+            None => warn!("Can't update avail_event"),
+        }
+
+        // This fence ensures all descriptor writes are visible before the index update is.
+        fence(Ordering::Release);
+    }
+
+    /// Return the value present in the used_event field of the avail ring.
+    pub fn get_used_event(&self, mem: &GuestMemoryMmap) -> Option<Wrapping<u16>> {
+        let avail_ring = self.avail_ring;
+        let used_event_addr =
+            match mem.checked_offset(avail_ring, (4 + self.actual_size() * 2) as usize) {
+                Some(a) => a,
+                None => {
+                    warn!("Invalid offset looking for used_event");
+                    return None;
+                }
+            };
+
+        match mem.read_obj::<u16>(used_event_addr) {
+            Ok(ret) => Some(Wrapping(ret)),
+            Err(_) => None,
+        }
+    }
+
     /// Puts an available descriptor head into the used ring for use by the guest.
-    pub fn add_used(&mut self, mem: &GuestMemoryMmap, desc_index: u16, len: u32) {
+    pub fn add_used(&mut self, mem: &GuestMemoryMmap, desc_index: u16, len: u32) -> Option<u16> {
         if desc_index >= self.actual_size() {
             error!(
                 "attempted to add out of bounds descriptor to used ring: {}",
                 desc_index
             );
-            return;
+            return None;
         }
 
         let used_ring = self.used_ring;
@@ -473,6 +518,8 @@ impl Queue {
 
         mem.write_obj(self.next_used.0 as u16, used_ring.unchecked_add(2))
             .unwrap();
+
+        Some(self.next_used.0)
     }
 
     /// Goes back one position in the available descriptor chain offered by the driver.
