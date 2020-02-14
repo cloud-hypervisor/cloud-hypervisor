@@ -396,6 +396,9 @@ pub struct DeviceManager {
 
     // Memory Manager
     memory_manager: Arc<Mutex<MemoryManager>>,
+
+    // The virtio devices on the system
+    virtio_devices: Vec<(VirtioDeviceArc, bool)>,
 }
 
 impl DeviceManager {
@@ -478,6 +481,7 @@ impl DeviceManager {
             config,
             migratable_devices,
             memory_manager,
+            virtio_devices: Vec::new(),
         };
 
         device_manager
@@ -499,10 +503,12 @@ impl DeviceManager {
         virtio_devices.append(&mut device_manager.make_virtio_devices()?);
 
         if cfg!(feature = "pci_support") {
-            device_manager.add_pci_devices(virtio_devices, &msi_interrupt_manager)?;
+            device_manager.add_pci_devices(virtio_devices.clone(), &msi_interrupt_manager)?;
         } else if cfg!(feature = "mmio_support") {
-            device_manager.add_mmio_devices(virtio_devices, &legacy_interrupt_manager)?;
+            device_manager.add_mmio_devices(virtio_devices.clone(), &legacy_interrupt_manager)?;
         }
+
+        device_manager.virtio_devices = virtio_devices;
 
         Ok(device_manager)
     }
@@ -1685,3 +1691,11 @@ impl Pausable for DeviceManager {
 
 impl Snapshotable for DeviceManager {}
 impl Migratable for DeviceManager {}
+
+impl Drop for DeviceManager {
+    fn drop(&mut self) {
+        for (device, _) in self.virtio_devices.drain(..) {
+            device.lock().unwrap().shutdown();
+        }
+    }
+}
