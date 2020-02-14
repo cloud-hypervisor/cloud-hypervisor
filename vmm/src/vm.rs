@@ -39,6 +39,7 @@ use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 use std::ffi::CString;
 use std::fs::File;
 use std::io;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use vm_allocator::{GsiApic, SystemAllocator};
@@ -223,6 +224,7 @@ impl Vm {
         config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
+        vmm_path: PathBuf,
     ) -> Result<Self> {
         let kvm = Kvm::new().map_err(Error::KvmNew)?;
 
@@ -343,6 +345,7 @@ impl Vm {
             memory_manager.clone(),
             &exit_evt,
             &reset_evt,
+            vmm_path,
         )
         .map_err(Error::DeviceManager)?;
 
