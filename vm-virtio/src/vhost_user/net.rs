@@ -17,6 +17,7 @@ use libc::EFD_NONBLOCK;
 use net_util::MacAddr;
 use std::cmp;
 use std::io::Write;
+use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -353,6 +354,10 @@ impl VirtioDevice for Net {
             self.interrupt_cb.take().unwrap(),
             self.queue_evts.take().unwrap(),
         ))
+    }
+
+    fn shutdown(&mut self) {
+        let _ = unsafe { libc::close(self.vhost_user_net.as_raw_fd()) };
     }
 }
 
