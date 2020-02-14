@@ -20,6 +20,7 @@ use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::{result, thread};
@@ -79,6 +80,9 @@ pub enum Error {
 
     /// Cannot shut the VMM down
     VmmShutdown(VmError),
+
+    // Error following "exe" link
+    ExePathReadLink(io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -159,10 +163,16 @@ pub fn start_vmm_thread(
 ) -> Result<thread::JoinHandle<Result<()>>> {
     let http_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
 
+    // Find the path that the "/proc/<pid>/exe" symlink points to. Must be done before spawning
+    // a thread as Rust does not put the child threads in the same thread group which prevents the
+    // link from being followed as per PTRACE_MODE_READ_FSCREDS (see proc(5) and ptrace(2)). The
+    // alternative is to run always with CAP_SYS_PTRACE but that is not a good idea.
+    let self_path = format!("/proc/{}/exe", std::process::id());
+    let vmm_path = std::fs::read_link(PathBuf::from(self_path)).map_err(Error::ExePathReadLink)?;
     let thread = thread::Builder::new()
         .name("vmm".to_string())
         .spawn(move || {
-            let mut vmm = Vmm::new(vmm_version.to_string(), api_event)?;
+            let mut vmm = Vmm::new(vmm_version.to_string(), api_event, vmm_path)?;
 
             vmm.control_loop(Arc::new(api_receiver))
         })
@@ -182,10 +192,11 @@ pub struct Vmm {
     version: String,
     vm: Option<Vm>,
     vm_config: Option<Arc<Mutex<VmConfig>>>,
+    vmm_path: PathBuf,
 }
 
 impl Vmm {
-    fn new(vmm_version: String, api_evt: EventFd) -> Result<Self> {
+    fn new(vmm_version: String, api_evt: EventFd, vmm_path: PathBuf) -> Result<Self> {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
@@ -214,6 +225,7 @@ impl Vmm {
             version: vmm_version,
             vm: None,
             vm_config: None,
+            vmm_path,
         })
     }
 
@@ -224,7 +236,12 @@ impl Vmm {
             let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
 
             if let Some(ref vm_config) = self.vm_config {
-                let vm = Vm::new(Arc::clone(vm_config), exit_evt, reset_evt)?;
+                let vm = Vm::new(
+                    Arc::clone(vm_config),
+                    exit_evt,
+                    reset_evt,
+                    self.vmm_path.clone(),
+                )?;
                 self.vm = Some(vm);
             }
         }
@@ -278,7 +295,7 @@ impl Vmm {
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
             let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
 
-            self.vm = Some(Vm::new(config, exit_evt, reset_evt)?);
+            self.vm = Some(Vm::new(config, exit_evt, reset_evt, self.vmm_path.clone())?);
         }
 
         // Then we start the new VM.

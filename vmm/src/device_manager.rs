@@ -35,6 +35,7 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
 use std::os::unix::fs::OpenOptionsExt;
+use std::path::PathBuf;
 use std::result;
 #[cfg(feature = "pci_support")]
 use std::sync::Weak;
@@ -399,6 +400,9 @@ pub struct DeviceManager {
 
     // The virtio devices on the system
     virtio_devices: Vec<(VirtioDeviceArc, bool)>,
+
+    // The path to the VMM for self spawning
+    _vmm_path: PathBuf,
 }
 
 impl DeviceManager {
@@ -409,6 +413,7 @@ impl DeviceManager {
         memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
+        _vmm_path: PathBuf,
     ) -> DeviceManagerResult<Self> {
         let io_bus = devices::Bus::new();
         let mmio_bus = devices::Bus::new();
@@ -482,6 +487,7 @@ impl DeviceManager {
             migratable_devices,
             memory_manager,
             virtio_devices: Vec::new(),
+            _vmm_path,
         };
 
         device_manager
