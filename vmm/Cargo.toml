@@ -10,6 +10,7 @@ acpi = ["acpi_tables","devices/acpi"]
 pci_support = ["pci", "vfio", "vm-virtio/pci_support"]
 mmio_support = ["vm-virtio/mmio_support"]
 cmos = ["devices/cmos"]
+pvh_boot = []
 
 [dependencies]
 arc-swap = ">=0.4.4"
