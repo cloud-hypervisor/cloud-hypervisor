@@ -39,6 +39,7 @@ acpi = ["vmm/acpi"]
 pci = ["vmm/pci_support"]
 mmio = ["vmm/mmio_support"]
 cmos = ["vmm/cmos"]
+pvh_boot = ["vmm/pvh_boot"]
 
 # Integration tests require a special environment to run in
 integration_tests = []
