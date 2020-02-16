@@ -242,68 +242,43 @@ fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut kvm_sregs) -> Result<()>
     Ok(())
 }
 
+macro_rules! KVM_MSR {
+    ($msr:expr) => {
+        kvm_msr_entry {
+            index: $msr,
+            data: 0x0,
+            ..Default::default()
+        }
+    };
+}
+
+macro_rules! KVM_MSR_DATA {
+    ($msr:expr, $data:expr) => {
+        kvm_msr_entry {
+            index: $msr,
+            data: $data,
+            ..Default::default()
+        }
+    };
+}
+
 fn create_msr_entries() -> Msrs {
-    let mut entries = Vec::<kvm_msr_entry>::new();
-
-    entries.push(kvm_msr_entry {
-        index: msr_index::MSR_IA32_SYSENTER_CS,
-        data: 0x0,
-        ..Default::default()
-    });
-    entries.push(kvm_msr_entry {
-        index: msr_index::MSR_IA32_SYSENTER_ESP,
-        data: 0x0,
-        ..Default::default()
-    });
-    entries.push(kvm_msr_entry {
-        index: msr_index::MSR_IA32_SYSENTER_EIP,
-        data: 0x0,
-        ..Default::default()
-    });
-    // x86_64 specific msrs, we only run on x86_64 not x86.
-    entries.push(kvm_msr_entry {
-        index: msr_index::MSR_STAR,
-        data: 0x0,
-        ..Default::default()
-    });
-    entries.push(kvm_msr_entry {
-        index: msr_index::MSR_CSTAR,
-        data: 0x0,
-        ..Default::default()
-    });
-    entries.push(kvm_msr_entry {
-        index: msr_index::MSR_KERNEL_GS_BASE,
-        data: 0x0,
-        ..Default::default()
-    });
-    entries.push(kvm_msr_entry {
-        index: msr_index::MSR_SYSCALL_MASK,
-        data: 0x0,
-        ..Default::default()
-    });
-    entries.push(kvm_msr_entry {
-        index: msr_index::MSR_LSTAR,
-        data: 0x0,
-        ..Default::default()
-    });
-    // end of x86_64 specific code
-    entries.push(kvm_msr_entry {
-        index: msr_index::MSR_IA32_TSC,
-        data: 0x0,
-        ..Default::default()
-    });
-    entries.push(kvm_msr_entry {
-        index: msr_index::MSR_IA32_MISC_ENABLE,
-        data: msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64,
-        ..Default::default()
-    });
-    entries.push(kvm_msr_entry {
-        index: msr_index::MSR_MTRRdefType,
-        data: MTRR_ENABLE | MTRR_MEM_TYPE_WB,
-        ..Default::default()
-    });
-
-    Msrs::from_entries(&entries)
+    Msrs::from_entries(&[
+        KVM_MSR!(msr_index::MSR_IA32_SYSENTER_CS),
+        KVM_MSR!(msr_index::MSR_IA32_SYSENTER_ESP),
+        KVM_MSR!(msr_index::MSR_IA32_SYSENTER_EIP),
+        KVM_MSR!(msr_index::MSR_STAR),
+        KVM_MSR!(msr_index::MSR_CSTAR),
+        KVM_MSR!(msr_index::MSR_LSTAR),
+        KVM_MSR!(msr_index::MSR_KERNEL_GS_BASE),
+        KVM_MSR!(msr_index::MSR_SYSCALL_MASK),
+        KVM_MSR!(msr_index::MSR_IA32_TSC),
+        KVM_MSR_DATA!(
+            msr_index::MSR_IA32_MISC_ENABLE,
+            msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64
+        ),
+        KVM_MSR_DATA!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
+    ])
 }
 
 #[cfg(test)]
