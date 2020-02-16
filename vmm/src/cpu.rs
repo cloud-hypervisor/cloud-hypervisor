@@ -17,9 +17,13 @@ use acpi_tables::{aml, aml::Aml, sdt::SDT};
 use arch::layout;
 use arch::EntryPoint;
 use devices::{ioapic, BusDevice};
-use kvm_bindings::CpuId;
+use kvm_bindings::{
+    kvm_clock_data, kvm_fpu, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events,
+    CpuId, Msrs,
+};
 use kvm_ioctls::*;
 use libc::{c_void, siginfo_t};
+use serde_derive::{Deserialize, Serialize};
 use std::cmp;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -121,6 +125,54 @@ pub enum Error {
 
     /// Asking for more vCPUs that we can have
     DesiredVCPUCountExceedsMax,
+
+    /// Failed to get KVM vcpu lapic.
+    VcpuGetLapic(kvm_ioctls::Error),
+
+    /// Failed to set KVM vcpu lapic.
+    VcpuSetLapic(kvm_ioctls::Error),
+
+    /// Failed to get KVM vcpu MP state.
+    VcpuGetMpState(kvm_ioctls::Error),
+
+    /// Failed to set KVM vcpu MP state.
+    VcpuSetMpState(kvm_ioctls::Error),
+
+    /// Failed to get KVM vcpu msrs.
+    VcpuGetMsrs(kvm_ioctls::Error),
+
+    /// Failed to set KVM vcpu msrs.
+    VcpuSetMsrs(kvm_ioctls::Error),
+
+    /// Failed to get KVM vcpu regs.
+    VcpuGetRegs(kvm_ioctls::Error),
+
+    /// Failed to set KVM vcpu regs.
+    VcpuSetRegs(kvm_ioctls::Error),
+
+    /// Failed to get KVM vcpu sregs.
+    VcpuGetSregs(kvm_ioctls::Error),
+
+    /// Failed to set KVM vcpu sregs.
+    VcpuSetSregs(kvm_ioctls::Error),
+
+    /// Failed to get KVM vcpu events.
+    VcpuGetVcpuEvents(kvm_ioctls::Error),
+
+    /// Failed to set KVM vcpu events.
+    VcpuSetVcpuEvents(kvm_ioctls::Error),
+
+    /// Failed to get KVM vcpu FPU.
+    VcpuGetFpu(kvm_ioctls::Error),
+
+    /// Failed to set KVM vcpu FPU.
+    VcpuSetFpu(kvm_ioctls::Error),
+
+    /// Failed to get KVM clock data.
+    VcpuGetClockData(kvm_ioctls::Error),
+
+    /// Failed to set KVM clock data.
+    VcpuSetClockData(kvm_ioctls::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -240,6 +292,18 @@ pub struct Vcpu {
     mmio_bus: Arc<devices::Bus>,
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
     vm_ts: std::time::Instant,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VcpuKvmState {
+    msrs: Msrs,
+    vcpu_events: kvm_vcpu_events,
+    mp_state: kvm_mp_state,
+    regs: kvm_regs,
+    sregs: kvm_sregs,
+    fpu: kvm_fpu,
+    lapic_state: kvm_lapic_state,
+    //    clock_data: kvm_clock_data,
 }
 
 impl Vcpu {
@@ -375,6 +439,49 @@ impl Vcpu {
             ts.as_micros()
         );
     }
+
+    #[allow(unused)]
+    fn kvm_state(&self) -> Result<VcpuKvmState> {
+        let mut msrs = arch::x86_64::regs::boot_msr_entries();
+        self.fd.get_msrs(&mut msrs).map_err(Error::VcpuGetMsrs)?;
+
+        let vcpu_events = self
+            .fd
+            .get_vcpu_events()
+            .map_err(Error::VcpuGetVcpuEvents)?;
+        let mp_state = self.fd.get_mp_state().map_err(Error::VcpuGetMpState)?;
+        let regs = self.fd.get_regs().map_err(Error::VcpuGetRegs)?;
+        let sregs = self.fd.get_sregs().map_err(Error::VcpuGetSregs)?;
+        let lapic_state = self.fd.get_lapic().map_err(Error::VcpuGetLapic)?;
+        let fpu = self.fd.get_fpu().map_err(Error::VcpuGetFpu)?;
+
+        Ok(VcpuKvmState {
+            msrs,
+            vcpu_events,
+            mp_state,
+            regs,
+            sregs,
+            fpu,
+            lapic_state,
+        })
+    }
+
+    #[allow(unused)]
+    fn set_kvm_state(&mut self, state: &VcpuKvmState) -> Result<()> {
+        self.fd.set_fpu(&state.fpu).map_err(Error::VcpuSetFpu)?;
+        self.fd
+            .set_lapic(&state.lapic_state)
+            .map_err(Error::VcpuSetLapic)?;
+        self.fd
+            .set_sregs(&state.sregs)
+            .map_err(Error::VcpuSetSregs)?;
+        self.fd.set_regs(&state.regs).map_err(Error::VcpuSetRegs)?;
+        self.fd
+            .set_mp_state(state.mp_state)
+            .map_err(Error::VcpuSetMpState)?;
+        self.fd.set_msrs(&state.msrs).map_err(Error::VcpuSetMsrs)?;
+        Ok(())
+    }
 }
 
 pub struct CpuManager {
@@ -496,6 +603,11 @@ impl VcpuState {
             handle.thread().unpark()
         }
     }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct CpuManagerKvmState {
+    clock_data: kvm_clock_data,
 }
 
 impl CpuManager {
@@ -748,6 +860,21 @@ impl CpuManager {
         });
 
         madt
+    }
+
+    #[allow(unused)]
+    fn kvm_state(&self) -> Result<CpuManagerKvmState> {
+        let clock_data = self.fd.get_clock().map_err(Error::VcpuGetClockData)?;
+
+        Ok(CpuManagerKvmState { clock_data })
+    }
+
+    #[allow(unused)]
+    fn set_kvm_state(&mut self, state: &CpuManagerKvmState) -> Result<()> {
+        self.fd
+            .set_clock(&state.clock_data)
+            .map_err(Error::VcpuSetMsrs)?;
+        Ok(())
     }
 }
 
