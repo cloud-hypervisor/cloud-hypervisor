@@ -70,7 +70,7 @@ pub fn setup_fpu(vcpu: &VcpuFd) -> Result<()> {
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 pub fn setup_msrs(vcpu: &VcpuFd) -> Result<()> {
-    vcpu.set_msrs(&create_msr_entries())
+    vcpu.set_msrs(&boot_msr_entries())
         .map_err(Error::SetModelSpecificRegisters)?;
 
     Ok(())
@@ -262,7 +262,7 @@ macro_rules! KVM_MSR_DATA {
     };
 }
 
-fn create_msr_entries() -> Msrs {
+pub fn boot_msr_entries() -> Msrs {
     Msrs::from_entries(&[
         KVM_MSR!(msr_index::MSR_IA32_SYSENTER_CS),
         KVM_MSR!(msr_index::MSR_IA32_SYSENTER_ESP),
@@ -426,7 +426,7 @@ mod tests {
         // Official entries that were setup when we did setup_msrs. We need to assert that the
         // tenth one (i.e the one with index msr_index::MSR_IA32_MISC_ENABLE has the data we
         // expect.
-        let entry_vec = create_msr_entries();
+        let entry_vec = boot_msr_entries();
         assert_eq!(entry_vec.as_slice()[9], msrs.as_slice()[0]);
     }
 
