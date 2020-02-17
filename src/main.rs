@@ -289,7 +289,7 @@ fn create_app<'a, 'b>(
                 .help(
                     "vhost-user-block backend parameters \"image=<image_path>,\
                      sock=<socket_path>,num_queues=<number_of_queues>,\
-                     readonly=true|false,direct=true|false\"",
+                     readonly=true|false,direct=true|false,poll_queue=true|false\"",
                 )
                 .takes_value(true)
                 .conflicts_with_all(&["net-backend", "kernel"])
