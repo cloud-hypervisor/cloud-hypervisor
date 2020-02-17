@@ -36,11 +36,6 @@ pipeline{
 								sh "scripts/dev_cli.sh tests --cargo"
 							}
 						}
-						stage ('Run unit tests') {
-							steps {
-								sh "scripts/dev_cli.sh tests --unit"
-							}
-						}
 						stage ('Run OpenAPI tests') {
 							steps {
 								sh "scripts/run_openapi_tests.sh"
@@ -57,6 +52,11 @@ pipeline{
 						stage ('Checkout') {
 							steps {
 								checkout scm
+							}
+						}
+						stage ('Run unit tests') {
+							steps {
+								sh "scripts/dev_cli.sh tests --unit"
 							}
 						}
 						stage ('Run integration tests') {
