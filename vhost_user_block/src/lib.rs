@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use std::process;
 use std::slice;
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 use std::vec::Vec;
 use std::{convert, error, fmt, io};
 use vhost_rs::vhost_user::message::*;
@@ -42,6 +43,10 @@ const QUEUE_SIZE: usize = 1024;
 const SECTOR_SHIFT: u8 = 9;
 const SECTOR_SIZE: u64 = (0x01 as u64) << SECTOR_SHIFT;
 const BLK_SIZE: u32 = 512;
+// Current (2020) enterprise SSDs have a latency lower than 30us.
+// Polling for 50us should be enough to cover for the device latency
+// and the overhead of the emulation layer.
+const POLL_QUEUE_US: u128 = 50;
 
 trait DiskFile: Read + Seek + Write + Send + Sync {}
 impl<D: Read + Seek + Write + Send + Sync> DiskFile for D {}
@@ -67,6 +72,8 @@ pub enum Error {
     ParseReadOnlyParam,
     /// Failed parsing fs number of queues parameter.
     ParseBlkNumQueuesParam(std::num::ParseIntError),
+    /// Failed to parse the poll_queue parameter.
+    ParsePollQueueParam,
     /// Failed to handle event other than input event.
     HandleEventNotEpollIn,
     /// Failed to create kill eventfd
@@ -97,12 +104,19 @@ pub struct VhostUserBlkBackend {
     disk_nsectors: u64,
     config: virtio_blk_config,
     rdonly: bool,
+    poll_queue: bool,
     event_idx: bool,
     kill_evt: EventFd,
 }
 
 impl VhostUserBlkBackend {
-    pub fn new(image_path: String, num_queues: usize, rdonly: bool, direct: bool) -> Result<Self> {
+    pub fn new(
+        image_path: String,
+        num_queues: usize,
+        rdonly: bool,
+        direct: bool,
+        poll_queue: bool,
+    ) -> Result<Self> {
         let mut options = OpenOptions::new();
         options.read(true);
         options.write(!rdonly);
@@ -139,6 +153,7 @@ impl VhostUserBlkBackend {
             disk_nsectors: nsectors,
             config,
             rdonly,
+            poll_queue,
             event_idx: false,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
         })
@@ -180,12 +195,21 @@ impl VhostUserBlkBackend {
                 }
             }
 
-            if let Some(used_idx) = vring.mut_queue().add_used(mem, head.index, len) {
-                let used_event = vring.mut_queue().get_used_event(mem);
-                if vring.needs_notification(Wrapping(used_idx), used_event) {
-                    debug!("signalling queue");
-                    vring.signal_used_queue().unwrap();
+            if self.event_idx {
+                if let Some(used_idx) = vring.mut_queue().add_used(mem, head.index, len) {
+                    let used_event = vring.mut_queue().get_used_event(mem);
+                    if vring.needs_notification(Wrapping(used_idx), used_event) {
+                        debug!("signalling queue");
+                        vring.signal_used_queue().unwrap();
+                    } else {
+                        debug!("omitting signal (event_idx)");
+                    }
+                    used_any = true;
                 }
+            } else {
+                debug!("signalling queue");
+                vring.mut_queue().add_used(mem, head.index, len);
+                vring.signal_used_queue().unwrap();
                 used_any = true;
             }
         }
@@ -248,13 +272,38 @@ impl VhostUserBackend for VhostUserBlkBackend {
         match device_event {
             q if device_event < self.config.num_queues => {
                 let mut vring = vrings[q as usize].write().unwrap();
-                if self.process_queue(&mut vring) && self.event_idx {
-                    if let Some(mem) = self.mem.as_ref() {
-                        vring.mut_queue().update_avail_event(mem);
-                        // Check the queue again to ensure there are no pending request
-                        self.process_queue(&mut vring);
+
+                if self.poll_queue {
+                    // Actively poll the queue until POLL_QUEUE_US has passed
+                    // without seeing a new request.
+                    let mut now = Instant::now();
+                    loop {
+                        if self.process_queue(&mut vring) {
+                            now = Instant::now();
+                        } else if now.elapsed().as_micros() > POLL_QUEUE_US {
+                            break;
+                        }
                     }
                 }
+
+                if self.event_idx {
+                    // vm-virtio's Queue implementation only checks avail_index
+                    // once, so to properly support EVENT_IDX we need to keep
+                    // calling process_queue() until it stops finding new
+                    // requests on the queue.
+                    loop {
+                        vring
+                            .mut_queue()
+                            .update_avail_event(self.mem.as_ref().unwrap());
+                        if !self.process_queue(&mut vring) {
+                            break;
+                        }
+                    }
+                } else {
+                    // Without EVENT_IDX, a single call is enough.
+                    self.process_queue(&mut vring);
+                }
+
                 Ok(false)
             }
             _ => Err(Error::HandleEventUnknownEvent.into()),
@@ -284,6 +333,7 @@ pub struct VhostUserBlkBackendConfig<'a> {
     pub num_queues: usize,
     pub readonly: bool,
     pub direct: bool,
+    pub poll_queue: bool,
 }
 
 impl<'a> VhostUserBlkBackendConfig<'a> {
@@ -295,6 +345,7 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
         let mut num_queues_str: &str = "";
         let mut readonly: bool = false;
         let mut direct: bool = false;
+        let mut poll_queue: bool = true;
 
         for param in params_list.iter() {
             if param.starts_with("image=") {
@@ -312,6 +363,11 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
                 direct = match param[7..].parse::<bool>() {
                     Ok(b) => b,
                     Err(_) => return Err(Error::ParseDirectParam),
+                }
+            } else if param.starts_with("poll_queue=") {
+                poll_queue = match param[11..].parse::<bool>() {
+                    Ok(b) => b,
+                    Err(_) => return Err(Error::ParsePollQueueParam),
                 }
             }
         }
@@ -334,6 +390,7 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
             num_queues,
             readonly,
             direct,
+            poll_queue,
         })
     }
 }
@@ -353,6 +410,7 @@ pub fn start_block_backend(backend_command: &str) {
             backend_config.num_queues,
             backend_config.readonly,
             backend_config.direct,
+            backend_config.poll_queue,
         )
         .unwrap(),
     ));
