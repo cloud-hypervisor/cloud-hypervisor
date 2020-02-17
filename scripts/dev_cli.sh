@@ -223,8 +223,9 @@ cmd_tests() {
 	       -ti \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
-	       --privileged \
-	       --volume /dev:/dev \
+	       --device /dev/kvm \
+	       --device /dev/net/tun \
+	       --cap-add net_admin \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_unit_tests.sh "$@"
