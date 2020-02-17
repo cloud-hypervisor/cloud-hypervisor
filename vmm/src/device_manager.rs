@@ -1028,8 +1028,13 @@ impl DeviceManager {
                             )
                             .ok_or(DeviceManagerError::FsRangeAllocation)?;
 
-                        let mmap_region = MmapRegion::new(fs_cache as usize)
-                            .map_err(DeviceManagerError::NewMmapRegion)?;
+                        let mmap_region = MmapRegion::build(
+                            None,
+                            fs_cache as usize,
+                            libc::PROT_NONE,
+                            libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
+                        )
+                        .map_err(DeviceManagerError::NewMmapRegion)?;
                         let addr: u64 = mmap_region.as_ptr() as u64;
 
                         self._mmap_regions.push(mmap_region);
