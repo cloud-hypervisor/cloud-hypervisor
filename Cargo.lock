@@ -464,8 +464,7 @@ dependencies = [
 [[package]]
 name = "kvm-bindings"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d381156ad52005b4655a9421401f02b80f9f049e653496e3ea6639a83fc12453"
+source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=topic/serde#3a6780089e0e2d69aaf77666524e81801c814bdd"
 dependencies = [
  "vmm-sys-util",
 ]
@@ -473,8 +472,7 @@ dependencies = [
 [[package]]
 name = "kvm-ioctls"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d99720f5df3814a7188f095ad6774775b7635dfdd62b7c091ce7e00a51c3c109"
+source = "git+https://github.com/cloud-hypervisor/kvm-ioctls?branch=topic/vmm-sys-util-dep#15969e192a02f5e41b4946683ed40d9d16296e67"
 dependencies = [
  "kvm-bindings",
  "libc",
@@ -1465,6 +1463,8 @@ checksum = "3a6cc7e1659e545d250261676c9193732da57357cc610b12a0e7c776ed047fc9"
 dependencies = [
  "bitflags 1.2.1",
  "libc",
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]
