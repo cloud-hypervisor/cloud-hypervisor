@@ -320,17 +320,17 @@ impl Vcpu {
         mmio_bus: Arc<devices::Bus>,
         ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
         creation_ts: std::time::Instant,
-    ) -> Result<Self> {
+    ) -> Result<Arc<Mutex<Self>>> {
         let kvm_vcpu = fd.create_vcpu(id).map_err(Error::VcpuFd)?;
         // Initially the cpuid per vCPU is the one supported by this VM.
-        Ok(Vcpu {
+        Ok(Arc::new(Mutex::new(Vcpu {
             fd: kvm_vcpu,
             id,
             io_bus,
             mmio_bus,
             ioapic,
             vm_ts: creation_ts,
-        })
+        })))
     }
 
     /// Configures a x86_64 specific vcpu and should be called once per vcpu from the vcpu's thread.
@@ -498,6 +498,7 @@ pub struct CpuManager {
     reset_evt: EventFd,
     vcpu_states: Vec<VcpuState>,
     selected_cpu: u8,
+    vcpus: Vec<Arc<Mutex<Vcpu>>>,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -638,6 +639,7 @@ impl CpuManager {
             vcpu_states,
             reset_evt,
             selected_cpu: 0,
+            vcpus: Vec::with_capacity(usize::from(max_vcpus)),
         }));
 
         device_manager
@@ -674,7 +676,7 @@ impl CpuManager {
                 None
             };
 
-            let mut vcpu = Vcpu::new(
+            let vcpu = Vcpu::new(
                 cpu_id,
                 &self.fd,
                 self.io_bus.clone(),
@@ -691,26 +693,30 @@ impl CpuManager {
 
             let vcpu_kill = self.vcpu_states[usize::from(cpu_id)].kill.clone();
             let vm_memory = self.vm_memory.clone();
-            let cpuid = self.cpuid.clone();
+
+            vcpu.lock()
+                .unwrap()
+                .configure(entry_point, &vm_memory, self.cpuid.clone())
+                .expect("Failed to configure vCPU");
+
+            let vcpu_clone = Arc::clone(&vcpu);
+            self.vcpus.push(vcpu_clone);
 
             let handle = Some(
                 thread::Builder::new()
-                    .name(format!("vcpu{}", vcpu.id))
+                    .name(format!("vcpu{}", cpu_id))
                     .spawn(move || {
                         extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
                         // This uses an async signal safe handler to kill the vcpu handles.
                         register_signal_handler(SIGRTMIN(), handle_signal)
                             .expect("Failed to register vcpu signal handler");
 
-                        vcpu.configure(entry_point, &vm_memory, cpuid)
-                            .expect("Failed to configure vCPU");
-
                         // Block until all CPUs are ready.
                         vcpu_thread_barrier.wait();
 
                         loop {
                             // vcpu.run() returns false on a KVM_EXIT_SHUTDOWN (triple-fault) so trigger a reset
-                            match vcpu.run() {
+                            match vcpu.lock().unwrap().run() {
                                 Err(e) => {
                                     error!("VCPU generated error: {:?}", e);
                                     break;
