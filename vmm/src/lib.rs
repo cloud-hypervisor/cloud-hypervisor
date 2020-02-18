@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+extern crate anyhow;
 extern crate arc_swap;
 #[macro_use]
 extern crate lazy_static;

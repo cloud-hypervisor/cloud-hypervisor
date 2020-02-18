@@ -15,6 +15,7 @@ use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
+use anyhow::anyhow;
 #[cfg(feature = "acpi")]
 use arch::layout;
 use arch::EntryPoint;
@@ -33,7 +34,10 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::{fmt, io, result};
 use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
@@ -456,7 +460,6 @@ impl Vcpu {
         );
     }
 
-    #[allow(unused)]
     fn kvm_state(&self) -> Result<VcpuKvmState> {
         let mut msrs = arch::x86_64::regs::boot_msr_entries();
         self.fd.get_msrs(&mut msrs).map_err(Error::VcpuGetMsrs)?;
@@ -486,7 +489,6 @@ impl Vcpu {
         })
     }
 
-    #[allow(unused)]
     fn set_kvm_state(&mut self, state: &VcpuKvmState) -> Result<()> {
         self.fd.set_regs(&state.regs).map_err(Error::VcpuSetRegs)?;
 
@@ -513,6 +515,56 @@ impl Vcpu {
             .map_err(Error::VcpuSetMpState)?;
 
         Ok(())
+    }
+}
+
+const VCPU_SNAPSHOT_ID: &str = "vcpu";
+impl Pausable for Vcpu {}
+impl Snapshottable for Vcpu {
+    fn id(&self) -> String {
+        VCPU_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot = serde_json::to_vec(&self.kvm_state().map_err(|e| {
+            MigratableError::Snapshot(anyhow!("Could not get vCPU KVM state {:?}", e))
+        })?)
+        .map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut vcpu_snapshot = Snapshot::new(&format!("{}", self.id));
+        vcpu_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", VCPU_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(vcpu_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(vcpu_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", VCPU_SNAPSHOT_ID))
+        {
+            let vcpu_state = match serde_json::from_slice(&vcpu_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize the vCPU snapshot {}",
+                        error
+                    )))
+                }
+            };
+
+            self.set_kvm_state(&vcpu_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not set the vCPU KVM state {:?}", e))
+            })?;
+
+            Ok(())
+        } else {
+            Err(MigratableError::Restore(anyhow!(
+                "Could not find the vCPU snapshot section"
+            )))
+        }
     }
 }
 
@@ -728,6 +780,7 @@ impl CpuManager {
         vcpu_thread_barrier: Arc<Barrier>,
         entry_point: Option<EntryPoint>,
         inserting: bool,
+        snapshot: Option<Snapshot>,
     ) -> Result<()> {
         let ioapic = if let Some(ioapic) = &self.ioapic {
             Some(ioapic.clone())
@@ -749,12 +802,29 @@ impl CpuManager {
         let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
 
         let vcpu_kill = self.vcpu_states[usize::from(cpu_id)].kill.clone();
-        let vm_memory = self.vm_memory.clone();
 
-        vcpu.lock()
-            .unwrap()
-            .configure(entry_point, &vm_memory, self.cpuid.clone())
-            .expect("Failed to configure vCPU");
+        if let Some(snapshot) = snapshot {
+            let mut cpuid = self.cpuid.clone();
+            CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(cpu_id));
+
+            vcpu.lock()
+                .unwrap()
+                .fd
+                .set_cpuid2(&cpuid)
+                .map_err(Error::SetSupportedCpusFailed)?;
+
+            vcpu.lock()
+                .unwrap()
+                .restore(snapshot)
+                .expect("Failed to restore vCPU");
+        } else {
+            let vm_memory = self.vm_memory.clone();
+
+            vcpu.lock()
+                .unwrap()
+                .configure(entry_point, &vm_memory, self.cpuid.clone())
+                .expect("Failed to configure vCPU");
+        }
 
         let vcpu_clone = Arc::clone(&vcpu);
         self.vcpus.push(vcpu_clone);
@@ -832,6 +902,7 @@ impl CpuManager {
                 vcpu_thread_barrier.clone(),
                 entry_point,
                 entry_point.is_none(),
+                None,
             )?;
         }
 
@@ -1265,6 +1336,46 @@ impl Pausable for CpuManager {
     }
 }
 
-impl Snapshottable for CpuManager {}
+const CPU_MANAGER_SNAPSHOT_ID: &str = "cpu-manager";
+impl Snapshottable for CpuManager {
+    fn id(&self) -> String {
+        CPU_MANAGER_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let mut cpu_manager_snapshot = Snapshot::new(CPU_MANAGER_SNAPSHOT_ID);
+
+        // The CpuManager snapshot is a collection of all vCPUs snapshots.
+        for vcpu in &self.vcpus {
+            let cpu_snapshot = vcpu.lock().unwrap().snapshot()?;
+            cpu_manager_snapshot.add_snapshot(cpu_snapshot);
+        }
+
+        Ok(cpu_manager_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        let creation_ts = std::time::Instant::now();
+        let vcpu_thread_barrier = Arc::new(Barrier::new((snapshot.snapshots.len() + 1) as usize));
+
+        for (cpu_id, snapshot) in snapshot.snapshots.iter() {
+            debug!("Restoring VCPU {}", cpu_id);
+            self.start_vcpu(
+                cpu_id.parse::<u8>().unwrap(),
+                creation_ts,
+                vcpu_thread_barrier.clone(),
+                None,
+                false,
+                Some(*snapshot.clone()),
+            )
+            .map_err(|e| MigratableError::Restore(anyhow!("Could not restore vCPU {:?}", e)))?;
+        }
+
+        // Unblock all restored CPU threads.
+        vcpu_thread_barrier.wait();
+        Ok(())
+    }
+}
+
 impl Transportable for CpuManager {}
 impl Migratable for CpuManager {}
