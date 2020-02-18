@@ -10,9 +10,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
+
 use crate::device_manager::DeviceManager;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
+use anyhow::anyhow;
 #[cfg(feature = "acpi")]
 use arch::layout;
 use arch::EntryPoint;
@@ -31,7 +33,10 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::{fmt, io, result};
 use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshotable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshotable,
+    Transportable,
+};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
@@ -440,7 +445,6 @@ impl Vcpu {
         );
     }
 
-    #[allow(unused)]
     fn kvm_state(&self) -> Result<VcpuKvmState> {
         let mut msrs = arch::x86_64::regs::boot_msr_entries();
         self.fd.get_msrs(&mut msrs).map_err(Error::VcpuGetMsrs)?;
@@ -481,6 +485,54 @@ impl Vcpu {
             .map_err(Error::VcpuSetMpState)?;
         self.fd.set_msrs(&state.msrs).map_err(Error::VcpuSetMsrs)?;
         Ok(())
+    }
+}
+
+const VCPU_SNAPSHOT_ID: &str = "vcpu";
+impl Pausable for Vcpu {}
+impl Snapshotable for Vcpu {
+    fn id(&self) -> String {
+        VCPU_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot = serde_json::to_vec(&self.kvm_state().map_err(|e| {
+            MigratableError::Snapshot(anyhow!("Could not get vCPU KVM state {:?}", e))
+        })?)
+        .map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut vcpu_snapshot = Snapshot::new(VCPU_SNAPSHOT_ID);
+        vcpu_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", VCPU_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(vcpu_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(vcpu_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", VCPU_SNAPSHOT_ID))
+        {
+            let vcpu_state = match serde_json::from_slice(&vcpu_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize the vCPU snapshot {}",
+                        error
+                    )))
+                }
+            };
+
+            self.set_kvm_state(&vcpu_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not set the vCPU KVM state {:?}", e))
+            })?
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find the vCPU snapshot section"
+        )))
     }
 }
 
@@ -1201,6 +1253,39 @@ impl Pausable for CpuManager {
     }
 }
 
-impl Snapshotable for CpuManager {}
+const CPU_MANAGER_SNAPSHOT_ID: &str = "cpu-manager";
+impl Snapshotable for CpuManager {
+    fn id(&self) -> String {
+        CPU_MANAGER_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let mut cpu_manager_snapshot = Snapshot::new(CPU_MANAGER_SNAPSHOT_ID);
+
+        // The CpuManager snapshot is a collection of all vCPUs snapshots.
+        for vcpu in &self.vcpus {
+            let cpu_snapshot = vcpu.lock().unwrap().snapshot()?;
+            cpu_manager_snapshot.add_snapshot(cpu_snapshot);
+        }
+
+        Ok(cpu_manager_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if snapshot.snapshots.len() != self.vcpus.len() {
+            return Err(MigratableError::Restore(anyhow!(
+                "Snapshot length mismatch"
+            )));
+        }
+
+        let vcpu_iter = snapshot.snapshots.iter().zip(self.vcpus.iter());
+        for ((_id, snapshot), vcpu) in vcpu_iter {
+            vcpu.lock().unwrap().restore(*snapshot.clone())?;
+        }
+
+        Ok(())
+    }
+}
+
 impl Transportable for CpuManager {}
 impl Migratable for CpuManager {}

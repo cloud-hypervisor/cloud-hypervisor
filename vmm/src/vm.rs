@@ -11,7 +11,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-extern crate anyhow;
 extern crate arch;
 extern crate devices;
 extern crate epoll;
