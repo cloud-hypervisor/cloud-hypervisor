@@ -489,7 +489,6 @@ mod tests {
 
     use self::tempfile::tempfile;
     use super::*;
-    use libc;
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::os::unix::io::FromRawFd;
@@ -513,15 +512,6 @@ mod tests {
         // accept on a fd without incoming connection
         let conn = listener.accept().unwrap();
         assert!(conn.is_none());
-
-        listener.set_nonblocking(true).unwrap();
-
-        // accept on a closed fd
-        unsafe {
-            libc::close(listener.as_raw_fd());
-        }
-        let conn2 = listener.accept();
-        assert!(conn2.is_err());
     }
 
     #[test]
