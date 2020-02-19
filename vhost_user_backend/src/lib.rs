@@ -174,7 +174,11 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
     /// terminate.
     pub fn wait(&mut self) -> Result<()> {
         if let Some(handle) = self.main_thread.take() {
-            handle.join().map_err(Error::WaitDaemon)?
+            match handle.join().map_err(Error::WaitDaemon)? {
+                Ok(()) => Ok(()),
+                Err(Error::HandleRequest(VhostUserError::SocketBroken(_))) => Ok(()),
+                Err(e) => Err(e),
+            }
         } else {
             Ok(())
         }
