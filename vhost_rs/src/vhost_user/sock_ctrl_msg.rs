@@ -182,8 +182,9 @@ fn raw_recvmsg(fd: RawFd, iovecs: &mut [iovec], in_fds: &mut [RawFd]) -> Result<
         return Err(Error::last());
     }
 
+    // When the connection is closed recvmsg() doesn't give an explicit error
     if total_read == 0 && msg.msg_controllen < size_of::<cmsghdr>() {
-        return Ok((0, 0));
+        return Err(Error::new(libc::ECONNRESET));
     }
 
     let mut cmsg_ptr = msg.msg_control as *mut cmsghdr;
