@@ -4587,7 +4587,9 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
+            // Let enough time for the first VM to be spawned, and to make
+            // sure the PSS measurement is accurate.
+            thread::sleep(std::time::Duration::new(60, 0));
 
             // Get initial PSS
             let old_pss = get_pss(child1.id());
@@ -4617,9 +4619,9 @@ mod tests {
                 .unwrap();
 
             // Let enough time for the second VM to be spawned, and to make
-            // sure KVM has enough time to merge identical pages between the
+            // sure KSM has enough time to merge identical pages between the
             // 2 VMs.
-            thread::sleep(std::time::Duration::new(30, 0));
+            thread::sleep(std::time::Duration::new(60, 0));
 
             // Get new PSS
             let new_pss = get_pss(child1.id());
