@@ -14,7 +14,7 @@ vhost-user-slave = []
 
 [dependencies]
 bitflags = "1.1.0"
-libc = "0.2.60"
+libc = "0.2.67"
 vmm-sys-util = ">=0.3.1"
 
 [dependencies.vm-memory]

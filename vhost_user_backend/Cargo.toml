@@ -11,7 +11,7 @@ mmio_support = ["vm-virtio/mmio_support"]
 
 [dependencies]
 epoll = ">=4.0.1"
-libc = "0.2.66"
+libc = "0.2.67"
 log = "0.4.8"
 virtio-bindings = "0.1.0"
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
