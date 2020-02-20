@@ -297,6 +297,9 @@ components:
         wce:
           type: boolean
           default: true
+        poll_queue:
+          type: boolean
+          default: true
 
     NetConfig:
       type: object
