@@ -150,7 +150,7 @@ impl PciConfigIo {
         }
 
         let (bus, device, function, register) =
-            parse_config_address(self.config_address & !0x8000_0000);
+            parse_io_config_address(self.config_address & !0x8000_0000);
 
         // Only support one bus.
         if bus != 0 {
@@ -183,7 +183,7 @@ impl PciConfigIo {
         }
 
         let (bus, device, _function, register) =
-            parse_config_address(self.config_address & !0x8000_0000);
+            parse_io_config_address(self.config_address & !0x8000_0000);
 
         // Only support one bus.
         if bus != 0 {
@@ -277,7 +277,7 @@ impl PciConfigMmio {
     }
 
     fn config_space_read(&self, config_address: u32) -> u32 {
-        let (bus, device, _function, register) = parse_config_address(config_address);
+        let (bus, device, _function, register) = parse_mmio_config_address(config_address);
 
         // Only support one bus.
         if bus != 0 {
@@ -299,7 +299,7 @@ impl PciConfigMmio {
             return;
         }
 
-        let (bus, device, _function, register) = parse_config_address(config_address);
+        let (bus, device, _function, register) = parse_mmio_config_address(config_address);
 
         // Only support one bus.
         if bus != 0 {
@@ -356,8 +356,33 @@ impl BusDevice for PciConfigMmio {
     }
 }
 
+fn shift_and_mask(value: u32, offset: usize, mask: u32) -> usize {
+    ((value >> offset) & mask) as usize
+}
+
+// Parse the MMIO address offset to a (bus, device, function, register) tuple.
+// See section 7.2.2 PCI Express Enhanced Configuration Access Mechanism (ECAM)
+// from the Pci Express Base Specification Revision 5.0 Version 1.0.
+fn parse_mmio_config_address(config_address: u32) -> (usize, usize, usize, usize) {
+    const BUS_NUMBER_OFFSET: usize = 20;
+    const BUS_NUMBER_MASK: u32 = 0x00ff;
+    const DEVICE_NUMBER_OFFSET: usize = 15;
+    const DEVICE_NUMBER_MASK: u32 = 0x1f;
+    const FUNCTION_NUMBER_OFFSET: usize = 12;
+    const FUNCTION_NUMBER_MASK: u32 = 0x07;
+    const REGISTER_NUMBER_OFFSET: usize = 2;
+    const REGISTER_NUMBER_MASK: u32 = 0x3ff;
+
+    (
+        shift_and_mask(config_address, BUS_NUMBER_OFFSET, BUS_NUMBER_MASK),
+        shift_and_mask(config_address, DEVICE_NUMBER_OFFSET, DEVICE_NUMBER_MASK),
+        shift_and_mask(config_address, FUNCTION_NUMBER_OFFSET, FUNCTION_NUMBER_MASK),
+        shift_and_mask(config_address, REGISTER_NUMBER_OFFSET, REGISTER_NUMBER_MASK),
+    )
+}
+
 // Parse the CONFIG_ADDRESS register to a (bus, device, function, register) tuple.
-fn parse_config_address(config_address: u32) -> (usize, usize, usize, usize) {
+fn parse_io_config_address(config_address: u32) -> (usize, usize, usize, usize) {
     const BUS_NUMBER_OFFSET: usize = 16;
     const BUS_NUMBER_MASK: u32 = 0x00ff;
     const DEVICE_NUMBER_OFFSET: usize = 11;
@@ -367,12 +392,10 @@ fn parse_config_address(config_address: u32) -> (usize, usize, usize, usize) {
     const REGISTER_NUMBER_OFFSET: usize = 2;
     const REGISTER_NUMBER_MASK: u32 = 0x3f;
 
-    let bus_number = ((config_address >> BUS_NUMBER_OFFSET) & BUS_NUMBER_MASK) as usize;
-    let device_number = ((config_address >> DEVICE_NUMBER_OFFSET) & DEVICE_NUMBER_MASK) as usize;
-    let function_number =
-        ((config_address >> FUNCTION_NUMBER_OFFSET) & FUNCTION_NUMBER_MASK) as usize;
-    let register_number =
-        ((config_address >> REGISTER_NUMBER_OFFSET) & REGISTER_NUMBER_MASK) as usize;
-
-    (bus_number, device_number, function_number, register_number)
+    (
+        shift_and_mask(config_address, BUS_NUMBER_OFFSET, BUS_NUMBER_MASK),
+        shift_and_mask(config_address, DEVICE_NUMBER_OFFSET, DEVICE_NUMBER_MASK),
+        shift_and_mask(config_address, FUNCTION_NUMBER_OFFSET, FUNCTION_NUMBER_MASK),
+        shift_and_mask(config_address, REGISTER_NUMBER_OFFSET, REGISTER_NUMBER_MASK),
+    )
 }
