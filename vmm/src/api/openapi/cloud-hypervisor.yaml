@@ -277,6 +277,9 @@ components:
         readonly:
           type: boolean
           default: false
+        direct:
+          type: boolean
+          default: false
         iommu:
           type: boolean
           default: false
