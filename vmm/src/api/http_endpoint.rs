@@ -44,6 +44,9 @@ pub enum HttpError {
     /// Could not act on a VM
     VmAction(ApiError),
 
+    /// Could not resize a VM
+    VmResize(ApiError),
+
     /// Could not shut the VMM down
     VmmShutdown(ApiError),
 
@@ -244,7 +247,7 @@ impl EndpointHandler for VmResize {
 
                         // Call vm_resize()
                         match vm_resize(api_notifier, api_sender, Arc::new(vm_resize_data))
-                            .map_err(HttpError::VmCreate)
+                            .map_err(HttpError::VmResize)
                         {
                             Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
                             Err(e) => error_response(e, StatusCode::InternalServerError),
