@@ -41,6 +41,8 @@ pub enum Error {
     ParseDisksParams,
     /// Failed parsing disk queue number parameter.
     ParseDiskNumQueuesParam(std::num::ParseIntError),
+    /// Failed parsing disk poll_queue parameter.
+    ParseDiskPollQueueParam(std::str::ParseBoolError),
     /// Failed parsing disk queue size parameter.
     ParseDiskQueueSizeParam(std::num::ParseIntError),
     /// Failed to parse vhost parameters
@@ -365,6 +367,8 @@ pub struct DiskConfig {
     pub vhost_socket: Option<String>,
     #[serde(default = "default_diskconfig_wce")]
     pub wce: bool,
+    #[serde(default = "default_diskconfig_poll_queue")]
+    pub poll_queue: bool,
 }
 
 fn default_diskconfig_num_queues() -> usize {
@@ -376,6 +380,10 @@ fn default_diskconfig_queue_size() -> u16 {
 }
 
 fn default_diskconfig_wce() -> bool {
+    true
+}
+
+fn default_diskconfig_poll_queue() -> bool {
     true
 }
 
@@ -393,6 +401,7 @@ impl DiskConfig {
         let mut vhost_socket_str: &str = "";
         let mut vhost_user_str: &str = "";
         let mut wce_str: &str = "";
+        let mut poll_queue_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("path=") {
@@ -413,6 +422,8 @@ impl DiskConfig {
                 vhost_socket_str = &param[7..];
             } else if param.starts_with("wce=") {
                 wce_str = &param[4..];
+            } else if param.starts_with("poll_queue=") {
+                poll_queue_str = &param[11..];
             }
         }
 
@@ -421,6 +432,7 @@ impl DiskConfig {
         let mut vhost_user = false;
         let mut vhost_socket = None;
         let mut wce: bool = default_diskconfig_wce();
+        let mut poll_queue: bool = default_diskconfig_poll_queue();
 
         if !num_queues_str.is_empty() {
             num_queues = num_queues_str
@@ -444,6 +456,14 @@ impl DiskConfig {
             }
             wce = wce_str.parse().map_err(Error::ParseDiskWceParam)?;
         }
+        if !poll_queue_str.is_empty() {
+            if !vhost_user {
+                warn!("poll_queue parameter currently only has effect when used vhost_user=true");
+            }
+            poll_queue = poll_queue_str
+                .parse()
+                .map_err(Error::ParseDiskPollQueueParam)?;
+        }
 
         Ok(DiskConfig {
             path: PathBuf::from(path_str),
@@ -455,6 +475,7 @@ impl DiskConfig {
             vhost_socket,
             vhost_user,
             wce,
+            poll_queue,
         })
     }
 }
