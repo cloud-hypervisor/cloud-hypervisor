@@ -276,7 +276,7 @@ components:
           type: string
         readonly:
           type: boolean
-          default: true
+          default: false
         iommu:
           type: boolean
           default: false
@@ -293,7 +293,7 @@ components:
           type: string
         wce:
           type: boolean
-          default: false
+          default: true
 
     NetConfig:
       type: object
