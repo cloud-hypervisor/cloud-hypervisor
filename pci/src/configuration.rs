@@ -9,8 +9,8 @@ use crate::{MsixConfig, PciInterruptPin};
 use byteorder::{ByteOrder, LittleEndian};
 use std::fmt::{self, Display};
 
-// The number of 32bit registers in the config space, 256 bytes.
-const NUM_CONFIGURATION_REGISTERS: usize = 64;
+// The number of 32bit registers in the config space, 4096 bytes.
+const NUM_CONFIGURATION_REGISTERS: usize = 1024;
 
 const STATUS_REG: usize = 1;
 const STATUS_REG_CAPABILITIES_USED_MASK: u32 = 0x0010_0000;
