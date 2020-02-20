@@ -9,6 +9,7 @@ use kvm_ioctls::VmFd;
 use std::collections::HashMap;
 use std::io;
 use std::mem::size_of;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
@@ -52,6 +53,7 @@ pub fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
 pub struct InterruptRoute {
     pub gsi: u32,
     pub irq_fd: EventFd,
+    registered: AtomicBool,
 }
 
 impl InterruptRoute {
@@ -61,25 +63,43 @@ impl InterruptRoute {
             .allocate_gsi()
             .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Failed allocating new GSI"))?;
 
-        Ok(InterruptRoute { gsi, irq_fd })
+        Ok(InterruptRoute {
+            gsi,
+            irq_fd,
+            registered: AtomicBool::new(false),
+        })
     }
 
     pub fn enable(&self, vm: &Arc<VmFd>) -> Result<()> {
-        vm.register_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed registering irq_fd: {}", e),
-            )
-        })
+        if !self.registered.load(Ordering::SeqCst) {
+            vm.register_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed registering irq_fd: {}", e),
+                )
+            })?;
+
+            // Update internals to track the irq_fd as "registered".
+            self.registered.store(true, Ordering::SeqCst);
+        }
+
+        Ok(())
     }
 
     pub fn disable(&self, vm: &Arc<VmFd>) -> Result<()> {
-        vm.unregister_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed unregistering irq_fd: {}", e),
-            )
-        })
+        if self.registered.load(Ordering::SeqCst) {
+            vm.unregister_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed unregistering irq_fd: {}", e),
+                )
+            })?;
+
+            // Update internals to track the irq_fd as "unregistered".
+            self.registered.store(false, Ordering::SeqCst);
+        }
+
+        Ok(())
     }
 }
 
@@ -234,11 +254,29 @@ impl InterruptSourceGroup for MsiInterruptGroup {
     }
 
     fn mask(&self, index: InterruptIndex) -> Result<()> {
-        self.mask_kvm_entry(index, true)
+        self.mask_kvm_entry(index, true)?;
+
+        if let Some(route) = self.irq_routes.get(&index) {
+            return route.disable(&self.vm_fd);
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("mask: Invalid interrupt index {}", index),
+        ))
     }
 
     fn unmask(&self, index: InterruptIndex) -> Result<()> {
-        self.mask_kvm_entry(index, false)
+        self.mask_kvm_entry(index, false)?;
+
+        if let Some(route) = self.irq_routes.get(&index) {
+            return route.enable(&self.vm_fd);
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("unmask: Invalid interrupt index {}", index),
+        ))
     }
 }
 
