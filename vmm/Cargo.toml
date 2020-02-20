@@ -12,30 +12,30 @@ mmio_support = ["vm-virtio/mmio_support"]
 cmos = ["devices/cmos"]
 
 [dependencies]
-arc-swap = ">=0.4.4"
+arc-swap = "0.4.4"
 clap = "2.33.0"
 acpi_tables = { path = "../acpi_tables", optional = true }
-anyhow = "1.0"
+anyhow = "1.0.26"
 arch = { path = "../arch" }
 devices = { path = "../devices" }
-epoll = ">=4.0.1"
+epoll = "4.1.0"
 kvm-bindings = "0.2.0"
 kvm-ioctls = "0.5.0"
 lazy_static = "1.4.0"
-libc = "0.2.62"
+libc = "0.2.66"
 log = "0.4.8"
 micro_http = { git = "https://github.com/firecracker-microvm/firecracker", branch = "master" }
 net_util = { path = "../net_util" }
 pci = {path = "../pci", optional = true}
 qcow = { path = "../qcow" }
-serde = {version = ">=1.0.27", features = ["rc"] }
-serde_derive = ">=1.0.27"
-serde_json = ">=1.0.9"
+serde = { version = "1.0.104", features = ["rc"] }
+serde_derive = "1.0.104"
+serde_json = "1.0.48"
 vfio = { path = "../vfio", optional = true }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = ">=0.3.1"
+vmm-sys-util = "0.4.0"
 signal-hook = "0.1.13"
 
 [dependencies.linux-loader]

@@ -8,7 +8,7 @@ edition = "2018"
 vm-allocator = { path = "../vm-allocator" }
 byteorder = "1.3.4"
 devices = { path = "../devices" }
-libc = "0.2.60"
+libc = "0.2.66"
 log = "0.4.8"
 vm-device = { path = "../vm-device" }
 vm-memory = { git = "https://github.com/rust-vmm/vm-memory" }
