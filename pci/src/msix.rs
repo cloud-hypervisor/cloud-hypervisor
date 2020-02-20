@@ -116,6 +116,9 @@ impl MsixConfig {
                         if let Err(e) = self.interrupt_source_group.mask(idx as InterruptIndex) {
                             error!("Failed masking vector: {:?}", e);
                         }
+                    } else if let Err(e) = self.interrupt_source_group.unmask(idx as InterruptIndex)
+                    {
+                        error!("Failed unmasking vector: {:?}", e);
                     }
                 }
 
