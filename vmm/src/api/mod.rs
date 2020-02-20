@@ -179,7 +179,7 @@ pub enum ApiRequest {
     /// VMM process.
     VmmShutdown(Sender<ApiResponse>),
 
-    //// Resuze the VMM
+    /// Resize the VMM
     VmResize(Arc<VmResizeData>, Sender<ApiResponse>),
 }
 
@@ -323,7 +323,7 @@ pub fn vm_resize(
 ) -> ApiResult<()> {
     let (response_sender, response_receiver) = channel();
 
-    // Send the VM creation request.
+    // Send the VM resizing request.
     api_sender
         .send(ApiRequest::VmResize(data, response_sender))
         .map_err(ApiError::RequestSend)?;
