@@ -278,9 +278,7 @@ impl<S: VhostUserSlaveReqHandler> SlaveReqHandler<S> {
                 self.set_config(&hdr, size, &buf)?;
             }
             MasterReq::SET_SLAVE_REQ_FD => {
-                if self.acked_protocol_features & VhostUserProtocolFeatures::SLAVE_SEND_FD.bits()
-                    == 0
-                {
+                if self.acked_protocol_features & VhostUserProtocolFeatures::SLAVE_REQ.bits() == 0 {
                     return Err(Error::InvalidOperation);
                 }
                 self.set_slave_req_fd(&hdr, rfds)?;
