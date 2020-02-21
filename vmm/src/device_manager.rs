@@ -859,9 +859,6 @@ impl DeviceManager {
         // Add virtio-vhost-user-net if required
         devices.append(&mut self.make_virtio_vhost_user_net_devices()?);
 
-        // Add virtio-vhost-user-blk if required
-        devices.append(&mut self.make_virtio_vhost_user_blk_devices()?);
-
         // Add virtio-vsock if required
         devices.append(&mut self.make_virtio_vsock_devices()?);
 
@@ -1292,36 +1289,6 @@ impl DeviceManager {
 
                 self.migratable_devices
                     .push(Arc::clone(&vhost_user_net_device) as Arc<Mutex<dyn Migratable>>);
-            }
-        }
-
-        Ok(devices)
-    }
-
-    fn make_virtio_vhost_user_blk_devices(
-        &mut self,
-    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
-        let mut devices = Vec::new();
-        // Add vhost-user-blk if required
-        if let Some(vhost_user_blk_list_cfg) = &self.config.lock().unwrap().vhost_user_blk {
-            for vhost_user_blk_cfg in vhost_user_blk_list_cfg.iter() {
-                let vu_cfg = VhostUserConfig {
-                    sock: vhost_user_blk_cfg.sock.clone(),
-                    num_queues: vhost_user_blk_cfg.num_queues,
-                    queue_size: vhost_user_blk_cfg.queue_size,
-                };
-                let vhost_user_blk_device = Arc::new(Mutex::new(
-                    vm_virtio::vhost_user::Blk::new(vhost_user_blk_cfg.wce, vu_cfg)
-                        .map_err(DeviceManagerError::CreateVhostUserBlk)?,
-                ));
-
-                devices.push((
-                    Arc::clone(&vhost_user_blk_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-                    false,
-                ));
-
-                self.migratable_devices
-                    .push(Arc::clone(&vhost_user_blk_device) as Arc<Mutex<dyn Migratable>>);
             }
         }
 

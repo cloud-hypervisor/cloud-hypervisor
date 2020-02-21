@@ -122,7 +122,6 @@ pub struct VmParams<'a> {
     pub console: &'a str,
     pub devices: Option<Vec<&'a str>>,
     pub vhost_user_net: Option<Vec<&'a str>>,
-    pub vhost_user_blk: Option<Vec<&'a str>>,
     pub vsock: Option<Vec<&'a str>>,
 }
 
@@ -145,8 +144,6 @@ impl<'a> VmParams<'a> {
         let devices: Option<Vec<&str>> = args.values_of("device").map(|x| x.collect());
         let vhost_user_net: Option<Vec<&str>> =
             args.values_of("vhost-user-net").map(|x| x.collect());
-        let vhost_user_blk: Option<Vec<&str>> =
-            args.values_of("vhost-user-blk").map(|x| x.collect());
         let vsock: Option<Vec<&str>> = args.values_of("vsock").map(|x| x.collect());
 
         VmParams {
@@ -163,7 +160,6 @@ impl<'a> VmParams<'a> {
             console,
             devices,
             vhost_user_net,
-            vhost_user_blk,
             vsock,
         }
     }
@@ -1046,79 +1042,6 @@ impl VsockConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct VhostUserBlkConfig {
-    pub sock: String,
-    #[serde(default = "default_vublkconfig_num_queues")]
-    pub num_queues: usize,
-    #[serde(default = "default_vublkconfig_queue_size")]
-    pub queue_size: u16,
-    #[serde(default = "default_vublkconfig_wce")]
-    pub wce: bool,
-}
-
-fn default_vublkconfig_num_queues() -> usize {
-    DEFAULT_NUM_QUEUES_VUBLK
-}
-
-fn default_vublkconfig_queue_size() -> u16 {
-    DEFAULT_QUEUE_SIZE_VUBLK
-}
-
-fn default_vublkconfig_wce() -> bool {
-    true
-}
-
-impl VhostUserBlkConfig {
-    pub fn parse(vhost_user_blk: &str) -> Result<Self> {
-        error!("Using deprecated --vhost-user-blk syntax. Use --disk with vhost_user=true,socket=<socket path>");
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = vhost_user_blk.split(',').collect();
-
-        let mut sock: &str = "";
-        let mut num_queues_str: &str = "";
-        let mut queue_size_str: &str = "";
-        let mut wce_str: &str = "";
-
-        for param in params_list.iter() {
-            if param.starts_with("sock=") {
-                sock = &param[5..];
-            } else if param.starts_with("num_queues=") {
-                num_queues_str = &param[11..];
-            } else if param.starts_with("queue_size=") {
-                queue_size_str = &param[11..];
-            } else if param.starts_with("wce=") {
-                wce_str = &param[4..];
-            }
-        }
-
-        let mut num_queues: usize = default_vublkconfig_num_queues();
-        let mut queue_size: u16 = default_vublkconfig_queue_size();
-        let mut wce: bool = default_vublkconfig_wce();
-
-        if !num_queues_str.is_empty() {
-            num_queues = num_queues_str
-                .parse()
-                .map_err(Error::ParseVuNumQueuesParam)?;
-        }
-        if !queue_size_str.is_empty() {
-            queue_size = queue_size_str
-                .parse()
-                .map_err(Error::ParseVuQueueSizeParam)?;
-        }
-        if !wce_str.is_empty() {
-            wce = wce_str.parse().map_err(Error::ParseVuBlkWceParam)?;
-        }
-
-        Ok(VhostUserBlkConfig {
-            sock: sock.to_string(),
-            num_queues,
-            queue_size,
-            wce,
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct VmConfig {
     #[serde(default)]
     pub cpus: CpusConfig,
@@ -1139,7 +1062,6 @@ pub struct VmConfig {
     pub console: ConsoleConfig,
     pub devices: Option<Vec<DeviceConfig>>,
     pub vhost_user_net: Option<Vec<VhostUserNetConfig>>,
-    pub vhost_user_blk: Option<Vec<VhostUserBlkConfig>>,
     pub vsock: Option<Vec<VsockConfig>>,
     #[serde(default)]
     pub iommu: bool,
@@ -1250,15 +1172,6 @@ impl VmConfig {
             vsock = Some(vsock_config_list);
         }
 
-        let mut vhost_user_blk: Option<Vec<VhostUserBlkConfig>> = None;
-        if let Some(vhost_user_blk_list) = &vm_params.vhost_user_blk {
-            let mut vhost_user_blk_config_list = Vec::new();
-            for item in vhost_user_blk_list.iter() {
-                vhost_user_blk_config_list.push(VhostUserBlkConfig::parse(item)?);
-            }
-            vhost_user_blk = Some(vhost_user_blk_config_list);
-        }
-
         let mut kernel: Option<KernelConfig> = None;
         if let Some(k) = vm_params.kernel {
             kernel = Some(KernelConfig {
@@ -1280,7 +1193,6 @@ impl VmConfig {
             console,
             devices,
             vhost_user_net,
-            vhost_user_blk,
             vsock,
             iommu,
         })
