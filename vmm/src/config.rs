@@ -121,7 +121,6 @@ pub struct VmParams<'a> {
     pub serial: &'a str,
     pub console: &'a str,
     pub devices: Option<Vec<&'a str>>,
-    pub vhost_user_net: Option<Vec<&'a str>>,
     pub vsock: Option<Vec<&'a str>>,
 }
 
@@ -142,8 +141,6 @@ impl<'a> VmParams<'a> {
         let fs: Option<Vec<&str>> = args.values_of("fs").map(|x| x.collect());
         let pmem: Option<Vec<&str>> = args.values_of("pmem").map(|x| x.collect());
         let devices: Option<Vec<&str>> = args.values_of("device").map(|x| x.collect());
-        let vhost_user_net: Option<Vec<&str>> =
-            args.values_of("vhost-user-net").map(|x| x.collect());
         let vsock: Option<Vec<&str>> = args.values_of("vsock").map(|x| x.collect());
 
         VmParams {
@@ -159,7 +156,6 @@ impl<'a> VmParams<'a> {
             serial,
             console,
             devices,
-            vhost_user_net,
             vsock,
         }
     }
@@ -927,82 +923,6 @@ impl DeviceConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct VhostUserNetConfig {
-    pub sock: String,
-    #[serde(default = "default_vunetconfig_num_queues")]
-    pub num_queues: usize,
-    #[serde(default = "default_vunetconfig_queue_size")]
-    pub queue_size: u16,
-    #[serde(default = "default_vunetconfig_mac")]
-    pub mac: MacAddr,
-}
-
-fn default_vunetconfig_num_queues() -> usize {
-    DEFAULT_NUM_QUEUES_VUNET
-}
-
-fn default_vunetconfig_queue_size() -> u16 {
-    DEFAULT_QUEUE_SIZE_VUNET
-}
-
-fn default_vunetconfig_mac() -> MacAddr {
-    MacAddr::local_random()
-}
-
-impl VhostUserNetConfig {
-    pub fn parse(vhost_user_net: &str) -> Result<Self> {
-        error!("Using deprecated --vhost-user-net syntax. Use --net with vhost_user=true,socket=<socket path>");
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = vhost_user_net.split(',').collect();
-
-        let mut mac_str: &str = "";
-        let mut sock: &str = "";
-        let mut num_queues_str: &str = "";
-        let mut queue_size_str: &str = "";
-
-        for param in params_list.iter() {
-            if param.starts_with("mac=") {
-                mac_str = &param[4..];
-            } else if param.starts_with("sock=") {
-                sock = &param[5..];
-            } else if param.starts_with("num_queues=") {
-                num_queues_str = &param[11..];
-            } else if param.starts_with("queue_size=") {
-                queue_size_str = &param[11..];
-            }
-        }
-
-        let mut mac: MacAddr = default_vunetconfig_mac();
-        let mut num_queues: usize = default_vunetconfig_num_queues();
-        let mut queue_size: u16 = default_vunetconfig_queue_size();
-
-        if !mac_str.is_empty() {
-            mac = MacAddr::parse_str(mac_str).map_err(Error::ParseVuNetMacParam)?;
-        }
-        if sock.is_empty() {
-            return Err(Error::ParseVuSockParam);
-        }
-        if !num_queues_str.is_empty() {
-            num_queues = num_queues_str
-                .parse()
-                .map_err(Error::ParseVuNumQueuesParam)?;
-        }
-        if !queue_size_str.is_empty() {
-            queue_size = queue_size_str
-                .parse()
-                .map_err(Error::ParseVuQueueSizeParam)?;
-        }
-
-        Ok(VhostUserNetConfig {
-            sock: sock.to_string(),
-            num_queues,
-            queue_size,
-            mac,
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct VsockConfig {
     pub cid: u64,
     pub sock: PathBuf,
@@ -1061,7 +981,6 @@ pub struct VmConfig {
     #[serde(default = "ConsoleConfig::default_console")]
     pub console: ConsoleConfig,
     pub devices: Option<Vec<DeviceConfig>>,
-    pub vhost_user_net: Option<Vec<VhostUserNetConfig>>,
     pub vsock: Option<Vec<VsockConfig>>,
     #[serde(default)]
     pub iommu: bool,
@@ -1150,15 +1069,6 @@ impl VmConfig {
             devices = Some(device_config_list);
         }
 
-        let mut vhost_user_net: Option<Vec<VhostUserNetConfig>> = None;
-        if let Some(vhost_user_net_list) = &vm_params.vhost_user_net {
-            let mut vhost_user_net_config_list = Vec::new();
-            for item in vhost_user_net_list.iter() {
-                vhost_user_net_config_list.push(VhostUserNetConfig::parse(item)?);
-            }
-            vhost_user_net = Some(vhost_user_net_config_list);
-        }
-
         let mut vsock: Option<Vec<VsockConfig>> = None;
         if let Some(vsock_list) = &vm_params.vsock {
             let mut vsock_config_list = Vec::new();
@@ -1192,7 +1102,6 @@ impl VmConfig {
             serial,
             console,
             devices,
-            vhost_user_net,
             vsock,
             iommu,
         })
