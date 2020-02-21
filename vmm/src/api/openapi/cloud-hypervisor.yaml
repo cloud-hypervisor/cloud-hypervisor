@@ -204,10 +204,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DeviceConfig'
-        vhost_user_net:
-          type: array
-          items:
-            $ref: '#/components/schemas/VhostUserNetConfig'
         vsock:
           type: array
           items:
@@ -404,22 +400,6 @@ components:
         iommu:
           type: boolean
           default: false
-
-    VhostUserNetConfig:
-      required:
-      - sock
-      type: object
-      properties:
-        sock:
-          type: string
-        num_queues:
-          type: integer
-          default: 2
-        queue_size:
-          type: integer
-          default: 256
-        mac:
-          type: string
 
     VsockConfig:
       required:

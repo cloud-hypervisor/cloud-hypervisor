@@ -509,7 +509,6 @@ mod unit_tests {
                     iommu: false,
                 },
                 devices: None,
-                vhost_user_net: None,
                 vsock: None,
                 iommu: false,
             };
@@ -1222,101 +1221,6 @@ mod unit_tests {
                 r#"{
                     "devices": [
                         {"path": "/path/to/device", "iommu": false}
-                    ]
-                }"#,
-                true,
-            ),
-        ]
-        .iter()
-        .for_each(|(cli, openapi, equal)| {
-            compare_vm_config_cli_vs_json(cli, openapi, *equal);
-        });
-    }
-
-    #[test]
-    fn test_valid_vm_config_vunet() {
-        vec![
-            // This test is expected to fail because the default MAC address is
-            // randomly generated. There's no way we can have twice the same
-            // default value.
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-net",
-                    "sock=/path/to/sock/1",
-                    "sock=/path/to/sock/2",
-                ],
-                r#"{
-                    "vhost_user_net": [
-                        {"sock": "/path/to/sock/1"},
-                        {"sock": "/path/to/sock/2"}
-                    ]
-                }"#,
-                false,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-net",
-                    "sock=/path/to/sock/1,mac=12:34:56:78:90:ab",
-                    "sock=/path/to/sock/2,mac=12:34:56:78:90:cd",
-                ],
-                r#"{
-                    "vhost_user_net": [
-                        {"sock": "/path/to/sock/1", "mac": "12:34:56:78:90:ab"},
-                        {"sock": "/path/to/sock/2", "mac": "12:34:56:78:90:cd"}
-                    ]
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-net",
-                    "sock=/path/to/sock,mac=12:34:56:78:90:ab,num_queues=4",
-                ],
-                r#"{
-                    "vhost_user_net": [
-                        {"sock": "/path/to/sock", "mac": "12:34:56:78:90:ab", "num_queues": 4}
-                    ]
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-net",
-                    "sock=/path/to/sock,mac=12:34:56:78:90:ab,num_queues=4,queue_size=128",
-                ],
-                r#"{
-                    "vhost_user_net": [
-                        {"sock": "/path/to/sock", "mac": "12:34:56:78:90:ab", "num_queues": 4, "queue_size": 128}
-                    ]
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-net",
-                    "sock=/path/to/sock,mac=12:34:56:78:90:ab,num_queues=2,queue_size=256",
-                ],
-                r#"{
-                    "vhost_user_net": [
-                        {"sock": "/path/to/sock", "mac": "12:34:56:78:90:ab"}
-                    ]
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-net",
-                    "sock=/path/to/sock,mac=12:34:56:78:90:ab",
-                ],
-                r#"{
-                    "vhost_user_net": [
-                        {"sock": "/path/to/sock", "mac": "12:34:56:78:90:ab", "num_queues": 2, "queue_size": 256}
                     ]
                 }"#,
                 true,
