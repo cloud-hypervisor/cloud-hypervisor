@@ -234,19 +234,6 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("vhost-user-blk")
-                .long("vhost-user-blk")
-                .help(
-                    "Vhost user Block parameters \"sock=<socket_path>,\
-                     num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>, \
-                     wce=<true|false, default true>\"",
-                )
-                .takes_value(true)
-                .min_values(1)
-                .group("vm-config"),
-        )
-        .arg(
             Arg::with_name("v")
                 .short("v")
                 .multiple(true)
@@ -523,7 +510,6 @@ mod unit_tests {
                 },
                 devices: None,
                 vhost_user_net: None,
-                vhost_user_blk: None,
                 vsock: None,
                 iommu: false,
             };
@@ -1331,110 +1317,6 @@ mod unit_tests {
                 r#"{
                     "vhost_user_net": [
                         {"sock": "/path/to/sock", "mac": "12:34:56:78:90:ab", "num_queues": 2, "queue_size": 256}
-                    ]
-                }"#,
-                true,
-            ),
-        ]
-        .iter()
-        .for_each(|(cli, openapi, equal)| {
-            compare_vm_config_cli_vs_json(cli, openapi, *equal);
-        });
-    }
-
-    #[test]
-    fn test_valid_vm_config_vublk() {
-        vec![
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-blk",
-                    "sock=/path/to/sock/1",
-                    "sock=/path/to/sock/2",
-                ],
-                r#"{
-                    "vhost_user_blk": [
-                        {"sock": "/path/to/sock/1"},
-                        {"sock": "/path/to/sock/2"}
-                    ]
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-blk",
-                    "sock=/path/to/sock/1",
-                    "sock=/path/to/sock/2",
-                ],
-                r#"{
-                    "vhost_user_blk": [
-                        {"sock": "/path/to/sock/1"}
-                    ]
-                }"#,
-                false,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-blk",
-                    "sock=/path/to/sock/1,num_queues=4",
-                ],
-                r#"{
-                    "vhost_user_blk": [
-                        {"sock": "/path/to/sock/1", "num_queues": 4}
-                    ]
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-blk",
-                    "sock=/path/to/sock/1,num_queues=4,queue_size=1024",
-                ],
-                r#"{
-                    "vhost_user_blk": [
-                        {"sock": "/path/to/sock/1", "num_queues": 4, "queue_size": 1024}
-                    ]
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-blk",
-                    "sock=/path/to/sock/1,num_queues=4,queue_size=1024,wce=true",
-                ],
-                r#"{
-                    "vhost_user_blk": [
-                        {"sock": "/path/to/sock/1", "num_queues": 4, "queue_size": 1024, "wce": true}
-                    ]
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-blk",
-                    "sock=/path/to/sock/1,num_queues=1,queue_size=128,wce=true",
-                ],
-                r#"{
-                    "vhost_user_blk": [
-                        {"sock": "/path/to/sock/1"}
-                    ]
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--vhost-user-blk",
-                    "sock=/path/to/sock/1",
-                ],
-                r#"{
-                    "vhost_user_blk": [
-                        {"sock": "/path/to/sock/1", "num_queues": 1, "queue_size": 128, "wce": true}
                     ]
                 }"#,
                 true,
