@@ -201,45 +201,37 @@ pub struct CpusConfig {
 
 impl CpusConfig {
     pub fn parse(cpus: &str) -> Result<Self> {
-        if let Ok(legacy_vcpu_count) = cpus.parse::<u8>() {
-            error!("Using deprecated vCPU syntax. Use --cpus boot=<boot_vcpus>[,max=<max_vcpus]");
-            Ok(CpusConfig {
-                boot_vcpus: legacy_vcpu_count,
-                max_vcpus: legacy_vcpu_count,
-            })
-        } else {
-            // Split the parameters based on the comma delimiter
-            let params_list: Vec<&str> = cpus.split(',').collect();
+        // Split the parameters based on the comma delimiter
+        let params_list: Vec<&str> = cpus.split(',').collect();
 
-            let mut boot_str: &str = "";
-            let mut max_str: &str = "";
+        let mut boot_str: &str = "";
+        let mut max_str: &str = "";
 
-            for param in params_list.iter() {
-                if param.starts_with("boot=") {
-                    boot_str = &param["boot=".len()..];
-                } else if param.starts_with("max=") {
-                    max_str = &param["max=".len()..];
-                } else {
-                    return Err(Error::ParseCpusUnknownParam);
-                }
-            }
-
-            let boot_vcpus: u8 = boot_str.parse().map_err(Error::ParseCpusParams)?;
-            let max_vcpus = if max_str != "" {
-                max_str.parse().map_err(Error::ParseCpusParams)?
+        for param in params_list.iter() {
+            if param.starts_with("boot=") {
+                boot_str = &param["boot=".len()..];
+            } else if param.starts_with("max=") {
+                max_str = &param["max=".len()..];
             } else {
-                boot_vcpus
-            };
-
-            if max_vcpus < boot_vcpus {
-                return Err(Error::ParseCpusMaxLowerThanBoot);
+                return Err(Error::ParseCpusUnknownParam);
             }
-
-            Ok(CpusConfig {
-                boot_vcpus,
-                max_vcpus,
-            })
         }
+
+        let boot_vcpus: u8 = boot_str.parse().map_err(Error::ParseCpusParams)?;
+        let max_vcpus = if max_str != "" {
+            max_str.parse().map_err(Error::ParseCpusParams)?
+        } else {
+            boot_vcpus
+        };
+
+        if max_vcpus < boot_vcpus {
+            return Err(Error::ParseCpusMaxLowerThanBoot);
+        }
+
+        Ok(CpusConfig {
+            boot_vcpus,
+            max_vcpus,
+        })
     }
 }
 
