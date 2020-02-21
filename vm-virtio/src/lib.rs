@@ -32,7 +32,7 @@ mod iommu;
 pub mod net;
 pub mod net_util;
 mod pmem;
-mod queue;
+pub mod queue;
 mod rng;
 pub mod vsock;
 

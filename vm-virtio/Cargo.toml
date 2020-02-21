@@ -27,8 +27,8 @@ vmm-sys-util = ">=0.3.1"
 
 [dependencies.vhost_rs]
 path = "../vhost_rs"
-features = ["vhost-user-master"]
+features = ["vhost-user-master", "vhost-user-slave"]
 
 [dependencies.vm-memory]
 git = "https://github.com/rust-vmm/vm-memory"
-features = ["backend-mmap"]
+features = ["backend-mmap", "backend-atomic"]
