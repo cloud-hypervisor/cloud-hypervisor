@@ -15,6 +15,7 @@ use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap,
     GuestMemoryRegion, Le16, Le32, Le64, VolatileMemory, VolatileMemoryError, VolatileSlice,
 };
+use vm_virtio::queue::Error as QueueError;
 use vm_virtio::DescriptorChain;
 
 use crate::file_traits::{FileReadWriteAtVolatile, FileReadWriteVolatile};
@@ -25,6 +26,7 @@ pub enum Error {
     FindMemoryRegion,
     GuestMemoryError(GuestMemoryError),
     InvalidChain,
+    ConvertIndirectDescriptor(QueueError),
     IoError(io::Error),
     SplitOutOfBounds(usize),
     VolatileMemoryError(VolatileMemoryError),
@@ -35,6 +37,7 @@ impl Display for Error {
         use self::Error::*;
 
         match self {
+            ConvertIndirectDescriptor(e) => write!(f, "invalid indirect descriptor: {}", e),
             DescriptorChainOverflow => write!(
                 f,
                 "the combined length of all the buffers in a `DescriptorChain` would overflow"
@@ -191,7 +194,14 @@ impl<'a> Reader<'a> {
     /// Construct a new Reader wrapper over `desc_chain`.
     pub fn new(mem: &'a GuestMemoryMmap, desc_chain: DescriptorChain<'a>) -> Result<Reader<'a>> {
         let mut total_len: usize = 0;
-        let buffers = desc_chain
+        let chain = if desc_chain.is_indirect() {
+            desc_chain
+                .new_from_indirect()
+                .map_err(Error::ConvertIndirectDescriptor)?
+        } else {
+            desc_chain
+        };
+        let buffers = chain
             .into_iter()
             .readable()
             .map(|desc| {
@@ -343,7 +353,14 @@ impl<'a> Writer<'a> {
     /// Construct a new Writer wrapper over `desc_chain`.
     pub fn new(mem: &'a GuestMemoryMmap, desc_chain: DescriptorChain<'a>) -> Result<Writer<'a>> {
         let mut total_len: usize = 0;
-        let buffers = desc_chain
+        let chain = if desc_chain.is_indirect() {
+            desc_chain
+                .new_from_indirect()
+                .map_err(Error::ConvertIndirectDescriptor)?
+        } else {
+            desc_chain
+        };
+        let buffers = chain
             .into_iter()
             .writable()
             .map(|desc| {
