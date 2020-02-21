@@ -25,6 +25,7 @@ use vhost_user_fs::passthrough::{self, PassthroughFs};
 use vhost_user_fs::server::Server;
 use vhost_user_fs::Error as VhostUserFsError;
 use virtio_bindings::bindings::virtio_net::*;
+use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_INDIRECT_DESC;
 use vm_memory::GuestMemoryMmap;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -138,7 +139,9 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
     }
 
     fn features(&self) -> u64 {
-        1 << VIRTIO_F_VERSION_1 | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+        1 << VIRTIO_F_VERSION_1
+            | 1 << VIRTIO_RING_F_INDIRECT_DESC
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
