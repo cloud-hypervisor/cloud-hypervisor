@@ -487,7 +487,7 @@ pub struct DeviceManager {
     config: Arc<Mutex<VmConfig>>,
 
     // Migratable devices
-    migratable_devices: Vec<Arc<Mutex<dyn Migratable>>>,
+    migratable_devices: HashMap<String, Arc<Mutex<dyn Migratable>>>,
 
     // Memory Manager
     memory_manager: Arc<Mutex<MemoryManager>>,
@@ -556,7 +556,7 @@ impl DeviceManager {
         vmm_path: PathBuf,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let mut virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)> = Vec::new();
-        let migratable_devices: Vec<Arc<Mutex<dyn Migratable>>> = Vec::new();
+        let migratable_devices: HashMap<String, Arc<Mutex<dyn Migratable>>> = HashMap::new();
         let mut bus_devices: Vec<Arc<Mutex<dyn BusDevice>>> = Vec::new();
         let mut _mmap_regions = Vec::new();
 
@@ -696,6 +696,11 @@ impl DeviceManager {
             .map_err(DeviceManagerError::BusError)?;
 
         Ok(device_manager)
+    }
+
+    fn add_migratable_device(&mut self, migratable_device: Arc<Mutex<dyn Migratable>>) {
+        let id = migratable_device.lock().unwrap().id();
+        self.migratable_devices.insert(id, migratable_device);
     }
 
     #[allow(unused_variables)]
@@ -1091,8 +1096,9 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::CreateVhostUserBlk)?,
             ));
 
-            self.migratable_devices
-                .push(Arc::clone(&vhost_user_block_device) as Arc<Mutex<dyn Migratable>>);
+            self.add_migratable_device(
+                Arc::clone(&vhost_user_block_device) as Arc<Mutex<dyn Migratable>>
+            );
 
             Ok((
                 Arc::clone(&vhost_user_block_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
@@ -1138,8 +1144,7 @@ impl DeviceManager {
 
                     let block = Arc::new(Mutex::new(dev));
 
-                    self.migratable_devices
-                        .push(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>);
+                    self.add_migratable_device(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>);
 
                     Ok((
                         Arc::clone(&block) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
@@ -1165,8 +1170,7 @@ impl DeviceManager {
 
                     let block = Arc::new(Mutex::new(dev));
 
-                    self.migratable_devices
-                        .push(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>);
+                    self.add_migratable_device(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>);
 
                     Ok((
                         Arc::clone(&block) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
@@ -1234,8 +1238,9 @@ impl DeviceManager {
                 vm_virtio::vhost_user::Net::new(net_cfg.mac, vu_cfg)
                     .map_err(DeviceManagerError::CreateVhostUserNet)?,
             ));
-            self.migratable_devices
-                .push(Arc::clone(&vhost_user_net_device) as Arc<Mutex<dyn Migratable>>);
+            self.add_migratable_device(
+                Arc::clone(&vhost_user_net_device) as Arc<Mutex<dyn Migratable>>
+            );
             Ok((
                 Arc::clone(&vhost_user_net_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                 net_cfg.iommu,
@@ -1268,8 +1273,9 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::CreateVirtioNet)?,
                 ))
             };
-            self.migratable_devices
-                .push(Arc::clone(&virtio_net_device) as Arc<Mutex<dyn Migratable>>);
+            self.add_migratable_device(
+                Arc::clone(&virtio_net_device) as Arc<Mutex<dyn Migratable>>
+            );
             Ok((
                 Arc::clone(&virtio_net_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
                 net_cfg.iommu,
@@ -1305,8 +1311,9 @@ impl DeviceManager {
                 false,
             ));
 
-            self.migratable_devices
-                .push(Arc::clone(&virtio_rng_device) as Arc<Mutex<dyn Migratable>>);
+            self.add_migratable_device(
+                Arc::clone(&virtio_rng_device) as Arc<Mutex<dyn Migratable>>
+            );
         }
 
         Ok(devices)
@@ -1391,8 +1398,9 @@ impl DeviceManager {
                         false,
                     ));
 
-                    self.migratable_devices
-                        .push(Arc::clone(&virtio_fs_device) as Arc<Mutex<dyn Migratable>>);
+                    let migratable = Arc::clone(&virtio_fs_device) as Arc<Mutex<dyn Migratable>>;
+                    let id = migratable.lock().unwrap().id();
+                    self.migratable_devices.insert(id, migratable);
                 }
             }
         }
@@ -1472,8 +1480,9 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::CreateVirtioPmem)?,
         ));
 
-        self.migratable_devices
-            .push(Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn Migratable>>);
+        let migratable = Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn Migratable>>;
+        let id = migratable.lock().unwrap().id();
+        self.migratable_devices.insert(id, migratable);
 
         Ok((
             Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
@@ -1517,8 +1526,9 @@ impl DeviceManager {
                     false,
                 ));
 
-                self.migratable_devices
-                    .push(Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>);
+                let migratable = Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>;
+                let id = migratable.lock().unwrap().id();
+                self.migratable_devices.insert(id, migratable);
             }
         }
 
@@ -1545,8 +1555,9 @@ impl DeviceManager {
                 false,
             ));
 
-            self.migratable_devices
-                .push(Arc::clone(&virtio_mem_device) as Arc<Mutex<dyn Migratable>>);
+            let migratable = Arc::clone(&virtio_mem_device) as Arc<Mutex<dyn Migratable>>;
+            let id = migratable.lock().unwrap().id();
+            self.migratable_devices.insert(id, migratable);
         }
 
         Ok(devices)
@@ -1794,8 +1805,9 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::AddPciDevice)?;
 
-        self.migratable_devices
-            .push(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
+        let migratable = Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>;
+        let id = migratable.lock().unwrap().id();
+        self.migratable_devices.insert(id, migratable);
 
         Ok(pci_device_bdf)
     }
@@ -1850,8 +1862,7 @@ impl DeviceManager {
             irq_num
         ));
 
-        self.migratable_devices
-            .push(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn Migratable>>);
+        self.add_migratable_device(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn Migratable>>);
 
         Ok(())
     }
@@ -2037,8 +2048,8 @@ impl DeviceManager {
 
             // Remove the device from the list of Migratable devices.
             if let Some(migratable_device) = &migratable_device {
-                self.migratable_devices
-                    .retain(|dev| !Arc::ptr_eq(dev, &migratable_device));
+                let id = migratable_device.lock().unwrap().id();
+                self.migratable_devices.remove(&id);
             }
 
             // At this point, the device has been removed from all the list and
@@ -2357,7 +2368,7 @@ impl Aml for DeviceManager {
 
 impl Pausable for DeviceManager {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
-        for dev in &self.migratable_devices {
+        for dev in self.migratable_devices.values() {
             dev.lock().unwrap().pause()?;
         }
 
@@ -2365,7 +2376,7 @@ impl Pausable for DeviceManager {
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
-        for dev in &self.migratable_devices {
+        for dev in self.migratable_devices.values() {
             dev.lock().unwrap().resume()?;
         }
 
