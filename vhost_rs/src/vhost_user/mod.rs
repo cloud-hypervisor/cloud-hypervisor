@@ -43,6 +43,7 @@ mod slave_req_handler;
 pub use self::slave_req_handler::{SlaveReqHandler, VhostUserSlaveReqHandler};
 #[cfg(feature = "vhost-user-slave")]
 mod slave_fs_cache;
+#[cfg(feature = "vhost-user-slave")]
 pub use self::slave_fs_cache::SlaveFsCacheReq;
 
 pub mod sock_ctrl_msg;
