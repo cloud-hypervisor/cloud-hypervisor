@@ -98,6 +98,9 @@ pub enum ApiError {
     /// The VM could not be snapshotted.
     VmSnapshot(VmError),
 
+    /// The VM could not restored.
+    VmRestore(VmError),
+
     /// The VMM could not shutdown.
     VmmShutdown(VmError),
 
@@ -153,6 +156,13 @@ pub struct VmRemoveDeviceData {
 pub struct VmSnapshotConfig {
     /// The snapshot destination URL
     pub destination_url: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct VmRestoreConfig {
+    /// The snapshot restore source URL.
+    /// This is where the VMM is going to get its snapshot to restore itself from.
+    pub source_url: String,
 }
 
 pub enum ApiResponsePayload {
@@ -235,6 +245,9 @@ pub enum ApiRequest {
 
     /// Take a VM snapshot
     VmSnapshot(Arc<VmSnapshotConfig>, Sender<ApiResponse>),
+
+    /// Restore from a VM snapshot
+    VmRestore(Arc<VmRestoreConfig>, Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -333,6 +346,24 @@ pub fn vm_snapshot(
     // Send the VM snapshot request.
     api_sender
         .send(ApiRequest::VmSnapshot(data, response_sender))
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+
+    Ok(())
+}
+
+pub fn vm_restore(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VmRestoreConfig>,
+) -> ApiResult<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM restore request.
+    api_sender
+        .send(ApiRequest::VmRestore(data, response_sender))
         .map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
