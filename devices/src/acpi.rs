@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use acpi_tables::{aml, aml::Aml};
 use std::sync::Arc;
 use vm_device::interrupt::InterruptSourceGroup;
 use vmm_sys_util::eventfd::EventFd;
@@ -93,4 +94,53 @@ impl BusDevice for AcpiGEDDevice {
     }
 
     fn write(&mut self, _base: u64, _offset: u64, _data: &[u8]) {}
+}
+
+#[cfg(feature = "acpi")]
+impl Aml for AcpiGEDDevice {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        aml::Device::new(
+            "_SB_.GED_".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &"ACPI0013"),
+                &aml::Name::new("_UID".into(), &aml::ZERO),
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![&aml::Interrupt::new(
+                        true,
+                        true,
+                        false,
+                        false,
+                        self.ged_irq,
+                    )]),
+                ),
+                &aml::OpRegion::new("GDST".into(), aml::OpRegionSpace::SystemIO, 0xb000, 0x1),
+                &aml::Field::new(
+                    "GDST".into(),
+                    aml::FieldAccessType::Byte,
+                    aml::FieldUpdateRule::WriteAsZeroes,
+                    vec![aml::FieldEntry::Named(*b"GDAT", 8)],
+                ),
+                &aml::Method::new(
+                    "_EVT".into(),
+                    1,
+                    true,
+                    vec![
+                        &aml::Store::new(&aml::Local(0), &aml::Path::new("GDAT")),
+                        &aml::And::new(&aml::Local(1), &aml::Local(0), &aml::ONE),
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Local(1), &aml::ONE),
+                            vec![&aml::MethodCall::new("\\_SB_.CPUS.CSCN".into(), vec![])],
+                        ),
+                        &aml::And::new(&aml::Local(1), &aml::Local(0), &2usize),
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Local(1), &2usize),
+                            vec![&aml::MethodCall::new("\\_SB_.MHPC.MSCN".into(), vec![])],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        .to_aml_bytes()
+    }
 }
