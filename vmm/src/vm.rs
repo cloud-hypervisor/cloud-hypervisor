@@ -145,6 +145,9 @@ pub enum Error {
     /// VM is not created
     VmNotCreated,
 
+    /// VM is already created
+    VmAlreadyCreated,
+
     /// VM is not running
     VmNotRunning,
 
@@ -189,6 +192,9 @@ pub enum Error {
 
     /// Cannot snapshot VM
     Snapshot(MigratableError),
+
+    /// Cannot restore VM
+    Restore(MigratableError),
 
     /// Cannot send VM snapshot
     SnapshotSend(MigratableError),
@@ -980,10 +986,10 @@ impl Pausable for Vm {
 
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
-    config: Arc<Mutex<VmConfig>>,
+    pub config: Arc<Mutex<VmConfig>>,
 }
 
-const VM_SNAPSHOT_ID: &str = "vm";
+pub const VM_SNAPSHOT_ID: &str = "vm";
 impl Snapshotable for Vm {
     fn id(&self) -> String {
         VM_SNAPSHOT_ID.to_string()
