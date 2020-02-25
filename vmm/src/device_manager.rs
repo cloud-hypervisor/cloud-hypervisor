@@ -1568,49 +1568,6 @@ impl DeviceManager {
 }
 
 #[cfg(feature = "acpi")]
-fn create_ged_device(ged_irq: u32) -> Vec<u8> {
-    aml::Device::new(
-        "_SB_.GED_".into(),
-        vec![
-            &aml::Name::new("_HID".into(), &"ACPI0013"),
-            &aml::Name::new("_UID".into(), &aml::ZERO),
-            &aml::Name::new(
-                "_CRS".into(),
-                &aml::ResourceTemplate::new(vec![&aml::Interrupt::new(
-                    true, true, false, false, ged_irq,
-                )]),
-            ),
-            &aml::OpRegion::new("GDST".into(), aml::OpRegionSpace::SystemIO, 0xb000, 0x1),
-            &aml::Field::new(
-                "GDST".into(),
-                aml::FieldAccessType::Byte,
-                aml::FieldUpdateRule::WriteAsZeroes,
-                vec![aml::FieldEntry::Named(*b"GDAT", 8)],
-            ),
-            &aml::Method::new(
-                "_EVT".into(),
-                1,
-                true,
-                vec![
-                    &aml::Store::new(&aml::Local(0), &aml::Path::new("GDAT")),
-                    &aml::And::new(&aml::Local(1), &aml::Local(0), &aml::ONE),
-                    &aml::If::new(
-                        &aml::Equal::new(&aml::Local(1), &aml::ONE),
-                        vec![&aml::MethodCall::new("\\_SB_.CPUS.CSCN".into(), vec![])],
-                    ),
-                    &aml::And::new(&aml::Local(1), &aml::Local(0), &2usize),
-                    &aml::If::new(
-                        &aml::Equal::new(&aml::Local(1), &2usize),
-                        vec![&aml::MethodCall::new("\\_SB_.MHPC.MSCN".into(), vec![])],
-                    ),
-                ],
-            ),
-        ],
-    )
-    .to_aml_bytes()
-}
-
-#[cfg(feature = "acpi")]
 impl Aml for DeviceManager {
     fn to_aml_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -1687,14 +1644,13 @@ impl Aml for DeviceManager {
         let s5_sleep_data =
             aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes();
 
-        let ged_data = create_ged_device(
-            self.ged_notification_device
-                .as_ref()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .irq(),
-        );
+        let ged_data = self
+            .ged_notification_device
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .to_aml_bytes();
 
         bytes.extend_from_slice(pci_dsdt_data.as_slice());
         bytes.extend_from_slice(mbrd_dsdt_data.as_slice());
