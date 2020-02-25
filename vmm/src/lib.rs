@@ -14,6 +14,7 @@ extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 extern crate tempfile;
+extern crate url;
 extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
@@ -37,6 +38,7 @@ pub mod cpu;
 pub mod device_manager;
 pub mod interrupt;
 pub mod memory_manager;
+pub mod migration;
 pub mod seccomp_filters;
 pub mod vm;
 
