@@ -139,6 +139,9 @@ pub enum Error {
     /// VM is not created
     VmNotCreated,
 
+    /// VM is already created
+    VmAlreadyCreated,
+
     /// VM is not running
     VmNotRunning,
 
@@ -183,6 +186,9 @@ pub enum Error {
 
     /// Cannot snapshot VM
     Snapshot(MigratableError),
+
+    /// Cannot restore VM
+    Restore(MigratableError),
 
     /// Cannot send VM snapshot
     SnapshotSend(MigratableError),
