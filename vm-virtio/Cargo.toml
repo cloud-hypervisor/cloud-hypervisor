@@ -24,10 +24,7 @@ virtio-bindings = { git = "https://github.com/rust-vmm/virtio-bindings", version
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vmm-sys-util = ">=0.3.1"
-
-[dependencies.vhost_rs]
-path = "../vhost_rs"
-features = ["vhost-user-master", "vhost-user-slave"]
+vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-master", "vhost-user-slave"] }
 
 [dependencies.vm-memory]
 git = "https://github.com/rust-vmm/vm-memory"
