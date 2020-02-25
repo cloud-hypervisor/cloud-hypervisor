@@ -174,7 +174,7 @@ dependencies = [
  "serde_json 1.0.48 (registry+https://github.com/rust-lang/crates.io-index)",
  "ssh2 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempdir 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
- "vhost_rs 0.1.0",
+ "vhost 0.1.0 (git+https://github.com/cloud-hypervisor/vhost?branch=dragonball)",
  "vhost_user_backend 0.1.0",
  "vhost_user_block 0.1.0",
  "vhost_user_fs 0.1.0",
@@ -1023,13 +1023,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "vhost_rs"
+name = "vhost"
 version = "0.1.0"
+source = "git+https://github.com/cloud-hypervisor/vhost?branch=dragonball#7d5a205199e3d5594494b3021635a719580fabc8"
 dependencies = [
  "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
- "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -1040,7 +1039,7 @@ dependencies = [
  "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
- "vhost_rs 0.1.0",
+ "vhost 0.1.0 (git+https://github.com/cloud-hypervisor/vhost?branch=dragonball)",
  "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
@@ -1056,7 +1055,7 @@ dependencies = [
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "qcow 0.1.0",
- "vhost_rs 0.1.0",
+ "vhost 0.1.0 (git+https://github.com/cloud-hypervisor/vhost?branch=dragonball)",
  "vhost_user_backend 0.1.0",
  "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
@@ -1071,7 +1070,7 @@ dependencies = [
  "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
- "vhost_rs 0.1.0",
+ "vhost 0.1.0 (git+https://github.com/cloud-hypervisor/vhost?branch=dragonball)",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
  "vm-virtio 0.1.0",
 ]
@@ -1085,7 +1084,7 @@ dependencies = [
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "net_util 0.1.0",
- "vhost_rs 0.1.0",
+ "vhost 0.1.0 (git+https://github.com/cloud-hypervisor/vhost?branch=dragonball)",
  "vhost_user_backend 0.1.0",
  "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
@@ -1148,7 +1147,7 @@ dependencies = [
  "net_util 0.1.0",
  "pci 0.1.0",
  "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "vhost_rs 0.1.0",
+ "vhost 0.1.0 (git+https://github.com/cloud-hypervisor/vhost?branch=dragonball)",
  "virtio-bindings 0.1.0 (git+https://github.com/rust-vmm/virtio-bindings)",
  "vm-allocator 0.1.0",
  "vm-device 0.1.0",
@@ -1351,6 +1350,7 @@ dependencies = [
 "checksum vcpkg 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)" = "3fc439f2794e98976c88a2a2dafce96b930fe8010b0a256b3c2199a773933168"
 "checksum vec_map 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)" = "05c78687fb1a80548ae3250346c3db86a80a7cdd77bda190189f2d0a0987c81a"
 "checksum vfio-bindings 0.1.0 (git+https://github.com/rust-vmm/vfio-bindings)" = "<none>"
+"checksum vhost 0.1.0 (git+https://github.com/cloud-hypervisor/vhost?branch=dragonball)" = "<none>"
 "checksum virtio-bindings 0.1.0 (git+https://github.com/rust-vmm/virtio-bindings)" = "<none>"
 "checksum virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
 "checksum vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)" = "<none>"
