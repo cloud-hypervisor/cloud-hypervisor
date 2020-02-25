@@ -14,7 +14,7 @@ use epoll;
 use libc::EFD_NONBLOCK;
 use log::*;
 use std::num::Wrapping;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 use std::{convert, error, fmt, io, process};
 
 use vhost_rs::vhost_user::message::*;
@@ -177,7 +177,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
         &mut self,
         device_event: u16,
         evset: epoll::Events,
-        vrings: &[Arc<RwLock<Vring>>],
+        vrings: &[Arc<Mutex<Vring>>],
     ) -> VhostUserBackendResult<bool> {
         if evset != epoll::Events::EPOLLIN {
             return Err(Error::HandleEventNotEpollIn.into());
@@ -186,11 +186,11 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
         let mut vring = match device_event {
             HIPRIO_QUEUE_EVENT => {
                 debug!("HIPRIO_QUEUE_EVENT");
-                vrings[0].write().unwrap()
+                vrings[0].lock().unwrap()
             }
             REQ_QUEUE_EVENT => {
                 debug!("QUEUE_EVENT");
-                vrings[1].write().unwrap()
+                vrings[1].lock().unwrap()
             }
             _ => return Err(Error::HandleEventUnknownEvent.into()),
         };
@@ -262,7 +262,7 @@ fn main() {
         ..Default::default()
     };
     let fs = PassthroughFs::new(fs_cfg).unwrap();
-    let fs_backend = Arc::new(RwLock::new(VhostUserFsBackend::new(fs).unwrap()));
+    let fs_backend = Arc::new(Mutex::new(VhostUserFsBackend::new(fs).unwrap()));
 
     let mut daemon = VhostUserDaemon::new(
         String::from("vhost-user-fs-backend"),
@@ -280,7 +280,7 @@ fn main() {
         error!("Waiting for daemon failed: {:?}", e);
     }
 
-    let kill_evt = &fs_backend.read().unwrap().kill_evt;
+    let kill_evt = &fs_backend.lock().unwrap().kill_evt;
     if let Err(e) = kill_evt.write(1) {
         error!("Error shutting down worker thread: {:?}", e)
     }

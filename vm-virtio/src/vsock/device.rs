@@ -42,7 +42,7 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
@@ -91,7 +91,7 @@ pub struct VsockEpollHandler<B: VsockBackend> {
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
-    pub backend: Arc<RwLock<B>>,
+    pub backend: Arc<Mutex<B>>,
 }
 
 impl<B> VsockEpollHandler<B>
@@ -124,7 +124,7 @@ where
         for avail_desc in self.queues[0].iter(&mem) {
             let used_len = match VsockPacket::from_rx_virtq_head(&avail_desc) {
                 Ok(mut pkt) => {
-                    if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
+                    if self.backend.lock().unwrap().recv_pkt(&mut pkt).is_ok() {
                         pkt.hdr().len() as u32 + pkt.len()
                     } else {
                         // We are using a consuming iterator over the virtio buffers, so, if we can't
@@ -174,7 +174,7 @@ where
                 }
             };
 
-            if self.backend.write().unwrap().send_pkt(&pkt).is_err() {
+            if self.backend.lock().unwrap().send_pkt(&pkt).is_err() {
                 self.queues[1].go_to_previous_position();
                 break;
             }
@@ -223,9 +223,9 @@ where
         epoll::ctl(
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.backend.read().unwrap().get_polled_fd(),
+            self.backend.lock().unwrap().get_polled_fd(),
             epoll::Event::new(
-                self.backend.read().unwrap().get_polled_evset(),
+                self.backend.lock().unwrap().get_polled_evset(),
                 u64::from(BACKEND_EVENT),
             ),
         )
@@ -301,7 +301,7 @@ where
                         event_type: "rx queue event",
                         underlying: e,
                     });
-                } else if self.backend.read().unwrap().has_pending_rx() {
+                } else if self.backend.lock().unwrap().has_pending_rx() {
                     self.process_rx()?;
                 }
             }
@@ -318,7 +318,7 @@ where
                     // The backend may have queued up responses to the packets we sent during TX queue
                     // processing. If that happened, we need to fetch those responses and place them
                     // into RX buffers.
-                    if self.backend.read().unwrap().has_pending_rx() {
+                    if self.backend.lock().unwrap().has_pending_rx() {
                         self.process_rx()?;
                     }
                 }
@@ -335,14 +335,14 @@ where
             }
             BACKEND_EVENT => {
                 debug!("vsock: backend event");
-                self.backend.write().unwrap().notify(evset);
+                self.backend.lock().unwrap().notify(evset);
                 // After the backend has been kicked, it might've freed up some resources, so we
                 // can attempt to send it more data to process.
                 // In particular, if `self.backend.send_pkt()` halted the TX queue processing (by
                 // reurning an error) at some point in the past, now is the time to try walking the
                 // TX queue again.
                 self.process_tx()?;
-                if self.backend.read().unwrap().has_pending_rx() {
+                if self.backend.lock().unwrap().has_pending_rx() {
                     self.process_rx()?;
                 }
             }
@@ -375,7 +375,7 @@ where
 /// Virtio device exposing virtual socket to the guest.
 pub struct Vsock<B: VsockBackend> {
     cid: u64,
-    backend: Arc<RwLock<B>>,
+    backend: Arc<Mutex<B>>,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
     avail_features: u64,
@@ -401,7 +401,7 @@ where
 
         Ok(Vsock {
             cid,
-            backend: Arc::new(RwLock::new(backend)),
+            backend: Arc::new(Mutex::new(backend)),
             kill_evt: None,
             pause_evt: None,
             avail_features,
@@ -689,7 +689,7 @@ mod tests {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
 
-            ctx.handler.backend.write().unwrap().set_pending_rx(false);
+            ctx.handler.backend.lock().unwrap().set_pending_rx(false);
             ctx.signal_txq_event();
 
             // The available TX descriptor should have been used.
@@ -705,7 +705,7 @@ mod tests {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
 
-            ctx.handler.backend.write().unwrap().set_pending_rx(true);
+            ctx.handler.backend.lock().unwrap().set_pending_rx(true);
             ctx.signal_txq_event();
 
             // Both available RX and TX descriptors should have been used.
@@ -720,10 +720,10 @@ mod tests {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
 
-            ctx.handler.backend.write().unwrap().set_pending_rx(false);
+            ctx.handler.backend.lock().unwrap().set_pending_rx(false);
             ctx.handler
                 .backend
-                .write()
+                .lock()
                 .unwrap()
                 .set_tx_err(Some(VsockError::NoData));
             ctx.signal_txq_event();
@@ -746,7 +746,7 @@ mod tests {
             // The available descriptor should have been consumed, but no packet should have
             // reached the backend.
             assert_eq!(ctx.guest_txvq.used.idx.get(), 1);
-            assert_eq!(ctx.handler.backend.read().unwrap().tx_ok_cnt, 0);
+            assert_eq!(ctx.handler.backend.lock().unwrap().tx_ok_cnt, 0);
         }
 
         // Test case: spurious TXQ_EVENT.
@@ -775,10 +775,10 @@ mod tests {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
 
-            ctx.handler.backend.write().unwrap().set_pending_rx(true);
+            ctx.handler.backend.lock().unwrap().set_pending_rx(true);
             ctx.handler
                 .backend
-                .write()
+                .lock()
                 .unwrap()
                 .set_rx_err(Some(VsockError::NoData));
             ctx.signal_rxq_event();
@@ -795,7 +795,7 @@ mod tests {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
 
-            ctx.handler.backend.write().unwrap().set_pending_rx(true);
+            ctx.handler.backend.lock().unwrap().set_pending_rx(true);
             ctx.signal_rxq_event();
 
             // The available RX buffer should have been used.
@@ -813,14 +813,14 @@ mod tests {
             // The chain should've been processed, without employing the backend.
             assert!(ctx.handler.process_rx().is_ok());
             assert_eq!(ctx.guest_rxvq.used.idx.get(), 1);
-            assert_eq!(ctx.handler.backend.read().unwrap().rx_ok_cnt, 0);
+            assert_eq!(ctx.handler.backend.lock().unwrap().rx_ok_cnt, 0);
         }
 
         // Test case: spurious RXQ_EVENT.
         {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
-            ctx.handler.backend.write().unwrap().set_pending_rx(false);
+            ctx.handler.backend.lock().unwrap().set_pending_rx(false);
             match ctx.handler.handle_event(
                 RX_QUEUE_EVENT,
                 epoll::Events::EPOLLIN,
@@ -838,7 +838,7 @@ mod tests {
         {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
-            ctx.handler.backend.write().unwrap().set_pending_rx(false);
+            ctx.handler.backend.lock().unwrap().set_pending_rx(false);
             match ctx.handler.handle_event(
                 EVT_QUEUE_EVENT,
                 epoll::Events::EPOLLIN,
@@ -859,7 +859,7 @@ mod tests {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
 
-            ctx.handler.backend.write().unwrap().set_pending_rx(true);
+            ctx.handler.backend.lock().unwrap().set_pending_rx(true);
             ctx.handler
                 .handle_event(
                     BACKEND_EVENT,
@@ -870,7 +870,7 @@ mod tests {
 
             // The backend should've received this event.
             assert_eq!(
-                ctx.handler.backend.read().unwrap().evset,
+                ctx.handler.backend.lock().unwrap().evset,
                 Some(epoll::Events::EPOLLIN)
             );
             // TX queue processing should've been triggered.
@@ -886,7 +886,7 @@ mod tests {
             let test_ctx = TestContext::new();
             let mut ctx = test_ctx.create_epoll_handler_context();
 
-            ctx.handler.backend.write().unwrap().set_pending_rx(false);
+            ctx.handler.backend.lock().unwrap().set_pending_rx(false);
             ctx.handler
                 .handle_event(
                     BACKEND_EVENT,
@@ -897,7 +897,7 @@ mod tests {
 
             // The backend should've received this event.
             assert_eq!(
-                ctx.handler.backend.read().unwrap().evset,
+                ctx.handler.backend.lock().unwrap().evset,
                 Some(epoll::Events::EPOLLIN)
             );
             // TX queue processing should've been triggered.

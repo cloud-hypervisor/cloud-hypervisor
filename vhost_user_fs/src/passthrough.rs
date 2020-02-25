@@ -11,7 +11,7 @@ use std::mem::{self, size_of, MaybeUninit};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use libc;
@@ -255,12 +255,12 @@ pub struct PassthroughFs {
     // the `O_PATH` option so they cannot be used for reading or writing any data. See the
     // documentation of the `O_PATH` flag in `open(2)` for more details on what one can and cannot
     // do with an fd opened with this flag.
-    inodes: RwLock<MultikeyBTreeMap<Inode, InodeAltKey, Arc<InodeData>>>,
+    inodes: Mutex<MultikeyBTreeMap<Inode, InodeAltKey, Arc<InodeData>>>,
     next_inode: AtomicU64,
 
     // File descriptors for open files and directories. Unlike the fds in `inodes`, these _can_ be
     // used for reading and writing data.
-    handles: RwLock<BTreeMap<Handle, Arc<HandleData>>>,
+    handles: Mutex<BTreeMap<Handle, Arc<HandleData>>>,
     next_handle: AtomicU64,
 
     // File descriptor pointing to the `/proc` directory. This is used to convert an fd from
@@ -297,10 +297,10 @@ impl PassthroughFs {
         let proc = unsafe { File::from_raw_fd(fd) };
 
         Ok(PassthroughFs {
-            inodes: RwLock::new(MultikeyBTreeMap::new()),
+            inodes: Mutex::new(MultikeyBTreeMap::new()),
             next_inode: AtomicU64::new(fuse::ROOT_ID + 1),
 
-            handles: RwLock::new(BTreeMap::new()),
+            handles: Mutex::new(BTreeMap::new()),
             next_handle: AtomicU64::new(0),
 
             proc,
@@ -317,7 +317,7 @@ impl PassthroughFs {
     fn open_inode(&self, inode: Inode, mut flags: i32) -> io::Result<File> {
         let data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&inode)
             .map(Arc::clone)
@@ -367,7 +367,7 @@ impl PassthroughFs {
     fn do_lookup(&self, parent: Inode, name: &CStr) -> io::Result<Entry> {
         let p = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&parent)
             .map(Arc::clone)
@@ -394,7 +394,7 @@ impl PassthroughFs {
             ino: st.st_ino,
             dev: st.st_dev,
         };
-        let data = self.inodes.read().unwrap().get_alt(&altkey).map(Arc::clone);
+        let data = self.inodes.lock().unwrap().get_alt(&altkey).map(Arc::clone);
 
         let inode = if let Some(data) = data {
             // Matches with the release store in `forget`.
@@ -405,7 +405,7 @@ impl PassthroughFs {
             // into the inode list.  However, since each of those will get a unique Inode
             // value and unique file descriptors this shouldn't be that much of a problem.
             let inode = self.next_inode.fetch_add(1, Ordering::Relaxed);
-            self.inodes.write().unwrap().insert(
+            self.inodes.lock().unwrap().insert(
                 inode,
                 InodeAltKey {
                     ino: st.st_ino,
@@ -447,7 +447,7 @@ impl PassthroughFs {
 
         let data = self
             .handles
-            .read()
+            .lock()
             .unwrap()
             .get(&handle)
             .filter(|hd| hd.inode == inode)
@@ -540,7 +540,7 @@ impl PassthroughFs {
         let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
         let data = HandleData { inode, file };
 
-        self.handles.write().unwrap().insert(handle, Arc::new(data));
+        self.handles.lock().unwrap().insert(handle, Arc::new(data));
 
         let mut opts = OpenOptions::empty();
         match self.cfg.cache_policy {
@@ -557,7 +557,7 @@ impl PassthroughFs {
     }
 
     fn do_release(&self, inode: Inode, handle: Handle) -> io::Result<()> {
-        let mut handles = self.handles.write().unwrap();
+        let mut handles = self.handles.lock().unwrap();
 
         if let btree_map::Entry::Occupied(e) = handles.entry(handle) {
             if e.get().inode == inode {
@@ -574,7 +574,7 @@ impl PassthroughFs {
     fn do_getattr(&self, inode: Inode) -> io::Result<(libc::stat64, Duration)> {
         let data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&inode)
             .map(Arc::clone)
@@ -588,7 +588,7 @@ impl PassthroughFs {
     fn do_unlink(&self, parent: Inode, name: &CStr, flags: libc::c_int) -> io::Result<()> {
         let data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&parent)
             .map(Arc::clone)
@@ -672,7 +672,7 @@ impl FileSystem for PassthroughFs {
         // we want the client to be able to set all the bits in the mode.
         unsafe { libc::umask(0o000) };
 
-        let mut inodes = self.inodes.write().unwrap();
+        let mut inodes = self.inodes.lock().unwrap();
 
         // Not sure why the root inode gets a refcount of 2 but that's what libfuse does.
         inodes.insert(
@@ -697,14 +697,14 @@ impl FileSystem for PassthroughFs {
     }
 
     fn destroy(&self) {
-        self.handles.write().unwrap().clear();
-        self.inodes.write().unwrap().clear();
+        self.handles.lock().unwrap().clear();
+        self.inodes.lock().unwrap().clear();
     }
 
     fn statfs(&self, _ctx: Context, inode: Inode) -> io::Result<libc::statvfs64> {
         let data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&inode)
             .map(Arc::clone)
@@ -727,13 +727,13 @@ impl FileSystem for PassthroughFs {
     }
 
     fn forget(&self, _ctx: Context, inode: Inode, count: u64) {
-        let mut inodes = self.inodes.write().unwrap();
+        let mut inodes = self.inodes.lock().unwrap();
 
         forget_one(&mut inodes, inode, count)
     }
 
     fn batch_forget(&self, _ctx: Context, requests: Vec<(Inode, u64)>) {
-        let mut inodes = self.inodes.write().unwrap();
+        let mut inodes = self.inodes.lock().unwrap();
 
         for (inode, count) in requests {
             forget_one(&mut inodes, inode, count)
@@ -770,7 +770,7 @@ impl FileSystem for PassthroughFs {
         let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
         let data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&parent)
             .map(Arc::clone)
@@ -864,7 +864,7 @@ impl FileSystem for PassthroughFs {
         let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
         let data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&parent)
             .map(Arc::clone)
@@ -896,7 +896,7 @@ impl FileSystem for PassthroughFs {
             file,
         };
 
-        self.handles.write().unwrap().insert(handle, Arc::new(data));
+        self.handles.lock().unwrap().insert(handle, Arc::new(data));
 
         let mut opts = OpenOptions::empty();
         match self.cfg.cache_policy {
@@ -960,7 +960,7 @@ impl FileSystem for PassthroughFs {
     ) -> io::Result<usize> {
         let data = self
             .handles
-            .read()
+            .lock()
             .unwrap()
             .get(&handle)
             .filter(|hd| hd.inode == inode)
@@ -988,7 +988,7 @@ impl FileSystem for PassthroughFs {
         let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
         let data = self
             .handles
-            .read()
+            .lock()
             .unwrap()
             .get(&handle)
             .filter(|hd| hd.inode == inode)
@@ -1018,7 +1018,7 @@ impl FileSystem for PassthroughFs {
     ) -> io::Result<(libc::stat64, Duration)> {
         let inode_data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&inode)
             .map(Arc::clone)
@@ -1033,7 +1033,7 @@ impl FileSystem for PassthroughFs {
         let data = if let Some(handle) = handle {
             let hd = self
                 .handles
-                .read()
+                .lock()
                 .unwrap()
                 .get(&handle)
                 .filter(|hd| hd.inode == inode)
@@ -1162,14 +1162,14 @@ impl FileSystem for PassthroughFs {
     ) -> io::Result<()> {
         let old_inode = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&olddir)
             .map(Arc::clone)
             .ok_or_else(ebadf)?;
         let new_inode = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&newdir)
             .map(Arc::clone)
@@ -1207,7 +1207,7 @@ impl FileSystem for PassthroughFs {
         let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
         let data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&parent)
             .map(Arc::clone)
@@ -1239,14 +1239,14 @@ impl FileSystem for PassthroughFs {
     ) -> io::Result<Entry> {
         let data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&inode)
             .map(Arc::clone)
             .ok_or_else(ebadf)?;
         let new_inode = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&newparent)
             .map(Arc::clone)
@@ -1282,7 +1282,7 @@ impl FileSystem for PassthroughFs {
         let (_uid, _gid) = set_creds(ctx.uid, ctx.gid)?;
         let data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&parent)
             .map(Arc::clone)
@@ -1301,7 +1301,7 @@ impl FileSystem for PassthroughFs {
     fn readlink(&self, _ctx: Context, inode: Inode) -> io::Result<Vec<u8>> {
         let data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&inode)
             .map(Arc::clone)
@@ -1338,7 +1338,7 @@ impl FileSystem for PassthroughFs {
     ) -> io::Result<()> {
         let data = self
             .handles
-            .read()
+            .lock()
             .unwrap()
             .get(&handle)
             .filter(|hd| hd.inode == inode)
@@ -1365,7 +1365,7 @@ impl FileSystem for PassthroughFs {
     fn fsync(&self, _ctx: Context, inode: Inode, datasync: bool, handle: Handle) -> io::Result<()> {
         let data = self
             .handles
-            .read()
+            .lock()
             .unwrap()
             .get(&handle)
             .filter(|hd| hd.inode == inode)
@@ -1403,7 +1403,7 @@ impl FileSystem for PassthroughFs {
     fn access(&self, ctx: Context, inode: Inode, mask: u32) -> io::Result<()> {
         let data = self
             .inodes
-            .read()
+            .lock()
             .unwrap()
             .get(&inode)
             .map(Arc::clone)
@@ -1565,7 +1565,7 @@ impl FileSystem for PassthroughFs {
     ) -> io::Result<()> {
         let data = self
             .handles
-            .read()
+            .lock()
             .unwrap()
             .get(&handle)
             .filter(|hd| hd.inode == inode)

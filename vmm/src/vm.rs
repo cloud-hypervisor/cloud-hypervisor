@@ -41,7 +41,7 @@ use std::fs::File;
 use std::io;
 use std::ops::Deref;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::{result, str, thread};
 use vm_allocator::{GsiApic, SystemAllocator};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
@@ -216,7 +216,7 @@ pub struct Vm {
     config: Arc<Mutex<VmConfig>>,
     on_tty: bool,
     signals: Option<Signals>,
-    state: RwLock<VmState>,
+    state: Mutex<VmState>,
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     memory_manager: Arc<Mutex<MemoryManager>>,
 }
@@ -373,7 +373,7 @@ impl Vm {
             on_tty,
             threads: Vec::with_capacity(1),
             signals: None,
-            state: RwLock::new(VmState::Created),
+            state: Mutex::new(VmState::Created),
             cpu_manager,
             memory_manager,
         })
@@ -469,7 +469,7 @@ impl Vm {
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
-        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
+        let mut state = self.state.try_lock().map_err(|_| Error::PoisonedState)?;
         let new_state = VmState::Shutdown;
 
         state.valid_transition(new_state)?;
@@ -600,7 +600,7 @@ impl Vm {
             }
         }
 
-        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
+        let mut state = self.state.try_lock().map_err(|_| Error::PoisonedState)?;
         *state = new_state;
 
         Ok(())
@@ -631,7 +631,7 @@ impl Vm {
     /// Get the VM state. Returns an error if the state is poisoned.
     pub fn get_state(&self) -> Result<VmState> {
         self.state
-            .try_read()
+            .try_lock()
             .map_err(|_| Error::PoisonedState)
             .map(|state| *state)
     }
@@ -641,7 +641,7 @@ impl Pausable for Vm {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         let mut state = self
             .state
-            .try_write()
+            .try_lock()
             .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM state: {}", e)))?;
         let new_state = VmState::Paused;
 
@@ -660,7 +660,7 @@ impl Pausable for Vm {
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         let mut state = self
             .state
-            .try_write()
+            .try_lock()
             .map_err(|e| MigratableError::Resume(anyhow!("Could not get VM state: {}", e)))?;
         let new_state = VmState::Running;
 

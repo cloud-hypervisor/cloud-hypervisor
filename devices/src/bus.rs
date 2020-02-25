@@ -9,7 +9,7 @@
 
 use std::cmp::{Ord, Ordering, PartialEq, PartialOrd};
 use std::collections::btree_map::BTreeMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::{convert, error, fmt, io, result};
 
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
@@ -95,19 +95,19 @@ impl PartialOrd for BusRange {
 /// only restriction is that no two devices can overlap in this address space.
 #[derive(Default)]
 pub struct Bus {
-    devices: RwLock<BTreeMap<BusRange, Arc<Mutex<dyn BusDevice>>>>,
+    devices: Mutex<BTreeMap<BusRange, Arc<Mutex<dyn BusDevice>>>>,
 }
 
 impl Bus {
     /// Constructs an a bus with an empty address space.
     pub fn new() -> Bus {
         Bus {
-            devices: RwLock::new(BTreeMap::new()),
+            devices: Mutex::new(BTreeMap::new()),
         }
     }
 
     fn first_before(&self, addr: u64) -> Option<(BusRange, Arc<Mutex<dyn BusDevice>>)> {
-        let devices = self.devices.read().unwrap();
+        let devices = self.devices.lock().unwrap();
         let (range, dev) = devices
             .range(..=BusRange { base: addr, len: 1 })
             .rev()
@@ -135,7 +135,7 @@ impl Bus {
         // Reject all cases where the new device's range overlaps with an existing device.
         if self
             .devices
-            .read()
+            .lock()
             .unwrap()
             .iter()
             .any(|(range, _dev)| range.overlaps(base, len))
@@ -145,7 +145,7 @@ impl Bus {
 
         if self
             .devices
-            .write()
+            .lock()
             .unwrap()
             .insert(BusRange { base, len }, device)
             .is_some()
@@ -164,7 +164,7 @@ impl Bus {
 
         let bus_range = BusRange { base, len };
 
-        if self.devices.write().unwrap().remove(&bus_range).is_none() {
+        if self.devices.lock().unwrap().remove(&bus_range).is_none() {
             return Err(Error::MissingAddressRange);
         }
 

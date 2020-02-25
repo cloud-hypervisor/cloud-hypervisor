@@ -27,7 +27,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process;
 use std::slice;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::vec::Vec;
 use std::{convert, error, fmt, io};
@@ -261,7 +261,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
         &mut self,
         device_event: u16,
         evset: epoll::Events,
-        vrings: &[Arc<RwLock<Vring>>],
+        vrings: &[Arc<Mutex<Vring>>],
     ) -> VhostUserBackendResult<bool> {
         if evset != epoll::Events::EPOLLIN {
             return Err(Error::HandleEventNotEpollIn.into());
@@ -271,7 +271,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
         match device_event {
             q if device_event < self.config.num_queues => {
-                let mut vring = vrings[q as usize].write().unwrap();
+                let mut vring = vrings[q as usize].lock().unwrap();
 
                 if self.poll_queue {
                     // Actively poll the queue until POLL_QUEUE_US has passed
@@ -404,7 +404,7 @@ pub fn start_block_backend(backend_command: &str) {
         }
     };
 
-    let blk_backend = Arc::new(RwLock::new(
+    let blk_backend = Arc::new(Mutex::new(
         VhostUserBlkBackend::new(
             backend_config.image.to_string(),
             backend_config.num_queues,
@@ -428,7 +428,7 @@ pub fn start_block_backend(backend_command: &str) {
 
     let vring_worker = blk_daemon.get_vring_worker();
     blk_backend
-        .write()
+        .lock()
         .unwrap()
         .set_vring_worker(Some(vring_worker));
 
@@ -444,7 +444,7 @@ pub fn start_block_backend(backend_command: &str) {
         error!("Error from the main thread: {:?}", e);
     }
 
-    let kill_evt = &blk_backend.write().unwrap().kill_evt;
+    let kill_evt = &blk_backend.lock().unwrap().kill_evt;
     if let Err(e) = kill_evt.write(1) {
         error!("Error shutting down worker thread: {:?}", e)
     }

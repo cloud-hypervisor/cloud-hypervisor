@@ -167,7 +167,7 @@ mod tests {
     use libc::EFD_NONBLOCK;
     use std::os::unix::io::AsRawFd;
     use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, RwLock};
+    use std::sync::{Arc, Mutex};
     use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
     use vmm_sys_util::eventfd::EventFd;
 
@@ -315,7 +315,7 @@ mod tests {
                     kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
                     pause_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
                     interrupt_cb,
-                    backend: Arc::new(RwLock::new(TestBackend::new())),
+                    backend: Arc::new(Mutex::new(TestBackend::new())),
                 },
             }
         }

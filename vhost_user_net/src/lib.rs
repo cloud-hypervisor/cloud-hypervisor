@@ -23,7 +23,7 @@ use std::io::{self};
 use std::net::Ipv4Addr;
 use std::os::unix::io::AsRawFd;
 use std::process;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 use std::vec::Vec;
 use vhost_rs::vhost_user::message::*;
 use vhost_rs::vhost_user::Error as VhostUserError;
@@ -286,7 +286,7 @@ impl VhostUserBackend for VhostUserNetBackend {
         &mut self,
         device_event: u16,
         evset: epoll::Events,
-        vrings: &[Arc<RwLock<Vring>>],
+        vrings: &[Arc<Mutex<Vring>>],
     ) -> VhostUserBackendResult<bool> {
         if evset != epoll::Events::EPOLLIN {
             return Err(Error::HandleEventNotEpollIn.into());
@@ -298,7 +298,7 @@ impl VhostUserBackend for VhostUserNetBackend {
         match device_event {
             x if ((x < self.num_queues as u16) && (x % 2 == 0)) => {
                 let index = (x / 2) as usize;
-                let mut vring = vrings[x as usize].write().unwrap();
+                let mut vring = vrings[x as usize].lock().unwrap();
                 self.resume_rx(&mut vring, index)?;
 
                 if !self.rx_tap_listenings[index] {
@@ -312,12 +312,12 @@ impl VhostUserBackend for VhostUserNetBackend {
             }
             x if ((x < self.num_queues as u16) && (x % 2 != 0)) => {
                 let index = ((x - 1) / 2) as usize;
-                let mut vring = vrings[x as usize].write().unwrap();
+                let mut vring = vrings[x as usize].lock().unwrap();
                 self.process_tx(&mut vring.mut_queue(), index)?;
             }
             x if x >= tap_start_index && x <= tap_end_index => {
                 let index = x as usize - self.num_queues;
-                let mut vring = vrings[2 * index].write().unwrap();
+                let mut vring = vrings[2 * index].lock().unwrap();
                 if self.rxs[index].deferred_frame
                 // Process a deferred frame first if available. Don't read from tap again
                 // until we manage to receive this deferred frame.
@@ -418,7 +418,7 @@ pub fn start_net_backend(backend_command: &str) {
         }
     };
 
-    let net_backend = Arc::new(RwLock::new(
+    let net_backend = Arc::new(Mutex::new(
         VhostUserNetBackend::new(
             backend_config.ip,
             backend_config.mask,
@@ -438,7 +438,7 @@ pub fn start_net_backend(backend_command: &str) {
     let vring_worker = net_daemon.get_vring_worker();
 
     net_backend
-        .write()
+        .lock()
         .unwrap()
         .set_vring_worker(Some(vring_worker));
 
@@ -454,7 +454,7 @@ pub fn start_net_backend(backend_command: &str) {
         error!("Error from the main thread: {:?}", e);
     }
 
-    let kill_evt = &net_backend.write().unwrap().kill_evt;
+    let kill_evt = &net_backend.lock().unwrap().kill_evt;
     if let Err(e) = kill_evt.write(1) {
         error!("Error shutting down worker thread: {:?}", e)
     }
