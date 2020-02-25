@@ -17,10 +17,11 @@ use std::io;
 use std::os::unix::io::FromRawFd;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use url::Url;
 use vm_allocator::{GsiApic, SystemAllocator};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
-    mmap::MmapRegionError, Address, Error as MmapError, GuestAddress, GuestAddressSpace,
+    mmap::MmapRegionError, Address, Bytes, Error as MmapError, GuestAddress, GuestAddressSpace,
     GuestMemory, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, GuestMemoryRegion,
     GuestRegionMmap, GuestUsize, MmapRegion,
 };
@@ -971,5 +972,67 @@ impl Snapshottable for MemoryManager {
     }
 }
 
-impl Transportable for MemoryManager {}
+impl Transportable for MemoryManager {
+    fn send(
+        &self,
+        _snapshot: &Snapshot,
+        destination_url: &str,
+    ) -> std::result::Result<(), MigratableError> {
+        let url = Url::parse(destination_url).map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Could not parse destination URL: {}", e))
+        })?;
+
+        match url.scheme() {
+            "file" => {
+                let vm_memory_snapshot_path = url
+                    .to_file_path()
+                    .map_err(|_| {
+                        MigratableError::MigrateSend(anyhow!(
+                            "Could not convert file URL to a file path"
+                        ))
+                    })
+                    .and_then(|path| {
+                        if !path.is_dir() {
+                            return Err(MigratableError::MigrateSend(anyhow!(
+                                "Destination is not a directory"
+                            )));
+                        }
+                        Ok(path)
+                    })?;
+
+                if let Some(guest_memory) = &*self.snapshot.lock().unwrap() {
+                    guest_memory.with_regions_mut(|index, region| {
+                        let mut memory_region_path = vm_memory_snapshot_path.clone();
+                        memory_region_path.push(format!("memory-region-{}", index));
+
+                        // Create the snapshot file for the region
+                        let mut memory_region_file = OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .create_new(true)
+                            .open(memory_region_path)
+                            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+                        guest_memory
+                            .write_to(
+                                region.start_addr(),
+                                &mut memory_region_file,
+                                region.len().try_into().unwrap(),
+                            )
+                            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+                        Ok(())
+                    })?;
+                }
+            }
+            _ => {
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Unsupported VM transport URL scheme: {}",
+                    url.scheme()
+                )))
+            }
+        }
+        Ok(())
+    }
+}
 impl Migratable for MemoryManager {}
