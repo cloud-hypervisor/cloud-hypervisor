@@ -29,6 +29,7 @@ use crate::config::{DeviceConfig, DiskConfig, HotplugMethod, NetConfig, PmemConf
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+use crate::migration::{url_to_path, VM_SNAPSHOT_FILE};
 use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID};
 use anyhow::anyhow;
 use arch::{BootProtocol, EntryPoint};
@@ -41,12 +42,14 @@ use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 use std::convert::TryInto;
 use std::ffi::CString;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::io::{self, Seek, SeekFrom};
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
+use url::Url;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryMmap,
     GuestMemoryRegion,
@@ -936,10 +939,10 @@ impl Pausable for Vm {
 
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
-    config: Arc<Mutex<VmConfig>>,
+    pub config: Arc<Mutex<VmConfig>>,
 }
 
-const VM_SNAPSHOT_ID: &str = "vm";
+pub const VM_SNAPSHOT_ID: &str = "vm";
 impl Snapshottable for Vm {
     fn id(&self) -> String {
         VM_SNAPSHOT_ID.to_string()
@@ -1060,7 +1063,61 @@ impl Snapshottable for Vm {
     }
 }
 
-impl Transportable for Vm {}
+impl Transportable for Vm {
+    fn send(
+        &self,
+        snapshot: &Snapshot,
+        destination_url: &str,
+    ) -> std::result::Result<(), MigratableError> {
+        let url = Url::parse(destination_url).map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Could not parse destination URL: {}", e))
+        })?;
+
+        match url.scheme() {
+            "file" => {
+                let mut vm_snapshot_path = url_to_path(&url)?;
+                vm_snapshot_path.push(VM_SNAPSHOT_FILE);
+
+                // Create the snapshot file
+                let mut vm_snapshot_file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create_new(true)
+                    .open(vm_snapshot_path)
+                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+                // Serialize and write the snapshot
+                let vm_snapshot = serde_json::to_vec(snapshot)
+                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+                vm_snapshot_file
+                    .write(&vm_snapshot)
+                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+                // Tell the memory manager to also send/write its own snapshot.
+                if let Some(memory_manager_snapshot) =
+                    snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
+                {
+                    self.memory_manager
+                        .lock()
+                        .unwrap()
+                        .send(&*memory_manager_snapshot.clone(), destination_url)?;
+                } else {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Missing memory manager snapshot"
+                    )));
+                }
+            }
+            _ => {
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Unsupported VM transport URL scheme: {}",
+                    url.scheme()
+                )))
+            }
+        }
+        Ok(())
+    }
+}
 impl Migratable for Vm {}
 
 #[cfg(test)]
