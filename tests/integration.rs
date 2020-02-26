@@ -18,13 +18,14 @@ extern crate lazy_static;
 mod tests {
     #![allow(dead_code)]
     use ssh2::Session;
+    use std::ffi::OsStr;
     use std::fs;
     use std::io;
     use std::io::BufRead;
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::path::Path;
-    use std::process::{Command, Stdio};
+    use std::process::{Child, Command, Stdio};
     use std::string::String;
     use std::sync::Mutex;
     use std::thread;
@@ -709,6 +710,31 @@ mod tests {
             let end_addr = u64::from_str_radix(args[1], 16).map_err(Error::Parsing)?;
 
             Ok(cache == (end_addr - start_addr + 1))
+        }
+    }
+
+    struct GuestCommand {
+        command: Command,
+    }
+
+    impl GuestCommand {
+        fn new() -> Self {
+            Self {
+                command: Command::new("target/release/cloud-hypervisor"),
+            }
+        }
+
+        fn spawn(&mut self) -> io::Result<Child> {
+            self.command.stderr(Stdio::piped()).stdout(Stdio::piped()).spawn()
+        }
+
+        fn args<I, S>(&mut self, args: I) -> &mut Self
+        where
+            I: IntoIterator<Item = S>,
+            S: AsRef<OsStr>,
+        {
+            self.command.args(args);
+            self
         }
     }
 
