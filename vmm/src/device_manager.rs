@@ -1568,45 +1568,81 @@ impl DeviceManager {
 }
 
 #[cfg(feature = "acpi")]
+struct PciDevSlot {
+    device_id: u8,
+}
+
+#[cfg(feature = "acpi")]
+impl Aml for PciDevSlot {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let sun = self.device_id;
+        let adr: u32 = (self.device_id as u32) << 16;
+        aml::Device::new(
+            format!("S{:03}", self.device_id).as_str().into(),
+            vec![
+                &aml::Name::new("_SUN".into(), &sun),
+                &aml::Name::new("_ADR".into(), &adr),
+            ],
+        )
+        .to_aml_bytes()
+    }
+}
+
+#[cfg(feature = "acpi")]
 impl Aml for DeviceManager {
     fn to_aml_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         let start_of_device_area = self.memory_manager.lock().unwrap().start_of_device_area().0;
         let end_of_device_area = self.memory_manager.lock().unwrap().end_of_device_area().0;
-        let pci_dsdt_data = aml::Device::new(
-            "_SB_.PCI0".into(),
-            vec![
-                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A08")),
-                &aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A03")),
-                &aml::Name::new("_ADR".into(), &aml::ZERO),
-                &aml::Name::new("_SEG".into(), &aml::ZERO),
-                &aml::Name::new("_UID".into(), &aml::ZERO),
-                &aml::Name::new("SUPP".into(), &aml::ZERO),
-                &aml::Name::new(
-                    "_CRS".into(),
-                    &aml::ResourceTemplate::new(vec![
-                        &aml::AddressSpace::new_bus_number(0x0u16, 0xffu16),
-                        &aml::IO::new(0xcf8, 0xcf8, 1, 0x8),
-                        &aml::AddressSpace::new_io(0x0u16, 0xcf7u16),
-                        &aml::AddressSpace::new_io(0xd00u16, 0xffffu16),
-                        &aml::AddressSpace::new_memory(
-                            aml::AddressSpaceCachable::NotCacheable,
-                            true,
-                            layout::MEM_32BIT_DEVICES_START.0 as u32,
-                            (layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE - 1)
-                                as u32,
-                        ),
-                        &aml::AddressSpace::new_memory(
-                            aml::AddressSpaceCachable::NotCacheable,
-                            true,
-                            start_of_device_area,
-                            end_of_device_area,
-                        ),
-                    ]),
+
+        let mut pci_dsdt_inner_data: Vec<&dyn aml::Aml> = Vec::new();
+        let hid = aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A08"));
+        pci_dsdt_inner_data.push(&hid);
+        let cid = aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A03"));
+        pci_dsdt_inner_data.push(&cid);
+        let adr = aml::Name::new("_ADR".into(), &aml::ZERO);
+        pci_dsdt_inner_data.push(&adr);
+        let seg = aml::Name::new("_SEG".into(), &aml::ZERO);
+        pci_dsdt_inner_data.push(&seg);
+        let uid = aml::Name::new("_UID".into(), &aml::ZERO);
+        pci_dsdt_inner_data.push(&uid);
+        let supp = aml::Name::new("SUPP".into(), &aml::ZERO);
+        pci_dsdt_inner_data.push(&supp);
+        let crs = aml::Name::new(
+            "_CRS".into(),
+            &aml::ResourceTemplate::new(vec![
+                &aml::AddressSpace::new_bus_number(0x0u16, 0xffu16),
+                &aml::IO::new(0xcf8, 0xcf8, 1, 0x8),
+                &aml::AddressSpace::new_io(0x0u16, 0xcf7u16),
+                &aml::AddressSpace::new_io(0xd00u16, 0xffffu16),
+                &aml::AddressSpace::new_memory(
+                    aml::AddressSpaceCachable::NotCacheable,
+                    true,
+                    layout::MEM_32BIT_DEVICES_START.0 as u32,
+                    (layout::MEM_32BIT_DEVICES_START.0 + layout::MEM_32BIT_DEVICES_SIZE - 1) as u32,
                 ),
-            ],
-        )
-        .to_aml_bytes();
+                &aml::AddressSpace::new_memory(
+                    aml::AddressSpaceCachable::NotCacheable,
+                    true,
+                    start_of_device_area,
+                    end_of_device_area,
+                ),
+            ]),
+        );
+        pci_dsdt_inner_data.push(&crs);
+
+        let mut pci_devices = Vec::new();
+        for device_id in 0..32 {
+            let pci_device = PciDevSlot { device_id };
+            pci_devices.push(pci_device);
+        }
+
+        for pci_device in pci_devices.iter() {
+            pci_dsdt_inner_data.push(pci_device);
+        }
+
+        let pci_dsdt_data =
+            aml::Device::new("_SB_.PCI0".into(), pci_dsdt_inner_data).to_aml_bytes();
 
         let mbrd_dsdt_data = aml::Device::new(
             "_SB_.MBRD".into(),
