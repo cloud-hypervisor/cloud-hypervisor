@@ -5,7 +5,7 @@
 
 use crate::api::http_endpoint::{
     VmActionHandler, VmAddDevice, VmAddDisk, VmAddNet, VmAddPmem, VmCreate, VmInfo, VmRemoveDevice,
-    VmResize, VmSnapshot, VmmPing, VmmShutdown,
+    VmResize, VmRestore, VmSnapshot, VmmPing, VmmShutdown,
 };
 use crate::api::{ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -63,6 +63,7 @@ lazy_static! {
         r.routes.insert(endpoint!("/vm.shutdown"), Box::new(VmActionHandler::new(VmAction::Shutdown)));
         r.routes.insert(endpoint!("/vm.reboot"), Box::new(VmActionHandler::new(VmAction::Reboot)));
         r.routes.insert(endpoint!("/vm.snapshot"), Box::new(VmSnapshot {}));
+        r.routes.insert(endpoint!("/vm.restore"), Box::new(VmRestore {}));
         r.routes.insert(endpoint!("/vmm.shutdown"), Box::new(VmmShutdown {}));
         r.routes.insert(endpoint!("/vmm.ping"), Box::new(VmmPing {}));
         r.routes.insert(endpoint!("/vm.resize"), Box::new(VmResize {}));
