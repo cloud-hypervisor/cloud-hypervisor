@@ -203,7 +203,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
             loop {
                 vring
                     .mut_queue()
-                    .update_avail_event(self.mem.as_ref().unwrap());
+                    .update_avail_event(self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?);
                 if !self.process_queue(&mut vring)? {
                     break;
                 }
