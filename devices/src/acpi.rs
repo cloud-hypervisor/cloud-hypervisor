@@ -137,6 +137,11 @@ impl Aml for AcpiGEDDevice {
                             &aml::Equal::new(&aml::Local(1), &2usize),
                             vec![&aml::MethodCall::new("\\_SB_.MHPC.MSCN".into(), vec![])],
                         ),
+                        &aml::And::new(&aml::Local(1), &aml::Local(0), &4usize),
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Local(1), &4usize),
+                            vec![&aml::MethodCall::new("\\_SB_.PCI0.PCNT".into(), vec![])],
+                        ),
                     ],
                 ),
             ],
