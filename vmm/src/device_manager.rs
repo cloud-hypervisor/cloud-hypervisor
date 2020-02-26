@@ -1589,6 +1589,48 @@ impl Aml for PciDevSlot {
 }
 
 #[cfg(feature = "acpi")]
+struct PciDevSlotNotify {
+    device_id: u8,
+}
+
+#[cfg(feature = "acpi")]
+impl Aml for PciDevSlotNotify {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let device_id_mask: u32 = 1 << self.device_id;
+        let object = aml::Path::new(&format!("S{:03}", self.device_id));
+        let mut bytes = aml::And::new(&aml::Local(0), &aml::Arg(0), &device_id_mask).to_aml_bytes();
+        bytes.extend_from_slice(
+            &aml::If::new(
+                &aml::Equal::new(&aml::Local(0), &device_id_mask),
+                vec![&aml::Notify::new(&object, &aml::Arg(1))],
+            )
+            .to_aml_bytes(),
+        );
+        bytes
+    }
+}
+
+#[cfg(feature = "acpi")]
+struct PciDevSlotMethods {}
+
+#[cfg(feature = "acpi")]
+impl Aml for PciDevSlotMethods {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut device_notifies = Vec::new();
+        for device_id in 0..32 {
+            device_notifies.push(PciDevSlotNotify { device_id });
+        }
+
+        let mut device_notifies_refs: Vec<&dyn aml::Aml> = Vec::new();
+        for device_notify in device_notifies.iter() {
+            device_notifies_refs.push(device_notify);
+        }
+
+        aml::Method::new("DVNT".into(), 2, true, device_notifies_refs).to_aml_bytes()
+    }
+}
+
+#[cfg(feature = "acpi")]
 impl Aml for DeviceManager {
     fn to_aml_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -1636,10 +1678,12 @@ impl Aml for DeviceManager {
             let pci_device = PciDevSlot { device_id };
             pci_devices.push(pci_device);
         }
-
         for pci_device in pci_devices.iter() {
             pci_dsdt_inner_data.push(pci_device);
         }
+
+        let pci_device_methods = PciDevSlotMethods {};
+        pci_dsdt_inner_data.push(&pci_device_methods);
 
         let pci_dsdt_data =
             aml::Device::new("_SB_.PCI0".into(), pci_dsdt_inner_data).to_aml_bytes();
