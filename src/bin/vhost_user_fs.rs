@@ -183,32 +183,34 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
             return Err(Error::HandleEventNotEpollIn.into());
         }
 
-        match device_event {
+        let mut vring = match device_event {
             HIPRIO_QUEUE_EVENT => {
                 debug!("HIPRIO_QUEUE_EVENT");
+                vrings[0].write().unwrap()
             }
             REQ_QUEUE_EVENT => {
-                debug!("REQ_QUEUE_EVENT");
-                let mut vring = vrings[1].write().unwrap();
-                if self.event_idx {
-                    // vm-virtio's Queue implementation only checks avail_index
-                    // once, so to properly support EVENT_IDX we need to keep
-                    // calling process_queue() until it stops finding new
-                    // requests on the queue.
-                    loop {
-                        vring.mut_queue().update_avail_event(
-                            self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?,
-                        );
-                        if !self.process_queue(&mut vring)? {
-                            break;
-                        }
-                    }
-                } else {
-                    // Without EVENT_IDX, a single call is enough.
-                    self.process_queue(&mut vring)?;
-                }
+                debug!("QUEUE_EVENT");
+                vrings[1].write().unwrap()
             }
             _ => return Err(Error::HandleEventUnknownEvent.into()),
+        };
+
+        if self.event_idx {
+            // vm-virtio's Queue implementation only checks avail_index
+            // once, so to properly support EVENT_IDX we need to keep
+            // calling process_queue() until it stops finding new
+            // requests on the queue.
+            loop {
+                vring
+                    .mut_queue()
+                    .update_avail_event(self.mem.as_ref().unwrap());
+                if !self.process_queue(&mut vring)? {
+                    break;
+                }
+            }
+        } else {
+            // Without EVENT_IDX, a single call is enough.
+            self.process_queue(&mut vring)?;
         }
 
         Ok(false)
