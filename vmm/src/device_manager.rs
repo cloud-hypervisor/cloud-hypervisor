@@ -1634,6 +1634,53 @@ impl Aml for PciDevSlotMethods {
 impl Aml for DeviceManager {
     fn to_aml_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
+        // PCI hotplug controller
+        bytes.extend_from_slice(
+            &aml::Device::new(
+                "_SB_.PHPR".into(),
+                vec![
+                    &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
+                    &aml::Name::new("_STA".into(), &0x0bu8),
+                    &aml::Mutex::new("BLCK".into(), 0),
+                    // I/O port for PCI hotplug controller
+                    &aml::Name::new(
+                        "_CRS".into(),
+                        &aml::ResourceTemplate::new(vec![&aml::IO::new(
+                            0xae00, 0xae00, 0x01, 0x10,
+                        )]),
+                    ),
+                    // OpRegion and Fields map I/O port into individual field values
+                    &aml::OpRegion::new("PCST".into(), aml::OpRegionSpace::SystemIO, 0xae00, 0x10),
+                    &aml::Field::new(
+                        "PCST".into(),
+                        aml::FieldAccessType::DWord,
+                        aml::FieldUpdateRule::WriteAsZeroes,
+                        vec![
+                            aml::FieldEntry::Named(*b"PCIU", 32),
+                            aml::FieldEntry::Named(*b"PCID", 32),
+                            aml::FieldEntry::Named(*b"B0EJ", 32),
+                        ],
+                    ),
+                    &aml::Method::new(
+                        "PCEJ".into(),
+                        1,
+                        true,
+                        vec![
+                            // Take lock defined above
+                            &aml::Acquire::new("BLCK".into(), 0xffff),
+                            // Write PCI bus number (in first argument) to I/O port via field
+                            &aml::ShiftLeft::new(&aml::Path::new("B0EJ"), &aml::ONE, &aml::Arg(0)),
+                            // Release lock
+                            &aml::Release::new("BLCK".into()),
+                            // Return 0
+                            &aml::Return::new(&aml::ZERO),
+                        ],
+                    ),
+                ],
+            )
+            .to_aml_bytes(),
+        );
+
         let start_of_device_area = self.memory_manager.lock().unwrap().start_of_device_area().0;
         let end_of_device_area = self.memory_manager.lock().unwrap().end_of_device_area().0;
 
