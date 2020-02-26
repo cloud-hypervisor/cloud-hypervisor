@@ -754,7 +754,7 @@ mod tests {
             .for_each(|disk_config| {
                 let guest = Guest::new(*disk_config);
 
-                let mut child = Command::new("target/release/cloud-hypervisor")
+                let mut child = GuestCommand::new()
                     .args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
@@ -804,7 +804,7 @@ mod tests {
         test_block!(tb, "", {
             let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut bionic);
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -850,7 +850,7 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=5120M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -888,7 +888,7 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=128G"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -929,7 +929,7 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -982,7 +982,7 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus","boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -1041,7 +1041,7 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("bzImage");
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus","boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -1098,7 +1098,7 @@ mod tests {
             blk_file_path.push("workloads");
             blk_file_path.push("blk.img");
 
-            let mut cloud_child = Command::new("target/release/cloud-hypervisor")
+            let mut cloud_child = GuestCommand::new()
                 .args(&["--cpus", "boot=4"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -1191,7 +1191,7 @@ mod tests {
                 .unwrap();
             thread::sleep(std::time::Duration::new(10, 0));
 
-            let mut cloud_child = Command::new("target/release/cloud-hypervisor")
+            let mut cloud_child = GuestCommand::new()
                 .args(&["--cpus", "boot=4"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -1279,7 +1279,7 @@ mod tests {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
-            let mut cloud_child = Command::new("target/release/cloud-hypervisor")
+            let mut cloud_child = GuestCommand::new()
                 .args(&["--cpus", "boot=4"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -1362,7 +1362,7 @@ mod tests {
             let (mut daemon_child, vubd_socket_path) =
                 prepare_vubd(&guest.tmp_dir, "blk.img", 2, false, false);
 
-            let mut cloud_child = Command::new("target/release/cloud-hypervisor")
+            let mut cloud_child = GuestCommand::new()
                 .args(&["--cpus", "boot=2"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -1453,7 +1453,7 @@ mod tests {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
-            let mut cloud_child = Command::new("target/release/cloud-hypervisor")
+            let mut cloud_child = GuestCommand::new()
                 .args(&["--cpus", "boot=2"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -1494,7 +1494,7 @@ mod tests {
             let (mut daemon_child, vubd_socket_path) =
                 prepare_vubd(&guest.tmp_dir, "blk.img", 1, true, false);
 
-            let mut cloud_child = Command::new("target/release/cloud-hypervisor")
+            let mut cloud_child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -1568,7 +1568,7 @@ mod tests {
             let (mut daemon_child, vubd_socket_path) =
                 prepare_vubd(&guest.tmp_dir, "blk.img", 1, false, true);
 
-            let mut cloud_child = Command::new("target/release/cloud-hypervisor")
+            let mut cloud_child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -1639,7 +1639,7 @@ mod tests {
                 false,
             );
 
-            let mut cloud_child = Command::new("target/release/cloud-hypervisor")
+            let mut cloud_child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -1686,7 +1686,7 @@ mod tests {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -1770,7 +1770,7 @@ mod tests {
                 virtiofsd_cache,
             );
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -1914,7 +1914,7 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus","boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -1977,7 +1977,7 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus","boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -2021,7 +2021,7 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -2074,7 +2074,7 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -2123,7 +2123,7 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -2143,8 +2143,6 @@ mod tests {
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--serial", "null"])
                 .args(&["--console", "off"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
                 .spawn()
                 .unwrap();
 
@@ -2184,7 +2182,7 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -2204,8 +2202,6 @@ mod tests {
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
                 .spawn()
                 .unwrap();
 
@@ -2247,7 +2243,7 @@ mod tests {
             let guest = Guest::new(&mut clear);
 
             let serial_path = guest.tmp_dir.path().join("/tmp/serial-output");
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -2310,7 +2306,7 @@ mod tests {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -2329,8 +2325,6 @@ mod tests {
                 ])
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--console", "tty"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
                 .spawn()
                 .unwrap();
 
@@ -2370,7 +2364,7 @@ mod tests {
             let guest = Guest::new(&mut clear);
 
             let console_path = guest.tmp_dir.path().join("/tmp/console-output");
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -2458,7 +2452,7 @@ mod tests {
             let (mut daemon_child, virtiofsd_socket_path) =
                 prepare_virtiofsd(&guest.tmp_dir, vfio_path.to_str().unwrap(), "none");
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=4"])
                 .args(&["--memory", "size=1G,file=/dev/hugepages"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -2562,7 +2556,7 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus","boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -2624,7 +2618,7 @@ mod tests {
             .for_each(|disk_config| {
                 let guest = Guest::new(*disk_config);
 
-                let mut child = Command::new("target/release/cloud-hypervisor")
+                let mut child = GuestCommand::new()
                     .args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
@@ -2695,7 +2689,7 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("bzImage");
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus","boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -2761,7 +2755,7 @@ mod tests {
 
             let sock = temp_vsock_path(&guest.tmp_dir);
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -2837,7 +2831,7 @@ mod tests {
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--api-socket", &api_socket])
                 .spawn()
                 .unwrap();
@@ -2896,7 +2890,7 @@ mod tests {
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--api-socket", &api_socket])
                 .spawn()
                 .unwrap();
@@ -2990,7 +2984,7 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("bzImage");
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus","boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -3076,7 +3070,7 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
@@ -3195,7 +3189,7 @@ mod tests {
 
             let guest1 = Guest::new(&mut clear1 as &mut dyn DiskConfig);
 
-            let mut child1 = Command::new("target/release/cloud-hypervisor")
+            let mut child1 = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
                 .args(&["--kernel", guest1.fw_path.as_str()])
@@ -3226,7 +3220,7 @@ mod tests {
 
             let guest2 = Guest::new(&mut clear2 as &mut dyn DiskConfig);
 
-            let mut child2 = Command::new("target/release/cloud-hypervisor")
+            let mut child2 = GuestCommand::new()
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
                 .args(&["--kernel", guest2.fw_path.as_str()])
@@ -3302,7 +3296,7 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -3408,7 +3402,7 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M,hotplug_size=8192M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -3534,7 +3528,7 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M,hotplug_size=8192M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -3643,7 +3637,7 @@ mod tests {
 
             let guest_memory_size_kb = 512 * 1024;
 
-            let mut child = Command::new("target/release/cloud-hypervisor")
+            let mut child = GuestCommand::new()
                 .args(&["--cpus","boot=1"])
                 .args(&["--memory", format!("size={}K", guest_memory_size_kb).as_str()])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
