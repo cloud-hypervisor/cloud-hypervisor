@@ -1635,7 +1635,28 @@ impl Aml for PciDevSlotMethods {
             device_notifies_refs.push(device_notify);
         }
 
-        aml::Method::new("DVNT".into(), 2, true, device_notifies_refs).to_aml_bytes()
+        let mut bytes =
+            aml::Method::new("DVNT".into(), 2, true, device_notifies_refs).to_aml_bytes();
+
+        bytes.extend_from_slice(
+            &aml::Method::new(
+                "PCNT".into(),
+                0,
+                true,
+                vec![
+                    &aml::MethodCall::new(
+                        "DVNT".into(),
+                        vec![&aml::Path::new("\\_SB_.PHPR.PCIU"), &aml::ONE],
+                    ),
+                    &aml::MethodCall::new(
+                        "DVNT".into(),
+                        vec![&aml::Path::new("\\_SB_.PHPR.PCID"), &3usize],
+                    ),
+                ],
+            )
+            .to_aml_bytes(),
+        );
+        bytes
     }
 }
 
