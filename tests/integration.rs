@@ -760,6 +760,10 @@ mod tests {
                 .as_str(),
             ])
         }
+
+        fn default_net(&mut self) -> &mut Self {
+            self.args(&["--net", self.guest.default_net_string().as_str()])
+        }
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
@@ -783,7 +787,7 @@ mod tests {
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
                     .default_disks()
-                    .args(&["--net", guest.default_net_string().as_str()])
+                    .default_net()
                     .args(&["--serial", "tty", "--console", "off"])
                     .spawn()
                     .unwrap();
@@ -821,7 +825,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .spawn()
                 .unwrap();
 
@@ -855,7 +859,7 @@ mod tests {
                 .args(&["--memory", "size=5120M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .spawn()
                 .unwrap();
 
@@ -881,7 +885,7 @@ mod tests {
                 .args(&["--memory", "size=128G"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .spawn()
                 .unwrap();
 
@@ -910,7 +914,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .spawn()
                 .unwrap();
 
@@ -951,7 +955,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
@@ -998,7 +1002,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
@@ -1060,7 +1064,7 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .spawn()
                 .unwrap();
 
@@ -1300,7 +1304,7 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .spawn()
                 .unwrap();
 
@@ -1386,7 +1390,7 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .spawn()
                 .unwrap();
 
@@ -1432,7 +1436,7 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .spawn()
                 .unwrap();
 
@@ -1506,7 +1510,7 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .spawn()
                 .unwrap();
 
@@ -1572,7 +1576,7 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .spawn()
                 .unwrap();
 
@@ -1607,7 +1611,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .spawn()
                 .unwrap();
 
@@ -1679,7 +1683,7 @@ mod tests {
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&[
                     "--fs",
                     format!(
@@ -1811,7 +1815,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&[
                     "--pmem",
                     format!(
@@ -1867,7 +1871,7 @@ mod tests {
                         guest.disk_config.disk(DiskType::CloudInit).unwrap()
                     )
                     .as_str()])
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&[
                     "--pmem",
                     format!(
@@ -1947,7 +1951,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--serial", "off"])
                 .spawn()
                 .unwrap();
@@ -1984,7 +1988,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--serial", "null"])
                 .args(&["--console", "off"])
                 .spawn()
@@ -2031,7 +2035,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
                 .spawn()
@@ -2080,7 +2084,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&[
                     "--serial",
                     format!("file={}", serial_path.to_str().unwrap()).as_str(),
@@ -2131,7 +2135,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--console", "tty"])
                 .spawn()
                 .unwrap();
@@ -2177,7 +2181,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&[
                     "--console",
                     format!("file={}", console_path.to_str().unwrap()).as_str(),
@@ -2345,7 +2349,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw acpi=off"])
                 .spawn()
                 .unwrap();
@@ -2395,7 +2399,7 @@ mod tests {
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
                     .default_disks()
-                    .args(&["--net", guest.default_net_string().as_str()])
+                    .default_net()
                     .args(&["--serial", "tty", "--console", "off"])
                     .spawn()
                     .unwrap();
@@ -2454,7 +2458,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
@@ -2508,7 +2512,7 @@ mod tests {
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--vsock", format!("cid=3,sock={}", sock).as_str()])
                 .spawn()
                 .unwrap();
@@ -3002,7 +3006,7 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--api-socket", &api_socket])
                 .spawn()
                 .unwrap();
@@ -3096,7 +3100,7 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--api-socket", &api_socket])
                 .spawn()
                 .unwrap();
@@ -3210,7 +3214,7 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--api-socket", &api_socket])
                 .spawn()
                 .unwrap();
@@ -3306,7 +3310,7 @@ mod tests {
                 .args(&["--memory", format!("size={}K", guest_memory_size_kb).as_str()])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .args(&["--net", guest.default_net_string().as_str()])
+                .default_net()
                 .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
