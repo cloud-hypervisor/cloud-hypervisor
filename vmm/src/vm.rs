@@ -547,6 +547,12 @@ impl Vm {
             .add_device(path)
             .map_err(Error::DeviceManager)?;
 
+        self.devices
+            .lock()
+            .unwrap()
+            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .map_err(Error::DeviceManager)?;
+
         Ok(())
     }
 

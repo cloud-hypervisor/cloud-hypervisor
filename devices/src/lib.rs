@@ -75,5 +75,6 @@ bitflags! {
         const NO_DEVICES_CHANGED = 0;
         const CPU_DEVICES_CHANGED = 0b1;
         const MEMORY_DEVICES_CHANGED = 0b10;
+        const PCI_DEVICES_CHANGED = 0b100;
     }
 }
