@@ -502,7 +502,7 @@ impl DeviceManager {
             .map_err(DeviceManagerError::BusError)?;
 
         let mut device_manager = DeviceManager {
-            address_manager,
+            address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
             ioapic: Some(ioapic),
             _mmap_regions,
@@ -543,7 +543,27 @@ impl DeviceManager {
 
         device_manager.virtio_devices = virtio_devices;
 
-        Ok(Arc::new(Mutex::new(device_manager)))
+        let device_manager = Arc::new(Mutex::new(device_manager));
+
+        #[cfg(feature = "acpi")]
+        address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_io_addresses(Some(GuestAddress(0xae00)), 0x10, None)
+            .ok_or(DeviceManagerError::AllocateIOPort)?;
+
+        #[cfg(feature = "acpi")]
+        address_manager
+            .io_bus
+            .insert(
+                Arc::clone(&device_manager) as Arc<Mutex<dyn BusDevice>>,
+                0xae00,
+                0x10,
+            )
+            .map_err(DeviceManagerError::BusError)?;
+
+        Ok(device_manager)
     }
 
     #[allow(unused_variables)]
