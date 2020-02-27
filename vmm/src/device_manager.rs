@@ -1582,6 +1582,15 @@ impl Aml for PciDevSlot {
             vec![
                 &aml::Name::new("_SUN".into(), &sun),
                 &aml::Name::new("_ADR".into(), &adr),
+                &aml::Method::new(
+                    "_EJ0".into(),
+                    1,
+                    true,
+                    vec![&aml::MethodCall::new(
+                        "\\_SB_.PHPR.PCEJ".into(),
+                        vec![&aml::Path::new("_SUN")],
+                    )],
+                ),
             ],
         )
         .to_aml_bytes()
