@@ -12,6 +12,8 @@
 extern crate vm_device;
 
 use crate::config::ConsoleOutputMode;
+#[cfg(feature = "pci_support")]
+use crate::config::DeviceConfig;
 use crate::config::{DiskConfig, NetConfig, VmConfig};
 use crate::interrupt::{
     KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager, KvmRoutingEntry,
@@ -603,9 +605,11 @@ impl DeviceManager {
                 Arc::downgrade(&self.address_manager) as Weak<dyn DeviceRelocation>,
             );
 
-            let (mut iommu_device, iommu_mapping) = if self.config.lock().unwrap().iommu {
+            let (iommu_device, iommu_mapping) = if self.config.lock().unwrap().iommu {
                 let (device, mapping) =
                     vm_virtio::Iommu::new().map_err(DeviceManagerError::CreateVirtioIommu)?;
+                let device = Arc::new(Mutex::new(device));
+                self.iommu_device = Some(Arc::clone(&device));
                 (Some(device), Some(mapping))
             } else {
                 (None, None)
@@ -631,15 +635,15 @@ impl DeviceManager {
             }
 
             let mut vfio_iommu_device_ids =
-                self.add_vfio_devices(&mut pci_bus, &mut iommu_device, &interrupt_manager)?;
+                self.add_vfio_devices(&mut pci_bus, &interrupt_manager)?;
 
             iommu_attached_devices.append(&mut vfio_iommu_device_ids);
 
-            if let Some(mut iommu_device) = iommu_device {
-                iommu_device.attach_pci_devices(0, iommu_attached_devices);
-
-                let iommu_device = Arc::new(Mutex::new(iommu_device));
-                self.iommu_device = Some(Arc::clone(&iommu_device));
+            if let Some(iommu_device) = iommu_device {
+                iommu_device
+                    .lock()
+                    .unwrap()
+                    .attach_pci_devices(0, iommu_attached_devices);
 
                 // Because we determined the virtio-iommu b/d/f, we have to
                 // add the device to the PCI topology now. Otherwise, the
@@ -1351,17 +1355,80 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
+    fn add_vfio_device(
+        &self,
+        pci: &mut PciBus,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        device_fd: &Arc<DeviceFd>,
+        device_cfg: &DeviceConfig,
+    ) -> DeviceManagerResult<u32> {
+        // We need to shift the device id since the 3 first bits
+        // are dedicated to the PCI function, and we know we don't
+        // do multifunction. Also, because we only support one PCI
+        // bus, the bus 0, we don't need to add anything to the
+        // global device ID.
+        let device_id = pci.next_device_id() << 3;
+
+        let memory = self.memory_manager.lock().unwrap().guest_memory();
+        let vfio_device = VfioDevice::new(
+            &device_cfg.path,
+            device_fd.clone(),
+            memory.clone(),
+            device_cfg.iommu,
+        )
+        .map_err(DeviceManagerError::VfioCreate)?;
+
+        if device_cfg.iommu {
+            if let Some(iommu) = &self.iommu_device {
+                let vfio_mapping =
+                    Arc::new(VfioDmaMapping::new(vfio_device.get_container(), memory));
+
+                iommu
+                    .lock()
+                    .unwrap()
+                    .add_external_mapping(device_id, vfio_mapping);
+            }
+        }
+
+        let mut vfio_pci_device =
+            VfioPciDevice::new(&self.address_manager.vm_fd, vfio_device, interrupt_manager)
+                .map_err(DeviceManagerError::VfioPciCreate)?;
+
+        let bars = vfio_pci_device
+            .allocate_bars(&mut self.address_manager.allocator.lock().unwrap())
+            .map_err(DeviceManagerError::AllocateBars)?;
+
+        vfio_pci_device
+            .map_mmio_regions(&self.address_manager.vm_fd, || {
+                self.memory_manager
+                    .lock()
+                    .unwrap()
+                    .allocate_kvm_memory_slot()
+            })
+            .map_err(DeviceManagerError::VfioMapRegion)?;
+
+        let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
+
+        pci.add_device(vfio_pci_device.clone())
+            .map_err(DeviceManagerError::AddPciDevice)?;
+
+        pci.register_mapping(
+            vfio_pci_device,
+            self.address_manager.io_bus.as_ref(),
+            self.address_manager.mmio_bus.as_ref(),
+            bars,
+        )
+        .map_err(DeviceManagerError::AddPciDevice)?;
+
+        Ok(device_id)
+    }
+
+    #[cfg(feature = "pci_support")]
     fn add_vfio_devices(
         &mut self,
         pci: &mut PciBus,
-        iommu_device: &mut Option<vm_virtio::Iommu>,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> DeviceManagerResult<Vec<u32>> {
-        let mut mem_slot = self
-            .memory_manager
-            .lock()
-            .unwrap()
-            .allocate_kvm_memory_slot();
         let mut iommu_attached_device_ids = Vec::new();
 
         if let Some(device_list_cfg) = &self.config.lock().unwrap().devices {
@@ -1371,58 +1438,11 @@ impl DeviceManager {
             self.kvm_device_fd = Some(Arc::clone(&device_fd));
 
             for device_cfg in device_list_cfg.iter() {
-                // We need to shift the device id since the 3 first bits
-                // are dedicated to the PCI function, and we know we don't
-                // do multifunction. Also, because we only support one PCI
-                // bus, the bus 0, we don't need to add anything to the
-                // global device ID.
-                let device_id = pci.next_device_id() << 3;
-
-                let memory = self.memory_manager.lock().unwrap().guest_memory();
-                let vfio_device = VfioDevice::new(
-                    &device_cfg.path,
-                    device_fd.clone(),
-                    memory.clone(),
-                    device_cfg.iommu,
-                )
-                .map_err(DeviceManagerError::VfioCreate)?;
-
-                if device_cfg.iommu {
-                    if let Some(iommu) = iommu_device {
-                        let vfio_mapping = Arc::new(VfioDmaMapping::new(
-                            vfio_device.get_container(),
-                            memory.clone(),
-                        ));
-
-                        iommu_attached_device_ids.push(device_id);
-                        iommu.add_external_mapping(device_id, vfio_mapping);
-                    }
+                let device_id =
+                    self.add_vfio_device(pci, interrupt_manager, &device_fd, device_cfg)?;
+                if self.iommu_device.is_some() {
+                    iommu_attached_device_ids.push(device_id);
                 }
-
-                let mut vfio_pci_device =
-                    VfioPciDevice::new(&self.address_manager.vm_fd, vfio_device, interrupt_manager)
-                        .map_err(DeviceManagerError::VfioPciCreate)?;
-
-                let bars = vfio_pci_device
-                    .allocate_bars(&mut self.address_manager.allocator.lock().unwrap())
-                    .map_err(DeviceManagerError::AllocateBars)?;
-
-                mem_slot = vfio_pci_device
-                    .map_mmio_regions(&self.address_manager.vm_fd, mem_slot)
-                    .map_err(DeviceManagerError::VfioMapRegion)?;
-
-                let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
-
-                pci.add_device(vfio_pci_device.clone())
-                    .map_err(DeviceManagerError::AddPciDevice)?;
-
-                pci.register_mapping(
-                    vfio_pci_device.clone(),
-                    self.address_manager.io_bus.as_ref(),
-                    self.address_manager.mmio_bus.as_ref(),
-                    bars,
-                )
-                .map_err(DeviceManagerError::AddPciDevice)?;
             }
         }
         Ok(iommu_attached_device_ids)

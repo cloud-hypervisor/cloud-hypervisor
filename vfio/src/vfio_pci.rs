@@ -502,9 +502,11 @@ impl VfioPciDevice {
     /// # Return value
     ///
     /// This function returns the updated KVM memory slot id.
-    pub fn map_mmio_regions(&mut self, vm: &Arc<VmFd>, mem_slot: u32) -> Result<u32> {
+    pub fn map_mmio_regions<F>(&mut self, vm: &Arc<VmFd>, mem_slot: F) -> Result<()>
+    where
+        F: Fn() -> u32,
+    {
         let fd = self.device.as_raw_fd();
-        let mut new_mem_slot = mem_slot;
 
         for region in self.mmio_regions.iter_mut() {
             // We want to skip the mapping of the BAR containing the MSI-X
@@ -548,8 +550,9 @@ impl VfioPciDevice {
                     continue;
                 }
 
+                let slot = mem_slot();
                 let mem_region = kvm_userspace_memory_region {
-                    slot: new_mem_slot as u32,
+                    slot,
                     guest_phys_addr: region.start.raw_value() + mmap_offset,
                     memory_size: mmap_size as u64,
                     userspace_addr: host_addr as u64,
@@ -563,15 +566,13 @@ impl VfioPciDevice {
                 }
 
                 // Update the region with memory mapped info.
-                region.mem_slot = Some(new_mem_slot);
+                region.mem_slot = Some(slot);
                 region.host_addr = Some(host_addr as u64);
                 region.mmap_size = Some(mmap_size as usize);
-
-                new_mem_slot += 1;
             }
         }
 
-        Ok(new_mem_slot)
+        Ok(())
     }
 
     pub fn unmap_mmio_regions(&mut self) {
