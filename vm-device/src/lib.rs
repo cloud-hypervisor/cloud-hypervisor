@@ -49,7 +49,7 @@ pub trait Snapshotable {}
 /// All migratable components are paused before being snapshotted, and then
 /// eventually resumed. Thus any Migratable component must be both Pausable
 /// and Snapshotable.
-pub trait Migratable: Pausable + Snapshotable {}
+pub trait Migratable: Send + Pausable + Snapshotable {}
 
 fn get_region_host_address_range(
     region: &GuestRegionMmap,

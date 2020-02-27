@@ -22,7 +22,7 @@ use acpi_tables::{aml, aml::Aml};
 #[cfg(feature = "acpi")]
 use arch::layout;
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
-use devices::{ioapic, HotPlugNotificationFlags};
+use devices::{ioapic, BusDevice, HotPlugNotificationFlags};
 use kvm_ioctls::*;
 use libc::O_TMPFILE;
 use libc::TIOCGWINSZ;
@@ -1840,6 +1840,8 @@ impl Pausable for DeviceManager {
 
 impl Snapshotable for DeviceManager {}
 impl Migratable for DeviceManager {}
+
+impl BusDevice for DeviceManager {}
 
 impl Drop for DeviceManager {
     fn drop(&mut self) {
