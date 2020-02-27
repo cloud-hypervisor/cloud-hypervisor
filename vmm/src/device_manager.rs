@@ -441,6 +441,10 @@ pub struct DeviceManager {
     // VFIO KVM device
     #[cfg(feature = "pci_support")]
     kvm_device_fd: Option<Arc<DeviceFd>>,
+
+    // Paravirtualized IOMMU
+    #[cfg(feature = "pci_support")]
+    iommu_device: Option<Arc<Mutex<vm_virtio::Iommu>>>,
 }
 
 impl DeviceManager {
@@ -533,6 +537,8 @@ impl DeviceManager {
             msi_interrupt_manager: Arc::clone(&msi_interrupt_manager),
             #[cfg(feature = "pci_support")]
             kvm_device_fd: None,
+            #[cfg(feature = "pci_support")]
+            iommu_device: None,
         };
 
         device_manager
@@ -632,15 +638,13 @@ impl DeviceManager {
             if let Some(mut iommu_device) = iommu_device {
                 iommu_device.attach_pci_devices(0, iommu_attached_devices);
 
+                let iommu_device = Arc::new(Mutex::new(iommu_device));
+                self.iommu_device = Some(Arc::clone(&iommu_device));
+
                 // Because we determined the virtio-iommu b/d/f, we have to
                 // add the device to the PCI topology now. Otherwise, the
                 // b/d/f won't match the virtio-iommu device as expected.
-                self.add_virtio_pci_device(
-                    Arc::new(Mutex::new(iommu_device)),
-                    &mut pci_bus,
-                    &None,
-                    &interrupt_manager,
-                )?;
+                self.add_virtio_pci_device(iommu_device, &mut pci_bus, &None, &interrupt_manager)?;
             }
 
             let pci_bus = Arc::new(Mutex::new(pci_bus));
