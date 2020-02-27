@@ -212,7 +212,7 @@ impl VmState {
 pub struct Vm {
     kernel: File,
     threads: Vec<thread::JoinHandle<()>>,
-    devices: DeviceManager,
+    devices: Arc<Mutex<DeviceManager>>,
     config: Arc<Mutex<VmConfig>>,
     on_tty: bool,
     signals: Option<Signals>,
@@ -384,7 +384,7 @@ impl Vm {
         cmdline
             .insert_str(self.config.lock().unwrap().cmdline.args.clone())
             .map_err(Error::CmdLineInsertStr)?;
-        for entry in self.devices.cmdline_additions() {
+        for entry in self.devices.lock().unwrap().cmdline_additions() {
             cmdline.insert_str(entry).map_err(Error::CmdLineInsertStr)?;
         }
 
@@ -513,6 +513,8 @@ impl Vm {
                 .map_err(Error::CpuManager)?
             {
                 self.devices
+                    .lock()
+                    .unwrap()
                     .notify_hotplug(HotPlugNotificationFlags::CPU_DEVICES_CHANGED)
                     .map_err(Error::DeviceManager)?;
             }
@@ -528,6 +530,8 @@ impl Vm {
                 .map_err(Error::MemoryManager)?
             {
                 self.devices
+                    .lock()
+                    .unwrap()
                     .notify_hotplug(HotPlugNotificationFlags::MEMORY_DEVICES_CHANGED)
                     .map_err(Error::DeviceManager)?;
             }
@@ -574,8 +578,8 @@ impl Vm {
             .start_boot_vcpus(entry_addr)
             .map_err(Error::CpuManager)?;
 
-        if self.devices.console().input_enabled() {
-            let console = self.devices.console().clone();
+        if self.devices.lock().unwrap().console().input_enabled() {
+            let console = self.devices.lock().unwrap().console().clone();
             let signals = Signals::new(&[SIGWINCH, SIGINT, SIGTERM]);
             match signals {
                 Ok(signals) => {
@@ -613,8 +617,10 @@ impl Vm {
             .read_raw(&mut out)
             .map_err(Error::Console)?;
 
-        if self.devices.console().input_enabled() {
+        if self.devices.lock().unwrap().console().input_enabled() {
             self.devices
+                .lock()
+                .unwrap()
                 .console()
                 .queue_input_bytes(&out[..count])
                 .map_err(Error::Console)?;
@@ -650,7 +656,7 @@ impl Pausable for Vm {
             .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {:?}", e)))?;
 
         self.cpu_manager.lock().unwrap().pause()?;
-        self.devices.pause()?;
+        self.devices.lock().unwrap().pause()?;
 
         *state = new_state;
 
@@ -668,7 +674,7 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {:?}", e)))?;
 
-        self.devices.resume()?;
+        self.devices.lock().unwrap().resume()?;
         self.cpu_manager.lock().unwrap().resume()?;
 
         // And we're back to the Running state.

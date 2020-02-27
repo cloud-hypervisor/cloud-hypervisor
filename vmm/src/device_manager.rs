@@ -440,7 +440,7 @@ impl DeviceManager {
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
         vmm_path: PathBuf,
-    ) -> DeviceManagerResult<Self> {
+    ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let io_bus = devices::Bus::new();
         let mmio_bus = devices::Bus::new();
 
@@ -543,7 +543,7 @@ impl DeviceManager {
 
         device_manager.virtio_devices = virtio_devices;
 
-        Ok(device_manager)
+        Ok(Arc::new(Mutex::new(device_manager)))
     }
 
     #[allow(unused_variables)]

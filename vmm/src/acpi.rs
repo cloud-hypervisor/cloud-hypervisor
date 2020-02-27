@@ -80,14 +80,14 @@ struct IortIdMapping {
 }
 
 pub fn create_dsdt_table(
-    device_manager: &DeviceManager,
+    device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
     memory_manager: &Arc<Mutex<MemoryManager>>,
 ) -> SDT {
     // DSDT
     let mut dsdt = SDT::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
 
-    dsdt.append_slice(device_manager.to_aml_bytes().as_slice());
+    dsdt.append_slice(device_manager.lock().unwrap().to_aml_bytes().as_slice());
     dsdt.append_slice(cpu_manager.lock().unwrap().to_aml_bytes().as_slice());
     dsdt.append_slice(memory_manager.lock().unwrap().to_aml_bytes().as_slice());
 
@@ -96,7 +96,7 @@ pub fn create_dsdt_table(
 
 pub fn create_acpi_tables(
     guest_mem: &GuestMemoryMmap,
-    device_manager: &DeviceManager,
+    device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
     memory_manager: &Arc<Mutex<MemoryManager>>,
 ) -> GuestAddress {
