@@ -494,7 +494,7 @@ impl CpuManager {
     pub fn new(
         boot_vcpus: u8,
         max_vcpus: u8,
-        device_manager: &DeviceManager,
+        device_manager: &Arc<Mutex<DeviceManager>>,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
         fd: Arc<VmFd>,
         cpuid: CpuId,
@@ -503,6 +503,7 @@ impl CpuManager {
         let mut vcpu_states = Vec::with_capacity(usize::from(max_vcpus));
         vcpu_states.resize_with(usize::from(max_vcpus), VcpuState::default);
 
+        let device_manager = device_manager.lock().unwrap();
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus,
             max_vcpus,
