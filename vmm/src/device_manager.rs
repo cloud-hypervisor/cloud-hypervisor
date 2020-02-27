@@ -433,6 +433,10 @@ pub struct DeviceManager {
     // Keep a reference to the PCI bus
     #[cfg(feature = "pci_support")]
     pci_bus: Option<Arc<Mutex<PciBus>>>,
+
+    // MSI Interrupt Manager
+    #[cfg(feature = "pci_support")]
+    msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
 }
 
 impl DeviceManager {
@@ -521,6 +525,8 @@ impl DeviceManager {
             vhost_user_backends: Vec::new(),
             #[cfg(feature = "pci_support")]
             pci_bus: None,
+            #[cfg(feature = "pci_support")]
+            msi_interrupt_manager: Arc::clone(&msi_interrupt_manager),
         };
 
         device_manager
@@ -542,7 +548,7 @@ impl DeviceManager {
         virtio_devices.append(&mut device_manager.make_virtio_devices()?);
 
         if cfg!(feature = "pci_support") {
-            device_manager.add_pci_devices(virtio_devices.clone(), &msi_interrupt_manager)?;
+            device_manager.add_pci_devices(virtio_devices.clone())?;
         } else if cfg!(feature = "mmio_support") {
             device_manager.add_mmio_devices(virtio_devices.clone(), &legacy_interrupt_manager)?;
         }
@@ -576,7 +582,6 @@ impl DeviceManager {
     fn add_pci_devices(
         &mut self,
         virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)>,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "pci_support")]
         {
@@ -594,6 +599,8 @@ impl DeviceManager {
                 (None, None)
             };
 
+            let interrupt_manager = Arc::clone(&self.msi_interrupt_manager);
+
             let mut iommu_attached_devices = Vec::new();
 
             for (device, iommu_attached) in virtio_devices {
@@ -604,7 +611,7 @@ impl DeviceManager {
                 };
 
                 let virtio_iommu_attach_dev =
-                    self.add_virtio_pci_device(device, &mut pci_bus, mapping, interrupt_manager)?;
+                    self.add_virtio_pci_device(device, &mut pci_bus, mapping, &interrupt_manager)?;
 
                 if let Some(dev_id) = virtio_iommu_attach_dev {
                     iommu_attached_devices.push(dev_id);
@@ -612,7 +619,7 @@ impl DeviceManager {
             }
 
             let mut vfio_iommu_device_ids =
-                self.add_vfio_devices(&mut pci_bus, &mut iommu_device, interrupt_manager)?;
+                self.add_vfio_devices(&mut pci_bus, &mut iommu_device, &interrupt_manager)?;
 
             iommu_attached_devices.append(&mut vfio_iommu_device_ids);
 
@@ -626,7 +633,7 @@ impl DeviceManager {
                     Arc::new(Mutex::new(iommu_device)),
                     &mut pci_bus,
                     &None,
-                    interrupt_manager,
+                    &interrupt_manager,
                 )?;
             }
 
