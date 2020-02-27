@@ -2087,17 +2087,16 @@ mod tests {
 
             guest.ssh_command("sudo shutdown -h now")?;
 
-            thread::sleep(std::time::Duration::new(10, 0));
-
+            // Check that the cloud-hypervisor binary actually terminated
+            if let Ok(status) = child.wait() {
+                aver_eq!(tb, status.success(), true);
+            }
             // Do this check after shutdown of the VM as an easy way to ensure
             // all writes are flushed to disk
             let mut f = std::fs::File::open(serial_path)?;
             let mut buf = String::new();
             f.read_to_string(&mut buf)?;
             aver!(tb, buf.contains("cloud login:"));
-
-            let _ = child.kill();
-            let _ = child.wait();
 
             Ok(())
         });
@@ -2170,17 +2169,17 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             guest.ssh_command("sudo shutdown -h now")?;
-            thread::sleep(std::time::Duration::new(10, 0));
 
+            // Check that the cloud-hypervisor binary actually terminated
+            if let Ok(status) = child.wait() {
+                aver_eq!(tb, status.success(), true);
+            }
             // Do this check after shutdown of the VM as an easy way to ensure
             // all writes are flushed to disk
             let mut f = std::fs::File::open(console_path)?;
             let mut buf = String::new();
             f.read_to_string(&mut buf)?;
             aver!(tb, buf.contains("cloud login:"));
-
-            let _ = child.kill();
-            let _ = child.wait();
 
             Ok(())
         });
