@@ -437,6 +437,10 @@ pub struct DeviceManager {
     // MSI Interrupt Manager
     #[cfg(feature = "pci_support")]
     msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+
+    // VFIO KVM device
+    #[cfg(feature = "pci_support")]
+    kvm_device_fd: Option<Arc<DeviceFd>>,
 }
 
 impl DeviceManager {
@@ -527,6 +531,8 @@ impl DeviceManager {
             pci_bus: None,
             #[cfg(feature = "pci_support")]
             msi_interrupt_manager: Arc::clone(&msi_interrupt_manager),
+            #[cfg(feature = "pci_support")]
+            kvm_device_fd: None,
         };
 
         device_manager
@@ -1358,6 +1364,7 @@ impl DeviceManager {
             // Create the KVM VFIO device
             let device_fd = DeviceManager::create_kvm_device(&self.address_manager.vm_fd)?;
             let device_fd = Arc::new(device_fd);
+            self.kvm_device_fd = Some(Arc::clone(&device_fd));
 
             for device_cfg in device_list_cfg.iter() {
                 // We need to shift the device id since the 3 first bits
