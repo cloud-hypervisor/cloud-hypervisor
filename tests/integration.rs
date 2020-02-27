@@ -716,6 +716,7 @@ mod tests {
     struct GuestCommand<'a> {
         command: Command,
         guest: &'a Guest<'a>,
+        capture_output: bool,
     }
 
     impl<'a> GuestCommand<'a> {
@@ -723,14 +724,24 @@ mod tests {
             Self {
                 command: Command::new("target/release/cloud-hypervisor"),
                 guest,
+                capture_output: false,
             }
         }
 
+        fn capture_output(&mut self) -> &mut Self {
+            self.capture_output = true;
+            self
+        }
+
         fn spawn(&mut self) -> io::Result<Child> {
-            self.command
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
+            if self.capture_output {
+                self.command
+                    .stderr(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .spawn()
+            } else {
+                self.command.spawn()
+            }
         }
 
         fn args<I, S>(&mut self, args: I) -> &mut Self
@@ -1991,6 +2002,7 @@ mod tests {
                 .default_net()
                 .args(&["--serial", "null"])
                 .args(&["--console", "off"])
+                .capture_output()
                 .spawn()
                 .unwrap();
 
@@ -2038,6 +2050,7 @@ mod tests {
                 .default_net()
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
+                .capture_output()
                 .spawn()
                 .unwrap();
 
@@ -2137,6 +2150,7 @@ mod tests {
                 .default_disks()
                 .default_net()
                 .args(&["--console", "tty"])
+                .capture_output()
                 .spawn()
                 .unwrap();
 
