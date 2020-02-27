@@ -118,7 +118,7 @@ pub struct MsiIrqGroupConfig {
 ///
 /// The InterruptManager implementations should protect itself from concurrent accesses internally,
 /// so it could be invoked from multi-threaded context.
-pub trait InterruptManager {
+pub trait InterruptManager: Send + Sync {
     type GroupConfig;
 
     /// Create an [InterruptSourceGroup](trait.InterruptSourceGroup.html) object to manage
