@@ -429,6 +429,10 @@ pub struct DeviceManager {
 
     // Backends that have been spawned
     vhost_user_backends: Vec<ActivatedBackend>,
+
+    // Keep a reference to the PCI bus
+    #[cfg(feature = "pci_support")]
+    pci_bus: Option<Arc<Mutex<PciBus>>>,
 }
 
 impl DeviceManager {
@@ -515,6 +519,8 @@ impl DeviceManager {
             virtio_devices: Vec::new(),
             vmm_path,
             vhost_user_backends: Vec::new(),
+            #[cfg(feature = "pci_support")]
+            pci_bus: None,
         };
 
         device_manager
@@ -625,12 +631,12 @@ impl DeviceManager {
             }
 
             let pci_bus = Arc::new(Mutex::new(pci_bus));
-            let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(pci_bus.clone())));
+            let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&pci_bus))));
             self.address_manager
                 .io_bus
                 .insert(pci_config_io, 0xcf8, 0x8)
                 .map_err(DeviceManagerError::BusError)?;
-            let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(pci_bus)));
+            let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
             self.address_manager
                 .mmio_bus
                 .insert(
@@ -639,6 +645,8 @@ impl DeviceManager {
                     arch::layout::PCI_MMCONFIG_SIZE,
                 )
                 .map_err(DeviceManagerError::BusError)?;
+
+            self.pci_bus = Some(pci_bus);
         }
 
         Ok(())
