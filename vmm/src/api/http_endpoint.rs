@@ -5,8 +5,9 @@
 
 use crate::api::http::EndpointHandler;
 use crate::api::{
-    vm_boot, vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_resize, vm_resume, vm_shutdown,
-    vmm_ping, vmm_shutdown, ApiError, ApiRequest, ApiResult, VmAction, VmConfig, VmResizeData,
+    vm_add_device, vm_boot, vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_resize,
+    vm_resume, vm_shutdown, vmm_ping, vmm_shutdown, ApiError, ApiRequest, ApiResult, VmAction,
+    VmAddDeviceData, VmConfig, VmResizeData,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
@@ -46,6 +47,9 @@ pub enum HttpError {
 
     /// Could not resize a VM
     VmResize(ApiError),
+
+    /// Could not add a device to a VM
+    VmAddDevice(ApiError),
 
     /// Could not shut the VMM down
     VmmShutdown(ApiError),
@@ -248,6 +252,46 @@ impl EndpointHandler for VmResize {
                         // Call vm_resize()
                         match vm_resize(api_notifier, api_sender, Arc::new(vm_resize_data))
                             .map_err(HttpError::VmResize)
+                        {
+                            Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
+                            Err(e) => error_response(e, StatusCode::InternalServerError),
+                        }
+                    }
+
+                    None => Response::new(Version::Http11, StatusCode::BadRequest),
+                }
+            }
+            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+        }
+    }
+}
+
+// /api/v1/vm.add-device handler
+pub struct VmAddDevice {}
+
+impl EndpointHandler for VmAddDevice {
+    fn handle_request(
+        &self,
+        req: &Request,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+    ) -> Response {
+        match req.method() {
+            Method::Put => {
+                match &req.body {
+                    Some(body) => {
+                        // Deserialize into a VmAddDeviceData
+                        let vm_add_device_data: VmAddDeviceData =
+                            match serde_json::from_slice(body.raw())
+                                .map_err(HttpError::SerdeJsonDeserialize)
+                            {
+                                Ok(config) => config,
+                                Err(e) => return error_response(e, StatusCode::BadRequest),
+                            };
+
+                        // Call vm_add_device()
+                        match vm_add_device(api_notifier, api_sender, Arc::new(vm_add_device_data))
+                            .map_err(HttpError::VmAddDevice)
                         {
                             Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
                             Err(e) => error_response(e, StatusCode::InternalServerError),

@@ -1585,6 +1585,10 @@ impl DeviceManager {
         #[cfg(not(feature = "acpi"))]
         return Ok(());
     }
+
+    pub fn add_device(&self, _path: String) -> DeviceManagerResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(feature = "acpi")]
