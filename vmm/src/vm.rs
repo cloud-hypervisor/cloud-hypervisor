@@ -540,6 +540,16 @@ impl Vm {
         Ok(())
     }
 
+    pub fn add_device(&mut self, path: String) -> Result<()> {
+        self.devices
+            .lock()
+            .unwrap()
+            .add_device(path)
+            .map_err(Error::DeviceManager)?;
+
+        Ok(())
+    }
+
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>, on_tty: bool) {
         for signal in signals.forever() {
             match signal {

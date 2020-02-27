@@ -139,6 +139,22 @@ paths:
         404:
           description: The VM instance could not be resized because it is not created.
 
+  /vm.add-device:
+    put:
+      summary: Add a new device to the VM
+      requestBody:
+        description: The path of the new device
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VmAddDevice'
+        required: true
+      responses:
+        204:
+          description: The new device was successfully added to the VM instance.
+        404:
+          description: The new device could not be added to the VM instance.
+
 components:
   schemas:
 
@@ -427,3 +443,9 @@ components:
           type: integer
         desired_ram:
           type: integer
+
+    VmAddDevice:
+      type: object
+      properties:
+        path:
+          type: string

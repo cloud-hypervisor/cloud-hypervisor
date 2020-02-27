@@ -99,6 +99,9 @@ pub enum ApiError {
 
     /// The VM could not be resized
     VmResize(VmError),
+
+    /// The device could not be added to the VM.
+    VmAddDevice(VmError),
 }
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
@@ -117,6 +120,11 @@ pub struct VmmPingResponse {
 pub struct VmResizeData {
     pub desired_vcpus: Option<u8>,
     pub desired_ram: Option<u64>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct VmAddDeviceData {
+    pub path: String,
 }
 
 pub enum ApiResponsePayload {
@@ -179,8 +187,11 @@ pub enum ApiRequest {
     /// VMM process.
     VmmShutdown(Sender<ApiResponse>),
 
-    /// Resize the VMM
+    /// Resize the VM.
     VmResize(Arc<VmResizeData>, Sender<ApiResponse>),
+
+    /// Add a device to the VM.
+    VmAddDevice(Arc<VmAddDeviceData>, Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -326,6 +337,24 @@ pub fn vm_resize(
     // Send the VM resizing request.
     api_sender
         .send(ApiRequest::VmResize(data, response_sender))
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+
+    Ok(())
+}
+
+pub fn vm_add_device(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VmAddDeviceData>,
+) -> ApiResult<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM add-device request.
+    api_sender
+        .send(ApiRequest::VmAddDevice(data, response_sender))
         .map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
