@@ -1648,7 +1648,7 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
-    pub fn add_device(&mut self, path: String) -> DeviceManagerResult<()> {
+    pub fn add_device(&mut self, path: String) -> DeviceManagerResult<DeviceConfig> {
         let device_cfg = DeviceConfig {
             path: PathBuf::from(path),
             iommu: false,
@@ -1680,7 +1680,7 @@ impl DeviceManager {
         // Update the PCIU bitmap
         self.pci_devices_up |= 1 << (device_id >> 3);
 
-        Ok(())
+        Ok(device_cfg)
     }
 }
 
