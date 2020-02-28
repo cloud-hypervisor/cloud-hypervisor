@@ -547,11 +547,23 @@ impl Vm {
         if cfg!(feature = "pci_support") {
             #[cfg(feature = "pci_support")]
             {
-                self.devices
+                let device_cfg = self
+                    .devices
                     .lock()
                     .unwrap()
                     .add_device(_path)
                     .map_err(Error::DeviceManager)?;
+
+                // Update VmConfig by adding the new device. This is important to
+                // ensure the device would be created in case of a reboot.
+                {
+                    let mut config = self.config.lock().unwrap();
+                    if let Some(devices) = config.devices.as_mut() {
+                        devices.push(device_cfg);
+                    } else {
+                        config.devices = Some(vec![device_cfg]);
+                    }
+                }
 
                 self.devices
                     .lock()
@@ -559,7 +571,6 @@ impl Vm {
                     .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
                     .map_err(Error::DeviceManager)?;
             }
-
             Ok(())
         } else {
             Err(Error::NoPciSupport)
