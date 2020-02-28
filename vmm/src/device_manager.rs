@@ -211,6 +211,9 @@ pub enum DeviceManagerError {
 
     /// Failed to spawn the block backend
     SpawnBlockBackend(io::Error),
+
+    /// Missing PCI bus.
+    NoPciBus,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -447,6 +450,14 @@ pub struct DeviceManager {
     // Paravirtualized IOMMU
     #[cfg(feature = "pci_support")]
     iommu_device: Option<Arc<Mutex<vm_virtio::Iommu>>>,
+
+    // Bitmap of PCI devices to hotplug.
+    #[cfg(feature = "pci_support")]
+    pci_devices_up: u32,
+
+    // Bitmap of PCI devices to hotunplug.
+    #[cfg(feature = "pci_support")]
+    pci_devices_down: u32,
 }
 
 impl DeviceManager {
@@ -541,6 +552,10 @@ impl DeviceManager {
             kvm_device_fd: None,
             #[cfg(feature = "pci_support")]
             iommu_device: None,
+            #[cfg(feature = "pci_support")]
+            pci_devices_up: 0,
+            #[cfg(feature = "pci_support")]
+            pci_devices_down: 0,
         };
 
         device_manager
@@ -1632,7 +1647,39 @@ impl DeviceManager {
         return Ok(());
     }
 
-    pub fn add_device(&self, _path: String) -> DeviceManagerResult<()> {
+    #[cfg(feature = "pci_support")]
+    pub fn add_device(&mut self, path: String) -> DeviceManagerResult<()> {
+        let device_cfg = DeviceConfig {
+            path: PathBuf::from(path),
+            iommu: false,
+        };
+
+        let mut pci = if let Some(pci_bus) = &self.pci_bus {
+            pci_bus.lock().unwrap()
+        } else {
+            return Err(DeviceManagerError::NoPciBus);
+        };
+
+        let interrupt_manager = Arc::clone(&self.msi_interrupt_manager);
+
+        let device_fd = if let Some(device_fd) = &self.kvm_device_fd {
+            Arc::clone(&device_fd)
+        } else {
+            // If the VFIO KVM device file descriptor has not been created yet,
+            // it is created here and stored in the DeviceManager structure for
+            // future needs.
+            let device_fd = DeviceManager::create_kvm_device(&self.address_manager.vm_fd)?;
+            let device_fd = Arc::new(device_fd);
+            self.kvm_device_fd = Some(Arc::clone(&device_fd));
+            device_fd
+        };
+
+        let device_id =
+            self.add_vfio_device(&mut pci, &interrupt_manager, &device_fd, &device_cfg)?;
+
+        // Update the PCIU bitmap
+        self.pci_devices_up |= 1 << (device_id >> 3);
+
         Ok(())
     }
 }
@@ -1911,7 +1958,48 @@ impl Pausable for DeviceManager {
 impl Snapshotable for DeviceManager {}
 impl Migratable for DeviceManager {}
 
-impl BusDevice for DeviceManager {}
+#[cfg(feature = "pci_support")]
+const PCIU_FIELD_OFFSET: u64 = 0;
+#[cfg(feature = "pci_support")]
+const PCID_FIELD_OFFSET: u64 = 4;
+
+#[cfg(feature = "pci_support")]
+const PCIU_FIELD_SIZE: usize = 4;
+#[cfg(feature = "pci_support")]
+const PCID_FIELD_SIZE: usize = 4;
+
+impl BusDevice for DeviceManager {
+    fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
+        #[cfg(feature = "pci_support")]
+        match offset {
+            PCIU_FIELD_OFFSET => {
+                assert!(data.len() == PCIU_FIELD_SIZE);
+                data.copy_from_slice(&self.pci_devices_up.to_le_bytes());
+                // Clear the PCIU bitmap
+                self.pci_devices_up = 0;
+            }
+            PCID_FIELD_OFFSET => {
+                assert!(data.len() == PCID_FIELD_SIZE);
+                data.copy_from_slice(&self.pci_devices_down.to_le_bytes());
+                // Clear the PCID bitmap
+                self.pci_devices_down = 0;
+            }
+            _ => {}
+        }
+
+        debug!(
+            "PCI_HP_REG_R: base 0x{:x}, offset 0x{:x}, data {:?}",
+            base, offset, data
+        )
+    }
+
+    fn write(&mut self, base: u64, offset: u64, data: &[u8]) {
+        debug!(
+            "PCI_HP_REG_W: base 0x{:x}, offset 0x{:x}, data {:?}",
+            base, offset, data
+        )
+    }
+}
 
 impl Drop for DeviceManager {
     fn drop(&mut self) {

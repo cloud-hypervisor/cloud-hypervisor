@@ -164,6 +164,9 @@ pub enum Error {
 
     /// Memory manager error
     MemoryManager(MemoryManagerError),
+
+    /// No PCI support
+    NoPciSupport,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -540,20 +543,27 @@ impl Vm {
         Ok(())
     }
 
-    pub fn add_device(&mut self, path: String) -> Result<()> {
-        self.devices
-            .lock()
-            .unwrap()
-            .add_device(path)
-            .map_err(Error::DeviceManager)?;
+    pub fn add_device(&mut self, _path: String) -> Result<()> {
+        if cfg!(feature = "pci_support") {
+            #[cfg(feature = "pci_support")]
+            {
+                self.devices
+                    .lock()
+                    .unwrap()
+                    .add_device(_path)
+                    .map_err(Error::DeviceManager)?;
 
-        self.devices
-            .lock()
-            .unwrap()
-            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
-            .map_err(Error::DeviceManager)?;
+                self.devices
+                    .lock()
+                    .unwrap()
+                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+                    .map_err(Error::DeviceManager)?;
+            }
 
-        Ok(())
+            Ok(())
+        } else {
+            Err(Error::NoPciSupport)
+        }
     }
 
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>, on_tty: bool) {
