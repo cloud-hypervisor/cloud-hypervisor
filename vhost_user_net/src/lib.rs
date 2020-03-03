@@ -144,9 +144,10 @@ impl VhostUserNetBackend {
         netmask: Ipv4Addr,
         num_queues: usize,
         queue_size: u16,
+        ifname: Option<&str>,
     ) -> Result<Self> {
-        let taps =
-            open_tap(None, Some(ip_addr), Some(netmask), num_queues / 2).map_err(Error::OpenTap)?;
+        let taps = open_tap(ifname, Some(ip_addr), Some(netmask), num_queues / 2)
+            .map_err(Error::OpenTap)?;
 
         Self::new_with_tap(taps, num_queues, queue_size)
     }
@@ -352,6 +353,7 @@ pub struct VhostUserNetBackendConfig<'a> {
     pub sock: &'a str,
     pub num_queues: usize,
     pub queue_size: u16,
+    pub tap: Option<&'a str>,
 }
 
 impl<'a> VhostUserNetBackendConfig<'a> {
@@ -363,6 +365,7 @@ impl<'a> VhostUserNetBackendConfig<'a> {
         let mut sock: &str = "";
         let mut num_queues_str: &str = "";
         let mut queue_size_str: &str = "";
+        let mut tap_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("ip=") {
@@ -375,6 +378,8 @@ impl<'a> VhostUserNetBackendConfig<'a> {
                 num_queues_str = &param[11..];
             } else if param.starts_with("queue_size=") {
                 queue_size_str = &param[11..];
+            } else if param.starts_with("tap=") {
+                tap_str = &param[4..];
             }
         }
 
@@ -382,6 +387,7 @@ impl<'a> VhostUserNetBackendConfig<'a> {
         let mut mask: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
         let mut num_queues: usize = 2;
         let mut queue_size: u16 = 256;
+        let mut tap: Option<&str> = None;
 
         if sock.is_empty() {
             return Err(Error::ParseSockParam);
@@ -398,6 +404,9 @@ impl<'a> VhostUserNetBackendConfig<'a> {
         if !queue_size_str.is_empty() {
             queue_size = queue_size_str.parse().map_err(Error::ParseQueueSizeParam)?;
         }
+        if !tap_str.is_empty() {
+            tap = Some(tap_str);
+        }
 
         Ok(VhostUserNetBackendConfig {
             ip,
@@ -405,6 +414,7 @@ impl<'a> VhostUserNetBackendConfig<'a> {
             sock,
             num_queues,
             queue_size,
+            tap,
         })
     }
 }
@@ -424,6 +434,7 @@ pub fn start_net_backend(backend_command: &str) {
             backend_config.mask,
             backend_config.num_queues,
             backend_config.queue_size,
+            backend_config.tap,
         )
         .unwrap(),
     ));
