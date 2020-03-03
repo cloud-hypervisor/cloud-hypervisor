@@ -161,7 +161,7 @@ components:
           $ref: '#/components/schemas/VmConfig'
         state:
           type: string
-          enum: [Created, Booted, Shutdown]
+          enum: [Created, Running, Shutdown, Paused]
       description: Virtual Machine information
 
     VmConfig:
@@ -385,7 +385,7 @@ components:
           type: string
         mode:
           type: string
-          enum: [Off, Tty, File, None]
+          enum: [Off, Tty, File, Null]
         iommu:
           type: boolean
           default: false
