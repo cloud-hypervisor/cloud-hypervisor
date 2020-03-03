@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::thread;
 use std::vec::Vec;
 use vhost_rs::vhost_user::message::VhostUserConfigFlags;
+use vhost_rs::vhost_user::message::VHOST_USER_CONFIG_OFFSET;
 use vhost_rs::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_rs::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost_rs::VhostBackend;
@@ -116,7 +117,7 @@ impl Blk {
         let config_space: Vec<u8> = vec![0u8; config_len as usize];
         let (_, config_space) = vhost_user_blk
             .get_config(
-                0,
+                VHOST_USER_CONFIG_OFFSET,
                 config_len as u32,
                 VhostUserConfigFlags::WRITABLE,
                 config_space.as_slice(),
