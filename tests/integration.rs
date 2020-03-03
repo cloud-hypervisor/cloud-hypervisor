@@ -39,10 +39,12 @@ mod tests {
         guest_ip: String,
         l2_guest_ip1: String,
         l2_guest_ip2: String,
+        l2_guest_ip3: String,
         host_ip: String,
         guest_mac: String,
         l2_guest_mac1: String,
         l2_guest_mac2: String,
+        l2_guest_mac3: String,
     }
 
     struct Guest<'a> {
@@ -160,11 +162,14 @@ mod tests {
             user_data_string = user_data_string.replace("192.168.2.2", &network.guest_ip);
             user_data_string = user_data_string.replace("192.168.2.3", &network.l2_guest_ip1);
             user_data_string = user_data_string.replace("192.168.2.4", &network.l2_guest_ip2);
+            user_data_string = user_data_string.replace("192.168.2.5", &network.l2_guest_ip3);
             user_data_string = user_data_string.replace("12:34:56:78:90:ab", &network.guest_mac);
             user_data_string =
                 user_data_string.replace("de:ad:be:ef:12:34", &network.l2_guest_mac1);
             user_data_string =
                 user_data_string.replace("de:ad:be:ef:34:56", &network.l2_guest_mac2);
+            user_data_string =
+                user_data_string.replace("de:ad:be:ef:56:78", &network.l2_guest_mac3);
 
             fs::File::create(cloud_init_directory.join("latest").join("user_data"))
                 .unwrap()
@@ -498,10 +503,12 @@ mod tests {
                 guest_ip: format!("{}.{}.2", class, id),
                 l2_guest_ip1: format!("{}.{}.3", class, id),
                 l2_guest_ip2: format!("{}.{}.4", class, id),
+                l2_guest_ip3: format!("{}.{}.5", class, id),
                 host_ip: format!("{}.{}.1", class, id),
                 guest_mac: format!("12:34:56:78:90:{:02x}", id),
                 l2_guest_mac1: format!("de:ad:be:ef:12:{:02x}", id),
                 l2_guest_mac2: format!("de:ad:be:ef:34:{:02x}", id),
+                l2_guest_mac3: format!("de:ad:be:ef:56:{:02x}", id),
             };
 
             disk_config.prepare_files(&tmp_dir, &network);
@@ -567,6 +574,15 @@ mod tests {
             ssh_command_ip(
                 command,
                 &self.network.l2_guest_ip2,
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
+        }
+
+        fn ssh_command_l2_3(&self, command: &str) -> Result<String, Error> {
+            ssh_command_ip(
+                command,
+                &self.network.l2_guest_ip3,
                 DEFAULT_SSH_RETRIES,
                 DEFAULT_SSH_TIMEOUT,
             )
@@ -2178,17 +2194,14 @@ mod tests {
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
-    // The VFIO integration test starts a cloud-hypervisor guest and then
-    // direct assigns one of the virtio-pci device to a cloud-hypervisor
-    // nested guest. The test assigns one of the 2 virtio-pci networking
-    // interface, and thus the cloud-hypervisor guest will get a networking
-    // interface through that direct assignment.
-    // The test starts cloud-hypervisor guest with 2 TAP backed networking
-    // interfaces, bound through a simple bridge on the host. So if the nested
-    // cloud-hypervisor succeeds in getting a directly assigned interface from
-    // its cloud-hypervisor host, we should be able to ssh into it, and verify
-    // that it's running with the right kernel command line (We tag the command
-    // line from cloud-hypervisor for that purpose).
+    // The VFIO integration test starts cloud-hypervisor guest with 3 TAP
+    // backed networking interfaces, bound through a simple bridge on the host.
+    // So if the nested cloud-hypervisor succeeds in getting a directly
+    // assigned interface from its cloud-hypervisor host, we should be able to
+    // ssh into it, and verify that it's running with the right kernel command
+    // line (We tag the command line from cloud-hypervisor for that purpose).
+    // The third device is added to validate that hotplug works correctly since
+    // it is being added to the L2 VM through hotplugging mechanism.
     fn test_vfio() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -2217,6 +2230,7 @@ mod tests {
             let vfio_tap0 = "vfio-tap0";
             let vfio_tap1 = "vfio-tap1";
             let vfio_tap2 = "vfio-tap2";
+            let vfio_tap3 = "vfio-tap3";
 
             let (mut daemon_child, virtiofsd_socket_path) =
                 prepare_virtiofsd(&guest.tmp_dir, vfio_path.to_str().unwrap(), "none");
@@ -2239,6 +2253,10 @@ mod tests {
                     .as_str(),
                     format!(
                         "tap={},mac={},iommu=on", vfio_tap2, guest.network.l2_guest_mac2
+                    )
+                    .as_str(),
+                    format!(
+                        "tap={},mac={},iommu=on", vfio_tap3, guest.network.l2_guest_mac3
                     )
                     .as_str(),
                 ])
@@ -2280,6 +2298,37 @@ mod tests {
                 tb,
                 guest
                     .ssh_command_l2_2("grep -c VFIOTAG /proc/cmdline")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // Hotplug an extra virtio-net device through L2 VM.
+            guest.ssh_command_l1(
+                "sudo bash -c 'echo 0000:00:07.0 > /sys/bus/pci/devices/0000:00:07.0/driver/unbind'",
+            )?;
+            guest.ssh_command_l1(
+                "sudo bash -c 'echo 1af4 1041 > /sys/bus/pci/drivers/vfio-pci/new_id'",
+            )?;
+            guest.ssh_command_l1(
+                "sudo curl \
+                 --unix-socket /tmp/ch_api.sock \
+                 -i \
+                 -X PUT http://localhost/api/v1/vm.add-device \
+                 -H 'Accept: application/json' -H 'Content-Type: application/json' \
+                 -d '{\"path\":\"/sys/bus/pci/devices/0000:00:07.0\"}'",
+            )?;
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Let's also verify from the third virtio-net device passed to
+            // the L2 VM. This third device has been hotplugged through the L2
+            // VM, so this is our way to validate hotplug works for VFIO PCI.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command_l2_3("grep -c VFIOTAG /proc/cmdline")
                     .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
