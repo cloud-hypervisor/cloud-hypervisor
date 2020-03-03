@@ -25,7 +25,8 @@ fn main() {
                     "vhost-user-net backend parameters \"ip=<ip_addr>,\
                      mask=<net_mask>,sock=<socket_path>,\
                      num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>\"",
+                     queue_size=<size_of_each_queue>,\
+                     tap=<if_name>\"",
                 )
                 .takes_value(true)
                 .min_values(1),
