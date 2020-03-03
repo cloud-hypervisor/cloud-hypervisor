@@ -410,6 +410,37 @@ mod tests {
         )
     }
 
+    fn prepare_vhost_user_net_daemon(
+        tmp_dir: &TempDir,
+        ip: &str,
+        tap: Option<&str>,
+        num_queues: usize,
+    ) -> (std::process::Child, String) {
+        let vunet_socket_path = String::from(tmp_dir.path().join("vunet.sock").to_str().unwrap());
+
+        // Start the daemon
+        let net_params = if let Some(tap_str) = tap {
+            format!(
+                "tap={},ip={},mask=255.255.255.0,sock={},num_queues={},queue_size=1024",
+                tap_str, ip, vunet_socket_path, num_queues
+            )
+        } else {
+            format!(
+                "ip={},mask=255.255.255.0,sock={},num_queues={},queue_size=1024",
+                ip, vunet_socket_path, num_queues
+            )
+        };
+
+        let child = Command::new("target/release/cloud-hypervisor")
+            .args(&["--net-backend", net_params.as_str()])
+            .spawn()
+            .unwrap();
+
+        thread::sleep(std::time::Duration::new(10, 0));
+
+        (child, vunet_socket_path)
+    }
+
     fn curl_command(api_socket: &str, method: &str, url: &str, http_body: Option<&str>) {
         let mut curl_args: Vec<&str> =
             ["--unix-socket", api_socket, "-i", "-X", method, url].to_vec();
@@ -1123,36 +1154,38 @@ mod tests {
         });
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
-    fn test_vhost_user_net() {
+    fn test_vhost_user_net(
+        tap: Option<&str>,
+        num_queues: usize,
+        prepare_vhost_user_net_daemon: &dyn Fn(
+            &TempDir,
+            &str,
+            Option<&str>,
+            usize,
+        ) -> (std::process::Child, String),
+    ) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
             // Start the daemon
-            let mut daemon_child = Command::new("target/release/cloud-hypervisor")
-                .args(&[
-                    "--net-backend",
-                    format!(
-                        "ip={},mask=255.255.255.0,sock=/tmp/vunet.sock,num_queues=4,queue_size=1024",
-                        guest.network.host_ip
-                    )
-                    .as_str(),
-                ])
-                .spawn()
-                .unwrap();
-            thread::sleep(std::time::Duration::new(10, 0));
+            let (mut daemon_child, vunet_socket_path) = prepare_vhost_user_net_daemon(
+                &guest.tmp_dir,
+                &guest.network.host_ip,
+                tap,
+                num_queues,
+            );
 
             let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=4"])
+                .args(&["--cpus", format!("boot={}", num_queues / 2).as_str()])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
                 .args(&[
                     "--net",
                     format!(
-                        "vhost_user=true,mac={},socket=/tmp/vunet.sock,num_queues=4,queue_size=1024",
-                        guest.network.guest_mac
+                        "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024",
+                        guest.network.guest_mac, vunet_socket_path, num_queues,
                     )
                     .as_str(),
                 ])
@@ -1194,7 +1227,7 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                14
+                10 + (num_queues as u32)
             );
 
             let _ = cloud_child.kill();
@@ -1206,6 +1239,26 @@ mod tests {
 
             Ok(())
         });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_vhost_user_net_default() {
+        test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon)
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_vhost_user_net_tap() {
+        test_vhost_user_net(Some("vunet-tap0"), 2, &prepare_vhost_user_net_daemon)
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_vhost_user_net_multiple_queues() {
+        test_vhost_user_net(None, 4, &prepare_vhost_user_net_daemon)
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_vhost_user_net_tap_multiple_queues() {
+        test_vhost_user_net(Some("vunet-tap1"), 4, &prepare_vhost_user_net_daemon)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]

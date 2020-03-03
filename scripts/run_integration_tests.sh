@@ -161,6 +161,11 @@ sudo ip tuntap add vfio-tap3 mode tap
 sudo ip link set vfio-tap3 master vfio-br0
 sudo ip link set vfio-tap3 up
 
+# Create tap interface without multipe queues support for vhost_user_net test.
+sudo ip tuntap add name vunet-tap0 mode tap
+# Create tap interface with multipe queues support for vhost_user_net test.
+sudo ip tuntap add name vunet-tap1 mode tap multi_queue
+
 cargo build --release
 sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
 sudo setcap cap_net_admin+ep target/release/vhost_user_net
@@ -208,5 +213,9 @@ sudo ip link del vfio-tap0
 sudo ip link del vfio-tap1
 sudo ip link del vfio-tap2
 sudo ip link del vfio-tap3
+
+# Tear vhost_user_net test network down
+sudo ip link del vunet-tap0
+sudo ip link del vunet-tap1
 
 exit $RES
