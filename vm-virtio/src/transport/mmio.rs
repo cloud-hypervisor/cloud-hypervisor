@@ -86,6 +86,7 @@ pub struct MmioDevice {
     queues: Vec<Queue>,
     queue_evts: Vec<EventFd>,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    shm_region_select: u32,
 }
 
 impl MmioDevice {
@@ -118,6 +119,7 @@ impl MmioDevice {
             queues,
             queue_evts,
             mem: Some(mem),
+            shm_region_select: 0,
         })
     }
 
@@ -200,6 +202,34 @@ impl BusDevice for MmioDevice {
                     0x60 => self.interrupt_status.load(Ordering::SeqCst) as u32,
                     0x70 => self.driver_status,
                     0xfc => self.config_generation,
+                    0xb0..=0xbc => {
+                        // For no SHM region or invalid region the kernel looks for length of -1
+                        let (shm_offset, shm_len) = if let Some(shm_regions) =
+                            self.device.lock().unwrap().get_shm_regions()
+                        {
+                            if self.shm_region_select as usize > shm_regions.region_list.len() {
+                                (0, !0 as u64)
+                            } else {
+                                (
+                                    shm_regions.region_list[self.shm_region_select as usize].offset
+                                        + shm_regions.addr.0,
+                                    shm_regions.region_list[self.shm_region_select as usize].len,
+                                )
+                            }
+                        } else {
+                            (0, !0 as u64)
+                        };
+                        match offset {
+                            0xb0 => shm_len as u32,
+                            0xb4 => (shm_len >> 32) as u32,
+                            0xb8 => shm_offset as u32,
+                            0xbc => (shm_offset >> 32) as u32,
+                            _ => {
+                                error!("invalid shm region offset");
+                                0
+                            }
+                        }
+                    }
                     _ => {
                         warn!("unknown virtio mmio register read: 0x{:x}", offset);
                         return;
@@ -265,6 +295,7 @@ impl BusDevice for MmioDevice {
                     0x94 => mut_q = self.with_queue_mut(|q| hi(&mut q.avail_ring, v)),
                     0xa0 => mut_q = self.with_queue_mut(|q| lo(&mut q.used_ring, v)),
                     0xa4 => mut_q = self.with_queue_mut(|q| hi(&mut q.used_ring, v)),
+                    0xac => self.shm_region_select = v,
                     _ => {
                         warn!("unknown virtio mmio register write: 0x{:x}", offset);
                         return;
