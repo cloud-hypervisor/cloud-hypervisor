@@ -1752,27 +1752,22 @@ mod tests {
         });
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_on_default_cache_size() {
         test_virtio_fs(true, None, "none", &prepare_virtiofsd)
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_on_cache_size_1_gib() {
         test_virtio_fs(true, Some(0x4000_0000), "none", &prepare_virtiofsd)
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_off() {
         test_virtio_fs(false, None, "none", &prepare_virtiofsd)
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_on_default_cache_size_w_vhost_user_fs_daemon() {
         test_virtio_fs(true, None, "none", &prepare_vhost_user_fs_daemon)
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_on_cache_size_1_gib_w_vhost_user_fs_daemon() {
         test_virtio_fs(
             true,
@@ -1782,7 +1777,6 @@ mod tests {
         )
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_dax_off_w_vhost_user_fs_daemon() {
         test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon)
     }
