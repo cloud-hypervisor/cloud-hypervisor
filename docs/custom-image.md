@@ -45,7 +45,7 @@ sudo swupd bundle-add os-installer
 wget https://download.clearlinux.org/current/config/image/cloudguest.yaml
 sed -i '/size: \"864M\"/d' cloudguest.yaml
 sed -i 's/\"800M\"/\"2G\"/g' cloudguest.yaml
-sed -i 's/bootloader,/bootloader,\n    iperf,/g' cloudguest.yaml
+sed -i 's/bootloader,/bootloader,\n    curl,\n    iperf,/g' cloudguest.yaml
 sed -i 's/systemd-networkd-autostart/sysadmin-basic,\n    systemd-networkd-autostart/g' cloudguest.yaml
 # Create the custom cloudguest image
 clr-installer -c cloudguest.yaml

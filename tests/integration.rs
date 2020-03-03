@@ -193,10 +193,10 @@ mod tests {
             workload_path.push("workloads");
 
             let mut osdisk_base_path = workload_path.clone();
-            osdisk_base_path.push("clear-31310-cloudguest.img");
+            osdisk_base_path.push("clear-31311-cloudguest.img");
 
             let mut osdisk_raw_base_path = workload_path;
-            osdisk_raw_base_path.push("clear-31310-cloudguest-raw.img");
+            osdisk_raw_base_path.push("clear-31311-cloudguest-raw.img");
 
             let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
             let osdisk_raw_path =
@@ -955,7 +955,7 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
@@ -1000,7 +1000,7 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
@@ -1143,7 +1143,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
             // 1 network interface + default localhost ==> 2 interfaces
             // It's important to note that this test is fully exercising the
             // vhost-user-net implementation and the associated backend since
@@ -1160,8 +1160,6 @@ mod tests {
                     .unwrap_or_default(),
                 2
             );
-
-            thread::sleep(std::time::Duration::new(10, 0));
 
             // The following pci devices will appear on guest with PCI-MSI
             // interrupt vectors assigned.
@@ -1581,7 +1579,7 @@ mod tests {
 
             // Just check the VM booted correctly.
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 492_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             let _ = cloud_child.kill();
@@ -1687,7 +1685,7 @@ mod tests {
                 ])
                 .args(&[
                     "--cmdline",
-                    "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 \
+                    "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c \
                      console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
                      init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
                      no_timer_check noreplace-smp cryptomgr.notests \
@@ -1816,7 +1814,7 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
@@ -1870,7 +1868,7 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
@@ -2234,7 +2232,7 @@ mod tests {
                 .args(&["--memory", "size=1G,file=/dev/hugepages"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts rw"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts rw"])
                 .args(&[
                     "--net",
                     format!(
@@ -2321,7 +2319,7 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw acpi=off"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw acpi=off"])
                 .spawn()
                 .unwrap();
 
@@ -2425,7 +2423,7 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
@@ -2556,7 +2554,7 @@ mod tests {
 
             // Then boot it
             curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
-            thread::sleep(std::time::Duration::new(5, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             // Check that the VM booted as expected
             aver_eq!(
@@ -2610,7 +2608,7 @@ mod tests {
 
             // Then boot it
             curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.boot", None);
-            thread::sleep(std::time::Duration::new(5, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             // Check that the VM booted as expected
             aver_eq!(
@@ -2695,7 +2693,7 @@ mod tests {
                     .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string_w_iommu().as_str()])
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
@@ -2946,7 +2944,7 @@ mod tests {
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .default_disks()
                 .default_net()
                 .args(&["--api-socket", &api_socket])
@@ -3038,7 +3036,7 @@ mod tests {
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M,hotplug_size=8192M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .default_disks()
                 .default_net()
                 .args(&["--api-socket", &api_socket])
@@ -3150,7 +3148,7 @@ mod tests {
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M,hotplug_size=8192M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .default_disks()
                 .default_net()
                 .args(&["--api-socket", &api_socket])
@@ -3247,7 +3245,7 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", "root=PARTUUID=8d93774b-e12c-4ac5-aa35-77bfa7168767 console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
