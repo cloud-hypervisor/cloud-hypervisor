@@ -6,6 +6,8 @@ source $HOME/.cargo/env
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
 
+cp scripts/sha1sums $WORKLOADS_DIR
+
 FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
 FW="$WORKLOADS_DIR/hypervisor-fw"
 if [ ! -f "$FW" ]; then
@@ -14,7 +16,7 @@ if [ ! -f "$FW" ]; then
     popd
 fi
 
-CLEAR_OS_IMAGE_NAME="clear-31310-cloudguest.img"
+CLEAR_OS_IMAGE_NAME="clear-31311-cloudguest.img"
 CLEAR_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$CLEAR_OS_IMAGE_NAME"
 CLEAR_OS_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_IMAGE_NAME"
 if [ ! -f "$CLEAR_OS_IMAGE" ]; then
@@ -23,7 +25,7 @@ if [ ! -f "$CLEAR_OS_IMAGE" ]; then
     popd
 fi
 
-CLEAR_OS_RAW_IMAGE_NAME="clear-31310-cloudguest-raw.img"
+CLEAR_OS_RAW_IMAGE_NAME="clear-31311-cloudguest-raw.img"
 CLEAR_OS_RAW_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_RAW_IMAGE_NAME"
 if [ ! -f "$CLEAR_OS_RAW_IMAGE" ]; then
     pushd $WORKLOADS_DIR
@@ -67,7 +69,7 @@ if [ ! -f "$EOAN_OS_RAW_IMAGE" ]; then
 fi
 
 pushd $WORKLOADS_DIR
-curl --silent "https://cloudhypervisorstorage.blob.core.windows.net/images/sha1sums" | sha1sum --check
+cat sha1sums | sha1sum --check
 if [ $? -ne 0 ]; then
     echo "sha1sum validation of images failed, remove invalid images to fix the issue."
     exit 1
