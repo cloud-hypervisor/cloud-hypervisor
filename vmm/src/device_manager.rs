@@ -1387,7 +1387,7 @@ impl DeviceManager {
 
     #[cfg(feature = "pci_support")]
     fn add_vfio_device(
-        &self,
+        &mut self,
         pci: &mut PciBus,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         device_fd: &Arc<DeviceFd>,
@@ -1461,8 +1461,9 @@ impl DeviceManager {
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> DeviceManagerResult<Vec<u32>> {
         let mut iommu_attached_device_ids = Vec::new();
+        let devices = self.config.lock().unwrap().devices.clone();
 
-        if let Some(device_list_cfg) = &self.config.lock().unwrap().devices {
+        if let Some(device_list_cfg) = &devices {
             // Create the KVM VFIO device
             let device_fd = DeviceManager::create_kvm_device(&self.address_manager.vm_fd)?;
             let device_fd = Arc::new(device_fd);
@@ -1670,8 +1671,8 @@ impl DeviceManager {
             iommu: false,
         };
 
-        let mut pci = if let Some(pci_bus) = &self.pci_bus {
-            pci_bus.lock().unwrap()
+        let pci = if let Some(pci_bus) = &self.pci_bus {
+            Arc::clone(&pci_bus)
         } else {
             return Err(DeviceManagerError::NoPciBus);
         };
@@ -1690,8 +1691,12 @@ impl DeviceManager {
             device_fd
         };
 
-        let device_id =
-            self.add_vfio_device(&mut pci, &interrupt_manager, &device_fd, &device_cfg)?;
+        let device_id = self.add_vfio_device(
+            &mut pci.lock().unwrap(),
+            &interrupt_manager,
+            &device_fd,
+            &device_cfg,
+        )?;
 
         // Update the PCIU bitmap
         self.pci_devices_up |= 1 << (device_id >> 3);
