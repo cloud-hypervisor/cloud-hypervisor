@@ -169,6 +169,9 @@ pub enum Error {
 
     /// No PCI support
     NoPciSupport,
+
+    /// Eventfd write error
+    EventfdError(std::io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -337,6 +340,7 @@ impl Vm {
             allocator.clone(),
             fd.clone(),
             memory_config.size,
+            memory_config.hotplug_method,
             memory_config.hotplug_size,
             &memory_config.file,
             memory_config.mergeable,
