@@ -2146,7 +2146,7 @@ mod tests {
             );
 
             let text = String::from("On a branch floating down river a cricket, singing.");
-            let cmd = format!("sudo -E bash -c 'echo {} > /dev/hvc0'", text);
+            let cmd = format!("echo {} | sudo tee /dev/hvc0", text);
             guest.ssh_command(&cmd)?;
 
             let _ = child.kill();
@@ -2315,11 +2315,10 @@ mod tests {
 
             // Hotplug an extra virtio-net device through L2 VM.
             guest.ssh_command_l1(
-                "sudo bash -c 'echo 0000:00:07.0 > /sys/bus/pci/devices/0000:00:07.0/driver/unbind'",
+                "echo 0000:00:07.0 | sudo tee /sys/bus/pci/devices/0000:00:07.0/driver/unbind",
             )?;
-            guest.ssh_command_l1(
-                "sudo bash -c 'echo 1af4 1041 > /sys/bus/pci/drivers/vfio-pci/new_id'",
-            )?;
+            guest
+                .ssh_command_l1("echo 1af4 1041 | sudo tee /sys/bus/pci/drivers/vfio-pci/new_id")?;
             guest.ssh_command_l1(
                 "sudo curl \
                  --unix-socket /tmp/ch_api.sock \
@@ -2837,12 +2836,12 @@ mod tests {
                 3
             );
 
-            let init_bar_addr = guest
-                .ssh_command("sudo bash -c \"cat /sys/bus/pci/devices/0000:00:05.0/resource | awk '{print $1; exit}'\"")?;
+            let init_bar_addr = guest.ssh_command(
+                "sudo awk '{print $1; exit}' /sys/bus/pci/devices/0000:00:05.0/resource",
+            )?;
 
             // Remove the PCI device
-            guest
-                .ssh_command("sudo bash -c 'echo 1 > /sys/bus/pci/devices/0000:00:05.0/remove'")?;
+            guest.ssh_command("echo 1 | sudo tee /sys/bus/pci/devices/0000:00:05.0/remove")?;
 
             // Only 1 network interface left + default localhost ==> 2 interfaces
             aver_eq!(
@@ -2857,7 +2856,7 @@ mod tests {
             );
 
             // Remove the PCI device
-            guest.ssh_command("sudo bash -c 'echo 1 > /sys/bus/pci/rescan'")?;
+            guest.ssh_command("echo 1 | sudo tee /sys/bus/pci/rescan")?;
 
             // Back to 2 network interface + default localhost ==> 3 interfaces
             aver_eq!(
@@ -2871,8 +2870,9 @@ mod tests {
                 3
             );
 
-            let new_bar_addr = guest
-                .ssh_command("sudo bash -c \"cat /sys/bus/pci/devices/0000:00:05.0/resource | awk '{print $1; exit}'\"")?;
+            let new_bar_addr = guest.ssh_command(
+                "sudo awk '{print $1; exit}' /sys/bus/pci/devices/0000:00:05.0/resource",
+            )?;
 
             // Let's compare the BAR addresses for our virtio-net device.
             // They should be different as we expect the BAR reprogramming
