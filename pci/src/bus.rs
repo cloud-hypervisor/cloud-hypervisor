@@ -11,7 +11,7 @@ use devices::BusDevice;
 use std;
 use std::any::Any;
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use vm_memory::{Address, GuestAddress, GuestUsize};
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
@@ -80,11 +80,11 @@ pub struct PciBus {
     /// Devices attached to this bus.
     /// Device 0 is host bridge.
     devices: Vec<Arc<Mutex<dyn PciDevice>>>,
-    device_reloc: Weak<dyn DeviceRelocation>,
+    device_reloc: Arc<dyn DeviceRelocation>,
 }
 
 impl PciBus {
-    pub fn new(pci_root: PciRoot, device_reloc: Weak<dyn DeviceRelocation>) -> Self {
+    pub fn new(pci_root: PciRoot, device_reloc: Arc<dyn DeviceRelocation>) -> Self {
         let mut devices: Vec<Arc<Mutex<dyn PciDevice>>> = Vec::new();
 
         devices.push(Arc::new(Mutex::new(pci_root)));
@@ -197,7 +197,7 @@ impl PciConfigIo {
             // Find out if one of the device's BAR is being reprogrammed, and
             // reprogram it if needed.
             if let Some(params) = device.detect_bar_reprogramming(register, data) {
-                if let Err(e) = pci_bus.device_reloc.upgrade().unwrap().move_bar(
+                if let Err(e) = pci_bus.device_reloc.move_bar(
                     params.old_base,
                     params.new_base,
                     params.len,
@@ -313,7 +313,7 @@ impl PciConfigMmio {
             // Find out if one of the device's BAR is being reprogrammed, and
             // reprogram it if needed.
             if let Some(params) = device.detect_bar_reprogramming(register, data) {
-                if let Err(e) = pci_bus.device_reloc.upgrade().unwrap().move_bar(
+                if let Err(e) = pci_bus.device_reloc.move_bar(
                     params.old_base,
                     params.new_base,
                     params.len,
