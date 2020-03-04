@@ -441,6 +441,17 @@ mod tests {
         )
         .unwrap();
 
+        configure_system(
+            &gm,
+            GuestAddress(0),
+            0,
+            no_vcpus,
+            None,
+            None,
+            BootProtocol::PvhBoot,
+        )
+        .unwrap();
+
         // Now assigning some memory that is equal to the start of the 32bit memory hole.
         let mem_size = 3328 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
@@ -461,6 +472,17 @@ mod tests {
         )
         .unwrap();
 
+        configure_system(
+            &gm,
+            GuestAddress(0),
+            0,
+            no_vcpus,
+            None,
+            None,
+            BootProtocol::PvhBoot,
+        )
+        .unwrap();
+
         // Now assigning some memory that falls after the 32bit memory hole.
         let mem_size = 3330 << 20;
         let arch_mem_regions = arch_memory_regions(mem_size);
@@ -478,6 +500,17 @@ mod tests {
             None,
             None,
             BootProtocol::LinuxBoot,
+        )
+        .unwrap();
+
+        configure_system(
+            &gm,
+            GuestAddress(0),
+            0,
+            no_vcpus,
+            None,
+            None,
+            BootProtocol::PvhBoot,
         )
         .unwrap();
     }
@@ -520,5 +553,30 @@ mod tests {
             e820_table[0].type_
         )
         .is_err());
+    }
+
+    #[test]
+    fn test_add_memmap_entry() {
+        let mut memmap: Vec<hvm_memmap_table_entry> = Vec::new();
+
+        let expected_memmap = vec![
+            hvm_memmap_table_entry {
+                addr: 0x0,
+                size: 0x1000,
+                type_: E820_RAM,
+                ..Default::default()
+            },
+            hvm_memmap_table_entry {
+                addr: 0x10000,
+                size: 0xa000,
+                type_: E820_RESERVED,
+                ..Default::default()
+            },
+        ];
+
+        add_memmap_entry(&mut memmap, 0, 0x1000, E820_RAM).unwrap();
+        add_memmap_entry(&mut memmap, 0x10000, 0xa000, E820_RESERVED).unwrap();
+
+        assert_eq!(format!("{:?}", memmap), format!("{:?}", expected_memmap));
     }
 }
