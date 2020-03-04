@@ -29,6 +29,7 @@ mod device;
 pub mod block;
 mod console;
 mod iommu;
+pub mod mem;
 pub mod net;
 pub mod net_util;
 mod pmem;
@@ -43,6 +44,7 @@ pub use self::block::*;
 pub use self::console::*;
 pub use self::device::*;
 pub use self::iommu::*;
+pub use self::mem::*;
 pub use self::net::*;
 pub use self::net_util::*;
 pub use self::pmem::*;
@@ -77,6 +79,7 @@ enum VirtioDeviceType {
     TYPE_INPUT = 18,
     TYPE_VSOCK = 19,
     TYPE_IOMMU = 23,
+    TYPE_MEM = 24,
     TYPE_FS = 26,
     TYPE_PMEM = 27,
     TYPE_UNKNOWN = 0xFF,
@@ -95,6 +98,7 @@ impl From<u32> for VirtioDeviceType {
             18 => VirtioDeviceType::TYPE_INPUT,
             19 => VirtioDeviceType::TYPE_VSOCK,
             23 => VirtioDeviceType::TYPE_IOMMU,
+            24 => VirtioDeviceType::TYPE_MEM,
             26 => VirtioDeviceType::TYPE_FS,
             27 => VirtioDeviceType::TYPE_PMEM,
             _ => VirtioDeviceType::TYPE_UNKNOWN,
@@ -118,6 +122,7 @@ impl fmt::Display for VirtioDeviceType {
             VirtioDeviceType::TYPE_INPUT => "input",
             VirtioDeviceType::TYPE_VSOCK => "vsock",
             VirtioDeviceType::TYPE_IOMMU => "iommu",
+            VirtioDeviceType::TYPE_MEM => "mem",
             VirtioDeviceType::TYPE_FS => "fs",
             VirtioDeviceType::TYPE_PMEM => "pmem",
             VirtioDeviceType::TYPE_UNKNOWN => "UNKNOWN",
@@ -176,4 +181,5 @@ pub enum Error {
     EpollWait(io::Error),
     FailedSignalingDriver(io::Error),
     VhostUserUpdateMemory(vhost_user::Error),
+    EventfdError(io::Error),
 }
