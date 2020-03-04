@@ -621,7 +621,13 @@ impl Vm {
             .start_boot_vcpus(entry_addr)
             .map_err(Error::CpuManager)?;
 
-        if self.device_manager.lock().unwrap().console().input_enabled() {
+        if self
+            .device_manager
+            .lock()
+            .unwrap()
+            .console()
+            .input_enabled()
+        {
             let console = self.device_manager.lock().unwrap().console().clone();
             let signals = Signals::new(&[SIGWINCH, SIGINT, SIGTERM]);
             match signals {
@@ -660,7 +666,13 @@ impl Vm {
             .read_raw(&mut out)
             .map_err(Error::Console)?;
 
-        if self.device_manager.lock().unwrap().console().input_enabled() {
+        if self
+            .device_manager
+            .lock()
+            .unwrap()
+            .console()
+            .input_enabled()
+        {
             self.device_manager
                 .lock()
                 .unwrap()
