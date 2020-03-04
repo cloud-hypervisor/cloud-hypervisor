@@ -9,7 +9,7 @@
 
 use std::cmp::{Ord, Ordering, PartialEq, PartialOrd};
 use std::collections::btree_map::BTreeMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::{convert, error, fmt, io, result};
 
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
@@ -95,7 +95,7 @@ impl PartialOrd for BusRange {
 /// only restriction is that no two devices can overlap in this address space.
 #[derive(Default)]
 pub struct Bus {
-    devices: RwLock<BTreeMap<BusRange, Arc<Mutex<dyn BusDevice>>>>,
+    devices: RwLock<BTreeMap<BusRange, Weak<Mutex<dyn BusDevice>>>>,
 }
 
 impl Bus {
@@ -112,7 +112,7 @@ impl Bus {
             .range(..=BusRange { base: addr, len: 1 })
             .rev()
             .next()?;
-        Some((*range, dev.clone()))
+        Some((*range, dev.upgrade().unwrap().clone()))
     }
 
     #[allow(clippy::type_complexity)]
@@ -147,7 +147,7 @@ impl Bus {
             .devices
             .write()
             .unwrap()
-            .insert(BusRange { base, len }, device)
+            .insert(BusRange { base, len }, Arc::downgrade(&device))
             .is_some()
         {
             return Err(Error::Overlap);
@@ -312,9 +312,8 @@ mod tests {
 
         let bus = Bus::new();
         let mut data = [1, 2, 3, 4];
-        assert!(bus
-            .insert(Arc::new(Mutex::new(DummyDevice)), 0x10, 0x10)
-            .is_ok());
+        let device = Arc::new(Mutex::new(DummyDevice));
+        assert!(bus.insert(device.clone(), 0x10, 0x10).is_ok());
         assert!(bus.write(0x10, &mut data));
         assert!(bus.read(0x10, &mut data));
         assert_eq!(data, [1, 2, 3, 4]);
