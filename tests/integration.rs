@@ -691,7 +691,7 @@ mod tests {
             cache_size: Option<u64>,
         ) -> Result<bool, Error> {
             let shm_region = self
-                .ssh_command("sudo -E bash -c 'cat /proc/iomem' | grep virtio-pci-shm")?
+                .ssh_command("sudo grep virtio-pci-shm /proc/iomem")?
                 .trim()
                 .to_string();
 
