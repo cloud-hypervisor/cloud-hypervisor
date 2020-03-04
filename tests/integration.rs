@@ -1596,7 +1596,6 @@ mod tests {
             // Just check the VM booted correctly.
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
-            aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             let _ = cloud_child.kill();
             let _ = cloud_child.wait();
