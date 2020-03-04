@@ -222,8 +222,6 @@ pub struct Vm {
     state: RwLock<VmState>,
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     memory_manager: Arc<Mutex<MemoryManager>>,
-    // Hold the strong reference onto the IO bus.
-    _io_bus: Arc<devices::Bus>,
 }
 
 impl Vm {
@@ -331,8 +329,6 @@ impl Vm {
             .ok_or(Error::CreateSystemAllocator)?,
         ));
 
-        let io_bus = Arc::new(devices::Bus::new());
-
         let memory_config = config.lock().unwrap().memory.clone();
 
         let memory_manager = MemoryManager::new(
@@ -355,7 +351,6 @@ impl Vm {
             &exit_evt,
             &reset_evt,
             vmm_path,
-            &io_bus,
         )
         .map_err(Error::DeviceManager)?;
 
@@ -384,7 +379,6 @@ impl Vm {
             state: RwLock::new(VmState::Created),
             cpu_manager,
             memory_manager,
-            _io_bus: io_bus,
         })
     }
 
