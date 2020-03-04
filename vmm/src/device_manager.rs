@@ -474,7 +474,6 @@ impl DeviceManager {
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
         vmm_path: PathBuf,
-        io_bus: &Arc<devices::Bus>,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let mut virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)> = Vec::new();
         let migratable_devices: Vec<Arc<Mutex<dyn Migratable>>> = Vec::new();
@@ -486,7 +485,7 @@ impl DeviceManager {
 
         let address_manager = Arc::new(AddressManager {
             allocator,
-            io_bus: Arc::clone(io_bus),
+            io_bus: Arc::new(devices::Bus::new()),
             mmio_bus: Arc::new(devices::Bus::new()),
             vm_fd: vm_fd.clone(),
         });
