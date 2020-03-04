@@ -355,6 +355,36 @@ mod tests {
         assert_eq!(0, sregs.tr.avl);
         assert_eq!(X86_CR0_PE, sregs.cr0);
         assert_eq!(EFER_LME | EFER_LMA, sregs.efer);
+
+        configure_segments_and_sregs(&gm, &mut sregs, BootProtocol::PvhBoot).unwrap();
+        assert_eq!(0x0, read_u64(&gm, BOOT_GDT_START));
+        assert_eq!(
+            0xcf9b000000ffff,
+            read_u64(&gm, BOOT_GDT_START.unchecked_add(8))
+        );
+        assert_eq!(
+            0xcf93000000ffff,
+            read_u64(&gm, BOOT_GDT_START.unchecked_add(16))
+        );
+        assert_eq!(
+            0x8b0000000067,
+            read_u64(&gm, BOOT_GDT_START.unchecked_add(24))
+        );
+        assert_eq!(0x0, read_u64(&gm, BOOT_IDT_START));
+
+        assert_eq!(0, sregs.cs.base);
+        assert_eq!(0xffffffff, sregs.ds.limit);
+        assert_eq!(0x10, sregs.es.selector);
+        assert_eq!(1, sregs.fs.present);
+        assert_eq!(1, sregs.gs.g);
+        assert_eq!(0, sregs.ss.avl);
+        assert_eq!(0, sregs.tr.base);
+        assert_eq!(0, sregs.tr.g);
+        assert_eq!(0x67, sregs.tr.limit);
+        assert_eq!(0xb, sregs.tr.type_);
+        assert_eq!(0, sregs.tr.avl);
+        assert_eq!(X86_CR0_PE, sregs.cr0);
+        assert_eq!(0, sregs.cr4);
     }
 
     #[test]
