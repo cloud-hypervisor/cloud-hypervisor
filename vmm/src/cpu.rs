@@ -507,7 +507,7 @@ impl CpuManager {
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus,
             max_vcpus,
-            io_bus: device_manager.io_bus(),
+            io_bus: device_manager.io_bus().clone(),
             mmio_bus: device_manager.mmio_bus().clone(),
             ioapic: device_manager.ioapic().clone(),
             vm_memory: guest_memory,

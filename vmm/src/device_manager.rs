@@ -39,7 +39,6 @@ use std::io::{self, sink, stdout};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::result;
-use std::sync::Weak;
 use std::sync::{Arc, Mutex};
 use tempfile::NamedTempFile;
 #[cfg(feature = "pci_support")]
@@ -277,7 +276,7 @@ impl Console {
 
 struct AddressManager {
     allocator: Arc<Mutex<SystemAllocator>>,
-    io_bus: Weak<devices::Bus>,
+    io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
     vm_fd: Arc<VmFd>,
 }
@@ -310,8 +309,6 @@ impl DeviceRelocation for AddressManager {
 
                 // Update PIO bus
                 self.io_bus
-                    .upgrade()
-                    .unwrap()
                     .update_range(old_base, len, new_base, len)
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
             }
@@ -489,7 +486,7 @@ impl DeviceManager {
 
         let address_manager = Arc::new(AddressManager {
             allocator,
-            io_bus: Arc::downgrade(io_bus),
+            io_bus: Arc::clone(io_bus),
             mmio_bus: Arc::new(devices::Bus::new()),
             vm_fd: vm_fd.clone(),
         });
@@ -535,8 +532,6 @@ impl DeviceManager {
         #[cfg(feature = "acpi")]
         address_manager
             .io_bus
-            .upgrade()
-            .unwrap()
             .insert(memory_manager.clone(), 0xa00, 0x18)
             .map_err(DeviceManagerError::BusError)?;
 
@@ -608,8 +603,6 @@ impl DeviceManager {
         #[cfg(feature = "acpi")]
         address_manager
             .io_bus
-            .upgrade()
-            .unwrap()
             .insert(
                 Arc::clone(&device_manager) as Arc<Mutex<dyn BusDevice>>,
                 0xae00,
@@ -685,8 +678,6 @@ impl DeviceManager {
                 .push(Arc::clone(&pci_config_io) as Arc<Mutex<dyn BusDevice>>);
             self.address_manager
                 .io_bus
-                .upgrade()
-                .unwrap()
                 .insert(pci_config_io, 0xcf8, 0x8)
                 .map_err(DeviceManagerError::BusError)?;
             let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
@@ -774,8 +765,6 @@ impl DeviceManager {
 
         self.address_manager
             .io_bus
-            .upgrade()
-            .unwrap()
             .insert(acpi_device, 0x3c0, 0x4)
             .map_err(DeviceManagerError::BusError)?;
 
@@ -810,8 +799,6 @@ impl DeviceManager {
 
         self.address_manager
             .io_bus
-            .upgrade()
-            .unwrap()
             .insert(ged_device.clone(), 0xb000, 0x1)
             .map_err(DeviceManagerError::BusError)?;
         Ok(Some(ged_device))
@@ -826,8 +813,6 @@ impl DeviceManager {
 
         self.address_manager
             .io_bus
-            .upgrade()
-            .unwrap()
             .insert(i8042, 0x61, 0x4)
             .map_err(DeviceManagerError::BusError)?;
         #[cfg(feature = "cmos")]
@@ -856,8 +841,6 @@ impl DeviceManager {
 
             self.address_manager
                 .io_bus
-                .upgrade()
-                .unwrap()
                 .insert(cmos, 0x70, 0x2)
                 .map_err(DeviceManagerError::BusError)?;
         }
@@ -906,8 +889,6 @@ impl DeviceManager {
 
             self.address_manager
                 .io_bus
-                .upgrade()
-                .unwrap()
                 .insert(serial.clone(), 0x3f8, 0x8)
                 .map_err(DeviceManagerError::BusError)?;
 
@@ -1476,7 +1457,7 @@ impl DeviceManager {
 
         pci.register_mapping(
             vfio_pci_device,
-            self.address_manager.io_bus.upgrade().unwrap().as_ref(),
+            self.address_manager.io_bus.as_ref(),
             self.address_manager.mmio_bus.as_ref(),
             bars,
         )
@@ -1585,7 +1566,7 @@ impl DeviceManager {
 
         pci.register_mapping(
             virtio_pci_device.clone(),
-            self.address_manager.io_bus.upgrade().unwrap().as_ref(),
+            self.address_manager.io_bus.as_ref(),
             self.address_manager.mmio_bus.as_ref(),
             bars,
         )
@@ -1659,8 +1640,8 @@ impl DeviceManager {
         Ok(())
     }
 
-    pub fn io_bus(&self) -> Arc<devices::Bus> {
-        Arc::clone(&self.address_manager.io_bus.upgrade().unwrap())
+    pub fn io_bus(&self) -> &Arc<devices::Bus> {
+        &self.address_manager.io_bus
     }
 
     pub fn mmio_bus(&self) -> &Arc<devices::Bus> {
