@@ -593,6 +593,20 @@ mod unit_tests {
                 }"#,
                 false,
             ),
+            (
+                vec!["cloud-hypervisor", "--memory", "size=1G,hotplug_size=1G"],
+                r#"{
+                    "memory": {"size": 1073741824, "hotplug_method": "Acpi", "hotplug_size": 1073741824}
+                }"#,
+                true,
+            ),
+            (
+                vec!["cloud-hypervisor", "--memory", "size=1G,hotplug_method=virtio-mem,hotplug_size=1G"],
+                r#"{
+                    "memory": {"size": 1073741824, "hotplug_method": "VirtioMem", "hotplug_size": 1073741824}
+                }"#,
+                true,
+            ),
         ]
         .iter()
         .for_each(|(cli, openapi, equal)| {
