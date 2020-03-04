@@ -630,7 +630,7 @@ impl DeviceManager {
             let pci_root = PciRoot::new(None);
             let mut pci_bus = PciBus::new(
                 pci_root,
-                Arc::downgrade(&self.address_manager) as Weak<dyn DeviceRelocation>,
+                Arc::clone(&self.address_manager) as Arc<dyn DeviceRelocation>,
             );
 
             let (iommu_device, iommu_mapping) = if self.config.lock().unwrap().iommu {
