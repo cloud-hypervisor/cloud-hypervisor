@@ -100,6 +100,7 @@ fn create_app<'a, 'b>(
                 .help(
                     "Memory parameters \
                      \"size=<guest_memory_size>,file=<backing_file_path>,mergeable=on|off,\
+                     hotplug_method=acpi|virtio-mem,\
                      hotplug_size=<hotpluggable_memory_size>\"",
                 )
                 .default_value(&default_memory)
@@ -412,6 +413,7 @@ extern crate credibility;
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::config::HotplugMethod;
     use crate::{create_app, prepare_default_values};
     use std::path::PathBuf;
     use vmm::config::{
@@ -476,6 +478,7 @@ mod unit_tests {
                     size: 536_870_912,
                     file: None,
                     mergeable: false,
+                    hotplug_method: HotplugMethod::Acpi,
                     hotplug_size: None,
                 },
                 kernel: None,

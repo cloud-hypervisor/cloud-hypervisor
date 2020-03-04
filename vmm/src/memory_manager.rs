@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use crate::config::HotplugMethod;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use arch::RegionType;
@@ -45,8 +46,12 @@ pub struct MemoryManager {
     backing_file: Option<PathBuf>,
     mergeable: bool,
     allocator: Arc<Mutex<SystemAllocator>>,
+    hotplug_method: HotplugMethod,
+    boot_ram: u64,
     current_ram: u64,
     next_hotplug_slot: usize,
+    pub virtiomem_region: Option<Arc<GuestRegionMmap>>,
+    pub virtiomem_resize: Option<vm_virtio::Resize>,
 }
 
 #[derive(Debug)]
@@ -80,6 +85,15 @@ pub enum Error {
 
     /// Failed to set the user memory region.
     SetUserMemoryRegion(kvm_ioctls::Error),
+
+    /// Failed to EventFd.
+    EventFdFail(std::io::Error),
+
+    /// Eventfd write error
+    EventfdError(std::io::Error),
+
+    /// Failed to virtio-mem resize
+    VirtioMemResizeFail(vm_virtio::mem::Error),
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
@@ -195,6 +209,7 @@ impl MemoryManager {
         allocator: Arc<Mutex<SystemAllocator>>,
         fd: Arc<VmFd>,
         boot_ram: u64,
+        hotplug_method: HotplugMethod,
         hotplug_size: Option<u64>,
         backing_file: &Option<PathBuf>,
         mergeable: bool,
@@ -228,8 +243,26 @@ impl MemoryManager {
             mem_end.unchecked_add(1)
         };
 
+        let mut virtiomem_region = None;
+        let mut virtiomem_resize = None;
         if let Some(size) = hotplug_size {
-            start_of_device_area = start_of_device_area.unchecked_add(size);
+            if hotplug_method == HotplugMethod::VirtioMem {
+                let start_addr = GuestAddress(
+                    (start_of_device_area.0 + vm_virtio::VIRTIO_MEM_DEFAULT_BLOCK_SIZE - 1)
+                        & (!(vm_virtio::VIRTIO_MEM_DEFAULT_BLOCK_SIZE - 1)),
+                );
+                virtiomem_region = Some(MemoryManager::create_ram_region(
+                    backing_file,
+                    start_addr,
+                    size as usize,
+                )?);
+
+                virtiomem_resize = Some(vm_virtio::Resize::new().map_err(Error::EventFdFail)?);
+
+                start_of_device_area = start_addr.unchecked_add(size);
+            } else {
+                start_of_device_area = start_of_device_area.unchecked_add(size);
+            }
         }
 
         let guest_memory = GuestMemoryAtomic::new(guest_memory);
@@ -248,8 +281,12 @@ impl MemoryManager {
             backing_file: backing_file.clone(),
             mergeable,
             allocator: allocator.clone(),
+            hotplug_method,
+            boot_ram,
             current_ram: boot_ram,
             next_hotplug_slot: 0,
+            virtiomem_region: virtiomem_region.clone(),
+            virtiomem_resize,
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -262,6 +299,21 @@ impl MemoryManager {
             )?;
             Ok(())
         })?;
+
+        if let Some(region) = virtiomem_region {
+            memory_manager.lock().unwrap().create_userspace_mapping(
+                region.start_addr().raw_value(),
+                region.len() as u64,
+                region.as_ptr() as u64,
+                mergeable,
+                false,
+            )?;
+            allocator
+                .lock()
+                .unwrap()
+                .allocate_mmio_addresses(Some(region.start_addr()), region.len(), None)
+                .ok_or(Error::MemoryRangeAllocation)?;
+        }
 
         // Allocate RAM and Reserved address ranges.
         for region in arch_mem_regions.iter() {
@@ -313,6 +365,18 @@ impl MemoryManager {
             )
             .map_err(Error::GuestMemory)?,
         }))
+    }
+
+    // Update the GuestMemoryMmap with the new range
+    fn add_region(&mut self, region: Arc<GuestRegionMmap>) -> Result<(), Error> {
+        let guest_memory = self
+            .guest_memory
+            .memory()
+            .insert_region(region)
+            .map_err(Error::GuestMemory)?;
+        self.guest_memory.lock().unwrap().replace(guest_memory);
+
+        Ok(())
     }
 
     fn hotplug_ram_region(&mut self, size: usize) -> Result<(), Error> {
@@ -370,13 +434,7 @@ impl MemoryManager {
 
         self.next_hotplug_slot += 1;
 
-        // Update the GuestMemoryMmap with the new range
-        let guest_memory = self
-            .guest_memory
-            .memory()
-            .insert_region(region)
-            .map_err(Error::GuestMemory)?;
-        self.guest_memory.lock().unwrap().replace(guest_memory);
+        self.add_region(region)?;
 
         Ok(())
     }
@@ -453,14 +511,39 @@ impl MemoryManager {
         Ok(slot)
     }
 
-    pub fn resize(&mut self, desired_ram: u64) -> Result<bool, Error> {
-        if desired_ram > self.current_ram {
-            self.hotplug_ram_region((desired_ram - self.current_ram) as usize)?;
-            self.current_ram = desired_ram;
-            Ok(true)
-        } else {
-            Ok(false)
+    pub fn virtiomem_resize(&mut self, size: u64) -> Result<(), Error> {
+        let region = self.virtiomem_region.take();
+        if let Some(region) = region {
+            self.add_region(region)?;
         }
+
+        if let Some(resize) = &self.virtiomem_resize {
+            resize.work(size).map_err(Error::VirtioMemResizeFail)?;
+        } else {
+            panic!("should not fail here");
+        }
+
+        Ok(())
+    }
+
+    pub fn resize(&mut self, desired_ram: u64) -> Result<bool, Error> {
+        let mut notify_hotplug = false;
+        match self.hotplug_method {
+            HotplugMethod::VirtioMem => {
+                if desired_ram >= self.boot_ram {
+                    self.virtiomem_resize(desired_ram - self.boot_ram)?;
+                    self.current_ram = desired_ram;
+                }
+            }
+            HotplugMethod::Acpi => {
+                if desired_ram >= self.current_ram {
+                    self.hotplug_ram_region((desired_ram - self.current_ram) as usize)?;
+                    self.current_ram = desired_ram;
+                    notify_hotplug = true
+                }
+            }
+        }
+        Ok(notify_hotplug)
     }
 }
 

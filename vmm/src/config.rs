@@ -31,6 +31,8 @@ pub enum Error {
     ParseCpusUnknownParam,
     /// Max is less than boot
     ParseCpusMaxLowerThanBoot,
+    /// Failed parsing memory hotplug_method parameter.
+    ParseMemoryHotplugMethodParam,
     /// Failed parsing memory file parameter.
     ParseMemoryFileParam,
     /// Failed parsing kernel parameters.
@@ -247,12 +249,26 @@ impl Default for CpusConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum HotplugMethod {
+    Acpi,
+    VirtioMem,
+}
+
+impl Default for HotplugMethod {
+    fn default() -> Self {
+        HotplugMethod::Acpi
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub size: u64,
     #[serde(default)]
     pub file: Option<PathBuf>,
     #[serde(default)]
     pub mergeable: bool,
+    #[serde(default)]
+    pub hotplug_method: HotplugMethod,
     #[serde(default)]
     pub hotplug_size: Option<u64>,
 }
@@ -266,6 +282,7 @@ impl MemoryConfig {
         let mut file_str: &str = "";
         let mut mergeable_str: &str = "";
         let mut backed = false;
+        let mut hotplug_method_str: &str = "acpi";
         let mut hotplug_str: &str = "";
 
         for param in params_list.iter() {
@@ -276,6 +293,8 @@ impl MemoryConfig {
                 file_str = &param[5..];
             } else if param.starts_with("mergeable=") {
                 mergeable_str = &param[10..];
+            } else if param.starts_with("hotplug_method=") {
+                hotplug_method_str = &param[15..];
             } else if param.starts_with("hotplug_size=") {
                 hotplug_str = &param[13..]
             }
@@ -291,10 +310,18 @@ impl MemoryConfig {
             None
         };
 
+        let hotplug_method_str = hotplug_method_str.to_string().to_lowercase();
+        let hotplug_method = match &hotplug_method_str[..] {
+            "acpi" => HotplugMethod::Acpi,
+            "virtio-mem" => HotplugMethod::VirtioMem,
+            _ => return Err(Error::ParseMemoryHotplugMethodParam),
+        };
+
         Ok(MemoryConfig {
             size: parse_size(size_str)?,
             file,
             mergeable: parse_on_off(mergeable_str)?,
+            hotplug_method,
             hotplug_size: if hotplug_str == "" {
                 None
             } else {
@@ -310,6 +337,7 @@ impl Default for MemoryConfig {
             size: DEFAULT_MEMORY_MB << 20,
             file: None,
             mergeable: false,
+            hotplug_method: HotplugMethod::Acpi,
             hotplug_size: None,
         }
     }
