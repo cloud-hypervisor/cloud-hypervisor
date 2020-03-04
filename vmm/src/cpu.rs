@@ -20,7 +20,7 @@ use libc::{c_void, siginfo_t};
 use std::cmp;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex, Weak};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::{fmt, io, result};
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
@@ -372,7 +372,7 @@ impl Vcpu {
 pub struct CpuManager {
     boot_vcpus: u8,
     max_vcpus: u8,
-    io_bus: Weak<devices::Bus>,
+    io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
     vm_memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -507,7 +507,7 @@ impl CpuManager {
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus,
             max_vcpus,
-            io_bus: Arc::downgrade(&device_manager.io_bus()),
+            io_bus: device_manager.io_bus(),
             mmio_bus: device_manager.mmio_bus().clone(),
             ioapic: device_manager.ioapic().clone(),
             vm_memory: guest_memory,
@@ -531,8 +531,6 @@ impl CpuManager {
             .lock()
             .unwrap()
             .io_bus
-            .upgrade()
-            .unwrap()
             .insert(cpu_manager.clone(), 0x0cd8, 0xc)
             .map_err(Error::BusError)?;
 
@@ -563,7 +561,7 @@ impl CpuManager {
             let mut vcpu = Vcpu::new(
                 cpu_id,
                 &self.fd,
-                self.io_bus.clone().upgrade().unwrap(),
+                self.io_bus.clone(),
                 self.mmio_bus.clone(),
                 ioapic,
                 creation_ts,
