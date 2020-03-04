@@ -69,7 +69,7 @@ if [ ! -f "$EOAN_OS_RAW_IMAGE" ]; then
 fi
 
 pushd $WORKLOADS_DIR
-cat sha1sums | sha1sum --check
+sha1sum sha1sums --check
 if [ $? -ne 0 ]; then
     echo "sha1sum validation of images failed, remove invalid images to fix the issue."
     exit 1
