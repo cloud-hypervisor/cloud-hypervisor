@@ -430,6 +430,12 @@ pub struct DeviceManager {
     // The virtio devices on the system
     virtio_devices: Vec<(VirtioDeviceArc, bool)>,
 
+    // List of bus devices
+    // Let the DeviceManager keep strong references to the BusDevice devices.
+    // This allows the IO and MMIO buses to be provided with Weak references,
+    // which prevents cyclic dependencies.
+    bus_devices: Vec<Arc<Mutex<dyn BusDevice>>>,
+
     // The path to the VMM for self spawning
     vmm_path: PathBuf,
 
@@ -475,6 +481,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let mut virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)> = Vec::new();
         let migratable_devices: Vec<Arc<Mutex<dyn Migratable>>> = Vec::new();
+        let mut bus_devices: Vec<Arc<Mutex<dyn BusDevice>>> = Vec::new();
         let mut _mmap_regions = Vec::new();
 
         #[allow(unused_mut)]
@@ -509,6 +516,7 @@ impl DeviceManager {
 
         let ioapic =
             DeviceManager::add_ioapic(&address_manager, Arc::clone(&msi_interrupt_manager))?;
+        bus_devices.push(Arc::clone(&ioapic) as Arc<Mutex<dyn BusDevice>>);
 
         // Now we can create the legacy interrupt manager, which needs the freshly
         // formed IOAPIC device.
@@ -544,6 +552,7 @@ impl DeviceManager {
             migratable_devices,
             memory_manager,
             virtio_devices: Vec::new(),
+            bus_devices,
             vmm_path,
             vhost_user_backends: Vec::new(),
             #[cfg(feature = "pci_support")]
@@ -672,6 +681,8 @@ impl DeviceManager {
 
             let pci_bus = Arc::new(Mutex::new(pci_bus));
             let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&pci_bus))));
+            self.bus_devices
+                .push(Arc::clone(&pci_config_io) as Arc<Mutex<dyn BusDevice>>);
             self.address_manager
                 .io_bus
                 .upgrade()
@@ -679,6 +690,8 @@ impl DeviceManager {
                 .insert(pci_config_io, 0xcf8, 0x8)
                 .map_err(DeviceManagerError::BusError)?;
             let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
+            self.bus_devices
+                .push(Arc::clone(&pci_config_mmio) as Arc<Mutex<dyn BusDevice>>);
             self.address_manager
                 .mmio_bus
                 .insert(
@@ -749,6 +762,9 @@ impl DeviceManager {
             exit_evt, reset_evt,
         )));
 
+        self.bus_devices
+            .push(Arc::clone(&acpi_device) as Arc<Mutex<dyn BusDevice>>);
+
         self.address_manager
             .allocator
             .lock()
@@ -782,6 +798,9 @@ impl DeviceManager {
             ged_irq,
         )));
 
+        self.bus_devices
+            .push(Arc::clone(&ged_device) as Arc<Mutex<dyn BusDevice>>);
+
         self.address_manager
             .allocator
             .lock()
@@ -801,6 +820,9 @@ impl DeviceManager {
     fn add_legacy_devices(&mut self, reset_evt: EventFd) -> DeviceManagerResult<()> {
         // Add a shutdown device (i8042)
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(reset_evt)));
+
+        self.bus_devices
+            .push(Arc::clone(&i8042) as Arc<Mutex<dyn BusDevice>>);
 
         self.address_manager
             .io_bus
@@ -828,6 +850,9 @@ impl DeviceManager {
                 mem_below_4g,
                 mem_above_4g,
             )));
+
+            self.bus_devices
+                .push(Arc::clone(&cmos) as Arc<Mutex<dyn BusDevice>>);
 
             self.address_manager
                 .io_bus
@@ -868,6 +893,9 @@ impl DeviceManager {
                 interrupt_group,
                 serial_writer,
             )));
+
+            self.bus_devices
+                .push(Arc::clone(&serial) as Arc<Mutex<dyn BusDevice>>);
 
             self.address_manager
                 .allocator
@@ -1443,6 +1471,9 @@ impl DeviceManager {
         pci.add_device(vfio_pci_device.clone())
             .map_err(DeviceManagerError::AddPciDevice)?;
 
+        self.bus_devices
+            .push(Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>);
+
         pci.register_mapping(
             vfio_pci_device,
             self.address_manager.io_bus.upgrade().unwrap().as_ref(),
@@ -1549,6 +1580,9 @@ impl DeviceManager {
         pci.add_device(virtio_pci_device.clone())
             .map_err(DeviceManagerError::AddPciDevice)?;
 
+        self.bus_devices
+            .push(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn BusDevice>>);
+
         pci.register_mapping(
             virtio_pci_device.clone(),
             self.address_manager.io_bus.upgrade().unwrap().as_ref(),
@@ -1605,6 +1639,8 @@ impl DeviceManager {
         mmio_device.assign_interrupt(interrupt_group);
 
         let mmio_device_arc = Arc::new(Mutex::new(mmio_device));
+        self.bus_devices
+            .push(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn BusDevice>>);
         self.address_manager
             .mmio_bus
             .insert(mmio_device_arc.clone(), mmio_base.0, MMIO_LEN)
