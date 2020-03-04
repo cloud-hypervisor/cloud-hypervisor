@@ -53,6 +53,7 @@ pub enum VfioError {
     IommuDmaUnmap,
     VfioDeviceGetIrqInfo,
     VfioDeviceSetIrq,
+    VfioNoIommuGroup(String),
     ReadLink(io::Error),
     ParseInt(num::ParseIntError),
 }
@@ -104,6 +105,7 @@ impl fmt::Display for VfioError {
             VfioError::VfioDeviceGetIrqInfo => write!(f, "failed to get vfio device irq info"),
             VfioError::VfioDeviceSetIrq => write!(f, "failed to set vfio deviece irq"),
             VfioError::ReadLink(e) => write!(f, "failed to read link from path: {}", e),
+            VfioError::VfioNoIommuGroup(e) => write!(f, "Failed to find iommu_group for: {}", e),
             VfioError::ParseInt(e) => write!(f, "failed to parse integer: {}", e),
         }
     }
@@ -602,6 +604,11 @@ impl VfioDevice {
         iommu_attached: bool,
     ) -> Result<Self> {
         let uuid_path: PathBuf = [sysfspath, Path::new("iommu_group")].iter().collect();
+        if !uuid_path.exists() {
+            return Err(VfioError::VfioNoIommuGroup(
+                uuid_path.to_str().unwrap().to_string(),
+            ));
+        }
         let group_path = uuid_path.read_link().map_err(VfioError::ReadLink)?;
         let group_osstr = group_path.file_name().ok_or(VfioError::InvalidPath)?;
         let group_str = group_osstr.to_str().ok_or(VfioError::InvalidPath)?;
