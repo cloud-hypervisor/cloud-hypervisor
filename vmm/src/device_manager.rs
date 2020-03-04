@@ -259,6 +259,15 @@ pub enum DeviceManagerError {
 
     /// Failed updating guest memory for virtio device.
     UpdateMemoryForVirtioDevice(vm_virtio::Error),
+
+    /// Cannot create virtio-mem device
+    CreateVirtioMem(io::Error),
+
+    /// Cannot try Clone virtio-mem resize
+    TryCloneVirtioMemResize(vm_virtio::mem::Error),
+
+    /// Cannot find a memory range for virtio-mem memory
+    VirtioMemRangeAllocation,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1018,6 +1027,8 @@ impl DeviceManager {
         // Add virtio-vsock if required
         devices.append(&mut self.make_virtio_vsock_devices()?);
 
+        devices.append(&mut self.make_virtio_mem_devices()?);
+
         Ok(devices)
     }
 
@@ -1497,6 +1508,33 @@ impl DeviceManager {
                 self.migratable_devices
                     .push(Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>);
             }
+        }
+
+        Ok(devices)
+    }
+
+    fn make_virtio_mem_devices(&mut self) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
+        let mut devices = Vec::new();
+
+        let mm = &self.memory_manager.lock().unwrap();
+        if let (Some(region), Some(resize)) = (&mm.virtiomem_region, &mm.virtiomem_resize) {
+            let virtio_mem_device = Arc::new(Mutex::new(
+                vm_virtio::Mem::new(
+                    &region,
+                    resize
+                        .try_clone()
+                        .map_err(DeviceManagerError::TryCloneVirtioMemResize)?,
+                )
+                .map_err(DeviceManagerError::CreateVirtioMem)?,
+            ));
+
+            devices.push((
+                Arc::clone(&virtio_mem_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
+                false,
+            ));
+
+            self.migratable_devices
+                .push(Arc::clone(&virtio_mem_device) as Arc<Mutex<dyn Migratable>>);
         }
 
         Ok(devices)
