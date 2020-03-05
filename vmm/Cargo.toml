@@ -34,6 +34,7 @@ serde_json = ">=1.0.9"
 vfio = { path = "../vfio", optional = true }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
+vm-memory = { version = "0.1.0", features = ["backend-mmap", "backend-atomic"] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
 signal-hook = "0.1.13"
@@ -42,7 +43,3 @@ tempfile = "3.1.0"
 [dependencies.linux-loader]
 git = "https://github.com/rust-vmm/linux-loader"
 features = ["elf", "bzimage"]
-
-[dependencies.vm-memory]
-git = "https://github.com/rust-vmm/vm-memory"
-features = ["backend-mmap", "backend-atomic"]

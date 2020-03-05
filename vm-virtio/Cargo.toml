@@ -23,9 +23,6 @@ tempfile = "3.1.0"
 virtio-bindings = { git = "https://github.com/rust-vmm/virtio-bindings", version = "0.1", features = ["virtio-v5_0_0"]}
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
+vm-memory = { version = "0.1.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = ">=0.3.1"
 vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-master", "vhost-user-slave"] }
-
-[dependencies.vm-memory]
-git = "https://github.com/rust-vmm/vm-memory"
-features = ["backend-mmap", "backend-atomic"]
