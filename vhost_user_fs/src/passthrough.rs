@@ -11,7 +11,7 @@ use std::mem::{self, size_of, MaybeUninit};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use libc;
@@ -48,7 +48,7 @@ struct InodeData {
 
 struct HandleData {
     inode: Inode,
-    file: Mutex<File>,
+    file: RwLock<File>,
 }
 
 #[repr(C, packed)]
@@ -460,7 +460,7 @@ impl PassthroughFs {
             // Since we are going to work with the kernel offset, we have to acquire the file lock
             // for both the `lseek64` and `getdents64` syscalls to ensure that no other thread
             // changes the kernel offset while we are using it.
-            let dir = data.file.lock().unwrap();
+            let dir = data.file.write().unwrap();
 
             // Safe because this doesn't modify any memory and we check the return value.
             let res =
@@ -535,7 +535,7 @@ impl PassthroughFs {
     }
 
     fn do_open(&self, inode: Inode, flags: u32) -> io::Result<(Option<Handle>, OpenOptions)> {
-        let file = Mutex::new(self.open_inode(inode, flags as i32)?);
+        let file = RwLock::new(self.open_inode(inode, flags as i32)?);
 
         let handle = self.next_handle.fetch_add(1, Ordering::Relaxed);
         let data = HandleData { inode, file };
@@ -886,7 +886,7 @@ impl FileSystem for PassthroughFs {
         }
 
         // Safe because we just opened this fd.
-        let file = Mutex::new(unsafe { File::from_raw_fd(fd) });
+        let file = RwLock::new(unsafe { File::from_raw_fd(fd) });
 
         let entry = self.do_lookup(parent, name)?;
 
@@ -967,7 +967,9 @@ impl FileSystem for PassthroughFs {
             .map(Arc::clone)
             .ok_or_else(ebadf)?;
 
-        let mut f = data.file.lock().unwrap();
+        // This is safe because write_from uses preadv64, so the underlying file descriptor
+        // offset is not affected by this operation.
+        let mut f = data.file.read().unwrap().try_clone().unwrap();
         w.write_from(&mut f, size as usize, offset)
     }
 
@@ -995,7 +997,9 @@ impl FileSystem for PassthroughFs {
             .map(Arc::clone)
             .ok_or_else(ebadf)?;
 
-        let mut f = data.file.lock().unwrap();
+        // This is safe because read_to uses pwritev64, so the underlying file descriptor
+        // offset is not affected by this operation.
+        let mut f = data.file.read().unwrap().try_clone().unwrap();
         r.read_to(&mut f, size as usize, offset)
     }
 
@@ -1040,7 +1044,7 @@ impl FileSystem for PassthroughFs {
                 .map(Arc::clone)
                 .ok_or_else(ebadf)?;
 
-            let fd = hd.file.lock().unwrap().as_raw_fd();
+            let fd = hd.file.write().unwrap().as_raw_fd();
             Data::Handle(hd, fd)
         } else {
             let pathname = CString::new(format!("self/fd/{}", inode_data.file.as_raw_fd()))
@@ -1349,7 +1353,7 @@ impl FileSystem for PassthroughFs {
         // behavior by doing the same thing (dup-ing the fd and then immediately closing it). Safe
         // because this doesn't modify any memory and we check the return values.
         unsafe {
-            let newfd = libc::dup(data.file.lock().unwrap().as_raw_fd());
+            let newfd = libc::dup(data.file.write().unwrap().as_raw_fd());
             if newfd < 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -1372,7 +1376,7 @@ impl FileSystem for PassthroughFs {
             .map(Arc::clone)
             .ok_or_else(ebadf)?;
 
-        let fd = data.file.lock().unwrap().as_raw_fd();
+        let fd = data.file.write().unwrap().as_raw_fd();
 
         // Safe because this doesn't modify any memory and we check the return value.
         let res = unsafe {
@@ -1572,7 +1576,7 @@ impl FileSystem for PassthroughFs {
             .map(Arc::clone)
             .ok_or_else(ebadf)?;
 
-        let fd = data.file.lock().unwrap().as_raw_fd();
+        let fd = data.file.write().unwrap().as_raw_fd();
         // Safe because this doesn't modify any memory and we check the return value.
         let res = unsafe {
             libc::fallocate64(
