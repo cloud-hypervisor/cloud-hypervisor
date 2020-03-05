@@ -78,18 +78,19 @@ Shut the VMM down                   | `/vmm.shutdown` | N/A          | N/A      
 
 #### Virtual Machine (VM) Actions
 
-Action                           | Endpoint       | Request Body        | Response Body     | Prerequisites
----------------------------------|----------------|---------------------|-------------------|---------------------------
-Create the VM                    | `/vm.create`   | `/schemas/VmConfig` | N/A               | The VM is not created yet
-Delete the VM                    | `/vm.delete`   | N/A                 | N/A               | The VM is created but not booted
-Boot the VM                      | `/vm.boot`     | N/A                 | N/A               | The VM is created
-Shut the VM down                 | `/vm.shutdown` | N/A                 | N/A               | The VM is booted
-Reboot the VM                    | `/vm.reboot`   | N/A                 | N/A               | The VM is booted
-Pause the VM                     | `/vm.pause`    | N/A                 | N/A               | The VM is booted
-Resume the VM                    | `/vm.resume`   | N/A                 | N/A               | The VM is paused
-Add/remove CPUs to/from the VM   | `/vm.resize`   | `/schemas/VmResize` | N/A               | The VM is booted
-Remove memory from the VM        | `/vm.resize`   | `/schemas/VmResize` | N/A               | The VM is booted
-Dump the VM information          | `/vm.info`     | N/A                 | `/schemas/VmInfo` | The VM is created
+Action                           | Endpoint         | Request Body           | Response Body     | Prerequisites
+---------------------------------|------------------|------------------------|-------------------|---------------------------
+Create the VM                    | `/vm.create`     | `/schemas/VmConfig`    | N/A               | The VM is not created yet
+Delete the VM                    | `/vm.delete`     | N/A                    | N/A               | The VM is created but not booted
+Boot the VM                      | `/vm.boot`       | N/A                    | N/A               | The VM is created
+Shut the VM down                 | `/vm.shutdown`   | N/A                    | N/A               | The VM is booted
+Reboot the VM                    | `/vm.reboot`     | N/A                    | N/A               | The VM is booted
+Pause the VM                     | `/vm.pause`      | N/A                    | N/A               | The VM is booted
+Resume the VM                    | `/vm.resume`     | N/A                    | N/A               | The VM is paused
+Add/remove CPUs to/from the VM   | `/vm.resize`     | `/schemas/VmResize`    | N/A               | The VM is booted
+Remove memory from the VM        | `/vm.resize`     | `/schemas/VmResize`    | N/A               | The VM is booted
+Dump the VM information          | `/vm.info`       | N/A                    | `/schemas/VmInfo` | The VM is created
+Add VFIO PCI device to the VM    | `/vm.add-device` | `/schemas/VmAddDevice` | N/A               | The VM is booted
 
 ### REST API Examples
 
