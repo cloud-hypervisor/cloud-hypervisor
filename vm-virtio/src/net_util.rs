@@ -11,6 +11,7 @@ use std::io::{self, Write};
 use std::mem;
 use std::net::Ipv4Addr;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use virtio_bindings::bindings::virtio_net::*;
@@ -465,6 +466,10 @@ fn check_mq_support(if_name: &Option<&str>, queue_pairs: usize) -> Result<()> {
     if let Some(tap_name) = if_name {
         let mq = queue_pairs > 1;
         let path = format!("/sys/class/net/{}/tun_flags", tap_name);
+        // interface does not exist, check is not required
+        if !Path::new(&path).exists() {
+            return Ok(());
+        }
         let tun_flags_str = fs::read_to_string(path).map_err(Error::ReadSysfsTunFlags)?;
         let tun_flags = u32::from_str_radix(tun_flags_str.trim().trim_start_matches("0x"), 16)
             .map_err(Error::ConvertHexStringToInt)?;
