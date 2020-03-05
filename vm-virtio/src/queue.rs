@@ -94,6 +94,14 @@ pub struct Descriptor {
 
 unsafe impl ByteValued for Descriptor {}
 
+/// A virtio descriptor head, not tied to a GuestMemoryMmap.
+pub struct DescriptorHead {
+    desc_table: GuestAddress,
+    table_size: u16,
+    index: u16,
+    iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
+}
+
 /// A virtio descriptor chain.
 #[derive(Clone)]
 pub struct DescriptorChain<'a> {
@@ -222,6 +230,34 @@ impl<'a> DescriptorChain<'a> {
         }
 
         Ok(chain)
+    }
+
+    /// Returns a copy of a descriptor referencing a different GuestMemoryMmap object.
+    pub fn new_from_head(
+        mem: &'a GuestMemoryMmap,
+        head: DescriptorHead,
+    ) -> Result<DescriptorChain<'a>, Error> {
+        match DescriptorChain::checked_new(
+            mem,
+            head.desc_table,
+            head.table_size,
+            head.index,
+            head.iommu_mapping_cb,
+        ) {
+            Some(d) => Ok(d),
+            None => Err(Error::InvalidChain),
+        }
+    }
+
+    /// Returns a DescriptorHead that can be used to build a copy of a descriptor
+    /// referencing a different GuestMemoryMmap.
+    pub fn get_head(&self) -> DescriptorHead {
+        DescriptorHead {
+            desc_table: self.desc_table,
+            table_size: self.table_size,
+            index: self.index,
+            iommu_mapping_cb: self.iommu_mapping_cb.clone(),
+        }
     }
 
     fn is_valid(&self) -> bool {
