@@ -389,9 +389,9 @@ dependencies = [
 [[package]]
 name = "linux-loader"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/linux-loader#e5c6d66d3121421672c9b25b02e8954f0ed5f58d"
+source = "git+https://github.com/rust-vmm/linux-loader#8cb7c6621bec18afdb193447b5aaf671cc630ec3"
 dependencies = [
- "vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)",
+ "vm-memory 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1134,6 +1134,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vm-memory"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
+ "winapi 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "vm-virtio"
 version = "0.1.0"
 dependencies = [
@@ -1354,6 +1363,7 @@ dependencies = [
 "checksum virtio-bindings 0.1.0 (git+https://github.com/rust-vmm/virtio-bindings)" = "<none>"
 "checksum virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
 "checksum vm-memory 0.1.0 (git+https://github.com/rust-vmm/vm-memory)" = "<none>"
+"checksum vm-memory 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "5d5563ea4d856645b13bc9623e6a0617457a77555a22301d896597cbc5131c2b"
 "checksum vmm-sys-util 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "048b10a74f061d87dacca196a1964052a7135651641ab8d100aef21e58f33571"
 "checksum wasi 0.9.0+wasi-snapshot-preview1 (registry+https://github.com/rust-lang/crates.io-index)" = "cccddf32554fecc6acb585f82a32a72e28b48f8c4c1883ddfeeeaa96f7d8e519"
 "checksum winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)" = "167dc9d6949a9b857f3451275e911c3f44255842c1f7a76f33c55103a909087a"
