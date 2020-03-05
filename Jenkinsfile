@@ -14,6 +14,7 @@ pipeline{
 					}
 				}
 				stage ('Cancel older builds') {
+					when { not { branch 'master' } }
 					steps {
 						cancelPreviousBuilds()
 					}
