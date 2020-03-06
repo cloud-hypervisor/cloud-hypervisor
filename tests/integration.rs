@@ -462,6 +462,14 @@ mod tests {
         assert!(status.success());
     }
 
+    fn remote_command(api_socket: &str, command: &str) -> bool {
+        Command::new("target/release/ch-remote")
+            .args(&[&format!("--api-socket={}", api_socket), command])
+            .status()
+            .expect("Failed to launch ch-remote")
+            .success()
+    }
+
     const DEFAULT_SSH_RETRIES: u8 = 6;
     const DEFAULT_SSH_TIMEOUT: u8 = 10;
     fn ssh_command_ip(command: &str, ip: &str, retries: u8, timeout: u8) -> Result<String, Error> {
@@ -2723,7 +2731,11 @@ mod tests {
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             // We now pause the VM
-            curl_command(&api_socket, "PUT", "http://localhost/api/v1/vm.pause", None);
+            aver!(tb, remote_command(&api_socket, "pause"));
+
+            // Check pausing again fails
+            aver!(tb, !remote_command(&api_socket, "pause"));
+
             thread::sleep(std::time::Duration::new(2, 0));
 
             // SSH into the VM should fail
@@ -2739,12 +2751,11 @@ mod tests {
             );
 
             // Resume the VM
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.resume",
-                None,
-            );
+            aver!(tb, remote_command(&api_socket, "resume"));
+
+            // Check resuming again fails
+            aver!(tb, !remote_command(&api_socket, "resume"));
+
             thread::sleep(std::time::Duration::new(2, 0));
 
             // Now we should be able to SSH back in and get the right number of CPUs
