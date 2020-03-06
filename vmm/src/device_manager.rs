@@ -33,6 +33,8 @@ use pci::{
     DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
 };
 use qcow::{self, ImageType, QcowFile};
+#[cfg(feature = "pci_support")]
+use std::any::Any;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
@@ -479,6 +481,10 @@ pub struct DeviceManager {
     // Counter to keep track of the consumed device IDs.
     #[cfg(feature = "pci_support")]
     device_id_cnt: Wrapping<usize>,
+
+    // Hashmap of PCI b/d/f to their corresponding Arc<Mutex<dyn PciDevice>>.
+    #[cfg(feature = "pci_support")]
+    pci_devices: HashMap<u32, Arc<dyn Any + Send + Sync>>,
 }
 
 impl DeviceManager {
@@ -582,6 +588,8 @@ impl DeviceManager {
             pci_id_list: HashMap::new(),
             #[cfg(feature = "pci_support")]
             device_id_cnt: Wrapping(0),
+            #[cfg(feature = "pci_support")]
+            pci_devices: HashMap::new(),
         };
 
         device_manager
@@ -1494,6 +1502,10 @@ impl DeviceManager {
         pci.add_device(vfio_pci_device.clone())
             .map_err(DeviceManagerError::AddPciDevice)?;
 
+        self.pci_devices.insert(
+            pci_device_bdf,
+            Arc::clone(&vfio_pci_device) as Arc<dyn Any + Send + Sync>,
+        );
         self.bus_devices
             .push(Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>);
 
