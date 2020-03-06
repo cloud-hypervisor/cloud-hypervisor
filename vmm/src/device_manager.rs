@@ -223,6 +223,19 @@ pub enum DeviceManagerError {
     /// Could not find an available VFIO device name.
     #[cfg(feature = "pci_support")]
     NoAvailableVfioDeviceName,
+
+    /// Missing PCI device.
+    MissingPciDevice,
+
+    /// Failed removing a PCI device from the PCI bus.
+    #[cfg(feature = "pci_support")]
+    RemoveDeviceFromPciBus(pci::PciRootError),
+
+    /// Failed removing a bus device from the IO bus.
+    RemoveDeviceFromIoBus(devices::BusError),
+
+    /// Failed removing a bus device from the MMIO bus.
+    RemoveDeviceFromMmioBus(devices::BusError),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1779,8 +1792,69 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
-    pub fn eject_device(&mut self, _device_id: u8) -> DeviceManagerResult<()> {
-        Ok(())
+    pub fn eject_device(&mut self, device_id: u8) -> DeviceManagerResult<()> {
+        // Retrieve the PCI bus.
+        let pci = if let Some(pci_bus) = &self.pci_bus {
+            Arc::clone(&pci_bus)
+        } else {
+            return Err(DeviceManagerError::NoPciBus);
+        };
+
+        // Convert the device ID into the corresponding b/d/f.
+        let pci_device_bdf = (device_id as u32) << 3;
+
+        // Find the device name corresponding to the PCI b/d/f while removing
+        // the device entry.
+        self.pci_id_list.retain(|_, bdf| *bdf != pci_device_bdf);
+
+        if let Some(any_device) = self.pci_devices.remove(&pci_device_bdf) {
+            let (pci_device, bus_device, migratable_device) =
+                if let Ok(vfio_pci_device) = any_device.downcast::<Mutex<VfioPciDevice>>() {
+                    (
+                        Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
+                        Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>,
+                        None as Option<Arc<Mutex<dyn Migratable>>>,
+                    )
+                } else {
+                    return Ok(());
+                };
+
+            // Remove the device from the PCI bus
+            pci.lock()
+                .unwrap()
+                .remove_by_device(&pci_device)
+                .map_err(DeviceManagerError::RemoveDeviceFromPciBus)?;
+
+            // Remove the device from the IO bus
+            self.io_bus()
+                .remove_by_device(&bus_device)
+                .map_err(DeviceManagerError::RemoveDeviceFromIoBus)?;
+
+            // Remove the device from the MMIO bus
+            self.mmio_bus()
+                .remove_by_device(&bus_device)
+                .map_err(DeviceManagerError::RemoveDeviceFromMmioBus)?;
+
+            // Remove the device from the list of BusDevice held by the
+            // DeviceManager.
+            self.bus_devices
+                .retain(|dev| !Arc::ptr_eq(dev, &bus_device));
+
+            // Remove the device from the list of Migratable devices.
+            if let Some(migratable_device) = &migratable_device {
+                self.migratable_devices
+                    .retain(|dev| !Arc::ptr_eq(dev, &migratable_device));
+            }
+
+            // At this point, the device has been removed from all the list and
+            // buses where it was stored. At the end of this function, after
+            // any_device, bus_device and pci_device are released, the actual
+            // device will be dropped.
+
+            Ok(())
+        } else {
+            Err(DeviceManagerError::MissingPciDevice)
+        }
     }
 }
 
