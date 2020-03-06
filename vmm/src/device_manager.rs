@@ -1777,6 +1777,11 @@ impl DeviceManager {
 
         Ok(device_cfg)
     }
+
+    #[cfg(feature = "pci_support")]
+    pub fn eject_device(&mut self, _device_id: u8) -> DeviceManagerResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(feature = "acpi")]
@@ -2057,11 +2062,15 @@ impl Migratable for DeviceManager {}
 const PCIU_FIELD_OFFSET: u64 = 0;
 #[cfg(feature = "pci_support")]
 const PCID_FIELD_OFFSET: u64 = 4;
+#[cfg(feature = "pci_support")]
+const B0EJ_FIELD_OFFSET: u64 = 8;
 
 #[cfg(feature = "pci_support")]
 const PCIU_FIELD_SIZE: usize = 4;
 #[cfg(feature = "pci_support")]
 const PCID_FIELD_SIZE: usize = 4;
+#[cfg(feature = "pci_support")]
+const B0EJ_FIELD_SIZE: usize = 4;
 
 impl BusDevice for DeviceManager {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
@@ -2079,7 +2088,10 @@ impl BusDevice for DeviceManager {
                 // Clear the PCID bitmap
                 self.pci_devices_down = 0;
             }
-            _ => {}
+            _ => error!(
+                "Accessing unknown location at base 0x{:x}, offset 0x{:x}",
+                base, offset
+            ),
         }
 
         debug!(
@@ -2089,6 +2101,29 @@ impl BusDevice for DeviceManager {
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) {
+        #[cfg(feature = "pci_support")]
+        match offset {
+            B0EJ_FIELD_OFFSET => {
+                assert!(data.len() == B0EJ_FIELD_SIZE);
+                let mut data_array: [u8; 4] = [0, 0, 0, 0];
+                data_array.copy_from_slice(&data[..]);
+                let device_bitmap = u32::from_le_bytes(data_array);
+
+                for device_id in 0..32 {
+                    let mask = 1u32 << device_id;
+                    if (device_bitmap & mask) == mask {
+                        if let Err(e) = self.eject_device(device_id as u8) {
+                            error!("Failed ejecting device {}: {:?}", device_id, e);
+                        }
+                    }
+                }
+            }
+            _ => error!(
+                "Accessing unknown location at base 0x{:x}, offset 0x{:x}",
+                base, offset
+            ),
+        }
+
         debug!(
             "PCI_HP_REG_W: base 0x{:x}, offset 0x{:x}, data {:?}",
             base, offset, data
