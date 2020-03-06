@@ -124,6 +124,11 @@ impl PciBus {
         Ok(())
     }
 
+    pub fn remove_by_device(&mut self, device: &Arc<Mutex<dyn PciDevice>>) -> Result<()> {
+        self.devices.retain(|dev| !Arc::ptr_eq(dev, device));
+        Ok(())
+    }
+
     pub fn next_device_id(&self) -> u32 {
         self.devices.len() as u32
     }
