@@ -171,6 +171,24 @@ impl Bus {
         Ok(())
     }
 
+    /// Removes all entries referencing the given device.
+    pub fn remove_by_device(&self, device: &Arc<Mutex<dyn BusDevice>>) -> Result<()> {
+        let mut device_list = self.devices.write().unwrap();
+        let mut remove_key_list = Vec::new();
+
+        for (key, value) in device_list.iter() {
+            if Arc::ptr_eq(&value.upgrade().unwrap(), device) {
+                remove_key_list.push(*key);
+            }
+        }
+
+        for key in remove_key_list.iter() {
+            device_list.remove(key);
+        }
+
+        Ok(())
+    }
+
     /// Updates the address range for an existing device.
     pub fn update_range(
         &self,
