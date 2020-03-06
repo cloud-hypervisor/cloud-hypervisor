@@ -36,6 +36,8 @@ use qcow::{self, ImageType, QcowFile};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout};
+#[cfg(feature = "pci_support")]
+use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::result;
@@ -63,6 +65,9 @@ use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(feature = "mmio_support")]
 const MMIO_LEN: u64 = 0x1000;
+
+#[cfg(feature = "pci_support")]
+const VFIO_DEVICE_NAME_PREFIX: &str = "vfio";
 
 /// Errors associated with device manager
 #[derive(Debug)]
@@ -212,6 +217,10 @@ pub enum DeviceManagerError {
 
     /// Missing PCI bus.
     NoPciBus,
+
+    /// Could not find an available VFIO device name.
+    #[cfg(feature = "pci_support")]
+    NoAvailableVfioDeviceName,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -462,6 +471,14 @@ pub struct DeviceManager {
     // Bitmap of PCI devices to hotunplug.
     #[cfg(feature = "pci_support")]
     pci_devices_down: u32,
+
+    // Hashmap of device's name to their corresponding PCI b/d/f.
+    #[cfg(feature = "pci_support")]
+    pci_id_list: HashMap<String, u32>,
+
+    // Counter to keep track of the consumed device IDs.
+    #[cfg(feature = "pci_support")]
+    device_id_cnt: Wrapping<usize>,
 }
 
 impl DeviceManager {
@@ -561,6 +578,10 @@ impl DeviceManager {
             pci_devices_up: 0,
             #[cfg(feature = "pci_support")]
             pci_devices_down: 0,
+            #[cfg(feature = "pci_support")]
+            pci_id_list: HashMap::new(),
+            #[cfg(feature = "pci_support")]
+            device_id_cnt: Wrapping(0),
         };
 
         device_manager
@@ -1394,6 +1415,28 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
+    fn next_device_name(&mut self, prefix: &str) -> DeviceManagerResult<String> {
+        let start_id = self.device_id_cnt;
+        loop {
+            // Generate the temporary name.
+            let name = format!("{}{}", prefix, self.device_id_cnt);
+            // Increment the counter.
+            self.device_id_cnt += Wrapping(1);
+            // Check if the name is already in use.
+            if !self.pci_id_list.contains_key(&name) {
+                return Ok(name);
+            }
+
+            if self.device_id_cnt == start_id {
+                // We went through a full loop and there's nothing else we can
+                // do.
+                break;
+            }
+        }
+        Err(DeviceManagerError::NoAvailableVfioDeviceName)
+    }
+
+    #[cfg(feature = "pci_support")]
     fn add_vfio_device(
         &mut self,
         pci: &mut PciBus,
@@ -1406,7 +1449,7 @@ impl DeviceManager {
         // do multifunction. Also, because we only support one PCI
         // bus, the bus 0, we don't need to add anything to the
         // global device ID.
-        let device_id = pci.next_device_id() << 3;
+        let pci_device_bdf = pci.next_device_id() << 3;
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let vfio_device = VfioDevice::new(
@@ -1425,7 +1468,7 @@ impl DeviceManager {
                 iommu
                     .lock()
                     .unwrap()
-                    .add_external_mapping(device_id, vfio_mapping);
+                    .add_external_mapping(pci_device_bdf, vfio_mapping);
             }
         }
 
@@ -1462,7 +1505,10 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::AddPciDevice)?;
 
-        Ok(device_id)
+        let vfio_name = self.next_device_name(VFIO_DEVICE_NAME_PREFIX)?;
+        self.pci_id_list.insert(vfio_name, pci_device_bdf);
+
+        Ok(pci_device_bdf)
     }
 
     #[cfg(feature = "pci_support")]
