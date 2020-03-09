@@ -102,6 +102,9 @@ pub enum ApiError {
 
     /// The device could not be added to the VM.
     VmAddDevice(VmError),
+
+    /// The device could not be removed from the VM.
+    VmRemoveDevice(VmError),
 }
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
@@ -125,6 +128,11 @@ pub struct VmResizeData {
 #[derive(Clone, Deserialize, Serialize)]
 pub struct VmAddDeviceData {
     pub path: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct VmRemoveDeviceData {
+    pub id: String,
 }
 
 pub enum ApiResponsePayload {
@@ -192,6 +200,9 @@ pub enum ApiRequest {
 
     /// Add a device to the VM.
     VmAddDevice(Arc<VmAddDeviceData>, Sender<ApiResponse>),
+
+    /// Remove a device from the VM.
+    VmRemoveDevice(Arc<VmRemoveDeviceData>, Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -355,6 +366,24 @@ pub fn vm_add_device(
     // Send the VM add-device request.
     api_sender
         .send(ApiRequest::VmAddDevice(data, response_sender))
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+
+    Ok(())
+}
+
+pub fn vm_remove_device(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VmRemoveDeviceData>,
+) -> ApiResult<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM remove-device request.
+    api_sender
+        .send(ApiRequest::VmRemoveDevice(data, response_sender))
         .map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 

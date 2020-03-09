@@ -577,6 +577,28 @@ impl Vm {
         }
     }
 
+    pub fn remove_device(&mut self, _id: String) -> Result<()> {
+        if cfg!(feature = "pci_support") {
+            #[cfg(feature = "pci_support")]
+            {
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .remove_device(_id)
+                    .map_err(Error::DeviceManager)?;
+
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+                    .map_err(Error::DeviceManager)?;
+            }
+            Ok(())
+        } else {
+            Err(Error::NoPciSupport)
+        }
+    }
+
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>, on_tty: bool) {
         for signal in signals.forever() {
             match signal {

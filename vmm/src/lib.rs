@@ -385,6 +385,19 @@ impl Vmm {
         }
     }
 
+    fn vm_remove_device(&mut self, id: String) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            if let Err(e) = vm.remove_device(id) {
+                error!("Error when adding new device to the VM: {:?}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -544,6 +557,13 @@ impl Vmm {
                                     let response = self
                                         .vm_add_device(add_device_data.path.clone())
                                         .map_err(ApiError::VmAddDevice)
+                                        .map(|_| ApiResponsePayload::Empty);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmRemoveDevice(remove_device_data, sender) => {
+                                    let response = self
+                                        .vm_remove_device(remove_device_data.id.clone())
+                                        .map_err(ApiError::VmRemoveDevice)
                                         .map(|_| ApiResponsePayload::Empty);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
