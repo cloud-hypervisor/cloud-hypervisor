@@ -1467,7 +1467,7 @@ impl DeviceManager {
         pci: &mut PciBus,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         device_fd: &Arc<DeviceFd>,
-        device_cfg: &DeviceConfig,
+        device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<u32> {
         // We need to shift the device id since the 3 first bits
         // are dedicated to the PCI function, and we know we don't
@@ -1535,6 +1535,7 @@ impl DeviceManager {
         .map_err(DeviceManagerError::AddPciDevice)?;
 
         let vfio_name = self.next_device_name(VFIO_DEVICE_NAME_PREFIX)?;
+        device_cfg.id = Some(vfio_name.clone());
         self.pci_id_list.insert(vfio_name, pci_device_bdf);
 
         Ok(pci_device_bdf)
@@ -1547,15 +1548,15 @@ impl DeviceManager {
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> DeviceManagerResult<Vec<u32>> {
         let mut iommu_attached_device_ids = Vec::new();
-        let devices = self.config.lock().unwrap().devices.clone();
+        let mut devices = self.config.lock().unwrap().devices.clone();
 
-        if let Some(device_list_cfg) = &devices {
+        if let Some(device_list_cfg) = &mut devices {
             // Create the KVM VFIO device
             let device_fd = DeviceManager::create_kvm_device(&self.address_manager.vm_fd)?;
             let device_fd = Arc::new(device_fd);
             self.kvm_device_fd = Some(Arc::clone(&device_fd));
 
-            for device_cfg in device_list_cfg.iter() {
+            for device_cfg in device_list_cfg.iter_mut() {
                 let device_id =
                     self.add_vfio_device(pci, interrupt_manager, &device_fd, device_cfg)?;
                 if self.iommu_device.is_some() {
@@ -1563,6 +1564,10 @@ impl DeviceManager {
                 }
             }
         }
+
+        // Update the list of devices
+        self.config.lock().unwrap().devices = devices;
+
         Ok(iommu_attached_device_ids)
     }
 
@@ -1757,9 +1762,10 @@ impl DeviceManager {
 
     #[cfg(feature = "pci_support")]
     pub fn add_device(&mut self, path: String) -> DeviceManagerResult<DeviceConfig> {
-        let device_cfg = DeviceConfig {
+        let mut device_cfg = DeviceConfig {
             path: PathBuf::from(path),
             iommu: false,
+            id: None,
         };
 
         let pci = if let Some(pci_bus) = &self.pci_bus {
@@ -1786,7 +1792,7 @@ impl DeviceManager {
             &mut pci.lock().unwrap(),
             &interrupt_manager,
             &device_fd,
-            &device_cfg,
+            &mut device_cfg,
         )?;
 
         // Update the PCIU bitmap

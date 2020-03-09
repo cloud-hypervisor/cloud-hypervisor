@@ -889,6 +889,8 @@ pub struct DeviceConfig {
     pub path: PathBuf,
     #[serde(default)]
     pub iommu: bool,
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 impl DeviceConfig {
@@ -910,6 +912,7 @@ impl DeviceConfig {
         Ok(DeviceConfig {
             path: PathBuf::from(path_str),
             iommu: parse_on_off(iommu_str)?,
+            id: None,
         })
     }
 }
