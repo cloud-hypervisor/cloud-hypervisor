@@ -31,6 +31,8 @@ pub enum PciRootError {
     MmioInsert(devices::BusError),
     /// Could not find an available device slot on the PCI bus.
     NoPciDeviceSlotAvailable,
+    /// Invalid PCI device identifier provided.
+    InvalidPciDeviceSlot(usize),
 }
 pub type Result<T> = std::result::Result<T, PciRootError>;
 
@@ -145,6 +147,15 @@ impl PciBus {
         }
 
         Err(PciRootError::NoPciDeviceSlotAvailable)
+    }
+
+    pub fn put_device_id(&mut self, id: usize) -> Result<()> {
+        if id < NUM_DEVICE_IDS {
+            self.device_ids[id] = false;
+            Ok(())
+        } else {
+            Err(PciRootError::InvalidPciDeviceSlot(id))
+        }
     }
 }
 

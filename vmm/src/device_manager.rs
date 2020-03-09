@@ -244,6 +244,10 @@ pub enum DeviceManagerError {
     /// Failed to find an available PCI device ID.
     #[cfg(feature = "pci_support")]
     NextPciDeviceId(pci::PciRootError),
+
+    /// Could not give the PCI device ID back.
+    #[cfg(feature = "pci_support")]
+    PutPciDeviceId(pci::PciRootError),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1838,6 +1842,12 @@ impl DeviceManager {
         // Find the device name corresponding to the PCI b/d/f while removing
         // the device entry.
         self.pci_id_list.retain(|_, bdf| *bdf != pci_device_bdf);
+
+        // Give the PCI device ID back to the PCI bus.
+        pci.lock()
+            .unwrap()
+            .put_device_id(device_id as usize)
+            .map_err(DeviceManagerError::PutPciDeviceId)?;
 
         if let Some(any_device) = self.pci_devices.remove(&pci_device_bdf) {
             let (pci_device, bus_device, migratable_device) =
