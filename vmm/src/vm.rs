@@ -584,8 +584,23 @@ impl Vm {
                 self.device_manager
                     .lock()
                     .unwrap()
-                    .remove_device(_id)
+                    .remove_device(_id.clone())
                     .map_err(Error::DeviceManager)?;
+
+                // Update VmConfig by removing the device. This is important to
+                // ensure the device would not be created in case of a reboot.
+                {
+                    let mut config = self.config.lock().unwrap();
+                    if let Some(devices) = config.devices.as_mut() {
+                        devices.retain(|dev| {
+                            if let Some(dev_id) = &dev.id {
+                                *dev_id != _id
+                            } else {
+                                true
+                            }
+                        });
+                    }
+                }
 
                 self.device_manager
                     .lock()
