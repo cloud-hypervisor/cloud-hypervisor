@@ -153,6 +153,8 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
                         break 'poll;
                     }
                     x if pause_evt_index == x => {
+                        // Drain pause event
+                        let _ = self.vu_epoll_cfg.pause_evt.read();
                         debug!("PAUSE_EVENT received, pausing vhost-user epoll loop");
                         // We loop here to handle spurious park() returns.
                         // Until we have not resumed, the paused boolean will
