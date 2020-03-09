@@ -155,6 +155,22 @@ paths:
         404:
           description: The new device could not be added to the VM instance.
 
+  /vm.remove-device:
+    put:
+      summary: Remove a device from the VM
+      requestBody:
+        description: The identifier of the device
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VmRemoveDevice'
+        required: true
+      responses:
+        204:
+          description: The device was successfully removed from the VM instance.
+        404:
+          description: The device could not be removed from the VM instance.
+
 components:
   schemas:
 
@@ -448,4 +464,10 @@ components:
       type: object
       properties:
         path:
+          type: string
+
+    VmRemoveDevice:
+      type: object
+      properties:
+        id:
           type: string

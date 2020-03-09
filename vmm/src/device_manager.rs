@@ -236,6 +236,10 @@ pub enum DeviceManagerError {
 
     /// Failed removing a bus device from the MMIO bus.
     RemoveDeviceFromMmioBus(devices::BusError),
+
+    /// Failed to find VFIO device corresponding to the given identifier.
+    #[cfg(feature = "pci_support")]
+    UnknownVfioDeviceId(String),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1789,6 +1793,18 @@ impl DeviceManager {
         self.pci_devices_up |= 1 << (device_id >> 3);
 
         Ok(device_cfg)
+    }
+
+    #[cfg(feature = "pci_support")]
+    pub fn remove_device(&mut self, id: String) -> DeviceManagerResult<()> {
+        if let Some(pci_device_bdf) = self.pci_id_list.get(&id) {
+            // Update the PCID bitmap
+            self.pci_devices_down |= 1 << (*pci_device_bdf >> 3);
+
+            Ok(())
+        } else {
+            Err(DeviceManagerError::UnknownVfioDeviceId(id))
+        }
     }
 
     #[cfg(feature = "pci_support")]
