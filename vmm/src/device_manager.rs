@@ -240,6 +240,10 @@ pub enum DeviceManagerError {
     /// Failed to find VFIO device corresponding to the given identifier.
     #[cfg(feature = "pci_support")]
     UnknownVfioDeviceId(String),
+
+    /// Failed to find an available PCI device ID.
+    #[cfg(feature = "pci_support")]
+    NextPciDeviceId(pci::PciRootError),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1474,7 +1478,10 @@ impl DeviceManager {
         // do multifunction. Also, because we only support one PCI
         // bus, the bus 0, we don't need to add anything to the
         // global device ID.
-        let pci_device_bdf = pci.next_device_id() << 3;
+        let pci_device_bdf = pci
+            .next_device_id()
+            .map_err(DeviceManagerError::NextPciDeviceId)?
+            << 3;
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let vfio_device = VfioDevice::new(
@@ -1588,7 +1595,10 @@ impl DeviceManager {
         // to the PCI function, and we know we don't do multifunction.
         // Also, because we only support one PCI bus, the bus 0, we don't need
         // to add anything to the global device ID.
-        let dev_id = pci.next_device_id() << 3;
+        let dev_id = pci
+            .next_device_id()
+            .map_err(DeviceManagerError::NextPciDeviceId)?
+            << 3;
 
         // Create the callback from the implementation of the DmaRemapping
         // trait. The point with the callback is to simplify the code as we
