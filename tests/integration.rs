@@ -2374,6 +2374,18 @@ mod tests {
                 1
             );
 
+            // Check the amount of PCI devices appearing in L2 VM.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                7,
+            );
+
             // Hotplug an extra virtio-net device through L2 VM.
             guest.ssh_command_l1(
                 "echo 0000:00:07.0 | sudo tee /sys/bus/pci/devices/0000:00:07.0/driver/unbind",
@@ -2402,6 +2414,48 @@ mod tests {
                     .parse::<u32>()
                     .unwrap_or_default(),
                 1
+            );
+
+            // Check the amount of PCI devices appearing in L2 VM.
+            // There should be one more device than before, raising the count
+            // up to 8 PCI devices.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                8,
+            );
+
+            // Let's now verify that we can correctly remove the virtio-net
+            // device through the "remove-device" command responsible for
+            // unplugging VFIO devices.
+            // "vfio2" is used here because the two previous devices will be
+            // affected with the values "vfio0" and "vfio1" by default.
+            guest.ssh_command_l1(
+                "sudo curl \
+                 --unix-socket /tmp/ch_api.sock \
+                 -i \
+                 -X PUT http://localhost/api/v1/vm.remove-device \
+                 -H 'Accept: application/json' -H 'Content-Type: application/json' \
+                 -d '{\"id\":\"vfio2\"}'",
+            )?;
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Check the amount of PCI devices appearing in L2 VM is back down
+            // to 7 devices.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                7,
             );
 
             let _ = child.kill();
