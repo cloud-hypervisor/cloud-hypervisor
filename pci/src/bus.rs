@@ -16,6 +16,7 @@ use vm_memory::{Address, GuestAddress, GuestUsize};
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
 const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;
+const NUM_DEVICE_IDS: usize = 32;
 
 /// Errors for device manager.
 #[derive(Debug)]
@@ -28,6 +29,8 @@ pub enum PciRootError {
     PioInsert(devices::BusError),
     /// Could not add a device to the mmio bus.
     MmioInsert(devices::BusError),
+    /// Could not find an available device slot on the PCI bus.
+    NoPciDeviceSlotAvailable,
 }
 pub type Result<T> = std::result::Result<T, PciRootError>;
 
@@ -81,17 +84,21 @@ pub struct PciBus {
     /// Device 0 is host bridge.
     devices: Vec<Arc<Mutex<dyn PciDevice>>>,
     device_reloc: Arc<dyn DeviceRelocation>,
+    device_ids: Vec<bool>,
 }
 
 impl PciBus {
     pub fn new(pci_root: PciRoot, device_reloc: Arc<dyn DeviceRelocation>) -> Self {
         let mut devices: Vec<Arc<Mutex<dyn PciDevice>>> = Vec::new();
+        let mut device_ids: Vec<bool> = vec![false; NUM_DEVICE_IDS];
 
         devices.push(Arc::new(Mutex::new(pci_root)));
+        device_ids[0] = true;
 
         PciBus {
             devices,
             device_reloc,
+            device_ids,
         }
     }
 
@@ -129,8 +136,15 @@ impl PciBus {
         Ok(())
     }
 
-    pub fn next_device_id(&self) -> u32 {
-        self.devices.len() as u32
+    pub fn next_device_id(&mut self) -> Result<u32> {
+        for (idx, device_id) in self.device_ids.iter_mut().enumerate() {
+            if !(*device_id) {
+                *device_id = true;
+                return Ok(idx as u32);
+            }
+        }
+
+        Err(PciRootError::NoPciDeviceSlotAvailable)
     }
 }
 
