@@ -269,6 +269,8 @@ impl NetCtrlEpollHandler {
                         break 'epoll;
                     }
                     PAUSE_EVENT => {
+                        // Drain pause event
+                        let _ = self.pause_evt.read();
                         debug!("PAUSE_EVENT received, pausing vhost-user epoll loop");
                         // We loop here to handle spurious park() returns.
                         // Until we have not resumed, the paused boolean will
