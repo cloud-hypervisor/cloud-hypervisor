@@ -33,7 +33,7 @@ use std::time::Instant;
 use std::vec::Vec;
 use std::{convert, error, fmt, io};
 use vhost_rs::vhost_user::message::*;
-use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
+use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{Bytes, GuestMemoryError, GuestMemoryMmap};
@@ -106,7 +106,6 @@ impl convert::From<Error> for io::Error {
 
 pub struct VhostUserBlkBackend {
     mem: Option<GuestMemoryMmap>,
-    vring_worker: Option<Arc<VringWorker>>,
     disk_image: Box<dyn DiskFile>,
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
@@ -156,7 +155,6 @@ impl VhostUserBlkBackend {
 
         Ok(VhostUserBlkBackend {
             mem: None,
-            vring_worker: None,
             disk_image: image,
             disk_image_id: image_id,
             disk_nsectors: nsectors,
@@ -226,46 +224,6 @@ impl VhostUserBlkBackend {
         used_any
     }
 
-    pub fn set_vring_worker(&mut self, vring_worker: Option<Arc<VringWorker>>) {
-        self.vring_worker = vring_worker;
-    }
-}
-
-impl VhostUserBackend for VhostUserBlkBackend {
-    fn num_queues(&self) -> usize {
-        self.config.num_queues as usize
-    }
-
-    fn max_queue_size(&self) -> usize {
-        QUEUE_SIZE
-    }
-
-    fn features(&self) -> u64 {
-        let mut avail_features = 1 << VIRTIO_BLK_F_MQ
-            | 1 << VIRTIO_BLK_F_CONFIG_WCE
-            | 1 << VIRTIO_RING_F_EVENT_IDX
-            | 1 << VIRTIO_F_VERSION_1
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
-
-        if self.rdonly {
-            avail_features |= 1 << VIRTIO_BLK_F_RO;
-        }
-        avail_features
-    }
-
-    fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::CONFIG
-    }
-
-    fn set_event_idx(&mut self, enabled: bool) {
-        self.event_idx = enabled;
-    }
-
-    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(mem);
-        Ok(())
-    }
-
     fn handle_event(
         &mut self,
         device_event: u16,
@@ -318,6 +276,42 @@ impl VhostUserBackend for VhostUserBlkBackend {
             _ => Err(Error::HandleEventUnknownEvent.into()),
         }
     }
+}
+
+impl VhostUserBackend for VhostUserBlkBackend {
+    fn num_queues(&self) -> usize {
+        self.config.num_queues as usize
+    }
+
+    fn max_queue_size(&self) -> usize {
+        QUEUE_SIZE
+    }
+
+    fn features(&self) -> u64 {
+        let mut avail_features = 1 << VIRTIO_BLK_F_MQ
+            | 1 << VIRTIO_BLK_F_CONFIG_WCE
+            | 1 << VIRTIO_RING_F_EVENT_IDX
+            | 1 << VIRTIO_F_VERSION_1
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+
+        if self.rdonly {
+            avail_features |= 1 << VIRTIO_BLK_F_RO;
+        }
+        avail_features
+    }
+
+    fn protocol_features(&self) -> VhostUserProtocolFeatures {
+        VhostUserProtocolFeatures::CONFIG
+    }
+
+    fn set_event_idx(&mut self, enabled: bool) {
+        self.event_idx = enabled;
+    }
+
+    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
+        self.mem = Some(mem);
+        Ok(())
+    }
 
     fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
         // self.config is a statically allocated virtio_blk_config
@@ -329,10 +323,6 @@ impl VhostUserBackend for VhostUserBlkBackend {
         };
 
         buf.to_vec()
-    }
-
-    fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
-        Some((self.kill_evt.try_clone().unwrap(), None))
     }
 
     fn register_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
@@ -446,12 +436,6 @@ pub fn start_block_backend(backend_command: &str) {
     )
     .unwrap();
     debug!("blk_daemon is created!\n");
-
-    let vring_worker = blk_daemon.get_vring_worker();
-    blk_backend
-        .write()
-        .unwrap()
-        .set_vring_worker(Some(vring_worker));
 
     if let Err(e) = blk_daemon.start() {
         error!(
