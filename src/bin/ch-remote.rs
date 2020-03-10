@@ -118,16 +118,36 @@ fn parse_http_response(socket: &mut UnixStream) -> Result<Option<String>, Error>
     Ok(content_length.and(Some(String::from(&res[body_offset.unwrap()..]))))
 }
 
-fn simple_api_command(socket: &mut UnixStream, method: &str, c: &str) -> Result<(), Error> {
+fn simple_api_command(
+    socket: &mut UnixStream,
+    method: &str,
+    c: &str,
+    request_body: Option<&str>,
+) -> Result<(), Error> {
     socket
         .write_all(
             format!(
-                "{} /api/v1/vm.{} HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n\r\n",
+                "{} /api/v1/vm.{} HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n",
                 method, c
             )
             .as_bytes(),
         )
         .map_err(Error::Socket)?;
+
+    if let Some(request_body) = request_body {
+        socket
+            .write_all(format!("Content-Length: {}\r\n", request_body.len()).as_bytes())
+            .map_err(Error::Socket)?;
+    }
+
+    socket.write_all(b"\r\n").map_err(Error::Socket)?;
+
+    if let Some(request_body) = request_body {
+        socket
+            .write_all(request_body.as_bytes())
+            .map_err(Error::Socket)?;
+    }
+
     socket.flush().map_err(Error::Socket)?;
 
     if let Some(body) = parse_http_response(socket)? {
@@ -141,8 +161,8 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
         UnixStream::connect(matches.value_of("api-socket").unwrap()).map_err(Error::Socket)?;
 
     match matches.subcommand_name() {
-        Some("info") => simple_api_command(&mut socket, "GET", "info"),
-        Some(c) => simple_api_command(&mut socket, "PUT", c),
+        Some("info") => simple_api_command(&mut socket, "GET", "info", None),
+        Some(c) => simple_api_command(&mut socket, "PUT", c, None),
         None => unreachable!(),
     }
 }
