@@ -184,36 +184,6 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
 
         Ok(used_any)
     }
-}
-
-impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBackend<F> {
-    fn num_queues(&self) -> usize {
-        NUM_QUEUES
-    }
-
-    fn max_queue_size(&self) -> usize {
-        QUEUE_SIZE
-    }
-
-    fn features(&self) -> u64 {
-        1 << VIRTIO_F_VERSION_1
-            | 1 << VIRTIO_RING_F_INDIRECT_DESC
-            | 1 << VIRTIO_RING_F_EVENT_IDX
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
-    }
-
-    fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::SLAVE_REQ
-    }
-
-    fn set_event_idx(&mut self, enabled: bool) {
-        self.event_idx = enabled;
-    }
-
-    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(GuestMemoryAtomic::new(mem));
-        Ok(())
-    }
 
     fn handle_event(
         &mut self,
@@ -263,9 +233,35 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
 
         Ok(false)
     }
+}
 
-    fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
-        Some((self.kill_evt.try_clone().unwrap(), Some(KILL_EVENT)))
+impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBackend<F> {
+    fn num_queues(&self) -> usize {
+        NUM_QUEUES
+    }
+
+    fn max_queue_size(&self) -> usize {
+        QUEUE_SIZE
+    }
+
+    fn features(&self) -> u64 {
+        1 << VIRTIO_F_VERSION_1
+            | 1 << VIRTIO_RING_F_INDIRECT_DESC
+            | 1 << VIRTIO_RING_F_EVENT_IDX
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+    }
+
+    fn protocol_features(&self) -> VhostUserProtocolFeatures {
+        VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::SLAVE_REQ
+    }
+
+    fn set_event_idx(&mut self, enabled: bool) {
+        self.event_idx = enabled;
+    }
+
+    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
+        self.mem = Some(GuestMemoryAtomic::new(mem));
+        Ok(())
     }
 
     fn set_slave_req_fd(&mut self, vu_req: SlaveFsCacheReq) {
