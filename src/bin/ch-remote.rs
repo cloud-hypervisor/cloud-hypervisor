@@ -5,6 +5,8 @@
 
 #[macro_use(crate_authors)]
 extern crate clap;
+extern crate serde_json;
+extern crate vmm;
 
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use std::io::{Read, Write};
@@ -18,6 +20,8 @@ enum Error {
     MissingProtocol,
     ContentLengthParsing(std::num::ParseIntError),
     ServerResponse(StatusCode),
+    InvalidCPUCount(std::num::ParseIntError),
+    InvalidMemorySize(std::num::ParseIntError),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -156,12 +160,53 @@ fn simple_api_command(
     Ok(())
 }
 
+fn resize_api_command(
+    socket: &mut UnixStream,
+    cpus: Option<&str>,
+    memory: Option<&str>,
+) -> Result<(), Error> {
+    let desired_vcpus: Option<u8> = if let Some(cpus) = cpus {
+        Some(cpus.parse().map_err(Error::InvalidCPUCount)?)
+    } else {
+        None
+    };
+
+    let desired_ram: Option<u64> = if let Some(memory) = memory {
+        Some(memory.parse().map_err(Error::InvalidMemorySize)?)
+    } else {
+        None
+    };
+
+    let resize = vmm::api::VmResizeData {
+        desired_vcpus,
+        desired_ram,
+    };
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "resize",
+        Some(&serde_json::to_string(&resize).unwrap()),
+    )
+}
+
 fn do_command(matches: &ArgMatches) -> Result<(), Error> {
     let mut socket =
         UnixStream::connect(matches.value_of("api-socket").unwrap()).map_err(Error::Socket)?;
 
     match matches.subcommand_name() {
         Some("info") => simple_api_command(&mut socket, "GET", "info", None),
+        Some("resize") => resize_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("resize")
+                .unwrap()
+                .value_of("cpus"),
+            matches
+                .subcommand_matches("resize")
+                .unwrap()
+                .value_of("memory"),
+        ),
         Some(c) => simple_api_command(&mut socket, "PUT", c, None),
         None => unreachable!(),
     }
@@ -183,6 +228,24 @@ fn main() {
         .subcommand(SubCommand::with_name("info").about("Info on the VM"))
         .subcommand(SubCommand::with_name("pause").about("Pause the VM"))
         .subcommand(SubCommand::with_name("reboot").about("Reboot the VM"))
+        .subcommand(
+            SubCommand::with_name("resize")
+                .about("Resize the VM")
+                .arg(
+                    Arg::with_name("cpus")
+                        .long("cpus")
+                        .help("New vCPUs count")
+                        .takes_value(true)
+                        .number_of_values(1),
+                )
+                .arg(
+                    Arg::with_name("memory")
+                        .long("memory")
+                        .help("New memory size (in MiB)")
+                        .takes_value(true)
+                        .number_of_values(1),
+                ),
+        )
         .subcommand(SubCommand::with_name("resume").about("Resume the VM"))
         .subcommand(SubCommand::with_name("shutdown").about("Shutdown the VM"));
 
