@@ -559,6 +559,8 @@ impl Queue {
                 }
             };
 
+        // This fence ensures we're seeing the latest update from the guest.
+        fence(Ordering::Acquire);
         match mem.read_obj::<u16>(used_event_addr) {
             Ok(ret) => Some(Wrapping(ret)),
             Err(_) => None,
