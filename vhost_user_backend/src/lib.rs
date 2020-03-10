@@ -4,9 +4,6 @@
 // Copyright 2019 Alibaba Cloud Computing. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-#[macro_use]
-extern crate log;
-
 use std::error;
 use std::fs::File;
 use std::io;
@@ -44,8 +41,6 @@ pub enum Error {
     WaitDaemon(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
     /// Failed handling a vhost-user request.
     HandleRequest(VhostUserError),
-    /// Failed to process queue.
-    ProcessQueue(VringEpollHandlerError),
 }
 
 /// Result of vhost-user daemon operations.
@@ -72,17 +67,6 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// Update guest memory regions.
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> result::Result<(), io::Error>;
 
-    /// This function gets called if the backend registered some additional
-    /// listeners onto specific file descriptors. The library can handle
-    /// virtqueues on its own, but does not know what to do with events
-    /// happening on custom listeners.
-    fn handle_event(
-        &mut self,
-        device_event: u16,
-        evset: epoll::Events,
-        vrings: &[Arc<RwLock<Vring>>],
-    ) -> result::Result<bool, io::Error>;
-
     /// Get virtio device configuration.
     /// A default implementation is provided as we cannot expect all backends
     /// to implement this function.
@@ -95,14 +79,6 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// to implement this function.
     fn set_config(&mut self, _offset: u32, _buf: &[u8]) -> result::Result<(), io::Error> {
         Ok(())
-    }
-
-    /// Provide an exit EventFd
-    /// When this EventFd is written to the worker thread will exit. An optional id may
-    /// also be provided, if it not provided then the exit event will be first event id
-    /// after the last queue
-    fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
-        None
     }
 
     /// Set slave fd.
@@ -191,13 +167,6 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
             Ok(())
         }
     }
-
-    /// Retrieve the vring worker. This is necessary to perform further
-    /// actions like registering and unregistering some extra event file
-    /// descriptors.
-    pub fn get_vring_worker(&self) -> Arc<VringWorker> {
-        self.handler.lock().unwrap().get_vring_worker()
-    }
 }
 
 struct AddrMapping {
@@ -272,161 +241,6 @@ impl Vring {
 }
 
 #[derive(Debug)]
-/// Errors related to vring epoll handler.
-pub enum VringEpollHandlerError {
-    /// Failed to process the queue from the backend.
-    ProcessQueueBackendProcessing(io::Error),
-    /// Failed to signal used queue.
-    SignalUsedQueue(io::Error),
-    /// Failed to read the event from kick EventFd.
-    HandleEventReadKick(io::Error),
-    /// Failed to handle the event from the backend.
-    HandleEventBackendHandling(io::Error),
-}
-
-/// Result of vring epoll handler operations.
-type VringEpollHandlerResult<T> = std::result::Result<T, VringEpollHandlerError>;
-
-struct VringEpollHandler<S: VhostUserBackend> {
-    backend: Arc<RwLock<S>>,
-    vrings: Vec<Arc<RwLock<Vring>>>,
-    exit_event_id: Option<u16>,
-}
-
-impl<S: VhostUserBackend> VringEpollHandler<S> {
-    fn handle_event(
-        &self,
-        device_event: u16,
-        evset: epoll::Events,
-    ) -> VringEpollHandlerResult<bool> {
-        if self.exit_event_id == Some(device_event) {
-            return Ok(true);
-        }
-
-        let num_queues = self.vrings.len();
-        if (device_event as usize) < num_queues {
-            if let Some(kick) = &self.vrings[device_event as usize].read().unwrap().kick {
-                kick.read()
-                    .map_err(VringEpollHandlerError::HandleEventReadKick)?;
-            }
-
-            // If the vring is not enabled, it should not be processed.
-            // The event is only read to be discarded.
-            if !self.vrings[device_event as usize].read().unwrap().enabled {
-                return Ok(false);
-            }
-        }
-
-        self.backend
-            .write()
-            .unwrap()
-            .handle_event(device_event, evset, &self.vrings)
-            .map_err(VringEpollHandlerError::HandleEventBackendHandling)
-    }
-}
-
-#[derive(Debug)]
-/// Errors related to vring worker.
-enum VringWorkerError {
-    /// Failed while waiting for events.
-    EpollWait(io::Error),
-    /// Failed to handle the event.
-    HandleEvent(VringEpollHandlerError),
-}
-
-/// Result of vring worker operations.
-type VringWorkerResult<T> = std::result::Result<T, VringWorkerError>;
-
-pub struct VringWorker {
-    epoll_fd: RawFd,
-}
-
-impl VringWorker {
-    fn run<S: VhostUserBackend>(&self, handler: VringEpollHandler<S>) -> VringWorkerResult<()> {
-        const EPOLL_EVENTS_LEN: usize = 100;
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
-
-        'epoll: loop {
-            let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
-                Ok(res) => res,
-                Err(e) => {
-                    if e.kind() == io::ErrorKind::Interrupted {
-                        // It's well defined from the epoll_wait() syscall
-                        // documentation that the epoll loop can be interrupted
-                        // before any of the requested events occurred or the
-                        // timeout expired. In both those cases, epoll_wait()
-                        // returns an error of type EINTR, but this should not
-                        // be considered as a regular error. Instead it is more
-                        // appropriate to retry, by calling into epoll_wait().
-                        continue;
-                    }
-                    return Err(VringWorkerError::EpollWait(e));
-                }
-            };
-
-            for event in events.iter().take(num_events) {
-                let evset = match epoll::Events::from_bits(event.events) {
-                    Some(evset) => evset,
-                    None => {
-                        let evbits = event.events;
-                        println!("epoll: ignoring unknown event set: 0x{:x}", evbits);
-                        continue;
-                    }
-                };
-
-                let ev_type = event.data as u16;
-
-                if handler
-                    .handle_event(ev_type, evset)
-                    .map_err(VringWorkerError::HandleEvent)?
-                {
-                    break 'epoll;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Register a custom event only meaningful to the caller. When this event
-    /// is later triggered, and because only the caller knows what to do about
-    /// it, the backend implementation of `handle_event` will be called.
-    /// This lets entire control to the caller about what needs to be done for
-    /// this special event, without forcing it to run its own dedicated epoll
-    /// loop for it.
-    pub fn register_listener(
-        &self,
-        fd: RawFd,
-        ev_type: epoll::Events,
-        data: u64,
-    ) -> result::Result<(), io::Error> {
-        epoll::ctl(
-            self.epoll_fd,
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            fd,
-            epoll::Event::new(ev_type, data),
-        )
-    }
-
-    /// Unregister a custom event. If the custom event is triggered after this
-    /// function has been called, nothing will happen as it will be removed
-    /// from the list of file descriptors the epoll loop is listening to.
-    pub fn unregister_listener(
-        &self,
-        fd: RawFd,
-        ev_type: epoll::Events,
-        data: u64,
-    ) -> result::Result<(), io::Error> {
-        epoll::ctl(
-            self.epoll_fd,
-            epoll::ControlOptions::EPOLL_CTL_DEL,
-            fd,
-            epoll::Event::new(ev_type, data),
-        )
-    }
-}
-
-#[derive(Debug)]
 /// Errors related to vhost-user handler.
 pub enum VhostUserHandlerError {
     /// Failed to create epoll file descriptor.
@@ -435,8 +249,6 @@ pub enum VhostUserHandlerError {
     SpawnVringWorker(io::Error),
     /// Could not find the mapping from memory regions.
     MissingMemoryMapping,
-    /// Could not register exit event
-    RegisterExitEvent(io::Error),
 }
 
 impl std::fmt::Display for VhostUserHandlerError {
@@ -447,9 +259,6 @@ impl std::fmt::Display for VhostUserHandlerError {
                 write!(f, "failed spawning the vring worker: {}", e)
             }
             VhostUserHandlerError::MissingMemoryMapping => write!(f, "Missing memory mapping"),
-            VhostUserHandlerError::RegisterExitEvent(e) => {
-                write!(f, "Failed to register exit event: {}", e)
-            }
         }
     }
 }
@@ -461,7 +270,6 @@ type VhostUserHandlerResult<T> = std::result::Result<T, VhostUserHandlerError>;
 
 struct VhostUserHandler<S: VhostUserBackend> {
     backend: Arc<RwLock<S>>,
-    worker: Arc<VringWorker>,
     owned: bool,
     features_acked: bool,
     acked_features: u64,
@@ -470,7 +278,6 @@ struct VhostUserHandler<S: VhostUserBackend> {
     max_queue_size: usize,
     memory: Option<Memory>,
     vrings: Vec<Arc<RwLock<Vring>>>,
-    worker_thread: Option<thread::JoinHandle<VringWorkerResult<()>>>,
 }
 
 impl<S: VhostUserBackend> VhostUserHandler<S> {
@@ -484,43 +291,8 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
             vrings.push(vring);
         }
 
-        // Create the epoll file descriptor
-        let epoll_fd = epoll::create(true).map_err(VhostUserHandlerError::EpollCreateFd)?;
-
-        let vring_worker = Arc::new(VringWorker { epoll_fd });
-        let worker = vring_worker.clone();
-
-        let exit_event_id =
-            if let Some((exit_event_fd, exit_event_id)) = backend.read().unwrap().exit_event() {
-                let exit_event_id = exit_event_id.unwrap_or(num_queues as u16);
-                worker
-                    .register_listener(
-                        exit_event_fd.as_raw_fd(),
-                        epoll::Events::EPOLLIN,
-                        u64::from(exit_event_id),
-                    )
-                    .map_err(VhostUserHandlerError::RegisterExitEvent)?;
-                Some(exit_event_id)
-            } else {
-                None
-            };
-
-        let vring_handler = VringEpollHandler {
-            backend: backend.clone(),
-            vrings: vrings.clone(),
-            exit_event_id,
-        };
-
-        let worker_thread = Some(
-            thread::Builder::new()
-                .name("vring_worker".to_string())
-                .spawn(move || vring_worker.run(vring_handler))
-                .map_err(VhostUserHandlerError::SpawnVringWorker)?,
-        );
-
         Ok(VhostUserHandler {
             backend,
-            worker,
             owned: false,
             features_acked: false,
             acked_features: 0,
@@ -529,12 +301,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
             max_queue_size,
             memory: None,
             vrings,
-            worker_thread,
         })
-    }
-
-    fn get_vring_worker(&self) -> Arc<VringWorker> {
-        self.worker.clone()
     }
 
     fn vmm_va_to_gpa(&self, vmm_va: u64) -> VhostUserHandlerResult<u64> {
@@ -848,11 +615,5 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
 }
 
 impl<S: VhostUserBackend> Drop for VhostUserHandler<S> {
-    fn drop(&mut self) {
-        if let Some(thread) = self.worker_thread.take() {
-            if let Err(e) = thread.join() {
-                error!("Error in vring worker: {:?}", e);
-            }
-        }
-    }
+    fn drop(&mut self) {}
 }
