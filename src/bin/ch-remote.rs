@@ -79,18 +79,7 @@ fn get_status_code(res: &str) -> Result<StatusCode, Error> {
     }
 }
 
-fn simple_api_command(socket: &mut UnixStream, method: &str, c: &str) -> Result<(), Error> {
-    socket
-        .write_all(
-            format!(
-                "{} /api/v1/vm.{} HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n\r\n",
-                method, c
-            )
-            .as_bytes(),
-        )
-        .map_err(Error::Socket)?;
-    socket.flush().map_err(Error::Socket)?;
-
+fn parse_http_response(socket: &mut UnixStream) -> Result<Option<String>, Error> {
     let mut res = String::new();
     let mut body_offset = None;
     let mut content_length: Option<usize> = None;
@@ -118,14 +107,33 @@ fn simple_api_command(socket: &mut UnixStream, method: &str, c: &str) -> Result<
         if let Some(body_offset) = body_offset {
             if let Some(content_length) = content_length {
                 if res.len() >= content_length + body_offset {
-                    println!("{}", &res[body_offset..]);
                     break;
                 }
             }
         }
     }
 
-    get_status_code(&res)?.check()
+    get_status_code(&res)?.check()?;
+
+    Ok(content_length.and(Some(String::from(&res[body_offset.unwrap()..]))))
+}
+
+fn simple_api_command(socket: &mut UnixStream, method: &str, c: &str) -> Result<(), Error> {
+    socket
+        .write_all(
+            format!(
+                "{} /api/v1/vm.{} HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n\r\n",
+                method, c
+            )
+            .as_bytes(),
+        )
+        .map_err(Error::Socket)?;
+    socket.flush().map_err(Error::Socket)?;
+
+    if let Some(body) = parse_http_response(socket)? {
+        println!("{}", body);
+    }
+    Ok(())
 }
 
 fn do_command(matches: &ArgMatches) -> Result<(), Error> {
