@@ -15,9 +15,9 @@ use futures::executor::{ThreadPool, ThreadPoolBuilder};
 use libc::EFD_NONBLOCK;
 use log::*;
 use std::num::Wrapping;
+use std::os::unix::io::RawFd;
 use std::sync::{Arc, RwLock};
 use std::{convert, error, fmt, io, process};
-
 use vhost_rs::vhost_user::message::*;
 use vhost_rs::vhost_user::SlaveFsCacheReq;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
@@ -32,6 +32,7 @@ use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_virtio::net_util::{register_listener, unregister_listener};
 use vm_virtio::queue::DescriptorChain;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -51,10 +52,16 @@ type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[derive(Debug)]
 enum Error {
+    /// Failed to create EventFd.
+    EpollCreateFd(io::Error),
     /// Failed to create kill eventfd.
     CreateKillEventFd(io::Error),
     /// Failed to create thread pool.
     CreateThreadPool(io::Error),
+    /// Failed register listener for vring.
+    FailedRegisterListener,
+    /// Failed unregister listener for vring.
+    FailedUnRegisterListener,
     /// Failed to handle event other than input event.
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
@@ -91,6 +98,7 @@ struct VhostUserFsBackend<F: FileSystem + Send + Sync + 'static> {
     vu_req: Option<SlaveFsCacheReq>,
     event_idx: bool,
     pool: ThreadPool,
+    epoll_fd: RawFd,
 }
 
 impl<F: FileSystem + Send + Sync + 'static> Clone for VhostUserFsBackend<F> {
@@ -102,6 +110,7 @@ impl<F: FileSystem + Send + Sync + 'static> Clone for VhostUserFsBackend<F> {
             vu_req: self.vu_req.clone(),
             event_idx: self.event_idx,
             pool: self.pool.clone(),
+            epoll_fd: self.epoll_fd,
         }
     }
 }
@@ -118,6 +127,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
                 .pool_size(thread_pool_size)
                 .create()
                 .map_err(Error::CreateThreadPool)?,
+            epoll_fd: epoll::create(true).map_err(Error::EpollCreateFd)?,
         })
     }
 
@@ -260,6 +270,18 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
 
     fn set_slave_req_fd(&mut self, vu_req: SlaveFsCacheReq) {
         self.vu_req = Some(vu_req);
+    }
+
+    fn register_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
+        register_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
+            .map_err(|_| Error::FailedRegisterListener)?;
+        Ok(())
+    }
+
+    fn unregister_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
+        unregister_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
+            .map_err(|_| Error::FailedUnRegisterListener)?;
+        Ok(())
     }
 }
 
