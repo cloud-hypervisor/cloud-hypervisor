@@ -22,6 +22,7 @@ enum Error {
     ServerResponse(StatusCode),
     InvalidCPUCount(std::num::ParseIntError),
     InvalidMemorySize(std::num::ParseIntError),
+    AddDeviceConfig(vmm::config::Error),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -190,6 +191,17 @@ fn resize_api_command(
     )
 }
 
+fn add_device_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
+    let device_config = vmm::config::DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "add-device",
+        Some(&serde_json::to_string(&device_config).unwrap()),
+    )
+}
+
 fn do_command(matches: &ArgMatches) -> Result<(), Error> {
     let mut socket =
         UnixStream::connect(matches.value_of("api-socket").unwrap()).map_err(Error::Socket)?;
@@ -206,6 +218,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .subcommand_matches("resize")
                 .unwrap()
                 .value_of("memory"),
+        ),
+        Some("add-device") => add_device_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("add-device")
+                .unwrap()
+                .value_of("device_config")
+                .unwrap(),
         ),
         Some(c) => simple_api_command(&mut socket, "PUT", c, None),
         None => unreachable!(),
@@ -224,6 +244,14 @@ fn main() {
                 .takes_value(true)
                 .min_values(1)
                 .required(true),
+        )
+        .subcommand(
+            SubCommand::with_name("add-device")
+                .about("Add VFIO device")
+                .arg(Arg::with_name("device_config").index(1).help(
+                    "Direct device assignment parameters \
+                     \"path=<device_path>,iommu=on|off\"",
+                )),
         )
         .subcommand(SubCommand::with_name("info").about("Info on the VM"))
         .subcommand(SubCommand::with_name("pause").about("Pause the VM"))
