@@ -24,6 +24,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::mem;
 use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::io::RawFd;
 use std::path::PathBuf;
 use std::process;
 use std::slice;
@@ -37,6 +38,7 @@ use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{Bytes, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::block::{build_disk_image_id, Request};
+use vm_virtio::net_util::{register_listener, unregister_listener};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: usize = 1024;
@@ -56,8 +58,14 @@ pub type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[derive(Debug)]
 pub enum Error {
+    /// Failed to create EventFd.
+    EpollCreateFd(io::Error),
     /// Failed to detect image type.
     DetectImageType,
+    /// Failed register listener for vring.
+    FailedRegisterListener,
+    /// Failed unregister listener for vring.
+    FailedUnRegisterListener,
     /// Bad memory address.
     GuestMemory(GuestMemoryError),
     /// Can't open image file.
@@ -107,6 +115,7 @@ pub struct VhostUserBlkBackend {
     poll_queue: bool,
     event_idx: bool,
     kill_evt: EventFd,
+    epoll_fd: RawFd,
 }
 
 impl VhostUserBlkBackend {
@@ -156,6 +165,7 @@ impl VhostUserBlkBackend {
             poll_queue,
             event_idx: false,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
+            epoll_fd: epoll::create(true).map_err(Error::EpollCreateFd)?,
         })
     }
 
@@ -323,6 +333,18 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
     fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
         Some((self.kill_evt.try_clone().unwrap(), None))
+    }
+
+    fn register_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
+        register_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
+            .map_err(|_| Error::FailedRegisterListener)?;
+        Ok(())
+    }
+
+    fn unregister_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
+        unregister_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
+            .map_err(|_| Error::FailedUnRegisterListener)?;
+        Ok(())
     }
 }
 
