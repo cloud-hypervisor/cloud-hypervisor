@@ -235,11 +235,7 @@ impl Vring {
         self.event_idx = enabled;
     }
 
-    pub fn needs_notification(
-        &mut self,
-        used_idx: Wrapping<u16>,
-        used_event: Option<Wrapping<u16>>,
-    ) -> bool {
+    pub fn needs_notification(&mut self, mem: &GuestMemoryMmap, used_idx: Wrapping<u16>) -> bool {
         if !self.event_idx {
             return true;
         }
@@ -247,7 +243,7 @@ impl Vring {
         let mut notify = true;
 
         if let Some(old_idx) = self.signalled_used {
-            if let Some(used_event) = used_event {
+            if let Some(used_event) = self.mut_queue().get_used_event(&mem) {
                 if (used_idx - used_event - Wrapping(1u16)) >= (used_idx - old_idx) {
                     notify = false;
                 }

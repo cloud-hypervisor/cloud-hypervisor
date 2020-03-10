@@ -197,8 +197,7 @@ impl VhostUserBlkBackend {
 
             if self.event_idx {
                 if let Some(used_idx) = vring.mut_queue().add_used(mem, head.index, len) {
-                    let used_event = vring.mut_queue().get_used_event(mem);
-                    if vring.needs_notification(Wrapping(used_idx), used_event) {
+                    if vring.needs_notification(&mem, Wrapping(used_idx)) {
                         debug!("signalling queue");
                         vring.signal_used_queue().unwrap();
                     } else {
