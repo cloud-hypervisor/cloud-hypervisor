@@ -21,7 +21,7 @@ use std::fmt;
 use std::io::Read;
 use std::io::{self};
 use std::net::Ipv4Addr;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::process;
 use std::sync::{Arc, RwLock};
 use std::vec::Vec;
@@ -30,7 +30,7 @@ use vhost_rs::vhost_user::Error as VhostUserError;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::GuestMemoryMmap;
-use vm_virtio::net_util::{open_tap, RxVirtio, TxVirtio};
+use vm_virtio::net_util::{open_tap, register_listener, unregister_listener, RxVirtio, TxVirtio};
 use vm_virtio::Queue;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -44,14 +44,18 @@ pub enum Error {
     BadActivate,
     /// Failed to create kill eventfd
     CreateKillEventFd(io::Error),
+    /// Failed to create EventFd.
+    EpollCreateFd(io::Error),
     /// Failed to add event.
     EpollCtl(io::Error),
     /// Fail to wait event.
     EpollWait(io::Error),
-    /// Failed to create EventFd.
-    EpollCreateFd,
     /// Failed to read Tap.
     FailedReadTap,
+    /// Failed register listener for vring.
+    FailedRegisterListener,
+    /// Failed unregister listener for vring.
+    FailedUnRegisterListener,
     /// Failed to signal used queue.
     FailedSignalingUsedQueue,
     /// Failed to handle event other than input event.
@@ -102,6 +106,7 @@ pub struct VhostUserNetBackend {
     rx_tap_listenings: Vec<bool>,
     num_queues: usize,
     queue_size: u16,
+    epoll_fd: RawFd,
 }
 
 impl VhostUserNetBackend {
@@ -134,6 +139,7 @@ impl VhostUserNetBackend {
             rx_tap_listenings,
             num_queues,
             queue_size,
+            epoll_fd: epoll::create(true).map_err(Error::EpollCreateFd)?,
         })
     }
 
@@ -344,6 +350,18 @@ impl VhostUserBackend for VhostUserNetBackend {
         let tap_end_index = (self.num_queues + self.num_queues / 2 - 1) as u16;
         let kill_index = tap_end_index + 1;
         Some((self.kill_evt.try_clone().unwrap(), Some(kill_index)))
+    }
+
+    fn register_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
+        register_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
+            .map_err(|_| Error::FailedRegisterListener)?;
+        Ok(())
+    }
+
+    fn unregister_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
+        unregister_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
+            .map_err(|_| Error::FailedUnRegisterListener)?;
+        Ok(())
     }
 }
 
