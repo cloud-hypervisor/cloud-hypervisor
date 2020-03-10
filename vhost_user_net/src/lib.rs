@@ -27,7 +27,7 @@ use std::sync::{Arc, RwLock};
 use std::vec::Vec;
 use vhost_rs::vhost_user::message::*;
 use vhost_rs::vhost_user::Error as VhostUserError;
-use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
+use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::GuestMemoryMmap;
 use vm_virtio::net_util::{open_tap, register_listener, unregister_listener, RxVirtio, TxVirtio};
@@ -98,7 +98,6 @@ impl std::convert::From<Error> for std::io::Error {
 
 pub struct VhostUserNetBackend {
     mem: Option<GuestMemoryMmap>,
-    vring_worker: Option<Arc<VringWorker>>,
     kill_evt: EventFd,
     taps: Vec<(Tap, usize)>,
     rxs: Vec<RxVirtio>,
@@ -131,7 +130,6 @@ impl VhostUserNetBackend {
 
         Ok(VhostUserNetBackend {
             mem: None,
-            vring_worker: None,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             taps: taps_v,
             rxs,
@@ -169,15 +167,13 @@ impl VhostUserNetBackend {
         if next_desc.is_none() {
             // Queue has no available descriptors
             if self.rx_tap_listenings[index] {
-                self.vring_worker
-                    .as_ref()
-                    .unwrap()
-                    .unregister_listener(
-                        self.taps[index].0.as_raw_fd(),
-                        epoll::Events::EPOLLIN,
-                        u64::try_from(self.taps[index].1).unwrap(),
-                    )
-                    .unwrap();
+                unregister_listener(
+                    self.epoll_fd,
+                    self.taps[index].0.as_raw_fd(),
+                    epoll::Events::EPOLLIN,
+                    u64::try_from(self.taps[index].1).unwrap(),
+                )
+                .unwrap();
                 self.rx_tap_listenings[index] = false;
             }
             return Ok(false);
@@ -253,42 +249,6 @@ impl VhostUserNetBackend {
         self.taps[index].0.read(&mut self.rxs[index].frame_buf)
     }
 
-    pub fn set_vring_worker(&mut self, vring_worker: Option<Arc<VringWorker>>) {
-        self.vring_worker = vring_worker;
-    }
-}
-
-impl VhostUserBackend for VhostUserNetBackend {
-    fn num_queues(&self) -> usize {
-        self.num_queues
-    }
-
-    fn max_queue_size(&self) -> usize {
-        self.queue_size as usize
-    }
-
-    fn features(&self) -> u64 {
-        1 << VIRTIO_NET_F_GUEST_CSUM
-            | 1 << VIRTIO_NET_F_CSUM
-            | 1 << VIRTIO_NET_F_GUEST_TSO4
-            | 1 << VIRTIO_NET_F_GUEST_UFO
-            | 1 << VIRTIO_NET_F_HOST_TSO4
-            | 1 << VIRTIO_NET_F_HOST_UFO
-            | 1 << VIRTIO_F_VERSION_1
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
-    }
-
-    fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::all()
-    }
-
-    fn set_event_idx(&mut self, _enabled: bool) {}
-
-    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(mem);
-        Ok(())
-    }
-
     fn handle_event(
         &mut self,
         device_event: u16,
@@ -309,7 +269,8 @@ impl VhostUserBackend for VhostUserNetBackend {
                 self.resume_rx(&mut vring, index)?;
 
                 if !self.rx_tap_listenings[index] {
-                    self.vring_worker.as_ref().unwrap().register_listener(
+                    register_listener(
+                        self.epoll_fd,
                         self.taps[index].0.as_raw_fd(),
                         epoll::Events::EPOLLIN,
                         u64::try_from(self.taps[index].1).unwrap(),
@@ -345,11 +306,37 @@ impl VhostUserBackend for VhostUserNetBackend {
 
         Ok(false)
     }
+}
 
-    fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
-        let tap_end_index = (self.num_queues + self.num_queues / 2 - 1) as u16;
-        let kill_index = tap_end_index + 1;
-        Some((self.kill_evt.try_clone().unwrap(), Some(kill_index)))
+impl VhostUserBackend for VhostUserNetBackend {
+    fn num_queues(&self) -> usize {
+        self.num_queues
+    }
+
+    fn max_queue_size(&self) -> usize {
+        self.queue_size as usize
+    }
+
+    fn features(&self) -> u64 {
+        1 << VIRTIO_NET_F_GUEST_CSUM
+            | 1 << VIRTIO_NET_F_CSUM
+            | 1 << VIRTIO_NET_F_GUEST_TSO4
+            | 1 << VIRTIO_NET_F_GUEST_UFO
+            | 1 << VIRTIO_NET_F_HOST_TSO4
+            | 1 << VIRTIO_NET_F_HOST_UFO
+            | 1 << VIRTIO_F_VERSION_1
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+    }
+
+    fn protocol_features(&self) -> VhostUserProtocolFeatures {
+        VhostUserProtocolFeatures::all()
+    }
+
+    fn set_event_idx(&mut self, _enabled: bool) {}
+
+    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
+        self.mem = Some(mem);
+        Ok(())
     }
 
     fn register_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
@@ -463,13 +450,6 @@ pub fn start_net_backend(backend_command: &str) {
         net_backend.clone(),
     )
     .unwrap();
-
-    let vring_worker = net_daemon.get_vring_worker();
-
-    net_backend
-        .write()
-        .unwrap()
-        .set_vring_worker(Some(vring_worker));
 
     if let Err(e) = net_daemon.start() {
         println!(
