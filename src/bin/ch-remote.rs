@@ -202,6 +202,17 @@ fn add_device_api_command(socket: &mut UnixStream, config: &str) -> Result<(), E
     )
 }
 
+fn remove_device_api_command(socket: &mut UnixStream, id: &str) -> Result<(), Error> {
+    let remove_device_data = vmm::api::VmRemoveDeviceData { id: id.to_owned() };
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "remove-device",
+        Some(&serde_json::to_string(&remove_device_data).unwrap()),
+    )
+}
+
 fn do_command(matches: &ArgMatches) -> Result<(), Error> {
     let mut socket =
         UnixStream::connect(matches.value_of("api-socket").unwrap()).map_err(Error::Socket)?;
@@ -227,6 +238,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .value_of("device_config")
                 .unwrap(),
         ),
+        Some("remove-device") => remove_device_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("remove-device")
+                .unwrap()
+                .value_of("id")
+                .unwrap(),
+        ),
         Some(c) => simple_api_command(&mut socket, "PUT", c, None),
         None => unreachable!(),
     }
@@ -250,8 +269,13 @@ fn main() {
                 .about("Add VFIO device")
                 .arg(Arg::with_name("device_config").index(1).help(
                     "Direct device assignment parameters \
-                     \"path=<device_path>,iommu=on|off\"",
+                     \"path=<device_path>,iommu=on|off,id=<device_id>\"",
                 )),
+        )
+        .subcommand(
+            SubCommand::with_name("remove-device")
+                .about("Remove VFIO device")
+                .arg(Arg::with_name("id").index(1).help("<device_id>")),
         )
         .subcommand(SubCommand::with_name("info").about("Info on the VM"))
         .subcommand(SubCommand::with_name("pause").about("Pause the VM"))
