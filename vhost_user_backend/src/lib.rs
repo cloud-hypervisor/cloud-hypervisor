@@ -46,10 +46,6 @@ pub enum Error {
     HandleRequest(VhostUserError),
     /// Failed to process queue.
     ProcessQueue(VringEpollHandlerError),
-    /// Failed to register listener.
-    RegisterListener(io::Error),
-    /// Failed to unregister listener.
-    UnregisterListener(io::Error),
 }
 
 /// Result of vhost-user daemon operations.
@@ -113,6 +109,18 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// A default implementation is provided as we cannot expect all backends
     /// to implement this function.
     fn set_slave_req_fd(&mut self, _vu_req: SlaveFsCacheReq) {}
+
+    /// Register listener.
+    /// Register listener for vring to the epoll_fd managed by backends. Then epoll thread could receive the vring events.
+    fn register_listener(&mut self, _fd: RawFd, _index: u64) -> result::Result<(), io::Error> {
+        Ok(())
+    }
+
+    /// Rnregister listener.
+    /// Unregister listener for vring from the epoll_fd managed by backends.
+    fn unregister_listener(&mut self, _fd: RawFd, _index: u64) -> result::Result<(), io::Error> {
+        Ok(())
+    }
 }
 
 /// This structure is the public API the backend is allowed to interact with
@@ -718,8 +726,10 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
         // VHOST_USER_GET_VRING_BASE.
         self.vrings[index as usize].write().unwrap().queue.ready = false;
         if let Some(fd) = self.vrings[index as usize].read().unwrap().kick.as_ref() {
-            self.worker
-                .unregister_listener(fd.as_raw_fd(), epoll::Events::EPOLLIN, u64::from(index))
+            self.backend
+                .write()
+                .unwrap()
+                .unregister_listener(fd.as_raw_fd(), u64::from(index))
                 .map_err(VhostUserError::ReqHandlerError)?;
         }
 
@@ -752,8 +762,10 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
         // VHOST_USER_GET_VRING_BASE.
         self.vrings[index as usize].write().unwrap().queue.ready = true;
         if let Some(fd) = self.vrings[index as usize].read().unwrap().kick.as_ref() {
-            self.worker
-                .register_listener(fd.as_raw_fd(), epoll::Events::EPOLLIN, u64::from(index))
+            self.backend
+                .write()
+                .unwrap()
+                .register_listener(fd.as_raw_fd(), u64::from(index))
                 .map_err(VhostUserError::ReqHandlerError)?;
         }
 
