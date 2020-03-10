@@ -543,7 +543,7 @@ impl Queue {
             None => warn!("Can't update avail_event"),
         }
 
-        // This fence ensures all descriptor writes are visible before the index update is.
+        // This fence ensures the guest sees the value we've just written.
         fence(Ordering::Release);
     }
 
