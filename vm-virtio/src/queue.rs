@@ -548,6 +548,7 @@ impl Queue {
     }
 
     /// Return the value present in the used_event field of the avail ring.
+    #[inline(always)]
     pub fn get_used_event(&self, mem: &GuestMemoryMmap) -> Option<Wrapping<u16>> {
         let avail_ring = self.avail_ring;
         let used_event_addr =
