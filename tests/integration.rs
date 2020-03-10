@@ -470,6 +470,25 @@ mod tests {
             .success()
     }
 
+    fn resize_command(
+        api_socket: &str,
+        desired_vcpus: Option<u8>,
+        desired_ram: Option<usize>,
+    ) -> bool {
+        let mut cmd = Command::new("target/release/ch-remote");
+        cmd.args(&[&format!("--api-socket={}", api_socket), "resize"]);
+
+        if let Some(desired_vcpus) = desired_vcpus {
+            cmd.arg(format!("--cpus={}", desired_vcpus));
+        }
+
+        if let Some(desired_ram) = desired_ram {
+            cmd.arg(format!("--memory={}", desired_ram));
+        }
+
+        cmd.status().expect("Failed to launch ch-remote").success()
+    }
+
     const DEFAULT_SSH_RETRIES: u8 = 6;
     const DEFAULT_SSH_TIMEOUT: u8 = 10;
     fn ssh_command_ip(command: &str, ip: &str, retries: u8, timeout: u8) -> Result<String, Error> {
@@ -637,14 +656,6 @@ mod tests {
                      self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
                      self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
             }
-        }
-
-        fn api_resize_body(&self, desired_vcpus: Option<u8>, desired_ram: Option<u64>) -> String {
-            let resize = vmm::api::VmResizeData {
-                desired_vcpus,
-                desired_ram,
-            };
-            serde_json::to_string(&resize).unwrap()
         }
 
         fn get_cpu_count(&self) -> Result<u32, Error> {
@@ -3072,13 +3083,7 @@ mod tests {
 
             // Resize the VM
             let desired_vcpus = 4;
-            let http_body = guest.api_resize_body(Some(desired_vcpus), None);
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.resize",
-                Some(&http_body),
-            );
+            resize_command(&api_socket, Some(desired_vcpus), None);
 
             guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu2/online")?;
             guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu3/online")?;
@@ -3116,13 +3121,8 @@ mod tests {
 
             // Resize the VM
             let desired_vcpus = 2;
-            let http_body = guest.api_resize_body(Some(desired_vcpus), None);
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.resize",
-                Some(&http_body),
-            );
+            resize_command(&api_socket, Some(desired_vcpus), None);
+
             thread::sleep(std::time::Duration::new(10, 0));
             aver_eq!(
                 tb,
@@ -3168,13 +3168,7 @@ mod tests {
 
             // Add RAM to the VM
             let desired_ram = 1024 << 20;
-            let http_body = guest.api_resize_body(None, Some(desired_ram));
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.resize",
-                Some(&http_body),
-            );
+            resize_command(&api_socket, None, Some(desired_ram));
 
             thread::sleep(std::time::Duration::new(10, 0));
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
@@ -3206,26 +3200,14 @@ mod tests {
 
             // Add RAM to the VM
             let desired_ram = 2048 << 20;
-            let http_body = guest.api_resize_body(None, Some(desired_ram));
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.resize",
-                Some(&http_body),
-            );
+            resize_command(&api_socket, None, Some(desired_ram));
 
             thread::sleep(std::time::Duration::new(10, 0));
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 1_964_000);
 
             // Remove RAM to the VM (only applies after reboot)
             let desired_ram = 1024 << 20;
-            let http_body = guest.api_resize_body(None, Some(desired_ram));
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.resize",
-                Some(&http_body),
-            );
+            resize_command(&api_socket, None, Some(desired_ram));
 
             guest.ssh_command("sudo reboot").unwrap_or_default();
 
@@ -3282,13 +3264,7 @@ mod tests {
             // Resize the VM
             let desired_vcpus = 4;
             let desired_ram = 1024 << 20;
-            let http_body = guest.api_resize_body(Some(desired_vcpus), Some(desired_ram));
-            curl_command(
-                &api_socket,
-                "PUT",
-                "http://localhost/api/v1/vm.resize",
-                Some(&http_body),
-            );
+            resize_command(&api_socket, Some(desired_vcpus), Some(desired_ram));
 
             guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu2/online")?;
             guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu3/online")?;
