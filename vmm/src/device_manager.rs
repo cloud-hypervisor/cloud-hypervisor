@@ -354,12 +354,12 @@ impl DeviceRelocation for AddressManager {
             }
             PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
                 // Update system allocator
-                self.allocator
-                    .lock()
-                    .unwrap()
-                    .free_mmio_addresses(GuestAddress(old_base), len as GuestUsize);
-
                 if region_type == PciBarRegionType::Memory32BitRegion {
+                    self.allocator
+                        .lock()
+                        .unwrap()
+                        .free_mmio_hole_addresses(GuestAddress(old_base), len as GuestUsize);
+
                     self.allocator
                         .lock()
                         .unwrap()
@@ -375,6 +375,11 @@ impl DeviceRelocation for AddressManager {
                             )
                         })?;
                 } else {
+                    self.allocator
+                        .lock()
+                        .unwrap()
+                        .free_mmio_addresses(GuestAddress(old_base), len as GuestUsize);
+
                     self.allocator
                         .lock()
                         .unwrap()
