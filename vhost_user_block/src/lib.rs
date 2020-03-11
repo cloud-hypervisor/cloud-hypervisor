@@ -82,8 +82,6 @@ pub enum Error {
     ParseBlkNumQueuesParam(std::num::ParseIntError),
     /// Failed to parse the poll_queue parameter.
     ParsePollQueueParam,
-    /// Failed to handle event other than input event.
-    HandleEventNotEpollIn,
     /// Failed to create kill eventfd
     CreateKillEventFd(io::Error),
     /// Failed to handle unknown event.
@@ -166,116 +164,6 @@ impl VhostUserBlkBackend {
             epoll_fd: epoll::create(true).map_err(Error::EpollCreateFd)?,
         })
     }
-
-    pub fn process_queue(&mut self, vring: &mut Vring) -> bool {
-        let mut used_any = false;
-        let mem = match self.mem.as_ref() {
-            Some(m) => m,
-            None => return false,
-        };
-
-        while let Some(head) = vring.mut_queue().iter(mem).next() {
-            debug!("got an element in the queue");
-            let len;
-            match Request::parse(&head, mem) {
-                Ok(request) => {
-                    debug!("element is a valid request");
-                    let status = match request.execute(
-                        &mut self.disk_image,
-                        self.disk_nsectors,
-                        mem,
-                        &self.disk_image_id,
-                    ) {
-                        Ok(l) => {
-                            len = l;
-                            VIRTIO_BLK_S_OK
-                        }
-                        Err(e) => {
-                            len = 1;
-                            e.status()
-                        }
-                    };
-                    mem.write_obj(status, request.status_addr).unwrap();
-                }
-                Err(err) => {
-                    error!("failed to parse available descriptor chain: {:?}", err);
-                    len = 0;
-                }
-            }
-
-            if self.event_idx {
-                if let Some(used_idx) = vring.mut_queue().add_used(mem, head.index, len) {
-                    if vring.needs_notification(&mem, Wrapping(used_idx)) {
-                        debug!("signalling queue");
-                        vring.signal_used_queue().unwrap();
-                    } else {
-                        debug!("omitting signal (event_idx)");
-                    }
-                    used_any = true;
-                }
-            } else {
-                debug!("signalling queue");
-                vring.mut_queue().add_used(mem, head.index, len);
-                vring.signal_used_queue().unwrap();
-                used_any = true;
-            }
-        }
-
-        used_any
-    }
-
-    fn handle_event(
-        &mut self,
-        device_event: u16,
-        evset: epoll::Events,
-        vrings: &[Arc<RwLock<Vring>>],
-    ) -> VhostUserBackendResult<bool> {
-        if evset != epoll::Events::EPOLLIN {
-            return Err(Error::HandleEventNotEpollIn.into());
-        }
-
-        debug!("event received: {:?}", device_event);
-
-        match device_event {
-            q if device_event < self.config.num_queues => {
-                let mut vring = vrings[q as usize].write().unwrap();
-
-                if self.poll_queue {
-                    // Actively poll the queue until POLL_QUEUE_US has passed
-                    // without seeing a new request.
-                    let mut now = Instant::now();
-                    loop {
-                        if self.process_queue(&mut vring) {
-                            now = Instant::now();
-                        } else if now.elapsed().as_micros() > POLL_QUEUE_US {
-                            break;
-                        }
-                    }
-                }
-
-                if self.event_idx {
-                    // vm-virtio's Queue implementation only checks avail_index
-                    // once, so to properly support EVENT_IDX we need to keep
-                    // calling process_queue() until it stops finding new
-                    // requests on the queue.
-                    loop {
-                        vring
-                            .mut_queue()
-                            .update_avail_event(self.mem.as_ref().unwrap());
-                        if !self.process_queue(&mut vring) {
-                            break;
-                        }
-                    }
-                } else {
-                    // Without EVENT_IDX, a single call is enough.
-                    self.process_queue(&mut vring);
-                }
-
-                Ok(false)
-            }
-            _ => Err(Error::HandleEventUnknownEvent.into()),
-        }
-    }
 }
 
 impl VhostUserBackend for VhostUserBlkBackend {
@@ -334,6 +222,143 @@ impl VhostUserBackend for VhostUserBlkBackend {
     fn unregister_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
         unregister_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
             .map_err(|_| Error::FailedUnRegisterListener)?;
+        Ok(())
+    }
+}
+
+struct BlockEpollHandler {
+    mem: Option<GuestMemoryMmap>,
+    disk_image: Box<dyn DiskFile>,
+    disk_image_id: Vec<u8>,
+    disk_nsectors: u64,
+    poll_queue: bool,
+    event_idx: bool,
+    epoll_fd: RawFd,
+    num_queues: u16,
+}
+
+impl BlockEpollHandler {
+    pub fn process_queue(&mut self, vring: &mut Vring) -> bool {
+        let mut used_any = false;
+        let mem = match self.mem.as_ref() {
+            Some(m) => m,
+            None => return false,
+        };
+
+        while let Some(head) = vring.mut_queue().iter(mem).next() {
+            debug!("got an element in the queue");
+            let len;
+            match Request::parse(&head, mem) {
+                Ok(request) => {
+                    debug!("element is a valid request");
+                    let status = match request.execute(
+                        &mut self.disk_image,
+                        self.disk_nsectors,
+                        mem,
+                        &self.disk_image_id,
+                    ) {
+                        Ok(l) => {
+                            len = l;
+                            VIRTIO_BLK_S_OK
+                        }
+                        Err(e) => {
+                            len = 1;
+                            e.status()
+                        }
+                    };
+                    mem.write_obj(status, request.status_addr).unwrap();
+                }
+                Err(err) => {
+                    error!("failed to parse available descriptor chain: {:?}", err);
+                    len = 0;
+                }
+            }
+
+            if self.event_idx {
+                if let Some(used_idx) = vring.mut_queue().add_used(mem, head.index, len) {
+                    if vring.needs_notification(&mem, Wrapping(used_idx)) {
+                        debug!("signalling queue");
+                        vring.signal_used_queue().unwrap();
+                    } else {
+                        debug!("omitting signal (event_idx)");
+                    }
+                    used_any = true;
+                }
+            } else {
+                debug!("signalling queue");
+                vring.mut_queue().add_used(mem, head.index, len);
+                vring.signal_used_queue().unwrap();
+                used_any = true;
+            }
+        }
+
+        used_any
+    }
+
+    fn handle_event(&mut self, vrings: Vec<Arc<RwLock<Vring>>>) -> VhostUserBackendResult<()> {
+        let mut events =
+            vec![epoll::Event::new(epoll::Events::empty(), 0); self.num_queues as usize];
+
+        'epoll: loop {
+            let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
+                Ok(res) => res,
+                Err(e) => {
+                    if e.kind() == io::ErrorKind::Interrupted {
+                        // It's well defined from the epoll_wait() syscall
+                        // documentation that the epoll loop can be interrupted
+                        // before any of the requested events occurred or the
+                        // timeout expired. In both those cases, epoll_wait()
+                        // returns an error of type EINTR, but this should not
+                        // be considered as a regular error. Instead it is more
+                        // appropriate to retry, by calling into epoll_wait().
+                        continue;
+                    }
+                    return Err(e);
+                }
+            };
+
+            for event in events.iter().take(num_events) {
+                let device_event = event.data as u16;
+
+                match device_event {
+                    q if device_event < self.num_queues => {
+                        let mut vring = vrings[q as usize].write().unwrap();
+
+                        if self.poll_queue {
+                            // Actively poll the queue until POLL_QUEUE_US has passed
+                            // without seeing a new request.
+                            let mut now = Instant::now();
+                            loop {
+                                if self.process_queue(&mut vring) {
+                                    now = Instant::now();
+                                } else if now.elapsed().as_micros() > POLL_QUEUE_US {
+                                    break;
+                                }
+                            }
+                        }
+
+                        if self.event_idx {
+                            // vm-virtio's Queue implementation only checks avail_index
+                            // once, so to properly support EVENT_IDX we need to keep
+                            // calling process_queue() until it stops finding new
+                            // requests on the queue.
+                            loop {
+                                vring
+                                    .mut_queue()
+                                    .update_avail_event(self.mem.as_ref().unwrap());
+                                if !self.process_queue(&mut vring) {
+                                    break;
+                                }
+                            }
+                        } else {
+                            // Without EVENT_IDX, a single call is enough.
+                            self.process_queue(&mut vring);
+                        }
+                    }
+                    _ => return Err(Error::HandleEventUnknownEvent.into()),
+                }
+            }
+        }
         Ok(())
     }
 }
