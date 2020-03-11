@@ -155,7 +155,63 @@ impl VhostUserNetBackend {
 
         Self::new_with_tap(taps, num_queues, queue_size)
     }
+}
 
+impl VhostUserBackend for VhostUserNetBackend {
+    fn num_queues(&self) -> usize {
+        self.num_queues
+    }
+
+    fn max_queue_size(&self) -> usize {
+        self.queue_size as usize
+    }
+
+    fn features(&self) -> u64 {
+        1 << VIRTIO_NET_F_GUEST_CSUM
+            | 1 << VIRTIO_NET_F_CSUM
+            | 1 << VIRTIO_NET_F_GUEST_TSO4
+            | 1 << VIRTIO_NET_F_GUEST_UFO
+            | 1 << VIRTIO_NET_F_HOST_TSO4
+            | 1 << VIRTIO_NET_F_HOST_UFO
+            | 1 << VIRTIO_F_VERSION_1
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+    }
+
+    fn protocol_features(&self) -> VhostUserProtocolFeatures {
+        VhostUserProtocolFeatures::all()
+    }
+
+    fn set_event_idx(&mut self, _enabled: bool) {}
+
+    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
+        self.mem = Some(mem);
+        Ok(())
+    }
+
+    fn register_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
+        register_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
+            .map_err(|_| Error::FailedRegisterListener)?;
+        Ok(())
+    }
+
+    fn unregister_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
+        unregister_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
+            .map_err(|_| Error::FailedUnRegisterListener)?;
+        Ok(())
+    }
+}
+
+struct NetEpollHandler {
+    mem: Option<GuestMemoryMmap>,
+    taps: Vec<(Tap, usize)>,
+    rxs: Vec<RxVirtio>,
+    txs: Vec<TxVirtio>,
+    rx_tap_listenings: Vec<bool>,
+    epoll_fd: RawFd,
+    num_queues: usize,
+}
+
+impl NetEpollHandler {
     // Copies a single frame from `self.rx.frame_buf` into the guest. Returns true
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
@@ -249,105 +305,77 @@ impl VhostUserNetBackend {
         self.taps[index].0.read(&mut self.rxs[index].frame_buf)
     }
 
-    fn handle_event(
-        &mut self,
-        device_event: u16,
-        evset: epoll::Events,
-        vrings: &[Arc<RwLock<Vring>>],
-    ) -> VhostUserBackendResult<bool> {
-        if evset != epoll::Events::EPOLLIN {
-            return Err(Error::HandleEventNotEpollIn.into());
-        }
-
+    fn handle_event(&mut self, vrings: Vec<Arc<RwLock<Vring>>>) -> VhostUserBackendResult<()> {
         let tap_start_index = self.num_queues as u16;
         let tap_end_index = (self.num_queues + self.num_queues / 2 - 1) as u16;
 
-        match device_event {
-            x if ((x < self.num_queues as u16) && (x % 2 == 0)) => {
-                let index = (x / 2) as usize;
-                let mut vring = vrings[x as usize].write().unwrap();
-                self.resume_rx(&mut vring, index)?;
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); tap_end_index as usize];
 
-                if !self.rx_tap_listenings[index] {
-                    register_listener(
-                        self.epoll_fd,
-                        self.taps[index].0.as_raw_fd(),
-                        epoll::Events::EPOLLIN,
-                        u64::try_from(self.taps[index].1).unwrap(),
-                    )?;
-                    self.rx_tap_listenings[index] = true;
-                }
-            }
-            x if ((x < self.num_queues as u16) && (x % 2 != 0)) => {
-                let index = ((x - 1) / 2) as usize;
-                let mut vring = vrings[x as usize].write().unwrap();
-                self.process_tx(&mut vring.mut_queue(), index)?;
-            }
-            x if x >= tap_start_index && x <= tap_end_index => {
-                let index = x as usize - self.num_queues;
-                let mut vring = vrings[2 * index].write().unwrap();
-                if self.rxs[index].deferred_frame
-                // Process a deferred frame first if available. Don't read from tap again
-                // until we manage to receive this deferred frame.
-                {
-                    if self.rx_single_frame(&mut vring.mut_queue(), index)? {
-                        self.rxs[index].deferred_frame = false;
-                        self.process_rx(&mut vring, index)?;
-                    } else if self.rxs[index].deferred_irqs {
-                        self.rxs[index].deferred_irqs = false;
-                        vring.signal_used_queue()?;
+        'epoll: loop {
+            let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
+                Ok(res) => res,
+                Err(e) => {
+                    if e.kind() == io::ErrorKind::Interrupted {
+                        // It's well defined from the epoll_wait() syscall
+                        // documentation that the epoll loop can be interrupted
+                        // before any of the requested events occurred or the
+                        // timeout expired. In both those cases, epoll_wait()
+                        // returns an error of type EINTR, but this should not
+                        // be considered as a regular error. Instead it is more
+                        // appropriate to retry, by calling into epoll_wait().
+                        continue;
                     }
-                } else {
-                    self.process_rx(&mut vring, index)?;
+                    return Err(e);
+                }
+            };
+
+            for event in events.iter().take(num_events) {
+                let device_event = event.data as u16;
+
+                match device_event {
+                    x if ((x < self.num_queues as u16) && (x % 2 == 0)) => {
+                        let index = (x / 2) as usize;
+                        let mut vring = vrings[x as usize].write().unwrap();
+                        self.resume_rx(&mut vring, index)?;
+
+                        if !self.rx_tap_listenings[index] {
+                            register_listener(
+                                self.epoll_fd,
+                                self.taps[index].0.as_raw_fd(),
+                                epoll::Events::EPOLLIN,
+                                u64::try_from(self.taps[index].1).unwrap(),
+                            )?;
+                            self.rx_tap_listenings[index] = true;
+                        }
+                    }
+                    x if ((x < self.num_queues as u16) && (x % 2 != 0)) => {
+                        let index = ((x - 1) / 2) as usize;
+                        let mut vring = vrings[x as usize].write().unwrap();
+                        self.process_tx(&mut vring.mut_queue(), index)?;
+                    }
+                    x if x >= tap_start_index && x <= tap_end_index => {
+                        let index = x as usize - self.num_queues;
+                        let mut vring = vrings[2 * index].write().unwrap();
+                        if self.rxs[index].deferred_frame
+                        // Process a deferred frame first if available. Don't read from tap again
+                        // until we manage to receive this deferred frame.
+                        {
+                            if self.rx_single_frame(&mut vring.mut_queue(), index)? {
+                                self.rxs[index].deferred_frame = false;
+                                self.process_rx(&mut vring, index)?;
+                            } else if self.rxs[index].deferred_irqs {
+                                self.rxs[index].deferred_irqs = false;
+                                vring.signal_used_queue()?;
+                            }
+                        } else {
+                            self.process_rx(&mut vring, index)?;
+                        }
+                    }
+                    _ => return Err(Error::HandleEventUnknownEvent.into()),
                 }
             }
-            _ => return Err(Error::HandleEventUnknownEvent.into()),
         }
 
-        Ok(false)
-    }
-}
-
-impl VhostUserBackend for VhostUserNetBackend {
-    fn num_queues(&self) -> usize {
-        self.num_queues
-    }
-
-    fn max_queue_size(&self) -> usize {
-        self.queue_size as usize
-    }
-
-    fn features(&self) -> u64 {
-        1 << VIRTIO_NET_F_GUEST_CSUM
-            | 1 << VIRTIO_NET_F_CSUM
-            | 1 << VIRTIO_NET_F_GUEST_TSO4
-            | 1 << VIRTIO_NET_F_GUEST_UFO
-            | 1 << VIRTIO_NET_F_HOST_TSO4
-            | 1 << VIRTIO_NET_F_HOST_UFO
-            | 1 << VIRTIO_F_VERSION_1
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
-    }
-
-    fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::all()
-    }
-
-    fn set_event_idx(&mut self, _enabled: bool) {}
-
-    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(mem);
-        Ok(())
-    }
-
-    fn register_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
-        register_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
-            .map_err(|_| Error::FailedRegisterListener)?;
-        Ok(())
-    }
-
-    fn unregister_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
-        unregister_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
-            .map_err(|_| Error::FailedUnRegisterListener)?;
         Ok(())
     }
 }
