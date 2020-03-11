@@ -24,7 +24,7 @@ extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
 
-use crate::config::VmConfig;
+use crate::config::{DeviceConfig, VmConfig};
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{get_host_cpu_phys_bits, Error as MemoryManagerError, MemoryManager};
@@ -543,15 +543,14 @@ impl Vm {
         Ok(())
     }
 
-    pub fn add_device(&mut self, _path: String) -> Result<()> {
+    pub fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<()> {
         if cfg!(feature = "pci_support") {
             #[cfg(feature = "pci_support")]
             {
-                let device_cfg = self
-                    .device_manager
+                self.device_manager
                     .lock()
                     .unwrap()
-                    .add_device(_path)
+                    .add_device(&mut _device_cfg)
                     .map_err(Error::DeviceManager)?;
 
                 // Update VmConfig by adding the new device. This is important to
@@ -559,9 +558,9 @@ impl Vm {
                 {
                     let mut config = self.config.lock().unwrap();
                     if let Some(devices) = config.devices.as_mut() {
-                        devices.push(device_cfg);
+                        devices.push(_device_cfg);
                     } else {
-                        config.devices = Some(vec![device_cfg]);
+                        config.devices = Some(vec![_device_cfg]);
                     }
                 }
 

@@ -2409,7 +2409,7 @@ mod tests {
                  -i \
                  -X PUT http://localhost/api/v1/vm.add-device \
                  -H 'Accept: application/json' -H 'Content-Type: application/json' \
-                 -d '{\"path\":\"/sys/bus/pci/devices/0000:00:07.0\"}'",
+                 -d '{\"path\":\"/sys/bus/pci/devices/0000:00:07.0\",\"id\":\"vfio123\"}'",
             )?;
             thread::sleep(std::time::Duration::new(10, 0));
 
@@ -2444,15 +2444,13 @@ mod tests {
             // Let's now verify that we can correctly remove the virtio-net
             // device through the "remove-device" command responsible for
             // unplugging VFIO devices.
-            // "vfio2" is used here because the two previous devices will be
-            // affected with the values "vfio0" and "vfio1" by default.
             guest.ssh_command_l1(
                 "sudo curl \
                  --unix-socket /tmp/ch_api.sock \
                  -i \
                  -X PUT http://localhost/api/v1/vm.remove-device \
                  -H 'Accept: application/json' -H 'Content-Type: application/json' \
-                 -d '{\"id\":\"vfio2\"}'",
+                 -d '{\"id\":\"vfio123\"}'",
             )?;
             thread::sleep(std::time::Duration::new(10, 0));
 
