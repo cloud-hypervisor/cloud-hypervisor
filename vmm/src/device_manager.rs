@@ -1796,13 +1796,7 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
-    pub fn add_device(&mut self, path: String) -> DeviceManagerResult<DeviceConfig> {
-        let mut device_cfg = DeviceConfig {
-            path: PathBuf::from(path),
-            iommu: false,
-            id: None,
-        };
-
+    pub fn add_device(&mut self, device_cfg: &mut DeviceConfig) -> DeviceManagerResult<()> {
         let pci = if let Some(pci_bus) = &self.pci_bus {
             Arc::clone(&pci_bus)
         } else {
@@ -1827,13 +1821,13 @@ impl DeviceManager {
             &mut pci.lock().unwrap(),
             &interrupt_manager,
             &device_fd,
-            &mut device_cfg,
+            device_cfg,
         )?;
 
         // Update the PCIU bitmap
         self.pci_devices_up |= 1 << (device_id >> 3);
 
-        Ok(device_cfg)
+        Ok(())
     }
 
     #[cfg(feature = "pci_support")]

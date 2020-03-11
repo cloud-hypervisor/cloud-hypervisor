@@ -36,7 +36,7 @@ pub use self::http::start_http_thread;
 pub mod http;
 pub mod http_endpoint;
 
-use crate::config::VmConfig;
+use crate::config::{DeviceConfig, VmConfig};
 use crate::vm::{Error as VmError, VmState};
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
@@ -126,11 +126,6 @@ pub struct VmResizeData {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-pub struct VmAddDeviceData {
-    pub path: String,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
 pub struct VmRemoveDeviceData {
     pub id: String,
 }
@@ -199,7 +194,7 @@ pub enum ApiRequest {
     VmResize(Arc<VmResizeData>, Sender<ApiResponse>),
 
     /// Add a device to the VM.
-    VmAddDevice(Arc<VmAddDeviceData>, Sender<ApiResponse>),
+    VmAddDevice(Arc<DeviceConfig>, Sender<ApiResponse>),
 
     /// Remove a device from the VM.
     VmRemoveDevice(Arc<VmRemoveDeviceData>, Sender<ApiResponse>),
@@ -359,7 +354,7 @@ pub fn vm_resize(
 pub fn vm_add_device(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
-    data: Arc<VmAddDeviceData>,
+    data: Arc<DeviceConfig>,
 ) -> ApiResult<()> {
     let (response_sender, response_receiver) = channel();
 

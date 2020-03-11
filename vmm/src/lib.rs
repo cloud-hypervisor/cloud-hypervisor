@@ -16,7 +16,7 @@ extern crate tempfile;
 extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
-use crate::config::VmConfig;
+use crate::config::{DeviceConfig, VmConfig};
 use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
 use std::io;
@@ -372,9 +372,9 @@ impl Vmm {
         }
     }
 
-    fn vm_add_device(&mut self, path: String) -> result::Result<(), VmError> {
+    fn vm_add_device(&mut self, device_cfg: DeviceConfig) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.add_device(path) {
+            if let Err(e) = vm.add_device(device_cfg) {
                 error!("Error when adding new device to the VM: {:?}", e);
                 Err(e)
             } else {
@@ -555,7 +555,7 @@ impl Vmm {
                                 }
                                 ApiRequest::VmAddDevice(add_device_data, sender) => {
                                     let response = self
-                                        .vm_add_device(add_device_data.path.clone())
+                                        .vm_add_device(add_device_data.as_ref().clone())
                                         .map_err(ApiError::VmAddDevice)
                                         .map(|_| ApiResponsePayload::Empty);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;

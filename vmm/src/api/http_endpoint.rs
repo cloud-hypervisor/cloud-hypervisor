@@ -7,7 +7,7 @@ use crate::api::http::EndpointHandler;
 use crate::api::{
     vm_add_device, vm_boot, vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_remove_device,
     vm_resize, vm_resume, vm_shutdown, vmm_ping, vmm_shutdown, ApiError, ApiRequest, ApiResult,
-    VmAction, VmAddDeviceData, VmConfig, VmRemoveDeviceData, VmResizeData,
+    DeviceConfig, VmAction, VmConfig, VmRemoveDeviceData, VmResizeData,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
@@ -283,8 +283,8 @@ impl EndpointHandler for VmAddDevice {
             Method::Put => {
                 match &req.body {
                     Some(body) => {
-                        // Deserialize into a VmAddDeviceData
-                        let vm_add_device_data: VmAddDeviceData =
+                        // Deserialize into a DeviceConfig
+                        let vm_add_device_data: DeviceConfig =
                             match serde_json::from_slice(body.raw())
                                 .map_err(HttpError::SerdeJsonDeserialize)
                             {
