@@ -578,11 +578,32 @@ impl VfioPciDevice {
 
     pub fn unmap_mmio_regions(&mut self) {
         for region in self.mmio_regions.iter() {
-            if let (Some(addr), Some(size)) = (region.host_addr, region.mmap_size) {
-                let ret = unsafe { libc::munmap(addr as *mut libc::c_void, size) };
+            if let (Some(host_addr), Some(mmap_size), Some(mem_slot)) =
+                (region.host_addr, region.mmap_size, region.mem_slot)
+            {
+                let (mmap_offset, _) = self.device.get_region_mmap(region.index);
+
+                // Remove region from KVM
+                let kvm_region = kvm_userspace_memory_region {
+                    slot: mem_slot,
+                    guest_phys_addr: region.start.raw_value() + mmap_offset,
+                    memory_size: 0,
+                    userspace_addr: host_addr,
+                    flags: 0,
+                };
+                // Safe because the guest regions are guaranteed not to overlap.
+                if let Err(e) = unsafe { self.vm_fd.set_user_memory_region(kvm_region) } {
+                    error!(
+                        "Could not remove the userspace memory region from KVM: {}",
+                        e
+                    );
+                }
+
+                let ret = unsafe { libc::munmap(host_addr as *mut libc::c_void, mmap_size) };
                 if ret != 0 {
                     error!(
-                        "Could not unmap regions, error:{}",
+                        "Could not unmap region {}, error:{}",
+                        region.index,
                         io::Error::last_os_error()
                     );
                 }
