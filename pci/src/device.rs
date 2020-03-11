@@ -55,6 +55,11 @@ pub trait PciDevice: BusDevice {
         Ok(Vec::new())
     }
 
+    /// Frees the PCI BARs previously allocated with a call to allocate_bars().
+    fn free_bars(&mut self, _allocator: &mut SystemAllocator) -> Result<()> {
+        Ok(())
+    }
+
     /// Sets a register in the configuration space.
     /// * `reg_idx` - The index of the config register to modify.
     /// * `offset` - Offset in to the register.
