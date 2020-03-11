@@ -900,19 +900,28 @@ impl DeviceConfig {
 
         let mut path_str: &str = "";
         let mut iommu_str: &str = "";
+        let mut id_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("path=") {
                 path_str = &param[5..];
             } else if param.starts_with("iommu=") {
                 iommu_str = &param[6..];
+            } else if param.starts_with("id=") {
+                id_str = &param[3..];
             }
         }
+
+        let id = if !id_str.is_empty() {
+            Some(String::from(id_str))
+        } else {
+            None
+        };
 
         Ok(DeviceConfig {
             path: PathBuf::from(path_str),
             iommu: parse_on_off(iommu_str)?,
-            id: None,
+            id,
         })
     }
 }

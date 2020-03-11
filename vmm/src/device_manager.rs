@@ -252,6 +252,9 @@ pub enum DeviceManagerError {
     /// Could not give the PCI device ID back.
     #[cfg(feature = "pci_support")]
     PutPciDeviceId(pci::PciRootError),
+
+    /// Incorrect device ID as it is already used by another device.
+    DeviceIdAlreadyInUse,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1554,8 +1557,17 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::AddPciDevice)?;
 
-        let vfio_name = self.next_device_name(VFIO_DEVICE_NAME_PREFIX)?;
-        device_cfg.id = Some(vfio_name.clone());
+        let vfio_name = if let Some(id) = &device_cfg.id {
+            if self.pci_id_list.contains_key(id) {
+                return Err(DeviceManagerError::DeviceIdAlreadyInUse);
+            }
+
+            id.clone()
+        } else {
+            let id = self.next_device_name(VFIO_DEVICE_NAME_PREFIX)?;
+            device_cfg.id = Some(id.clone());
+            id
+        };
         self.pci_id_list.insert(vfio_name, pci_device_bdf);
 
         Ok(pci_device_bdf)
