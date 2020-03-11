@@ -131,4 +131,10 @@ impl SystemAllocator {
     pub fn free_mmio_addresses(&mut self, address: GuestAddress, size: GuestUsize) {
         self.mmio_address_space.free(address, size)
     }
+
+    /// Free an MMIO address range from the 32 bits hole.
+    /// We can only free a range if it matches exactly an already allocated range.
+    pub fn free_mmio_hole_addresses(&mut self, address: GuestAddress, size: GuestUsize) {
+        self.mmio_hole_address_space.free(address, size)
+    }
 }
