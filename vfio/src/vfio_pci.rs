@@ -222,6 +222,7 @@ impl Interrupt {
 struct MmioRegion {
     start: GuestAddress,
     length: GuestUsize,
+    type_: PciBarRegionType,
     index: u32,
     mem_slot: Option<u32>,
     host_addr: Option<u64>,
@@ -799,6 +800,7 @@ impl PciDevice for VfioPciDevice {
             self.mmio_regions.push(MmioRegion {
                 start: bar_addr,
                 length: region_size,
+                type_: region_type,
                 index: bar_id as u32,
                 mem_slot: None,
                 host_addr: None,
@@ -816,6 +818,26 @@ impl PciDevice for VfioPciDevice {
         }
 
         Ok(ranges)
+    }
+
+    fn free_bars(
+        &mut self,
+        allocator: &mut SystemAllocator,
+    ) -> std::result::Result<(), PciDeviceError> {
+        for region in self.mmio_regions.iter() {
+            match region.type_ {
+                PciBarRegionType::IORegion => {
+                    allocator.free_io_addresses(region.start, region.length);
+                }
+                PciBarRegionType::Memory32BitRegion => {
+                    allocator.free_mmio_hole_addresses(region.start, region.length);
+                }
+                PciBarRegionType::Memory64BitRegion => {
+                    allocator.free_mmio_addresses(region.start, region.length);
+                }
+            }
+        }
+        Ok(())
     }
 
     fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
