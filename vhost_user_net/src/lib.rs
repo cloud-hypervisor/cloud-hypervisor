@@ -224,6 +224,7 @@ struct NetEpollHandler {
     rxs: Vec<RxVirtio>,
     txs: Vec<TxVirtio>,
     rx_tap_listenings: Vec<bool>,
+    kill_evt: EventFd,
     epoll_fd: RawFd,
     num_queues: usize,
     worker_reset: Arc<Mutex<WorkerReset>>,
@@ -336,6 +337,13 @@ impl NetEpollHandler {
             epoll::Events::EPOLLIN,
             u64::try_from(worker_reset_index).unwrap(),
         )?;
+        let kill_index = worker_reset_index + 1;
+        register_listener(
+            self.epoll_fd,
+            self.kill_evt.as_raw_fd(),
+            epoll::Events::EPOLLIN,
+            u64::try_from(kill_index).unwrap(),
+        )?;
 
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 100];
 
@@ -417,6 +425,7 @@ impl NetEpollHandler {
                             .map_err(|_| Error::FailedReadWorkerReset)?;
                         self.mem = self.worker_reset.lock().unwrap().get_mem();
                     }
+                    x if x == kill_index => break 'epoll,
                     _ => return Err(Error::HandleEventUnknownEvent.into()),
                 }
             }
