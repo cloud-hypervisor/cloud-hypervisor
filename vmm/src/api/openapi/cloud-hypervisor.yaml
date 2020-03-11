@@ -432,6 +432,8 @@ components:
         iommu:
           type: boolean
           default: false
+        id:
+          type: string
 
     VsockConfig:
       required:
