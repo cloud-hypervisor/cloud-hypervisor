@@ -135,6 +135,10 @@ pub enum DeviceManagerError {
     #[cfg(feature = "pci_support")]
     AllocateBars(pci::PciDeviceError),
 
+    /// Could not free the BARs associated with a PCI device.
+    #[cfg(feature = "pci_support")]
+    FreePciBars(pci::PciDeviceError),
+
     /// Cannot register ioevent.
     RegisterIoevent(kvm_ioctls::Error),
 
@@ -1860,6 +1864,13 @@ impl DeviceManager {
                 } else {
                     return Ok(());
                 };
+
+            // Free the allocated BARs
+            pci_device
+                .lock()
+                .unwrap()
+                .free_bars(&mut self.address_manager.allocator.lock().unwrap())
+                .map_err(DeviceManagerError::FreePciBars)?;
 
             // Remove the device from the PCI bus
             pci.lock()
