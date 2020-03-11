@@ -24,7 +24,7 @@ kvm-ioctls = "0.5.0"
 lazy_static = "1.4.0"
 libc = "0.2.67"
 log = "0.4.8"
-micro_http = { git = "https://github.com/firecracker-microvm/firecracker", branch = "master" }
+micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "master" }
 net_util = { path = "../net_util" }
 pci = {path = "../pci", optional = true}
 qcow = { path = "../qcow" }
