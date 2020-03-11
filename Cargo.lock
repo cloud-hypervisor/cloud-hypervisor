@@ -418,7 +418,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/firecracker#9bbde4fb6a614fc32f13017f8e7d9dca63b730ad"
+source = "git+https://github.com/firecracker-microvm/firecracker#6b3e5f0a1818fae17657ca3625ad31351a591c06"
 dependencies = [
  "utils 0.1.0 (git+https://github.com/firecracker-microvm/firecracker)",
 ]
@@ -426,7 +426,7 @@ dependencies = [
 [[package]]
 name = "net_gen"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/firecracker#9bbde4fb6a614fc32f13017f8e7d9dca63b730ad"
+source = "git+https://github.com/firecracker-microvm/firecracker#6b3e5f0a1818fae17657ca3625ad31351a591c06"
 
 [[package]]
 name = "net_gen"
@@ -985,7 +985,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/firecracker#9bbde4fb6a614fc32f13017f8e7d9dca63b730ad"
+source = "git+https://github.com/firecracker-microvm/firecracker#6b3e5f0a1818fae17657ca3625ad31351a591c06"
 dependencies = [
  "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
