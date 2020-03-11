@@ -462,12 +462,15 @@ mod tests {
         assert!(status.success());
     }
 
-    fn remote_command(api_socket: &str, command: &str) -> bool {
-        Command::new("target/release/ch-remote")
-            .args(&[&format!("--api-socket={}", api_socket), command])
-            .status()
-            .expect("Failed to launch ch-remote")
-            .success()
+    fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
+        let mut cmd = Command::new("target/release/ch-remote");
+        cmd.args(&[&format!("--api-socket={}", api_socket), command]);
+
+        if let Some(arg) = arg {
+            cmd.arg(arg);
+        }
+
+        cmd.status().expect("Failed to launch ch-remote").success()
     }
 
     fn resize_command(
@@ -2794,10 +2797,10 @@ mod tests {
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             // We now pause the VM
-            aver!(tb, remote_command(&api_socket, "pause"));
+            aver!(tb, remote_command(&api_socket, "pause", None));
 
             // Check pausing again fails
-            aver!(tb, !remote_command(&api_socket, "pause"));
+            aver!(tb, !remote_command(&api_socket, "pause", None));
 
             thread::sleep(std::time::Duration::new(2, 0));
 
@@ -2814,10 +2817,10 @@ mod tests {
             );
 
             // Resume the VM
-            aver!(tb, remote_command(&api_socket, "resume"));
+            aver!(tb, remote_command(&api_socket, "resume", None));
 
             // Check resuming again fails
-            aver!(tb, !remote_command(&api_socket, "resume"));
+            aver!(tb, !remote_command(&api_socket, "resume", None));
 
             thread::sleep(std::time::Duration::new(2, 0));
 
