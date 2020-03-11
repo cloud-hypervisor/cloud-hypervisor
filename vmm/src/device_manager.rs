@@ -1591,7 +1591,7 @@ impl DeviceManager {
             for device_cfg in device_list_cfg.iter_mut() {
                 let device_id =
                     self.add_vfio_device(pci, interrupt_manager, &device_fd, device_cfg)?;
-                if self.iommu_device.is_some() {
+                if device_cfg.iommu && self.iommu_device.is_some() {
                     iommu_attached_device_ids.push(device_id);
                 }
             }
