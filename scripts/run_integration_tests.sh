@@ -78,22 +78,38 @@ popd
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
+VMLINUX_PVH_IMAGE="$WORKLOADS_DIR/vmlinux.pvh"
 BZIMAGE_IMAGE="$WORKLOADS_DIR/bzImage"
 
-LINUX_CUSTOM_DIR="linux-custom"
+LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
 
-if [ ! -f "$VMLINUX_IMAGE" ]; then
+if [ ! -f "$VMLINUX_IMAGE" ] || [ ! -f "$VMLINUX_PVH_IMAGE" ]; then
     SRCDIR=$PWD
     pushd $WORKLOADS_DIR
     time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu-virtio-mem-5.6-rc4" $LINUX_CUSTOM_DIR
+    cp $SRCDIR/resources/linux-config $LINUX_CUSTOM_DIR/.config
+    popd
+fi
+
+if [ ! -f "$VMLINUX_IMAGE" ]; then
     pushd $LINUX_CUSTOM_DIR
-    cp $SRCDIR/resources/linux-config .config
+    scripts/config --disable "CONFIG_PVH"
     time make bzImage -j `nproc`
     cp vmlinux $VMLINUX_IMAGE || exit 1
     cp arch/x86/boot/bzImage $BZIMAGE_IMAGE || exit 1
     popd
-    rm -rf $LINUX_CUSTOM_DIR
+fi
+
+if [ ! -f "$VMLINUX_PVH_IMAGE" ]; then
+    pushd $LINUX_CUSTOM_DIR
+    scripts/config --enable "CONFIG_PVH"
+    time make bzImage -j `nproc`
+    cp vmlinux $VMLINUX_PVH_IMAGE || exit 1
     popd
+fi
+
+if [ -d "$LINUX_CUSTOM_DIR" ]; then
+    rm -rf $LINUX_CUSTOM_DIR
 fi
 
 VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
@@ -203,6 +219,19 @@ if [ $RES -eq 0 ]; then
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
 time cargo test --features "integration_tests,mmio" "$@" -- --nocapture
+EOF
+
+    RES=$?
+fi
+
+# Test the pvh_boot feature
+if [ $RES -eq 0 ]; then
+    cargo build --release --features "pvh_boot"
+    sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
+
+    newgrp kvm << EOF
+export RUST_BACKTRACE=1
+time cargo test --features "integration_tests,pvh_boot" "$@" -- --nocapture
 EOF
 
     RES=$?
