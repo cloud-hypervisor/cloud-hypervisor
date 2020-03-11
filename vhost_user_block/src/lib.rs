@@ -23,12 +23,13 @@ use std::io::Read;
 use std::io::{Seek, SeekFrom, Write};
 use std::mem;
 use std::num::Wrapping;
+use std::ops::DerefMut;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::RawFd;
 use std::path::PathBuf;
 use std::process;
 use std::slice;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use std::vec::Vec;
 use std::{convert, error, fmt, io};
@@ -104,7 +105,7 @@ impl convert::From<Error> for io::Error {
 
 pub struct VhostUserBlkBackend {
     mem: Option<GuestMemoryMmap>,
-    disk_image: Box<dyn DiskFile>,
+    disk_image: Arc<Mutex<dyn DiskFile>>,
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
     config: virtio_blk_config,
@@ -134,12 +135,14 @@ impl VhostUserBlkBackend {
 
         let image_id = build_disk_image_id(&PathBuf::from(&image_path));
         let image_type = qcow::detect_image_type(&mut raw_img).unwrap();
-        let mut image = match image_type {
-            ImageType::Raw => Box::new(raw_img) as Box<dyn DiskFile>,
-            ImageType::Qcow2 => Box::new(QcowFile::from(raw_img).unwrap()) as Box<dyn DiskFile>,
+        let image = match image_type {
+            ImageType::Raw => Arc::new(Mutex::new(raw_img)) as Arc<Mutex<dyn DiskFile>>,
+            ImageType::Qcow2 => {
+                Arc::new(Mutex::new(QcowFile::from(raw_img).unwrap())) as Arc<Mutex<dyn DiskFile>>
+            }
         };
 
-        let nsectors = (image.seek(SeekFrom::End(0)).unwrap() as u64) / SECTOR_SIZE;
+        let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap() as u64) / SECTOR_SIZE;
         let mut config = virtio_blk_config::default();
 
         config.capacity = nsectors;
@@ -228,7 +231,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
 struct BlockEpollHandler {
     mem: Option<GuestMemoryMmap>,
-    disk_image: Box<dyn DiskFile>,
+    disk_image: Arc<Mutex<dyn DiskFile>>,
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
     poll_queue: bool,
@@ -251,8 +254,11 @@ impl BlockEpollHandler {
             match Request::parse(&head, mem) {
                 Ok(request) => {
                     debug!("element is a valid request");
+                    // TODO: Remove the Mutex lock which prevents parallelismm.
+                    let mut disk_image_locked = self.disk_image.lock().unwrap();
+                    let mut disk_image = disk_image_locked.deref_mut();
                     let status = match request.execute(
-                        &mut self.disk_image,
+                        &mut disk_image,
                         self.disk_nsectors,
                         mem,
                         &self.disk_image_id,
