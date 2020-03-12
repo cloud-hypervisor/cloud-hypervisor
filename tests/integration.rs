@@ -2407,13 +2407,11 @@ mod tests {
             guest
                 .ssh_command_l1("echo 1af4 1041 | sudo tee /sys/bus/pci/drivers/vfio-pci/new_id")?;
             guest.ssh_command_l1(
-                "sudo curl \
-                 --unix-socket /tmp/ch_api.sock \
-                 -i \
-                 -X PUT http://localhost/api/v1/vm.add-device \
-                 -H 'Accept: application/json' -H 'Content-Type: application/json' \
-                 -d '{\"path\":\"/sys/bus/pci/devices/0000:00:07.0\",\"id\":\"vfio123\"}'",
+                "sudo /mnt/ch-remote \
+                 --api-socket=/tmp/ch_api.sock \
+                 add-device path=/sys/bus/pci/devices/0000:00:07.0,id=vfio123",
             )?;
+
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Let's also verify from the third virtio-net device passed to
@@ -2448,12 +2446,9 @@ mod tests {
             // device through the "remove-device" command responsible for
             // unplugging VFIO devices.
             guest.ssh_command_l1(
-                "sudo curl \
-                 --unix-socket /tmp/ch_api.sock \
-                 -i \
-                 -X PUT http://localhost/api/v1/vm.remove-device \
-                 -H 'Accept: application/json' -H 'Content-Type: application/json' \
-                 -d '{\"id\":\"vfio123\"}'",
+                "sudo /mnt/ch-remote \
+                 --api-socket=/tmp/ch_api.sock \
+                 remove-device vfio123",
             )?;
             thread::sleep(std::time::Duration::new(10, 0));
 
