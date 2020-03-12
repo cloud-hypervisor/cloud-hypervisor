@@ -97,8 +97,8 @@ fn create_app<'a, 'b>(
             Arg::with_name("memory")
                 .long("memory")
                 .help(
-                    "Memory parameters \"size=<guest_memory_size>,\
-                     file=<backing_file_path>,mergeable=on|off,\
+                    "Memory parameters \
+                     \"size=<guest_memory_size>,file=<backing_file_path>,mergeable=on|off,\
                      hotplug_size=<hotpluggable_memory_size>\"",
                 )
                 .default_value(&default_memory)
@@ -122,11 +122,10 @@ fn create_app<'a, 'b>(
             Arg::with_name("disk")
                 .long("disk")
                 .help(
-                    "Disk parameters \"path=<disk_image_path>,\
-                     readonly=on|off,iommu=on|off,\
-                     num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>,
-                     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,
+                    "Disk parameters \
+                     \"path=<disk_image_path>,readonly=on|off,iommu=on|off,\
+                     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
+                     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,\
                      wce=<true|false, default true>\"",
                 )
                 .takes_value(true)
@@ -137,10 +136,9 @@ fn create_app<'a, 'b>(
             Arg::with_name("net")
                 .long("net")
                 .help(
-                    "Network parameters \"tap=<if_name>,\
-                     ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,\
-                     iommu=on|off,num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>,\
+                    "Network parameters \
+                     \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,iommu=on|off,\
+                     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
                      vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>\"",
                 )
                 .takes_value(true)
@@ -151,8 +149,7 @@ fn create_app<'a, 'b>(
             Arg::with_name("rng")
                 .long("rng")
                 .help(
-                    "Random number generator parameters \
-                     \"src=<entropy_source_path>,iommu=on|off\"",
+                    "Random number generator parameters \"src=<entropy_source_path>,iommu=on|off\"",
                 )
                 .default_value(&default_rng)
                 .group("vm-config"),
@@ -161,10 +158,10 @@ fn create_app<'a, 'b>(
             Arg::with_name("fs")
                 .long("fs")
                 .help(
-                    "virtio-fs parameters \"tag=<tag_name>,\
-                     sock=<socket_path>,num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>,dax=on|off,\
-                     cache_size=<DAX cache size: default 8Gib>\"",
+                    "virtio-fs parameters \
+                     \"tag=<tag_name>,sock=<socket_path>,num_queues=<number_of_queues>,\
+                     queue_size=<size_of_each_queue>,dax=on|off,cache_size=<DAX cache size: \
+                     default 8Gib>\"",
                 )
                 .takes_value(true)
                 .min_values(1)
@@ -174,8 +171,9 @@ fn create_app<'a, 'b>(
             Arg::with_name("pmem")
                 .long("pmem")
                 .help(
-                    "Persistent memory parameters \"file=<backing_file_path>,\
-                     size=<persistent_memory_size>,iommu=on|off,mergeable=on|off\"",
+                    "Persistent memory parameters \
+                     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
+                     mergeable=on|off\"",
                 )
                 .takes_value(true)
                 .min_values(1)
@@ -192,8 +190,7 @@ fn create_app<'a, 'b>(
             Arg::with_name("console")
                 .long("console")
                 .help(
-                    "Control (virtio) console: \"off|null|tty|file=/path/to/a/file,\
-                     iommu=on|off\"",
+                    "Control (virtio) console: \"off|null|tty|file=/path/to/a/file,iommu=on|off\"",
                 )
                 .default_value("tty")
                 .group("vm-config"),
@@ -213,9 +210,8 @@ fn create_app<'a, 'b>(
             Arg::with_name("vhost-user-net")
                 .long("vhost-user-net")
                 .help(
-                    "Network parameters \"mac=<mac_addr>,\
-                     sock=<socket_path>, num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>\"",
+                    "Network parameters \"mac=<mac_addr>,sock=<socket_path>, \
+                     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>\"",
                 )
                 .takes_value(true)
                 .min_values(1)
@@ -225,8 +221,7 @@ fn create_app<'a, 'b>(
             Arg::with_name("vsock")
                 .long("vsock")
                 .help(
-                    "Virtio VSOCK parameters \"cid=<context_id>,\
-                     sock=<socket_path>,iommu=on|off\"",
+                    "Virtio VSOCK parameters \"cid=<context_id>,sock=<socket_path>,iommu=on|off\"",
                 )
                 .takes_value(true)
                 .min_values(1)
@@ -260,11 +255,9 @@ fn create_app<'a, 'b>(
             Arg::with_name("net-backend")
                 .long("net-backend")
                 .help(
-                    "vhost-user-net backend parameters \"ip=<ip_addr>,\
-                     mask=<net_mask>,sock=<socket_path>,\
-                     num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>,\
-                     tap=<if_name>\"",
+                    "vhost-user-net backend parameters \
+                     \"ip=<ip_addr>,mask=<net_mask>,sock=<socket_path>,\
+                     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"",
                 )
                 .takes_value(true)
                 .conflicts_with_all(&["block-backend", "kernel"])
@@ -274,8 +267,8 @@ fn create_app<'a, 'b>(
             Arg::with_name("block-backend")
                 .long("block-backend")
                 .help(
-                    "vhost-user-block backend parameters \"image=<image_path>,\
-                     sock=<socket_path>,num_queues=<number_of_queues>,\
+                    "vhost-user-block backend parameters \
+                     \"image=<image_path>,sock=<socket_path>,num_queues=<number_of_queues>,\
                      readonly=true|false,direct=true|false,poll_queue=true|false\"",
                 )
                 .takes_value(true)
@@ -299,8 +292,8 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         .expect("Missing argument: api-socket");
 
     println!(
-        "Cloud Hypervisor Guest\n\tAPI server: {}\n\tvCPUs: {}\n\tMemory: {} MB\
-         \n\tKernel: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
+        "Cloud Hypervisor Guest\n\tAPI server: {}\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: \
+         {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
         api_socket_path,
         vm_config.cpus.boot_vcpus,
         vm_config.memory.size >> 20,
