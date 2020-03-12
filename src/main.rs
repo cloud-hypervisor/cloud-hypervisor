@@ -207,17 +207,6 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
-            Arg::with_name("vhost-user-net")
-                .long("vhost-user-net")
-                .help(
-                    "Network parameters \"mac=<mac_addr>,sock=<socket_path>, \
-                     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>\"",
-                )
-                .takes_value(true)
-                .min_values(1)
-                .group("vm-config"),
-        )
-        .arg(
             Arg::with_name("vsock")
                 .long("vsock")
                 .help(
