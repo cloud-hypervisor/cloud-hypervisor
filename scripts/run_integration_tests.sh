@@ -87,7 +87,7 @@ if [ ! -f "$VMLINUX_IMAGE" ]; then
     pushd $WORKLOADS_DIR
     time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu-virtio-mem-5.6-rc4" $LINUX_CUSTOM_DIR
     pushd $LINUX_CUSTOM_DIR
-    cp $SRCDIR/resources/linux-virtio-fs-virtio-iommu-config .config
+    cp $SRCDIR/resources/linux-config .config
     time make bzImage -j `nproc`
     cp vmlinux $VMLINUX_IMAGE || exit 1
     cp arch/x86/boot/bzImage $BZIMAGE_IMAGE || exit 1

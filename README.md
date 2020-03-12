@@ -169,7 +169,7 @@ $ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b virtio-fs
 $ pushd linux-cloud-hypervisor
 
 # Use the cloud-hypervisor kernel config to build your kernel
-$ cp $CLOUDH/cloud-hypervisor/resources/linux-virtio-fs-virtio-iommu-config .config
+$ cp $CLOUDH/cloud-hypervisor/resources/linux-config .config
 $ make bzImage -j `nproc`
 $ popd
 ```
