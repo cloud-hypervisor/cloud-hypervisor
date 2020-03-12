@@ -8,7 +8,7 @@ build = "build.rs"
 
 [dependencies]
 arc-swap = ">=0.4.4"
-clap = "2.33.0"
+clap = { version = "2.33.0", features=["wrap_help"] }
 epoll = ">=4.0.1"
 lazy_static = "1.4.0"
 libc = "0.2.67"
