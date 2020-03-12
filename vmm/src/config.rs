@@ -904,6 +904,8 @@ pub struct DeviceConfig {
 }
 
 impl DeviceConfig {
+    pub const SYNTAX: &'static str =
+        "Direct device assignment parameters \"path=<device_path>,iommu=on|off,id=<device_id>\"";
     pub fn parse(device: &str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = device.split(',').collect();
