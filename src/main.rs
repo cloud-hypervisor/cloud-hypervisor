@@ -122,13 +122,7 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("disk")
                 .long("disk")
-                .help(
-                    "Disk parameters \
-                     \"path=<disk_image_path>,readonly=on|off,iommu=on|off,\
-                     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
-                     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,\
-                     wce=<true|false, default true>\"",
-                )
+                .help(config::DiskConfig::SYNTAX)
                 .takes_value(true)
                 .min_values(1)
                 .group("vm-config"),
