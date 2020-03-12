@@ -172,6 +172,7 @@ sudo setcap cap_net_admin+ep target/release/vhost_user_net
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/release/cloud-hypervisor $VFIO_DIR
+cp target/release/ch-remote $VFIO_DIR
 
 # Enable KSM with some reasonable parameters so that it won't take too long
 # for the memory to be merged between two processes.
