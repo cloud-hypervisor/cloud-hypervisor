@@ -231,6 +231,13 @@ pub struct Config {
     ///
     /// The default is `/`.
     pub root_dir: String,
+
+    /// Whether the file system should support Extended Attributes (xattr). Enabling this feature may
+    /// have a significant impact on performance, especially on write parallelism. This is the result
+    /// of FUSE attempting to remove the special file privileges after each write request.
+    ///
+    /// The default value for this options is `false`.
+    pub xattr: bool,
 }
 
 impl Default for Config {
@@ -241,6 +248,7 @@ impl Default for Config {
             cache_policy: Default::default(),
             writeback: false,
             root_dir: String::from("/"),
+            xattr: false,
         }
     }
 }
@@ -1461,6 +1469,10 @@ impl FileSystem for PassthroughFs {
         value: &[u8],
         flags: u32,
     ) -> io::Result<()> {
+        if !self.cfg.xattr {
+            return Err(io::Error::from_raw_os_error(libc::ENOSYS));
+        }
+
         // The f{set,get,remove,list}xattr functions don't work on an fd opened with `O_PATH` so we
         // need to get a new fd.
         let file = self.open_inode(inode, libc::O_RDONLY | libc::O_NONBLOCK)?;
@@ -1489,6 +1501,10 @@ impl FileSystem for PassthroughFs {
         name: &CStr,
         size: u32,
     ) -> io::Result<GetxattrReply> {
+        if !self.cfg.xattr {
+            return Err(io::Error::from_raw_os_error(libc::ENOSYS));
+        }
+
         // The f{set,get,remove,list}xattr functions don't work on an fd opened with `O_PATH` so we
         // need to get a new fd.
         let file = self.open_inode(inode, libc::O_RDONLY | libc::O_NONBLOCK)?;
@@ -1517,6 +1533,10 @@ impl FileSystem for PassthroughFs {
     }
 
     fn listxattr(&self, _ctx: Context, inode: Inode, size: u32) -> io::Result<ListxattrReply> {
+        if !self.cfg.xattr {
+            return Err(io::Error::from_raw_os_error(libc::ENOSYS));
+        }
+
         // The f{set,get,remove,list}xattr functions don't work on an fd opened with `O_PATH` so we
         // need to get a new fd.
         let file = self.open_inode(inode, libc::O_RDONLY | libc::O_NONBLOCK)?;
@@ -1544,6 +1564,10 @@ impl FileSystem for PassthroughFs {
     }
 
     fn removexattr(&self, _ctx: Context, inode: Inode, name: &CStr) -> io::Result<()> {
+        if !self.cfg.xattr {
+            return Err(io::Error::from_raw_os_error(libc::ENOSYS));
+        }
+
         // The f{set,get,remove,list}xattr functions don't work on an fd opened with `O_PATH` so we
         // need to get a new fd.
         let file = self.open_inode(inode, libc::O_RDONLY | libc::O_NONBLOCK)?;

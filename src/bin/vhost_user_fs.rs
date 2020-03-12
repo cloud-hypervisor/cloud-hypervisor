@@ -289,6 +289,11 @@ fn main() {
                 .takes_value(true)
                 .min_values(1),
         )
+        .arg(
+            Arg::with_name("disable-xattr")
+                .long("disable-xattr")
+                .help("Disable support for extended attributes"),
+        )
         .get_matches();
 
     // Retrieve arguments
@@ -302,12 +307,14 @@ fn main() {
         Some(size) => size.parse().expect("Invalid argument for thread-pool-size"),
         None => THREAD_POOL_SIZE,
     };
+    let xattr: bool = !cmd_arguments.is_present("disable-xattr");
 
     // Convert into appropriate types
     let sock = String::from(sock);
 
     let fs_cfg = passthrough::Config {
         root_dir: shared_dir.to_string(),
+        xattr,
         ..Default::default()
     };
     let fs = PassthroughFs::new(fs_cfg).unwrap();
