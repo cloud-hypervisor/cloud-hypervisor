@@ -165,11 +165,7 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("pmem")
                 .long("pmem")
-                .help(
-                    "Persistent memory parameters \
-                     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
-                     mergeable=on|off,discard_writes=on|off,\"",
-                )
+                .help(config::PmemConfig::SYNTAX)
                 .takes_value(true)
                 .min_values(1)
                 .group("vm-config"),

@@ -776,6 +776,9 @@ pub struct PmemConfig {
 }
 
 impl PmemConfig {
+    pub const SYNTAX: &'static str = "Persistent memory parameters \
+    \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
+    mergeable=on|off,discard_writes=on|off,\"";
     pub fn parse(pmem: &str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = pmem.split(',').collect();
