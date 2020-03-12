@@ -198,10 +198,7 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("device")
                 .long("device")
-                .help(
-                    "Direct device assignment parameters \
-                     \"path=<device_path>,iommu=on|off,id=<device_id>\"",
-                )
+                .help(config::DeviceConfig::SYNTAX)
                 .takes_value(true)
                 .min_values(1)
                 .group("vm-config"),

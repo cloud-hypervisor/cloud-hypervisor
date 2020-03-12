@@ -267,10 +267,11 @@ fn main() {
         .subcommand(
             SubCommand::with_name("add-device")
                 .about("Add VFIO device")
-                .arg(Arg::with_name("device_config").index(1).help(
-                    "Direct device assignment parameters \
-                     \"path=<device_path>,iommu=on|off,id=<device_id>\"",
-                )),
+                .arg(
+                    Arg::with_name("device_config")
+                        .index(1)
+                        .help(vmm::config::DeviceConfig::SYNTAX),
+                ),
         )
         .subcommand(
             SubCommand::with_name("remove-device")
