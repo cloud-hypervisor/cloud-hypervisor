@@ -1,9 +1,9 @@
 name: Cloud Hypervisor Actions
-on: [push, create]
+on: [pull_request, create]
 
 jobs:
   build:
-    if: github.event_name == 'push'
+    if: github.event_name == 'pull_request'
     name: Build
     runs-on: ubuntu-latest
     steps:
