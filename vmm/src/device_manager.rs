@@ -1539,7 +1539,7 @@ impl DeviceManager {
 
         let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
 
-        pci.add_device(vfio_pci_device.clone())
+        pci.add_device(pci_device_bdf, vfio_pci_device.clone())
             .map_err(DeviceManagerError::AddPciDevice)?;
 
         self.pci_devices.insert(
@@ -1620,7 +1620,7 @@ impl DeviceManager {
         // to the PCI function, and we know we don't do multifunction.
         // Also, because we only support one PCI bus, the bus 0, we don't need
         // to add anything to the global device ID.
-        let dev_id = pci
+        let pci_device_bdf = pci
             .next_device_id()
             .map_err(DeviceManagerError::NextPciDeviceId)?
             << 3;
@@ -1632,12 +1632,12 @@ impl DeviceManager {
             if let Some(mapping) = iommu_mapping {
                 let mapping_clone = mapping.clone();
                 Some(Arc::new(Box::new(move |addr: u64| {
-                    mapping_clone.translate(dev_id, addr).map_err(|e| {
+                    mapping_clone.translate(pci_device_bdf, addr).map_err(|e| {
                         std::io::Error::new(
                             std::io::ErrorKind::Other,
                             format!(
                                 "failed to translate addr 0x{:x} for device 00:{:02x}.0 {}",
-                                addr, dev_id, e
+                                addr, pci_device_bdf, e
                             ),
                         )
                     })
@@ -1672,7 +1672,7 @@ impl DeviceManager {
 
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
 
-        pci.add_device(virtio_pci_device.clone())
+        pci.add_device(pci_device_bdf, virtio_pci_device.clone())
             .map_err(DeviceManagerError::AddPciDevice)?;
 
         self.bus_devices
@@ -1690,7 +1690,7 @@ impl DeviceManager {
             .push(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
 
         let ret = if iommu_mapping.is_some() {
-            Some(dev_id)
+            Some(pci_device_bdf)
         } else {
             None
         };
