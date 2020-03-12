@@ -460,7 +460,9 @@ components:
           minimum: 1
           type: integer
         desired_ram:
+          description: desired memory ram in bytes
           type: integer
+          format: int64
 
     VmAddDevice:
       type: object

@@ -91,7 +91,7 @@ Before issuing the API request it is necessary to run the following command insi
 root@ch-guest ~ # echo online | sudo tee /sys/devices/system/memory/auto_online_blocks
 ```
 
-To ask the VMM to add expand the RAM for the VM:
+To ask the VMM to add expand the RAM for the VM  (request is in bytes):
 
 ```shell
 curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"desired_vcpus\": 4, \"desired_ram\" : 3221225472}" http://localhost/api/v1/vm.resize
