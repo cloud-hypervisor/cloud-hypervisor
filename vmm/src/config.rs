@@ -335,7 +335,7 @@ impl CmdlineConfig {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct DiskConfig {
-    pub path: PathBuf,
+    pub path: Option<PathBuf>,
     #[serde(default)]
     pub readonly: bool,
     #[serde(default)]
@@ -417,6 +417,7 @@ impl DiskConfig {
         let mut vhost_socket = None;
         let mut wce: bool = default_diskconfig_wce();
         let mut poll_queue: bool = default_diskconfig_poll_queue();
+        let mut path = None;
 
         if !num_queues_str.is_empty() {
             num_queues = num_queues_str
@@ -448,9 +449,12 @@ impl DiskConfig {
                 .parse()
                 .map_err(Error::ParseDiskPollQueueParam)?;
         }
+        if !path_str.is_empty() {
+            path = Some(PathBuf::from(path_str))
+        }
 
         Ok(DiskConfig {
-            path: PathBuf::from(path_str),
+            path,
             readonly: parse_on_off(readonly_str)?,
             direct: parse_on_off(direct_str)?,
             iommu: parse_on_off(iommu_str)?,
