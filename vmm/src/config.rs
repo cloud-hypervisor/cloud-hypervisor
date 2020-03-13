@@ -49,6 +49,8 @@ pub enum Error {
     ParseDiskVhostParam(std::str::ParseBoolError),
     /// Failed parsing disk wce parameter.
     ParseDiskWceParam(std::str::ParseBoolError),
+    /// Both socket and path specified
+    ParseDiskSocketAndPath,
     /// Failed parsing random number generator parameters.
     ParseRngParams,
     /// Failed parsing network ip parameter.
@@ -451,6 +453,10 @@ impl DiskConfig {
         }
         if !path_str.is_empty() {
             path = Some(PathBuf::from(path_str))
+        }
+
+        if vhost_socket.as_ref().and(path.as_ref()).is_some() {
+            return Err(Error::ParseDiskSocketAndPath);
         }
 
         Ok(DiskConfig {
