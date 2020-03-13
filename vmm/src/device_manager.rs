@@ -14,7 +14,7 @@ extern crate vm_device;
 use crate::config::ConsoleOutputMode;
 #[cfg(feature = "pci_support")]
 use crate::config::DeviceConfig;
-use crate::config::{DiskConfig, NetConfig, VmConfig};
+use crate::config::{DiskConfig, NetConfig, PmemConfig, VmConfig};
 use crate::interrupt::{
     KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager, KvmRoutingEntry,
 };
@@ -1377,86 +1377,94 @@ impl DeviceManager {
         Ok(devices)
     }
 
+    fn make_virtio_pmem_device(
+        &mut self,
+        pmem_cfg: &PmemConfig,
+    ) -> DeviceManagerResult<(VirtioDeviceArc, bool)> {
+        let size = pmem_cfg.size;
+
+        // The memory needs to be 2MiB aligned in order to support
+        // hugepages.
+        let pmem_guest_addr = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_mmio_addresses(None, size as GuestUsize, Some(0x0020_0000))
+            .ok_or(DeviceManagerError::PmemRangeAllocation)?;
+
+        let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
+            (O_TMPFILE, true)
+        } else {
+            (0, false)
+        };
+
+        let file = OpenOptions::new()
+            .read(true)
+            .write(!pmem_cfg.discard_writes)
+            .custom_flags(custom_flags)
+            .open(&pmem_cfg.file)
+            .map_err(DeviceManagerError::PmemFileOpen)?;
+
+        if set_len {
+            file.set_len(size)
+                .map_err(DeviceManagerError::PmemFileSetLen)?;
+        }
+
+        let cloned_file = file.try_clone().map_err(DeviceManagerError::CloneFile)?;
+        let mmap_region = MmapRegion::build(
+            Some(FileOffset::new(cloned_file, 0)),
+            size as usize,
+            if pmem_cfg.discard_writes {
+                PROT_READ
+            } else {
+                PROT_READ | PROT_WRITE
+            },
+            MAP_NORESERVE
+                | if pmem_cfg.discard_writes {
+                    MAP_PRIVATE
+                } else {
+                    MAP_SHARED
+                },
+        )
+        .map_err(DeviceManagerError::NewMmapRegion)?;
+        let addr: u64 = mmap_region.as_ptr() as u64;
+
+        self._mmap_regions.push(mmap_region);
+
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .create_userspace_mapping(
+                pmem_guest_addr.raw_value(),
+                size,
+                addr,
+                pmem_cfg.mergeable,
+                pmem_cfg.discard_writes,
+            )
+            .map_err(DeviceManagerError::MemoryManager)?;
+
+        let virtio_pmem_device = Arc::new(Mutex::new(
+            vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize, pmem_cfg.iommu)
+                .map_err(DeviceManagerError::CreateVirtioPmem)?,
+        ));
+
+        self.migratable_devices
+            .push(Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn Migratable>>);
+
+        Ok((
+            Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
+            false,
+        ))
+    }
+
     fn make_virtio_pmem_devices(&mut self) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool)>> {
         let mut devices = Vec::new();
         // Add virtio-pmem if required
-        if let Some(pmem_list_cfg) = &self.config.lock().unwrap().pmem {
+        let pmem_devices = self.config.lock().unwrap().pmem.clone();
+        if let Some(pmem_list_cfg) = &pmem_devices {
             for pmem_cfg in pmem_list_cfg.iter() {
-                let size = pmem_cfg.size;
-
-                // The memory needs to be 2MiB aligned in order to support
-                // hugepages.
-                let pmem_guest_addr = self
-                    .address_manager
-                    .allocator
-                    .lock()
-                    .unwrap()
-                    .allocate_mmio_addresses(None, size as GuestUsize, Some(0x0020_0000))
-                    .ok_or(DeviceManagerError::PmemRangeAllocation)?;
-
-                let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
-                    (O_TMPFILE, true)
-                } else {
-                    (0, false)
-                };
-
-                let file = OpenOptions::new()
-                    .read(true)
-                    .write(!pmem_cfg.discard_writes)
-                    .custom_flags(custom_flags)
-                    .open(&pmem_cfg.file)
-                    .map_err(DeviceManagerError::PmemFileOpen)?;
-
-                if set_len {
-                    file.set_len(size)
-                        .map_err(DeviceManagerError::PmemFileSetLen)?;
-                }
-
-                let cloned_file = file.try_clone().map_err(DeviceManagerError::CloneFile)?;
-                let mmap_region = MmapRegion::build(
-                    Some(FileOffset::new(cloned_file, 0)),
-                    size as usize,
-                    if pmem_cfg.discard_writes {
-                        PROT_READ
-                    } else {
-                        PROT_READ | PROT_WRITE
-                    },
-                    MAP_NORESERVE
-                        | if pmem_cfg.discard_writes {
-                            MAP_PRIVATE
-                        } else {
-                            MAP_SHARED
-                        },
-                )
-                .map_err(DeviceManagerError::NewMmapRegion)?;
-                let addr: u64 = mmap_region.as_ptr() as u64;
-
-                self._mmap_regions.push(mmap_region);
-
-                self.memory_manager
-                    .lock()
-                    .unwrap()
-                    .create_userspace_mapping(
-                        pmem_guest_addr.raw_value(),
-                        size,
-                        addr,
-                        pmem_cfg.mergeable,
-                        pmem_cfg.discard_writes,
-                    )
-                    .map_err(DeviceManagerError::MemoryManager)?;
-
-                let virtio_pmem_device = Arc::new(Mutex::new(
-                    vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize, pmem_cfg.iommu)
-                        .map_err(DeviceManagerError::CreateVirtioPmem)?,
-                ));
-
-                devices.push((
-                    Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn vm_virtio::VirtioDevice>>,
-                    false,
-                ));
-
-                self.migratable_devices
-                    .push(Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn Migratable>>);
+                devices.push(self.make_virtio_pmem_device(pmem_cfg)?);
             }
         }
 
