@@ -6,13 +6,19 @@ jobs:
     if: github.event_name == 'pull_request'
     name: Build
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - beta
+          - nightly
     steps:
       - name: Code checkout
         uses: actions/checkout@v2
-      - name: Install Rust toolchain (stable)
+      - name: Install Rust toolchain (${{ matrix.rust }})
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: stable
+            toolchain: ${{ matrix.rust }}
             override: true
 
       - name: Build
