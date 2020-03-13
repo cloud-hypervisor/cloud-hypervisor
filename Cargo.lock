@@ -163,7 +163,7 @@ dependencies = [
  "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.48 (registry+https://github.com/rust-lang/crates.io-index)",
  "ssh2 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempdir 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -221,7 +221,7 @@ dependencies = [
  "byteorder 1.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-device 0.1.0",
  "vm-memory 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -382,7 +382,7 @@ dependencies = [
 [[package]]
 name = "linux-loader"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/linux-loader#0c754f380acaa905e764a6a41175275cbc7d761b"
+source = "git+https://github.com/rust-vmm/linux-loader#0ce5bfa70d1073a9743fadfea233edef09c81e49"
 dependencies = [
  "vm-memory 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -400,12 +400,12 @@ name = "log"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "log"
-version = "0.4.10"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "cfg-if 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -486,7 +486,7 @@ dependencies = [
  "byteorder 1.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "devices 0.1.0",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-allocator 0.1.0",
  "vm-device 0.1.0",
  "vm-memory 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -597,7 +597,7 @@ version = "0.1.0"
 dependencies = [
  "byteorder 1.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "remain 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-virtio 0.1.0",
@@ -1009,7 +1009,7 @@ dependencies = [
  "kvm-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "kvm-ioctls 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "pci 0.1.0",
  "vfio-bindings 0.1.0 (git+https://github.com/rust-vmm/vfio-bindings)",
  "vm-allocator 0.1.0",
@@ -1042,7 +1042,7 @@ version = "0.1.0"
 dependencies = [
  "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "vhost 0.1.0 (git+https://github.com/cloud-hypervisor/vhost?branch=dragonball)",
  "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1057,7 +1057,7 @@ dependencies = [
  "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "qcow 0.1.0",
  "vhost 0.1.0 (git+https://github.com/cloud-hypervisor/vhost?branch=dragonball)",
  "vhost_user_backend 0.1.0",
@@ -1073,7 +1073,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "vhost 0.1.0 (git+https://github.com/cloud-hypervisor/vhost?branch=dragonball)",
  "vm-memory 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-virtio 0.1.0",
@@ -1086,7 +1086,7 @@ dependencies = [
  "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "net_util 0.1.0",
  "vhost 0.1.0 (git+https://github.com/cloud-hypervisor/vhost?branch=dragonball)",
  "vhost_user_backend 0.1.0",
@@ -1099,7 +1099,7 @@ dependencies = [
 [[package]]
 name = "virtio-bindings"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/virtio-bindings#c5676476f1048d212f53ca80711d2b132dcebe23"
+source = "git+https://github.com/rust-vmm/virtio-bindings#921b722856335b799261b736cbb90e767e739dfc"
 
 [[package]]
 name = "virtio-bindings"
@@ -1146,7 +1146,7 @@ dependencies = [
  "devices 0.1.0",
  "epoll 4.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "net_gen 0.1.0",
  "net_util 0.1.0",
  "pci 0.1.0",
@@ -1175,7 +1175,7 @@ dependencies = [
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
  "linux-loader 0.1.0 (git+https://github.com/rust-vmm/linux-loader)",
- "log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "micro_http 0.1.0 (git+https://github.com/firecracker-microvm/micro-http)",
  "net_util 0.1.0",
  "pci 0.1.0",
@@ -1288,7 +1288,7 @@ dependencies = [
 "checksum linux-loader 0.1.0 (git+https://github.com/rust-vmm/linux-loader)" = "<none>"
 "checksum lock_api 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "79b2de95ecb4691949fea4716ca53cdbcfccb2c612e19644a8bad05edcf9f47b"
 "checksum log 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)" = "e19e8d5c34a3e0e2223db8e060f9e8264aeeb5c5fc64a4ee9965c062211c024b"
-"checksum log 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)" = "1b9ad466a945c9c40f6f9a449c55675547e59bc75a2722d4689042ab3ae80c9c"
+"checksum log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)" = "14b6052be84e6b71ab17edffc2eeabf5c2c3ae1fdb464aae35ac50c67a44e1f7"
 "checksum memchr 2.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "3728d817d99e5ac407411fa471ff9800a778d88a24685968b36824eaf4bee400"
 "checksum micro_http 0.1.0 (git+https://github.com/firecracker-microvm/micro-http)" = "<none>"
 "checksum openssl-sys 0.9.54 (registry+https://github.com/rust-lang/crates.io-index)" = "1024c0a59774200a555087a6da3f253a9095a5f344e353b212ac4c8b8e450986"
