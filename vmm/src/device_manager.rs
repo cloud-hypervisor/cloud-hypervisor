@@ -255,6 +255,9 @@ pub enum DeviceManagerError {
 
     /// Incorrect device ID as it is already used by another device.
     DeviceIdAlreadyInUse,
+
+    // No disk path was specified when one was expected
+    NoDiskPath,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1026,7 +1029,12 @@ impl DeviceManager {
                 "--block-backend",
                 &format!(
                     "image={},sock={},num_queues={},queue_size={}",
-                    disk_cfg.path.to_str().unwrap(),
+                    disk_cfg
+                        .path
+                        .as_ref()
+                        .ok_or(DeviceManagerError::NoDiskPath)?
+                        .to_str()
+                        .unwrap(),
                     &sock,
                     disk_cfg.num_queues,
                     disk_cfg.queue_size
@@ -1083,7 +1091,12 @@ impl DeviceManager {
                     }
                     // Open block device path
                     let image: File = options
-                        .open(&disk_cfg.path)
+                        .open(
+                            &disk_cfg
+                                .path
+                                .as_ref()
+                                .ok_or(DeviceManagerError::NoDiskPath)?,
+                        )
                         .map_err(DeviceManagerError::Disk)?;
 
                     let mut raw_img = vm_virtio::RawFile::new(image, disk_cfg.direct);
@@ -1094,7 +1107,11 @@ impl DeviceManager {
                         ImageType::Raw => {
                             let dev = vm_virtio::Block::new(
                                 raw_img,
-                                disk_cfg.path.clone(),
+                                disk_cfg
+                                    .path
+                                    .as_ref()
+                                    .ok_or(DeviceManagerError::NoDiskPath)?
+                                    .clone(),
                                 disk_cfg.readonly,
                                 disk_cfg.iommu,
                                 disk_cfg.num_queues,
@@ -1116,7 +1133,11 @@ impl DeviceManager {
                                 .map_err(DeviceManagerError::QcowDeviceCreate)?;
                             let dev = vm_virtio::Block::new(
                                 qcow_img,
-                                disk_cfg.path.clone(),
+                                disk_cfg
+                                    .path
+                                    .as_ref()
+                                    .ok_or(DeviceManagerError::NoDiskPath)?
+                                    .clone(),
                                 disk_cfg.readonly,
                                 disk_cfg.iommu,
                                 disk_cfg.num_queues,
