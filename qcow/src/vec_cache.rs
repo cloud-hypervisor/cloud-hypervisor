@@ -120,7 +120,7 @@ impl<T: Cacheable> CacheMap<T> {
     {
         if self.map.len() == self.capacity {
             // TODO(dgreid) - smarter eviction strategy.
-            let to_evict = *self.map.iter().nth(0).unwrap().0;
+            let to_evict = *self.map.iter().next().unwrap().0;
             if let Some(evicted) = self.map.remove(&to_evict) {
                 if evicted.dirty() {
                     write_callback(to_evict, evicted)?;
