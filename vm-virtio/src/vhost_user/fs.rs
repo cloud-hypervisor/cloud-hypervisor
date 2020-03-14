@@ -9,7 +9,7 @@ use crate::{
     ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
     VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
 };
-use libc::{self, EFD_NONBLOCK};
+use libc::{self, c_void, off64_t, pread64, pwrite64, EFD_NONBLOCK};
 use std::cmp;
 use std::io;
 use std::io::Write;
@@ -19,20 +19,23 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use vhost_rs::vhost_user::message::{
-    VhostUserFSSlaveMsg, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
-    VHOST_USER_FS_SLAVE_ENTRIES,
+    VhostUserFSSlaveMsg, VhostUserFSSlaveMsgFlags, VhostUserProtocolFeatures,
+    VhostUserVirtioFeatures, VHOST_USER_FS_SLAVE_ENTRIES,
 };
 use vhost_rs::vhost_user::{
     HandlerResult, Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
 };
 use vhost_rs::VhostBackend;
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
-use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::{
+    Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 const NUM_QUEUE_OFFSET: usize = 1;
 
 struct SlaveReqHandler {
+    cache_offset: GuestAddress,
     cache_size: u64,
     mmap_cache_addr: u64,
 }
@@ -140,6 +143,68 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             if ret == -1 {
                 return Err(io::Error::last_os_error());
             }
+        }
+
+        Ok(())
+    }
+
+    fn fs_slave_io(&mut self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<()> {
+        debug!("fs_slave_io");
+
+        for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
+            // Ignore if the length is 0.
+            if fs.len[i] == 0 {
+                continue;
+            }
+
+            let mut foffset = fs.fd_offset[i];
+            let mut len = fs.len[i] as usize;
+            let gpa = fs.cache_offset[i];
+            if gpa < self.cache_offset.raw_value()
+                || gpa >= self.cache_offset.raw_value() + self.cache_size
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "gpa is out of cache range",
+                ));
+            }
+
+            let offset = gpa
+                .checked_sub(self.cache_offset.raw_value())
+                .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "gpa is out of cache range"))?;
+            let mut ptr = self.mmap_cache_addr + offset;
+
+            while len > 0 {
+                let ret = if (fs.flags[i] & VhostUserFSSlaveMsgFlags::MAP_W)
+                    == VhostUserFSSlaveMsgFlags::MAP_W
+                {
+                    debug!("write: foffset={}, len={}", foffset, len);
+                    unsafe { pwrite64(fd, ptr as *const c_void, len as usize, foffset as off64_t) }
+                } else {
+                    debug!("read: foffset={}, len={}", foffset, len);
+                    unsafe { pread64(fd, ptr as *mut c_void, len as usize, foffset as off64_t) }
+                };
+
+                if ret < 0 {
+                    return Err(io::Error::last_os_error());
+                }
+
+                if ret == 0 {
+                    // EOF
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "failed to access whole buffer",
+                    ));
+                }
+                len -= ret as usize;
+                foffset += ret as u64;
+                ptr += ret as u64;
+            }
+        }
+
+        let ret = unsafe { libc::close(fd) };
+        if ret == -1 {
+            return Err(io::Error::last_os_error());
         }
 
         Ok(())
@@ -387,6 +452,7 @@ impl VirtioDevice for Fs {
         let slave_req_handler = if self.slave_req_support {
             if let Some(cache) = self.cache.clone() {
                 let vu_master_req_handler = Arc::new(Mutex::new(SlaveReqHandler {
+                    cache_offset: cache.0.addr,
                     cache_size: cache.0.len,
                     mmap_cache_addr: cache.1,
                 }));
