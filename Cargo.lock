@@ -1147,7 +1147,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.1.0"
-source = "git+https://github.com/cloud-hypervisor/vhost?branch=dragonball#7d5a205199e3d5594494b3021635a719580fabc8"
+source = "git+https://github.com/cloud-hypervisor/vhost?branch=dragonball#af264bb39201b175607d7cc517ee2d90b8820dcc"
 dependencies = [
  "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.67 (registry+https://github.com/rust-lang/crates.io-index)",
