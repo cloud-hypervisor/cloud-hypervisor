@@ -114,6 +114,13 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
+            Arg::with_name("initramfs")
+                .long("initramfs")
+                .help("Path to initramfs image")
+                .takes_value(true)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::with_name("cmdline")
                 .long("cmdline")
                 .help("Kernel command line")
@@ -273,11 +280,12 @@ fn start_vmm(cmd_arguments: ArgMatches) {
 
     println!(
         "Cloud Hypervisor Guest\n\tAPI server: {}\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: \
-         {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
+         {:?}\n\tInitramfs: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
         api_socket_path,
         vm_config.cpus.boot_vcpus,
         vm_config.memory.size >> 20,
         vm_config.kernel,
+        vm_config.initramfs,
         vm_config.cmdline.args.as_str(),
         vm_config.disks,
     );
@@ -477,6 +485,7 @@ mod unit_tests {
                     hotplug_size: None,
                 },
                 kernel: None,
+                initramfs: None,
                 cmdline: CmdlineConfig {
                     args: String::from(""),
                 },
