@@ -116,6 +116,7 @@ pub struct VmParams<'a> {
     pub cpus: &'a str,
     pub memory: &'a str,
     pub kernel: Option<&'a str>,
+    pub initramfs: Option<&'a str>,
     pub cmdline: Option<&'a str>,
     pub disks: Option<Vec<&'a str>>,
     pub net: Option<Vec<&'a str>>,
@@ -137,6 +138,7 @@ impl<'a> VmParams<'a> {
         let serial = args.value_of("serial").unwrap();
 
         let kernel = args.value_of("kernel");
+        let initramfs = args.value_of("initramfs");
         let cmdline = args.value_of("cmdline");
 
         let disks: Option<Vec<&str>> = args.values_of("disk").map(|x| x.collect());
@@ -151,6 +153,7 @@ impl<'a> VmParams<'a> {
             cpus,
             memory,
             kernel,
+            initramfs,
             cmdline,
             disks,
             net,
@@ -345,6 +348,11 @@ impl Default for MemoryConfig {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct KernelConfig {
+    pub path: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct InitramfsConfig {
     pub path: PathBuf,
 }
 
@@ -1031,6 +1039,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub memory: MemoryConfig,
     pub kernel: Option<KernelConfig>,
+    pub initramfs: Option<InitramfsConfig>,
     #[serde(default)]
     pub cmdline: CmdlineConfig,
     pub disks: Option<Vec<DiskConfig>>,
@@ -1152,10 +1161,18 @@ impl VmConfig {
             });
         }
 
+        let mut initramfs: Option<InitramfsConfig> = None;
+        if let Some(k) = vm_params.initramfs {
+            initramfs = Some(InitramfsConfig {
+                path: PathBuf::from(k),
+            });
+        }
+
         Ok(VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
             kernel,
+            initramfs,
             cmdline: CmdlineConfig::parse(vm_params.cmdline)?,
             disks,
             net,
