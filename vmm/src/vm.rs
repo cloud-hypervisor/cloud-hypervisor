@@ -38,9 +38,10 @@ use kvm_ioctls::*;
 use linux_loader::cmdline::Cmdline;
 use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
+use std::convert::TryInto;
 use std::ffi::CString;
 use std::fs::File;
-use std::io;
+use std::io::{self, Seek, SeekFrom};
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
@@ -78,8 +79,14 @@ pub enum Error {
     /// Cannot open the kernel image
     KernelFile(io::Error),
 
+    /// Cannot open the initramfs image
+    InitramfsFile(io::Error),
+
     /// Cannot load the kernel in memory
     KernelLoad(linux_loader::loader::Error),
+
+    /// Cannot load the initramfs in memory
+    InitramfsLoad,
 
     /// Cannot load the command line in memory
     LoadCmdLine(linux_loader::loader::Error),
@@ -219,6 +226,7 @@ impl VmState {
 
 pub struct Vm {
     kernel: File,
+    initramfs: Option<File>,
     threads: Vec<thread::JoinHandle<()>>,
     device_manager: Arc<Mutex<DeviceManager>>,
     config: Arc<Mutex<VmConfig>>,
@@ -253,6 +261,11 @@ impl Vm {
 
         let kernel = File::open(&config.lock().unwrap().kernel.as_ref().unwrap().path)
             .map_err(Error::KernelFile)?;
+
+        let initramfs = match &config.lock().unwrap().initramfs {
+            Some(initramfs) => Some(File::open(&initramfs.path).map_err(Error::InitramfsFile)?),
+            None => None,
+        };
 
         let fd: VmFd;
         loop {
@@ -377,6 +390,7 @@ impl Vm {
 
         Ok(Vm {
             kernel,
+            initramfs,
             device_manager,
             config,
             on_tty,
@@ -386,6 +400,28 @@ impl Vm {
             cpu_manager,
             memory_manager,
         })
+    }
+
+    fn load_initramfs(&mut self, guest_mem: &GuestMemoryMmap) -> Result<arch::InitramfsConfig> {
+        let mut initramfs = self.initramfs.as_ref().unwrap();
+        let size: usize = initramfs
+            .seek(SeekFrom::End(0))
+            .map_err(|_| Error::InitramfsLoad)?
+            .try_into()
+            .unwrap();
+        initramfs
+            .seek(SeekFrom::Start(0))
+            .map_err(|_| Error::InitramfsLoad)?;
+
+        let address =
+            arch::initramfs_load_addr(guest_mem, size).map_err(|_| Error::InitramfsLoad)?;
+        let address = GuestAddress(address);
+
+        guest_mem
+            .read_from(address, &mut initramfs, size)
+            .map_err(|_| Error::InitramfsLoad)?;
+
+        Ok(arch::InitramfsConfig { address, size })
     }
 
     fn load_kernel(&mut self) -> Result<EntryPoint> {
@@ -425,6 +461,12 @@ impl Vm {
             &cmdline_cstring,
         )
         .map_err(Error::LoadCmdLine)?;
+
+        let initramfs_config = match self.initramfs {
+            Some(_) => Some(self.load_initramfs(mem.deref())?),
+            None => None,
+        };
+
         let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
         let _max_vcpus = self.cpu_manager.lock().unwrap().max_vcpus();
 
@@ -447,6 +489,7 @@ impl Vm {
                     &mem,
                     arch::layout::CMDLINE_START,
                     cmdline_cstring.to_bytes().len() + 1,
+                    &initramfs_config,
                     boot_vcpus,
                     Some(hdr),
                     rsdp_addr,
@@ -481,6 +524,7 @@ impl Vm {
                     &mem,
                     arch::layout::CMDLINE_START,
                     cmdline_cstring.to_bytes().len() + 1,
+                    &initramfs_config,
                     boot_vcpus,
                     None,
                     rsdp_addr,

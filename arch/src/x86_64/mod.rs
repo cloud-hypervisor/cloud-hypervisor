@@ -13,12 +13,14 @@ pub mod layout;
 mod mptable;
 pub mod regs;
 
+use crate::InitramfsConfig;
 use crate::RegionType;
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::start_info::{hvm_memmap_table_entry, hvm_start_info};
 use std::mem;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestUsize,
+    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion,
+    GuestUsize,
 };
 
 #[derive(Debug, Copy, Clone)]
@@ -151,6 +153,7 @@ pub fn configure_system(
     guest_mem: &GuestMemoryMmap,
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
+    initramfs: &Option<InitramfsConfig>,
     num_cpus: u8,
     setup_hdr: Option<setup_header>,
     rsdp_addr: Option<GuestAddress>,
@@ -164,7 +167,14 @@ pub fn configure_system(
             configure_pvh(guest_mem, cmdline_addr, rsdp_addr)?;
         }
         BootProtocol::LinuxBoot => {
-            configure_64bit_boot(guest_mem, cmdline_addr, cmdline_size, setup_hdr, rsdp_addr)?;
+            configure_64bit_boot(
+                guest_mem,
+                cmdline_addr,
+                cmdline_size,
+                initramfs,
+                setup_hdr,
+                rsdp_addr,
+            )?;
         }
     }
 
@@ -293,6 +303,7 @@ fn configure_64bit_boot(
     guest_mem: &GuestMemoryMmap,
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
+    initramfs: &Option<InitramfsConfig>,
     setup_hdr: Option<setup_header>,
     rsdp_addr: Option<GuestAddress>,
 ) -> super::Result<()> {
@@ -318,6 +329,11 @@ fn configure_64bit_boot(
     }
     params.0.hdr.cmd_line_ptr = cmdline_addr.raw_value() as u32;
     params.0.hdr.cmdline_size = cmdline_size as u32;
+
+    if let Some(initramfs_config) = initramfs {
+        params.0.hdr.ramdisk_image = initramfs_config.address.raw_value() as u32;
+        params.0.hdr.ramdisk_size = initramfs_config.size as u32;
+    }
 
     add_e820_entry(&mut params.0, 0, layout::EBDA_START.raw_value(), E820_RAM)?;
 
@@ -388,6 +404,25 @@ fn add_e820_entry(
     Ok(())
 }
 
+/// Returns the memory address where the initramfs could be loaded.
+pub fn initramfs_load_addr(
+    guest_mem: &GuestMemoryMmap,
+    initramfs_size: usize,
+) -> super::Result<u64> {
+    let first_region = guest_mem
+        .find_region(GuestAddress::new(0))
+        .ok_or(super::Error::InitramfsAddress)?;
+    // It's safe to cast to usize because the size of a region can't be greater than usize.
+    let lowmem_size = first_region.len() as usize;
+
+    if lowmem_size < initramfs_size {
+        return Err(super::Error::InitramfsAddress);
+    }
+
+    let aligned_addr: u64 = ((lowmem_size - initramfs_size) & !(crate::pagesize() - 1)) as u64;
+    Ok(aligned_addr)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,6 +452,7 @@ mod tests {
             &gm,
             GuestAddress(0),
             0,
+            &None,
             1,
             None,
             None,
@@ -437,6 +473,7 @@ mod tests {
             &gm,
             GuestAddress(0),
             0,
+            &None,
             no_vcpus,
             None,
             None,
@@ -448,6 +485,7 @@ mod tests {
             &gm,
             GuestAddress(0),
             0,
+            &None,
             no_vcpus,
             None,
             None,
@@ -468,6 +506,7 @@ mod tests {
             &gm,
             GuestAddress(0),
             0,
+            &None,
             no_vcpus,
             None,
             None,
@@ -479,6 +518,7 @@ mod tests {
             &gm,
             GuestAddress(0),
             0,
+            &None,
             no_vcpus,
             None,
             None,
@@ -499,6 +539,7 @@ mod tests {
             &gm,
             GuestAddress(0),
             0,
+            &None,
             no_vcpus,
             None,
             None,
@@ -510,6 +551,7 @@ mod tests {
             &gm,
             GuestAddress(0),
             0,
+            &None,
             no_vcpus,
             None,
             None,
