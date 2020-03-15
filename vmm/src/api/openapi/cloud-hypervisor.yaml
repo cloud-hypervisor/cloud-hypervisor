@@ -256,6 +256,8 @@ components:
           $ref: '#/components/schemas/MemoryConfig'
         kernel:
           $ref: '#/components/schemas/KernelConfig'
+        initramfs:
+          $ref: '#/components/schemas/InitramfsConfig'
         cmdline:
           $ref: '#/components/schemas/CmdLineConfig'
         disks:
@@ -330,6 +332,14 @@ components:
           default: "acpi"
 
     KernelConfig:
+      required:
+      - path
+      type: object
+      properties:
+        path:
+          type: string
+
+    InitramfsConfig:
       required:
       - path
       type: object
