@@ -41,6 +41,8 @@ pub enum Error {
     StartInfoPastRamEnd,
     /// Error writing hvm_start_info to guest memory.
     StartInfoSetup,
+    /// Failed to compute initramfs address.
+    InitramfsAddress,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -76,8 +78,8 @@ pub mod x86_64;
 
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    arch_memory_regions, configure_system, layout, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START,
-    BootProtocol, EntryPoint,
+    arch_memory_regions, configure_system, initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE,
+    layout::CMDLINE_START, BootProtocol, EntryPoint,
 };
 
 /// Safe wrapper for `sysconf(_SC_PAGESIZE)`.
@@ -85,4 +87,12 @@ pub use x86_64::{
 fn pagesize() -> usize {
     // Trivially safe
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
+}
+
+/// Type for passing information about the initramfs in the guest memory.
+pub struct InitramfsConfig {
+    /// Load address of initramfs in guest memory
+    pub address: vm_memory::GuestAddress,
+    /// Size of initramfs in guest memory
+    pub size: usize,
 }
