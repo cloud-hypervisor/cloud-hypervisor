@@ -31,6 +31,10 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transpo
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
+// CPUID feature bits
+const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
+const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
+
 // Debug I/O port
 #[cfg(target_arch = "x86_64")]
 const DEBUG_IOPORT: u16 = 0x80;
@@ -83,6 +87,9 @@ pub enum Error {
 
     /// Cannot spawn a new vCPU thread.
     VcpuSpawn(io::Error),
+
+    /// Cannot patch the CPU ID
+    PatchCpuId(kvm_ioctls::Error),
 
     #[cfg(target_arch = "x86_64")]
     /// Error configuring the general purpose registers
@@ -504,14 +511,15 @@ impl CpuManager {
         max_vcpus: u8,
         device_manager: &Arc<Mutex<DeviceManager>>,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+        kvm: &Kvm,
         fd: Arc<VmFd>,
-        cpuid: CpuId,
         reset_evt: EventFd,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let mut vcpu_states = Vec::with_capacity(usize::from(max_vcpus));
         vcpu_states.resize_with(usize::from(max_vcpus), VcpuState::default);
 
         let device_manager = device_manager.lock().unwrap();
+        let cpuid = CpuManager::patch_cpuid(kvm)?;
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus,
             max_vcpus,
@@ -543,6 +551,41 @@ impl CpuManager {
             .map_err(Error::BusError)?;
 
         Ok(cpu_manager)
+    }
+
+    fn patch_cpuid(kvm: &Kvm) -> Result<CpuId> {
+        let mut cpuid_patches = Vec::new();
+
+        // Patch tsc deadline timer bit
+        cpuid_patches.push(CpuidPatch {
+            function: 1,
+            index: 0,
+            flags_bit: None,
+            eax_bit: None,
+            ebx_bit: None,
+            ecx_bit: Some(TSC_DEADLINE_TIMER_ECX_BIT),
+            edx_bit: None,
+        });
+
+        // Patch hypervisor bit
+        cpuid_patches.push(CpuidPatch {
+            function: 1,
+            index: 0,
+            flags_bit: None,
+            eax_bit: None,
+            ebx_bit: None,
+            ecx_bit: Some(HYPERVISOR_ECX_BIT),
+            edx_bit: None,
+        });
+
+        // Supported CPUID
+        let mut cpuid = kvm
+            .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
+            .map_err(Error::PatchCpuId)?;
+
+        CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
+
+        Ok(cpuid)
     }
 
     fn activate_vcpus(&mut self, desired_vcpus: u8, entry_point: Option<EntryPoint>) -> Result<()> {
