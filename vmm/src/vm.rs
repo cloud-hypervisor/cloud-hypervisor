@@ -299,18 +299,6 @@ impl Vm {
     ) -> Result<Self> {
         let (kvm, fd) = Vm::kvm_new()?;
 
-        let kernel = File::open(&config.lock().unwrap().kernel.as_ref().unwrap().path)
-            .map_err(Error::KernelFile)?;
-
-        let initramfs = config
-            .lock()
-            .unwrap()
-            .initramfs
-            .as_ref()
-            .map(|i| File::open(&i.path))
-            .transpose()
-            .map_err(Error::InitramfsFile)?;
-
         let memory_manager = MemoryManager::new(fd.clone(), &config.lock().unwrap().memory.clone())
             .map_err(Error::MemoryManager)?;
 
@@ -335,6 +323,18 @@ impl Vm {
         .map_err(Error::CpuManager)?;
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
+        let kernel = File::open(&config.lock().unwrap().kernel.as_ref().unwrap().path)
+            .map_err(Error::KernelFile)?;
+
+        let initramfs = config
+            .lock()
+            .unwrap()
+            .initramfs
+            .as_ref()
+            .map(|i| File::open(&i.path))
+            .transpose()
+            .map_err(Error::InitramfsFile)?;
+
         Ok(Vm {
             kernel,
             initramfs,
