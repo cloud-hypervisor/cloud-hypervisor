@@ -314,7 +314,6 @@ impl Vm {
         let memory_manager = MemoryManager::new(fd.clone(), &config.lock().unwrap().memory.clone())
             .map_err(Error::MemoryManager)?;
 
-        let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let device_manager = DeviceManager::new(
             fd.clone(),
             config.clone(),
@@ -325,21 +324,17 @@ impl Vm {
         )
         .map_err(Error::DeviceManager)?;
 
-        let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
-
-        let boot_vcpus = config.lock().unwrap().cpus.boot_vcpus;
-        let max_vcpus = config.lock().unwrap().cpus.max_vcpus;
         let cpu_manager = cpu::CpuManager::new(
-            boot_vcpus,
-            max_vcpus,
+            &config.lock().unwrap().cpus.clone(),
             &device_manager,
-            guest_memory,
+            memory_manager.lock().unwrap().guest_memory(),
             &kvm,
             fd,
             reset_evt,
         )
         .map_err(Error::CpuManager)?;
 
+        let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
         Ok(Vm {
             kernel,
             initramfs,
