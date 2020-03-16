@@ -257,12 +257,7 @@ pub struct Vm {
 }
 
 impl Vm {
-    pub fn new(
-        config: Arc<Mutex<VmConfig>>,
-        exit_evt: EventFd,
-        reset_evt: EventFd,
-        vmm_path: PathBuf,
-    ) -> Result<Self> {
+    fn kvm_new() -> Result<(Kvm, Arc<VmFd>)> {
         let kvm = Kvm::new().map_err(Error::KvmNew)?;
 
         // Check required capabilities:
@@ -277,14 +272,6 @@ impl Vm {
         if !kvm.check_extension(Cap::SplitIrqchip) {
             return Err(Error::CapabilityMissing(Cap::SplitIrqchip));
         }
-
-        let kernel = File::open(&config.lock().unwrap().kernel.as_ref().unwrap().path)
-            .map_err(Error::KernelFile)?;
-
-        let initramfs = match &config.lock().unwrap().initramfs {
-            Some(initramfs) => Some(File::open(&initramfs.path).map_err(Error::InitramfsFile)?),
-            None => None,
-        };
 
         let fd: VmFd;
         loop {
@@ -309,7 +296,6 @@ impl Vm {
         fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize)
             .map_err(Error::VmSetup)?;
 
-        let mut cpuid_patches = Vec::new();
         // Create split irqchip
         // Only the local APIC is emulated in kernel, both PICs and IOAPIC
         // are not.
@@ -317,6 +303,27 @@ impl Vm {
         cap.cap = KVM_CAP_SPLIT_IRQCHIP;
         cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
         fd.enable_cap(&cap).map_err(Error::VmSetup)?;
+
+        Ok((kvm, fd))
+    }
+
+    pub fn new(
+        config: Arc<Mutex<VmConfig>>,
+        exit_evt: EventFd,
+        reset_evt: EventFd,
+        vmm_path: PathBuf,
+    ) -> Result<Self> {
+        let (kvm, fd) = Vm::kvm_new()?;
+
+        let kernel = File::open(&config.lock().unwrap().kernel.as_ref().unwrap().path)
+            .map_err(Error::KernelFile)?;
+
+        let initramfs = match &config.lock().unwrap().initramfs {
+            Some(initramfs) => Some(File::open(&initramfs.path).map_err(Error::InitramfsFile)?),
+            None => None,
+        };
+
+        let mut cpuid_patches = Vec::new();
 
         // Patch tsc deadline timer bit
         cpuid_patches.push(cpu::CpuidPatch {
