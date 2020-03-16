@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::config::HotplugMethod;
+use crate::config::{HotplugMethod, MemoryConfig};
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
@@ -216,14 +216,10 @@ impl MemoryManager {
     pub fn new(
         allocator: Arc<Mutex<SystemAllocator>>,
         fd: Arc<VmFd>,
-        boot_ram: u64,
-        hotplug_method: HotplugMethod,
-        hotplug_size: Option<u64>,
-        backing_file: &Option<PathBuf>,
-        mergeable: bool,
+        config: &MemoryConfig,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         // Init guest memory
-        let arch_mem_regions = arch::arch_memory_regions(boot_ram);
+        let arch_mem_regions = arch::arch_memory_regions(config.size);
 
         let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
             .iter()
@@ -234,7 +230,7 @@ impl MemoryManager {
         let mut mem_regions = Vec::new();
         for region in ram_regions.iter() {
             mem_regions.push(MemoryManager::create_ram_region(
-                backing_file,
+                &config.file,
                 region.0,
                 region.1,
             )?);
@@ -253,14 +249,14 @@ impl MemoryManager {
 
         let mut virtiomem_region = None;
         let mut virtiomem_resize = None;
-        if let Some(size) = hotplug_size {
-            if hotplug_method == HotplugMethod::VirtioMem {
+        if let Some(size) = config.hotplug_size {
+            if config.hotplug_method == HotplugMethod::VirtioMem {
                 let start_addr = GuestAddress(
                     (start_of_device_area.0 + vm_virtio::VIRTIO_MEM_DEFAULT_BLOCK_SIZE - 1)
                         & (!(vm_virtio::VIRTIO_MEM_DEFAULT_BLOCK_SIZE - 1)),
                 );
                 virtiomem_region = Some(MemoryManager::create_ram_region(
-                    backing_file,
+                    &config.file,
                     start_addr,
                     size as usize,
                 )?);
@@ -286,12 +282,12 @@ impl MemoryManager {
             fd,
             hotplug_slots,
             selected_slot: 0,
-            backing_file: backing_file.clone(),
-            mergeable,
+            backing_file: config.file.clone(),
+            mergeable: config.mergeable,
             allocator: allocator.clone(),
-            hotplug_method,
-            boot_ram,
-            current_ram: boot_ram,
+            hotplug_method: config.hotplug_method.clone(),
+            boot_ram: config.size,
+            current_ram: config.size,
             next_hotplug_slot: 0,
             virtiomem_region: virtiomem_region.clone(),
             virtiomem_resize,
@@ -303,7 +299,7 @@ impl MemoryManager {
                 region.start_addr().raw_value(),
                 region.len() as u64,
                 region.as_ptr() as u64,
-                mergeable,
+                config.mergeable,
                 false,
             )?;
             Ok(())
@@ -314,7 +310,7 @@ impl MemoryManager {
                 region.start_addr().raw_value(),
                 region.len() as u64,
                 region.as_ptr() as u64,
-                mergeable,
+                config.mergeable,
                 false,
             )?;
             allocator

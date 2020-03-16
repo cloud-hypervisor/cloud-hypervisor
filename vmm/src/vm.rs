@@ -336,21 +336,14 @@ impl Vm {
             .ok_or(Error::CreateSystemAllocator)?,
         ));
 
-        let memory_config = config.lock().unwrap().memory.clone();
-
         let memory_manager = MemoryManager::new(
             allocator.clone(),
             fd.clone(),
-            memory_config.size,
-            memory_config.hotplug_method,
-            memory_config.hotplug_size,
-            &memory_config.file,
-            memory_config.mergeable,
+            &config.lock().unwrap().memory.clone(),
         )
         .map_err(Error::MemoryManager)?;
 
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
-
         let device_manager = DeviceManager::new(
             fd.clone(),
             config.clone(),
