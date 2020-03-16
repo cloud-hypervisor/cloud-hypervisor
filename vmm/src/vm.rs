@@ -29,9 +29,9 @@ extern crate vm_virtio;
 use crate::config::{DeviceConfig, DiskConfig, HotplugMethod, NetConfig, PmemConfig, VmConfig};
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
-use crate::memory_manager::{get_host_cpu_phys_bits, Error as MemoryManagerError, MemoryManager};
+use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use anyhow::anyhow;
-use arch::{layout, BootProtocol, EntryPoint};
+use arch::{BootProtocol, EntryPoint};
 use devices::{ioapic, HotPlugNotificationFlags};
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::*;
@@ -47,16 +47,13 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
-use vm_allocator::{GsiApic, SystemAllocator};
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryMmap,
-    GuestMemoryRegion, GuestUsize,
+    GuestMemoryRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
-
-const X86_64_IRQ_BASE: u32 = 5;
 
 // 64 bit direct boot entry offset for bzImage
 const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
@@ -110,9 +107,6 @@ pub enum Error {
 
     /// Cannot setup terminal in canonical mode.
     SetTerminalCanon(vmm_sys_util::errno::Error),
-
-    /// Cannot create the system allocator
-    CreateSystemAllocator,
 
     /// Failed parsing network parameters
     ParseNetworkParameters,
@@ -317,35 +311,13 @@ impl Vm {
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
-        // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
-        let allocator = Arc::new(Mutex::new(
-            SystemAllocator::new(
-                GuestAddress(0),
-                1 << 16 as GuestUsize,
-                GuestAddress(0),
-                1 << get_host_cpu_phys_bits(),
-                layout::MEM_32BIT_RESERVED_START,
-                layout::MEM_32BIT_DEVICES_SIZE,
-                vec![GsiApic::new(
-                    X86_64_IRQ_BASE,
-                    ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
-                )],
-            )
-            .ok_or(Error::CreateSystemAllocator)?,
-        ));
-
-        let memory_manager = MemoryManager::new(
-            allocator.clone(),
-            fd.clone(),
-            &config.lock().unwrap().memory.clone(),
-        )
-        .map_err(Error::MemoryManager)?;
+        let memory_manager = MemoryManager::new(fd.clone(), &config.lock().unwrap().memory.clone())
+            .map_err(Error::MemoryManager)?;
 
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let device_manager = DeviceManager::new(
             fd.clone(),
             config.clone(),
-            allocator,
             memory_manager.clone(),
             &exit_evt,
             &reset_evt,

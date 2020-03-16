@@ -6,8 +6,8 @@
 use crate::config::{HotplugMethod, MemoryConfig};
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
-use arch::RegionType;
-use devices::BusDevice;
+use arch::{layout, RegionType};
+use devices::{ioapic, BusDevice};
 use kvm_bindings::{kvm_userspace_memory_region, KVM_MEM_READONLY};
 use kvm_ioctls::*;
 use std::convert::TryInto;
@@ -16,7 +16,7 @@ use std::io;
 use std::os::unix::io::FromRawFd;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use vm_allocator::SystemAllocator;
+use vm_allocator::{GsiApic, SystemAllocator};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     mmap::MmapRegionError, Address, Error as MmapError, GuestAddress, GuestAddressSpace,
@@ -24,6 +24,8 @@ use vm_memory::{
     GuestUsize, MmapRegion,
 };
 use vm_migration::{Migratable, Pausable, Snapshottable, Transportable};
+
+const X86_64_IRQ_BASE: u32 = 5;
 
 const HOTPLUG_COUNT: usize = 8;
 
@@ -95,6 +97,9 @@ pub enum Error {
 
     /// Failed to virtio-mem resize
     VirtioMemResizeFail(vm_virtio::mem::Error),
+
+    /// Cannot create the system allocator
+    CreateSystemAllocator,
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
@@ -206,11 +211,7 @@ impl BusDevice for MemoryManager {
 }
 
 impl MemoryManager {
-    pub fn new(
-        allocator: Arc<Mutex<SystemAllocator>>,
-        fd: Arc<VmFd>,
-        config: &MemoryConfig,
-    ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
+    pub fn new(fd: Arc<VmFd>, config: &MemoryConfig) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         // Init guest memory
         let arch_mem_regions = arch::arch_memory_regions(config.size);
 
@@ -266,6 +267,23 @@ impl MemoryManager {
 
         let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
         hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
+
+        // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
+        let allocator = Arc::new(Mutex::new(
+            SystemAllocator::new(
+                GuestAddress(0),
+                1 << 16 as GuestUsize,
+                GuestAddress(0),
+                1 << get_host_cpu_phys_bits(),
+                layout::MEM_32BIT_RESERVED_START,
+                layout::MEM_32BIT_DEVICES_SIZE,
+                vec![GsiApic::new(
+                    X86_64_IRQ_BASE,
+                    ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
+                )],
+            )
+            .ok_or(Error::CreateSystemAllocator)?,
+        ));
 
         let memory_manager = Arc::new(Mutex::new(MemoryManager {
             guest_memory: guest_memory.clone(),
@@ -438,6 +456,10 @@ impl MemoryManager {
 
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.guest_memory.clone()
+    }
+
+    pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {
+        self.allocator.clone()
     }
 
     pub fn start_of_device_area(&self) -> GuestAddress {
