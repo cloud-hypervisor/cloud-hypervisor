@@ -24,7 +24,7 @@ use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     mmap::MmapRegionError, Address, Bytes, Error as MmapError, GuestAddress, GuestAddressSpace,
     GuestMemory, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, GuestMemoryRegion,
-    GuestRegionMmap, GuestUsize, MmapRegion,
+    GuestRegionMmap, GuestUsize, MemoryRegionAddress, MmapRegion,
 };
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
@@ -104,6 +104,9 @@ pub enum Error {
 
     /// Failed to virtio-mem resize
     VirtioMemResizeFail(vm_virtio::mem::Error),
+
+    /// Cannot restore VM
+    Restore(MigratableError),
 
     /// Cannot create the system allocator
     CreateSystemAllocator,
@@ -345,6 +348,64 @@ impl MemoryManager {
                 .unwrap()
                 .allocate_mmio_addresses(Some(region.0), region.1 as GuestUsize, None)
                 .ok_or(Error::MemoryRangeAllocation)?;
+        }
+
+        Ok(memory_manager)
+    }
+
+    pub fn new_from_snapshot(
+        snapshot: &Snapshot,
+        fd: Arc<VmFd>,
+        config: &MemoryConfig,
+        source_url: &str,
+    ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
+        let memory_manager = MemoryManager::new(fd, config)?;
+
+        let url = Url::parse(source_url).unwrap();
+        /* url must be valid dir which is verified in recv_vm_snapshot() */
+        let vm_snapshot_path = url.to_file_path().unwrap();
+
+        if let Some(mem_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", MEMORY_MANAGER_SNAPSHOT_ID))
+        {
+            let mem_snapshot: MemoryManagerSnapshotData =
+                match serde_json::from_slice(&mem_section.snapshot) {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => {
+                        return Err(Error::Restore(MigratableError::Restore(anyhow!(
+                            "Could not deserialize MemoryManager {}",
+                            error
+                        ))))
+                    }
+                };
+
+            memory_manager
+                .lock()
+                .unwrap()
+                .guest_memory
+                .memory()
+                .with_regions(|index, region| {
+                    let mut memory_region_path = vm_snapshot_path.clone();
+                    memory_region_path
+                        .push(mem_snapshot.memory_regions[index].backing_file.clone());
+
+                    // Create the snapshot file for the region
+                    let mut memory_region_file = OpenOptions::new()
+                        .read(true)
+                        .open(memory_region_path)
+                        .map_err(|e| Error::Restore(MigratableError::MigrateReceive(e.into())))?;
+
+                    region
+                        .read_from(
+                            MemoryRegionAddress(0),
+                            &mut memory_region_file,
+                            region.len().try_into().unwrap(),
+                        )
+                        .map_err(|e| Error::Restore(MigratableError::MigrateReceive(e.into())))?;
+
+                    Ok(())
+                })?;
         }
 
         Ok(memory_manager)
