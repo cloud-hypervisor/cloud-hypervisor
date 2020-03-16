@@ -291,17 +291,15 @@ impl Vm {
         Ok((kvm, fd))
     }
 
-    pub fn new(
+    fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
+        memory_manager: Arc<Mutex<MemoryManager>>,
+        fd: Arc<VmFd>,
+        kvm: Kvm,
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
     ) -> Result<Self> {
-        let (kvm, fd) = Vm::kvm_new()?;
-
-        let memory_manager = MemoryManager::new(fd.clone(), &config.lock().unwrap().memory.clone())
-            .map_err(Error::MemoryManager)?;
-
         let device_manager = DeviceManager::new(
             fd.clone(),
             config.clone(),
@@ -347,6 +345,27 @@ impl Vm {
             cpu_manager,
             memory_manager,
         })
+    }
+
+    pub fn new(
+        config: Arc<Mutex<VmConfig>>,
+        exit_evt: EventFd,
+        reset_evt: EventFd,
+        vmm_path: PathBuf,
+    ) -> Result<Self> {
+        let (kvm, fd) = Vm::kvm_new()?;
+        let memory_manager = MemoryManager::new(fd.clone(), &config.lock().unwrap().memory.clone())
+            .map_err(Error::MemoryManager)?;
+
+        Vm::new_from_memory_manager(
+            config,
+            memory_manager,
+            fd,
+            kvm,
+            exit_evt,
+            reset_evt,
+            vmm_path,
+        )
     }
 
     fn load_initramfs(&mut self, guest_mem: &GuestMemoryMmap) -> Result<arch::InitramfsConfig> {
