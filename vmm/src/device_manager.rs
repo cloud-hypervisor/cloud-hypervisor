@@ -551,7 +551,6 @@ impl DeviceManager {
     pub fn new(
         vm_fd: Arc<VmFd>,
         config: Arc<Mutex<VmConfig>>,
-        allocator: Arc<Mutex<SystemAllocator>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
@@ -566,7 +565,7 @@ impl DeviceManager {
         let mut cmdline_additions = Vec::new();
 
         let address_manager = Arc::new(AddressManager {
-            allocator,
+            allocator: memory_manager.lock().unwrap().allocator(),
             io_bus: Arc::new(devices::Bus::new()),
             mmio_bus: Arc::new(devices::Bus::new()),
             vm_fd: vm_fd.clone(),
