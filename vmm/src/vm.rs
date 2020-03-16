@@ -319,11 +319,6 @@ impl Vm {
             None => None,
         };
 
-        let ioapic = GsiApic::new(
-            X86_64_IRQ_BASE,
-            ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
-        );
-
         // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
@@ -333,7 +328,10 @@ impl Vm {
                 1 << get_host_cpu_phys_bits(),
                 layout::MEM_32BIT_RESERVED_START,
                 layout::MEM_32BIT_DEVICES_SIZE,
-                vec![ioapic],
+                vec![GsiApic::new(
+                    X86_64_IRQ_BASE,
+                    ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
+                )],
             )
             .ok_or(Error::CreateSystemAllocator)?,
         ));
