@@ -11,6 +11,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
@@ -673,22 +674,21 @@ pub struct CpuManagerKvmState {
 
 impl CpuManager {
     pub fn new(
-        boot_vcpus: u8,
-        max_vcpus: u8,
+        config: &CpusConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
         kvm: &Kvm,
         fd: Arc<VmFd>,
         reset_evt: EventFd,
     ) -> Result<Arc<Mutex<CpuManager>>> {
-        let mut vcpu_states = Vec::with_capacity(usize::from(max_vcpus));
-        vcpu_states.resize_with(usize::from(max_vcpus), VcpuState::default);
+        let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
+        vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
 
         let device_manager = device_manager.lock().unwrap();
         let cpuid = CpuManager::patch_cpuid(kvm)?;
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
-            boot_vcpus,
-            max_vcpus,
+            boot_vcpus: config.boot_vcpus,
+            max_vcpus: config.max_vcpus,
             io_bus: device_manager.io_bus().clone(),
             mmio_bus: device_manager.mmio_bus().clone(),
             ioapic: device_manager.ioapic().clone(),
@@ -700,7 +700,7 @@ impl CpuManager {
             vcpu_states,
             reset_evt,
             selected_cpu: 0,
-            vcpus: Vec::with_capacity(usize::from(max_vcpus)),
+            vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
         }));
 
         device_manager
