@@ -64,10 +64,6 @@ use vmm_sys_util::terminal::Terminal;
 
 const X86_64_IRQ_BASE: u32 = 5;
 
-// CPUID feature bits
-const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
-const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
-
 // 64 bit direct boot entry offset for bzImage
 const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
 
@@ -323,37 +319,6 @@ impl Vm {
             None => None,
         };
 
-        let mut cpuid_patches = Vec::new();
-
-        // Patch tsc deadline timer bit
-        cpuid_patches.push(cpu::CpuidPatch {
-            function: 1,
-            index: 0,
-            flags_bit: None,
-            eax_bit: None,
-            ebx_bit: None,
-            ecx_bit: Some(TSC_DEADLINE_TIMER_ECX_BIT),
-            edx_bit: None,
-        });
-
-        // Patch hypervisor bit
-        cpuid_patches.push(cpu::CpuidPatch {
-            function: 1,
-            index: 0,
-            flags_bit: None,
-            eax_bit: None,
-            ebx_bit: None,
-            ecx_bit: Some(HYPERVISOR_ECX_BIT),
-            edx_bit: None,
-        });
-
-        // Supported CPUID
-        let mut cpuid = kvm
-            .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
-            .map_err(Error::VmSetup)?;
-
-        cpu::CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
-
         let ioapic = GsiApic::new(
             X86_64_IRQ_BASE,
             ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
@@ -408,8 +373,8 @@ impl Vm {
             max_vcpus,
             &device_manager,
             guest_memory,
+            &kvm,
             fd,
-            cpuid,
             reset_evt,
         )
         .map_err(Error::CpuManager)?;
