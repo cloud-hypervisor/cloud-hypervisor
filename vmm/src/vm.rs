@@ -29,7 +29,7 @@ use crate::config::{DeviceConfig, DiskConfig, HotplugMethod, NetConfig, PmemConf
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
-use crate::migration::{url_to_path, VM_SNAPSHOT_FILE};
+use crate::migration::{url_to_path, vm_config_from_snapshot, VM_SNAPSHOT_FILE};
 use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID};
 use anyhow::anyhow;
 use arch::{BootProtocol, EntryPoint};
@@ -358,6 +358,37 @@ impl Vm {
         let (kvm, fd) = Vm::kvm_new()?;
         let memory_manager = MemoryManager::new(fd.clone(), &config.lock().unwrap().memory.clone())
             .map_err(Error::MemoryManager)?;
+
+        Vm::new_from_memory_manager(
+            config,
+            memory_manager,
+            fd,
+            kvm,
+            exit_evt,
+            reset_evt,
+            vmm_path,
+        )
+    }
+
+    pub fn new_from_snapshot(
+        snapshot: &Snapshot,
+        exit_evt: EventFd,
+        reset_evt: EventFd,
+        vmm_path: PathBuf,
+    ) -> Result<Self> {
+        let (kvm, fd) = Vm::kvm_new()?;
+        let config = vm_config_from_snapshot(snapshot).map_err(Error::Restore)?;
+
+        let memory_manager = if let Some(memory_manager_snapshot) =
+            snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
+        {
+            MemoryManager::new_from_snapshot(memory_manager_snapshot, fd.clone())
+                .map_err(Error::MemoryManager)?
+        } else {
+            return Err(Error::Restore(MigratableError::Restore(anyhow!(
+                "Missing memory manager snapshot"
+            ))));
+        };
 
         Vm::new_from_memory_manager(
             config,
