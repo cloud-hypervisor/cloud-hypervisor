@@ -28,57 +28,6 @@ struct PCIRangeEntry {
     _reserved: u32,
 }
 
-#[repr(packed)]
-#[derive(Default)]
-struct IortParavirtIommuNode {
-    pub type_: u8,
-    pub length: u16,
-    pub revision: u8,
-    _reserved1: u32,
-    pub num_id_mappings: u32,
-    pub ref_id_mappings: u32,
-    pub device_id: u32,
-    _reserved2: [u32; 3],
-    pub model: u32,
-    pub flags: u32,
-    _reserved3: [u32; 4],
-}
-
-#[repr(packed)]
-#[derive(Default)]
-struct IortPciRootComplexNode {
-    pub type_: u8,
-    pub length: u16,
-    pub revision: u8,
-    _reserved1: u32,
-    pub num_id_mappings: u32,
-    pub ref_id_mappings: u32,
-    pub mem_access_props: IortMemoryAccessProperties,
-    pub ats_attr: u32,
-    pub pci_seg_num: u32,
-    pub mem_addr_size_limit: u8,
-    _reserved2: [u8; 3],
-}
-
-#[repr(packed)]
-#[derive(Default)]
-struct IortMemoryAccessProperties {
-    pub cca: u32,
-    pub ah: u8,
-    _reserved: u16,
-    pub maf: u8,
-}
-
-#[repr(packed)]
-#[derive(Default)]
-struct IortIdMapping {
-    pub input_base: u32,
-    pub num_of_ids: u32,
-    pub ouput_base: u32,
-    pub output_ref: u32,
-    pub flags: u32,
-}
-
 pub fn create_dsdt_table(
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
