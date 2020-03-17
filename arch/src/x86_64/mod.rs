@@ -307,13 +307,15 @@ fn configure_64bit_boot(
         // We should use the header if the loader provides one (e.g. from a bzImage).
         params.0.hdr = hdr;
     } else {
-        params.0.hdr.type_of_loader = KERNEL_LOADER_OTHER;
         params.0.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
         params.0.hdr.header = KERNEL_HDR_MAGIC;
         params.0.hdr.kernel_alignment = KERNEL_MIN_ALIGNMENT_BYTES;
     };
 
     // Common bootparams settings
+    if params.0.hdr.type_of_loader == 0 {
+        params.0.hdr.type_of_loader = KERNEL_LOADER_OTHER;
+    }
     params.0.hdr.cmd_line_ptr = cmdline_addr.raw_value() as u32;
     params.0.hdr.cmdline_size = cmdline_size as u32;
 
