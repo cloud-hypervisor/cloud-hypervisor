@@ -7,7 +7,7 @@ authors = ["The Chromium OS Authors"]
 bitflags = ">=1.2.1"
 byteorder = "1.3.4"
 epoll = ">=4.0.1"
-libc = "0.2.67"
+libc = "0.2.68"
 log = "0.4.8"
 vm-device = { path = "../vm-device" }
 acpi_tables = { path = "../acpi_tables", optional = true }
