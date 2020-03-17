@@ -304,17 +304,18 @@ fn configure_64bit_boot(
     let mut params: BootParamsWrapper = BootParamsWrapper(boot_params::default());
 
     if let Some(hdr) = setup_hdr {
+        // We should use the header if the loader provides one (e.g. from a bzImage).
         params.0.hdr = hdr;
-        params.0.hdr.cmd_line_ptr = cmdline_addr.raw_value() as u32;
-        params.0.hdr.cmdline_size = cmdline_size as u32;
     } else {
         params.0.hdr.type_of_loader = KERNEL_LOADER_OTHER;
         params.0.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
         params.0.hdr.header = KERNEL_HDR_MAGIC;
-        params.0.hdr.cmd_line_ptr = cmdline_addr.raw_value() as u32;
-        params.0.hdr.cmdline_size = cmdline_size as u32;
         params.0.hdr.kernel_alignment = KERNEL_MIN_ALIGNMENT_BYTES;
     };
+
+    // Common bootparams settings
+    params.0.hdr.cmd_line_ptr = cmdline_addr.raw_value() as u32;
+    params.0.hdr.cmdline_size = cmdline_size as u32;
 
     add_e820_entry(&mut params.0, 0, layout::EBDA_START.raw_value(), E820_RAM)?;
 
