@@ -3414,6 +3414,64 @@ mod tests {
         });
     }
 
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_virtio_mem() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let api_socket = temp_api_path(&guest.tmp_dir);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+            let mut kernel_path = workload_path;
+            kernel_path.push("vmlinux");
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=2,max=4"])
+                .args(&["--memory", "size=512M,hotplug_method=virtio-mem,hotplug_size=8192M"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .default_disks()
+                .default_net()
+                .args(&["--api-socket", &api_socket])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+
+            guest
+                .ssh_command("echo online | sudo tee /sys/devices/system/memory/auto_online_blocks")
+                .unwrap_or_default();
+
+            // Add RAM to the VM
+            let desired_ram = 1024 << 20;
+            resize_command(&api_socket, None, Some(desired_ram));
+
+            thread::sleep(std::time::Duration::new(10, 0));
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+
+            // Add RAM to the VM
+            let desired_ram = 2048 << 20;
+            resize_command(&api_socket, None, Some(desired_ram));
+
+            thread::sleep(std::time::Duration::new(10, 0));
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 1_964_000);
+
+            // Remove RAM to the VM
+            let desired_ram = 1024 << 20;
+            resize_command(&api_socket, None, Some(desired_ram));
+
+            thread::sleep(std::time::Duration::new(10, 0));
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() < 1_964_000);
+
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
+
     // Test both vCPU and memory resizing together
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_resize() {
