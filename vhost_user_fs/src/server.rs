@@ -1241,11 +1241,24 @@ impl<F: FileSystem + Sync> Server<F> {
         }
     }
 
-    fn lseek(&self, in_header: InHeader, mut _r: Reader, w: Writer) -> Result<usize> {
-        if let Err(e) = self.fs.lseek() {
-            reply_error(e, in_header.unique, w)
-        } else {
-            Ok(0)
+    fn lseek(&self, in_header: InHeader, mut r: Reader, w: Writer) -> Result<usize> {
+        let LseekIn {
+            fh, offset, whence, ..
+        } = r.read_obj().map_err(Error::DecodeMessage)?;
+
+        match self.fs.lseek(
+            Context::from(in_header),
+            in_header.nodeid.into(),
+            fh.into(),
+            offset,
+            whence,
+        ) {
+            Ok(offset) => {
+                let out = LseekOut { offset };
+
+                reply_ok(Some(out), None, in_header.unique, w)
+            }
+            Err(e) => reply_error(e, in_header.unique, w),
         }
     }
 }

@@ -1084,6 +1084,18 @@ pub trait FileSystem {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
 
+    /// Reposition read/write file offset.
+    fn lseek(
+        &self,
+        ctx: Context,
+        inode: Self::Inode,
+        handle: Self::Handle,
+        offset: u64,
+        whence: u32,
+    ) -> io::Result<u64> {
+        Err(io::Error::from_raw_os_error(libc::ENOSYS))
+    }
+
     /// TODO: support this
     fn getlk(&self) -> io::Result<()> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
@@ -1116,11 +1128,6 @@ pub trait FileSystem {
 
     /// TODO: support this
     fn notify_reply(&self) -> io::Result<()> {
-        Err(io::Error::from_raw_os_error(libc::ENOSYS))
-    }
-
-    /// TODO: support this
-    fn lseek(&self) -> io::Result<()> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
 }
