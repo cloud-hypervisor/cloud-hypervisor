@@ -36,6 +36,7 @@ use devices::{ioapic, HotPlugNotificationFlags};
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::*;
 use linux_loader::cmdline::Cmdline;
+use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
 use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 use std::convert::TryInto;
@@ -436,15 +437,15 @@ impl Vm {
         let cmdline_cstring = CString::new(cmdline).map_err(Error::CmdLineCString)?;
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
-        let entry_addr = match linux_loader::loader::Elf::load(
+        let entry_addr = match linux_loader::loader::elf::Elf::load(
             mem.deref(),
             None,
             &mut self.kernel,
             Some(arch::layout::HIGH_RAM_START),
         ) {
             Ok(entry_addr) => entry_addr,
-            Err(linux_loader::loader::Error::InvalidElfMagicNumber) => {
-                linux_loader::loader::BzImage::load(
+            Err(linux_loader::loader::Error::Elf(InvalidElfMagicNumber)) => {
+                linux_loader::loader::bzimage::BzImage::load(
                     mem.deref(),
                     None,
                     &mut self.kernel,

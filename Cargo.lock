@@ -468,7 +468,7 @@ dependencies = [
 [[package]]
 name = "linux-loader"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/linux-loader#bf2e6ea1500e1f92c4d7721b234824a2db8e9a40"
+source = "git+https://github.com/rust-vmm/linux-loader#2adddce25b37f68c99ae8e7db1cb7f5853626fdd"
 dependencies = [
  "vm-memory 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
