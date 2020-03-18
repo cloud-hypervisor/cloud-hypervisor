@@ -715,10 +715,10 @@ impl DeviceManager {
                     &None
                 };
 
-                let virtio_iommu_attach_dev =
+                let dev_id =
                     self.add_virtio_pci_device(device, &mut pci_bus, mapping, &interrupt_manager)?;
 
-                if let Some(dev_id) = virtio_iommu_attach_dev {
+                if iommu_attached {
                     iommu_attached_devices.push(dev_id);
                 }
             }
@@ -1631,7 +1631,7 @@ impl DeviceManager {
         pci: &mut PciBus,
         iommu_mapping: &Option<Arc<IommuMapping>>,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-    ) -> DeviceManagerResult<Option<u32>> {
+    ) -> DeviceManagerResult<u32> {
         // Allows support for one MSI-X vector per queue. It also adds 1
         // as we need to take into account the dedicated vector to notify
         // about a virtio config change.
@@ -1710,13 +1710,7 @@ impl DeviceManager {
         self.migratable_devices
             .push(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
 
-        let ret = if iommu_mapping.is_some() {
-            Some(pci_device_bdf)
-        } else {
-            None
-        };
-
-        Ok(ret)
+        Ok(pci_device_bdf)
     }
 
     #[cfg(feature = "mmio_support")]
