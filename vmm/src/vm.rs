@@ -560,6 +560,10 @@ impl Vm {
                     .notify_hotplug(HotPlugNotificationFlags::MEMORY_DEVICES_CHANGED)
                     .map_err(Error::DeviceManager)?;
             }
+
+            // We update the VM config regardless of the actual guest resize operation
+            // result (true or false, happened or not), so that if the VM reboots it
+            // will be running with the last configure memory size.
             self.config.lock().unwrap().memory.size = desired_memory;
         }
         Ok(())
