@@ -16,7 +16,7 @@ pub mod regs;
 use crate::InitramfsConfig;
 use crate::RegionType;
 use linux_loader::loader::bootparam::{boot_params, setup_header};
-use linux_loader::loader::start_info::{hvm_memmap_table_entry, hvm_start_info};
+use linux_loader::loader::elf::start_info::{hvm_memmap_table_entry, hvm_start_info};
 use std::mem;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion,
