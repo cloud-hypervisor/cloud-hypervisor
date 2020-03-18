@@ -269,6 +269,9 @@ components:
           type: integer
           format: int64
           default: 512 MB
+        hotplug_size:
+          type: integer
+          format: int64
         file:
           type: string
         mergeable:
