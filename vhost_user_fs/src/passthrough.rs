@@ -1616,4 +1616,32 @@ impl FileSystem for PassthroughFs {
             Err(io::Error::last_os_error())
         }
     }
+
+    fn lseek(
+        &self,
+        _ctx: Context,
+        inode: Inode,
+        handle: Handle,
+        offset: u64,
+        whence: u32,
+    ) -> io::Result<u64> {
+        let data = self
+            .handles
+            .read()
+            .unwrap()
+            .get(&handle)
+            .filter(|hd| hd.inode == inode)
+            .map(Arc::clone)
+            .ok_or_else(ebadf)?;
+
+        let fd = data.file.write().unwrap().as_raw_fd();
+
+        // Safe because this doesn't modify any memory and we check the return value.
+        let res = unsafe { libc::lseek(fd, offset as libc::off64_t, whence as libc::c_int) };
+        if res < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(res as u64)
+        }
+    }
 }
