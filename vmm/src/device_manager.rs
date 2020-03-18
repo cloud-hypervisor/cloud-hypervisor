@@ -1695,7 +1695,10 @@ impl DeviceManager {
 
         pci.add_device(pci_device_bdf, virtio_pci_device.clone())
             .map_err(DeviceManagerError::AddPciDevice)?;
-
+        self.pci_devices.insert(
+            pci_device_bdf,
+            Arc::clone(&virtio_pci_device) as Arc<dyn Any + Send + Sync>,
+        );
         self.bus_devices
             .push(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn BusDevice>>);
 
