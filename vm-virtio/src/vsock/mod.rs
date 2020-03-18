@@ -17,7 +17,7 @@ pub use self::device::Vsock;
 pub use self::unix::VsockUnixBackend;
 pub use self::unix::VsockUnixError;
 
-use packet::VsockPacket;
+pub use packet::VsockPacket;
 use std::os::unix::io::RawFd;
 
 mod defs {
