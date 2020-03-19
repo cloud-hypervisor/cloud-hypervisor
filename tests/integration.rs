@@ -1052,7 +1052,7 @@ mod tests {
         });
     }
 
-    #[cfg_attr(feature = "pvh_boot", test)]
+    #[test]
     fn test_pvh_boot() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
