@@ -857,6 +857,98 @@ impl CpuManager {
         Ok(())
     }
 
+    fn restore_vcpu(
+        &mut self,
+        cpu_id: u8,
+        creation_ts: std::time::Instant,
+        vcpu_thread_barrier: Arc<Barrier>,
+        snapshot: Snapshot,
+    ) -> Result<()> {
+        let ioapic = if let Some(ioapic) = &self.ioapic {
+            Some(ioapic.clone())
+        } else {
+            None
+        };
+
+        let vcpu = Vcpu::new(
+            cpu_id,
+            &self.fd,
+            self.io_bus.clone(),
+            self.mmio_bus.clone(),
+            ioapic,
+            creation_ts,
+        )?;
+
+        let reset_evt = self.reset_evt.try_clone().unwrap();
+        let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
+        let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
+
+        let vcpu_kill = self.vcpu_states[usize::from(cpu_id)].kill.clone();
+
+        vcpu.lock()
+            .unwrap()
+            .restore(snapshot)
+            .expect("Failed to restore vCPU");
+
+        let vcpu_clone = Arc::clone(&vcpu);
+        self.vcpus.push(vcpu_clone);
+
+        let handle = Some(
+            thread::Builder::new()
+                .name(format!("vcpu{}", cpu_id))
+                .spawn(move || {
+                    extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
+                    // This uses an async signal safe handler to kill the vcpu handles.
+                    register_signal_handler(SIGRTMIN(), handle_signal)
+                        .expect("Failed to register vcpu signal handler");
+
+                    // Block until all CPUs are ready.
+                    vcpu_thread_barrier.wait();
+
+                    loop {
+                        // vcpu.run() returns false on a KVM_EXIT_SHUTDOWN (triple-fault) so trigger a reset
+                        match vcpu.lock().unwrap().run() {
+                            Err(e) => {
+                                error!("VCPU generated error: {:?}", e);
+                                break;
+                            }
+                            Ok(true) => {}
+                            Ok(false) => {
+                                reset_evt.write(1).unwrap();
+                                break;
+                            }
+                        }
+
+                        // We've been told to terminate
+                        if vcpu_kill_signalled.load(Ordering::SeqCst)
+                            || vcpu_kill.load(Ordering::SeqCst)
+                        {
+                            break;
+                        }
+
+                        // If we are being told to pause, we park the thread
+                        // until the pause boolean is toggled.
+                        // The resume operation is responsible for toggling
+                        // the boolean and unpark the thread.
+                        // We enter a loop because park() could spuriously
+                        // return. We will then park() again unless the
+                        // pause boolean has been toggled.
+                        while vcpu_pause_signalled.load(Ordering::SeqCst) {
+                            thread::park();
+                        }
+                    }
+                })
+                .map_err(Error::VcpuSpawn)?,
+        );
+
+        // On hot plug calls into this function entry_point is None. It is for
+        // those hotplug CPU additions that we need to set the inserting flag.
+        self.vcpu_states[usize::from(cpu_id)].handle = handle;
+        self.vcpu_states[usize::from(cpu_id)].inserting = false;
+
+        Ok(())
+    }
+
     fn mark_vcpus_for_removal(&mut self, desired_vcpus: u8) -> Result<()> {
         // Mark vCPUs for removal, actual removal happens on ejection
         for cpu_id in desired_vcpus..self.present_vcpus() {
@@ -1315,11 +1407,22 @@ impl Snapshotable for CpuManager {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        let vcpu_iter = snapshot.snapshots.iter().zip(self.vcpus.iter());
-        for ((_id, snapshot), vcpu) in vcpu_iter {
-            vcpu.lock().unwrap().restore(*snapshot.clone())?;
+        let creation_ts = std::time::Instant::now();
+        let vcpu_thread_barrier = Arc::new(Barrier::new((snapshot.snapshots.len() + 1) as usize));
+
+        for (cpu_id, (_id, snapshot)) in snapshot.snapshots.iter().enumerate() {
+            println!("Restoring VCPU {}", cpu_id);
+            self.restore_vcpu(
+                cpu_id as u8,
+                creation_ts,
+                vcpu_thread_barrier.clone(),
+                *snapshot.clone(),
+            )
+            .map_err(|e| MigratableError::Restore(anyhow!("Could not restore vCPU {:?}", e)))?;
         }
 
+        // Unblock all restored CPU threads.
+        vcpu_thread_barrier.wait();
         Ok(())
     }
 }
