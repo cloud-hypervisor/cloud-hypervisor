@@ -1926,8 +1926,17 @@ mod tests {
         test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon)
     }
 
-    #[test]
-    fn test_virtio_pmem() {
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_virtio_pmem_persist_writes() {
+        test_virtio_pmem(false)
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_virtio_pmem_discard_writes() {
+        test_virtio_pmem(true)
+    }
+
+    fn test_virtio_pmem(discard_writes: bool) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
@@ -1935,28 +1944,34 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path;
-            kernel_path.push("vmlinux");
-
             let mut pmem_temp_file = NamedTempFile::new().unwrap();
             pmem_temp_file.as_file_mut().set_len(128 << 20).unwrap();
 
+            std::process::Command::new("mkfs.ext4")
+                .arg(pmem_temp_file.path())
+                .output()
+                .expect("Expect creating disk image to succeed");
+
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus","boot=1"])
+                .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--kernel", &guest.fw_path])
                 .default_disks()
                 .default_net()
                 .args(&[
                     "--pmem",
                     format!(
-                        "file={},size={}",
+                        "file={},size={}{}",
                         pmem_temp_file.path().to_str().unwrap(),
                         "128M",
+                        if discard_writes {
+                            ",discard_writes=on"
+                        } else {
+                            ""
+                        }
                     )
                     .as_str(),
                 ])
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
                 .spawn()
                 .unwrap();
 
@@ -1970,6 +1985,42 @@ mod tests {
                     .unwrap_or_default()
                     .trim(),
                 "/dev/pmem0"
+            );
+
+            // Check changes persist after reboot
+            aver_eq!(
+                tb,
+                guest.ssh_command("sudo mount /dev/pmem0 /mnt").unwrap(),
+                ""
+            );
+            aver_eq!(tb, guest.ssh_command("ls /mnt").unwrap(), "lost+found\n");
+            guest
+                .ssh_command("echo test123 | sudo tee /mnt/test")
+                .unwrap();
+            aver_eq!(tb, guest.ssh_command("sudo umount /mnt").unwrap(), "");
+            aver_eq!(tb, guest.ssh_command("ls /mnt").unwrap(), "");
+
+            guest.ssh_command("sudo reboot").unwrap();
+            thread::sleep(std::time::Duration::new(30, 0));
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            aver_eq!(tb, reboot_count, 1);
+            aver_eq!(
+                tb,
+                guest.ssh_command("sudo mount /dev/pmem0 /mnt").unwrap(),
+                ""
+            );
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("sudo cat /mnt/test")
+                    .unwrap_or_default()
+                    .trim(),
+                if discard_writes { "" } else { "test123" }
             );
 
             let _ = child.kill();
