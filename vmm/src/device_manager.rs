@@ -26,8 +26,8 @@ use arch::layout;
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use devices::{ioapic, BusDevice, HotPlugNotificationFlags};
 use kvm_ioctls::*;
-use libc::O_TMPFILE;
 use libc::TIOCGWINSZ;
+use libc::{MAP_NORESERVE, MAP_SHARED, O_RDONLY, O_TMPFILE, PROT_READ, PROT_WRITE};
 #[cfg(feature = "pci_support")]
 use pci::{
     DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
@@ -1403,9 +1403,17 @@ impl DeviceManager {
                 }
 
                 let cloned_file = file.try_clone().map_err(DeviceManagerError::CloneFile)?;
-                let mmap_region =
-                    MmapRegion::from_file(FileOffset::new(cloned_file, 0), size as usize)
-                        .map_err(DeviceManagerError::NewMmapRegion)?;
+                let mmap_region = MmapRegion::build(
+                    Some(FileOffset::new(cloned_file, 0)),
+                    size as usize,
+                    if pmem_cfg.readonly {
+                        PROT_READ
+                    } else {
+                        PROT_READ | PROT_WRITE
+                    },
+                    MAP_NORESERVE | MAP_SHARED,
+                )
+                .map_err(DeviceManagerError::NewMmapRegion)?;
                 let addr: u64 = mmap_region.as_ptr() as u64;
 
                 self._mmap_regions.push(mmap_region);
