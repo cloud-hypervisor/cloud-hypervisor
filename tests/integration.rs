@@ -30,6 +30,7 @@ mod tests {
     use std::sync::Mutex;
     use std::thread;
     use tempdir::TempDir;
+    use tempfile::NamedTempFile;
 
     lazy_static! {
         static ref NEXT_VM_ID: Mutex<u8> = Mutex::new(1);
@@ -1937,6 +1938,9 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
+            let mut pmem_temp_file = NamedTempFile::new().unwrap();
+            pmem_temp_file.as_file_mut().set_len(128 << 20).unwrap();
+
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus","boot=1"])
                 .args(&["--memory", "size=512M"])
@@ -1947,8 +1951,8 @@ mod tests {
                     "--pmem",
                     format!(
                         "file={},size={}",
-                        guest.disk_config.disk(DiskType::RawOperatingSystem).unwrap(),
-                        fs::metadata(&guest.disk_config.disk(DiskType::RawOperatingSystem).unwrap()).unwrap().len()
+                        pmem_temp_file.path().to_str().unwrap(),
+                        "128M",
                     )
                     .as_str(),
                 ])
