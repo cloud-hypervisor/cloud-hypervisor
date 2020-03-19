@@ -1315,12 +1315,6 @@ impl Snapshotable for CpuManager {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if snapshot.snapshots.len() != self.vcpus.len() {
-            return Err(MigratableError::Restore(anyhow!(
-                "Snapshot length mismatch"
-            )));
-        }
-
         let vcpu_iter = snapshot.snapshots.iter().zip(self.vcpus.iter());
         for ((_id, snapshot), vcpu) in vcpu_iter {
             vcpu.lock().unwrap().restore(*snapshot.clone())?;
