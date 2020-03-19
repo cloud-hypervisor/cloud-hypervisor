@@ -410,6 +410,9 @@ components:
         mergeable:
           type: boolean
           default: false
+        discard_writes:
+          type: boolean
+          default: false
 
     ConsoleConfig:
       required:

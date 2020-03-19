@@ -173,7 +173,7 @@ fn create_app<'a, 'b>(
                 .help(
                     "Persistent memory parameters \
                      \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
-                     mergeable=on|off\"",
+                     mergeable=on|off,discard_writes=on|off,\"",
                 )
                 .takes_value(true)
                 .min_values(1)

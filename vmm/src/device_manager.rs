@@ -27,7 +27,7 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use devices::{ioapic, BusDevice, HotPlugNotificationFlags};
 use kvm_ioctls::*;
 use libc::TIOCGWINSZ;
-use libc::{MAP_NORESERVE, MAP_SHARED, O_RDONLY, O_TMPFILE, PROT_READ, PROT_WRITE};
+use libc::{MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE};
 #[cfg(feature = "pci_support")]
 use pci::{
     DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
@@ -1391,7 +1391,7 @@ impl DeviceManager {
 
                 let file = OpenOptions::new()
                     .read(true)
-                    .write(true)
+                    .write(!pmem_cfg.discard_writes)
                     .custom_flags(custom_flags)
                     .open(&pmem_cfg.file)
                     .map_err(DeviceManagerError::PmemFileOpen)?;
@@ -1405,12 +1405,17 @@ impl DeviceManager {
                 let mmap_region = MmapRegion::build(
                     Some(FileOffset::new(cloned_file, 0)),
                     size as usize,
-                    if pmem_cfg.readonly {
+                    if pmem_cfg.discard_writes {
                         PROT_READ
                     } else {
                         PROT_READ | PROT_WRITE
                     },
-                    MAP_NORESERVE | MAP_SHARED,
+                    MAP_NORESERVE
+                        | if pmem_cfg.discard_writes {
+                            MAP_PRIVATE
+                        } else {
+                            MAP_SHARED
+                        },
                 )
                 .map_err(DeviceManagerError::NewMmapRegion)?;
                 let addr: u64 = mmap_region.as_ptr() as u64;
@@ -1425,7 +1430,7 @@ impl DeviceManager {
                         size,
                         addr,
                         pmem_cfg.mergeable,
-                        false,
+                        pmem_cfg.discard_writes,
                     )
                     .map_err(DeviceManagerError::MemoryManager)?;
 
