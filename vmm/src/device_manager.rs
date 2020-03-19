@@ -1319,6 +1319,7 @@ impl DeviceManager {
                                 fs_cache,
                                 addr,
                                 false,
+                                false,
                             )
                             .map_err(DeviceManagerError::MemoryManager)?;
 
@@ -1416,6 +1417,7 @@ impl DeviceManager {
                         size,
                         addr,
                         pmem_cfg.mergeable,
+                        false,
                     )
                     .map_err(DeviceManagerError::MemoryManager)?;
 
