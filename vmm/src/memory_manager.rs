@@ -7,7 +7,7 @@
 use acpi_tables::{aml, aml::Aml};
 use arch::RegionType;
 use devices::BusDevice;
-use kvm_bindings::kvm_userspace_memory_region;
+use kvm_bindings::{kvm_userspace_memory_region, KVM_MEM_READONLY};
 use kvm_ioctls::*;
 use std::convert::TryInto;
 use std::fs::{File, OpenOptions};
@@ -258,6 +258,7 @@ impl MemoryManager {
                 region.len() as u64,
                 region.as_ptr() as u64,
                 mergeable,
+                false,
             )?;
             Ok(())
         })?;
@@ -350,6 +351,7 @@ impl MemoryManager {
             region.len() as u64,
             region.as_ptr() as u64,
             self.mergeable,
+            false,
         )?;
 
         // Tell the allocator
@@ -403,6 +405,7 @@ impl MemoryManager {
         memory_size: u64,
         userspace_addr: u64,
         mergeable: bool,
+        readonly: bool,
     ) -> Result<u32, Error> {
         let slot = self.allocate_kvm_memory_slot();
         let mem_region = kvm_userspace_memory_region {
@@ -410,7 +413,7 @@ impl MemoryManager {
             guest_phys_addr,
             memory_size,
             userspace_addr,
-            flags: 0,
+            flags: if readonly { KVM_MEM_READONLY } else { 0 },
         };
 
         // Safe because the guest regions are guaranteed not to overlap.
