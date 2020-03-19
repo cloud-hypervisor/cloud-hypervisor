@@ -766,6 +766,8 @@ pub struct PmemConfig {
     pub iommu: bool,
     #[serde(default)]
     pub mergeable: bool,
+    #[serde(default)]
+    pub discard_writes: bool,
 }
 
 impl PmemConfig {
@@ -777,6 +779,7 @@ impl PmemConfig {
         let mut size_str: &str = "";
         let mut iommu_str: &str = "";
         let mut mergeable_str: &str = "";
+        let mut discard_writes_str: &str = "";
 
         for param in params_list.iter() {
             if param.starts_with("file=") {
@@ -787,6 +790,8 @@ impl PmemConfig {
                 iommu_str = &param[6..];
             } else if param.starts_with("mergeable=") {
                 mergeable_str = &param[10..];
+            } else if param.starts_with("discard_writes=") {
+                discard_writes_str = &param[15..];
             }
         }
 
@@ -799,6 +804,7 @@ impl PmemConfig {
             size: parse_size(size_str)?,
             iommu: parse_on_off(iommu_str)?,
             mergeable: parse_on_off(mergeable_str)?,
+            discard_writes: parse_on_off(discard_writes_str)?,
         })
     }
 }
