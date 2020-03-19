@@ -224,19 +224,6 @@ EOF
     RES=$?
 fi
 
-# Test the pvh_boot feature
-if [ $RES -eq 0 ]; then
-    cargo build --release --features "pvh_boot"
-    sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
-
-    newgrp kvm << EOF
-export RUST_BACKTRACE=1
-time cargo test --features "integration_tests,pvh_boot" "$@" -- --nocapture
-EOF
-
-    RES=$?
-fi
-
 # Tear VFIO test network down
 sudo ip link del vfio-br0
 sudo ip link del vfio-tap0

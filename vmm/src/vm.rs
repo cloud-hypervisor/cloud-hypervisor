@@ -465,8 +465,7 @@ impl Vm {
                 // Assume by default Linux boot protocol is used and not PVH
                 let mut entry_point_addr: GuestAddress = entry_addr.kernel_load;
 
-                let boot_prot = if cfg!(feature = "pvh_boot") && entry_addr.pvh_entry_addr.is_some()
-                {
+                let boot_prot = if entry_addr.pvh_entry_addr.is_some() {
                     // entry_addr.pvh_entry_addr field is safe to unwrap here
                     entry_point_addr = entry_addr.pvh_entry_addr.unwrap();
                     BootProtocol::PvhBoot
