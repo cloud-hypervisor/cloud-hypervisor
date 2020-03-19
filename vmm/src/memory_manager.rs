@@ -105,6 +105,9 @@ pub enum Error {
     /// Failed to virtio-mem resize
     VirtioMemResizeFail(vm_virtio::mem::Error),
 
+    /// Cannot restore VM
+    Restore(MigratableError),
+
     /// Cannot create the system allocator
     CreateSystemAllocator,
 }
@@ -337,6 +340,130 @@ impl MemoryManager {
                 .allocate_mmio_addresses(Some(region.start_addr()), region.len(), None)
                 .ok_or(Error::MemoryRangeAllocation)?;
         }
+
+        // Allocate RAM and Reserved address ranges.
+        for region in arch_mem_regions.iter() {
+            allocator
+                .lock()
+                .unwrap()
+                .allocate_mmio_addresses(Some(region.0), region.1 as GuestUsize, None)
+                .ok_or(Error::MemoryRangeAllocation)?;
+        }
+
+        Ok(memory_manager)
+    }
+
+    pub fn new_from_snapshot(
+        snapshot: &Snapshot,
+        fd: Arc<VmFd>,
+        config: &MemoryConfig,
+        source_url: &str,
+    ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
+        let mut mem_regions = Vec::new();
+        let url = Url::parse(source_url).unwrap();
+        /* url must be valid dir which is verified in recv_vm_snapshot() */
+        let vm_snapshot_path = url.to_file_path().unwrap();
+
+        if let Some(mem_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", MEMORY_MANAGER_SNAPSHOT_ID))
+        {
+            let mem_snapshot: MemoryManagerSnapshotData =
+                match serde_json::from_slice(&mem_section.snapshot) {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => {
+                        return Err(Error::Restore(MigratableError::Restore(anyhow!(
+                            "Could not deserialize MemoryManager {}",
+                            error
+                        ))))
+                    }
+                };
+
+            let regions: Vec<MemoryRegion> = mem_snapshot.memory_regions;
+            for region in regions.iter() {
+                let backing_file = PathBuf::from(format!(
+                    "{}/{}",
+                    vm_snapshot_path.display(),
+                    region.backing_file.display()
+                ));
+                mem_regions.push(MemoryManager::create_ram_region(
+                    &Some(backing_file),
+                    region.start_addr,
+                    region.size as usize,
+                )?);
+            }
+        }
+
+        // Init guest memory
+        let arch_mem_regions = arch::arch_memory_regions(config.size);
+
+        let guest_memory =
+            GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
+
+        let end_of_device_area = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
+        let mem_end = guest_memory.last_addr();
+        let mut start_of_device_area = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
+            arch::layout::RAM_64BIT_START
+        } else {
+            mem_end.unchecked_add(1)
+        };
+
+        if let Some(size) = config.hotplug_size {
+            start_of_device_area = start_of_device_area.unchecked_add(size);
+        }
+
+        let guest_memory = GuestMemoryAtomic::new(guest_memory);
+
+        let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
+        hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
+
+        // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
+        let allocator = Arc::new(Mutex::new(
+            SystemAllocator::new(
+                GuestAddress(0),
+                1 << 16 as GuestUsize,
+                GuestAddress(0),
+                1 << get_host_cpu_phys_bits(),
+                layout::MEM_32BIT_RESERVED_START,
+                layout::MEM_32BIT_DEVICES_SIZE,
+                vec![GsiApic::new(
+                    X86_64_IRQ_BASE,
+                    ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
+                )],
+            )
+            .ok_or(Error::CreateSystemAllocator)?,
+        ));
+
+        let memory_manager = Arc::new(Mutex::new(MemoryManager {
+            guest_memory: guest_memory.clone(),
+            next_kvm_memory_slot: 0,
+            start_of_device_area,
+            end_of_device_area,
+            fd,
+            hotplug_slots,
+            selected_slot: 0,
+            backing_file: config.file.clone(),
+            mergeable: config.mergeable,
+            allocator: allocator.clone(),
+            hotplug_method: config.hotplug_method.clone(),
+            boot_ram: config.size,
+            current_ram: config.size,
+            virtiomem_region: None,
+            virtiomem_resize: None,
+            next_hotplug_slot: 0,
+            snapshot: Mutex::new(None),
+        }));
+
+        guest_memory.memory().with_regions(|_, region| {
+            let _ = memory_manager.lock().unwrap().create_userspace_mapping(
+                region.start_addr().raw_value(),
+                region.len() as u64,
+                region.as_ptr() as u64,
+                config.mergeable,
+                false,
+            )?;
+            Ok(())
+        })?;
 
         // Allocate RAM and Reserved address ranges.
         for region in arch_mem_regions.iter() {

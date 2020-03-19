@@ -375,6 +375,7 @@ impl Vm {
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
+        source_url: &str,
     ) -> Result<Self> {
         let (kvm, fd) = Vm::kvm_new()?;
         let config = vm_config_from_snapshot(snapshot).map_err(Error::Restore)?;
@@ -382,8 +383,13 @@ impl Vm {
         let memory_manager = if let Some(memory_manager_snapshot) =
             snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
         {
-            MemoryManager::new_from_snapshot(memory_manager_snapshot, fd.clone())
-                .map_err(Error::MemoryManager)?
+            MemoryManager::new_from_snapshot(
+                memory_manager_snapshot,
+                fd.clone(),
+                &config.lock().unwrap().memory.clone(),
+                source_url,
+            )
+            .map_err(Error::MemoryManager)?
         } else {
             return Err(Error::Restore(MigratableError::Restore(anyhow!(
                 "Missing memory manager snapshot"

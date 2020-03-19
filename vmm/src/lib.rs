@@ -318,7 +318,13 @@ impl Vmm {
         let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
         let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
 
-        let vm = Vm::new_from_snapshot(&vm_snapshot, exit_evt, reset_evt, self.vmm_path.clone())?;
+        let vm = Vm::new_from_snapshot(
+            &vm_snapshot,
+            exit_evt,
+            reset_evt,
+            self.vmm_path.clone(),
+            source_url,
+        )?;
         self.vm = Some(vm);
 
         // Now we can restore the rest of the VM.
