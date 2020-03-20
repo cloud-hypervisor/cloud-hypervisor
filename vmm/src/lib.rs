@@ -17,7 +17,7 @@ extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
 use crate::config::{DeviceConfig, VmConfig};
-use crate::seccomp_filters::get_seccomp_filter;
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
 use seccomp::{SeccompFilter, SeccompLevel};
@@ -176,7 +176,7 @@ pub fn start_vmm_thread(
 
     // Retrieve seccomp filter
     let vmm_seccomp_filter =
-        get_seccomp_filter(seccomp_level).map_err(Error::CreateSeccompFilter)?;
+        get_seccomp_filter(seccomp_level, Thread::Vmm).map_err(Error::CreateSeccompFilter)?;
 
     // Find the path that the "/proc/<pid>/exe" symlink points to. Must be done before spawning
     // a thread as Rust does not put the child threads in the same thread group which prevents the

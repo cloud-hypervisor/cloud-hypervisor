@@ -12,6 +12,11 @@ use seccomp::{
 };
 use std::convert::TryInto;
 
+pub enum Thread {
+    Vmm,
+    Api,
+}
+
 /// Shorthand for chaining `SeccompCondition`s with the `and` operator  in a `SeccompRule`.
 /// The rule will take the `Allow` action if _all_ the conditions are true.
 ///
@@ -94,7 +99,7 @@ const VFIO_IOMMU_MAP_DMA: u64 = 0x3b71;
 const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 const VFIO_DEVICE_IOEVENTFD: u64 = 0x3b74;
 
-fn create_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
     Ok(or![
         and![Cond::new(1, ArgLen::DWORD, Eq, FIOCLEX)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO)?],
@@ -156,9 +161,13 @@ fn create_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
     ])
 }
 
-/// The default filter containing the white listed syscall rules required by
-/// the VMM to function.
-pub fn default_filter() -> Result<SeccompFilter, Error> {
+fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+    Ok(or![and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO)?],])
+}
+
+/// The filter containing the white listed syscall rules required by the VMM to
+/// function.
+pub fn vmm_thread_filter() -> Result<SeccompFilter, Error> {
     Ok(SeccompFilter::new(
         vec![
             allow_syscall(libc::SYS_accept4),
@@ -187,7 +196,7 @@ pub fn default_filter() -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_getpid),
             allow_syscall(libc::SYS_getrandom),
             allow_syscall(libc::SYS_getuid),
-            allow_syscall_if(libc::SYS_ioctl, create_ioctl_seccomp_rule()?),
+            allow_syscall_if(libc::SYS_ioctl, create_vmm_ioctl_seccomp_rule()?),
             allow_syscall(libc::SYS_listen),
             allow_syscall(libc::SYS_lseek),
             allow_syscall(libc::SYS_madvise),
@@ -234,11 +243,48 @@ pub fn default_filter() -> Result<SeccompFilter, Error> {
     )?)
 }
 
+/// The filter containing the white listed syscall rules required by the API to
+/// function.
+pub fn api_thread_filter() -> Result<SeccompFilter, Error> {
+    Ok(SeccompFilter::new(
+        vec![
+            allow_syscall(libc::SYS_accept4),
+            allow_syscall(libc::SYS_bind),
+            allow_syscall(libc::SYS_close),
+            allow_syscall(libc::SYS_dup),
+            allow_syscall(libc::SYS_epoll_create1),
+            allow_syscall(libc::SYS_epoll_ctl),
+            allow_syscall(libc::SYS_epoll_wait),
+            allow_syscall(libc::SYS_exit),
+            allow_syscall(libc::SYS_futex),
+            allow_syscall(libc::SYS_getrandom),
+            allow_syscall_if(libc::SYS_ioctl, create_api_ioctl_seccomp_rule()?),
+            allow_syscall(libc::SYS_listen),
+            allow_syscall(libc::SYS_madvise),
+            allow_syscall(libc::SYS_munmap),
+            allow_syscall(libc::SYS_recvfrom),
+            allow_syscall(libc::SYS_sigaltstack),
+            allow_syscall(libc::SYS_socket),
+            allow_syscall(libc::SYS_write),
+        ]
+        .into_iter()
+        .collect(),
+        SeccompAction::Trap,
+    )?)
+}
+
 /// Generate a BPF program based on a seccomp level value.
-pub fn get_seccomp_filter(seccomp_level: &SeccompLevel) -> Result<BpfProgram, SeccompError> {
+pub fn get_seccomp_filter(
+    seccomp_level: &SeccompLevel,
+    thread_type: Thread,
+) -> Result<BpfProgram, SeccompError> {
+    let filter = match thread_type {
+        Thread::Vmm => vmm_thread_filter(),
+        Thread::Api => api_thread_filter(),
+    };
     match *seccomp_level {
         SeccompLevel::None => Ok(vec![]),
-        _ => default_filter()
+        _ => filter
             .and_then(|filter| filter.try_into())
             .map_err(SeccompError::SeccompFilter),
     }
