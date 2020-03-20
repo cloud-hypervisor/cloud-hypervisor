@@ -105,6 +105,12 @@ pub enum ApiError {
 
     /// The device could not be removed from the VM.
     VmRemoveDevice(VmError),
+
+    /// Cannot create seccomp filter
+    CreateSeccompFilter(seccomp::SeccompError),
+
+    /// Cannot apply seccomp filter
+    ApplySeccompFilter(seccomp::Error),
 }
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
