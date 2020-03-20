@@ -309,6 +309,9 @@ components:
         mergeable:
           type: boolean
           default: false
+        hotplug_method:
+          type: string
+          default: "acpi"
 
     KernelConfig:
       required:
