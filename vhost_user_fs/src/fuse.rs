@@ -55,6 +55,9 @@ const FOPEN_KEEP_CACHE: u32 = 2;
 /// The file is not seekable.
 const FOPEN_NONSEEKABLE: u32 = 4;
 
+/// Allow caching this directory.
+const FOPEN_CACHE_DIR: u32 = 8;
+
 bitflags! {
     /// Options controlling the behavior of files opened by the server in response
     /// to an open or create request.
@@ -62,6 +65,7 @@ bitflags! {
         const DIRECT_IO = FOPEN_DIRECT_IO;
         const KEEP_CACHE = FOPEN_KEEP_CACHE;
         const NONSEEKABLE = FOPEN_NONSEEKABLE;
+        const CACHE_DIR = FOPEN_CACHE_DIR;
     }
 }
 
