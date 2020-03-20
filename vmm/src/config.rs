@@ -338,6 +338,8 @@ pub struct MemoryConfig {
     pub shared: bool,
     #[serde(default)]
     pub hugepages: bool,
+    #[serde(default)]
+    pub balloon: bool,
 }
 
 impl MemoryConfig {
@@ -350,7 +352,8 @@ impl MemoryConfig {
             .add("hotplug_method")
             .add("hotplug_size")
             .add("shared")
-            .add("hugepages");
+            .add("hugepages")
+            .add("balloon");
         parser.parse(memory).map_err(Error::ParseMemory)?;
 
         let size = parser
@@ -382,6 +385,11 @@ impl MemoryConfig {
             .map_err(Error::ParseMemory)?
             .unwrap_or(Toggle(false))
             .0;
+        let balloon = parser
+            .convert::<Toggle>("balloon")
+            .map_err(Error::ParseMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         Ok(MemoryConfig {
             size,
@@ -391,6 +399,7 @@ impl MemoryConfig {
             hotplug_size,
             shared,
             hugepages,
+            balloon,
         })
     }
 }
@@ -405,6 +414,7 @@ impl Default for MemoryConfig {
             hotplug_size: None,
             shared: false,
             hugepages: false,
+            balloon: false,
         }
     }
 }
@@ -1862,6 +1872,7 @@ mod tests {
                 hotplug_size: None,
                 shared: false,
                 hugepages: false,
+                balloon: false,
             },
             kernel: Some(KernelConfig {
                 path: PathBuf::from("/path/to/kernel"),

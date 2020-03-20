@@ -70,6 +70,7 @@ pub struct MemoryManager {
     snapshot: Mutex<Option<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
     shared: bool,
     hugepages: bool,
+    balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
 }
 
 #[derive(Debug)]
@@ -122,6 +123,9 @@ pub enum Error {
     /// The number of external backing files doesn't match the number of
     /// memory regions.
     InvalidAmountExternalBackingFiles,
+
+    /// Failed to virtio-balloon resize
+    VirtioBalloonResizeFail(virtio_devices::balloon::Error),
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -338,6 +342,7 @@ impl MemoryManager {
             snapshot: Mutex::new(None),
             shared: config.shared,
             hugepages: config.hugepages,
+            balloon: None,
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -645,6 +650,10 @@ impl MemoryManager {
         Ok(region)
     }
 
+    pub fn set_balloon(&mut self, balloon: Arc<Mutex<virtio_devices::Balloon>>) {
+        self.balloon = Some(balloon);
+    }
+
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.guest_memory.clone()
     }
@@ -785,6 +794,23 @@ impl MemoryManager {
             resize.work(size).map_err(Error::VirtioMemResizeFail)?;
         } else {
             panic!("should not fail here");
+        }
+
+        Ok(())
+    }
+
+    pub fn balloon_resize(&mut self, expected_ram: u64) -> Result<(), Error> {
+        if let Some(balloon) = &self.balloon {
+            let balloon_size = if expected_ram < self.current_ram {
+                self.current_ram - expected_ram
+            } else {
+                0
+            };
+            balloon
+                .lock()
+                .unwrap()
+                .resize(balloon_size)
+                .map_err(Error::VirtioBalloonResizeFail)?;
         }
 
         Ok(())

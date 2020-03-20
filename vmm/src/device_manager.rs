@@ -104,6 +104,7 @@ const CONSOLE_DEVICE_NAME: &str = "_console";
 const DISK_DEVICE_NAME_PREFIX: &str = "_disk";
 const FS_DEVICE_NAME_PREFIX: &str = "_fs";
 const MEM_DEVICE_NAME: &str = "_mem";
+const BALLOON_DEVICE_NAME: &str = "_balloon";
 const NET_DEVICE_NAME_PREFIX: &str = "_net";
 const PMEM_DEVICE_NAME_PREFIX: &str = "_pmem";
 const RNG_DEVICE_NAME: &str = "_rng";
@@ -164,6 +165,9 @@ pub enum DeviceManagerError {
 
     /// Cannot create virtio-iommu device
     CreateVirtioIommu(io::Error),
+
+    /// Cannot create virtio-balloon device
+    CreateVirtioBalloon(io::Error),
 
     /// Failed parsing disk image format
     DetectImageType(qcow::Error),
@@ -1500,6 +1504,9 @@ impl DeviceManager {
 
         devices.append(&mut self.make_virtio_mem_devices()?);
 
+        // Add virtio-balloon if required
+        devices.append(&mut self.make_virtio_balloon_devices()?);
+
         Ok(devices)
     }
 
@@ -2288,6 +2295,39 @@ impl DeviceManager {
                 .lock()
                 .unwrap()
                 .insert(id.clone(), device_node!(id, virtio_mem_device));
+        }
+
+        Ok(devices)
+    }
+
+    fn make_virtio_balloon_devices(
+        &mut self,
+    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool, String)>> {
+        let mut devices = Vec::new();
+
+        if self.config.lock().unwrap().memory.balloon {
+            let id = String::from(BALLOON_DEVICE_NAME);
+
+            let virtio_balloon_device = Arc::new(Mutex::new(
+                virtio_devices::Balloon::new(id.clone())
+                    .map_err(DeviceManagerError::CreateVirtioBalloon)?,
+            ));
+
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .set_balloon(virtio_balloon_device.clone());
+
+            devices.push((
+                Arc::clone(&virtio_balloon_device) as VirtioDeviceArc,
+                false,
+                id.clone(),
+            ));
+
+            self.device_tree
+                .lock()
+                .unwrap()
+                .insert(id.clone(), device_node!(id, virtio_balloon_device));
         }
 
         Ok(devices)
