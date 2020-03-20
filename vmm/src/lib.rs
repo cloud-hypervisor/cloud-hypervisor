@@ -197,7 +197,7 @@ pub fn start_vmm_thread(
         .map_err(Error::VmmThreadSpawn)?;
 
     // The VMM thread is started, we can start serving HTTP requests
-    api::start_http_thread(http_path, http_api_event, api_sender)?;
+    api::start_http_thread(http_path, http_api_event, api_sender, seccomp_level)?;
 
     Ok(thread)
 }

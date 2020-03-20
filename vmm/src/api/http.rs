@@ -7,8 +7,10 @@ use crate::api::http_endpoint::{
     VmActionHandler, VmAddDevice, VmCreate, VmInfo, VmRemoveDevice, VmResize, VmmPing, VmmShutdown,
 };
 use crate::api::{ApiRequest, VmAction};
+use crate::seccomp_filters::get_seccomp_filter;
 use crate::{Error, Result};
 use micro_http::{HttpServer, MediaType, Request, Response, StatusCode, Version};
+use seccomp::{SeccompFilter, SeccompLevel};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -92,13 +94,21 @@ pub fn start_http_thread(
     path: &str,
     api_notifier: EventFd,
     api_sender: Sender<ApiRequest>,
+    seccomp_level: &SeccompLevel,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     std::fs::remove_file(path).unwrap_or_default();
     let socket_path = PathBuf::from(path);
 
+    // Retrieve seccomp filter for API thread
+    let api_seccomp_filter =
+        get_seccomp_filter(seccomp_level).map_err(Error::CreateSeccompFilter)?;
+
     thread::Builder::new()
         .name("http-server".to_string())
         .spawn(move || {
+            // Apply seccomp filter for API thread.
+            SeccompFilter::apply(api_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+
             let mut server = HttpServer::new(socket_path).unwrap();
             server.start_server().unwrap();
             loop {
