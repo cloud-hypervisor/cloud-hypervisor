@@ -1096,6 +1096,22 @@ pub trait FileSystem {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn copyfilerange(
+        &self,
+        ctx: Context,
+        inode_in: Self::Inode,
+        handle_in: Self::Handle,
+        offset_in: u64,
+        inode_out: Self::Inode,
+        handle_out: Self::Handle,
+        offset_out: u64,
+        len: u64,
+        flags: u64,
+    ) -> io::Result<usize> {
+        Err(io::Error::from_raw_os_error(libc::ENOSYS))
+    }
+
     /// TODO: support this
     fn getlk(&self) -> io::Result<()> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))

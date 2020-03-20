@@ -124,6 +124,7 @@ impl<F: FileSystem + Sync> Server<F> {
             x if x == Opcode::Readdirplus as u32 => self.readdirplus(in_header, r, w),
             x if x == Opcode::Rename2 as u32 => self.rename2(in_header, r, w),
             x if x == Opcode::Lseek as u32 => self.lseek(in_header, r, w),
+            x if x == Opcode::CopyFileRange as u32 => self.copyfilerange(in_header, r, w),
             x if x == Opcode::SetupMapping as u32 => self.setupmapping(in_header, r, w, vu_req),
             x if x == Opcode::RemoveMapping as u32 => self.removemapping(in_header, r, w, vu_req),
             _ => reply_error(
@@ -1255,6 +1256,41 @@ impl<F: FileSystem + Sync> Server<F> {
         ) {
             Ok(offset) => {
                 let out = LseekOut { offset };
+
+                reply_ok(Some(out), None, in_header.unique, w)
+            }
+            Err(e) => reply_error(e, in_header.unique, w),
+        }
+    }
+
+    fn copyfilerange(&self, in_header: InHeader, mut r: Reader, w: Writer) -> Result<usize> {
+        let CopyfilerangeIn {
+            fh_in,
+            off_in,
+            nodeid_out,
+            fh_out,
+            off_out,
+            len,
+            flags,
+            ..
+        } = r.read_obj().map_err(Error::DecodeMessage)?;
+
+        match self.fs.copyfilerange(
+            Context::from(in_header),
+            in_header.nodeid.into(),
+            fh_in.into(),
+            off_in,
+            nodeid_out.into(),
+            fh_out.into(),
+            off_out,
+            len,
+            flags,
+        ) {
+            Ok(count) => {
+                let out = WriteOut {
+                    size: count as u32,
+                    ..Default::default()
+                };
 
                 reply_ok(Some(out), None, in_header.unique, w)
             }

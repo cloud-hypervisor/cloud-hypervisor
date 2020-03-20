@@ -1049,6 +1049,19 @@ pub struct LseekOut {
 }
 unsafe impl ByteValued for LseekOut {}
 
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct CopyfilerangeIn {
+    pub fh_in: u64,
+    pub off_in: u64,
+    pub nodeid_out: u64,
+    pub fh_out: u64,
+    pub off_out: u64,
+    pub len: u64,
+    pub flags: u64,
+}
+unsafe impl ByteValued for CopyfilerangeIn {}
+
 bitflags! {
     pub struct SetupmappingFlags: u64 {
     const WRITE = 0x1;
