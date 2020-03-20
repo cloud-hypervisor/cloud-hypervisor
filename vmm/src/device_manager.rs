@@ -265,14 +265,15 @@ type VirtioDeviceArc = Arc<Mutex<dyn vm_virtio::VirtioDevice>>;
 
 pub fn get_win_size() -> (u16, u16) {
     #[repr(C)]
+    #[derive(Default)]
     struct WS {
         rows: u16,
         cols: u16,
+        xpixel: u16,
+        ypixel: u16,
     };
-    let ws: WS = WS {
-        rows: 0u16,
-        cols: 0u16,
-    };
+    let ws: WS = WS::default();
+
     unsafe {
         libc::ioctl(0, TIOCGWINSZ, &ws);
     }
