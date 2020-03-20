@@ -17,8 +17,10 @@ extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
 use crate::config::{DeviceConfig, VmConfig};
+use crate::seccomp_filters::get_seccomp_filter;
 use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
+use seccomp::{SeccompFilter, SeccompLevel};
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
@@ -34,6 +36,7 @@ pub mod cpu;
 pub mod device_manager;
 pub mod interrupt;
 pub mod memory_manager;
+pub mod seccomp_filters;
 pub mod vm;
 
 #[cfg(feature = "acpi")]
@@ -84,6 +87,12 @@ pub enum Error {
 
     // Error following "exe" link
     ExePathReadLink(io::Error),
+
+    /// Cannot create seccomp filter
+    CreateSeccompFilter(seccomp::SeccompError),
+
+    /// Cannot apply seccomp filter
+    ApplySeccompFilter(seccomp::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -161,8 +170,13 @@ pub fn start_vmm_thread(
     api_event: EventFd,
     api_sender: Sender<ApiRequest>,
     api_receiver: Receiver<ApiRequest>,
+    seccomp_level: &SeccompLevel,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     let http_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
+
+    // Retrieve seccomp filter
+    let vmm_seccomp_filter =
+        get_seccomp_filter(seccomp_level).map_err(Error::CreateSeccompFilter)?;
 
     // Find the path that the "/proc/<pid>/exe" symlink points to. Must be done before spawning
     // a thread as Rust does not put the child threads in the same thread group which prevents the
@@ -173,6 +187,9 @@ pub fn start_vmm_thread(
     let thread = thread::Builder::new()
         .name("vmm".to_string())
         .spawn(move || {
+            // Apply seccomp filter for VMM thread.
+            SeccompFilter::apply(vmm_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
+
             let mut vmm = Vmm::new(vmm_version.to_string(), api_event, vmm_path)?;
 
             vmm.control_loop(Arc::new(api_receiver))
