@@ -262,6 +262,13 @@ fn create_app<'a, 'b>(
                 .conflicts_with_all(&["net-backend", "kernel"])
                 .min_values(1),
         )
+        .arg(
+            Arg::with_name("seccomp")
+                .long("seccomp")
+                .takes_value(true)
+                .possible_values(&["true", "false"])
+                .default_value("true"),
+        )
 }
 
 fn start_vmm(cmd_arguments: ArgMatches) {
@@ -293,13 +300,27 @@ fn start_vmm(cmd_arguments: ArgMatches) {
     let api_evt = EventFd::new(EFD_NONBLOCK).expect("Cannot create API EventFd");
 
     let http_sender = api_request_sender.clone();
+
+    let seccomp_level = if let Some(seccomp_value) = cmd_arguments.value_of("seccomp") {
+        match seccomp_value {
+            "true" => SeccompLevel::Advanced,
+            "false" => SeccompLevel::None,
+            _ => {
+                eprintln!("Invalid parameter {} for \"--seccomp\" flag", seccomp_value);
+                process::exit(1);
+            }
+        }
+    } else {
+        SeccompLevel::Advanced
+    };
+
     let vmm_thread = match vmm::start_vmm_thread(
         env!("CARGO_PKG_VERSION").to_string(),
         api_socket_path,
         api_evt.try_clone().unwrap(),
         http_sender,
         api_request_receiver,
-        &SeccompLevel::None,
+        &seccomp_level,
     ) {
         Ok(t) => t,
         Err(e) => {
