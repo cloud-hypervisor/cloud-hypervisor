@@ -68,6 +68,32 @@ if [ ! -f "$EOAN_OS_RAW_IMAGE" ]; then
     popd
 fi
 
+ALPINE_MINIROOTFS_URL="http://dl-cdn.alpinelinux.org/alpine/v3.11/releases/x86_64/alpine-minirootfs-3.11.3-x86_64.tar.gz"
+ALPINE_MINIROOTFS_TARBALL="$WORKLOADS_DIR/alpine-minirootfs-x86_64.tar.gz"
+if [ ! -f "$ALPINE_MINIROOTFS_TARBALL" ]; then
+    pushd $WORKLOADS_DIR
+    time wget --quiet $ALPINE_MINIROOTFS_URL -O $ALPINE_MINIROOTFS_TARBALL || exit 1
+    popd
+fi
+
+ALPINE_INITRAMFS_IMAGE="$WORKLOADS_DIR/alpine_initramfs.img"
+if [ ! -f "$ALPINE_INITRAMFS_IMAGE" ]; then
+    pushd $WORKLOADS_DIR
+    mkdir alpine-minirootfs
+    tar xf "$ALPINE_MINIROOTFS_TARBALL" -C alpine-minirootfs
+    cat > alpine-minirootfs/init <<-EOF
+		#! /bin/sh
+		mount -t devtmpfs dev /dev
+		echo \$TEST_STRING > /dev/console
+		poweroff -f
+	EOF
+    chmod +x alpine-minirootfs/init
+    cd alpine-minirootfs
+    find . -print0 |
+        cpio --null --create --verbose --owner root:root --format=newc > "$ALPINE_INITRAMFS_IMAGE"
+    popd
+fi
+
 pushd $WORKLOADS_DIR
 sha1sum sha1sums --check
 if [ $? -ne 0 ]; then
