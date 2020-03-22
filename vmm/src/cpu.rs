@@ -481,6 +481,7 @@ impl Vcpu {
 
     #[allow(unused)]
     fn set_kvm_state(&mut self, state: &VcpuKvmState) -> Result<()> {
+        self.fd.set_regs(&state.regs).map_err(Error::VcpuSetRegs)?;
         self.fd.set_fpu(&state.fpu).map_err(Error::VcpuSetFpu)?;
         self.fd
             .set_lapic(&state.lapic_state)
@@ -488,7 +489,7 @@ impl Vcpu {
         self.fd
             .set_sregs(&state.sregs)
             .map_err(Error::VcpuSetSregs)?;
-        self.fd.set_regs(&state.regs).map_err(Error::VcpuSetRegs)?;
+        println!("MP STATE {:#?}", state.mp_state);
         self.fd
             .set_mp_state(state.mp_state)
             .map_err(Error::VcpuSetMpState)?;
@@ -510,7 +511,7 @@ impl Snapshotable for Vcpu {
         })?)
         .map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        let mut vcpu_snapshot = Snapshot::new(VCPU_SNAPSHOT_ID);
+        let mut vcpu_snapshot = Snapshot::new(&format!("{}-{}", VCPU_SNAPSHOT_ID, self.id));
         vcpu_snapshot.add_data_section(SnapshotDataSection {
             id: format!("{}-section", VCPU_SNAPSHOT_ID),
             snapshot,
@@ -536,12 +537,18 @@ impl Snapshotable for Vcpu {
 
             self.set_kvm_state(&vcpu_state).map_err(|e| {
                 MigratableError::Restore(anyhow!("Could not set the vCPU KVM state {:?}", e))
-            })?
-        }
+            })?;
 
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find the vCPU snapshot section"
-        )))
+            arch::x86_64::interrupts::set_lint(&self.fd).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not set the vCPU LAPIC {:?}", e))
+            })?;
+
+            Ok(())
+        } else {
+            Err(MigratableError::Restore(anyhow!(
+                "Could not find the vCPU snapshot section"
+            )))
+        }
     }
 }
 
@@ -884,6 +891,15 @@ impl CpuManager {
         let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
 
         let vcpu_kill = self.vcpu_states[usize::from(cpu_id)].kill.clone();
+
+        let mut cpuid = self.cpuid.clone();
+        CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(cpu_id));
+
+        vcpu.lock()
+            .unwrap()
+            .fd
+            .set_cpuid2(&cpuid)
+            .map_err(Error::SetSupportedCpusFailed)?;
 
         vcpu.lock()
             .unwrap()
