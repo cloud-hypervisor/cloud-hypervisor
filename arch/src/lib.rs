@@ -79,3 +79,10 @@ pub use x86_64::{
     arch_memory_regions, configure_system, layout, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START,
     BootProtocol, EntryPoint,
 };
+
+/// Safe wrapper for `sysconf(_SC_PAGESIZE)`.
+#[inline(always)]
+fn pagesize() -> usize {
+    // Trivially safe
+    unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
+}
