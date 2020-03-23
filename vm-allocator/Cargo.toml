@@ -6,4 +6,4 @@ edition = "2018"
 
 [dependencies]
 libc = "0.2.68"
-vm-memory = "0.1.0"
+vm-memory = "0.2.0"

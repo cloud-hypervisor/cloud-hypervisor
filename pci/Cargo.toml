@@ -11,4 +11,4 @@ devices = { path = "../devices" }
 libc = "0.2.68"
 log = "0.4.8"
 vm-device = { path = "../vm-device" }
-vm-memory = "0.1.0"
+vm-memory = "0.2.0"
