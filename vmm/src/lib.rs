@@ -16,7 +16,7 @@ extern crate tempfile;
 extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
-use crate::config::{DeviceConfig, DiskConfig, PmemConfig, VmConfig};
+use crate::config::{DeviceConfig, DiskConfig, NetConfig, PmemConfig, VmConfig};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
@@ -441,6 +441,19 @@ impl Vmm {
         }
     }
 
+    fn vm_add_net(&mut self, net_cfg: NetConfig) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            if let Err(e) = vm.add_net(net_cfg) {
+                error!("Error when adding new network device to the VM: {:?}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -621,6 +634,13 @@ impl Vmm {
                                     let response = self
                                         .vm_add_pmem(add_pmem_data.as_ref().clone())
                                         .map_err(ApiError::VmAddPmem)
+                                        .map(|_| ApiResponsePayload::Empty);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmAddNet(add_net_data, sender) => {
+                                    let response = self
+                                        .vm_add_net(add_net_data.as_ref().clone())
+                                        .map_err(ApiError::VmAddNet)
                                         .map(|_| ApiResponsePayload::Empty);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
