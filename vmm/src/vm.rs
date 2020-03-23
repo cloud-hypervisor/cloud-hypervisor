@@ -26,7 +26,7 @@ extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
 
-use crate::config::{DeviceConfig, DiskConfig, HotplugMethod, PmemConfig, VmConfig};
+use crate::config::{DeviceConfig, DiskConfig, HotplugMethod, NetConfig, PmemConfig, VmConfig};
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{get_host_cpu_phys_bits, Error as MemoryManagerError, MemoryManager};
@@ -705,6 +705,39 @@ impl Vm {
                         pmem.push(_pmem_cfg);
                     } else {
                         config.pmem = Some(vec![_pmem_cfg]);
+                    }
+                }
+
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+                    .map_err(Error::DeviceManager)?;
+            }
+            Ok(())
+        } else {
+            Err(Error::NoPciSupport)
+        }
+    }
+
+    pub fn add_net(&mut self, mut _net_cfg: NetConfig) -> Result<()> {
+        if cfg!(feature = "pci_support") {
+            #[cfg(feature = "pci_support")]
+            {
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .add_net(&mut _net_cfg)
+                    .map_err(Error::DeviceManager)?;
+
+                // Update VmConfig by adding the new device. This is important to
+                // ensure the device would be created in case of a reboot.
+                {
+                    let mut config = self.config.lock().unwrap();
+                    if let Some(net) = config.net.as_mut() {
+                        net.push(_net_cfg);
+                    } else {
+                        config.net = Some(vec![_net_cfg]);
                     }
                 }
 
