@@ -34,6 +34,8 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -yq \
 	libcap-ng-dev \
 	socat \
 	dosfstools \
+	cpio \
+	bsdtar \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
