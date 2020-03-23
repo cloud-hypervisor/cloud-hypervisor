@@ -405,7 +405,7 @@ impl Vmm {
     fn vm_remove_device(&mut self, id: String) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
             if let Err(e) = vm.remove_device(id) {
-                error!("Error when adding new device to the VM: {:?}", e);
+                error!("Error when removing new device to the VM: {:?}", e);
                 Err(e)
             } else {
                 Ok(())
