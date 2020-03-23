@@ -26,7 +26,7 @@ extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
 
-use crate::config::{DeviceConfig, VmConfig};
+use crate::config::{DeviceConfig, DiskConfig, VmConfig};
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{get_host_cpu_phys_bits, Error as MemoryManagerError, MemoryManager};
@@ -629,6 +629,39 @@ impl Vm {
                                 true
                             }
                         });
+                    }
+                }
+
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+                    .map_err(Error::DeviceManager)?;
+            }
+            Ok(())
+        } else {
+            Err(Error::NoPciSupport)
+        }
+    }
+
+    pub fn add_disk(&mut self, mut _disk_cfg: DiskConfig) -> Result<()> {
+        if cfg!(feature = "pci_support") {
+            #[cfg(feature = "pci_support")]
+            {
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .add_disk(&mut _disk_cfg)
+                    .map_err(Error::DeviceManager)?;
+
+                // Update VmConfig by adding the new device. This is important to
+                // ensure the device would be created in case of a reboot.
+                {
+                    let mut config = self.config.lock().unwrap();
+                    if let Some(disks) = config.disks.as_mut() {
+                        disks.push(_disk_cfg);
+                    } else {
+                        config.disks = Some(vec![_disk_cfg]);
                     }
                 }
 
