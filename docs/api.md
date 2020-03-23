@@ -92,6 +92,7 @@ Remove memory from the VM          | `/vm.resize`        | `/schemas/VmResize`  
 Dump the VM information            | `/vm.info`          | N/A                       | `/schemas/VmInfo` | The VM is created
 Add VFIO PCI device to the VM      | `/vm.add-device`    | `/schemas/VmAddDevice`    | N/A               | The VM is booted
 Remove VFIO PCI device from the VM | `/vm.remove-device` | `/schemas/VmRemoveDevice` | N/A               | The VM is booted
+Add disk device to the VM          | `/vm.add-disk`      | `/schemas/DiskConfig`     | N/A               | The VM is booted
 
 ### REST API Examples
 
