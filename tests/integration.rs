@@ -3540,4 +3540,89 @@ mod tests {
             Ok(())
         });
     }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_disk_hotplug() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .default_disks()
+                .default_net()
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Check /dev/vdc is not there
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                0
+            );
+
+            let mut blk_file_path = dirs::home_dir().unwrap();
+            blk_file_path.push("workloads");
+            blk_file_path.push("blk.img");
+            aver!(
+                tb,
+                remote_command(
+                    &api_socket,
+                    "add-disk",
+                    Some(&format!("path={}", blk_file_path.to_str().unwrap()))
+                )
+            );
+
+            // Check that if /dev/vdc exists and the block size is 16M.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            guest.ssh_command("sudo reboot").unwrap_or_default();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            aver_eq!(tb, reboot_count, 1);
+
+            // Check still there after reboot
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
 }
