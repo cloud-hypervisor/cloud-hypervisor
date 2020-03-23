@@ -23,6 +23,7 @@ enum Error {
     InvalidCPUCount(std::num::ParseIntError),
     InvalidMemorySize(std::num::ParseIntError),
     AddDeviceConfig(vmm::config::Error),
+    AddDiskConfig(vmm::config::Error),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -213,6 +214,17 @@ fn remove_device_api_command(socket: &mut UnixStream, id: &str) -> Result<(), Er
     )
 }
 
+fn add_disk_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
+    let disk_config = vmm::config::DiskConfig::parse(config).map_err(Error::AddDiskConfig)?;
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "add-disk",
+        Some(&serde_json::to_string(&disk_config).unwrap()),
+    )
+}
+
 fn do_command(matches: &ArgMatches) -> Result<(), Error> {
     let mut socket =
         UnixStream::connect(matches.value_of("api-socket").unwrap()).map_err(Error::Socket)?;
@@ -246,6 +258,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .value_of("id")
                 .unwrap(),
         ),
+        Some("add-disk") => add_disk_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("add-disk")
+                .unwrap()
+                .value_of("disk_config")
+                .unwrap(),
+        ),
         Some(c) => simple_api_command(&mut socket, "PUT", c, None),
         None => unreachable!(),
     }
@@ -271,6 +291,15 @@ fn main() {
                     Arg::with_name("device_config")
                         .index(1)
                         .help(vmm::config::DeviceConfig::SYNTAX),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("add-disk")
+                .about("Add block device")
+                .arg(
+                    Arg::with_name("disk_config")
+                        .index(1)
+                        .help(vmm::config::DiskConfig::SYNTAX),
                 ),
         )
         .subcommand(
