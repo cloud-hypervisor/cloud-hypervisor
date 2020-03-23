@@ -2022,6 +2022,12 @@ impl DeviceManager {
         let (device, iommu_attached) = self.make_virtio_block_device(disk_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached)
     }
+
+    #[cfg(feature = "pci_support")]
+    pub fn add_pmem(&mut self, pmem_cfg: &mut PmemConfig) -> DeviceManagerResult<()> {
+        let (device, iommu_attached) = self.make_virtio_pmem_device(pmem_cfg)?;
+        self.hotplug_virtio_pci_device(device, iommu_attached)
+    }
 }
 
 #[cfg(feature = "acpi")]
