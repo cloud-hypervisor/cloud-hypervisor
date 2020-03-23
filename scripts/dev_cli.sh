@@ -113,6 +113,13 @@ ensure_build_dir() {
     done
 }
 
+# Make sure we're using the latest dev container, by just pulling it.
+ensure_latest_ctr() {
+    $DOCKER_RUNTIME pull "$CTR_IMAGE"
+
+    ok_or_die "Error pulling container image. Aborting."
+}
+
 # Fix main directory permissions after a container ran as root.
 # Since the container ran as root, any files it creates will be owned by root.
 # This fixes that by recursively changing the ownership of /cloud-hypervisor to the
@@ -325,5 +332,6 @@ cmd=cmd_$1
 shift
 
 ensure_build_dir
+ensure_latest_ctr
 
 $cmd "$@"
