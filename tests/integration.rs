@@ -1355,17 +1355,52 @@ mod tests {
         test_vhost_user_net(None, 4, None, true)
     }
 
-    #[test]
-    fn test_vhost_user_blk() {
+    type PrepareBlkDaemon =
+        dyn Fn(&TempDir, &str, usize, bool, bool) -> (std::process::Child, String);
+
+    fn test_vhost_user_blk(
+        num_queues: usize,
+        readonly: bool,
+        direct: bool,
+        prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,
+        self_spawned: bool,
+    ) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
-            let (mut daemon_child, vubd_socket_path) =
-                prepare_vubd(&guest.tmp_dir, "blk.img", 2, false, false);
+            let (blk_params, daemon_child) = if self_spawned {
+                let mut workload_path = dirs::home_dir().unwrap();
+                workload_path.push("workloads");
+
+                let mut blk_file_path = workload_path;
+                blk_file_path.push("blk.img");
+                let blk_file_path = String::from(blk_file_path.to_str().unwrap());
+
+                (
+                    format!(
+                        "vhost_user=true,path={},num_queues={},queue_size=128,wce=true",
+                        blk_file_path, num_queues,
+                    ),
+                    None,
+                )
+            } else {
+                let prepare_daemon = prepare_vhost_user_blk_daemon.unwrap();
+                // Start the daemon
+                let (daemon_child, vubd_socket_path) =
+                    prepare_daemon(&guest.tmp_dir, "blk.img", num_queues, readonly, direct);
+
+                (
+                    format!(
+                        "vhost_user=true,socket={},num_queues={},queue_size=128,wce=true",
+                        vubd_socket_path, num_queues,
+                    ),
+                    Some(daemon_child),
+                )
+            };
 
             let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=2"])
+                .args(&["--cpus", format!("boot={}", num_queues).as_str()])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
@@ -1380,11 +1415,7 @@ mod tests {
                         guest.disk_config.disk(DiskType::CloudInit).unwrap()
                     )
                     .as_str(),
-                    format!(
-                        "vhost_user=true,socket={},num_queues=2,queue_size=128,wce=true",
-                        vubd_socket_path
-                    )
-                    .as_str(),
+                    blk_params.as_str(),
                 ])
                 .default_net()
                 .spawn()
@@ -1404,8 +1435,20 @@ mod tests {
                 1
             );
 
-            thread::sleep(std::time::Duration::new(20, 0));
-            // Check if the queue number in /sys/block/vdc/mq is same to 2.
+            // Check if this block is RO or RW.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep vdc | awk '{print $5}'")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                readonly as u32
+            );
+
+            // Check if the number of queues in /sys/block/vdc/mq matches the
+            // expected num_queues.
             aver_eq!(
                 tb,
                 guest
@@ -1414,12 +1457,19 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                2
+                num_queues as u32
             );
 
             // Mount the device
+            let mount_ro_rw_flag = if readonly { "ro,noload" } else { "rw" };
             guest.ssh_command("mkdir mount_image")?;
-            guest.ssh_command("sudo mount -t ext4 /dev/vdc mount_image/")?;
+            guest.ssh_command(
+                format!(
+                    "sudo mount -o {} -t ext4 /dev/vdc mount_image/",
+                    mount_ro_rw_flag
+                )
+                .as_str(),
+            )?;
 
             // Check the content of the block device. The file "foo" should
             // contain "bar".
@@ -1439,284 +1489,34 @@ mod tests {
             let _ = cloud_child.kill();
             let _ = cloud_child.wait();
 
-            thread::sleep(std::time::Duration::new(5, 0));
-            let _ = daemon_child.kill();
-            let _ = daemon_child.wait();
+            if let Some(mut daemon_child) = daemon_child {
+                thread::sleep(std::time::Duration::new(5, 0));
+                let _ = daemon_child.kill();
+                let _ = daemon_child.wait();
+            }
 
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_vhost_user_blk_default() {
+        test_vhost_user_blk(2, false, false, Some(&prepare_vubd), false)
     }
 
     #[test]
     fn test_vhost_user_blk_self_spawning() {
-        test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
-
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut blk_file_path = workload_path;
-            blk_file_path.push("blk.img");
-            let blk_file_path = String::from(blk_file_path.to_str().unwrap());
-
-            let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
-                .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&[
-                    "--disk",
-                    format!(
-                        "path={}",
-                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                    )
-                    .as_str(),
-                    format!(
-                        "path={}",
-                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                    )
-                    .as_str(),
-                    format!("path={},vhost_user=true", blk_file_path).as_str(),
-                ])
-                .default_net()
-                .spawn()
-                .unwrap();
-
-            thread::sleep(std::time::Duration::new(20, 0));
-
-            // Check both if /dev/vdc exists and if the block size is 16M.
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("lsblk | grep vdc | grep -c 16M")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                1
-            );
-
-            thread::sleep(std::time::Duration::new(20, 0));
-            // Check if the queue number in /sys/block/vdc/mq is same to 2.
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                1
-            );
-
-            // Mount the device
-            guest.ssh_command("mkdir mount_image")?;
-            guest.ssh_command("sudo mount -t ext4 /dev/vdc mount_image/")?;
-
-            // Check the content of the block device. The file "foo" should
-            // contain "bar".
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("cat mount_image/foo")
-                    .unwrap_or_default()
-                    .trim(),
-                "bar"
-            );
-
-            // Unmount the device
-            guest.ssh_command("sudo umount /dev/vdc")?;
-            guest.ssh_command("rm -r mount_image")?;
-
-            let _ = cloud_child.kill();
-            let _ = cloud_child.wait();
-
-            Ok(())
-        });
+        test_vhost_user_blk(1, false, false, None, true)
     }
 
     #[test]
     fn test_vhost_user_blk_readonly() {
-        test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
-
-            let (mut daemon_child, vubd_socket_path) =
-                prepare_vubd(&guest.tmp_dir, "blk.img", 1, true, false);
-
-            let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
-                .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&[
-                    "--disk",
-                    format!(
-                        "path={}",
-                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                    )
-                    .as_str(),
-                    format!(
-                        "path={}",
-                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                    )
-                    .as_str(),
-                    format!(
-                        "vhost_user=true,socket={},num_queues=1,queue_size=128,wce=true",
-                        vubd_socket_path
-                    )
-                    .as_str(),
-                ])
-                .default_net()
-                .spawn()
-                .unwrap();
-
-            thread::sleep(std::time::Duration::new(20, 0));
-
-            // Check both if /dev/vdc exists and if the block size is 16M.
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("lsblk | grep vdc | grep -c 16M")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                1
-            );
-
-            thread::sleep(std::time::Duration::new(20, 0));
-            // Check if the queue number in /sys/block/vdc/mq is same to 2.
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                1
-            );
-
-            // Mount the device
-            guest.ssh_command("mkdir mount_image")?;
-            guest.ssh_command("sudo mount -t ext4 /dev/vdc mount_image/")?;
-
-            // Check the content of the block device. The file "foo" should
-            // contain "bar".
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("cat mount_image/foo")
-                    .unwrap_or_default()
-                    .trim(),
-                "bar"
-            );
-
-            // Unmount the device
-            guest.ssh_command("sudo umount /dev/vdc")?;
-            guest.ssh_command("rm -r mount_image")?;
-
-            let _ = cloud_child.kill();
-            let _ = cloud_child.wait();
-
-            thread::sleep(std::time::Duration::new(5, 0));
-            let _ = daemon_child.kill();
-            let _ = daemon_child.wait();
-
-            Ok(())
-        });
+        test_vhost_user_blk(1, true, false, Some(&prepare_vubd), false)
     }
 
     #[test]
     fn test_vhost_user_blk_direct() {
-        test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
-
-            let (mut daemon_child, vubd_socket_path) =
-                prepare_vubd(&guest.tmp_dir, "blk.img", 1, false, true);
-
-            let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
-                .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&[
-                    "--disk",
-                    format!(
-                        "path={}",
-                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                    )
-                    .as_str(),
-                    format!(
-                        "path={}",
-                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                    )
-                    .as_str(),
-                    format!(
-                        "vhost_user=true,socket={},num_queues=1,queue_size=128,wce=true",
-                        vubd_socket_path
-                    )
-                    .as_str(),
-                ])
-                .default_net()
-                .spawn()
-                .unwrap();
-
-            thread::sleep(std::time::Duration::new(20, 0));
-
-            // Check both if /dev/vdc exists and if the block size is 16M.
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("lsblk | grep vdc | grep -c 16M")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                1
-            );
-
-            thread::sleep(std::time::Duration::new(20, 0));
-            // Check if the queue number in /sys/block/vdc/mq is same to 2.
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                1
-            );
-
-            // Mount the device
-            guest.ssh_command("mkdir mount_image")?;
-            guest.ssh_command("sudo mount -t ext4 /dev/vdc mount_image/")?;
-
-            // Check the content of the block device. The file "foo" should
-            // contain "bar".
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("cat mount_image/foo")
-                    .unwrap_or_default()
-                    .trim(),
-                "bar"
-            );
-
-            // Unmount the device
-            guest.ssh_command("sudo umount /dev/vdc")?;
-            guest.ssh_command("rm -r mount_image")?;
-
-            let _ = cloud_child.kill();
-            let _ = cloud_child.wait();
-
-            thread::sleep(std::time::Duration::new(5, 0));
-            let _ = daemon_child.kill();
-            let _ = daemon_child.wait();
-
-            Ok(())
-        });
+        test_vhost_user_blk(1, false, true, Some(&prepare_vubd), false)
     }
 
     #[test]
