@@ -3770,4 +3770,76 @@ mod tests {
             Ok(())
         });
     }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_net_hotplug() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            // Boot without network
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .default_disks()
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Add network
+            aver!(
+                tb,
+                remote_command(
+                    &api_socket,
+                    "add-net",
+                    Some(guest.default_net_string().as_str())
+                )
+            );
+
+            // 1 network interfaces + default localhost ==> 2 interfaces
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ip -o link | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                2
+            );
+
+            guest.ssh_command("sudo reboot").unwrap_or_default();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            aver_eq!(tb, reboot_count, 1);
+
+            // Check still there after reboot
+            // 1 network interfaces + default localhost ==> 2 interfaces
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ip -o link | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                2
+            );
+
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
 }
