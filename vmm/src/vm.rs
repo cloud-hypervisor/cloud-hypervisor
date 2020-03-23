@@ -556,6 +556,12 @@ impl Vm {
                 self.device_manager
                     .lock()
                     .unwrap()
+                    .update_memory()
+                    .map_err(Error::DeviceManager)?;
+
+                self.device_manager
+                    .lock()
+                    .unwrap()
                     .notify_hotplug(HotPlugNotificationFlags::MEMORY_DEVICES_CHANGED)
                     .map_err(Error::DeviceManager)?;
             }
