@@ -1453,22 +1453,30 @@ mod tests {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut blk_file_path = workload_path;
+            blk_file_path.push("blk.img");
+            let blk_file_path = String::from(blk_file_path.to_str().unwrap());
+
             let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=2"])
+                .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
                     format!(
-                        "path={},vhost_user=true",
+                        "path={}",
                         guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                     )
                     .as_str(),
                     format!(
-                        "path={},vhost_user=true",
+                        "path={}",
                         guest.disk_config.disk(DiskType::CloudInit).unwrap()
                     )
                     .as_str(),
+                    format!("path={},vhost_user=true", blk_file_path).as_str(),
                 ])
                 .default_net()
                 .spawn()
@@ -1476,24 +1484,49 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
-            let reboot_count = guest
-                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                .unwrap_or_default()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or(1);
-
-            aver_eq!(tb, reboot_count, 0);
-            guest.ssh_command("sudo reboot").unwrap_or_default();
+            // Check both if /dev/vdc exists and if the block size is 16M.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
 
             thread::sleep(std::time::Duration::new(20, 0));
-            let reboot_count = guest
-                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                .unwrap_or_default()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default();
-            aver_eq!(tb, reboot_count, 1);
+            // Check if the queue number in /sys/block/vdc/mq is same to 2.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // Mount the device
+            guest.ssh_command("mkdir mount_image")?;
+            guest.ssh_command("sudo mount -t ext4 /dev/vdc mount_image/")?;
+
+            // Check the content of the block device. The file "foo" should
+            // contain "bar".
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("cat mount_image/foo")
+                    .unwrap_or_default()
+                    .trim(),
+                "bar"
+            );
+
+            // Unmount the device
+            guest.ssh_command("sudo umount /dev/vdc")?;
+            guest.ssh_command("rm -r mount_image")?;
 
             let _ = cloud_child.kill();
             let _ = cloud_child.wait();
@@ -1551,17 +1584,37 @@ mod tests {
                 1
             );
 
-            // Check both if /dev/vdc exists and if this block is RO.
+            thread::sleep(std::time::Duration::new(20, 0));
+            // Check if the queue number in /sys/block/vdc/mq is same to 2.
             aver_eq!(
                 tb,
                 guest
-                    .ssh_command("lsblk | grep vdc | awk '{print $5}'")
+                    .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
                     .unwrap_or_default()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
                 1
             );
+
+            // Mount the device
+            guest.ssh_command("mkdir mount_image")?;
+            guest.ssh_command("sudo mount -t ext4 /dev/vdc mount_image/")?;
+
+            // Check the content of the block device. The file "foo" should
+            // contain "bar".
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("cat mount_image/foo")
+                    .unwrap_or_default()
+                    .trim(),
+                "bar"
+            );
+
+            // Unmount the device
+            guest.ssh_command("sudo umount /dev/vdc")?;
+            guest.ssh_command("rm -r mount_image")?;
 
             let _ = cloud_child.kill();
             let _ = cloud_child.wait();
@@ -1622,6 +1675,38 @@ mod tests {
                     .unwrap_or_default(),
                 1
             );
+
+            thread::sleep(std::time::Duration::new(20, 0));
+            // Check if the queue number in /sys/block/vdc/mq is same to 2.
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // Mount the device
+            guest.ssh_command("mkdir mount_image")?;
+            guest.ssh_command("sudo mount -t ext4 /dev/vdc mount_image/")?;
+
+            // Check the content of the block device. The file "foo" should
+            // contain "bar".
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("cat mount_image/foo")
+                    .unwrap_or_default()
+                    .trim(),
+                "bar"
+            );
+
+            // Unmount the device
+            guest.ssh_command("sudo umount /dev/vdc")?;
+            guest.ssh_command("rm -r mount_image")?;
 
             let _ = cloud_child.kill();
             let _ = cloud_child.wait();
@@ -1685,6 +1770,65 @@ mod tests {
             thread::sleep(std::time::Duration::new(5, 0));
             let _ = daemon_child.kill();
             let _ = daemon_child.wait();
+
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_boot_from_vhost_user_blk_self_spawning() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let mut cloud_child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={},vhost_user=true",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={},vhost_user=true",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                ])
+                .default_net()
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Just check the VM booted correctly.
+            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1);
+
+            aver_eq!(tb, reboot_count, 0);
+            guest.ssh_command("sudo reboot").unwrap_or_default();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            aver_eq!(tb, reboot_count, 1);
+
+            let _ = cloud_child.kill();
+            let _ = cloud_child.wait();
 
             Ok(())
         });
