@@ -1,7 +1,7 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::vu_common_ctrl::{reset_vhost_user, setup_vhost_user};
+use super::vu_common_ctrl::{reset_vhost_user, setup_vhost_user, update_mem_table};
 use super::Error as DeviceError;
 use super::{Error, Result};
 use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
@@ -528,6 +528,10 @@ impl VirtioDevice for Fs {
         } else {
             None
         }
+    }
+
+    fn update_memory(&mut self, mem: &GuestMemoryMmap) -> std::result::Result<(), crate::Error> {
+        update_mem_table(&mut self.vu, mem).map_err(crate::Error::VhostUserUpdateMemory)
     }
 }
 

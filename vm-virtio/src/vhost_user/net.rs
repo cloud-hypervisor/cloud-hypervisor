@@ -358,6 +358,10 @@ impl VirtioDevice for Net {
     fn shutdown(&mut self) {
         let _ = unsafe { libc::close(self.vhost_user_net.as_raw_fd()) };
     }
+
+    fn update_memory(&mut self, mem: &GuestMemoryMmap) -> std::result::Result<(), crate::Error> {
+        update_mem_table(&mut self.vhost_user_net, mem).map_err(crate::Error::VhostUserUpdateMemory)
+    }
 }
 
 virtio_ctrl_q_pausable!(Net);
