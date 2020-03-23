@@ -53,9 +53,7 @@ use vm_device::interrupt::{
 };
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::guest_memory::FileOffset;
-#[cfg(feature = "cmos")]
-use vm_memory::GuestAddressSpace;
-use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
+use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestUsize, MmapRegion};
 #[cfg(feature = "pci_support")]
 use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::transport::VirtioTransport;
@@ -256,8 +254,11 @@ pub enum DeviceManagerError {
     /// Incorrect device ID as it is already used by another device.
     DeviceIdAlreadyInUse,
 
-    // No disk path was specified when one was expected
+    /// No disk path was specified when one was expected
     NoDiskPath,
+
+    /// Failed updating guest memory for virtio device.
+    UpdateMemoryForVirtioDevice(vm_virtio::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1810,6 +1811,19 @@ impl DeviceManager {
 
     pub fn cmdline_additions(&self) -> &[String] {
         self.cmdline_additions.as_slice()
+    }
+
+    pub fn update_memory(&self) -> DeviceManagerResult<()> {
+        let memory = self.memory_manager.lock().unwrap().guest_memory();
+        for (virtio_device, _) in self.virtio_devices.iter() {
+            virtio_device
+                .lock()
+                .unwrap()
+                .update_memory(&memory.memory())
+                .map_err(DeviceManagerError::UpdateMemoryForVirtioDevice)?;
+        }
+
+        Ok(())
     }
 
     pub fn notify_hotplug(
