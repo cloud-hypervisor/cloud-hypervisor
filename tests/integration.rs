@@ -1294,6 +1294,8 @@ mod tests {
             // Since virtio-net has 2 queue pairs, its vectors is as follows:
             // 1 virtio-net     with 5 vectors: config, Rx (2), Tx (2)
             // Based on the above, the total vectors should 14.
+            // This is a PCI only feature.
+            #[cfg(not(feature = "mmio"))]
             aver_eq!(
                 tb,
                 guest
@@ -1318,12 +1320,12 @@ mod tests {
         });
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
+    #[test]
     fn test_vhost_user_net_default() {
         test_vhost_user_net(None, 2, Some(&prepare_vhost_user_net_daemon), false)
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
+    #[test]
     fn test_vhost_user_net_tap() {
         test_vhost_user_net(
             Some("vunet-tap0"),
@@ -1333,12 +1335,12 @@ mod tests {
         )
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
+    #[test]
     fn test_vhost_user_net_multiple_queues() {
         test_vhost_user_net(None, 4, Some(&prepare_vhost_user_net_daemon), false)
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
+    #[test]
     fn test_vhost_user_net_tap_multiple_queues() {
         test_vhost_user_net(
             Some("vunet-tap1"),
@@ -1348,7 +1350,7 @@ mod tests {
         )
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
+    #[test]
     fn test_vhost_user_net_self_spawning() {
         test_vhost_user_net(None, 4, None, true)
     }

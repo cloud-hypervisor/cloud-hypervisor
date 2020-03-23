@@ -216,6 +216,10 @@ if [ $RES -eq 0 ]; then
     cargo build --release --no-default-features --features "mmio"
     sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
 
+    # Ensure test binary has the same caps as the cloud-hypervisor one
+    time cargo test --no-run --features "integration_tests,mmio" -- --nocapture || exit 1
+    ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
+
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
 time cargo test --features "integration_tests,mmio" "$@" -- --nocapture
