@@ -26,7 +26,7 @@ extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
 
-use crate::config::{DeviceConfig, DiskConfig, PmemConfig, VmConfig};
+use crate::config::{DeviceConfig, DiskConfig, HotplugMethod, PmemConfig, VmConfig};
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{get_host_cpu_phys_bits, Error as MemoryManagerError, MemoryManager};
@@ -563,11 +563,17 @@ impl Vm {
                     .update_memory()
                     .map_err(Error::DeviceManager)?;
 
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .notify_hotplug(HotPlugNotificationFlags::MEMORY_DEVICES_CHANGED)
-                    .map_err(Error::DeviceManager)?;
+                let memory_config = &self.config.lock().unwrap().memory;
+                match memory_config.hotplug_method {
+                    HotplugMethod::Acpi => {
+                        self.device_manager
+                            .lock()
+                            .unwrap()
+                            .notify_hotplug(HotPlugNotificationFlags::MEMORY_DEVICES_CHANGED)
+                            .map_err(Error::DeviceManager)?;
+                    }
+                    HotplugMethod::VirtioMem => {}
+                }
             }
 
             // We update the VM config regardless of the actual guest resize operation
