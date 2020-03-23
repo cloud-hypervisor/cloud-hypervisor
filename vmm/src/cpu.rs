@@ -23,7 +23,7 @@ use arch::EntryPoint;
 use devices::{ioapic, BusDevice};
 use kvm_bindings::{
     kvm_clock_data, kvm_fpu, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events,
-    CpuId, Msrs,
+    kvm_xcrs, kvm_xsave, CpuId, Msrs,
 };
 use kvm_ioctls::*;
 use libc::{c_void, siginfo_t};
@@ -182,6 +182,18 @@ pub enum Error {
     /// Failed to set KVM vcpu FPU.
     VcpuSetFpu(kvm_ioctls::Error),
 
+    /// Failed to get KVM vcpu XSAVE.
+    VcpuGetXsave(kvm_ioctls::Error),
+
+    /// Failed to set KVM vcpu XSAVE.
+    VcpuSetXsave(kvm_ioctls::Error),
+
+    /// Failed to get KVM vcpu XCRS.
+    VcpuGetXcrs(kvm_ioctls::Error),
+
+    /// Failed to set KVM vcpu XCRS.
+    VcpuSetXcrs(kvm_ioctls::Error),
+
     /// Failed to get KVM clock data.
     VcpuGetClockData(kvm_ioctls::Error),
 
@@ -317,6 +329,8 @@ pub struct VcpuKvmState {
     sregs: kvm_sregs,
     fpu: kvm_fpu,
     lapic_state: kvm_lapic_state,
+    xsave: kvm_xsave,
+    xcrs: kvm_xcrs,
     //    clock_data: kvm_clock_data,
 }
 
@@ -467,6 +481,8 @@ impl Vcpu {
         let sregs = self.fd.get_sregs().map_err(Error::VcpuGetSregs)?;
         let lapic_state = self.fd.get_lapic().map_err(Error::VcpuGetLapic)?;
         let fpu = self.fd.get_fpu().map_err(Error::VcpuGetFpu)?;
+        let xsave = self.fd.get_xsave().map_err(Error::VcpuGetXsave)?;
+        let xcrs = self.fd.get_xcrs().map_err(Error::VcpuGetXsave)?;
 
         Ok(VcpuKvmState {
             msrs,
@@ -476,24 +492,38 @@ impl Vcpu {
             sregs,
             fpu,
             lapic_state,
+            xsave,
+            xcrs,
         })
     }
 
     #[allow(unused)]
     fn set_kvm_state(&mut self, state: &VcpuKvmState) -> Result<()> {
         self.fd.set_regs(&state.regs).map_err(Error::VcpuSetRegs)?;
+
         self.fd.set_fpu(&state.fpu).map_err(Error::VcpuSetFpu)?;
+
         self.fd
-            .set_lapic(&state.lapic_state)
-            .map_err(Error::VcpuSetLapic)?;
+            .set_xsave(&state.xsave)
+            .map_err(Error::VcpuSetXsave)?;
+
         self.fd
             .set_sregs(&state.sregs)
             .map_err(Error::VcpuSetSregs)?;
+
+        self.fd.set_xcrs(&state.xcrs).map_err(Error::VcpuSetXcrs)?;
+
         println!("MP STATE {:#?}", state.mp_state);
         self.fd
             .set_mp_state(state.mp_state)
             .map_err(Error::VcpuSetMpState)?;
+
         self.fd.set_msrs(&state.msrs).map_err(Error::VcpuSetMsrs)?;
+
+        self.fd
+            .set_lapic(&state.lapic_state)
+            .map_err(Error::VcpuSetLapic)?;
+
         Ok(())
     }
 }
@@ -537,10 +567,6 @@ impl Snapshotable for Vcpu {
 
             self.set_kvm_state(&vcpu_state).map_err(|e| {
                 MigratableError::Restore(anyhow!("Could not set the vCPU KVM state {:?}", e))
-            })?;
-
-            arch::x86_64::interrupts::set_lint(&self.fd).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not set the vCPU LAPIC {:?}", e))
             })?;
 
             Ok(())
