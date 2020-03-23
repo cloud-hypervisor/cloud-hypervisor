@@ -3625,4 +3625,91 @@ mod tests {
             Ok(())
         });
     }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_pmem_hotplug() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .default_disks()
+                .default_net()
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Check /dev/pmem0 is not there
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep -c pmem0")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                0
+            );
+
+            let mut pmem_temp_file = NamedTempFile::new().unwrap();
+            pmem_temp_file.as_file_mut().set_len(128 << 20).unwrap();
+            aver!(
+                tb,
+                remote_command(
+                    &api_socket,
+                    "add-pmem",
+                    Some(&format!(
+                        "file={},size=128M",
+                        pmem_temp_file.path().to_str().unwrap()
+                    ))
+                )
+            );
+
+            // Check that /dev/pmem0 exists and the block size is 128M
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep pmem0 | grep -c 128M")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            guest.ssh_command("sudo reboot").unwrap_or_default();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            aver_eq!(tb, reboot_count, 1);
+
+            // Check still there after reboot
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep pmem0 | grep -c 128M")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
 }
