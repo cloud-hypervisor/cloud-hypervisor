@@ -24,6 +24,7 @@ enum Error {
     InvalidMemorySize(std::num::ParseIntError),
     AddDeviceConfig(vmm::config::Error),
     AddDiskConfig(vmm::config::Error),
+    AddPmemConfig(vmm::config::Error),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -225,6 +226,17 @@ fn add_disk_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Err
     )
 }
 
+fn add_pmem_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
+    let pmem_config = vmm::config::PmemConfig::parse(config).map_err(Error::AddPmemConfig)?;
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "add-pmem",
+        Some(&serde_json::to_string(&pmem_config).unwrap()),
+    )
+}
+
 fn do_command(matches: &ArgMatches) -> Result<(), Error> {
     let mut socket =
         UnixStream::connect(matches.value_of("api-socket").unwrap()).map_err(Error::Socket)?;
@@ -266,6 +278,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .value_of("disk_config")
                 .unwrap(),
         ),
+        Some("add-pmem") => add_pmem_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("add-pmem")
+                .unwrap()
+                .value_of("pmem_config")
+                .unwrap(),
+        ),
         Some(c) => simple_api_command(&mut socket, "PUT", c, None),
         None => unreachable!(),
     }
@@ -300,6 +320,15 @@ fn main() {
                     Arg::with_name("disk_config")
                         .index(1)
                         .help(vmm::config::DiskConfig::SYNTAX),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("add-pmem")
+                .about("Add persistent memory device")
+                .arg(
+                    Arg::with_name("pmem_config")
+                        .index(1)
+                        .help(vmm::config::PmemConfig::SYNTAX),
                 ),
         )
         .subcommand(
