@@ -1222,41 +1222,48 @@ mod tests {
         });
     }
 
+    type PrepareNetDaemon =
+        dyn Fn(&TempDir, &str, Option<&str>, usize) -> (std::process::Child, String);
+
     fn test_vhost_user_net(
         tap: Option<&str>,
         num_queues: usize,
-        prepare_vhost_user_net_daemon: &dyn Fn(
-            &TempDir,
-            &str,
-            Option<&str>,
-            usize,
-        ) -> (std::process::Child, String),
+        prepare_vhost_user_net_daemon: Option<&PrepareNetDaemon>,
+        self_spawned: bool,
     ) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
-            // Start the daemon
-            let (mut daemon_child, vunet_socket_path) = prepare_vhost_user_net_daemon(
-                &guest.tmp_dir,
-                &guest.network.host_ip,
-                tap,
-                num_queues,
-            );
+            let (net_params, daemon_child) = if self_spawned {
+                (
+                    format!(
+                        "vhost_user=true,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size=1024",
+                        guest.network.guest_mac, guest.network.host_ip, num_queues,
+                    ),
+                    None,
+                )
+            } else {
+                let prepare_daemon = prepare_vhost_user_net_daemon.unwrap();
+                // Start the daemon
+                let (daemon_child, vunet_socket_path) =
+                    prepare_daemon(&guest.tmp_dir, &guest.network.host_ip, tap, num_queues);
+
+                (
+                    format!(
+                        "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024",
+                        guest.network.guest_mac, vunet_socket_path, num_queues,
+                    ),
+                    Some(daemon_child),
+                )
+            };
 
             let mut cloud_child = GuestCommand::new(&guest)
                 .args(&["--cpus", format!("boot={}", num_queues / 2).as_str()])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
-                .args(&[
-                    "--net",
-                    format!(
-                        "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024",
-                        guest.network.guest_mac, vunet_socket_path, num_queues,
-                    )
-                    .as_str(),
-                ])
+                .args(&["--net", net_params.as_str()])
                 .spawn()
                 .unwrap();
 
@@ -1301,9 +1308,11 @@ mod tests {
             let _ = cloud_child.kill();
             let _ = cloud_child.wait();
 
-            thread::sleep(std::time::Duration::new(5, 0));
-            let _ = daemon_child.kill();
-            let _ = daemon_child.wait();
+            if let Some(mut daemon_child) = daemon_child {
+                thread::sleep(std::time::Duration::new(5, 0));
+                let _ = daemon_child.kill();
+                let _ = daemon_child.wait();
+            }
 
             Ok(())
         });
@@ -1311,87 +1320,37 @@ mod tests {
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_vhost_user_net_default() {
-        test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon)
+        test_vhost_user_net(None, 2, Some(&prepare_vhost_user_net_daemon), false)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_vhost_user_net_tap() {
-        test_vhost_user_net(Some("vunet-tap0"), 2, &prepare_vhost_user_net_daemon)
+        test_vhost_user_net(
+            Some("vunet-tap0"),
+            2,
+            Some(&prepare_vhost_user_net_daemon),
+            false,
+        )
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_vhost_user_net_multiple_queues() {
-        test_vhost_user_net(None, 4, &prepare_vhost_user_net_daemon)
+        test_vhost_user_net(None, 4, Some(&prepare_vhost_user_net_daemon), false)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_vhost_user_net_tap_multiple_queues() {
-        test_vhost_user_net(Some("vunet-tap1"), 4, &prepare_vhost_user_net_daemon)
+        test_vhost_user_net(
+            Some("vunet-tap1"),
+            4,
+            Some(&prepare_vhost_user_net_daemon),
+            false,
+        )
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_vhost_user_net_self_spawning() {
-        test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
-
-            let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=4"])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
-                .args(&["--kernel", guest.fw_path.as_str()])
-                .default_disks()
-                .args(&[
-                    "--net",
-                    format!(
-                        "vhost_user=true,mac={},ip={},mask=255.255.255.0,num_queues=4,queue_size=1024",
-                        guest.network.guest_mac,
-                        guest.network.host_ip
-                    )
-                    .as_str(),
-                ])
-                .spawn()
-                .unwrap();
-
-            thread::sleep(std::time::Duration::new(10, 0));
-            // 1 network interface + default localhost ==> 2 interfaces
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("ip -o link | wc -l")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                2
-            );
-
-            thread::sleep(std::time::Duration::new(10, 0));
-
-            // The following pci devices will appear on guest with PCI-MSI
-            // interrupt vectors assigned.
-            // 1 virtio-console with 3 vectors: config, Rx, Tx
-            // 1 virtio-blk     with 2 vectors: config, Request
-            // 1 virtio-blk     with 2 vectors: config, Request
-            // 1 virtio-rng     with 2 vectors: config, Request
-            // Since virtio-net has 2 queue pairs, its vectors is as follows:
-            // 1 virtio-net     with 5 vectors: config, Rx (2), Tx (2)
-            // Based on the above, the total vectors should 14.
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("grep -c PCI-MSI /proc/interrupts")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                14
-            );
-
-            let _ = cloud_child.kill();
-            let _ = cloud_child.wait();
-
-            Ok(())
-        });
+        test_vhost_user_net(None, 4, None, true)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
