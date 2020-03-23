@@ -171,6 +171,22 @@ paths:
         404:
           description: The device could not be removed from the VM instance.
 
+  /vm.add-disk:
+    put:
+      summary: Add a new disk to the VM
+      requestBody:
+        description: The details of the new disk
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiskConfig'
+        required: true
+      responses:
+        204:
+          description: The new disk was successfully added to the VM instance.
+        500:
+          description: The new disk could not be added to the VM instance.
+
 components:
   schemas:
 
