@@ -16,7 +16,7 @@ extern crate tempfile;
 extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
-use crate::config::{DeviceConfig, DiskConfig, VmConfig};
+use crate::config::{DeviceConfig, DiskConfig, PmemConfig, VmConfig};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
@@ -428,6 +428,19 @@ impl Vmm {
         }
     }
 
+    fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            if let Err(e) = vm.add_pmem(pmem_cfg) {
+                error!("Error when adding new pmem device to the VM: {:?}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -601,6 +614,13 @@ impl Vmm {
                                     let response = self
                                         .vm_add_disk(add_disk_data.as_ref().clone())
                                         .map_err(ApiError::VmAddDisk)
+                                        .map(|_| ApiResponsePayload::Empty);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmAddPmem(add_pmem_data, sender) => {
+                                    let response = self
+                                        .vm_add_pmem(add_pmem_data.as_ref().clone())
+                                        .map_err(ApiError::VmAddPmem)
                                         .map(|_| ApiResponsePayload::Empty);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
