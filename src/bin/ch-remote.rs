@@ -25,6 +25,7 @@ enum Error {
     AddDeviceConfig(vmm::config::Error),
     AddDiskConfig(vmm::config::Error),
     AddPmemConfig(vmm::config::Error),
+    AddNetConfig(vmm::config::Error),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -237,6 +238,17 @@ fn add_pmem_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Err
     )
 }
 
+fn add_net_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
+    let net_config = vmm::config::NetConfig::parse(config).map_err(Error::AddNetConfig)?;
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "add-net",
+        Some(&serde_json::to_string(&net_config).unwrap()),
+    )
+}
+
 fn do_command(matches: &ArgMatches) -> Result<(), Error> {
     let mut socket =
         UnixStream::connect(matches.value_of("api-socket").unwrap()).map_err(Error::Socket)?;
@@ -286,6 +298,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .value_of("pmem_config")
                 .unwrap(),
         ),
+        Some("add-net") => add_net_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("add-net")
+                .unwrap()
+                .value_of("net_config")
+                .unwrap(),
+        ),
         Some(c) => simple_api_command(&mut socket, "PUT", c, None),
         None => unreachable!(),
     }
@@ -329,6 +349,15 @@ fn main() {
                     Arg::with_name("pmem_config")
                         .index(1)
                         .help(vmm::config::PmemConfig::SYNTAX),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("add-net")
+                .about("Add network device")
+                .arg(
+                    Arg::with_name("net_config")
+                        .index(1)
+                        .help(vmm::config::NetConfig::SYNTAX),
                 ),
         )
         .subcommand(
