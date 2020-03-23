@@ -1977,6 +1977,43 @@ impl DeviceManager {
             Err(DeviceManagerError::MissingPciDevice)
         }
     }
+
+    #[cfg(feature = "pci_support")]
+    fn hotplug_virtio_pci_device(
+        &mut self,
+        device: VirtioDeviceArc,
+        iommu_attached: bool,
+    ) -> DeviceManagerResult<()> {
+        if iommu_attached {
+            warn!("Placing device behind vIOMMU is not available for hotplugged devices");
+        }
+
+        let pci = if let Some(pci_bus) = &self.pci_bus {
+            Arc::clone(&pci_bus)
+        } else {
+            return Err(DeviceManagerError::NoPciBus);
+        };
+
+        let interrupt_manager = Arc::clone(&self.msi_interrupt_manager);
+
+        let device_id = self.add_virtio_pci_device(
+            device,
+            &mut pci.lock().unwrap(),
+            &None,
+            &interrupt_manager,
+        )?;
+
+        // Update the PCIU bitmap
+        self.pci_devices_up |= 1 << (device_id >> 3);
+
+        Ok(())
+    }
+
+    #[cfg(feature = "pci_support")]
+    pub fn add_disk(&mut self, disk_cfg: &mut DiskConfig) -> DeviceManagerResult<()> {
+        let (device, iommu_attached) = self.make_virtio_block_device(disk_cfg)?;
+        self.hotplug_virtio_pci_device(device, iommu_attached)
+    }
 }
 
 #[cfg(feature = "acpi")]
