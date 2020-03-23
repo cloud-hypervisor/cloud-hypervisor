@@ -36,7 +36,7 @@ pub use self::http::start_http_thread;
 pub mod http;
 pub mod http_endpoint;
 
-use crate::config::{DeviceConfig, DiskConfig, PmemConfig, VmConfig};
+use crate::config::{DeviceConfig, DiskConfig, NetConfig, PmemConfig, VmConfig};
 use crate::vm::{Error as VmError, VmState};
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
@@ -117,6 +117,9 @@ pub enum ApiError {
 
     /// The pmem device could not be added to the VM.
     VmAddPmem(VmError),
+
+    /// The network device could not be added to the VM.
+    VmAddNet(VmError),
 }
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
@@ -216,6 +219,9 @@ pub enum ApiRequest {
 
     /// Add a pmem device to the VM.
     VmAddPmem(Arc<PmemConfig>, Sender<ApiResponse>),
+
+    /// Add a network device to the VM.
+    VmAddNet(Arc<NetConfig>, Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -433,6 +439,24 @@ pub fn vm_add_pmem(
     // Send the VM add-pmem request.
     api_sender
         .send(ApiRequest::VmAddPmem(data, response_sender))
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+
+    Ok(())
+}
+
+pub fn vm_add_net(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<NetConfig>,
+) -> ApiResult<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM add-net request.
+    api_sender
+        .send(ApiRequest::VmAddNet(data, response_sender))
         .map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
