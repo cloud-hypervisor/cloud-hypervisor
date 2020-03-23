@@ -27,13 +27,7 @@ pub struct VhostUserConfig {
     pub queue_size: u16,
 }
 
-pub fn setup_vhost_user_vring(
-    vu: &mut Master,
-    mem: &GuestMemoryMmap,
-    queues: Vec<Queue>,
-    queue_evts: Vec<EventFd>,
-    virtio_interrupt: &Arc<dyn VirtioInterrupt>,
-) -> Result<Vec<(Option<EventFd>, Queue)>> {
+pub fn update_mem_table(vu: &mut Master, mem: &GuestMemoryMmap) -> Result<()> {
     let mut regions: Vec<VhostUserMemoryRegionInfo> = Vec::new();
     mem.with_regions_mut(|_, region| {
         let (mmap_handle, mmap_offset) = match region.file_offset() {
@@ -57,6 +51,19 @@ pub fn setup_vhost_user_vring(
 
     vu.set_mem_table(regions.as_slice())
         .map_err(Error::VhostUserSetMemTable)?;
+
+    Ok(())
+}
+
+pub fn setup_vhost_user_vring(
+    vu: &mut Master,
+    mem: &GuestMemoryMmap,
+    queues: Vec<Queue>,
+    queue_evts: Vec<EventFd>,
+    virtio_interrupt: &Arc<dyn VirtioInterrupt>,
+) -> Result<Vec<(Option<EventFd>, Queue)>> {
+    // Let's first provide the memory table to the backend.
+    update_mem_table(vu, mem)?;
 
     let mut vu_interrupt_list = Vec::new();
 
