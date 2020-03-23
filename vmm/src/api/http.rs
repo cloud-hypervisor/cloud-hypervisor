@@ -4,8 +4,8 @@
 //
 
 use crate::api::http_endpoint::{
-    VmActionHandler, VmAddDevice, VmAddDisk, VmCreate, VmInfo, VmRemoveDevice, VmResize, VmmPing,
-    VmmShutdown,
+    VmActionHandler, VmAddDevice, VmAddDisk, VmAddPmem, VmCreate, VmInfo, VmRemoveDevice, VmResize,
+    VmmPing, VmmShutdown,
 };
 use crate::api::{ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -68,6 +68,7 @@ lazy_static! {
         r.routes.insert(endpoint!("/vm.add-device"), Box::new(VmAddDevice {}));
         r.routes.insert(endpoint!("/vm.remove-device"), Box::new(VmRemoveDevice {}));
         r.routes.insert(endpoint!("/vm.add-disk"), Box::new(VmAddDisk {}));
+        r.routes.insert(endpoint!("/vm.add-pmem"), Box::new(VmAddPmem {}));
 
         r
     };
