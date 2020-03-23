@@ -1519,38 +1519,59 @@ mod tests {
         test_vhost_user_blk(1, false, true, Some(&prepare_vubd), false)
     }
 
-    #[test]
-    fn test_boot_from_vhost_user_blk() {
+    fn test_boot_from_vhost_user_blk(
+        num_queues: usize,
+        readonly: bool,
+        direct: bool,
+        prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,
+        self_spawned: bool,
+    ) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
+            let disk_path = guest
+                .disk_config
+                .disk(DiskType::RawOperatingSystem)
+                .unwrap();
 
-            let (mut daemon_child, vubd_socket_path) = prepare_vubd(
-                &guest.tmp_dir,
-                guest
-                    .disk_config
-                    .disk(DiskType::RawOperatingSystem)
-                    .unwrap()
-                    .as_str(),
-                1,
-                false,
-                false,
-            );
+            let (blk_boot_params, daemon_child) = if self_spawned {
+                (
+                    format!(
+                        "vhost_user=true,path={},num_queues={},queue_size=128,wce=true",
+                        disk_path, num_queues,
+                    ),
+                    None,
+                )
+            } else {
+                let prepare_daemon = prepare_vhost_user_blk_daemon.unwrap();
+                // Start the daemon
+                let (daemon_child, vubd_socket_path) = prepare_daemon(
+                    &guest.tmp_dir,
+                    disk_path.as_str(),
+                    num_queues,
+                    readonly,
+                    direct,
+                );
+
+                (
+                    format!(
+                        "vhost_user=true,socket={},num_queues={},queue_size=128,wce=true",
+                        vubd_socket_path, num_queues,
+                    ),
+                    Some(daemon_child),
+                )
+            };
 
             let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
+                .args(&["--cpus", format!("boot={}", num_queues).as_str()])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
+                    blk_boot_params.as_str(),
                     format!(
                         "path={}",
                         guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                    )
-                    .as_str(),
-                    format!(
-                        "vhost_user=true,socket={},num_queues=1,queue_size=128,wce=true",
-                        vubd_socket_path
                     )
                     .as_str(),
                 ])
@@ -1561,81 +1582,59 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             // Just check the VM booted correctly.
-            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
+            aver_eq!(
+                tb,
+                guest.get_cpu_count().unwrap_or_default(),
+                num_queues as u32
+            );
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+
+            if self_spawned {
+                // The reboot is not supported with mmio, so no reason to test it.
+                #[cfg(not(feature = "mmio"))]
+                {
+                    let reboot_count = guest
+                        .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or(1);
+
+                    aver_eq!(tb, reboot_count, 0);
+                    guest.ssh_command("sudo reboot").unwrap_or_default();
+
+                    thread::sleep(std::time::Duration::new(20, 0));
+                    let reboot_count = guest
+                        .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default();
+                    aver_eq!(tb, reboot_count, 1);
+                }
+            }
 
             let _ = cloud_child.kill();
             let _ = cloud_child.wait();
 
-            thread::sleep(std::time::Duration::new(5, 0));
-            let _ = daemon_child.kill();
-            let _ = daemon_child.wait();
+            if let Some(mut daemon_child) = daemon_child {
+                thread::sleep(std::time::Duration::new(5, 0));
+                let _ = daemon_child.kill();
+                let _ = daemon_child.wait();
+            }
 
             Ok(())
         });
     }
 
     #[test]
+    fn test_boot_from_vhost_user_blk_default() {
+        test_boot_from_vhost_user_blk(1, false, false, Some(&prepare_vubd), false)
+    }
+
+    #[test]
     fn test_boot_from_vhost_user_blk_self_spawning() {
-        test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
-
-            let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
-                .args(&["--kernel", guest.fw_path.as_str()])
-                .args(&[
-                    "--disk",
-                    format!(
-                        "path={},vhost_user=true",
-                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                    )
-                    .as_str(),
-                    format!(
-                        "path={},vhost_user=true",
-                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                    )
-                    .as_str(),
-                ])
-                .default_net()
-                .spawn()
-                .unwrap();
-
-            thread::sleep(std::time::Duration::new(20, 0));
-
-            // Just check the VM booted correctly.
-            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
-
-            // The reboot is not supported with mmio, so no reason to test it.
-            #[cfg(not(feature = "mmio"))]
-            {
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or(1);
-
-                aver_eq!(tb, reboot_count, 0);
-                guest.ssh_command("sudo reboot").unwrap_or_default();
-
-                thread::sleep(std::time::Duration::new(20, 0));
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                aver_eq!(tb, reboot_count, 1);
-            }
-
-            let _ = cloud_child.kill();
-            let _ = cloud_child.wait();
-
-            Ok(())
-        });
+        test_boot_from_vhost_user_blk(1, false, false, None, true)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
