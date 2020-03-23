@@ -5,9 +5,10 @@
 
 use crate::api::http::EndpointHandler;
 use crate::api::{
-    vm_add_device, vm_boot, vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_remove_device,
-    vm_resize, vm_resume, vm_shutdown, vmm_ping, vmm_shutdown, ApiError, ApiRequest, ApiResult,
-    DeviceConfig, VmAction, VmConfig, VmRemoveDeviceData, VmResizeData,
+    vm_add_device, vm_add_disk, vm_boot, vm_create, vm_delete, vm_info, vm_pause, vm_reboot,
+    vm_remove_device, vm_resize, vm_resume, vm_shutdown, vmm_ping, vmm_shutdown, ApiError,
+    ApiRequest, ApiResult, DeviceConfig, DiskConfig, VmAction, VmConfig, VmRemoveDeviceData,
+    VmResizeData,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
@@ -59,6 +60,9 @@ pub enum HttpError {
 
     /// Could not handle VMM ping
     VmmPing(ApiError),
+
+    /// Could not add a disk to a VM
+    VmAddDisk(ApiError),
 }
 
 fn error_response(error: HttpError, status: StatusCode) -> Response {
@@ -339,6 +343,45 @@ impl EndpointHandler for VmRemoveDevice {
                             Arc::new(vm_remove_device_data),
                         )
                         .map_err(HttpError::VmRemoveDevice)
+                        {
+                            Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
+                            Err(e) => error_response(e, StatusCode::InternalServerError),
+                        }
+                    }
+
+                    None => Response::new(Version::Http11, StatusCode::BadRequest),
+                }
+            }
+            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+        }
+    }
+}
+
+// /api/v1/vm.add-disk handler
+pub struct VmAddDisk {}
+
+impl EndpointHandler for VmAddDisk {
+    fn handle_request(
+        &self,
+        req: &Request,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+    ) -> Response {
+        match req.method() {
+            Method::Put => {
+                match &req.body {
+                    Some(body) => {
+                        // Deserialize into a DiskConfig
+                        let vm_add_disk_data: DiskConfig = match serde_json::from_slice(body.raw())
+                            .map_err(HttpError::SerdeJsonDeserialize)
+                        {
+                            Ok(config) => config,
+                            Err(e) => return error_response(e, StatusCode::BadRequest),
+                        };
+
+                        // Call vm_add_device()
+                        match vm_add_disk(api_notifier, api_sender, Arc::new(vm_add_disk_data))
+                            .map_err(HttpError::VmAddDisk)
                         {
                             Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
                             Err(e) => error_response(e, StatusCode::InternalServerError),

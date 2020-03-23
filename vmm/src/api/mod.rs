@@ -36,7 +36,7 @@ pub use self::http::start_http_thread;
 pub mod http;
 pub mod http_endpoint;
 
-use crate::config::{DeviceConfig, VmConfig};
+use crate::config::{DeviceConfig, DiskConfig, VmConfig};
 use crate::vm::{Error as VmError, VmState};
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
@@ -111,6 +111,9 @@ pub enum ApiError {
 
     /// Cannot apply seccomp filter
     ApplySeccompFilter(seccomp::Error),
+
+    /// The device could not be added to the VM.
+    VmAddDisk(VmError),
 }
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
@@ -204,6 +207,9 @@ pub enum ApiRequest {
 
     /// Remove a device from the VM.
     VmRemoveDevice(Arc<VmRemoveDeviceData>, Sender<ApiResponse>),
+
+    /// Add a disk to the VM.
+    VmAddDisk(Arc<DiskConfig>, Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -385,6 +391,24 @@ pub fn vm_remove_device(
     // Send the VM remove-device request.
     api_sender
         .send(ApiRequest::VmRemoveDevice(data, response_sender))
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+
+    Ok(())
+}
+
+pub fn vm_add_disk(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<DiskConfig>,
+) -> ApiResult<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM add-disk request.
+    api_sender
+        .send(ApiRequest::VmAddDisk(data, response_sender))
         .map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
