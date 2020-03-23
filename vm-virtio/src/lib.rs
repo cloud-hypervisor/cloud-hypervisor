@@ -175,4 +175,5 @@ pub enum Error {
     EpollCtl(io::Error),
     EpollWait(io::Error),
     FailedSignalingDriver(io::Error),
+    VhostUserUpdateMemory(vhost_user::Error),
 }

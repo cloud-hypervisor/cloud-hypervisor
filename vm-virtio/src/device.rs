@@ -6,7 +6,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::*;
+use crate::{ActivateResult, Error, Queue};
 use std::sync::Arc;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
@@ -106,6 +106,10 @@ pub trait VirtioDevice: Send {
     /// every device as part of shutting down the VM. Acting on the device
     /// after a shutdown() can lead to unpredictable results.
     fn shutdown(&mut self) {}
+
+    fn update_memory(&mut self, _mem: &GuestMemoryMmap) -> std::result::Result<(), Error> {
+        Ok(())
+    }
 }
 
 /// Trait providing address translation the same way a physical DMA remapping
