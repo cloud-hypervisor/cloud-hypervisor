@@ -22,8 +22,8 @@ use arch::layout;
 use arch::EntryPoint;
 use devices::{ioapic, BusDevice};
 use kvm_bindings::{
-    kvm_clock_data, kvm_fpu, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events,
-    kvm_xcrs, kvm_xsave, CpuId, Msrs,
+    kvm_clock_data, kvm_fpu, kvm_lapic_state, kvm_regs, kvm_sregs, kvm_vcpu_events, kvm_xcrs,
+    kvm_xsave, CpuId, Msrs,
 };
 use kvm_ioctls::*;
 use libc::{c_void, siginfo_t};
@@ -324,7 +324,6 @@ pub struct Vcpu {
 pub struct VcpuKvmState {
     msrs: Msrs,
     vcpu_events: kvm_vcpu_events,
-    mp_state: kvm_mp_state,
     regs: kvm_regs,
     sregs: kvm_sregs,
     fpu: kvm_fpu,
@@ -476,7 +475,6 @@ impl Vcpu {
             .fd
             .get_vcpu_events()
             .map_err(Error::VcpuGetVcpuEvents)?;
-        let mp_state = self.fd.get_mp_state().map_err(Error::VcpuGetMpState)?;
         let regs = self.fd.get_regs().map_err(Error::VcpuGetRegs)?;
         let sregs = self.fd.get_sregs().map_err(Error::VcpuGetSregs)?;
         let lapic_state = self.fd.get_lapic().map_err(Error::VcpuGetLapic)?;
@@ -487,7 +485,6 @@ impl Vcpu {
         Ok(VcpuKvmState {
             msrs,
             vcpu_events,
-            mp_state,
             regs,
             sregs,
             fpu,
@@ -512,11 +509,6 @@ impl Vcpu {
             .map_err(Error::VcpuSetSregs)?;
 
         self.fd.set_xcrs(&state.xcrs).map_err(Error::VcpuSetXcrs)?;
-
-        println!("MP STATE {:#?}", state.mp_state);
-        self.fd
-            .set_mp_state(state.mp_state)
-            .map_err(Error::VcpuSetMpState)?;
 
         self.fd.set_msrs(&state.msrs).map_err(Error::VcpuSetMsrs)?;
 
