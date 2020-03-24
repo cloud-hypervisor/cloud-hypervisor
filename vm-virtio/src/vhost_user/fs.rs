@@ -41,12 +41,12 @@ struct SlaveReqHandler {
 }
 
 impl VhostUserMasterReqHandler for SlaveReqHandler {
-    fn handle_config_change(&mut self) -> HandlerResult<()> {
+    fn handle_config_change(&mut self) -> HandlerResult<u64> {
         debug!("handle_config_change");
-        Ok(())
+        Ok(0)
     }
 
-    fn fs_slave_map(&mut self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<()> {
+    fn fs_slave_map(&mut self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<u64> {
         debug!("fs_slave_map");
 
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
@@ -80,10 +80,10 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             }
         }
 
-        Ok(())
+        Ok(0)
     }
 
-    fn fs_slave_unmap(&mut self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<()> {
+    fn fs_slave_unmap(&mut self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<u64> {
         debug!("fs_slave_unmap");
 
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
@@ -120,10 +120,10 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             }
         }
 
-        Ok(())
+        Ok(0)
     }
 
-    fn fs_slave_sync(&mut self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<()> {
+    fn fs_slave_sync(&mut self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<u64> {
         debug!("fs_slave_sync");
 
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
@@ -145,12 +145,13 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             }
         }
 
-        Ok(())
+        Ok(0)
     }
 
-    fn fs_slave_io(&mut self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<()> {
+    fn fs_slave_io(&mut self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<u64> {
         debug!("fs_slave_io");
 
+        let mut done: u64 = 0;
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
             // Ignore if the length is 0.
             if fs.len[i] == 0 {
@@ -199,6 +200,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
                 len -= ret as usize;
                 foffset += ret as u64;
                 ptr += ret as u64;
+                done += ret as u64;
             }
         }
 
@@ -207,7 +209,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             return Err(io::Error::last_os_error());
         }
 
-        Ok(())
+        Ok(done)
     }
 }
 
