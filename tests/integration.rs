@@ -1235,6 +1235,12 @@ mod tests {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path;
+            kernel_path.push("vmlinux");
+
             let (net_params, daemon_child) = if self_spawned {
                 (
                     format!(
@@ -1261,7 +1267,15 @@ mod tests {
             let mut cloud_child = GuestCommand::new(&guest)
                 .args(&["--cpus", format!("boot={}", num_queues / 2).as_str()])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&[
+                    "--cmdline",
+                    "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c \
+                     console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
+                     init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
+                     no_timer_check noreplace-smp cryptomgr.notests \
+                     rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw",
+                ])
                 .default_disks()
                 .args(&["--net", net_params.as_str()])
                 .spawn()
@@ -1369,10 +1383,13 @@ mod tests {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
 
-            let (blk_params, daemon_child) = if self_spawned {
-                let mut workload_path = dirs::home_dir().unwrap();
-                workload_path.push("workloads");
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
 
+            let mut kernel_path = workload_path.clone();
+            kernel_path.push("vmlinux");
+
+            let (blk_params, daemon_child) = if self_spawned {
                 let mut blk_file_path = workload_path;
                 blk_file_path.push("blk.img");
                 let blk_file_path = String::from(blk_file_path.to_str().unwrap());
@@ -1402,7 +1419,15 @@ mod tests {
             let mut cloud_child = GuestCommand::new(&guest)
                 .args(&["--cpus", format!("boot={}", num_queues).as_str()])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&[
+                    "--cmdline",
+                    "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c \
+                     console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
+                     init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
+                     no_timer_check noreplace-smp cryptomgr.notests \
+                     rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw",
+                ])
                 .args(&[
                     "--disk",
                     format!(
@@ -1529,6 +1554,13 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
+
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path;
+            kernel_path.push("vmlinux");
+
             let disk_path = guest
                 .disk_config
                 .disk(DiskType::RawOperatingSystem)
@@ -1565,7 +1597,15 @@ mod tests {
             let mut cloud_child = GuestCommand::new(&guest)
                 .args(&["--cpus", format!("boot={}", num_queues).as_str()])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&[
+                    "--cmdline",
+                    "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c \
+                     console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
+                     init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
+                     no_timer_check noreplace-smp cryptomgr.notests \
+                     rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw",
+                ])
                 .args(&[
                     "--disk",
                     blk_boot_params.as_str(),
