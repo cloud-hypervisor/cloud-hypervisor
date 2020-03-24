@@ -96,6 +96,12 @@ mod tests {
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64-raw.img";
     const EOAN_IMAGE_NAME: &str = "eoan-server-cloudimg-amd64-raw.img";
 
+    const CLEAR_KERNEL_CMDLINE: &str = "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c \
+                     console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
+                     init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
+                     no_timer_check noreplace-smp cryptomgr.notests \
+                     rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw";
+
     impl UbuntuDiskConfig {
         fn new(image_name: String) -> Self {
             UbuntuDiskConfig {
@@ -1020,12 +1026,12 @@ mod tests {
             kernel_path.push("vmlinux");
 
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus","boot=1"])
+                .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .spawn()
                 .unwrap();
 
@@ -1065,12 +1071,12 @@ mod tests {
             kernel_path.push("vmlinux.pvh");
 
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus","boot=1"])
+                .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .spawn()
                 .unwrap();
 
@@ -1110,12 +1116,12 @@ mod tests {
             kernel_path.push("bzImage");
 
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus","boot=1"])
+                .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .spawn()
                 .unwrap();
 
@@ -1268,14 +1274,7 @@ mod tests {
                 .args(&["--cpus", format!("boot={}", num_queues / 2).as_str()])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&[
-                    "--cmdline",
-                    "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c \
-                     console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
-                     init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
-                     no_timer_check noreplace-smp cryptomgr.notests \
-                     rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw",
-                ])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .default_disks()
                 .args(&["--net", net_params.as_str()])
                 .spawn()
@@ -1420,14 +1419,7 @@ mod tests {
                 .args(&["--cpus", format!("boot={}", num_queues).as_str()])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&[
-                    "--cmdline",
-                    "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c \
-                     console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
-                     init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
-                     no_timer_check noreplace-smp cryptomgr.notests \
-                     rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw",
-                ])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .args(&[
                     "--disk",
                     format!(
@@ -1598,14 +1590,7 @@ mod tests {
                 .args(&["--cpus", format!("boot={}", num_queues).as_str()])
                 .args(&["--memory", "size=512M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&[
-                    "--cmdline",
-                    "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c \
-                     console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
-                     init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
-                     no_timer_check noreplace-smp cryptomgr.notests \
-                     rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw",
-                ])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .args(&[
                     "--disk",
                     blk_boot_params.as_str(),
@@ -1767,14 +1752,7 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&[
-                    "--cmdline",
-                    "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c \
-                     console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
-                     init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
-                     no_timer_check noreplace-smp cryptomgr.notests \
-                     rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw",
-                ])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .spawn()
                 .unwrap();
 
@@ -1990,26 +1968,38 @@ mod tests {
             kernel_path.push("vmlinux");
 
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus","boot=1"])
+                .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--disk",
+                .args(&[
+                    "--disk",
                     format!(
                         "path={}",
                         guest.disk_config.disk(DiskType::CloudInit).unwrap()
                     )
-                    .as_str()])
+                    .as_str(),
+                ])
                 .default_net()
                 .args(&[
                     "--pmem",
                     format!(
                         "file={},size={}",
-                        guest.disk_config.disk(DiskType::RawOperatingSystem).unwrap(),
-                        fs::metadata(&guest.disk_config.disk(DiskType::RawOperatingSystem).unwrap()).unwrap().len()
+                        guest
+                            .disk_config
+                            .disk(DiskType::RawOperatingSystem)
+                            .unwrap(),
+                        fs::metadata(
+                            &guest
+                                .disk_config
+                                .disk(DiskType::RawOperatingSystem)
+                                .unwrap()
+                        )
+                        .unwrap()
+                        .len()
                     )
                     .as_str(),
                 ])
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .spawn()
                 .unwrap();
 
@@ -2371,23 +2361,30 @@ mod tests {
                 .args(&["--memory", "size=1G,file=/dev/hugepages"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts rw"])
+                .args(&[
+                    "--cmdline",
+                    format!(
+                        "{} vfio_iommu_type1.allow_unsafe_interrupts",
+                        CLEAR_KERNEL_CMDLINE
+                    )
+                    .as_str(),
+                ])
                 .args(&[
                     "--net",
+                    format!("tap={},mac={}", vfio_tap0, guest.network.guest_mac).as_str(),
                     format!(
-                        "tap={},mac={}", vfio_tap0, guest.network.guest_mac
+                        "tap={},mac={},iommu=on",
+                        vfio_tap1, guest.network.l2_guest_mac1
                     )
                     .as_str(),
                     format!(
-                        "tap={},mac={},iommu=on", vfio_tap1, guest.network.l2_guest_mac1
+                        "tap={},mac={},iommu=on",
+                        vfio_tap2, guest.network.l2_guest_mac2
                     )
                     .as_str(),
                     format!(
-                        "tap={},mac={},iommu=on", vfio_tap2, guest.network.l2_guest_mac2
-                    )
-                    .as_str(),
-                    format!(
-                        "tap={},mac={},iommu=on", vfio_tap3, guest.network.l2_guest_mac3
+                        "tap={},mac={},iommu=on",
+                        vfio_tap3, guest.network.l2_guest_mac3
                     )
                     .as_str(),
                 ])
@@ -2534,12 +2531,15 @@ mod tests {
             kernel_path.push("vmlinux");
 
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus","boot=1"])
+                .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw acpi=off"])
+                .args(&[
+                    "--cmdline",
+                    format!("{} acpi=off", CLEAR_KERNEL_CMDLINE).as_str(),
+                ])
                 .spawn()
                 .unwrap();
 
@@ -2638,12 +2638,12 @@ mod tests {
             kernel_path.push("bzImage");
 
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus","boot=1"])
+                .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .spawn()
                 .unwrap();
 
@@ -2899,7 +2899,7 @@ mod tests {
             kernel_path.push("bzImage");
 
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus","boot=1"])
+                .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&[
@@ -2916,7 +2916,7 @@ mod tests {
                     .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string_w_iommu().as_str()])
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .spawn()
                 .unwrap();
 
@@ -3168,7 +3168,7 @@ mod tests {
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .default_disks()
                 .default_net()
                 .args(&["--api-socket", &api_socket])
@@ -3249,7 +3249,7 @@ mod tests {
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M,hotplug_size=8192M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .default_disks()
                 .default_net()
                 .args(&["--api-socket", &api_socket])
@@ -3343,7 +3343,7 @@ mod tests {
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M,hotplug_size=8192M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .default_disks()
                 .default_net()
                 .args(&["--api-socket", &api_socket])
@@ -3429,12 +3429,15 @@ mod tests {
             let guest_memory_size_kb = 512 * 1024;
 
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus","boot=1"])
-                .args(&["--memory", format!("size={}K", guest_memory_size_kb).as_str()])
+                .args(&["--cpus", "boot=1"])
+                .args(&[
+                    "--memory",
+                    format!("size={}K", guest_memory_size_kb).as_str(),
+                ])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .spawn()
                 .unwrap();
 
