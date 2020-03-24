@@ -1240,6 +1240,7 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
+            let api_socket = temp_api_path(&guest.tmp_dir);
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -1272,11 +1273,12 @@ mod tests {
 
             let mut cloud_child = GuestCommand::new(&guest)
                 .args(&["--cpus", format!("boot={}", num_queues / 2).as_str()])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--memory", "size=512M,hotplug_size=2048M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .default_disks()
                 .args(&["--net", net_params.as_str()])
+                .args(&["--api-socket", &api_socket])
                 .spawn()
                 .unwrap();
 
@@ -1319,6 +1321,28 @@ mod tests {
                     .unwrap_or_default(),
                 10 + (num_queues as u32)
             );
+
+            // ACPI is not built with mmio, hence we can't test the resize
+            // feature for mmio.
+            #[cfg(not(feature = "mmio"))]
+            {
+                guest
+                    .ssh_command(
+                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
+                    )
+                    .unwrap_or_default();
+
+                // Add RAM to the VM
+                let desired_ram = 1024 << 20;
+                resize_command(&api_socket, None, Some(desired_ram));
+
+                thread::sleep(std::time::Duration::new(10, 0));
+
+                // Here by simply checking the size (through ssh), we validate
+                // the connection is still working, which means vhost-user-net
+                // keeps working after the resize.
+                aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+            }
 
             let _ = cloud_child.kill();
             let _ = cloud_child.wait();
@@ -1381,6 +1405,7 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
+            let api_socket = temp_api_path(&guest.tmp_dir);
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -1417,7 +1442,7 @@ mod tests {
 
             let mut cloud_child = GuestCommand::new(&guest)
                 .args(&["--cpus", format!("boot={}", num_queues).as_str()])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--memory", "size=512M,hotplug_size=2048M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .args(&[
@@ -1435,6 +1460,7 @@ mod tests {
                     blk_params.as_str(),
                 ])
                 .default_net()
+                .args(&["--api-socket", &api_socket])
                 .spawn()
                 .unwrap();
 
@@ -1498,6 +1524,36 @@ mod tests {
                     .trim(),
                 "bar"
             );
+
+            // ACPI is not built with mmio, hence we can't test the resize
+            // feature for mmio.
+            #[cfg(not(feature = "mmio"))]
+            {
+                guest
+                    .ssh_command(
+                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
+                    )
+                    .unwrap_or_default();
+
+                // Add RAM to the VM
+                let desired_ram = 1024 << 20;
+                resize_command(&api_socket, None, Some(desired_ram));
+
+                thread::sleep(std::time::Duration::new(10, 0));
+
+                aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+
+                // Check again the content of the block device after the resize
+                // has been performed.
+                aver_eq!(
+                    tb,
+                    guest
+                        .ssh_command("cat mount_image/foo")
+                        .unwrap_or_default()
+                        .trim(),
+                    "bar"
+                );
+            }
 
             // Unmount the device
             guest.ssh_command("sudo umount /dev/vdc")?;
@@ -1715,6 +1771,7 @@ mod tests {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
+            let api_socket = temp_api_path(&guest.tmp_dir);
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -1740,7 +1797,7 @@ mod tests {
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--memory", "size=512M,hotplug_size=2048M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
@@ -1753,6 +1810,7 @@ mod tests {
                     .as_str(),
                 ])
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--api-socket", &api_socket])
                 .spawn()
                 .unwrap();
 
@@ -1808,6 +1866,35 @@ mod tests {
                     .trim(),
                 "bar"
             );
+
+            // ACPI is not built with mmio, hence we can't test the resize
+            // feature for mmio.
+            #[cfg(not(feature = "mmio"))]
+            {
+                guest
+                    .ssh_command(
+                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
+                    )
+                    .unwrap_or_default();
+
+                // Add RAM to the VM
+                let desired_ram = 1024 << 20;
+                resize_command(&api_socket, None, Some(desired_ram));
+
+                thread::sleep(std::time::Duration::new(10, 0));
+                aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+
+                // After the resize, check again that file1 exists and its
+                // content is "foo".
+                aver_eq!(
+                    tb,
+                    guest
+                        .ssh_command("cat mount_dir/file1")
+                        .unwrap_or_default()
+                        .trim(),
+                    "foo"
+                );
+            }
 
             let _ = child.kill();
             let _ = daemon_child.kill();
