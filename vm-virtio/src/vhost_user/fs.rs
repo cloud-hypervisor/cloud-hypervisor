@@ -161,20 +161,21 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             let mut foffset = fs.fd_offset[i];
             let mut len = fs.len[i] as usize;
             let gpa = fs.cache_offset[i];
-            if gpa < self.cache_offset.raw_value()
-                || gpa >= self.cache_offset.raw_value() + self.cache_size
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "gpa is out of cache range",
-                ));
-            }
+            let cache_end = self.cache_offset.raw_value() + self.cache_size;
+            let efault = libc::EFAULT;
 
             let offset = gpa
                 .checked_sub(self.cache_offset.raw_value())
-                .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "gpa is out of cache range"))?;
-            let mut ptr = self.mmap_cache_addr + offset;
+                .ok_or_else(|| io::Error::from_raw_os_error(efault))?;
+            let end = gpa
+                .checked_add(fs.len[i])
+                .ok_or_else(|| io::Error::from_raw_os_error(efault))?;
 
+            if gpa < self.cache_offset.raw_value() || gpa >= cache_end || end >= cache_end {
+                return Err(io::Error::from_raw_os_error(efault));
+            }
+
+            let mut ptr = self.mmap_cache_addr + offset;
             while len > 0 {
                 let ret = if (fs.flags[i] & VhostUserFSSlaveMsgFlags::MAP_W)
                     == VhostUserFSSlaveMsgFlags::MAP_W
