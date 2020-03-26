@@ -27,7 +27,7 @@ use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
-use vm_memory::{Address, GuestAddress, GuestUsize};
+use vm_memory::{Address, GuestAddress, GuestRegionMmap, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]
@@ -41,6 +41,7 @@ pub enum VfioPciError {
     SetGsiRouting(kvm_ioctls::Error),
     MsiNotConfigured,
     MsixNotConfigured,
+    UpdateMemory(crate::VfioError),
     UpdateMsiEventFd,
     UpdateMsixEventFd,
 }
@@ -62,6 +63,7 @@ impl fmt::Display for VfioPciError {
             VfioPciError::SetGsiRouting(e) => write!(f, "failed to set GSI routes for KVM: {}", e),
             VfioPciError::MsiNotConfigured => write!(f, "MSI interrupt not yet configured"),
             VfioPciError::MsixNotConfigured => write!(f, "MSI-X interrupt not yet configured"),
+            VfioPciError::UpdateMemory(e) => write!(f, "failed to update memory: {}", e),
             VfioPciError::UpdateMsiEventFd => write!(f, "failed to update MSI eventfd"),
             VfioPciError::UpdateMsixEventFd => write!(f, "failed to update MSI-X eventfd"),
         }
@@ -609,6 +611,12 @@ impl VfioPciDevice {
                 }
             }
         }
+    }
+
+    pub fn update_memory(&self, new_region: &Arc<GuestRegionMmap>) -> Result<()> {
+        self.device
+            .extend_dma_map(new_region)
+            .map_err(VfioPciError::UpdateMemory)
     }
 }
 

@@ -25,7 +25,7 @@ use vfio_ioctls::*;
 use vm_device::{get_host_address_range, ExternalDmaMapping};
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap,
-    GuestMemoryRegion,
+    GuestMemoryRegion, GuestRegionMmap,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::fam::FamStruct;
@@ -871,6 +871,18 @@ impl VfioDevice {
             })?;
         }
         Ok(())
+    }
+
+    pub fn extend_dma_map(&self, new_region: &Arc<GuestRegionMmap>) -> Result<()> {
+        if !self.iommu_attached {
+            self.vfio_dma_map(
+                new_region.start_addr().raw_value(),
+                new_region.len() as u64,
+                new_region.as_ptr() as u64,
+            )
+        } else {
+            Ok(())
+        }
     }
 
     /// Return the maximum numner of interrupts a VFIO device can request.
