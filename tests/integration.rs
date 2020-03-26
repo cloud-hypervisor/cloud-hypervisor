@@ -692,6 +692,14 @@ mod tests {
                 .map_err(Error::Parsing)?)
         }
 
+        fn get_total_memory_l2(&self) -> Result<u32, Error> {
+            Ok(self
+                .ssh_command_l2_1("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")?
+                .trim()
+                .parse()
+                .map_err(Error::Parsing)?)
+        }
+
         fn get_entropy(&self) -> Result<u32, Error> {
             Ok(self
                 .ssh_command("cat /proc/sys/kernel/random/entropy_avail")?
@@ -2445,7 +2453,7 @@ mod tests {
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=4"])
-                .args(&["--memory", "size=1G,file=/dev/hugepages"])
+                .args(&["--memory", "size=2G,file=/dev/hugepages"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .args(&[
@@ -2595,6 +2603,27 @@ mod tests {
                     .parse::<u32>()
                     .unwrap_or_default(),
                 7,
+            );
+
+            // Perform memory hotplug in L2 and validate the memory is showing
+            // up as expected. In order to check, we will use the virtio-net
+            // device already passed through L2 as a VFIO device, this will
+            // verify that VFIO devices are functional with memory hotplug.
+            aver!(
+                tb,
+                guest.get_total_memory_l2().unwrap_or_default() > 491_000
+            );
+            guest.ssh_command_l2_1(
+                "sudo bash -c 'echo online > /sys/devices/system/memory/auto_online_blocks'",
+            )?;
+            guest.ssh_command_l1(
+                "sudo /mnt/ch-remote \
+                 --api-socket=/tmp/ch_api.sock \
+                 resize --memory=1073741824",
+            )?;
+            aver!(
+                tb,
+                guest.get_total_memory_l2().unwrap_or_default() > 982_000
             );
 
             let _ = child.kill();
