@@ -606,17 +606,18 @@ impl Vm {
         }
 
         if let Some(desired_memory) = desired_memory {
-            if self
+            let new_region = self
                 .memory_manager
                 .lock()
                 .unwrap()
                 .resize(desired_memory)
-                .map_err(Error::MemoryManager)?
-            {
+                .map_err(Error::MemoryManager)?;
+
+            if let Some(new_region) = &new_region {
                 self.device_manager
                     .lock()
                     .unwrap()
-                    .update_memory()
+                    .update_memory(&new_region)
                     .map_err(Error::DeviceManager)?;
 
                 let memory_config = &self.config.lock().unwrap().memory;
@@ -632,9 +633,9 @@ impl Vm {
                 }
             }
 
-            // We update the VM config regardless of the actual guest resize operation
-            // result (true or false, happened or not), so that if the VM reboots it
-            // will be running with the last configure memory size.
+            // We update the VM config regardless of the actual guest resize
+            // operation result (happened or not), so that if the VM reboots
+            // it will be running with the last configure memory size.
             self.config.lock().unwrap().memory.size = desired_memory;
         }
         Ok(())
