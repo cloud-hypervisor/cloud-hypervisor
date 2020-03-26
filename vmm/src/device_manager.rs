@@ -270,6 +270,10 @@ pub enum DeviceManagerError {
 
     /// Cannot find a memory range for virtio-mem memory
     VirtioMemRangeAllocation,
+
+    /// Failed updating guest memory for VFIO PCI device.
+    #[cfg(feature = "pci_support")]
+    UpdateMemoryForVfioPciDevice(VfioPciError),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1884,6 +1888,22 @@ impl DeviceManager {
                 .unwrap()
                 .update_memory(&memory.memory())
                 .map_err(DeviceManagerError::UpdateMemoryForVirtioDevice)?;
+        }
+
+        // Take care of updating the memory for VFIO PCI devices.
+        #[cfg(feature = "pci_support")]
+        {
+            for (_, any_device) in self.pci_devices.iter() {
+                if let Ok(vfio_pci_device) =
+                    Arc::clone(any_device).downcast::<Mutex<VfioPciDevice>>()
+                {
+                    vfio_pci_device
+                        .lock()
+                        .unwrap()
+                        .update_memory(_new_region)
+                        .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
+                }
+            }
         }
 
         Ok(())
