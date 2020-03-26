@@ -134,6 +134,9 @@ const HANDLE_KILLPRIV: u32 = 524_288;
 /// FileSystem supports posix acls.
 const POSIX_ACL: u32 = 1_048_576;
 
+/// Reading the device after abort returns ECONNABORTED.
+const ABORT_ERROR: u32 = 2_097_152;
+
 bitflags! {
     /// A bitfield passed in as a parameter to and returned from the `init` method of the
     /// `FileSystem` trait.
@@ -300,6 +303,12 @@ bitflags! {
         ///
         /// This feature is disabled by default.
         const POSIX_ACL = POSIX_ACL;
+
+        /// Indicates that if the connection is gone because of sysfs abort, reading from the device
+        /// will return -ECONNABORTED.
+        ///
+        /// This feature is not currently supported.
+        const ABORT_ERROR = ABORT_ERROR;
     }
 }
 
