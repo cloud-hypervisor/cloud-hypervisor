@@ -53,7 +53,9 @@ use vm_device::interrupt::{
 };
 use vm_device::{Migratable, MigratableError, Pausable, Snapshotable};
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestUsize, MmapRegion};
+use vm_memory::{
+    Address, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize, MmapRegion,
+};
 #[cfg(feature = "pci_support")]
 use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::transport::VirtioTransport;
@@ -1874,7 +1876,7 @@ impl DeviceManager {
         self.cmdline_additions.as_slice()
     }
 
-    pub fn update_memory(&self) -> DeviceManagerResult<()> {
+    pub fn update_memory(&self, _new_region: &Arc<GuestRegionMmap>) -> DeviceManagerResult<()> {
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         for (virtio_device, _) in self.virtio_devices.iter() {
             virtio_device

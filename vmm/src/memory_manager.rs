@@ -379,7 +379,7 @@ impl MemoryManager {
         Ok(())
     }
 
-    fn hotplug_ram_region(&mut self, size: usize) -> Result<(), Error> {
+    fn hotplug_ram_region(&mut self, size: usize) -> Result<Arc<GuestRegionMmap>, Error> {
         info!("Hotplugging new RAM: {}", size);
 
         // Check that there is a free slot
@@ -434,9 +434,9 @@ impl MemoryManager {
 
         self.next_hotplug_slot += 1;
 
-        self.add_region(region)?;
+        self.add_region(Arc::clone(&region))?;
 
-        Ok(())
+        Ok(region)
     }
 
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
@@ -526,25 +526,28 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn resize(&mut self, desired_ram: u64) -> Result<bool, Error> {
-        let mut resized = false;
+    /// In case this function resulted in adding a new memory region to the
+    /// guest memory, the new region is returned to the caller. The virtio-mem
+    /// use case never adds a new region as the whole hotpluggable memory has
+    /// already been allocated at boot time.
+    pub fn resize(&mut self, desired_ram: u64) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
+        let mut region: Option<Arc<GuestRegionMmap>> = None;
         match self.hotplug_method {
             HotplugMethod::VirtioMem => {
                 if desired_ram >= self.boot_ram {
                     self.virtiomem_resize(desired_ram - self.boot_ram)?;
                     self.current_ram = desired_ram;
-                    resized = true;
                 }
             }
             HotplugMethod::Acpi => {
                 if desired_ram >= self.current_ram {
-                    self.hotplug_ram_region((desired_ram - self.current_ram) as usize)?;
+                    region =
+                        Some(self.hotplug_ram_region((desired_ram - self.current_ram) as usize)?);
                     self.current_ram = desired_ram;
-                    resized = true;
                 }
             }
         }
-        Ok(resized)
+        Ok(region)
     }
 }
 
