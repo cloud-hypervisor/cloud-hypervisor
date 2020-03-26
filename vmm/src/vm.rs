@@ -513,9 +513,20 @@ impl Vm {
                 let mut entry_point_addr: GuestAddress = entry_addr.kernel_load;
 
                 let boot_prot = if entry_addr.pvh_entry_addr.is_some() {
-                    // entry_addr.pvh_entry_addr field is safe to unwrap here
-                    entry_point_addr = entry_addr.pvh_entry_addr.unwrap();
-                    BootProtocol::PvhBoot
+                    // Handle the case where PVH is set but the user wants to
+                    // boot an initramfs. At this point in time, our code does
+                    // not support initramfs along with PVH, hence we make the
+                    // code fallback to the legacy Linux boot.
+                    if initramfs_config.is_some() {
+                        warn!(
+                            "PVH not supported with initramfs, falling back to legacy Linux boot"
+                        );
+                        BootProtocol::LinuxBoot
+                    } else {
+                        // entry_addr.pvh_entry_addr field is safe to unwrap here
+                        entry_point_addr = entry_addr.pvh_entry_addr.unwrap();
+                        BootProtocol::PvhBoot
+                    }
                 } else {
                     BootProtocol::LinuxBoot
                 };
