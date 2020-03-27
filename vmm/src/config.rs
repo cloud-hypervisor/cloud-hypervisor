@@ -30,7 +30,7 @@ pub enum Error {
     /// Max is less than boot
     ParseCpusMaxLowerThanBoot,
     /// Failed parsing memory hotplug_method parameter.
-    ParseMemoryHotplugMethodParam,
+    ParseMemoryHotplugMethodParam(ParseHotplugMethodError),
     /// Failed parsing memory file parameter.
     ParseMemoryFileParam,
     /// Failed parsing kernel parameters.
@@ -262,6 +262,35 @@ impl FromStr for Toggle {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum HotplugMethod {
+    Acpi,
+    VirtioMem,
+}
+
+impl Default for HotplugMethod {
+    fn default() -> Self {
+        HotplugMethod::Acpi
+    }
+}
+
+#[derive(Debug)]
+pub enum ParseHotplugMethodError {
+    InvalidValue(String),
+}
+
+impl FromStr for HotplugMethod {
+    type Err = ParseHotplugMethodError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "acpi" => Ok(HotplugMethod::Acpi),
+            "virtio-mem" => Ok(HotplugMethod::VirtioMem),
+            _ => Err(ParseHotplugMethodError::InvalidValue(s.to_owned())),
+        }
+    }
+}
+
 fn parse_size(size: &str) -> Result<u64> {
     let s = size.trim();
 
@@ -336,18 +365,6 @@ impl Default for CpusConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub enum HotplugMethod {
-    Acpi,
-    VirtioMem,
-}
-
-impl Default for HotplugMethod {
-    fn default() -> Self {
-        HotplugMethod::Acpi
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub size: u64,
     #[serde(default)]
@@ -397,12 +414,9 @@ impl MemoryConfig {
             None
         };
 
-        let hotplug_method_str = hotplug_method_str.to_string().to_lowercase();
-        let hotplug_method = match &hotplug_method_str[..] {
-            "acpi" => HotplugMethod::Acpi,
-            "virtio-mem" => HotplugMethod::VirtioMem,
-            _ => return Err(Error::ParseMemoryHotplugMethodParam),
-        };
+        let hotplug_method = hotplug_method_str[..]
+            .parse()
+            .map_err(Error::ParseMemoryHotplugMethodParam)?;
 
         Ok(MemoryConfig {
             size: parse_size(size_str)?,
