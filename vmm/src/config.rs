@@ -349,7 +349,7 @@ impl MemoryConfig {
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = memory.split(',').collect();
 
-        let mut size_str: &str = "";
+        let mut size_str: &str = "512M";
         let mut file_str: &str = "";
         let mut mergeable_str: &str = "";
         let mut backed = false;
@@ -1304,6 +1304,66 @@ mod tests {
             }
         );
         assert!(CpusConfig::parse("boot=2,max=1").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_mem_parsing() -> Result<()> {
+        assert_eq!(MemoryConfig::parse("")?, MemoryConfig::default());
+        // Default string
+        assert_eq!(MemoryConfig::parse("size=512M")?, MemoryConfig::default());
+        assert_eq!(
+            MemoryConfig::parse("size=512M,file=/some/file")?,
+            MemoryConfig {
+                size: 512 << 20,
+                file: Some(PathBuf::from("/some/file")),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            MemoryConfig::parse("size=512M,mergeable=on")?,
+            MemoryConfig {
+                size: 512 << 20,
+                mergeable: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            MemoryConfig::parse("mergeable=on")?,
+            MemoryConfig {
+                mergeable: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            MemoryConfig::parse("size=1G,mergeable=off")?,
+            MemoryConfig {
+                size: 1 << 30,
+                mergeable: false,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            MemoryConfig::parse("hotplug_method=acpi")?,
+            MemoryConfig {
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            MemoryConfig::parse("hotplug_method=acpi,hotplug_size=512M")?,
+            MemoryConfig {
+                hotplug_size: Some(512 << 20),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            MemoryConfig::parse("hotplug_method=virtio-mem,hotplug_size=512M")?,
+            MemoryConfig {
+                hotplug_size: Some(512 << 20),
+                hotplug_method: HotplugMethod::VirtioMem,
+                ..Default::default()
+            }
+        );
         Ok(())
     }
 }
