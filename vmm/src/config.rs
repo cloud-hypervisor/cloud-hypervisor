@@ -27,10 +27,6 @@ pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = 128;
 /// Errors associated with VM configuration parameters.
 #[derive(Debug)]
 pub enum Error {
-    /// Failed parsing cpus parameters.
-    ParseCpusParams(std::num::ParseIntError),
-    /// Unexpected vCPU parameter
-    ParseCpusUnknownParam,
     /// Max is less than boot
     ParseCpusMaxLowerThanBoot,
     /// Failed parsing memory hotplug_method parameter.
@@ -111,6 +107,8 @@ pub enum Error {
     ValidateMissingKernelConfig,
     /// Failed parsing generic on|off parameter.
     ParseOnOff,
+    /// Error parsing CPU options
+    ParseCpus(OptionParserError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -288,28 +286,18 @@ pub struct CpusConfig {
 
 impl CpusConfig {
     pub fn parse(cpus: &str) -> Result<Self> {
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = cpus.split(',').collect();
+        let mut parser = OptionParser::new();
+        parser.add("boot").add("max");
+        parser.parse(cpus).map_err(Error::ParseCpus)?;
 
-        let mut boot_str: &str = "";
-        let mut max_str: &str = "";
-
-        for param in params_list.iter() {
-            if param.starts_with("boot=") {
-                boot_str = &param["boot=".len()..];
-            } else if param.starts_with("max=") {
-                max_str = &param["max=".len()..];
-            } else {
-                return Err(Error::ParseCpusUnknownParam);
-            }
-        }
-
-        let boot_vcpus: u8 = boot_str.parse().map_err(Error::ParseCpusParams)?;
-        let max_vcpus = if max_str != "" {
-            max_str.parse().map_err(Error::ParseCpusParams)?
-        } else {
-            boot_vcpus
-        };
+        let boot_vcpus: u8 = parser
+            .convert("boot")
+            .map_err(Error::ParseCpus)?
+            .unwrap_or(DEFAULT_VCPUS);
+        let max_vcpus: u8 = parser
+            .convert("max")
+            .map_err(Error::ParseCpus)?
+            .unwrap_or(boot_vcpus);
 
         if max_vcpus < boot_vcpus {
             return Err(Error::ParseCpusMaxLowerThanBoot);
