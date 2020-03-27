@@ -7,12 +7,14 @@ extern crate vm_virtio;
 
 use clap::ArgMatches;
 use net_util::MacAddr;
+use std::collections::HashMap;
 use std::convert::From;
 use std::io;
 use std::net::AddrParseError;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::result;
+use std::str::FromStr;
 
 pub const DEFAULT_VCPUS: u8 = 1;
 pub const DEFAULT_MEMORY_MB: u64 = 512;
@@ -111,6 +113,84 @@ pub enum Error {
     ParseOnOff,
 }
 pub type Result<T> = result::Result<T, Error>;
+
+#[derive(Default)]
+pub struct OptionParser {
+    options: HashMap<String, OptionParserValue>,
+}
+
+struct OptionParserValue {
+    value: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum OptionParserError {
+    UnknownOption(String),
+    InvalidSyntax(String),
+    Conversion(String, String),
+}
+
+type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
+
+impl OptionParser {
+    pub fn new() -> Self {
+        Self {
+            options: HashMap::new(),
+        }
+    }
+
+    pub fn parse(&mut self, input: &str) -> OptionParserResult<()> {
+        if input.trim().is_empty() {
+            return Ok(());
+        }
+
+        let options_list: Vec<&str> = input.trim().split(',').collect();
+
+        for option in options_list.iter() {
+            let parts: Vec<&str> = option.split('=').collect();
+
+            if parts.len() != 2 {
+                return Err(OptionParserError::InvalidSyntax((*option).to_owned()));
+            }
+
+            match self.options.get_mut(parts[0]) {
+                None => return Err(OptionParserError::UnknownOption(parts[0].to_owned())),
+                Some(value) => {
+                    value.value = Some(parts[1].trim().to_owned());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn add(&mut self, option: &str) -> &mut Self {
+        self.options
+            .insert(option.to_owned(), OptionParserValue { value: None });
+
+        self
+    }
+
+    pub fn get(&self, option: &str) -> Option<String> {
+        self.options.get(option).and_then(|v| v.value.clone())
+    }
+
+    pub fn is_set(&self, option: &str) -> bool {
+        self.options
+            .get(option)
+            .and_then(|v| v.value.as_ref())
+            .is_some()
+    }
+
+    pub fn convert<T: FromStr>(&self, option: &str) -> OptionParserResult<Option<T>> {
+        match self.options.get(option).and_then(|v| v.value.as_ref()) {
+            None => Ok(None),
+            Some(v) => Ok(Some(v.parse().map_err(|_| {
+                OptionParserError::Conversion(option.to_owned(), v.to_owned())
+            })?)),
+        }
+    }
+}
 
 pub struct VmParams<'a> {
     pub cpus: &'a str,
@@ -1185,5 +1265,35 @@ impl VmConfig {
             vsock,
             iommu,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_option_parser() -> std::result::Result<(), OptionParserError> {
+        let mut parser = OptionParser::new();
+        parser
+            .add("size")
+            .add("file")
+            .add("mergeable")
+            .add("hotplug_method")
+            .add("hotplug_size");
+
+        assert!(parser
+            .parse("size=128M,file=/dev/shm,hanging_param")
+            .is_err());
+        assert!(parser
+            .parse("size=128M,file=/dev/shm,too_many_equals=foo=bar")
+            .is_err());
+        assert!(parser.parse("size=128M,file=/dev/shm").is_ok());
+
+        assert_eq!(parser.get("size"), Some("128M".to_owned()));
+        assert_eq!(parser.get("file"), Some("/dev/shm".to_owned()));
+        assert!(!parser.is_set("mergeable"));
+        assert!(parser.is_set("size"));
+        Ok(())
     }
 }
