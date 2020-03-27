@@ -40,6 +40,18 @@ struct SlaveReqHandler {
     mmap_cache_addr: u64,
 }
 
+impl SlaveReqHandler {
+    // Make sure request is within cache range
+    fn is_req_valid(&self, offset: u64, len: u64) -> bool {
+        let end = match offset.checked_add(len) {
+            Some(n) => n,
+            None => return false,
+        };
+
+        !(offset >= self.cache_size || end > self.cache_size)
+    }
+}
+
 impl VhostUserMasterReqHandler for SlaveReqHandler {
     fn handle_config_change(&mut self) -> HandlerResult<u64> {
         debug!("handle_config_change");
@@ -50,20 +62,23 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         debug!("fs_slave_map");
 
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
+            let offset = fs.cache_offset[i];
+            let len = fs.len[i];
+
             // Ignore if the length is 0.
-            if fs.len[i] == 0 {
+            if len == 0 {
                 continue;
             }
 
-            if fs.cache_offset[i] > self.cache_size {
+            if !self.is_req_valid(offset, len) {
                 return Err(io::Error::new(io::ErrorKind::Other, "Wrong offset"));
             }
 
-            let addr = self.mmap_cache_addr + fs.cache_offset[i];
+            let addr = self.mmap_cache_addr + offset;
             let ret = unsafe {
                 libc::mmap(
                     addr as *mut libc::c_void,
-                    fs.len[i] as usize,
+                    len as usize,
                     fs.flags[i].bits() as i32,
                     libc::MAP_SHARED | libc::MAP_FIXED,
                     fd,
@@ -87,6 +102,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         debug!("fs_slave_unmap");
 
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
+            let offset = fs.cache_offset[i];
             let mut len = fs.len[i];
 
             // Ignore if the length is 0.
@@ -100,11 +116,11 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
                 len = self.cache_size;
             }
 
-            if fs.cache_offset[i] > self.cache_size {
+            if !self.is_req_valid(offset, len) {
                 return Err(io::Error::new(io::ErrorKind::Other, "Wrong offset"));
             }
 
-            let addr = self.mmap_cache_addr + fs.cache_offset[i];
+            let addr = self.mmap_cache_addr + offset;
             let ret = unsafe {
                 libc::mmap(
                     addr as *mut libc::c_void,
@@ -127,19 +143,21 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         debug!("fs_slave_sync");
 
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
+            let offset = fs.cache_offset[i];
+            let len = fs.len[i];
+
             // Ignore if the length is 0.
-            if fs.len[i] == 0 {
+            if len == 0 {
                 continue;
             }
 
-            if fs.cache_offset[i] > self.cache_size {
+            if !self.is_req_valid(offset, len) {
                 return Err(io::Error::new(io::ErrorKind::Other, "Wrong offset"));
             }
 
-            let addr = self.mmap_cache_addr + fs.cache_offset[i];
-            let ret = unsafe {
-                libc::msync(addr as *mut libc::c_void, fs.len[i] as usize, libc::MS_SYNC)
-            };
+            let addr = self.mmap_cache_addr + offset;
+            let ret =
+                unsafe { libc::msync(addr as *mut libc::c_void, len as usize, libc::MS_SYNC) };
             if ret == -1 {
                 return Err(io::Error::last_os_error());
             }
