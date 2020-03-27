@@ -71,7 +71,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             }
 
             if !self.is_req_valid(offset, len) {
-                return Err(io::Error::new(io::ErrorKind::Other, "Wrong offset"));
+                return Err(io::Error::from_raw_os_error(libc::EINVAL));
             }
 
             let addr = self.mmap_cache_addr + offset;
@@ -117,7 +117,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             }
 
             if !self.is_req_valid(offset, len) {
-                return Err(io::Error::new(io::ErrorKind::Other, "Wrong offset"));
+                return Err(io::Error::from_raw_os_error(libc::EINVAL));
             }
 
             let addr = self.mmap_cache_addr + offset;
@@ -152,7 +152,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
             }
 
             if !self.is_req_valid(offset, len) {
-                return Err(io::Error::new(io::ErrorKind::Other, "Wrong offset"));
+                return Err(io::Error::from_raw_os_error(libc::EINVAL));
             }
 
             let addr = self.mmap_cache_addr + offset;
