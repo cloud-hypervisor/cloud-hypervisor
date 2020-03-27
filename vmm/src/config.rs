@@ -246,6 +246,22 @@ impl<'a> VmParams<'a> {
     }
 }
 
+struct Toggle(bool);
+
+enum ToggleParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for Toggle {
+    type Err = ToggleParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(Toggle(parse_on_off(s).map_err(|_| {
+            ToggleParseError::InvalidValue(s.to_owned())
+        })?))
+    }
+}
+
 fn parse_size(size: &str) -> Result<u64> {
     let s = size.trim();
 
