@@ -1296,4 +1296,26 @@ mod tests {
         assert!(parser.is_set("size"));
         Ok(())
     }
+
+    #[test]
+    fn test_cpu_parsing() -> Result<()> {
+        assert_eq!(CpusConfig::parse("")?, CpusConfig::default());
+
+        assert_eq!(
+            CpusConfig::parse("boot=1")?,
+            CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 1
+            }
+        );
+        assert_eq!(
+            CpusConfig::parse("boot=1,max=2")?,
+            CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 2,
+            }
+        );
+        assert!(CpusConfig::parse("boot=2,max=1").is_err());
+        Ok(())
+    }
 }
