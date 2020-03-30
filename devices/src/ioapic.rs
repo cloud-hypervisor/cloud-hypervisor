@@ -159,6 +159,7 @@ pub struct Ioapic {
     id: u32,
     reg_sel: u32,
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
+    used_entries: [bool; NUM_IOAPIC_PINS],
     apic_address: GuestAddress,
     interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
 }
@@ -168,6 +169,7 @@ pub struct IoapicState {
     id: u32,
     reg_sel: u32,
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
+    used_entries: [bool; NUM_IOAPIC_PINS],
     #[serde(with = "GuestAddressDef")]
     apic_address: GuestAddress,
 }
@@ -227,6 +229,7 @@ impl Ioapic {
             id: 0,
             reg_sel: 0,
             reg_entries: [0; NUM_IOAPIC_PINS],
+            used_entries: [false; NUM_IOAPIC_PINS],
             apic_address,
             interrupt_source_group,
         })
@@ -359,6 +362,8 @@ impl Ioapic {
                 if let Err(e) = self.update_entry(index) {
                     error!("Failed updating IOAPIC entry: {:?}", e);
                 }
+                // Store the information this IRQ is now being used.
+                self.used_entries[index] = true;
             }
             _ => error!("IOAPIC: invalid write to register offset"),
         }
@@ -390,16 +395,25 @@ impl Ioapic {
             id: self.id,
             reg_sel: self.reg_sel,
             reg_entries: self.reg_entries,
+            used_entries: self.used_entries,
             apic_address: self.apic_address,
         }
     }
 
     #[allow(unused)]
-    fn set_state(&mut self, state: &IoapicState) {
+    fn set_state(&mut self, state: &IoapicState) -> Result<()> {
         self.id = state.id;
         self.reg_sel = state.reg_sel;
         self.reg_entries = state.reg_entries;
+        self.used_entries = state.used_entries;
         self.apic_address = state.apic_address;
+        for (irq, entry) in self.used_entries.iter().enumerate() {
+            if *entry {
+                self.update_entry(irq)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -437,9 +451,9 @@ impl Snapshotable for Ioapic {
                 }
             };
 
-            self.set_state(&ioapic_state);
-
-            return Ok(());
+            return self.set_state(&ioapic_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore IOAPIC state {:?}", e))
+            });
         }
 
         Err(MigratableError::Restore(anyhow!(
