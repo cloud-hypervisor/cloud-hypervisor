@@ -53,6 +53,7 @@ const KVM_CREATE_VCPU: u64 = 0xae41;
 const KVM_SET_TSS_ADDR: u64 = 0xae47;
 const KVM_CREATE_IRQCHIP: u64 = 0xae60;
 const KVM_RUN: u64 = 0xae80;
+const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
 const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
 const KVM_SET_MSRS: u64 = 0x4008_ae89;
 const KVM_SET_CPUID2: u64 = 0x4008_ae90;
@@ -64,11 +65,20 @@ const KVM_IOEVENTFD: u64 = 0x4040_ae79;
 const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
 const KVM_SET_REGS: u64 = 0x4090_ae82;
 const KVM_SET_SREGS: u64 = 0x4138_ae84;
+const KVM_SET_XCRS: u64 = 0x4188_aea7;
 const KVM_SET_FPU: u64 = 0x41a0_ae8d;
 const KVM_SET_LAPIC: u64 = 0x4400_ae8f;
+const KVM_SET_XSAVE: u64 = 0x5000_aea5;
+const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
+const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
+const KVM_GET_REGS: u64 = 0x8090_ae81;
 const KVM_GET_SREGS: u64 = 0x8138_ae83;
+const KVM_GET_XCRS: u64 = 0x8188_aea6;
+const KVM_GET_FPU: u64 = 0x81a0_ae8c;
 const KVM_GET_LAPIC: u64 = 0x8400_ae8e;
+const KVM_GET_XSAVE: u64 = 0x9000_aea4;
 const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
+const KVM_GET_MSRS: u64 = 0xc008_ae88;
 const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
 
 // See include/uapi/linux/if_tun.h in the kernel code.
@@ -111,10 +121,17 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_VM)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_ENABLE_CAP)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_API_VERSION,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_FPU)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_LAPIC)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MP_STATE)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MSRS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_REGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_SREGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_SUPPORTED_CPUID,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_VCPU_EVENTS,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_VCPU_MMAP_SIZE,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_XSAVE,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_XCRS,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IOEVENTFD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IRQFD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_RUN)?],
@@ -123,11 +140,14 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_FPU)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_GSI_ROUTING)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_LAPIC)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_MP_STATE)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_MSRS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_REGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_SREGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_TSS_ADDR,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_USER_MEMORY_REGION,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_XSAVE,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_XCRS,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCSIFADDR)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCSIFFLAGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCSIFNETMASK)?],
