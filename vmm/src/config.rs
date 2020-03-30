@@ -291,6 +291,22 @@ impl FromStr for HotplugMethod {
     }
 }
 
+struct ByteSized(u64);
+
+enum ByteSizedParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for ByteSized {
+    type Err = ByteSizedParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(ByteSized(parse_size(s).map_err(|_| {
+            ByteSizedParseError::InvalidValue(s.to_owned())
+        })?))
+    }
+}
+
 fn parse_size(size: &str) -> Result<u64> {
     let s = size.trim();
 
