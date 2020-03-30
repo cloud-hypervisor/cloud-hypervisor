@@ -29,10 +29,6 @@ pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = 128;
 pub enum Error {
     /// Max is less than boot
     ParseCpusMaxLowerThanBoot,
-    /// Failed parsing memory hotplug_method parameter.
-    ParseMemoryHotplugMethodParam(ParseHotplugMethodError),
-    /// Failed parsing memory file parameter.
-    ParseMemoryFileParam,
     /// Failed parsing kernel parameters.
     ParseKernelParams,
     /// Failed parsing kernel command line parameters.
@@ -109,6 +105,8 @@ pub enum Error {
     ParseOnOff,
     /// Error parsing CPU options
     ParseCpus(OptionParserError),
+    /// Error parsing memory options
+    ParseMemory(OptionParserError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -395,55 +393,41 @@ pub struct MemoryConfig {
 
 impl MemoryConfig {
     pub fn parse(memory: &str) -> Result<Self> {
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = memory.split(',').collect();
+        let mut parser = OptionParser::new();
+        parser
+            .add("size")
+            .add("file")
+            .add("mergeable")
+            .add("hotplug_method")
+            .add("hotplug_size");
+        parser.parse(memory).map_err(Error::ParseMemory)?;
 
-        let mut size_str: &str = "512M";
-        let mut file_str: &str = "";
-        let mut mergeable_str: &str = "";
-        let mut backed = false;
-        let mut hotplug_method_str: &str = "acpi";
-        let mut hotplug_str: &str = "";
-
-        for param in params_list.iter() {
-            if param.starts_with("size=") {
-                size_str = &param[5..];
-            } else if param.starts_with("file=") {
-                backed = true;
-                file_str = &param[5..];
-            } else if param.starts_with("mergeable=") {
-                mergeable_str = &param[10..];
-            } else if param.starts_with("hotplug_method=") {
-                hotplug_method_str = &param[15..];
-            } else if param.starts_with("hotplug_size=") {
-                hotplug_str = &param[13..]
-            }
-        }
-
-        let file = if backed {
-            if file_str.is_empty() {
-                return Err(Error::ParseMemoryFileParam);
-            }
-
-            Some(PathBuf::from(file_str))
-        } else {
-            None
-        };
-
-        let hotplug_method = hotplug_method_str[..]
-            .parse()
-            .map_err(Error::ParseMemoryHotplugMethodParam)?;
+        let size = parser
+            .convert::<ByteSized>("size")
+            .map_err(Error::ParseMemory)?
+            .unwrap_or(ByteSized(DEFAULT_MEMORY_MB << 20))
+            .0;
+        let file = parser.get("file").map(PathBuf::from);
+        let mergeable = parser
+            .convert::<Toggle>("mergeable")
+            .map_err(Error::ParseMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let hotplug_method = parser
+            .convert("hotplug_method")
+            .map_err(Error::ParseMemory)?
+            .unwrap_or_default();
+        let hotplug_size = parser
+            .convert::<ByteSized>("hotplug_size")
+            .map_err(Error::ParseMemory)?
+            .map(|v| v.0);
 
         Ok(MemoryConfig {
-            size: parse_size(size_str)?,
+            size,
             file,
-            mergeable: parse_on_off(mergeable_str)?,
+            mergeable,
             hotplug_method,
-            hotplug_size: if hotplug_str == "" {
-                None
-            } else {
-                Some(parse_size(hotplug_str)?)
-            },
+            hotplug_size,
         })
     }
 }
