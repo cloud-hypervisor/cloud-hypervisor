@@ -9,8 +9,6 @@ use clap::ArgMatches;
 use net_util::MacAddr;
 use std::collections::HashMap;
 use std::convert::From;
-use std::io;
-use std::net::AddrParseError;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::result;
@@ -37,20 +35,6 @@ pub enum Error {
     ParseDiskSocketAndPath,
     /// Failed parsing random number generator parameters.
     ParseRngParams,
-    /// Failed parsing network ip parameter.
-    ParseNetIpParam(AddrParseError),
-    /// Failed parsing network mask parameter.
-    ParseNetMaskParam(AddrParseError),
-    /// Failed parsing network mac parameter.
-    ParseNetMacParam(io::Error),
-    /// Failed parsing network queue number parameter.
-    ParseNetNumQueuesParam(std::num::ParseIntError),
-    /// Failed parsing network queue size parameter.
-    ParseNetQueueSizeParam(std::num::ParseIntError),
-    /// Failed to parse vhost parameters
-    ParseNetVhostParam(std::str::ParseBoolError),
-    /// Need a vhost socket
-    ParseNetVhostSocketRequired,
     /// Failed parsing fs tag parameter.
     ParseFsTagParam,
     /// Failed parsing fs socket path parameter.
@@ -71,16 +55,6 @@ pub enum Error {
     ParseConsoleParam,
     /// Both console and serial are tty.
     ParseTTYParam,
-    /// Failed parsing vhost-user-net mac parameter.
-    ParseVuNetMacParam(io::Error),
-    /// Failed parsing vhost-user sock parameter.
-    ParseVuSockParam,
-    /// Failed parsing vhost-user queue number parameter.
-    ParseVuNumQueuesParam(std::num::ParseIntError),
-    /// Failed parsing vhost-user queue size parameter.
-    ParseVuQueueSizeParam(std::num::ParseIntError),
-    /// Failed parsing vhost-user-net server parameter.
-    ParseVuNetServerParam(std::num::ParseIntError),
     /// Failed parsing vsock context ID parameter.
     ParseVsockCidParam(std::num::ParseIntError),
     /// Failed parsing vsock socket path parameter.
@@ -95,6 +69,8 @@ pub enum Error {
     ParseMemory(OptionParserError),
     /// Error parsing disk options
     ParseDisk(OptionParserError),
+    /// Error parsing network options
+    ParseNetwork(OptionParserError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -666,79 +642,51 @@ impl NetConfig {
     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>\"";
 
     pub fn parse(net: &str) -> Result<Self> {
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = net.split(',').collect();
+        let mut parser = OptionParser::new();
 
-        let mut tap_str: &str = "";
-        let mut ip_str: &str = "";
-        let mut mask_str: &str = "";
-        let mut mac_str: &str = "";
-        let mut iommu_str: &str = "";
-        let mut num_queues_str: &str = "";
-        let mut queue_size_str: &str = "";
-        let mut vhost_socket_str: &str = "";
-        let mut vhost_user_str: &str = "";
+        parser
+            .add("tap")
+            .add("ip")
+            .add("mask")
+            .add("mac")
+            .add("iommu")
+            .add("queue_size")
+            .add("num_queues")
+            .add("vhost_user")
+            .add("socket");
+        parser.parse(net).map_err(Error::ParseNetwork)?;
 
-        for param in params_list.iter() {
-            if param.starts_with("tap=") {
-                tap_str = &param[4..];
-            } else if param.starts_with("ip=") {
-                ip_str = &param[3..];
-            } else if param.starts_with("mask=") {
-                mask_str = &param[5..];
-            } else if param.starts_with("mac=") {
-                mac_str = &param[4..];
-            } else if param.starts_with("iommu=") {
-                iommu_str = &param[6..];
-            } else if param.starts_with("num_queues=") {
-                num_queues_str = &param[11..];
-            } else if param.starts_with("queue_size=") {
-                queue_size_str = &param[11..];
-            } else if param.starts_with("vhost_user=") {
-                vhost_user_str = &param[11..];
-            } else if param.starts_with("socket=") {
-                vhost_socket_str = &param[7..];
-            }
-        }
-
-        let mut tap: Option<String> = default_netconfig_tap();
-        let mut ip: Ipv4Addr = default_netconfig_ip();
-        let mut mask: Ipv4Addr = default_netconfig_mask();
-        let mut mac: MacAddr = default_netconfig_mac();
-        let iommu = parse_on_off(iommu_str)?;
-        let mut num_queues: usize = default_netconfig_num_queues();
-        let mut queue_size: u16 = default_netconfig_queue_size();
-        let mut vhost_user = false;
-        let mut vhost_socket = None;
-
-        if !tap_str.is_empty() {
-            tap = Some(tap_str.to_string());
-        }
-        if !ip_str.is_empty() {
-            ip = ip_str.parse().map_err(Error::ParseNetIpParam)?;
-        }
-        if !mask_str.is_empty() {
-            mask = mask_str.parse().map_err(Error::ParseNetMaskParam)?;
-        }
-        if !mac_str.is_empty() {
-            mac = MacAddr::parse_str(mac_str).map_err(Error::ParseNetMacParam)?;
-        }
-        if !num_queues_str.is_empty() {
-            num_queues = num_queues_str
-                .parse()
-                .map_err(Error::ParseNetNumQueuesParam)?;
-        }
-        if !queue_size_str.is_empty() {
-            queue_size = queue_size_str
-                .parse()
-                .map_err(Error::ParseNetQueueSizeParam)?;
-        }
-        if !vhost_user_str.is_empty() {
-            vhost_user = vhost_user_str.parse().map_err(Error::ParseNetVhostParam)?;
-        }
-        if !vhost_socket_str.is_empty() {
-            vhost_socket = Some(vhost_socket_str.to_owned());
-        }
+        let tap = parser.get("tap");
+        let ip = parser
+            .convert("ip")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or_else(default_netconfig_ip);
+        let mask = parser
+            .convert("mask")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or_else(default_netconfig_mask);
+        let mac = parser
+            .convert("mac")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or_else(default_netconfig_mac);
+        let iommu = parser
+            .convert::<Toggle>("iommu")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let queue_size = parser
+            .convert("queue_size")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or_else(default_netconfig_queue_size);
+        let num_queues = parser
+            .convert("num_queues")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or_else(default_netconfig_num_queues);
+        let vhost_user = parser
+            .convert("vhost_user")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or(false);
+        let vhost_socket = parser.get("socket");
 
         Ok(NetConfig {
             tap,
