@@ -22,8 +22,8 @@ use arch::layout;
 use arch::EntryPoint;
 use devices::{ioapic, BusDevice};
 use kvm_bindings::{
-    kvm_clock_data, kvm_fpu, kvm_lapic_state, kvm_regs, kvm_sregs, kvm_vcpu_events, kvm_xcrs,
-    kvm_xsave, CpuId, Msrs,
+    kvm_clock_data, kvm_fpu, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events,
+    kvm_xcrs, kvm_xsave, CpuId, Msrs,
 };
 use kvm_ioctls::*;
 use libc::{c_void, siginfo_t};
@@ -331,6 +331,7 @@ pub struct VcpuKvmState {
     xsave: kvm_xsave,
     xcrs: kvm_xcrs,
     //    clock_data: kvm_clock_data,
+    mp_state: kvm_mp_state,
 }
 
 impl Vcpu {
@@ -481,6 +482,7 @@ impl Vcpu {
         let fpu = self.fd.get_fpu().map_err(Error::VcpuGetFpu)?;
         let xsave = self.fd.get_xsave().map_err(Error::VcpuGetXsave)?;
         let xcrs = self.fd.get_xcrs().map_err(Error::VcpuGetXsave)?;
+        let mp_state = self.fd.get_mp_state().unwrap();
 
         Ok(VcpuKvmState {
             msrs,
@@ -491,6 +493,7 @@ impl Vcpu {
             lapic_state,
             xsave,
             xcrs,
+            mp_state,
         })
     }
 
@@ -516,6 +519,8 @@ impl Vcpu {
             .set_lapic(&state.lapic_state)
             .map_err(Error::VcpuSetLapic)?;
 
+        self.fd.set_mp_state(state.mp_state).unwrap();
+
         Ok(())
     }
 }
@@ -533,7 +538,7 @@ impl Snapshotable for Vcpu {
         })?)
         .map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        let mut vcpu_snapshot = Snapshot::new(&format!("{}-{}", VCPU_SNAPSHOT_ID, self.id));
+        let mut vcpu_snapshot = Snapshot::new(&format!("{}", self.id));
         vcpu_snapshot.add_data_section(SnapshotDataSection {
             id: format!("{}-section", VCPU_SNAPSHOT_ID),
             snapshot,
@@ -1444,10 +1449,10 @@ impl Snapshotable for CpuManager {
         let creation_ts = std::time::Instant::now();
         let vcpu_thread_barrier = Arc::new(Barrier::new((snapshot.snapshots.len() + 1) as usize));
 
-        for (cpu_id, (_id, snapshot)) in snapshot.snapshots.iter().enumerate() {
+        for (cpu_id, snapshot) in snapshot.snapshots.iter() {
             println!("Restoring VCPU {}", cpu_id);
             self.restore_vcpu(
-                cpu_id as u8,
+                cpu_id.parse::<u8>().unwrap(),
                 creation_ts,
                 vcpu_thread_barrier.clone(),
                 *snapshot.clone(),
