@@ -29,7 +29,7 @@ use vhost_rs::vhost_user::message::*;
 use vhost_rs::vhost_user::Error as VhostUserError;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_net::*;
-use vm_memory::GuestMemoryMmap;
+use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_virtio::net_util::{open_tap, register_listener, unregister_listener, RxVirtio, TxVirtio};
 use vm_virtio::Queue;
 use vmm_sys_util::eventfd::EventFd;
@@ -99,7 +99,7 @@ impl std::convert::From<Error> for std::io::Error {
 }
 
 pub struct VhostUserNetBackend {
-    mem: Option<GuestMemoryMmap>,
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     kill_evt: EventFd,
     taps: Vec<(Tap, usize)>,
     rxs: Vec<RxVirtio>,
@@ -186,7 +186,7 @@ impl VhostUserBackend for VhostUserNetBackend {
     fn set_event_idx(&mut self, _enabled: bool) {}
 
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(mem);
+        self.mem = Some(GuestMemoryAtomic::new(mem));
         Ok(())
     }
 
@@ -204,7 +204,7 @@ impl VhostUserBackend for VhostUserNetBackend {
 }
 
 struct NetEpollHandler {
-    mem: Option<GuestMemoryMmap>,
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     taps: Vec<(Tap, usize)>,
     rxs: Vec<RxVirtio>,
     txs: Vec<TxVirtio>,
@@ -218,7 +218,8 @@ impl NetEpollHandler {
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
     fn rx_single_frame(&mut self, mut queue: &mut Queue, index: usize) -> Result<bool> {
-        let mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
+        let atomic_mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
+        let mem = atomic_mem.memory();
 
         let next_desc = queue.iter(&mem).next();
 
@@ -296,7 +297,8 @@ impl NetEpollHandler {
     }
 
     fn process_tx(&mut self, mut queue: &mut Queue, index: usize) -> Result<()> {
-        let mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
+        let atomic_mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
+        let mem = atomic_mem.memory();
 
         self.txs[index].process_desc_chain(&mem, &mut self.taps[index].0, &mut queue);
 
