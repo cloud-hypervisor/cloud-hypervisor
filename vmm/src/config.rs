@@ -643,6 +643,22 @@ fn default_netconfig_queue_size() -> u16 {
     DEFAULT_QUEUE_SIZE_VUNET
 }
 
+impl Default for NetConfig {
+    fn default() -> Self {
+        Self {
+            tap: default_netconfig_tap(),
+            ip: default_netconfig_ip(),
+            mask: default_netconfig_mask(),
+            mac: default_netconfig_mac(),
+            iommu: false,
+            num_queues: default_netconfig_num_queues(),
+            queue_size: default_netconfig_queue_size(),
+            vhost_user: false,
+            vhost_socket: None,
+        }
+    }
+}
+
 impl NetConfig {
     pub const SYNTAX: &'static str = "Network parameters \
     \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,iommu=on|off,\
@@ -1467,6 +1483,54 @@ mod tests {
             }
         );
         assert!(DiskConfig::parse("path=/path/to_file,socket=/path/to_socket").is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_net_parsing() -> Result<()> {
+        // mac address is random
+        assert_eq!(
+            NetConfig::parse("mac=de:ad:be:ef:12:34")?,
+            NetConfig {
+                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                ..Default::default()
+            }
+        );
+
+        assert_eq!(
+            NetConfig::parse(
+                "mac=de:ad:be:ef:12:34,tap=tap0,ip=192.168.100.1,mask=255.255.255.128"
+            )?,
+            NetConfig {
+                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                tap: Some("tap0".to_owned()),
+                ip: "192.168.100.1".parse().unwrap(),
+                mask: "255.255.255.128".parse().unwrap(),
+                ..Default::default()
+            }
+        );
+
+        assert_eq!(
+            NetConfig::parse("mac=de:ad:be:ef:12:34,vhost_user=true,socket=/tmp/socket")?,
+            NetConfig {
+                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                vhost_user: true,
+                vhost_socket: Some("/tmp/socket".to_owned()),
+                ..Default::default()
+            }
+        );
+
+        assert_eq!(
+            NetConfig::parse("mac=de:ad:be:ef:12:34,num_queues=4,queue_size=1024,iommu=on")?,
+            NetConfig {
+                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                num_queues: 4,
+                queue_size: 1024,
+                iommu: true,
+                ..Default::default()
+            }
+        );
 
         Ok(())
     }
