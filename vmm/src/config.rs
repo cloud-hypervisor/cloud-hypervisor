@@ -33,18 +33,6 @@ pub enum Error {
     ParseKernelParams,
     /// Failed parsing kernel command line parameters.
     ParseCmdlineParams,
-    /// Failed parsing disks parameters.
-    ParseDisksParams,
-    /// Failed parsing disk queue number parameter.
-    ParseDiskNumQueuesParam(std::num::ParseIntError),
-    /// Failed parsing disk poll_queue parameter.
-    ParseDiskPollQueueParam(std::str::ParseBoolError),
-    /// Failed parsing disk queue size parameter.
-    ParseDiskQueueSizeParam(std::num::ParseIntError),
-    /// Failed to parse vhost parameters
-    ParseDiskVhostParam(std::str::ParseBoolError),
-    /// Failed parsing disk wce parameter.
-    ParseDiskWceParam(std::str::ParseBoolError),
     /// Both socket and path specified
     ParseDiskSocketAndPath,
     /// Failed parsing random number generator parameters.
@@ -93,8 +81,6 @@ pub enum Error {
     ParseVuQueueSizeParam(std::num::ParseIntError),
     /// Failed parsing vhost-user-net server parameter.
     ParseVuNetServerParam(std::num::ParseIntError),
-    /// Failed parsing vhost-user-blk wce parameter.
-    ParseVuBlkWceParam(std::str::ParseBoolError),
     /// Failed parsing vsock context ID parameter.
     ParseVsockCidParam(std::num::ParseIntError),
     /// Failed parsing vsock socket path parameter.
@@ -107,6 +93,8 @@ pub enum Error {
     ParseCpus(OptionParserError),
     /// Error parsing memory options
     ParseMemory(OptionParserError),
+    /// Error parsing disk options
+    ParseDisk(OptionParserError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -531,84 +519,64 @@ impl DiskConfig {
          socket=<vhost_user_socket_path>,wce=<true|false, default true>\"";
 
     pub fn parse(disk: &str) -> Result<Self> {
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = disk.split(',').collect();
+        let mut parser = OptionParser::new();
+        parser
+            .add("path")
+            .add("readonly")
+            .add("direct")
+            .add("iommu")
+            .add("queue_size")
+            .add("num_queues")
+            .add("vhost_user")
+            .add("socket")
+            .add("wce")
+            .add("poll_queue");
+        parser.parse(disk).map_err(Error::ParseDisk)?;
 
-        let mut path_str: &str = "";
-        let mut readonly_str: &str = "";
-        let mut direct_str: &str = "";
-        let mut iommu_str: &str = "";
-        let mut num_queues_str: &str = "";
-        let mut queue_size_str: &str = "";
-        let mut vhost_socket_str: &str = "";
-        let mut vhost_user_str: &str = "";
-        let mut wce_str: &str = "";
-        let mut poll_queue_str: &str = "";
+        let path = parser.get("path").map(PathBuf::from);
+        let readonly = parser
+            .convert::<Toggle>("readonly")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let direct = parser
+            .convert::<Toggle>("direct")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let iommu = parser
+            .convert::<Toggle>("iommu")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let queue_size = parser
+            .convert("queue_size")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_else(default_diskconfig_queue_size);
+        let num_queues = parser
+            .convert("num_queues")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_else(default_diskconfig_num_queues);
+        let vhost_user = parser
+            .convert("vhost_user")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or(false);
+        let vhost_socket = parser.get("socket");
+        let wce = parser
+            .convert("wce")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_else(default_diskconfig_wce);
+        let poll_queue = parser
+            .convert("poll_queue")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_else(default_diskconfig_poll_queue);
 
-        for param in params_list.iter() {
-            if param.starts_with("path=") {
-                path_str = &param[5..];
-            } else if param.starts_with("readonly=") {
-                readonly_str = &param[9..];
-            } else if param.starts_with("direct=") {
-                direct_str = &param[7..];
-            } else if param.starts_with("iommu=") {
-                iommu_str = &param[6..];
-            } else if param.starts_with("num_queues=") {
-                num_queues_str = &param[11..];
-            } else if param.starts_with("queue_size=") {
-                queue_size_str = &param[11..];
-            } else if param.starts_with("vhost_user=") {
-                vhost_user_str = &param[11..];
-            } else if param.starts_with("socket=") {
-                vhost_socket_str = &param[7..];
-            } else if param.starts_with("wce=") {
-                wce_str = &param[4..];
-            } else if param.starts_with("poll_queue=") {
-                poll_queue_str = &param[11..];
-            }
+        if parser.is_set("wce") && !vhost_user {
+            warn!("wce parameter currently only has effect when used vhost_user=true");
         }
 
-        let mut num_queues: usize = default_diskconfig_num_queues();
-        let mut queue_size: u16 = default_diskconfig_queue_size();
-        let mut vhost_user = false;
-        let mut vhost_socket = None;
-        let mut wce: bool = default_diskconfig_wce();
-        let mut poll_queue: bool = default_diskconfig_poll_queue();
-        let mut path = None;
-
-        if !num_queues_str.is_empty() {
-            num_queues = num_queues_str
-                .parse()
-                .map_err(Error::ParseDiskNumQueuesParam)?;
-        }
-        if !queue_size_str.is_empty() {
-            queue_size = queue_size_str
-                .parse()
-                .map_err(Error::ParseDiskQueueSizeParam)?;
-        }
-        if !vhost_user_str.is_empty() {
-            vhost_user = vhost_user_str.parse().map_err(Error::ParseDiskVhostParam)?;
-        }
-        if !vhost_socket_str.is_empty() {
-            vhost_socket = Some(vhost_socket_str.to_owned());
-        }
-        if !wce_str.is_empty() {
-            if !vhost_user {
-                warn!("wce parameter currently only has effect when used vhost_user=true");
-            }
-            wce = wce_str.parse().map_err(Error::ParseDiskWceParam)?;
-        }
-        if !poll_queue_str.is_empty() {
-            if !vhost_user {
-                warn!("poll_queue parameter currently only has effect when used vhost_user=true");
-            }
-            poll_queue = poll_queue_str
-                .parse()
-                .map_err(Error::ParseDiskPollQueueParam)?;
-        }
-        if !path_str.is_empty() {
-            path = Some(PathBuf::from(path_str))
+        if parser.is_set("poll_queue") && !vhost_user {
+            warn!("poll_queue parameter currently only has effect when used vhost_user=true");
         }
 
         if vhost_socket.as_ref().and(path.as_ref()).is_some() {
@@ -617,9 +585,9 @@ impl DiskConfig {
 
         Ok(DiskConfig {
             path,
-            readonly: parse_on_off(readonly_str)?,
-            direct: parse_on_off(direct_str)?,
-            iommu: parse_on_off(iommu_str)?,
+            readonly,
+            direct,
+            iommu,
             num_queues,
             queue_size,
             vhost_socket,
