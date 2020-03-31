@@ -448,6 +448,7 @@ mod tests {
         api_socket: &str,
         desired_vcpus: Option<u8>,
         desired_ram: Option<usize>,
+        desired_ram_w_balloon: Option<usize>,
     ) -> bool {
         let mut cmd = Command::new(clh_command("ch-remote"));
         cmd.args(&[&format!("--api-socket={}", api_socket), "resize"]);
@@ -458,6 +459,10 @@ mod tests {
 
         if let Some(desired_ram) = desired_ram {
             cmd.arg(format!("--memory={}", desired_ram));
+        }
+
+        if let Some(desired_ram_w_balloon) = desired_ram_w_balloon {
+            cmd.arg(format!("--balloon={}", desired_ram_w_balloon));
         }
 
         cmd.status().expect("Failed to launch ch-remote").success()
@@ -1091,7 +1096,7 @@ mod tests {
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
-                resize_command(&api_socket, None, Some(desired_ram));
+                resize_command(&api_socket, None, Some(desired_ram), None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
 
@@ -1259,7 +1264,7 @@ mod tests {
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
-                resize_command(&api_socket, None, Some(desired_ram));
+                resize_command(&api_socket, None, Some(desired_ram), None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
 
@@ -1544,7 +1549,7 @@ mod tests {
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
-                resize_command(&api_socket, None, Some(desired_ram));
+                resize_command(&api_socket, None, Some(desired_ram), None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
                 aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
@@ -3843,7 +3848,7 @@ mod tests {
 
                 // Resize the VM
                 let desired_vcpus = 4;
-                resize_command(&api_socket, Some(desired_vcpus), None);
+                resize_command(&api_socket, Some(desired_vcpus), None, None);
 
                 guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu2/online")?;
                 guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu3/online")?;
@@ -3881,7 +3886,7 @@ mod tests {
 
                 // Resize the VM
                 let desired_vcpus = 2;
-                resize_command(&api_socket, Some(desired_vcpus), None);
+                resize_command(&api_socket, Some(desired_vcpus), None, None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
                 aver_eq!(
@@ -3892,7 +3897,7 @@ mod tests {
 
                 // Resize the VM back up to 4
                 let desired_vcpus = 4;
-                resize_command(&api_socket, Some(desired_vcpus), None);
+                resize_command(&api_socket, Some(desired_vcpus), None, None);
 
                 guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu2/online")?;
                 guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu3/online")?;
@@ -3922,7 +3927,7 @@ mod tests {
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=2,max=4"])
-                    .args(&["--memory", "size=512M,hotplug_size=8192M"])
+                    .args(&["--memory", "size=512M,hotplug_size=8192M,balloon=on"])
                     .args(&["--kernel", kernel_path.to_str().unwrap()])
                     .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .default_disks()
@@ -3943,10 +3948,18 @@ mod tests {
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
-                resize_command(&api_socket, None, Some(desired_ram));
+                resize_command(&api_socket, None, Some(desired_ram), None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
                 aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
+
+                // Use balloon remove RAM from the VM
+                let desired_ram = 512 << 20;
+                resize_command(&api_socket, None, None, Some(desired_ram));
+
+                thread::sleep(std::time::Duration::new(10, 0));
+                aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
+                aver!(tb, guest.get_total_memory().unwrap_or_default() < 960_000);
 
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
@@ -3967,6 +3980,14 @@ mod tests {
                     .unwrap_or_default();
                 aver_eq!(tb, reboot_count, 1);
 
+                aver!(tb, guest.get_total_memory().unwrap_or_default() < 960_000);
+
+                // Use balloon add RAM to the VM
+                let desired_ram = 1024 << 20;
+                resize_command(&api_socket, None, None, Some(desired_ram));
+
+                thread::sleep(std::time::Duration::new(10, 0));
+
                 aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
 
                 guest
@@ -3977,14 +3998,14 @@ mod tests {
 
                 // Add RAM to the VM
                 let desired_ram = 2048 << 20;
-                resize_command(&api_socket, None, Some(desired_ram));
+                resize_command(&api_socket, None, Some(desired_ram), None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
                 aver!(tb, guest.get_total_memory().unwrap_or_default() > 1_920_000);
 
                 // Remove RAM to the VM (only applies after reboot)
                 let desired_ram = 1024 << 20;
-                resize_command(&api_socket, None, Some(desired_ram));
+                resize_command(&api_socket, None, Some(desired_ram), None);
 
                 guest.ssh_command("sudo reboot").unwrap_or_default();
 
@@ -4043,21 +4064,21 @@ mod tests {
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
-                resize_command(&api_socket, None, Some(desired_ram));
+                resize_command(&api_socket, None, Some(desired_ram), None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
                 aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
 
                 // Add RAM to the VM
                 let desired_ram = 2048 << 20;
-                resize_command(&api_socket, None, Some(desired_ram));
+                resize_command(&api_socket, None, Some(desired_ram), None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
                 aver!(tb, guest.get_total_memory().unwrap_or_default() > 1_920_000);
 
                 // Remove RAM to the VM
                 let desired_ram = 1024 << 20;
-                resize_command(&api_socket, None, Some(desired_ram));
+                resize_command(&api_socket, None, Some(desired_ram), None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
                 aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
@@ -4106,7 +4127,7 @@ mod tests {
                 // Resize the VM
                 let desired_vcpus = 4;
                 let desired_ram = 1024 << 20;
-                resize_command(&api_socket, Some(desired_vcpus), Some(desired_ram));
+                resize_command(&api_socket, Some(desired_vcpus), Some(desired_ram), None);
 
                 guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu2/online")?;
                 guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu3/online")?;
