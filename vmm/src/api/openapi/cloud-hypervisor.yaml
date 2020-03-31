@@ -470,6 +470,9 @@ components:
         hugepages:
           type: boolean
           default: false
+        balloon:
+          type: boolean
+          default: false
 
     KernelConfig:
       required:
