@@ -282,9 +282,11 @@ impl MemoryManager {
         let mut virtiomem_resize = None;
         if let Some(size) = config.hotplug_size {
             if config.hotplug_method == HotplugMethod::VirtioMem {
+                // Alignment must be "natural" i.e. same as size of block
                 let start_addr = GuestAddress(
                     (start_of_device_area.0 + vm_virtio::VIRTIO_MEM_DEFAULT_BLOCK_SIZE - 1)
-                        & (!(vm_virtio::VIRTIO_MEM_DEFAULT_BLOCK_SIZE - 1)),
+                        / vm_virtio::VIRTIO_MEM_DEFAULT_BLOCK_SIZE
+                        * vm_virtio::VIRTIO_MEM_DEFAULT_BLOCK_SIZE,
                 );
                 virtiomem_region = Some(MemoryManager::create_ram_region(
                     &config.file,
