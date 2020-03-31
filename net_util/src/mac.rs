@@ -9,6 +9,7 @@ use rand::Rng;
 use std::fmt;
 use std::io;
 use std::result::Result;
+use std::str::FromStr;
 
 use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
@@ -117,6 +118,18 @@ impl<'de> Deserialize<'de> for MacAddr {
         let s = String::deserialize(deserializer)?;
         MacAddr::parse_str(&s)
             .map_err(|e| D::Error::custom(format!("The provided MAC address is invalid: {}", e)))
+    }
+}
+
+pub enum MacAddrParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for MacAddr {
+    type Err = MacAddrParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        MacAddr::parse_str(s).map_err(|_| MacAddrParseError::InvalidValue(s.to_owned()))
     }
 }
 
