@@ -507,6 +507,23 @@ fn default_diskconfig_poll_queue() -> bool {
     true
 }
 
+impl Default for DiskConfig {
+    fn default() -> Self {
+        Self {
+            path: None,
+            readonly: false,
+            direct: false,
+            iommu: false,
+            num_queues: default_diskconfig_num_queues(),
+            queue_size: default_diskconfig_queue_size(),
+            vhost_user: false,
+            vhost_socket: None,
+            wce: default_diskconfig_wce(),
+            poll_queue: default_diskconfig_poll_queue(),
+        }
+    }
+}
+
 impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
          \"path=<disk_image_path>,readonly=on|off,iommu=on|off,num_queues=<number_of_queues>,\
@@ -1394,6 +1411,95 @@ mod tests {
                 ..Default::default()
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_disk_parsing() -> Result<()> {
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,vhost_user=true")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                vhost_user: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,iommu=on")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                iommu: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,iommu=on,queue_size=256")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                iommu: true,
+                queue_size: 256,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,iommu=on,queue_size=256,num_queues=4")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                iommu: true,
+                queue_size: 256,
+                num_queues: 4,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,direct=on")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                direct: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,wce=true")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                wce: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,wce=false")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                wce: false,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,poll_queue=false")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                poll_queue: false,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,poll_queue=true")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                poll_queue: true,
+                ..Default::default()
+            }
+        );
+        assert!(DiskConfig::parse("path=/path/to_file,socket=/path/to_socket").is_err());
+
         Ok(())
     }
 }
