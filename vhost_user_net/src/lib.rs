@@ -60,6 +60,8 @@ pub enum Error {
     FailedSignalingUsedQueue,
     /// Failed to handle event other than input event.
     HandleEventNotEpollIn,
+    /// Failed to read the event from kick EventFd.
+    HandleEventReadKick,
     /// Failed to handle unknown event.
     HandleEventUnknownEvent,
     /// Invalid vring address.
@@ -331,6 +333,15 @@ impl NetEpollHandler {
 
             for event in events.iter().take(num_events) {
                 let device_event = event.data as u16;
+
+                if device_event < self.num_queues as u16 {
+                    if let Some(kick) = &vrings[device_event as usize].read().unwrap().get_kick() {
+                        kick.read().map_err(|_| Error::HandleEventReadKick)?;
+                    }
+                    if !vrings[device_event as usize].read().unwrap().get_enabled() {
+                        continue;
+                    }
+                }
 
                 match device_event {
                     x if ((x < self.num_queues as u16) && (x % 2 == 0)) => {
