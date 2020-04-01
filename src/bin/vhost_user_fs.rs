@@ -15,12 +15,12 @@ use futures::executor::{ThreadPool, ThreadPoolBuilder};
 use libc::EFD_NONBLOCK;
 use log::*;
 use std::num::Wrapping;
-use std::os::unix::io::RawFd;
-use std::sync::{Arc, RwLock};
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::{Arc, Mutex, RwLock};
 use std::{convert, error, fmt, io, process};
 use vhost_rs::vhost_user::message::*;
 use vhost_rs::vhost_user::SlaveFsCacheReq;
-use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
+use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, WorkerReset};
 use vhost_user_fs::descriptor_utils::Error as VufDescriptorError;
 use vhost_user_fs::descriptor_utils::{Reader, Writer};
 use vhost_user_fs::filesystem::FileSystem;
@@ -44,8 +44,10 @@ const THREAD_POOL_SIZE: usize = 64;
 const HIPRIO_QUEUE_EVENT: u16 = 0;
 // The guest queued an available buffer for the request queue.
 const REQ_QUEUE_EVENT: u16 = 1;
-// The device has been dropped.
-const KILL_EVENT: u16 = 2;
+// The memory is resized.
+const RESET_EVENT: u16 = 2;
+// The total event count.
+const EVENT_COUNT: u16 = 3;
 
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
@@ -62,6 +64,14 @@ enum Error {
     FailedRegisterListener,
     /// Failed unregister listener for vring.
     FailedUnRegisterListener,
+    /// Failed to read worker reset event.
+    FailedReadWorkerReset,
+    /// Failed to update event idx.
+    FailedUpdateEventIdx,
+    /// Failed to update memory.
+    FailedUpdateMemory,
+    /// Failed to update slave request fd.
+    FailedUpdateVuReq,
     /// Failed to read the event from kick EventFd.
     HandleEventReadKick,
     /// Failed to handle unknown event.
@@ -91,26 +101,23 @@ impl convert::From<Error> for io::Error {
 }
 
 struct VhostUserFsBackend<F: FileSystem + Send + Sync + 'static> {
-    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     kill_evt: EventFd,
     server: Arc<Server<F>>,
-    // handle request from slave to master
-    vu_req: Option<SlaveFsCacheReq>,
     event_idx: bool,
     pool: ThreadPool,
     epoll_fd: RawFd,
+    worker_reset: Arc<Mutex<WorkerReset>>,
 }
 
 impl<F: FileSystem + Send + Sync + 'static> Clone for VhostUserFsBackend<F> {
     fn clone(&self) -> Self {
         VhostUserFsBackend {
-            mem: self.mem.clone(),
             kill_evt: self.kill_evt.try_clone().unwrap(),
             server: self.server.clone(),
-            vu_req: self.vu_req.clone(),
             event_idx: self.event_idx,
             pool: self.pool.clone(),
             epoll_fd: self.epoll_fd,
+            worker_reset: self.worker_reset.clone(),
         }
     }
 }
@@ -118,16 +125,15 @@ impl<F: FileSystem + Send + Sync + 'static> Clone for VhostUserFsBackend<F> {
 impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
     fn new(fs: F, thread_pool_size: usize) -> Result<Self> {
         Ok(VhostUserFsBackend {
-            mem: None,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             server: Arc::new(Server::new(fs)),
-            vu_req: None,
             event_idx: false,
             pool: ThreadPoolBuilder::new()
                 .pool_size(thread_pool_size)
                 .create()
                 .map_err(Error::CreateThreadPool)?,
             epoll_fd: epoll::create(true).map_err(Error::EpollCreateFd)?,
+            worker_reset: Arc::new(Mutex::new(WorkerReset::new().unwrap())),
         })
     }
 }
@@ -152,17 +158,43 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
         VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::SLAVE_REQ
     }
 
-    fn set_event_idx(&mut self, enabled: bool) {
-        self.event_idx = enabled;
-    }
-
-    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(GuestMemoryAtomic::new(mem));
+    fn set_event_idx(&mut self, enabled: bool) -> VhostUserBackendResult<()> {
+        self.worker_reset.lock().unwrap().set_event_idx(enabled);
+        self.worker_reset
+            .lock()
+            .unwrap()
+            .get_evt()
+            .write(1)
+            .map_err(|_| Error::FailedUpdateEventIdx)?;
         Ok(())
     }
 
-    fn set_slave_req_fd(&mut self, vu_req: SlaveFsCacheReq) {
-        self.vu_req = Some(vu_req);
+    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
+        self.worker_reset
+            .lock()
+            .unwrap()
+            .set_mem(Some(GuestMemoryAtomic::new(mem)));
+        self.worker_reset
+            .lock()
+            .unwrap()
+            .get_evt()
+            .write(1)
+            .map_err(|_| Error::FailedUpdateMemory)?;
+        Ok(())
+    }
+
+    fn set_slave_req_fd(&mut self, vu_req: SlaveFsCacheReq) -> VhostUserBackendResult<()> {
+        self.worker_reset
+            .lock()
+            .unwrap()
+            .set_slave_req_fd(Some(vu_req));
+        self.worker_reset
+            .lock()
+            .unwrap()
+            .get_evt()
+            .write(1)
+            .map_err(|_| Error::FailedUpdateVuReq)?;
+        Ok(())
     }
 
     fn register_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
@@ -186,6 +218,7 @@ struct FsEpollHandler<F: FileSystem + Send + Sync + 'static> {
     event_idx: bool,
     pool: ThreadPool,
     epoll_fd: RawFd,
+    worker_reset: Arc<Mutex<WorkerReset>>,
 }
 
 impl<F: FileSystem + Send + Sync + 'static> FsEpollHandler<F> {
@@ -244,7 +277,14 @@ impl<F: FileSystem + Send + Sync + 'static> FsEpollHandler<F> {
     }
 
     fn handle_event(&mut self, vrings: Vec<Arc<RwLock<Vring>>>) -> VhostUserBackendResult<()> {
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); NUM_QUEUES];
+        register_listener(
+            self.epoll_fd,
+            self.worker_reset.lock().unwrap().get_evt().as_raw_fd(),
+            epoll::Events::EPOLLIN,
+            RESET_EVENT.into(),
+        )?;
+
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EVENT_COUNT as usize];
 
         'epoll: loop {
             let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
@@ -279,6 +319,19 @@ impl<F: FileSystem + Send + Sync + 'static> FsEpollHandler<F> {
                     REQ_QUEUE_EVENT => {
                         debug!("QUEUE_EVENT");
                         vrings[1].clone()
+                    }
+                    RESET_EVENT => {
+                        println!("RESET_EVENT!\n");
+                        self.worker_reset
+                            .lock()
+                            .unwrap()
+                            .get_evt()
+                            .read()
+                            .map_err(|_| Error::FailedReadWorkerReset)?;
+                        self.mem = self.worker_reset.lock().unwrap().get_mem();
+                        self.event_idx = self.worker_reset.lock().unwrap().get_event_idx();
+                        self.vu_req = self.worker_reset.lock().unwrap().get_slave_req_fd();
+                        continue;
                     }
                     _ => return Err(Error::HandleEventUnknownEvent.into()),
                 };
