@@ -260,7 +260,7 @@ fn create_app<'a, 'b>(
                 .long("seccomp")
                 .takes_value(true)
                 .possible_values(&["true", "false"])
-                .default_value("true"),
+                .default_value("false"),
         )
 }
 
