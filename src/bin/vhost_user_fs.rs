@@ -62,6 +62,8 @@ enum Error {
     FailedRegisterListener,
     /// Failed unregister listener for vring.
     FailedUnRegisterListener,
+    /// Failed to read the event from kick EventFd.
+    HandleEventReadKick,
     /// Failed to handle unknown event.
     HandleEventUnknownEvent,
     /// No memory configured.
@@ -280,6 +282,13 @@ impl<F: FileSystem + Send + Sync + 'static> FsEpollHandler<F> {
                     }
                     _ => return Err(Error::HandleEventUnknownEvent.into()),
                 };
+
+                if let Some(kick) = &vring_lock.read().unwrap().get_kick() {
+                    kick.read().map_err(|_| Error::HandleEventReadKick)?;
+                }
+                if !vring_lock.read().unwrap().get_enabled() {
+                    continue;
+                }
 
                 if self.event_idx {
                     // vm-virtio's Queue implementation only checks avail_index
