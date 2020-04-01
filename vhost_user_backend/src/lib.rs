@@ -238,6 +238,14 @@ impl Vring {
             Ok(())
         }
     }
+
+    pub fn get_kick(&self) -> Option<&EventFd> {
+        self.kick.as_ref()
+    }
+
+    pub fn get_enabled(&self) -> bool {
+        self.enabled
+    }
 }
 
 #[derive(Debug)]
