@@ -4,6 +4,7 @@
 // Copyright 2019 Alibaba Cloud Computing. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use libc::EFD_NONBLOCK;
 use std::error;
 use std::fs::File;
 use std::io;
@@ -22,7 +23,7 @@ use vhost_rs::vhost_user::{
 };
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{GuestAddress, GuestMemoryMmap};
+use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_virtio::Queue;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -62,7 +63,7 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     fn protocol_features(&self) -> VhostUserProtocolFeatures;
 
     /// Tell the backend if EVENT_IDX has been negotiated.
-    fn set_event_idx(&mut self, enabled: bool);
+    fn set_event_idx(&mut self, enabled: bool) -> result::Result<(), io::Error>;
 
     /// Update guest memory regions.
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> result::Result<(), io::Error>;
@@ -84,7 +85,9 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// Set slave fd.
     /// A default implementation is provided as we cannot expect all backends
     /// to implement this function.
-    fn set_slave_req_fd(&mut self, _vu_req: SlaveFsCacheReq) {}
+    fn set_slave_req_fd(&mut self, _vu_req: SlaveFsCacheReq) -> result::Result<(), io::Error> {
+        Ok(())
+    }
 
     /// Register listener.
     /// Register listener for vring to the epoll_fd managed by backends. Then epoll thread could receive the vring events.
@@ -486,7 +489,11 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
             .write()
             .unwrap()
             .set_event_idx(event_idx);
-        self.backend.write().unwrap().set_event_idx(event_idx);
+        self.backend
+            .write()
+            .unwrap()
+            .set_event_idx(event_idx)
+            .unwrap();
         Ok(())
     }
 
@@ -618,10 +625,71 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
     }
 
     fn set_slave_req_fd(&mut self, vu_req: SlaveFsCacheReq) {
-        self.backend.write().unwrap().set_slave_req_fd(vu_req);
+        self.backend
+            .write()
+            .unwrap()
+            .set_slave_req_fd(vu_req)
+            .unwrap();
     }
 }
 
 impl<S: VhostUserBackend> Drop for VhostUserHandler<S> {
     fn drop(&mut self) {}
+}
+
+pub struct WorkerReset {
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    event_idx: bool,
+    vu_req: Option<SlaveFsCacheReq>,
+    pub evt: EventFd,
+}
+
+impl WorkerReset {
+    pub fn new() -> io::Result<Self> {
+        Ok(WorkerReset {
+            mem: None,
+            event_idx: false,
+            vu_req: None,
+            evt: EventFd::new(EFD_NONBLOCK)?,
+        })
+    }
+
+    pub fn get_mem(&self) -> Option<GuestMemoryAtomic<GuestMemoryMmap>> {
+        self.mem.clone()
+    }
+
+    pub fn set_mem(&mut self, mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>) {
+        self.mem = mem;
+    }
+
+    pub fn get_event_idx(&self) -> bool {
+        self.event_idx
+    }
+
+    pub fn set_event_idx(&mut self, event_idx: bool) {
+        self.event_idx = event_idx;
+    }
+
+    pub fn get_slave_req_fd(&self) -> Option<SlaveFsCacheReq> {
+        self.vu_req.clone()
+    }
+
+    pub fn set_slave_req_fd(&mut self, vu_req: Option<SlaveFsCacheReq>) {
+        self.vu_req = vu_req;
+    }
+
+    pub fn get_evt(&self) -> EventFd {
+        self.evt.try_clone().unwrap()
+    }
+}
+
+impl std::clone::Clone for WorkerReset {
+    fn clone(&self) -> Self {
+        WorkerReset {
+            mem: self.mem.clone(),
+            event_idx: self.event_idx,
+            vu_req: self.vu_req.clone(),
+            evt: self.evt.try_clone().unwrap(),
+        }
+    }
 }
