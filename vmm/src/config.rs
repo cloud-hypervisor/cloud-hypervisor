@@ -132,7 +132,10 @@ impl OptionParser {
     }
 
     pub fn get(&self, option: &str) -> Option<String> {
-        self.options.get(option).and_then(|v| v.value.clone())
+        self.options
+            .get(option)
+            .and_then(|v| v.value.clone())
+            .and_then(|s| if s.is_empty() { None } else { Some(s) })
     }
 
     pub fn is_set(&self, option: &str) -> bool {
@@ -143,7 +146,7 @@ impl OptionParser {
     }
 
     pub fn convert<T: FromStr>(&self, option: &str) -> OptionParserResult<Option<T>> {
-        match self.options.get(option).and_then(|v| v.value.as_ref()) {
+        match self.get(option) {
             None => Ok(None),
             Some(v) => Ok(Some(v.parse().map_err(|_| {
                 OptionParserError::Conversion(option.to_owned(), v.to_owned())
