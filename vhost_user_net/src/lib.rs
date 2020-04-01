@@ -23,11 +23,11 @@ use std::io::{self};
 use std::net::Ipv4Addr;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::process;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::vec::Vec;
 use vhost_rs::vhost_user::message::*;
 use vhost_rs::vhost_user::Error as VhostUserError;
-use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
+use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, WorkerReset};
 use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_virtio::net_util::{open_tap, register_listener, unregister_listener, RxVirtio, TxVirtio};
@@ -56,8 +56,12 @@ pub enum Error {
     FailedRegisterListener,
     /// Failed unregister listener for vring.
     FailedUnRegisterListener,
+    /// Failed to read worker reset event.
+    FailedReadWorkerReset,
     /// Failed to signal used queue.
     FailedSignalingUsedQueue,
+    /// Failed to update memory.
+    FailedUpdateMemory,
     /// Failed to handle event other than input event.
     HandleEventNotEpollIn,
     /// Failed to read the event from kick EventFd.
@@ -99,7 +103,6 @@ impl std::convert::From<Error> for std::io::Error {
 }
 
 pub struct VhostUserNetBackend {
-    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     kill_evt: EventFd,
     taps: Vec<(Tap, usize)>,
     rxs: Vec<RxVirtio>,
@@ -108,6 +111,7 @@ pub struct VhostUserNetBackend {
     num_queues: usize,
     queue_size: u16,
     epoll_fd: RawFd,
+    worker_reset: Arc<Mutex<WorkerReset>>,
 }
 
 impl VhostUserNetBackend {
@@ -131,7 +135,6 @@ impl VhostUserNetBackend {
         }
 
         Ok(VhostUserNetBackend {
-            mem: None,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             taps: taps_v,
             rxs,
@@ -140,6 +143,7 @@ impl VhostUserNetBackend {
             num_queues,
             queue_size,
             epoll_fd: epoll::create(true).map_err(Error::EpollCreateFd)?,
+            worker_reset: Arc::new(Mutex::new(WorkerReset::new().unwrap())),
         })
     }
 
@@ -183,10 +187,21 @@ impl VhostUserBackend for VhostUserNetBackend {
         VhostUserProtocolFeatures::all()
     }
 
-    fn set_event_idx(&mut self, _enabled: bool) {}
+    fn set_event_idx(&mut self, _enabled: bool) -> VhostUserBackendResult<()> {
+        Ok(())
+    }
 
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(GuestMemoryAtomic::new(mem));
+        self.worker_reset
+            .lock()
+            .unwrap()
+            .set_mem(Some(GuestMemoryAtomic::new(mem)));
+        self.worker_reset
+            .lock()
+            .unwrap()
+            .get_evt()
+            .write(1)
+            .map_err(|_| Error::FailedUpdateMemory)?;
         Ok(())
     }
 
@@ -211,6 +226,7 @@ struct NetEpollHandler {
     rx_tap_listenings: Vec<bool>,
     epoll_fd: RawFd,
     num_queues: usize,
+    worker_reset: Arc<Mutex<WorkerReset>>,
 }
 
 impl NetEpollHandler {
@@ -313,7 +329,15 @@ impl NetEpollHandler {
         let tap_start_index = self.num_queues as u16;
         let tap_end_index = (self.num_queues + self.num_queues / 2 - 1) as u16;
 
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); tap_end_index as usize];
+        let worker_reset_index = tap_end_index + 1;
+        register_listener(
+            self.epoll_fd,
+            self.worker_reset.lock().unwrap().get_evt().as_raw_fd(),
+            epoll::Events::EPOLLIN,
+            u64::try_from(worker_reset_index).unwrap(),
+        )?;
+
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 100];
 
         'epoll: loop {
             let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
@@ -383,6 +407,15 @@ impl NetEpollHandler {
                         } else {
                             self.process_rx(&mut vring, index)?;
                         }
+                    }
+                    x if x == worker_reset_index => {
+                        self.worker_reset
+                            .lock()
+                            .unwrap()
+                            .get_evt()
+                            .read()
+                            .map_err(|_| Error::FailedReadWorkerReset)?;
+                        self.mem = self.worker_reset.lock().unwrap().get_mem();
                     }
                     _ => return Err(Error::HandleEventUnknownEvent.into()),
                 }
