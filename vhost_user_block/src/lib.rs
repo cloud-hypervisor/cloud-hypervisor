@@ -17,6 +17,7 @@ use epoll;
 use libc::EFD_NONBLOCK;
 use log::*;
 use qcow::{self, ImageType, QcowFile};
+use std::convert::TryFrom;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;
@@ -25,7 +26,7 @@ use std::mem;
 use std::num::Wrapping;
 use std::ops::DerefMut;
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::process;
 use std::slice;
@@ -34,7 +35,7 @@ use std::time::Instant;
 use std::vec::Vec;
 use std::{convert, error, fmt, io};
 use vhost_rs::vhost_user::message::*;
-use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
+use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, WorkerReset};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError, GuestMemoryMmap};
@@ -67,6 +68,12 @@ pub enum Error {
     FailedRegisterListener,
     /// Failed unregister listener for vring.
     FailedUnRegisterListener,
+    /// Failed to read worker reset event,
+    FailedReadWorkerReset,
+    /// Failed to set event idx.
+    FailedUpdateEventIdx,
+    /// Failed to update memory.
+    FailedUpdateMemory,
     /// Bad memory address.
     GuestMemory(GuestMemoryError),
     /// Can't open image file.
@@ -106,16 +113,15 @@ impl convert::From<Error> for io::Error {
 }
 
 pub struct VhostUserBlkBackend {
-    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     disk_image: Arc<Mutex<dyn DiskFile>>,
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
     config: virtio_blk_config,
     rdonly: bool,
     poll_queue: bool,
-    event_idx: bool,
     kill_evt: EventFd,
     epoll_fd: RawFd,
+    worker_reset: Arc<Mutex<WorkerReset>>,
 }
 
 impl VhostUserBlkBackend {
@@ -157,16 +163,15 @@ impl VhostUserBlkBackend {
         config.wce = 1;
 
         Ok(VhostUserBlkBackend {
-            mem: None,
             disk_image: image,
             disk_image_id: image_id,
             disk_nsectors: nsectors,
             config,
             rdonly,
             poll_queue,
-            event_idx: false,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             epoll_fd: epoll::create(true).map_err(Error::EpollCreateFd)?,
+            worker_reset: Arc::new(Mutex::new(WorkerReset::new().unwrap())),
         })
     }
 }
@@ -197,12 +202,28 @@ impl VhostUserBackend for VhostUserBlkBackend {
         VhostUserProtocolFeatures::CONFIG
     }
 
-    fn set_event_idx(&mut self, enabled: bool) {
-        self.event_idx = enabled;
+    fn set_event_idx(&mut self, enabled: bool) -> VhostUserBackendResult<()> {
+        self.worker_reset.lock().unwrap().set_event_idx(enabled);
+        self.worker_reset
+            .lock()
+            .unwrap()
+            .get_evt()
+            .write(1)
+            .map_err(|_| Error::FailedUpdateEventIdx)?;
+        Ok(())
     }
 
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(GuestMemoryAtomic::new(mem));
+        self.worker_reset
+            .lock()
+            .unwrap()
+            .set_mem(Some(GuestMemoryAtomic::new(mem)));
+        self.worker_reset
+            .lock()
+            .unwrap()
+            .get_evt()
+            .write(1)
+            .map_err(|_| Error::FailedUpdateMemory)?;
         Ok(())
     }
 
@@ -240,6 +261,7 @@ struct BlockEpollHandler {
     event_idx: bool,
     epoll_fd: RawFd,
     num_queues: u16,
+    worker_reset: Arc<Mutex<WorkerReset>>,
 }
 
 impl BlockEpollHandler {
@@ -304,8 +326,15 @@ impl BlockEpollHandler {
     }
 
     fn handle_event(&mut self, vrings: Vec<Arc<RwLock<Vring>>>) -> VhostUserBackendResult<()> {
-        let mut events =
-            vec![epoll::Event::new(epoll::Events::empty(), 0); self.num_queues as usize];
+        let worker_reset_index = self.num_queues;
+        register_listener(
+            self.epoll_fd,
+            self.worker_reset.lock().unwrap().get_evt().as_raw_fd(),
+            epoll::Events::EPOLLIN,
+            u64::try_from(worker_reset_index).unwrap(),
+        )?;
+
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 100];
 
         'epoll: loop {
             let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
@@ -369,6 +398,16 @@ impl BlockEpollHandler {
                             // Without EVENT_IDX, a single call is enough.
                             self.process_queue(&mut vring);
                         }
+                    }
+                    q if q == worker_reset_index => {
+                        self.worker_reset
+                            .lock()
+                            .unwrap()
+                            .get_evt()
+                            .read()
+                            .map_err(|_| Error::FailedReadWorkerReset)?;
+                        self.mem = self.worker_reset.lock().unwrap().get_mem();
+                        self.event_idx = self.worker_reset.lock().unwrap().get_event_idx();
                     }
                     _ => return Err(Error::HandleEventUnknownEvent.into()),
                 }
