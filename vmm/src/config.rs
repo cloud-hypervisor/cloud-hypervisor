@@ -33,8 +33,6 @@ pub enum Error {
     ParseCmdlineParams,
     /// Both socket and path specified
     ParseDiskSocketAndPath,
-    /// Failed parsing random number generator parameters.
-    ParseRngParams,
     /// Failed parsing fs tag parameter.
     ParseFsTagParam,
     /// Failed parsing fs socket path parameter.
@@ -71,6 +69,8 @@ pub enum Error {
     ParseDisk(OptionParserError),
     /// Error parsing network options
     ParseNetwork(OptionParserError),
+    /// Error parsing RNG options
+    ParseRNG(OptionParserError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -714,24 +714,22 @@ pub struct RngConfig {
 
 impl RngConfig {
     pub fn parse(rng: &str) -> Result<Self> {
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = rng.split(',').collect();
+        let mut parser = OptionParser::new();
+        parser.add("src").add("iommu");
+        parser.parse(rng).map_err(Error::ParseRNG)?;
 
-        let mut src_str: &str = DEFAULT_RNG_SOURCE;
-        let mut iommu_str: &str = "";
+        let src = PathBuf::from(
+            parser
+                .get("src")
+                .unwrap_or_else(|| DEFAULT_RNG_SOURCE.to_owned()),
+        );
+        let iommu = parser
+            .convert::<Toggle>("iommu")
+            .map_err(Error::ParseRNG)?
+            .unwrap_or(Toggle(false))
+            .0;
 
-        for param in params_list.iter() {
-            if param.starts_with("src=") {
-                src_str = &param[4..];
-            } else if param.starts_with("iommu=") {
-                iommu_str = &param[6..];
-            }
-        }
-
-        Ok(RngConfig {
-            src: PathBuf::from(src_str),
-            iommu: parse_on_off(iommu_str)?,
-        })
+        Ok(RngConfig { src, iommu })
     }
 }
 
