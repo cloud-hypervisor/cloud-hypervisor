@@ -772,6 +772,19 @@ fn default_fsconfig_cache_size() -> u64 {
     0x0002_0000_0000
 }
 
+impl Default for FsConfig {
+    fn default() -> Self {
+        Self {
+            tag: "".to_owned(),
+            sock: PathBuf::new(),
+            num_queues: default_fsconfig_num_queues(),
+            queue_size: default_fsconfig_queue_size(),
+            dax: default_fsconfig_dax(),
+            cache_size: default_fsconfig_cache_size(),
+        }
+    }
+}
+
 impl FsConfig {
     pub fn parse(fs: &str) -> Result<Self> {
         // Split the parameters based on the comma delimiter
@@ -1508,6 +1521,64 @@ mod tests {
                 ..Default::default()
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_fs() -> Result<()> {
+        // "tag" and "socket" must be supplied
+        assert!(FsConfig::parse("").is_err());
+        assert!(FsConfig::parse("tag=mytag").is_err());
+        assert!(FsConfig::parse("sock=/tmp/sock").is_err());
+        assert_eq!(
+            FsConfig::parse("tag=mytag,sock=/tmp/sock")?,
+            FsConfig {
+                sock: PathBuf::from("/tmp/sock"),
+                tag: "mytag".to_owned(),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            FsConfig::parse("tag=mytag,sock=/tmp/sock")?,
+            FsConfig {
+                sock: PathBuf::from("/tmp/sock"),
+                tag: "mytag".to_owned(),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            FsConfig::parse("tag=mytag,sock=/tmp/sock,num_queues=4,queue_size=1024")?,
+            FsConfig {
+                sock: PathBuf::from("/tmp/sock"),
+                tag: "mytag".to_owned(),
+                num_queues: 4,
+                queue_size: 1024,
+                ..Default::default()
+            }
+        );
+        // DAX on -> default cache size
+        assert_eq!(
+            FsConfig::parse("tag=mytag,sock=/tmp/sock,dax=on")?,
+            FsConfig {
+                sock: PathBuf::from("/tmp/sock"),
+                tag: "mytag".to_owned(),
+                dax: true,
+                cache_size: default_fsconfig_cache_size(),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            FsConfig::parse("tag=mytag,sock=/tmp/sock,dax=on,cache_size=4G")?,
+            FsConfig {
+                sock: PathBuf::from("/tmp/sock"),
+                tag: "mytag".to_owned(),
+                dax: true,
+                cache_size: 4 << 30,
+                ..Default::default()
+            }
+        );
+        // Cache size without DAX is an error
+        assert!(FsConfig::parse("tag=mytag,sock=/tmp/sock,dax=off,cache_size=4G").is_err());
         Ok(())
     }
 }
