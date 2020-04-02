@@ -75,6 +75,10 @@ pub enum Error {
     ParseConsoleFileMissing,
     /// No mode given for console
     ParseConsoleInvalidModeGiven,
+    /// Failed parsing device parameters
+    ParseDevice(OptionParserError),
+    /// Missing path from device,
+    ParseDevicePathMissing,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1015,34 +1019,21 @@ impl DeviceConfig {
     pub const SYNTAX: &'static str =
         "Direct device assignment parameters \"path=<device_path>,iommu=on|off,id=<device_id>\"";
     pub fn parse(device: &str) -> Result<Self> {
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = device.split(',').collect();
+        let mut parser = OptionParser::new();
+        parser.add("path").add("id").add("iommu");
+        parser.parse(device).map_err(Error::ParseDevice)?;
 
-        let mut path_str: &str = "";
-        let mut iommu_str: &str = "";
-        let mut id_str: &str = "";
-
-        for param in params_list.iter() {
-            if param.starts_with("path=") {
-                path_str = &param[5..];
-            } else if param.starts_with("iommu=") {
-                iommu_str = &param[6..];
-            } else if param.starts_with("id=") {
-                id_str = &param[3..];
-            }
-        }
-
-        let id = if !id_str.is_empty() {
-            Some(String::from(id_str))
-        } else {
-            None
-        };
-
-        Ok(DeviceConfig {
-            path: PathBuf::from(path_str),
-            iommu: parse_on_off(iommu_str)?,
-            id,
-        })
+        let path = parser
+            .get("path")
+            .map(PathBuf::from)
+            .ok_or(Error::ParseDevicePathMissing)?;
+        let iommu = parser
+            .convert::<Toggle>("iommu")
+            .map_err(Error::ParseDevice)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let id = parser.get("id");
+        Ok(DeviceConfig { path, iommu, id })
     }
 }
 
@@ -1660,6 +1651,8 @@ mod tests {
 
     #[test]
     fn test_device_parsing() -> Result<()> {
+        // Device must have a path provided
+        assert!(DeviceConfig::parse("").is_err());
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device")?,
             DeviceConfig {
