@@ -33,16 +33,10 @@ pub enum Error {
     ParseCmdlineParams,
     /// Both socket and path specified
     ParseDiskSocketAndPath,
-    /// Failed parsing fs tag parameter.
-    ParseFsTagParam,
-    /// Failed parsing fs socket path parameter.
-    ParseFsSockParam,
-    /// Failed parsing fs number of queues parameter.
-    ParseFsNumQueuesParam(std::num::ParseIntError),
-    /// Failed parsing fs queue size parameter.
-    ParseFsQueueSizeParam(std::num::ParseIntError),
-    /// Failed parsing fs dax parameter.
-    ParseFsDax,
+    /// Filesystem tag is missing
+    ParseFsTagMissing,
+    /// Filesystem socket is missing
+    ParseFsSockMissing,
     /// Cannot have dax=off along with cache_size parameter.
     InvalidCacheSizeWithDaxOff,
     /// Failed parsing persitent memory file parameter.
@@ -71,6 +65,8 @@ pub enum Error {
     ParseNetwork(OptionParserError),
     /// Error parsing RNG options
     ParseRNG(OptionParserError),
+    /// Error parsing filesystem parameters
+    ParseFileSystem(OptionParserError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -787,76 +783,47 @@ impl Default for FsConfig {
 
 impl FsConfig {
     pub fn parse(fs: &str) -> Result<Self> {
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = fs.split(',').collect();
+        let mut parser = OptionParser::new();
+        parser
+            .add("tag")
+            .add("dax")
+            .add("cache_size")
+            .add("queue_size")
+            .add("num_queues")
+            .add("sock");
+        parser.parse(fs).map_err(Error::ParseFileSystem)?;
 
-        let mut tag: &str = "";
-        let mut sock: &str = "";
-        let mut num_queues_str: &str = "";
-        let mut queue_size_str: &str = "";
-        let mut dax_str: &str = "";
-        let mut cache_size_str: &str = "";
+        let tag = parser.get("tag").ok_or(Error::ParseFsTagMissing)?;
+        let sock = PathBuf::from(parser.get("sock").ok_or(Error::ParseFsSockMissing)?);
 
-        for param in params_list.iter() {
-            if param.starts_with("tag=") {
-                tag = &param[4..];
-            } else if param.starts_with("sock=") {
-                sock = &param[5..];
-            } else if param.starts_with("num_queues=") {
-                num_queues_str = &param[11..];
-            } else if param.starts_with("queue_size=") {
-                queue_size_str = &param[11..];
-            } else if param.starts_with("dax=") {
-                dax_str = &param[4..];
-            } else if param.starts_with("cache_size=") {
-                cache_size_str = &param[11..];
-            }
-        }
+        let queue_size = parser
+            .convert("queue_size")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or_else(default_fsconfig_queue_size);
+        let num_queues = parser
+            .convert("num_queues")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or_else(default_fsconfig_num_queues);
 
-        let mut num_queues: usize = default_fsconfig_num_queues();
-        let mut queue_size: u16 = default_fsconfig_queue_size();
-        let mut dax: bool = default_fsconfig_dax();
-        // Default cache size set to 8Gib.
-        let mut cache_size: u64 = default_fsconfig_cache_size();
+        let dax = parser
+            .convert::<Toggle>("dax")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or_else(|| Toggle(default_fsconfig_dax()))
+            .0;
 
-        if tag.is_empty() {
-            return Err(Error::ParseFsTagParam);
-        }
-        if sock.is_empty() {
-            return Err(Error::ParseFsSockParam);
-        }
-        if !num_queues_str.is_empty() {
-            num_queues = num_queues_str
-                .parse()
-                .map_err(Error::ParseFsNumQueuesParam)?;
-        }
-        if !queue_size_str.is_empty() {
-            queue_size = queue_size_str
-                .parse()
-                .map_err(Error::ParseFsQueueSizeParam)?;
-        }
-        if !dax_str.is_empty() {
-            match dax_str {
-                "on" => dax = true,
-                "off" => dax = false,
-                _ => return Err(Error::ParseFsDax),
-            }
+        if parser.is_set("cache_size") && !dax {
+            return Err(Error::InvalidCacheSizeWithDaxOff);
         }
 
-        // Take appropriate decision about cache_size based on DAX being
-        // enabled or disabled.
-        if !dax {
-            if !cache_size_str.is_empty() {
-                return Err(Error::InvalidCacheSizeWithDaxOff);
-            }
-            cache_size = 0;
-        } else if !cache_size_str.is_empty() {
-            cache_size = parse_size(cache_size_str)?;
-        }
+        let cache_size = parser
+            .convert::<ByteSized>("cache_size")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or_else(|| ByteSized(default_fsconfig_cache_size()))
+            .0;
 
         Ok(FsConfig {
-            tag: tag.to_string(),
-            sock: PathBuf::from(sock),
+            tag,
+            sock,
             num_queues,
             queue_size,
             dax,
