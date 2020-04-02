@@ -138,6 +138,32 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
             worker_reset: Arc::new(Mutex::new(WorkerReset::new().unwrap())),
         })
     }
+
+    pub fn start_worker_thread(
+        &mut self,
+        vrings: Vec<Arc<RwLock<Vring>>>,
+    ) -> VhostUserBackendResult<()> {
+        let mut handler = FsEpollHandler {
+            mem: None,
+            server: self.server.clone(),
+            vu_req: None,
+            event_idx: false,
+            pool: self.pool.clone(),
+            epoll_fd: self.epoll_fd,
+            worker_reset: self.worker_reset.clone(),
+            kill_evt: self.kill_evt.try_clone().unwrap(),
+        };
+
+        std::thread::Builder::new()
+            .name("vring_worker".to_string())
+            .spawn(move || handler.handle_event(vrings.clone()))
+            .map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                e
+            })?;
+
+        Ok(())
+    }
 }
 
 impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBackend<F> {
@@ -315,10 +341,6 @@ impl<F: FileSystem + Send + Sync + 'static> FsEpollHandler<F> {
 
             for event in events.iter().take(num_events) {
                 let device_event = event.data as u16;
-                let mem = match &self.mem {
-                    Some(m) => m.memory(),
-                    None => return Err(Error::NoMemoryConfigured.into()),
-                };
 
                 let vring_lock = match device_event {
                     HIPRIO_QUEUE_EVENT => {
@@ -346,6 +368,11 @@ impl<F: FileSystem + Send + Sync + 'static> FsEpollHandler<F> {
                         break 'epoll;
                     }
                     _ => return Err(Error::HandleEventUnknownEvent.into()),
+                };
+
+                let mem = match &self.mem {
+                    Some(m) => m.memory(),
+                    None => return Err(Error::NoMemoryConfigured.into()),
                 };
 
                 if let Some(kick) = &vring_lock.read().unwrap().get_kick() {
@@ -444,6 +471,18 @@ fn main() {
         fs_backend.clone(),
     )
     .unwrap();
+
+    if let Err(e) = fs_backend
+        .write()
+        .unwrap()
+        .start_worker_thread(daemon.get_vrings())
+    {
+        error!(
+            "Failed to start worker thread for vhost-user-fs with error: {:?}",
+            e
+        );
+        process::exit(1);
+    }
 
     if let Err(e) = daemon.start() {
         error!("Failed to start daemon: {:?}", e);
