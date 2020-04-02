@@ -39,8 +39,10 @@ pub enum Error {
     ParseFsSockMissing,
     /// Cannot have dax=off along with cache_size parameter.
     InvalidCacheSizeWithDaxOff,
-    /// Failed parsing persitent memory file parameter.
-    ParsePmemFileParam,
+    /// Missing persistant memory file parameter.
+    ParsePmemFileMissing,
+    /// Missing persistant memory size parameter.
+    ParsePmemSizeMissing,
     /// Failed parsing size parameter.
     ParseSizeParam(std::num::ParseIntError),
     /// Failed parsing console parameter.
@@ -67,6 +69,8 @@ pub enum Error {
     ParseRNG(OptionParserError),
     /// Error parsing filesystem parameters
     ParseFileSystem(OptionParserError),
+    /// Error parsing persistent memorry parameters
+    ParsePersistentMemory(OptionParserError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -849,39 +853,43 @@ impl PmemConfig {
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
     mergeable=on|off,discard_writes=on|off,\"";
     pub fn parse(pmem: &str) -> Result<Self> {
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = pmem.split(',').collect();
+        let mut parser = OptionParser::new();
+        parser
+            .add("size")
+            .add("file")
+            .add("mergeable")
+            .add("iommu")
+            .add("discard_writes");
+        parser.parse(pmem).map_err(Error::ParsePersistentMemory)?;
 
-        let mut file_str: &str = "";
-        let mut size_str: &str = "";
-        let mut iommu_str: &str = "";
-        let mut mergeable_str: &str = "";
-        let mut discard_writes_str: &str = "";
-
-        for param in params_list.iter() {
-            if param.starts_with("file=") {
-                file_str = &param[5..];
-            } else if param.starts_with("size=") {
-                size_str = &param[5..];
-            } else if param.starts_with("iommu=") {
-                iommu_str = &param[6..];
-            } else if param.starts_with("mergeable=") {
-                mergeable_str = &param[10..];
-            } else if param.starts_with("discard_writes=") {
-                discard_writes_str = &param[15..];
-            }
-        }
-
-        if file_str.is_empty() {
-            return Err(Error::ParsePmemFileParam);
-        }
+        let file = PathBuf::from(parser.get("file").ok_or(Error::ParsePmemFileMissing)?);
+        let size = parser
+            .convert::<ByteSized>("size")
+            .map_err(Error::ParseMemory)?
+            .ok_or(Error::ParsePmemSizeMissing)?
+            .0;
+        let mergeable = parser
+            .convert::<Toggle>("mergeable")
+            .map_err(Error::ParsePersistentMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let iommu = parser
+            .convert::<Toggle>("iommu")
+            .map_err(Error::ParsePersistentMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let discard_writes = parser
+            .convert::<Toggle>("discard_writes")
+            .map_err(Error::ParsePersistentMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         Ok(PmemConfig {
-            file: PathBuf::from(file_str),
-            size: parse_size(size_str)?,
-            iommu: parse_on_off(iommu_str)?,
-            mergeable: parse_on_off(mergeable_str)?,
-            discard_writes: parse_on_off(discard_writes_str)?,
+            file,
+            size,
+            iommu,
+            mergeable,
+            discard_writes,
         })
     }
 }
