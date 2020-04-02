@@ -85,6 +85,7 @@ pub struct OptionParser {
 
 struct OptionParserValue {
     value: Option<String>,
+    requires_value: bool,
 }
 
 #[derive(Debug)]
@@ -113,14 +114,17 @@ impl OptionParser {
         for option in options_list.iter() {
             let parts: Vec<&str> = option.split('=').collect();
 
-            if parts.len() != 2 {
-                return Err(OptionParserError::InvalidSyntax((*option).to_owned()));
-            }
-
             match self.options.get_mut(parts[0]) {
                 None => return Err(OptionParserError::UnknownOption(parts[0].to_owned())),
                 Some(value) => {
-                    value.value = Some(parts[1].trim().to_owned());
+                    if value.requires_value {
+                        if parts.len() != 2 {
+                            return Err(OptionParserError::InvalidSyntax((*option).to_owned()));
+                        }
+                        value.value = Some(parts[1].trim().to_owned());
+                    } else {
+                        value.value = Some(String::new());
+                    }
                 }
             }
         }
@@ -129,8 +133,25 @@ impl OptionParser {
     }
 
     pub fn add(&mut self, option: &str) -> &mut Self {
-        self.options
-            .insert(option.to_owned(), OptionParserValue { value: None });
+        self.options.insert(
+            option.to_owned(),
+            OptionParserValue {
+                value: None,
+                requires_value: true,
+            },
+        );
+
+        self
+    }
+
+    pub fn add_valueless(&mut self, option: &str) -> &mut Self {
+        self.options.insert(
+            option.to_owned(),
+            OptionParserValue {
+                value: None,
+                requires_value: false,
+            },
+        );
 
         self
     }
