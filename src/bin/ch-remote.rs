@@ -262,6 +262,19 @@ fn snapshot_api_command(socket: &mut UnixStream, url: &str) -> Result<(), Error>
     )
 }
 
+fn restore_api_command(socket: &mut UnixStream, url: &str) -> Result<(), Error> {
+    let restore_config = vmm::api::VmRestoreConfig {
+        source_url: String::from(url),
+    };
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "restore",
+        Some(&serde_json::to_string(&restore_config).unwrap()),
+    )
+}
+
 fn do_command(matches: &ArgMatches) -> Result<(), Error> {
     let mut socket =
         UnixStream::connect(matches.value_of("api-socket").unwrap()).map_err(Error::Socket)?;
@@ -325,6 +338,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .subcommand_matches("snapshot")
                 .unwrap()
                 .value_of("snapshot_config")
+                .unwrap(),
+        ),
+        Some("restore") => restore_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("restore")
+                .unwrap()
+                .value_of("restore_config")
                 .unwrap(),
         ),
         Some(c) => simple_api_command(&mut socket, "PUT", c, None),
