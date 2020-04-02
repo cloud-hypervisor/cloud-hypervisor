@@ -47,10 +47,10 @@ pub enum Error {
     ParseSizeParam(std::num::ParseIntError),
     /// Both console and serial are tty.
     ParseTTYParam,
-    /// Failed parsing vsock context ID parameter.
-    ParseVsockCidParam(std::num::ParseIntError),
-    /// Failed parsing vsock socket path parameter.
-    ParseVsockSockParam,
+    /// Missing vsock socket path parameter.
+    ParseVsockSockMissing,
+    /// Missing vsock cid parameter.
+    ParseVsockCidMissing,
     /// Missing kernel configuration
     ValidateMissingKernelConfig,
     /// Failed parsing generic on|off parameter.
@@ -79,6 +79,8 @@ pub enum Error {
     ParseDevice(OptionParserError),
     /// Missing path from device,
     ParseDevicePathMissing,
+    /// Failed to parse vsock parameters
+    ParseVsock(OptionParserError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1047,32 +1049,25 @@ pub struct VsockConfig {
 
 impl VsockConfig {
     pub fn parse(vsock: &str) -> Result<Self> {
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = vsock.split(',').collect();
+        let mut parser = OptionParser::new();
+        parser.add("sock").add("cid").add("iommu");
+        parser.parse(vsock).map_err(Error::ParseVsock)?;
 
-        let mut cid_str: &str = "";
-        let mut sock_str: &str = "";
-        let mut iommu_str: &str = "";
+        let sock = parser
+            .get("sock")
+            .map(PathBuf::from)
+            .ok_or(Error::ParseVsockSockMissing)?;
+        let iommu = parser
+            .convert::<Toggle>("iommu")
+            .map_err(Error::ParseVsock)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let cid = parser
+            .convert("cid")
+            .map_err(Error::ParseVsock)?
+            .ok_or(Error::ParseVsockCidMissing)?;
 
-        for param in params_list.iter() {
-            if param.starts_with("cid=") {
-                cid_str = &param[4..];
-            } else if param.starts_with("sock=") {
-                sock_str = &param[5..];
-            } else if param.starts_with("iommu=") {
-                iommu_str = &param[6..];
-            }
-        }
-
-        if sock_str.is_empty() {
-            return Err(Error::ParseVsockSockParam);
-        }
-
-        Ok(VsockConfig {
-            cid: cid_str.parse::<u64>().map_err(Error::ParseVsockCidParam)?,
-            sock: PathBuf::from(sock_str),
-            iommu: parse_on_off(iommu_str)?,
-        })
+        Ok(VsockConfig { cid, sock, iommu })
     }
 }
 
