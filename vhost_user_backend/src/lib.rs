@@ -170,6 +170,12 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
             Ok(())
         }
     }
+
+    /// Get vrings for backends to start worker thread which will run
+    /// epoll handler to handle vring events.
+    pub fn get_vrings(&self) -> Vec<Arc<RwLock<Vring>>> {
+        self.handler.lock().unwrap().vrings.clone()
+    }
 }
 
 struct AddrMapping {
