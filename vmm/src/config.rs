@@ -1657,4 +1657,36 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn test_device_parsing() -> Result<()> {
+        assert_eq!(
+            DeviceConfig::parse("path=/path/to/device")?,
+            DeviceConfig {
+                path: PathBuf::from("/path/to/device"),
+                id: None,
+                iommu: false
+            }
+        );
+
+        assert_eq!(
+            DeviceConfig::parse("path=/path/to/device,iommu=on")?,
+            DeviceConfig {
+                path: PathBuf::from("/path/to/device"),
+                id: None,
+                iommu: true
+            }
+        );
+
+        assert_eq!(
+            DeviceConfig::parse("path=/path/to/device,iommu=on,id=mydevice0")?,
+            DeviceConfig {
+                path: PathBuf::from("/path/to/device"),
+                id: Some("mydevice0".to_owned()),
+                iommu: true
+            }
+        );
+
+        Ok(())
+    }
 }
