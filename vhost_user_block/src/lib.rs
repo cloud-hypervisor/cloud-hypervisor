@@ -174,6 +174,34 @@ impl VhostUserBlkBackend {
             worker_reset: Arc::new(Mutex::new(WorkerReset::new().unwrap())),
         })
     }
+
+    pub fn start_worker_thread(
+        &mut self,
+        vrings: Vec<Arc<RwLock<Vring>>>,
+    ) -> VhostUserBackendResult<()> {
+        let mut handler = BlockEpollHandler {
+            mem: None,
+            disk_image: self.disk_image.clone(),
+            disk_image_id: self.disk_image_id.clone(),
+            disk_nsectors: self.disk_nsectors,
+            poll_queue: self.poll_queue,
+            event_idx: false,
+            epoll_fd: self.epoll_fd,
+            num_queues: self.config.num_queues,
+            worker_reset: self.worker_reset.clone(),
+            kill_evt: self.kill_evt.try_clone().unwrap(),
+        };
+
+        std::thread::Builder::new()
+            .name("vring_worker".to_string())
+            .spawn(move || handler.handle_event(vrings.clone()))
+            .map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                e
+            })?;
+
+        Ok(())
+    }
 }
 
 impl VhostUserBackend for VhostUserBlkBackend {
@@ -524,6 +552,18 @@ pub fn start_block_backend(backend_command: &str) {
     )
     .unwrap();
     debug!("blk_daemon is created!\n");
+
+    if let Err(e) = blk_backend
+        .write()
+        .unwrap()
+        .start_worker_thread(blk_daemon.get_vrings())
+    {
+        error!(
+            "Failed to start worker thread for vhost-user-block with error: {:?}\n",
+            e
+        );
+        process::exit(1);
+    }
 
     if let Err(e) = blk_daemon.start() {
         error!(
