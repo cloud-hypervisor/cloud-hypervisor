@@ -1682,4 +1682,27 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_vsock_parsing() -> Result<()> {
+        // sock and cid is required
+        assert!(VsockConfig::parse("").is_err());
+        assert_eq!(
+            VsockConfig::parse("sock=/tmp/sock,cid=1")?,
+            VsockConfig {
+                cid: 1,
+                sock: PathBuf::from("/tmp/sock"),
+                iommu: false
+            }
+        );
+        assert_eq!(
+            VsockConfig::parse("sock=/tmp/sock,cid=1,iommu=on")?,
+            VsockConfig {
+                cid: 1,
+                sock: PathBuf::from("/tmp/sock"),
+                iommu: true
+            }
+        );
+        Ok(())
+    }
 }
