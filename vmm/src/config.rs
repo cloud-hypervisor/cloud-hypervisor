@@ -45,8 +45,6 @@ pub enum Error {
     ParsePmemSizeMissing,
     /// Failed parsing size parameter.
     ParseSizeParam(std::num::ParseIntError),
-    /// Failed parsing console parameter.
-    ParseConsoleParam,
     /// Both console and serial are tty.
     ParseTTYParam,
     /// Failed parsing vsock context ID parameter.
@@ -71,6 +69,12 @@ pub enum Error {
     ParseFileSystem(OptionParserError),
     /// Error parsing persistent memorry parameters
     ParsePersistentMemory(OptionParserError),
+    /// Failed parsing console
+    ParseConsole(OptionParserError),
+    /// Missing file value for console
+    ParseConsoleFileMissing,
+    /// No mode given for console
+    ParseConsoleInvalidModeGiven,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -926,46 +930,38 @@ fn default_consoleconfig_file() -> Option<PathBuf> {
 
 impl ConsoleConfig {
     pub fn parse(console: &str) -> Result<Self> {
-        // Split the parameters based on the comma delimiter
-        let params_list: Vec<&str> = console.split(',').collect();
+        let mut parser = OptionParser::new();
+        parser
+            .add_valueless("off")
+            .add_valueless("tty")
+            .add_valueless("null")
+            .add("file")
+            .add("iommu");
+        parser.parse(console).map_err(Error::ParseConsole)?;
 
-        let mut valid = false;
         let mut file: Option<PathBuf> = default_consoleconfig_file();
         let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
-        let mut iommu_str: &str = "";
 
-        for param in params_list.iter() {
-            if param.starts_with("iommu=") {
-                iommu_str = &param[6..];
-            } else {
-                if *param == "off" {
-                    mode = ConsoleOutputMode::Off;
-                    file = None;
-                } else if *param == "tty" {
-                    mode = ConsoleOutputMode::Tty;
-                    file = None;
-                } else if param.starts_with("file=") {
-                    mode = ConsoleOutputMode::File;
-                    file = Some(PathBuf::from(&param[5..]));
-                } else if param.starts_with("null") {
-                    mode = ConsoleOutputMode::Null;
-                    file = None;
-                } else {
-                    return Err(Error::ParseConsoleParam);
-                }
-                valid = true;
-            }
+        if parser.is_set("off") {
+        } else if parser.is_set("tty") {
+            mode = ConsoleOutputMode::Tty
+        } else if parser.is_set("null") {
+            mode = ConsoleOutputMode::Null
+        } else if parser.is_set("file") {
+            mode = ConsoleOutputMode::File;
+            file = Some(PathBuf::from(
+                parser.get("file").ok_or(Error::ParseConsoleFileMissing)?,
+            ));
+        } else {
+            return Err(Error::ParseConsoleInvalidModeGiven);
         }
+        let iommu = parser
+            .convert::<Toggle>("iommu")
+            .map_err(Error::ParseConsole)?
+            .unwrap_or(Toggle(false))
+            .0;
 
-        if !valid {
-            return Err(Error::ParseConsoleParam);
-        }
-
-        Ok(Self {
-            mode,
-            file,
-            iommu: parse_on_off(iommu_str)?,
-        })
+        Ok(Self { mode, file, iommu })
     }
 
     pub fn default_serial() -> Self {
