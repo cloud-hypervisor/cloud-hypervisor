@@ -19,6 +19,7 @@ extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
 use crate::config::{DeviceConfig, DiskConfig, NetConfig, PmemConfig, VmConfig};
+use crate::migration::{recv_vm_snapshot, vm_config_from_snapshot};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
@@ -304,8 +305,34 @@ impl Vmm {
         }
     }
 
-    fn vm_restore(&mut self, _source_url: &str) -> result::Result<(), VmError> {
-        Ok(())
+    fn vm_restore(&mut self, source_url: &str) -> result::Result<(), VmError> {
+        if self.vm.is_some() || self.vm_config.is_some() {
+            return Err(VmError::VmAlreadyCreated);
+        }
+
+        let vm_snapshot = recv_vm_snapshot(source_url).map_err(VmError::Restore)?;
+        let vm_config = vm_config_from_snapshot(&vm_snapshot).map_err(VmError::Restore)?;
+
+        self.vm_config = Some(Arc::clone(&vm_config));
+
+        let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
+        let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+
+        let vm = Vm::new_from_snapshot(
+            &vm_snapshot,
+            exit_evt,
+            reset_evt,
+            self.vmm_path.clone(),
+            source_url,
+        )?;
+        self.vm = Some(vm);
+
+        // Now we can restore the rest of the VM.
+        if let Some(ref mut vm) = self.vm {
+            vm.restore(vm_snapshot).map_err(VmError::Restore)
+        } else {
+            Err(VmError::VmNotCreated)
+        }
     }
 
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
