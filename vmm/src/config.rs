@@ -717,7 +717,7 @@ impl RngConfig {
         // Split the parameters based on the comma delimiter
         let params_list: Vec<&str> = rng.split(',').collect();
 
-        let mut src_str: &str = "";
+        let mut src_str: &str = DEFAULT_RNG_SOURCE;
         let mut iommu_str: &str = "";
 
         for param in params_list.iter() {
@@ -1483,6 +1483,33 @@ mod tests {
             }
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_rng() -> Result<()> {
+        assert_eq!(RngConfig::parse("")?, RngConfig::default());
+        assert_eq!(
+            RngConfig::parse("src=/dev/random")?,
+            RngConfig {
+                src: PathBuf::from("/dev/random"),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            RngConfig::parse("src=/dev/random,iommu=on")?,
+            RngConfig {
+                src: PathBuf::from("/dev/random"),
+                iommu: true,
+            }
+        );
+        assert_eq!(
+            RngConfig::parse("iommu=on")?,
+            RngConfig {
+                iommu: true,
+                ..Default::default()
+            }
+        );
         Ok(())
     }
 }
