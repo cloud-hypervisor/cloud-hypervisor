@@ -46,8 +46,10 @@ const HIPRIO_QUEUE_EVENT: u16 = 0;
 const REQ_QUEUE_EVENT: u16 = 1;
 // The memory is resized.
 const RESET_EVENT: u16 = 2;
+// The device has been dropped.
+const KILL_EVENT: u16 = 3;
 // The total event count.
-const EVENT_COUNT: u16 = 3;
+const EVENT_COUNT: u16 = 4;
 
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
@@ -219,6 +221,7 @@ struct FsEpollHandler<F: FileSystem + Send + Sync + 'static> {
     pool: ThreadPool,
     epoll_fd: RawFd,
     worker_reset: Arc<Mutex<WorkerReset>>,
+    kill_evt: EventFd,
 }
 
 impl<F: FileSystem + Send + Sync + 'static> FsEpollHandler<F> {
@@ -283,6 +286,12 @@ impl<F: FileSystem + Send + Sync + 'static> FsEpollHandler<F> {
             epoll::Events::EPOLLIN,
             RESET_EVENT.into(),
         )?;
+        register_listener(
+            self.epoll_fd,
+            self.kill_evt.as_raw_fd(),
+            epoll::Events::EPOLLIN,
+            KILL_EVENT.into(),
+        )?;
 
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EVENT_COUNT as usize];
 
@@ -332,6 +341,9 @@ impl<F: FileSystem + Send + Sync + 'static> FsEpollHandler<F> {
                         self.event_idx = self.worker_reset.lock().unwrap().get_event_idx();
                         self.vu_req = self.worker_reset.lock().unwrap().get_slave_req_fd();
                         continue;
+                    }
+                    KILL_EVENT => {
+                        break 'epoll;
                     }
                     _ => return Err(Error::HandleEventUnknownEvent.into()),
                 };
