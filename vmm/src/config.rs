@@ -832,7 +832,7 @@ impl FsConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct PmemConfig {
     pub file: PathBuf,
     pub size: u64,
@@ -1546,6 +1546,35 @@ mod tests {
         );
         // Cache size without DAX is an error
         assert!(FsConfig::parse("tag=mytag,sock=/tmp/sock,dax=off,cache_size=4G").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_pmem_parsing() -> Result<()> {
+        // Must always give a file and size
+        assert!(PmemConfig::parse("").is_err());
+        assert!(PmemConfig::parse("file=/tmp/pmem").is_err());
+        assert!(PmemConfig::parse("size=128M").is_err());
+        assert_eq!(
+            PmemConfig::parse("file=/tmp/pmem,size=128M")?,
+            PmemConfig {
+                file: PathBuf::from("/tmp/pmem"),
+                size: 128 << 20,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            PmemConfig::parse("file=/tmp/pmem,size=128M,iommu=on,mergeable=on,discard_writes=on")?,
+            PmemConfig {
+                file: PathBuf::from("/tmp/pmem"),
+                size: 128 << 20,
+                mergeable: true,
+                discard_writes: true,
+                iommu: true,
+                ..Default::default()
+            }
+        );
+
         Ok(())
     }
 }
