@@ -429,7 +429,25 @@ fn main() {
                 ),
         )
         .subcommand(SubCommand::with_name("resume").about("Resume the VM"))
-        .subcommand(SubCommand::with_name("shutdown").about("Shutdown the VM"));
+        .subcommand(SubCommand::with_name("shutdown").about("Shutdown the VM"))
+        .subcommand(
+            SubCommand::with_name("snapshot")
+                .about("Create a snapshot from VM")
+                .arg(
+                    Arg::with_name("snapshot_config")
+                        .index(1)
+                        .help("<destination_url>"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("restore")
+                .about("Restore VM from a snapshot")
+                .arg(
+                    Arg::with_name("restore_config")
+                        .index(1)
+                        .help("<source_url>"),
+                ),
+        );
 
     let matches = app.get_matches();
 
