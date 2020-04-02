@@ -344,7 +344,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         )
         .expect("Could not create the VM");
         vmm::api::vm_boot(api_evt.try_clone().unwrap(), sender).expect("Could not boot the VM");
-    } else if let Some(restore_url) = cmd_arguments.value_of("restore-from") {
+    } else if let Some(restore_url) = cmd_arguments.value_of("restore") {
         vmm::api::vm_restore(
             api_evt.try_clone().unwrap(),
             api_request_sender,
