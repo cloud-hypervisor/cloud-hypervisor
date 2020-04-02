@@ -1585,4 +1585,59 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_console_parsing() -> Result<()> {
+        assert!(ConsoleConfig::parse("").is_err());
+        assert!(ConsoleConfig::parse("badmode").is_err());
+        assert_eq!(
+            ConsoleConfig::parse("off")?,
+            ConsoleConfig {
+                mode: ConsoleOutputMode::Off,
+                iommu: false,
+                file: None,
+            }
+        );
+        assert_eq!(
+            ConsoleConfig::parse("tty")?,
+            ConsoleConfig {
+                mode: ConsoleOutputMode::Tty,
+                iommu: false,
+                file: None,
+            }
+        );
+        assert_eq!(
+            ConsoleConfig::parse("null")?,
+            ConsoleConfig {
+                mode: ConsoleOutputMode::Null,
+                iommu: false,
+                file: None,
+            }
+        );
+        assert_eq!(
+            ConsoleConfig::parse("file=/tmp/console")?,
+            ConsoleConfig {
+                mode: ConsoleOutputMode::File,
+                iommu: false,
+                file: Some(PathBuf::from("/tmp/console"))
+            }
+        );
+        assert_eq!(
+            ConsoleConfig::parse("null,iommu=on")?,
+            ConsoleConfig {
+                mode: ConsoleOutputMode::Null,
+                iommu: true,
+                file: None,
+            }
+        );
+        assert_eq!(
+            ConsoleConfig::parse("file=/tmp/console,iommu=on")?,
+            ConsoleConfig {
+                mode: ConsoleOutputMode::File,
+                iommu: true,
+                file: Some(PathBuf::from("/tmp/console"))
+            }
+        );
+        Ok(())
+    }
 }
