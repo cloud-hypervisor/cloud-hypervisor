@@ -104,10 +104,7 @@ impl std::convert::From<Error> for std::io::Error {
 
 pub struct VhostUserNetBackend {
     kill_evt: EventFd,
-    taps: Vec<(Tap, usize)>,
-    rxs: Vec<RxVirtio>,
-    txs: Vec<TxVirtio>,
-    rx_tap_listenings: Vec<bool>,
+    taps: Vec<Tap>,
     num_queues: usize,
     queue_size: u16,
     epoll_fd: RawFd,
@@ -117,29 +114,9 @@ pub struct VhostUserNetBackend {
 impl VhostUserNetBackend {
     /// Create a new virtio network device with the given TAP interface.
     pub fn new_with_tap(taps: Vec<Tap>, num_queues: usize, queue_size: u16) -> Result<Self> {
-        let mut taps_v: Vec<(Tap, usize)> = Vec::new();
-        for (i, tap) in taps.iter().enumerate() {
-            taps_v.push((tap.clone(), num_queues + i));
-        }
-
-        let mut rxs: Vec<RxVirtio> = Vec::new();
-        let mut txs: Vec<TxVirtio> = Vec::new();
-        let mut rx_tap_listenings: Vec<bool> = Vec::new();
-
-        for _ in 0..taps.len() {
-            let rx = RxVirtio::new();
-            rxs.push(rx);
-            let tx = TxVirtio::new();
-            txs.push(tx);
-            rx_tap_listenings.push(false);
-        }
-
         Ok(VhostUserNetBackend {
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
-            taps: taps_v,
-            rxs,
-            txs,
-            rx_tap_listenings,
+            taps,
             num_queues,
             queue_size,
             epoll_fd: epoll::create(true).map_err(Error::EpollCreateFd)?,
@@ -160,6 +137,57 @@ impl VhostUserNetBackend {
             .map_err(Error::OpenTap)?;
 
         Self::new_with_tap(taps, num_queues, queue_size)
+    }
+
+    /// Run vring epoll handler
+    /// Backend could run its specifid vring epoll handler in this way. Such as
+    /// net backend, if it has multiple threads created in backend lib code, all
+    /// the threads will share the same data structure which could cause race
+    /// condition and lead to performance penalty. To create threads by net backend
+    /// itself, and define data structure for each threads to access respectively,
+    /// performance could be improved.
+    pub fn start_worker_thread(
+        &mut self,
+        vrings: Vec<Arc<RwLock<Vring>>>,
+    ) -> VhostUserBackendResult<()> {
+        let mut tap_set: Vec<(Tap, usize)> = Vec::new();
+        for (i, tap) in self.taps.iter().enumerate() {
+            tap_set.push((tap.clone(), self.num_queues + i));
+        }
+
+        let mut rxs: Vec<RxVirtio> = Vec::new();
+        let mut txs: Vec<TxVirtio> = Vec::new();
+        let mut rx_tap_listenings: Vec<bool> = Vec::new();
+
+        for _ in 0..self.taps.len() {
+            let rx = RxVirtio::new();
+            rxs.push(rx);
+            let tx = TxVirtio::new();
+            txs.push(tx);
+            rx_tap_listenings.push(false);
+        }
+
+        let mut handler = NetEpollHandler {
+            mem: None,
+            taps: tap_set,
+            rxs,
+            txs,
+            rx_tap_listenings,
+            kill_evt: self.kill_evt.try_clone().unwrap(),
+            epoll_fd: self.epoll_fd,
+            num_queues: self.num_queues,
+            worker_reset: self.worker_reset.clone(),
+        };
+
+        std::thread::Builder::new()
+            .name("vring_worker".to_string())
+            .spawn(move || handler.handle_event(vrings))
+            .map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                e
+            })?;
+
+        Ok(())
     }
 }
 
@@ -533,6 +561,18 @@ pub fn start_net_backend(backend_command: &str) {
         net_backend.clone(),
     )
     .unwrap();
+
+    if let Err(e) = net_backend
+        .write()
+        .unwrap()
+        .start_worker_thread(net_daemon.get_vrings())
+    {
+        error!(
+            "failed to start worker thread for vhost-user-net with error: {:?}",
+            e
+        );
+        process::exit(1);
+    }
 
     if let Err(e) = net_daemon.start() {
         println!(
