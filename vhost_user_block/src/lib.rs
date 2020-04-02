@@ -37,7 +37,7 @@ use vhost_rs::vhost_user::message::*;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use vm_memory::{Bytes, GuestMemoryError, GuestMemoryMmap};
+use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::block::{build_disk_image_id, Request};
 use vm_virtio::net_util::{register_listener, unregister_listener};
 use vmm_sys_util::eventfd::EventFd;
@@ -106,7 +106,7 @@ impl convert::From<Error> for io::Error {
 }
 
 pub struct VhostUserBlkBackend {
-    mem: Option<GuestMemoryMmap>,
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     disk_image: Arc<Mutex<dyn DiskFile>>,
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
@@ -202,7 +202,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
     }
 
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(mem);
+        self.mem = Some(GuestMemoryAtomic::new(mem));
         Ok(())
     }
 
@@ -232,7 +232,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
 }
 
 struct BlockEpollHandler {
-    mem: Option<GuestMemoryMmap>,
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     disk_image: Arc<Mutex<dyn DiskFile>>,
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
@@ -246,14 +246,14 @@ impl BlockEpollHandler {
     pub fn process_queue(&mut self, vring: &mut Vring) -> bool {
         let mut used_any = false;
         let mem = match self.mem.as_ref() {
-            Some(m) => m,
+            Some(m) => m.memory(),
             None => return false,
         };
 
-        while let Some(head) = vring.mut_queue().iter(mem).next() {
+        while let Some(head) = vring.mut_queue().iter(&mem).next() {
             debug!("got an element in the queue");
             let len;
-            match Request::parse(&head, mem) {
+            match Request::parse(&head, &mem) {
                 Ok(request) => {
                     debug!("element is a valid request");
                     // TODO: Remove the Mutex lock which prevents parallelismm.
@@ -262,7 +262,7 @@ impl BlockEpollHandler {
                     let status = match request.execute(
                         &mut disk_image,
                         self.disk_nsectors,
-                        mem,
+                        &mem,
                         &self.disk_image_id,
                     ) {
                         Ok(l) => {
@@ -283,7 +283,7 @@ impl BlockEpollHandler {
             }
 
             if self.event_idx {
-                if let Some(used_idx) = vring.mut_queue().add_used(mem, head.index, len) {
+                if let Some(used_idx) = vring.mut_queue().add_used(&mem, head.index, len) {
                     if vring.needs_notification(&mem, Wrapping(used_idx)) {
                         debug!("signalling queue");
                         vring.signal_used_queue().unwrap();
@@ -294,7 +294,7 @@ impl BlockEpollHandler {
                 }
             } else {
                 debug!("signalling queue");
-                vring.mut_queue().add_used(mem, head.index, len);
+                vring.mut_queue().add_used(&mem, head.index, len);
                 vring.signal_used_queue().unwrap();
                 used_any = true;
             }
@@ -360,7 +360,7 @@ impl BlockEpollHandler {
                             loop {
                                 vring
                                     .mut_queue()
-                                    .update_avail_event(self.mem.as_ref().unwrap());
+                                    .update_avail_event(&(self.mem.as_ref().unwrap().memory()));
                                 if !self.process_queue(&mut vring) {
                                     break;
                                 }
