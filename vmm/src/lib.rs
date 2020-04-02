@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::{result, thread};
-use vm_migration::Pausable;
+use vm_migration::{Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 pub mod api;
@@ -291,8 +291,17 @@ impl Vmm {
         }
     }
 
-    fn vm_snapshot(&mut self, _destination_url: &str) -> result::Result<(), VmError> {
-        Ok(())
+    fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            vm.snapshot()
+                .map_err(VmError::Snapshot)
+                .and_then(|snapshot| {
+                    vm.send(&snapshot, destination_url)
+                        .map_err(VmError::SnapshotSend)
+                })
+        } else {
+            Err(VmError::VmNotRunning)
+        }
     }
 
     fn vm_restore(&mut self, _source_url: &str) -> result::Result<(), VmError> {
