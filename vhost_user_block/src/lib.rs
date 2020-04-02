@@ -87,6 +87,8 @@ pub enum Error {
     CreateKillEventFd(io::Error),
     /// Failed to handle unknown event.
     HandleEventUnknownEvent,
+    /// Failed to read kick EventFd.
+    HandleEventReadKick,
 }
 
 impl fmt::Display for Error {
@@ -327,7 +329,14 @@ impl BlockEpollHandler {
                 let device_event = event.data as u16;
 
                 match device_event {
-                    q if device_event < self.num_queues => {
+                    q if q < self.num_queues => {
+                        if let Some(kick) = &vrings[q as usize].read().unwrap().get_kick() {
+                            kick.read().map_err(|_| Error::HandleEventReadKick)?;
+                        }
+                        if !vrings[q as usize].read().unwrap().get_enabled() {
+                            continue;
+                        }
+
                         let mut vring = vrings[q as usize].write().unwrap();
 
                         if self.poll_queue {
