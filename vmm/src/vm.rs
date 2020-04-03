@@ -680,7 +680,12 @@ impl Vm {
         Ok(())
     }
 
-    pub fn resize(&mut self, desired_vcpus: Option<u8>, desired_memory: Option<u64>) -> Result<()> {
+    pub fn resize(
+        &mut self,
+        desired_vcpus: Option<u8>,
+        desired_memory: Option<u64>,
+        desired_ram_w_balloon: Option<u64>,
+    ) -> Result<()> {
         if let Some(desired_vcpus) = desired_vcpus {
             if self
                 .cpu_manager
@@ -731,6 +736,15 @@ impl Vm {
             // it will be running with the last configure memory size.
             self.config.lock().unwrap().memory.size = desired_memory;
         }
+
+        if let Some(desired_ram_w_balloon) = desired_ram_w_balloon {
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .balloon_resize(desired_ram_w_balloon)
+                .map_err(Error::MemoryManager)?;
+        }
+
         Ok(())
     }
 

@@ -23,6 +23,7 @@ enum Error {
     ServerResponse(StatusCode, Option<String>),
     InvalidCPUCount(std::num::ParseIntError),
     InvalidMemorySize(std::num::ParseIntError),
+    InvalidBalloonSize(std::num::ParseIntError),
     AddDeviceConfig(vmm::config::Error),
     AddDiskConfig(vmm::config::Error),
     AddFsConfig(vmm::config::Error),
@@ -49,6 +50,7 @@ impl fmt::Display for Error {
             }
             InvalidCPUCount(e) => write!(f, "Error parsing CPU count: {}", e),
             InvalidMemorySize(e) => write!(f, "Error parsing memory size: {}", e),
+            InvalidBalloonSize(e) => write!(f, "Error parsing balloon size: {}", e),
             AddDeviceConfig(e) => write!(f, "Error parsing device syntax: {}", e),
             AddDiskConfig(e) => write!(f, "Error parsing disk syntax: {}", e),
             AddFsConfig(e) => write!(f, "Error parsing filesystem syntax: {}", e),
@@ -204,6 +206,7 @@ fn resize_api_command(
     socket: &mut UnixStream,
     cpus: Option<&str>,
     memory: Option<&str>,
+    balloon: Option<&str>,
 ) -> Result<(), Error> {
     let desired_vcpus: Option<u8> = if let Some(cpus) = cpus {
         Some(cpus.parse().map_err(Error::InvalidCPUCount)?)
@@ -217,9 +220,16 @@ fn resize_api_command(
         None
     };
 
+    let desired_ram_w_balloon: Option<u64> = if let Some(balloon) = balloon {
+        Some(balloon.parse().map_err(Error::InvalidBalloonSize)?)
+    } else {
+        None
+    };
+
     let resize = vmm::api::VmResizeData {
         desired_vcpus,
         desired_ram,
+        desired_ram_w_balloon,
     };
 
     simple_api_command(
@@ -348,6 +358,10 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .subcommand_matches("resize")
                 .unwrap()
                 .value_of("memory"),
+            matches
+                .subcommand_matches("resize")
+                .unwrap()
+                .value_of("balloon"),
         ),
         Some("add-device") => add_device_api_command(
             &mut socket,
@@ -516,6 +530,13 @@ fn main() {
                     Arg::with_name("memory")
                         .long("memory")
                         .help("New memory size (in MiB)")
+                        .takes_value(true)
+                        .number_of_values(1),
+                )
+                .arg(
+                    Arg::with_name("balloon")
+                        .long("balloon")
+                        .help("New memory with balloon size")
                         .takes_value(true)
                         .number_of_values(1),
                 ),
