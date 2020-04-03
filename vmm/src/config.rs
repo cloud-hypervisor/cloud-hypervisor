@@ -250,10 +250,12 @@ impl FromStr for Toggle {
     type Err = ToggleParseError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
+        match s.to_lowercase().as_str() {
             "" => Ok(Toggle(false)),
             "on" => Ok(Toggle(true)),
             "off" => Ok(Toggle(false)),
+            "true" => Ok(Toggle(true)),
+            "false" => Ok(Toggle(false)),
             _ => Err(ToggleParseError::InvalidValue(s.to_owned())),
         }
     }
