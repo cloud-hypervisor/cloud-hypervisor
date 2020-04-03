@@ -43,8 +43,6 @@ pub enum Error {
     ParsePmemFileMissing,
     /// Missing persistant memory size parameter.
     ParsePmemSizeMissing,
-    /// Failed parsing size parameter.
-    ParseSizeParam(std::num::ParseIntError),
     /// Both console and serial are tty.
     ParseTTYParam,
     /// Missing vsock socket path parameter.
@@ -300,28 +298,24 @@ impl FromStr for ByteSized {
     type Err = ByteSizedParseError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(ByteSized(parse_size(s).map_err(|_| {
-            ByteSizedParseError::InvalidValue(s.to_owned())
-        })?))
+        Ok(ByteSized({
+            let s = s.trim();
+            let shift = if s.ends_with('K') {
+                10
+            } else if s.ends_with('M') {
+                20
+            } else if s.ends_with('G') {
+                30
+            } else {
+                0
+            };
+
+            let s = s.trim_end_matches(|c| c == 'K' || c == 'M' || c == 'G');
+            s.parse::<u64>()
+                .map_err(|_| ByteSizedParseError::InvalidValue(s.to_owned()))?
+                << shift
+        }))
     }
-}
-
-fn parse_size(size: &str) -> Result<u64> {
-    let s = size.trim();
-
-    let shift = if s.ends_with('K') {
-        10
-    } else if s.ends_with('M') {
-        20
-    } else if s.ends_with('G') {
-        30
-    } else {
-        0
-    };
-
-    let s = s.trim_end_matches(|c| c == 'K' || c == 'M' || c == 'G');
-    let res = s.parse::<u64>().map_err(Error::ParseSizeParam)?;
-    Ok(res << shift)
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
