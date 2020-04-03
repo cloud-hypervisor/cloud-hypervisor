@@ -27,10 +27,6 @@ pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = 128;
 pub enum Error {
     /// Max is less than boot
     ParseCpusMaxLowerThanBoot,
-    /// Failed parsing kernel parameters.
-    ParseKernelParams,
-    /// Failed parsing kernel command line parameters.
-    ParseCmdlineParams,
     /// Both socket and path specified
     ParseDiskSocketAndPath,
     /// Filesystem tag is missing
@@ -49,8 +45,6 @@ pub enum Error {
     ParseVsockSockMissing,
     /// Missing vsock cid parameter.
     ParseVsockCidMissing,
-    /// Missing kernel configuration
-    ValidateMissingKernelConfig,
     /// Error parsing CPU options
     ParseCpus(OptionParserError),
     /// Error parsing memory options
