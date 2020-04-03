@@ -53,8 +53,6 @@ pub enum Error {
     ParseVsockCidMissing,
     /// Missing kernel configuration
     ValidateMissingKernelConfig,
-    /// Failed parsing generic on|off parameter.
-    ParseOnOff,
     /// Error parsing CPU options
     ParseCpus(OptionParserError),
     /// Error parsing memory options
@@ -252,9 +250,12 @@ impl FromStr for Toggle {
     type Err = ToggleParseError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(Toggle(parse_on_off(s).map_err(|_| {
-            ToggleParseError::InvalidValue(s.to_owned())
-        })?))
+        match s {
+            "" => Ok(Toggle(false)),
+            "on" => Ok(Toggle(true)),
+            "off" => Ok(Toggle(false)),
+            _ => Err(ToggleParseError::InvalidValue(s.to_owned())),
+        }
     }
 }
 
@@ -319,20 +320,6 @@ fn parse_size(size: &str) -> Result<u64> {
     let s = s.trim_end_matches(|c| c == 'K' || c == 'M' || c == 'G');
     let res = s.parse::<u64>().map_err(Error::ParseSizeParam)?;
     Ok(res << shift)
-}
-
-fn parse_on_off(param: &str) -> Result<bool> {
-    if !param.is_empty() {
-        let res = match param {
-            "on" => true,
-            "off" => false,
-            _ => return Err(Error::ParseOnOff),
-        };
-
-        Ok(res)
-    } else {
-        Ok(false)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
