@@ -9,6 +9,7 @@ use clap::ArgMatches;
 use net_util::MacAddr;
 use std::collections::HashMap;
 use std::convert::From;
+use std::fmt;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::result;
@@ -72,6 +73,52 @@ pub enum Error {
     /// Failed to parse vsock parameters
     ParseVsock(OptionParserError),
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::Error::*;
+        match self {
+            ParseConsole(o) => write!(f, "Error parsing --console: {}", o),
+            ParseConsoleFileMissing => {
+                write!(f, "Error parsing --console: path missing when using file")
+            }
+            ParseConsoleInvalidModeGiven => {
+                write!(f, "Error parsing --console: invalid console mode given")
+            }
+            ParseCpus(o) => write!(f, "Error parsing --cpus: {}", o),
+            ParseCpusMaxLowerThanBoot => {
+                write!(f, "Error parsing --cpus: max CPUs greater than boot CPUs")
+            }
+            ParseDevice(o) => write!(f, "Error parsing --device: {}", o),
+            ParseDevicePathMissing => write!(f, "Error parsing --device: path missing"),
+            ParseDiskSocketAndPath => write!(
+                f,
+                "Error parsing --disk: vhost socket and disk path both provided"
+            ),
+            ParseFileSystem(o) => write!(f, "Error parsing --fs: {}", o),
+            ParseFsSockMissing => write!(f, "Error parsing --fs: sock missing"),
+            ParseFsTagMissing => write!(f, "Error parsing --fs: tag missing"),
+            InvalidCacheSizeWithDaxOff => {
+                write!(f, "Error parsing --fs: cache_size used with dax=on")
+            }
+            ParsePersistentMemory(o) => write!(f, "Error parsing --pmem: {}", o),
+            ParsePmemFileMissing => write!(f, "Error parsing --pmem: file missing"),
+            ParsePmemSizeMissing => write!(f, "Error parsing --pmem: size missing"),
+            ParseTTYParam => write!(
+                f,
+                "Console mode tty specified for both --serial and --console"
+            ),
+            ParseVsock(o) => write!(f, "Error parsing --vsock: {}", o),
+            ParseVsockCidMissing => write!(f, "Error parsing --vsock: cid missing"),
+            ParseVsockSockMissing => write!(f, "Error parsing --vsock: sock missing"),
+            ParseMemory(o) => write!(f, "Error parsing --memory: {}", o),
+            ParseNetwork(o) => write!(f, "Error parsing --net: {}", o),
+            ParseDisk(o) => write!(f, "Error parsing --disk: {}", o),
+            ParseRNG(o) => write!(f, "Error parsing --rng: {}", o),
+        }
+    }
+}
+
 pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Default)]
@@ -91,6 +138,17 @@ pub enum OptionParserError {
     Conversion(String, String),
 }
 
+impl fmt::Display for OptionParserError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            OptionParserError::UnknownOption(s) => write!(f, "unknown option: {}", s),
+            OptionParserError::InvalidSyntax(s) => write!(f, "invalid syntax:{}", s),
+            OptionParserError::Conversion(field, value) => {
+                write!(f, "unable to parse {} for {}", value, field)
+            }
+        }
+    }
+}
 type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
 
 impl OptionParser {
