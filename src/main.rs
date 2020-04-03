@@ -280,7 +280,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
     let vm_config = match config::VmConfig::parse(vm_params) {
         Ok(config) => config,
         Err(e) => {
-            println!("Failed parsing parameters {:?}", e);
+            println!("{}", e);
             process::exit(1);
         }
     };
