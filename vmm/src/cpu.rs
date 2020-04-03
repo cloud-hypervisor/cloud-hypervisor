@@ -721,6 +721,100 @@ impl CpuManager {
         Ok(cpuid)
     }
 
+    fn start_vcpu(
+        &mut self,
+        cpu_id: u8,
+        creation_ts: std::time::Instant,
+        vcpu_thread_barrier: Arc<Barrier>,
+        entry_point: Option<EntryPoint>,
+        inserting: bool,
+    ) -> Result<()> {
+        let ioapic = if let Some(ioapic) = &self.ioapic {
+            Some(ioapic.clone())
+        } else {
+            None
+        };
+
+        let vcpu = Vcpu::new(
+            cpu_id,
+            &self.fd,
+            self.io_bus.clone(),
+            self.mmio_bus.clone(),
+            ioapic,
+            creation_ts,
+        )?;
+
+        let reset_evt = self.reset_evt.try_clone().unwrap();
+        let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
+        let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
+
+        let vcpu_kill = self.vcpu_states[usize::from(cpu_id)].kill.clone();
+        let vm_memory = self.vm_memory.clone();
+
+        vcpu.lock()
+            .unwrap()
+            .configure(entry_point, &vm_memory, self.cpuid.clone())
+            .expect("Failed to configure vCPU");
+
+        let vcpu_clone = Arc::clone(&vcpu);
+        self.vcpus.push(vcpu_clone);
+
+        let handle = Some(
+            thread::Builder::new()
+                .name(format!("vcpu{}", cpu_id))
+                .spawn(move || {
+                    extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
+                    // This uses an async signal safe handler to kill the vcpu handles.
+                    register_signal_handler(SIGRTMIN(), handle_signal)
+                        .expect("Failed to register vcpu signal handler");
+
+                    // Block until all CPUs are ready.
+                    vcpu_thread_barrier.wait();
+
+                    loop {
+                        // vcpu.run() returns false on a KVM_EXIT_SHUTDOWN (triple-fault) so trigger a reset
+                        match vcpu.lock().unwrap().run() {
+                            Err(e) => {
+                                error!("VCPU generated error: {:?}", e);
+                                break;
+                            }
+                            Ok(true) => {}
+                            Ok(false) => {
+                                reset_evt.write(1).unwrap();
+                                break;
+                            }
+                        }
+
+                        // We've been told to terminate
+                        if vcpu_kill_signalled.load(Ordering::SeqCst)
+                            || vcpu_kill.load(Ordering::SeqCst)
+                        {
+                            break;
+                        }
+
+                        // If we are being told to pause, we park the thread
+                        // until the pause boolean is toggled.
+                        // The resume operation is responsible for toggling
+                        // the boolean and unpark the thread.
+                        // We enter a loop because park() could spuriously
+                        // return. We will then park() again unless the
+                        // pause boolean has been toggled.
+                        while vcpu_pause_signalled.load(Ordering::SeqCst) {
+                            thread::park();
+                        }
+                    }
+                })
+                .map_err(Error::VcpuSpawn)?,
+        );
+
+        // On hot plug calls into this function entry_point is None. It is for
+        // those hotplug CPU additions that we need to set the inserting flag.
+        self.vcpu_states[usize::from(cpu_id)].handle = handle;
+        self.vcpu_states[usize::from(cpu_id)].inserting = inserting;
+
+        Ok(())
+    }
+
     fn activate_vcpus(&mut self, desired_vcpus: u8, entry_point: Option<EntryPoint>) -> Result<()> {
         if desired_vcpus > self.max_vcpus {
             return Err(Error::DesiredVCPUCountExceedsMax);
@@ -732,90 +826,13 @@ impl CpuManager {
         ));
 
         for cpu_id in self.present_vcpus()..desired_vcpus {
-            let ioapic = if let Some(ioapic) = &self.ioapic {
-                Some(ioapic.clone())
-            } else {
-                None
-            };
-
-            let vcpu = Vcpu::new(
+            self.start_vcpu(
                 cpu_id,
-                &self.fd,
-                self.io_bus.clone(),
-                self.mmio_bus.clone(),
-                ioapic,
                 creation_ts,
+                vcpu_thread_barrier.clone(),
+                entry_point,
+                entry_point.is_none(),
             )?;
-
-            let vcpu_thread_barrier = vcpu_thread_barrier.clone();
-
-            let reset_evt = self.reset_evt.try_clone().unwrap();
-            let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
-            let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
-
-            let vcpu_kill = self.vcpu_states[usize::from(cpu_id)].kill.clone();
-            let vm_memory = self.vm_memory.clone();
-
-            vcpu.lock()
-                .unwrap()
-                .configure(entry_point, &vm_memory, self.cpuid.clone())
-                .expect("Failed to configure vCPU");
-
-            let vcpu_clone = Arc::clone(&vcpu);
-            self.vcpus.push(vcpu_clone);
-
-            let handle = Some(
-                thread::Builder::new()
-                    .name(format!("vcpu{}", cpu_id))
-                    .spawn(move || {
-                        extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
-                        // This uses an async signal safe handler to kill the vcpu handles.
-                        register_signal_handler(SIGRTMIN(), handle_signal)
-                            .expect("Failed to register vcpu signal handler");
-
-                        // Block until all CPUs are ready.
-                        vcpu_thread_barrier.wait();
-
-                        loop {
-                            // vcpu.run() returns false on a KVM_EXIT_SHUTDOWN (triple-fault) so trigger a reset
-                            match vcpu.lock().unwrap().run() {
-                                Err(e) => {
-                                    error!("VCPU generated error: {:?}", e);
-                                    break;
-                                }
-                                Ok(true) => {}
-                                Ok(false) => {
-                                    reset_evt.write(1).unwrap();
-                                    break;
-                                }
-                            }
-
-                            // We've been told to terminate
-                            if vcpu_kill_signalled.load(Ordering::SeqCst)
-                                || vcpu_kill.load(Ordering::SeqCst)
-                            {
-                                break;
-                            }
-
-                            // If we are being told to pause, we park the thread
-                            // until the pause boolean is toggled.
-                            // The resume operation is responsible for toggling
-                            // the boolean and unpark the thread.
-                            // We enter a loop because park() could spuriously
-                            // return. We will then park() again unless the
-                            // pause boolean has been toggled.
-                            while vcpu_pause_signalled.load(Ordering::SeqCst) {
-                                thread::park();
-                            }
-                        }
-                    })
-                    .map_err(Error::VcpuSpawn)?,
-            );
-
-            // On hot plug calls into this function entry_point is None. It is for
-            // those hotplug CPU additions that we need to set the inserting flag.
-            self.vcpu_states[usize::from(cpu_id)].handle = handle;
-            self.vcpu_states[usize::from(cpu_id)].inserting = entry_point.is_none();
         }
 
         // Unblock all CPU threads.
