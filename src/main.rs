@@ -331,7 +331,9 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         }
     };
 
-    if cmd_arguments.is_present("vm-config") && vm_config.valid() {
+    // Can't test for "vm-config" group as some have default values. The kernel
+    // is the only required option for booting the VM.
+    if cmd_arguments.is_present("kernel") {
         // Create and boot the VM based off the VM config we just built.
         let sender = api_request_sender.clone();
         vmm::api::vm_create(
@@ -441,8 +443,8 @@ mod unit_tests {
     use crate::{create_app, prepare_default_values};
     use std::path::PathBuf;
     use vmm::config::{
-        CmdlineConfig, ConsoleConfig, ConsoleOutputMode, CpusConfig, MemoryConfig, RngConfig,
-        VmConfig, VmParams,
+        CmdlineConfig, ConsoleConfig, ConsoleOutputMode, CpusConfig, KernelConfig, MemoryConfig,
+        RngConfig, VmConfig, VmParams,
     };
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
@@ -485,8 +487,8 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_default() {
-        let cli = vec!["cloud-hypervisor"];
-        let openapi = r#"{}"#;
+        let cli = vec!["cloud-hypervisor", "--kernel", "/path/to/kernel"];
+        let openapi = r#"{ "kernel": {"path": "/path/to/kernel"} }"#;
 
         // First we check we get identical VmConfig structures.
         let (result_vm_config, _) = compare_vm_config_cli_vs_json(&cli, openapi, true);
@@ -505,7 +507,9 @@ mod unit_tests {
                     hotplug_method: HotplugMethod::Acpi,
                     hotplug_size: None,
                 },
-                kernel: None,
+                kernel: Some(KernelConfig {
+                    path: PathBuf::from("/path/to/kernel"),
+                }),
                 initramfs: None,
                 cmdline: CmdlineConfig {
                     args: String::from(""),
@@ -542,22 +546,43 @@ mod unit_tests {
     fn test_valid_vm_config_cpus() {
         vec![
             (
-                vec!["cloud-hypervisor", "--cpus", "boot=1"],
+                vec![
+                    "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
+                    "--cpus",
+                    "boot=1",
+                ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "cpus": {"boot_vcpus": 1, "max_vcpus": 1}
                 }"#,
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--cpus", "boot=1,max=3"],
+                vec![
+                    "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
+                    "--cpus",
+                    "boot=1,max=3",
+                ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "cpus": {"boot_vcpus": 1, "max_vcpus": 3}
                 }"#,
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--cpus", "boot=2,max=4"],
+                vec![
+                    "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
+                    "--cpus",
+                    "boot=2,max=4",
+                ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "cpus": {"boot_vcpus": 1, "max_vcpus": 3}
                 }"#,
                 false,
@@ -573,61 +598,69 @@ mod unit_tests {
     fn test_valid_vm_config_memory() {
         vec![
             (
-                vec!["cloud-hypervisor", "--memory", "size=1073741824"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "size=1073741824"],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "memory": {"size": 1073741824}
                 }"#,
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--memory", "size=1G"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "size=1G"],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "memory": {"size": 1073741824}
                 }"#,
                 true,
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory",
                     "size=1G,file=/path/to/shared/file",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "memory": {"size": 1073741824, "file": "/path/to/shared/file"}
                 }"#,
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--memory", "size=1G,mergeable=on"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "size=1G,mergeable=on"],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "memory": {"size": 1073741824, "mergeable": true}
                 }"#,
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--memory", "size=1G,mergeable=off"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "size=1G,mergeable=off"],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "memory": {"size": 1073741824, "mergeable": false}
                 }"#,
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--memory", "size=1G,mergeable=on"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "size=1G,mergeable=on"],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "memory": {"size": 1073741824, "mergeable": false}
                 }"#,
                 false,
             ),
             (
-                vec!["cloud-hypervisor", "--memory", "size=1G,hotplug_size=1G"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "size=1G,hotplug_size=1G"],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "memory": {"size": 1073741824, "hotplug_method": "Acpi", "hotplug_size": 1073741824}
                 }"#,
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--memory", "size=1G,hotplug_method=virtio-mem,hotplug_size=1G"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "size=1G,hotplug_method=virtio-mem,hotplug_size=1G"],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "memory": {"size": 1073741824, "hotplug_method": "VirtioMem", "hotplug_size": 1073741824}
                 }"#,
                 true,
@@ -657,8 +690,15 @@ mod unit_tests {
     #[test]
     fn test_valid_vm_config_cmdline() {
         vec![(
-            vec!["cloud-hypervisor", "--cmdline", "arg1=foo arg2=bar"],
+            vec![
+                "cloud-hypervisor",
+                "--kernel",
+                "/path/to/kernel",
+                "--cmdline",
+                "arg1=foo arg2=bar",
+            ],
             r#"{
+                "kernel": {"path": "/path/to/kernel"},
                 "cmdline": {"args": "arg1=foo arg2=bar"}
             }"#,
             true,
@@ -675,11 +715,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--disk",
                     "path=/path/to/disk/1",
                     "path=/path/to/disk/2",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "disks": [
                         {"path": "/path/to/disk/1"},
                         {"path": "/path/to/disk/2"}
@@ -690,11 +733,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--disk",
                     "path=/path/to/disk/1",
                     "path=/path/to/disk/2",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "disks": [
                         {"path": "/path/to/disk/1"}
                     ]
@@ -704,11 +750,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--disk",
                     "vhost_user=true,socket=/tmp/socket1",
                     "path=/path/to/disk/2",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "disks": [
                         {"vhost_user":true, "vhost_socket":"/tmp/socket1"},
                         {"path": "/path/to/disk/2"}
@@ -719,11 +768,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--disk",
                     "vhost_user=true,socket=/tmp/socket1,wce=true",
                     "path=/path/to/disk/2",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "disks": [
                         {"vhost_user":true, "vhost_socket":"/tmp/socket1", "wce":true},
                         {"path": "/path/to/disk/2"}
@@ -745,15 +797,17 @@ mod unit_tests {
             // randomly generated. There's no way we can have twice the same
             // default value.
             (
-                vec!["cloud-hypervisor", "--net", "mac="],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--net", "mac="],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": []
                 }"#,
                 false,
             ),
             (
-                vec!["cloud-hypervisor", "--net", "mac=12:34:56:78:90:ab"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--net", "mac=12:34:56:78:90:ab"],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab"}
                     ]
@@ -762,11 +816,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
                     "mac=12:34:56:78:90:ab,tap=tap0",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "tap": "tap0"}
                     ]
@@ -775,11 +830,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
                     "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4"}
                     ]
@@ -788,11 +844,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
                     "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8"}
                     ]
@@ -801,11 +858,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
                     "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4}
                     ]
@@ -814,11 +872,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
                     "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4,queue_size=128",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4, "queue_size": 128}
                     ]
@@ -827,11 +886,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
                     "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8"}
                     ]
@@ -840,11 +900,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
                     "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256}
                     ]
@@ -853,11 +914,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
                     "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=on",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": true}
                     ]
@@ -866,11 +928,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
                     "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=on",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": true}
                     ],
@@ -880,11 +943,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
                     "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=off",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": false}
                     ]
@@ -892,8 +956,9 @@ mod unit_tests {
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--net", "mac=12:34:56:78:90:ab,vhost_user=true,socket=/tmp/socket"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--net", "mac=12:34:56:78:90:ab,vhost_user=true,socket=/tmp/socket"],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "vhost_user": true, "vhost_socket": "/tmp/socket"}
                     ]
@@ -910,8 +975,15 @@ mod unit_tests {
     #[test]
     fn test_valid_vm_config_rng() {
         vec![(
-            vec!["cloud-hypervisor", "--rng", "src=/path/to/entropy/source"],
+            vec![
+                "cloud-hypervisor",
+                "--kernel",
+                "/path/to/kernel",
+                "--rng",
+                "src=/path/to/entropy/source",
+            ],
             r#"{
+                "kernel": {"path": "/path/to/kernel"},
                 "rng": {"src": "/path/to/entropy/source"}
             }"#,
             true,
@@ -927,12 +999,13 @@ mod unit_tests {
         vec![
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--fs",
                     "tag=virtiofs1,sock=/path/to/sock1",
                     "tag=virtiofs2,sock=/path/to/sock2",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "fs": [
                         {"tag": "virtiofs1", "sock": "/path/to/sock1"},
                         {"tag": "virtiofs2", "sock": "/path/to/sock2"}
@@ -942,12 +1015,13 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--fs",
                     "tag=virtiofs1,sock=/path/to/sock1",
                     "tag=virtiofs2,sock=/path/to/sock2",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "fs": [
                         {"tag": "virtiofs1", "sock": "/path/to/sock1"}
                     ]
@@ -956,11 +1030,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--fs",
                     "tag=virtiofs1,sock=/path/to/sock1,num_queues=4",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "fs": [
                         {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4}
                     ]
@@ -969,11 +1044,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--fs",
                     "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "fs": [
                         {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
@@ -982,11 +1058,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--fs",
                     "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128,dax=on"
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "fs": [
                         {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
@@ -995,11 +1072,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--fs",
                     "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128,dax=on"
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "fs": [
                         {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "dax": true}
                     ]
@@ -1008,11 +1086,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--fs",
                     "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "fs": [
                         {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "dax": true}
                     ]
@@ -1021,11 +1100,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--fs",
                     "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128,cache_size=8589934592"
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "fs": [
                         {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
@@ -1034,11 +1114,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--fs",
                     "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "fs": [
                         {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "cache_size": 8589934592}
                     ]
@@ -1047,11 +1128,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--fs",
                     "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128,cache_size=4294967296"
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "fs": [
                         {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "cache_size": 4294967296}
                     ]
@@ -1060,11 +1142,12 @@ mod unit_tests {
             ),
             (
                 vec![
-                    "cloud-hypervisor",
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--fs",
                     "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128,cache_size=4294967296"
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "fs": [
                         {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
@@ -1084,11 +1167,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--pmem",
                     "file=/path/to/img/1,size=1G",
                     "file=/path/to/img/2,size=2G",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "pmem": [
                         {"file": "/path/to/img/1", "size": 1073741824},
                         {"file": "/path/to/img/2", "size": 2147483648}
@@ -1099,10 +1185,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--pmem",
                     "file=/path/to/img/1,size=1G,iommu=on",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "pmem": [
                         {"file": "/path/to/img/1", "size": 1073741824, "iommu": true}
                     ],
@@ -1113,10 +1202,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--pmem",
                     "file=/path/to/img/1,size=1G,iommu=on",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "pmem": [
                         {"file": "/path/to/img/1", "size": 1073741824, "iommu": true}
                     ]
@@ -1126,10 +1218,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--pmem",
                     "file=/path/to/img/1,size=1G,mergeable=on",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "pmem": [
                         {"file": "/path/to/img/1", "size": 1073741824, "mergeable": true}
                     ]
@@ -1139,10 +1234,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--pmem",
                     "file=/path/to/img/1,size=1G,mergeable=off",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "pmem": [
                         {"file": "/path/to/img/1", "size": 1073741824, "mergeable": false}
                     ]
@@ -1160,21 +1258,41 @@ mod unit_tests {
     fn test_valid_vm_config_serial_console() {
         vec![
             (
-                vec!["cloud-hypervisor"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel"],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "serial": {"mode": "Null"},
                     "console": {"mode": "Tty"}
                 }"#,
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--serial", "null", "--console", "tty"],
-                r#"{}"#,
+                vec![
+                    "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
+                    "--serial",
+                    "null",
+                    "--console",
+                    "tty",
+                ],
+                r#"{
+                    "kernel": {"path": "/path/to/kernel"}
+                }"#,
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--serial", "tty", "--console", "off"],
+                vec![
+                    "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
+                    "--serial",
+                    "tty",
+                    "--console",
+                    "off",
+                ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "serial": {"mode": "Tty"},
                     "console": {"mode": "Off"}
                 }"#,
@@ -1193,11 +1311,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--device",
                     "path=/path/to/device/1",
                     "path=/path/to/device/2",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "devices": [
                         {"path": "/path/to/device/1"},
                         {"path": "/path/to/device/2"}
@@ -1208,11 +1329,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--device",
                     "path=/path/to/device/1",
                     "path=/path/to/device/2",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "devices": [
                         {"path": "/path/to/device/1"}
                     ]
@@ -1222,10 +1346,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--device",
                     "path=/path/to/device,iommu=on",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "devices": [
                         {"path": "/path/to/device", "iommu": true}
                     ],
@@ -1236,10 +1363,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--device",
                     "path=/path/to/device,iommu=on",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "devices": [
                         {"path": "/path/to/device", "iommu": true}
                     ]
@@ -1249,10 +1379,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--device",
                     "path=/path/to/device,iommu=off",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "devices": [
                         {"path": "/path/to/device", "iommu": false}
                     ]
@@ -1272,11 +1405,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--vsock",
                     "cid=123,sock=/path/to/sock/1",
                     "cid=456,sock=/path/to/sock/2",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "vsock": [
                         {"cid": 123, "sock": "/path/to/sock/1"},
                         {"cid": 456, "sock": "/path/to/sock/2"}
@@ -1287,11 +1423,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--vsock",
                     "cid=123,sock=/path/to/sock/1",
                     "cid=456,sock=/path/to/sock/2",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "vsock": [
                         {"cid": 123, "sock": "/path/to/sock/1"}
                     ]
@@ -1301,10 +1440,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--vsock",
                     "cid=124,sock=/path/to/sock/1",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "vsock": [
                         {"cid": 123, "sock": "/path/to/sock/1"}
                     ]
@@ -1314,10 +1456,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--vsock",
                     "cid=123,sock=/path/to/sock/1,iommu=on",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "vsock": [
                         {"cid": 123, "sock": "/path/to/sock/1", "iommu": true}
                     ],
@@ -1328,10 +1473,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--vsock",
                     "cid=123,sock=/path/to/sock/1,iommu=on",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "vsock": [
                         {"cid": 123, "sock": "/path/to/sock/1", "iommu": true}
                     ]
@@ -1341,10 +1489,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
                     "--vsock",
                     "cid=123,sock=/path/to/sock/1,iommu=off",
                 ],
                 r#"{
+                    "kernel": {"path": "/path/to/kernel"},
                     "vsock": [
                         {"cid": 123, "sock": "/path/to/sock/1", "iommu": false}
                     ]
