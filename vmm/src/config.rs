@@ -40,8 +40,6 @@ pub enum Error {
     ParsePmemFileMissing,
     /// Missing persistant memory size parameter.
     ParsePmemSizeMissing,
-    /// Both console and serial are tty.
-    ParseTTYParam,
     /// Missing vsock socket path parameter.
     ParseVsockSockMissing,
     /// Missing vsock cid parameter.
@@ -76,6 +74,25 @@ pub enum Error {
     ParseVsock(OptionParserError),
     /// Failed to parse restore parameters
     ParseRestore(OptionParserError),
+    /// Failed to validate configuration
+    Validation(ValidationError),
+}
+
+#[derive(Debug)]
+pub enum ValidationError {
+    /// Both console and serial are tty.
+    DoubleTtyMode,
+}
+
+type ValidationResult<T> = std::result::Result<T, ValidationError>;
+
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::ValidationError::*;
+        match self {
+            DoubleTtyMode => write!(f, "Console mode tty specified for both serial and console"),
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -108,10 +125,7 @@ impl fmt::Display for Error {
             ParsePersistentMemory(o) => write!(f, "Error parsing --pmem: {}", o),
             ParsePmemFileMissing => write!(f, "Error parsing --pmem: file missing"),
             ParsePmemSizeMissing => write!(f, "Error parsing --pmem: size missing"),
-            ParseTTYParam => write!(
-                f,
-                "Console mode tty specified for both --serial and --console"
-            ),
+
             ParseVsock(o) => write!(f, "Error parsing --vsock: {}", o),
             ParseVsockCidMissing => write!(f, "Error parsing --vsock: cid missing"),
             ParseVsockSockMissing => write!(f, "Error parsing --vsock: sock missing"),
@@ -123,6 +137,7 @@ impl fmt::Display for Error {
             ParseRestoreSourceUrlMissing => {
                 write!(f, "Error parsing --restore: source_url missing")
             }
+            Validation(v) => write!(f, "Error validating configuration: {}", v),
         }
     }
 }
@@ -1179,6 +1194,15 @@ impl VmConfig {
         self.kernel.is_some()
     }
 
+    pub fn validate(&self) -> ValidationResult<()> {
+        if self.console.mode == ConsoleOutputMode::Tty && self.serial.mode == ConsoleOutputMode::Tty
+        {
+            return Err(ValidationError::DoubleTtyMode);
+        }
+
+        Ok(())
+    }
+
     pub fn parse(vm_params: VmParams) -> Result<Self> {
         let mut iommu = false;
 
@@ -1240,9 +1264,6 @@ impl VmConfig {
             iommu = true;
         }
         let serial = ConsoleConfig::parse(vm_params.serial)?;
-        if console.mode == ConsoleOutputMode::Tty && serial.mode == ConsoleOutputMode::Tty {
-            return Err(Error::ParseTTYParam);
-        }
 
         let mut devices: Option<Vec<DeviceConfig>> = None;
         if let Some(device_list) = &vm_params.devices {
@@ -1284,7 +1305,7 @@ impl VmConfig {
             });
         }
 
-        Ok(VmConfig {
+        let config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory)?,
             kernel,
@@ -1300,7 +1321,9 @@ impl VmConfig {
             devices,
             vsock,
             iommu,
-        })
+        };
+        config.validate().map_err(Error::Validation)?;
+        Ok(config)
     }
 }
 
@@ -1775,6 +1798,58 @@ mod tests {
                 iommu: true
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_validation() -> Result<()> {
+        let valid_config = VmConfig {
+            cpus: CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 1,
+            },
+            memory: MemoryConfig {
+                size: 536_870_912,
+                file: None,
+                mergeable: false,
+                hotplug_method: HotplugMethod::Acpi,
+                hotplug_size: None,
+            },
+            kernel: None,
+            initramfs: None,
+            cmdline: CmdlineConfig {
+                args: String::from(""),
+            },
+            disks: None,
+            net: None,
+            rng: RngConfig {
+                src: PathBuf::from("/dev/urandom"),
+                iommu: false,
+            },
+            fs: None,
+            pmem: None,
+            serial: ConsoleConfig {
+                file: None,
+                mode: ConsoleOutputMode::Null,
+                iommu: false,
+            },
+            console: ConsoleConfig {
+                file: None,
+                mode: ConsoleOutputMode::Tty,
+                iommu: false,
+            },
+            devices: None,
+            vsock: None,
+            iommu: false,
+        };
+
+        assert!(valid_config.validate().is_ok());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.serial.mode = ConsoleOutputMode::Tty;
+        invalid_config.console.mode = ConsoleOutputMode::Tty;
+        assert!(invalid_config.validate().is_err());
+
         Ok(())
     }
 }
