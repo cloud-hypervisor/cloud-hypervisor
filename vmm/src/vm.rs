@@ -518,27 +518,18 @@ impl Vm {
                 })
             }
             None => {
-                // Assume by default Linux boot protocol is used and not PVH
-                let mut entry_point_addr: GuestAddress = entry_addr.kernel_load;
+                let entry_point_addr: GuestAddress;
+                let boot_prot: BootProtocol;
 
-                let boot_prot = if entry_addr.pvh_entry_addr.is_some() {
-                    // Handle the case where PVH is set but the user wants to
-                    // boot an initramfs. At this point in time, our code does
-                    // not support initramfs along with PVH, hence we make the
-                    // code fallback to the legacy Linux boot.
-                    if initramfs_config.is_some() {
-                        warn!(
-                            "PVH not supported with initramfs, falling back to legacy Linux boot"
-                        );
-                        BootProtocol::LinuxBoot
-                    } else {
-                        // entry_addr.pvh_entry_addr field is safe to unwrap here
-                        entry_point_addr = entry_addr.pvh_entry_addr.unwrap();
-                        BootProtocol::PvhBoot
-                    }
+                if let Some(pvh_entry_addr) = entry_addr.pvh_entry_addr {
+                    // Use the PVH kernel entry point to boot the guest
+                    entry_point_addr = pvh_entry_addr;
+                    boot_prot = BootProtocol::PvhBoot;
                 } else {
-                    BootProtocol::LinuxBoot
-                };
+                    // Use the Linux 64-bit boot protocol
+                    entry_point_addr = entry_addr.kernel_load;
+                    boot_prot = BootProtocol::LinuxBoot;
+                }
 
                 arch::configure_system(
                     &mem,
