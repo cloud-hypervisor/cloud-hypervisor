@@ -25,7 +25,9 @@ extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vm_virtio;
 
-use crate::config::{DeviceConfig, DiskConfig, HotplugMethod, NetConfig, PmemConfig, VmConfig};
+use crate::config::{
+    DeviceConfig, DiskConfig, HotplugMethod, NetConfig, PmemConfig, ValidationError, VmConfig,
+};
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
@@ -191,6 +193,9 @@ pub enum Error {
 
     /// Cannot convert source URL from Path into &str
     RestoreSourceUrlPathToStr,
+
+    /// Failed to validate config
+    ConfigValidation(ValidationError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -309,6 +314,12 @@ impl Vm {
         reset_evt: EventFd,
         vmm_path: PathBuf,
     ) -> Result<Self> {
+        config
+            .lock()
+            .unwrap()
+            .validate()
+            .map_err(Error::ConfigValidation)?;
+
         let device_manager = DeviceManager::new(
             fd.clone(),
             config.clone(),
