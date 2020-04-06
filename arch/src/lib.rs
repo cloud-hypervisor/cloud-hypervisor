@@ -43,6 +43,8 @@ pub enum Error {
     StartInfoSetup,
     /// Failed to compute initramfs address.
     InitramfsAddress,
+    /// Error writing module entry to guest memory.
+    ModlistSetup(vm_memory::GuestMemoryError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
