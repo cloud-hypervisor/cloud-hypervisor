@@ -82,6 +82,8 @@ pub enum Error {
 pub enum ValidationError {
     /// Both console and serial are tty.
     DoubleTtyMode,
+    /// No kernel specified
+    KernelMissing,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -91,6 +93,7 @@ impl fmt::Display for ValidationError {
         use self::ValidationError::*;
         match self {
             DoubleTtyMode => write!(f, "Console mode tty specified for both serial and console"),
+            KernelMissing => write!(f, "No kernel specified"),
         }
     }
 }
@@ -1190,11 +1193,9 @@ pub struct VmConfig {
 }
 
 impl VmConfig {
-    pub fn valid(&self) -> bool {
-        self.kernel.is_some()
-    }
-
     pub fn validate(&self) -> ValidationResult<()> {
+        self.kernel.as_ref().ok_or(ValidationError::KernelMissing)?;
+
         if self.console.mode == ConsoleOutputMode::Tty && self.serial.mode == ConsoleOutputMode::Tty
         {
             return Err(ValidationError::DoubleTtyMode);
@@ -1815,7 +1816,9 @@ mod tests {
                 hotplug_method: HotplugMethod::Acpi,
                 hotplug_size: None,
             },
-            kernel: None,
+            kernel: Some(KernelConfig {
+                path: PathBuf::from("/path/to/kernel"),
+            }),
             initramfs: None,
             cmdline: CmdlineConfig {
                 args: String::from(""),
@@ -1848,6 +1851,10 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.serial.mode = ConsoleOutputMode::Tty;
         invalid_config.console.mode = ConsoleOutputMode::Tty;
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.kernel = None;
         assert!(invalid_config.validate().is_err());
 
         Ok(())
