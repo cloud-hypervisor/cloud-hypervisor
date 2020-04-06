@@ -31,6 +31,10 @@ pub const BOOT_IDT_START: GuestAddress = GuestAddress(0x520);
 /// Address for the hvm_start_info struct used in PVH boot
 pub const PVH_INFO_START: GuestAddress = GuestAddress(0x6000);
 
+/// Starting address of array of modules of hvm_modlist_entry type.
+/// Used to enable initrd support using the PVH boot ABI.
+pub const MODLIST_START: GuestAddress = GuestAddress(0x6040);
+
 /// Address of memory map table used in PVH boot. Can overlap
 /// with the zero page address since they are mutually exclusive.
 pub const MEMMAP_START: GuestAddress = GuestAddress(0x7000);

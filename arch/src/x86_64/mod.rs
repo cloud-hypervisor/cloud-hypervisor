@@ -16,7 +16,9 @@ pub mod regs;
 use crate::InitramfsConfig;
 use crate::RegionType;
 use linux_loader::loader::bootparam::{boot_params, setup_header};
-use linux_loader::loader::elf::start_info::{hvm_memmap_table_entry, hvm_start_info};
+use linux_loader::loader::elf::start_info::{
+    hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
+};
 use std::mem;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion,
@@ -67,6 +69,11 @@ unsafe impl ByteValued for StartInfoWrapper {}
 struct MemmapTableEntryWrapper(hvm_memmap_table_entry);
 
 unsafe impl ByteValued for MemmapTableEntryWrapper {}
+
+#[derive(Copy, Clone, Default)]
+struct ModlistEntryWrapper(hvm_modlist_entry);
+
+unsafe impl ByteValued for ModlistEntryWrapper {}
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `DataInit`) where:
@@ -164,7 +171,7 @@ pub fn configure_system(
 
     match boot_prot {
         BootProtocol::PvhBoot => {
-            configure_pvh(guest_mem, cmdline_addr, rsdp_addr)?;
+            configure_pvh(guest_mem, cmdline_addr, initramfs, rsdp_addr)?;
         }
         BootProtocol::LinuxBoot => {
             configure_64bit_boot(
@@ -184,6 +191,7 @@ pub fn configure_system(
 fn configure_pvh(
     guest_mem: &GuestMemoryMmap,
     cmdline_addr: GuestAddress,
+    initramfs: &Option<InitramfsConfig>,
     rsdp_addr: Option<GuestAddress>,
 ) -> super::Result<()> {
     const XEN_HVM_START_MAGIC_VALUE: u32 = 0x336ec578;
@@ -198,6 +206,24 @@ fn configure_pvh(
 
     if let Some(rsdp_addr) = rsdp_addr {
         start_info.0.rsdp_paddr = rsdp_addr.0;
+    }
+
+    if let Some(initramfs_config) = initramfs {
+        // The initramfs has been written to guest memory already, here we just need to
+        // create the module structure that describes it.
+        let ramdisk_mod: ModlistEntryWrapper = ModlistEntryWrapper(hvm_modlist_entry {
+            paddr: initramfs_config.address.raw_value(),
+            size: initramfs_config.size as u64,
+            ..Default::default()
+        });
+
+        start_info.0.nr_modules += 1;
+        start_info.0.modlist_paddr = layout::MODLIST_START.raw_value();
+
+        // Write the modlist struct to guest memory.
+        guest_mem
+            .write_obj(ramdisk_mod, layout::MODLIST_START)
+            .map_err(super::Error::ModlistSetup)?;
     }
 
     // Vector to hold the memory maps which needs to be written to guest memory
