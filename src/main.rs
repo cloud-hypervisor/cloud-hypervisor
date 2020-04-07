@@ -305,7 +305,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
     ) {
         Ok(t) => t,
         Err(e) => {
-            println!("Failed spawning the VMM thread {:?}", e);
+            eprintln!("Failed spawning the VMM thread {:?}", e);
             process::exit(1);
         }
     };
@@ -317,7 +317,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         let vm_config = match config::VmConfig::parse(vm_params) {
             Ok(config) => config,
             Err(e) => {
-                println!("{}", e);
+                eprintln!("{}", e);
                 process::exit(1);
             }
         };
@@ -362,12 +362,12 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         Ok(res) => match res {
             Ok(_) => (),
             Err(e) => {
-                println!("VMM thread failed {:?}", e);
+                eprintln!("VMM thread failed {:?}", e);
                 process::exit(1);
             }
         },
         Err(e) => {
-            println!("Could not joing VMM thread {:?}", e);
+            eprintln!("Could not join VMM thread {:?}", e);
             process::exit(1);
         }
     }
