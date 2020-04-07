@@ -331,6 +331,7 @@ impl Vmm {
             reset_evt,
             self.vmm_path.clone(),
             source_url,
+            restore_cfg.prefault,
         )?;
         self.vm = Some(vm);
 

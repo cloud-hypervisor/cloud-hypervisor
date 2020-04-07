@@ -388,6 +388,7 @@ impl Vm {
         reset_evt: EventFd,
         vmm_path: PathBuf,
         source_url: &str,
+        prefault: bool,
     ) -> Result<Self> {
         let (kvm, fd) = Vm::kvm_new()?;
         let config = vm_config_from_snapshot(snapshot).map_err(Error::Restore)?;
@@ -400,6 +401,7 @@ impl Vm {
                 fd.clone(),
                 &config.lock().unwrap().memory.clone(),
                 source_url,
+                prefault,
             )
             .map_err(Error::MemoryManager)?
         } else {
