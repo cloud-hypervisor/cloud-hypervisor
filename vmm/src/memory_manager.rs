@@ -110,6 +110,10 @@ pub enum Error {
 
     /// Cannot create the system allocator
     CreateSystemAllocator,
+
+    /// The number of external backing files doesn't match the number of
+    /// memory regions.
+    InvalidAmountExternalBackingFiles,
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
@@ -221,7 +225,11 @@ impl BusDevice for MemoryManager {
 }
 
 impl MemoryManager {
-    pub fn new(fd: Arc<VmFd>, config: &MemoryConfig) -> Result<Arc<Mutex<MemoryManager>>, Error> {
+    pub fn new(
+        fd: Arc<VmFd>,
+        config: &MemoryConfig,
+        ext_regions: Option<Vec<MemoryRegion>>,
+    ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         // Init guest memory
         let arch_mem_regions = arch::arch_memory_regions(config.size);
 
@@ -232,13 +240,28 @@ impl MemoryManager {
             .collect();
 
         let mut mem_regions = Vec::new();
-        for region in ram_regions.iter() {
-            mem_regions.push(MemoryManager::create_ram_region(
-                &config.file,
-                region.0,
-                region.1,
-                false,
-            )?);
+        if let Some(ext_regions) = &ext_regions {
+            if ram_regions.len() > ext_regions.len() {
+                return Err(Error::InvalidAmountExternalBackingFiles);
+            }
+
+            for region in ext_regions.iter() {
+                mem_regions.push(MemoryManager::create_ram_region(
+                    &Some(region.backing_file.clone()),
+                    region.start_addr,
+                    region.size as usize,
+                    true,
+                )?);
+            }
+        } else {
+            for region in ram_regions.iter() {
+                mem_regions.push(MemoryManager::create_ram_region(
+                    &config.file,
+                    region.0,
+                    region.1,
+                    false,
+                )?);
+            }
         }
 
         let guest_memory =
@@ -361,7 +384,7 @@ impl MemoryManager {
         config: &MemoryConfig,
         source_url: &str,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
-        let memory_manager = MemoryManager::new(fd, config)?;
+        let memory_manager = MemoryManager::new(fd, config, None)?;
 
         let url = Url::parse(source_url).unwrap();
         /* url must be valid dir which is verified in recv_vm_snapshot() */
