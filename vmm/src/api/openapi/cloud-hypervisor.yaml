@@ -245,7 +245,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/VmRestoreConfig'
+              $ref: '#/components/schemas/RestoreConfig'
         required: true
       responses:
         204:
@@ -583,8 +583,12 @@ components:
         destination_url:
           type: string
 
-    VmRestoreConfig:
+    RestoreConfig:
+      required:
+      - source_url
       type: object
       properties:
         source_url:
           type: string
+        prefault:
+          type: boolean
