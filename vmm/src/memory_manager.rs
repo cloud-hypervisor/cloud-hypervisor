@@ -387,6 +387,7 @@ impl MemoryManager {
         fd: Arc<VmFd>,
         config: &MemoryConfig,
         source_url: &str,
+        prefault: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         let url = Url::parse(source_url).unwrap();
         /* url must be valid dir which is verified in recv_vm_snapshot() */
@@ -419,7 +420,7 @@ impl MemoryManager {
             // allows for a faster VM restoration and does not require us to
             // fill the memory content, hence we can return right away.
             if config.file.is_none() {
-                return MemoryManager::new(fd, config, Some(ext_regions), false);
+                return MemoryManager::new(fd, config, Some(ext_regions), prefault);
             };
 
             let memory_manager = MemoryManager::new(fd, config, None, false)?;

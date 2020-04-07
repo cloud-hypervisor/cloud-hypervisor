@@ -1117,23 +1117,34 @@ impl VsockConfig {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct RestoreConfig {
     pub source_url: PathBuf,
+    #[serde(default)]
+    pub prefault: bool,
 }
 
 impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
-        Restore parameters \"source_url=<source_url>\" \
-        source_url should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo)";
+        \nRestore parameters \"source_url=<source_url>,prefault=on|off\" \
+        \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
+        \n`prefault` brings memory pages in when enabled (disabled by default)";
     pub fn parse(restore: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("source_url");
+        parser.add("source_url").add("prefault");
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
         let source_url = parser
             .get("source_url")
             .map(PathBuf::from)
             .ok_or(Error::ParseRestoreSourceUrlMissing)?;
+        let prefault = parser
+            .convert::<Toggle>("prefault")
+            .map_err(Error::ParseRestore)?
+            .unwrap_or(Toggle(false))
+            .0;
 
-        Ok(RestoreConfig { source_url })
+        Ok(RestoreConfig {
+            source_url,
+            prefault,
+        })
     }
 }
 
