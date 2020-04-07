@@ -26,8 +26,6 @@ pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = 128;
 /// Errors associated with VM configuration parameters.
 #[derive(Debug)]
 pub enum Error {
-    /// Both socket and path specified
-    ParseDiskSocketAndPath,
     /// Filesystem tag is missing
     ParseFsTagMissing,
     /// Filesystem socket is missing
@@ -84,6 +82,8 @@ pub enum ValidationError {
     ConsoleFileMissing,
     /// Max is less than boot
     CpusMaxLowerThanBoot,
+    /// Both socket and path specified
+    DiskSocketAndPath,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -96,6 +96,7 @@ impl fmt::Display for ValidationError {
             KernelMissing => write!(f, "No kernel specified"),
             ConsoleFileMissing => write!(f, "Path missing when using file console mode"),
             CpusMaxLowerThanBoot => write!(f, "Max CPUs greater than boot CPUs"),
+            DiskSocketAndPath => write!(f, "Disk path and vhost socket both provided"),
         }
     }
 }
@@ -112,10 +113,6 @@ impl fmt::Display for Error {
 
             ParseDevice(o) => write!(f, "Error parsing --device: {}", o),
             ParseDevicePathMissing => write!(f, "Error parsing --device: path missing"),
-            ParseDiskSocketAndPath => write!(
-                f,
-                "Error parsing --disk: vhost socket and disk path both provided"
-            ),
             ParseFileSystem(o) => write!(f, "Error parsing --fs: {}", o),
             ParseFsSockMissing => write!(f, "Error parsing --fs: sock missing"),
             ParseFsTagMissing => write!(f, "Error parsing --fs: tag missing"),
@@ -641,10 +638,6 @@ impl DiskConfig {
 
         if parser.is_set("poll_queue") && !vhost_user {
             warn!("poll_queue parameter currently only has effect when used vhost_user=true");
-        }
-
-        if vhost_socket.as_ref().and(path.as_ref()).is_some() {
-            return Err(Error::ParseDiskSocketAndPath);
         }
 
         Ok(DiskConfig {
@@ -1207,6 +1200,14 @@ impl VmConfig {
             return Err(ValidationError::CpusMaxLowerThanBoot);
         }
 
+        if let Some(disks) = &self.disks {
+            for disk in disks {
+                if disk.vhost_socket.as_ref().and(disk.path.as_ref()).is_some() {
+                    return Err(ValidationError::DiskSocketAndPath);
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1528,7 +1529,6 @@ mod tests {
                 ..Default::default()
             }
         );
-        assert!(DiskConfig::parse("path=/path/to_file,socket=/path/to_socket").is_err());
 
         Ok(())
     }
@@ -1870,6 +1870,14 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.cpus.max_vcpus = 16;
         invalid_config.cpus.boot_vcpus = 32;
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            vhost_socket: Some("/path/to/socket".to_owned()),
+            path: Some(PathBuf::from("/path/to/image")),
+            ..Default::default()
+        }]);
         assert!(invalid_config.validate().is_err());
 
         Ok(())
