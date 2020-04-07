@@ -360,9 +360,13 @@ impl Vm {
         vmm_path: PathBuf,
     ) -> Result<Self> {
         let (kvm, fd) = Vm::kvm_new()?;
-        let memory_manager =
-            MemoryManager::new(fd.clone(), &config.lock().unwrap().memory.clone(), None)
-                .map_err(Error::MemoryManager)?;
+        let memory_manager = MemoryManager::new(
+            fd.clone(),
+            &config.lock().unwrap().memory.clone(),
+            None,
+            false,
+        )
+        .map_err(Error::MemoryManager)?;
 
         Vm::new_from_memory_manager(
             config,
