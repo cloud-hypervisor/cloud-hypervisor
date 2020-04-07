@@ -436,9 +436,15 @@ impl MemoryManager {
 
                 f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
 
+                let mmap_flags = libc::MAP_NORESERVE | libc::MAP_SHARED;
                 GuestRegionMmap::new(
-                    MmapRegion::from_file(FileOffset::new(f, 0), size)
-                        .map_err(Error::GuestMemoryRegion)?,
+                    MmapRegion::build(
+                        Some(FileOffset::new(f, 0)),
+                        size,
+                        libc::PROT_READ | libc::PROT_WRITE,
+                        mmap_flags,
+                    )
+                    .map_err(Error::GuestMemoryRegion)?,
                     start_addr,
                 )
                 .map_err(Error::GuestMemory)?
