@@ -26,8 +26,6 @@ pub const DEFAULT_QUEUE_SIZE_VUBLK: u16 = 128;
 /// Errors associated with VM configuration parameters.
 #[derive(Debug)]
 pub enum Error {
-    /// Max is less than boot
-    ParseCpusMaxLowerThanBoot,
     /// Both socket and path specified
     ParseDiskSocketAndPath,
     /// Filesystem tag is missing
@@ -84,6 +82,8 @@ pub enum ValidationError {
     KernelMissing,
     /// Missing file value for console
     ConsoleFileMissing,
+    /// Max is less than boot
+    CpusMaxLowerThanBoot,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -95,6 +95,7 @@ impl fmt::Display for ValidationError {
             DoubleTtyMode => write!(f, "Console mode tty specified for both serial and console"),
             KernelMissing => write!(f, "No kernel specified"),
             ConsoleFileMissing => write!(f, "Path missing when using file console mode"),
+            CpusMaxLowerThanBoot => write!(f, "Max CPUs greater than boot CPUs"),
         }
     }
 }
@@ -108,9 +109,7 @@ impl fmt::Display for Error {
                 write!(f, "Error parsing --console: invalid console mode given")
             }
             ParseCpus(o) => write!(f, "Error parsing --cpus: {}", o),
-            ParseCpusMaxLowerThanBoot => {
-                write!(f, "Error parsing --cpus: max CPUs greater than boot CPUs")
-            }
+
             ParseDevice(o) => write!(f, "Error parsing --device: {}", o),
             ParseDevicePathMissing => write!(f, "Error parsing --device: path missing"),
             ParseDiskSocketAndPath => write!(
@@ -414,10 +413,6 @@ impl CpusConfig {
             .convert("max")
             .map_err(Error::ParseCpus)?
             .unwrap_or(boot_vcpus);
-
-        if max_vcpus < boot_vcpus {
-            return Err(Error::ParseCpusMaxLowerThanBoot);
-        }
 
         Ok(CpusConfig {
             boot_vcpus,
@@ -1208,6 +1203,10 @@ impl VmConfig {
             return Err(ValidationError::ConsoleFileMissing);
         }
 
+        if self.cpus.max_vcpus < self.cpus.boot_vcpus {
+            return Err(ValidationError::CpusMaxLowerThanBoot);
+        }
+
         Ok(())
     }
 
@@ -1382,7 +1381,6 @@ mod tests {
                 max_vcpus: 2,
             }
         );
-        assert!(CpusConfig::parse("boot=2,max=1").is_err());
         Ok(())
     }
 
@@ -1867,6 +1865,11 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.serial.mode = ConsoleOutputMode::File;
         invalid_config.serial.file = None;
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.cpus.max_vcpus = 16;
+        invalid_config.cpus.boot_vcpus = 32;
         assert!(invalid_config.validate().is_err());
 
         Ok(())
