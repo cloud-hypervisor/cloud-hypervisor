@@ -26,6 +26,7 @@ enum Error {
     AddDiskConfig(vmm::config::Error),
     AddPmemConfig(vmm::config::Error),
     AddNetConfig(vmm::config::Error),
+    Restore(vmm::config::Error),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -262,10 +263,8 @@ fn snapshot_api_command(socket: &mut UnixStream, url: &str) -> Result<(), Error>
     )
 }
 
-fn restore_api_command(socket: &mut UnixStream, url: &str) -> Result<(), Error> {
-    let restore_config = vmm::api::VmRestoreConfig {
-        source_url: String::from(url),
-    };
+fn restore_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
+    let restore_config = vmm::config::RestoreConfig::parse(config).map_err(Error::Restore)?;
 
     simple_api_command(
         socket,
@@ -445,7 +444,7 @@ fn main() {
                 .arg(
                     Arg::with_name("restore_config")
                         .index(1)
-                        .help("<source_url>"),
+                        .help(vmm::config::RestoreConfig::SYNTAX),
                 ),
         );
 

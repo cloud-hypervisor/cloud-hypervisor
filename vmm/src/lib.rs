@@ -18,7 +18,7 @@ extern crate url;
 extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
-use crate::config::{DeviceConfig, DiskConfig, NetConfig, PmemConfig, VmConfig};
+use crate::config::{DeviceConfig, DiskConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig};
 use crate::migration::{recv_vm_snapshot, vm_config_from_snapshot};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
@@ -305,10 +305,17 @@ impl Vmm {
         }
     }
 
-    fn vm_restore(&mut self, source_url: &str) -> result::Result<(), VmError> {
+    fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
         if self.vm.is_some() || self.vm_config.is_some() {
             return Err(VmError::VmAlreadyCreated);
         }
+
+        let source_url = restore_cfg.source_url.as_path().to_str();
+        if source_url.is_none() {
+            return Err(VmError::RestoreSourceUrlPathToStr);
+        }
+        // Safe to unwrap as we checked it was Some(&str).
+        let source_url = source_url.unwrap();
 
         let vm_snapshot = recv_vm_snapshot(source_url).map_err(VmError::Restore)?;
         let vm_config = vm_config_from_snapshot(&vm_snapshot).map_err(VmError::Restore)?;
@@ -644,9 +651,9 @@ impl Vmm {
 
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
-                                ApiRequest::VmRestore(snapshot_data, sender) => {
+                                ApiRequest::VmRestore(restore_data, sender) => {
                                     let response = self
-                                        .vm_restore(&snapshot_data.source_url)
+                                        .vm_restore(restore_data.as_ref().clone())
                                         .map_err(ApiError::VmRestore)
                                         .map(|_| ApiResponsePayload::Empty);
 

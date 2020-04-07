@@ -234,10 +234,7 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("restore")
                 .long("restore")
-                .help(
-                    "Restore from a VM snapshot. \
-                    Should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo)",
-                )
+                .help(config::RestoreConfig::SYNTAX)
                 .takes_value(true)
                 .min_values(1)
                 .group("vmm-config"),
@@ -344,12 +341,16 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         )
         .expect("Could not create the VM");
         vmm::api::vm_boot(api_evt.try_clone().unwrap(), sender).expect("Could not boot the VM");
-    } else if let Some(restore_url) = cmd_arguments.value_of("restore") {
+    } else if let Some(restore_params) = cmd_arguments.value_of("restore") {
         vmm::api::vm_restore(
             api_evt.try_clone().unwrap(),
             api_request_sender,
-            Arc::new(vmm::api::VmRestoreConfig {
-                source_url: restore_url.to_string(),
+            Arc::new(match config::RestoreConfig::parse(restore_params) {
+                Ok(config) => config,
+                Err(e) => {
+                    println!("{}", e);
+                    process::exit(1);
+                }
             }),
         )
         .expect("Could not restore the VM");
