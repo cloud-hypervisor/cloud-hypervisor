@@ -62,8 +62,6 @@ pub enum Error {
     ParsePersistentMemory(OptionParserError),
     /// Failed parsing console
     ParseConsole(OptionParserError),
-    /// Missing file value for console
-    ParseConsoleFileMissing,
     /// No mode given for console
     ParseConsoleInvalidModeGiven,
     /// Failed parsing device parameters
@@ -84,6 +82,8 @@ pub enum ValidationError {
     DoubleTtyMode,
     /// No kernel specified
     KernelMissing,
+    /// Missing file value for console
+    ConsoleFileMissing,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -94,6 +94,7 @@ impl fmt::Display for ValidationError {
         match self {
             DoubleTtyMode => write!(f, "Console mode tty specified for both serial and console"),
             KernelMissing => write!(f, "No kernel specified"),
+            ConsoleFileMissing => write!(f, "Path missing when using file console mode"),
         }
     }
 }
@@ -103,9 +104,6 @@ impl fmt::Display for Error {
         use self::Error::*;
         match self {
             ParseConsole(o) => write!(f, "Error parsing --console: {}", o),
-            ParseConsoleFileMissing => {
-                write!(f, "Error parsing --console: path missing when using file")
-            }
             ParseConsoleInvalidModeGiven => {
                 write!(f, "Error parsing --console: invalid console mode given")
             }
@@ -1037,9 +1035,10 @@ impl ConsoleConfig {
             mode = ConsoleOutputMode::Null
         } else if parser.is_set("file") {
             mode = ConsoleOutputMode::File;
-            file = Some(PathBuf::from(
-                parser.get("file").ok_or(Error::ParseConsoleFileMissing)?,
-            ));
+            file =
+                Some(PathBuf::from(parser.get("file").ok_or(
+                    Error::Validation(ValidationError::ConsoleFileMissing),
+                )?));
         } else {
             return Err(Error::ParseConsoleInvalidModeGiven);
         }
@@ -1199,6 +1198,14 @@ impl VmConfig {
         if self.console.mode == ConsoleOutputMode::Tty && self.serial.mode == ConsoleOutputMode::Tty
         {
             return Err(ValidationError::DoubleTtyMode);
+        }
+
+        if self.console.mode == ConsoleOutputMode::File && self.console.file.is_none() {
+            return Err(ValidationError::ConsoleFileMissing);
+        }
+
+        if self.serial.mode == ConsoleOutputMode::File && self.serial.file.is_none() {
+            return Err(ValidationError::ConsoleFileMissing);
         }
 
         Ok(())
@@ -1855,6 +1862,11 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.kernel = None;
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.serial.mode = ConsoleOutputMode::File;
+        invalid_config.serial.file = None;
         assert!(invalid_config.validate().is_err());
 
         Ok(())
