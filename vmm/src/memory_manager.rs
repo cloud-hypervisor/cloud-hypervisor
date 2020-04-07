@@ -384,8 +384,6 @@ impl MemoryManager {
         config: &MemoryConfig,
         source_url: &str,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
-        let memory_manager = MemoryManager::new(fd, config, None)?;
-
         let url = Url::parse(source_url).unwrap();
         /* url must be valid dir which is verified in recv_vm_snapshot() */
         let vm_snapshot_path = url.to_file_path().unwrap();
@@ -405,35 +403,54 @@ impl MemoryManager {
                     }
                 };
 
-            memory_manager
-                .lock()
-                .unwrap()
-                .guest_memory
-                .memory()
-                .with_regions(|index, region| {
-                    let mut memory_region_path = vm_snapshot_path.clone();
-                    memory_region_path
-                        .push(mem_snapshot.memory_regions[index].backing_file.clone());
+            let mut ext_regions = mem_snapshot.memory_regions;
+            for region in ext_regions.iter_mut() {
+                let mut memory_region_path = vm_snapshot_path.clone();
+                memory_region_path.push(region.backing_file.clone());
+                region.backing_file = memory_region_path;
+            }
 
-                    // Create the snapshot file for the region
-                    let mut memory_region_file = OpenOptions::new()
-                        .read(true)
-                        .open(memory_region_path)
-                        .map_err(|e| Error::Restore(MigratableError::MigrateReceive(e.into())))?;
+            // In case there was no backing file, we can safely use CoW by
+            // mapping the source files provided for restoring. This case
+            // allows for a faster VM restoration and does not require us to
+            // fill the memory content, hence we can return right away.
+            if config.file.is_none() {
+                return MemoryManager::new(fd, config, Some(ext_regions));
+            };
 
-                    region
-                        .read_from(
-                            MemoryRegionAddress(0),
-                            &mut memory_region_file,
-                            region.len().try_into().unwrap(),
-                        )
-                        .map_err(|e| Error::Restore(MigratableError::MigrateReceive(e.into())))?;
+            let memory_manager = MemoryManager::new(fd, config, None)?;
+            let guest_memory = memory_manager.lock().unwrap().guest_memory();
 
-                    Ok(())
-                })?;
+            // In case the previous config was using a backing file, this means
+            // it was MAP_SHARED, therefore we must copy the content into the
+            // new regions so that we can still use MAP_SHARED when restoring
+            // the VM.
+            guest_memory.memory().with_regions(|index, region| {
+                // Open (read only) the snapshot file for the given region.
+                let mut memory_region_file = OpenOptions::new()
+                    .read(true)
+                    .open(&ext_regions[index].backing_file)
+                    .map_err(|e| Error::Restore(MigratableError::MigrateReceive(e.into())))?;
+
+                // Fill the region with the file content.
+                region
+                    .read_from(
+                        MemoryRegionAddress(0),
+                        &mut memory_region_file,
+                        region.len().try_into().unwrap(),
+                    )
+                    .map_err(|e| Error::Restore(MigratableError::MigrateReceive(e.into())))?;
+
+                Ok(())
+            })?;
+
+            Ok(memory_manager)
+        } else {
+            Err(Error::Restore(MigratableError::Restore(anyhow!(
+                "Could not find {}-section from snapshot",
+                MEMORY_MANAGER_SNAPSHOT_ID
+            ))))
         }
-
-        Ok(memory_manager)
     }
 
     fn create_ram_region(
