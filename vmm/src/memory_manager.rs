@@ -229,6 +229,7 @@ impl MemoryManager {
         fd: Arc<VmFd>,
         config: &MemoryConfig,
         ext_regions: Option<Vec<MemoryRegion>>,
+        prefault: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         // Init guest memory
         let arch_mem_regions = arch::arch_memory_regions(config.size);
@@ -251,6 +252,7 @@ impl MemoryManager {
                     region.start_addr,
                     region.size as usize,
                     true,
+                    prefault,
                 )?);
             }
         } else {
@@ -260,6 +262,7 @@ impl MemoryManager {
                     region.0,
                     region.1,
                     false,
+                    prefault,
                 )?);
             }
         }
@@ -287,6 +290,7 @@ impl MemoryManager {
                     &config.file,
                     start_addr,
                     size as usize,
+                    false,
                     false,
                 )?);
 
@@ -415,10 +419,10 @@ impl MemoryManager {
             // allows for a faster VM restoration and does not require us to
             // fill the memory content, hence we can return right away.
             if config.file.is_none() {
-                return MemoryManager::new(fd, config, Some(ext_regions));
+                return MemoryManager::new(fd, config, Some(ext_regions), false);
             };
 
-            let memory_manager = MemoryManager::new(fd, config, None)?;
+            let memory_manager = MemoryManager::new(fd, config, None, false)?;
             let guest_memory = memory_manager.lock().unwrap().guest_memory();
 
             // In case the previous config was using a backing file, this means
@@ -458,6 +462,7 @@ impl MemoryManager {
         start_addr: GuestAddress,
         size: usize,
         copy_on_write: bool,
+        prefault: bool,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
         Ok(Arc::new(match backing_file {
             Some(ref file) => {
@@ -479,11 +484,14 @@ impl MemoryManager {
 
                 f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
 
-                let mmap_flags = if copy_on_write {
+                let mut mmap_flags = if copy_on_write {
                     libc::MAP_NORESERVE | libc::MAP_PRIVATE
                 } else {
                     libc::MAP_NORESERVE | libc::MAP_SHARED
                 };
+                if prefault {
+                    mmap_flags |= libc::MAP_POPULATE;
+                }
                 GuestRegionMmap::new(
                     MmapRegion::build(
                         Some(FileOffset::new(f, 0)),
@@ -544,7 +552,8 @@ impl MemoryManager {
         }
 
         // Allocate memory for the region
-        let region = MemoryManager::create_ram_region(&self.backing_file, start_addr, size, false)?;
+        let region =
+            MemoryManager::create_ram_region(&self.backing_file, start_addr, size, false, false)?;
 
         // Map it into the guest
         self.create_userspace_mapping(
