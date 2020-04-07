@@ -42,7 +42,7 @@ const NUM_QUEUES: usize = 1;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
 
 // Use 2 MiB alignment so transparent hugepages can be used by KVM.
-pub const VIRTIO_MEM_DEFAULT_BLOCK_SIZE: u64 = (512 * 4096);
+pub const VIRTIO_MEM_DEFAULT_BLOCK_SIZE: u64 = 512 * 4096;
 const VIRTIO_MEM_USABLE_EXTENT: u64 = 256 * 1024 * 1024;
 
 // Request processed successfully, applicable for
