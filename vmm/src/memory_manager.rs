@@ -237,6 +237,7 @@ impl MemoryManager {
                 &config.file,
                 region.0,
                 region.1,
+                false,
             )?);
         }
 
@@ -263,6 +264,7 @@ impl MemoryManager {
                     &config.file,
                     start_addr,
                     size as usize,
+                    false,
                 )?);
 
                 virtiomem_resize = Some(vm_virtio::Resize::new().map_err(Error::EventFdFail)?);
@@ -415,6 +417,7 @@ impl MemoryManager {
         backing_file: &Option<PathBuf>,
         start_addr: GuestAddress,
         size: usize,
+        copy_on_write: bool,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
         Ok(Arc::new(match backing_file {
             Some(ref file) => {
@@ -436,7 +439,11 @@ impl MemoryManager {
 
                 f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
 
-                let mmap_flags = libc::MAP_NORESERVE | libc::MAP_SHARED;
+                let mmap_flags = if copy_on_write {
+                    libc::MAP_NORESERVE | libc::MAP_PRIVATE
+                } else {
+                    libc::MAP_NORESERVE | libc::MAP_SHARED
+                };
                 GuestRegionMmap::new(
                     MmapRegion::build(
                         Some(FileOffset::new(f, 0)),
@@ -497,7 +504,7 @@ impl MemoryManager {
         }
 
         // Allocate memory for the region
-        let region = MemoryManager::create_ram_region(&self.backing_file, start_addr, size)?;
+        let region = MemoryManager::create_ram_region(&self.backing_file, start_addr, size, false)?;
 
         // Map it into the guest
         self.create_userspace_mapping(
