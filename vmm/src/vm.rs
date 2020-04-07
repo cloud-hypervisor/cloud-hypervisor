@@ -188,6 +188,9 @@ pub enum Error {
 
     /// Cannot send VM snapshot
     SnapshotSend(MigratableError),
+
+    /// Cannot convert source URL from Path into &str
+    RestoreSourceUrlPathToStr,
 }
 pub type Result<T> = result::Result<T, Error>;
 

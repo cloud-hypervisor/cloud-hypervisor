@@ -8,7 +8,7 @@ use crate::api::{
     vm_add_device, vm_add_disk, vm_add_net, vm_add_pmem, vm_boot, vm_create, vm_delete, vm_info,
     vm_pause, vm_reboot, vm_remove_device, vm_resize, vm_restore, vm_resume, vm_shutdown,
     vm_snapshot, vmm_ping, vmm_shutdown, ApiError, ApiRequest, ApiResult, DeviceConfig, DiskConfig,
-    NetConfig, PmemConfig, VmAction, VmConfig, VmRemoveDeviceData, VmResizeData, VmRestoreConfig,
+    NetConfig, PmemConfig, RestoreConfig, VmAction, VmConfig, VmRemoveDeviceData, VmResizeData,
     VmSnapshotConfig,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
@@ -252,8 +252,8 @@ impl EndpointHandler for VmRestore {
             Method::Put => {
                 match &req.body {
                     Some(body) => {
-                        // Deserialize into a VmRestoreConfig
-                        let vm_restore_data: VmRestoreConfig =
+                        // Deserialize into a RestoreConfig
+                        let vm_restore_data: RestoreConfig =
                             match serde_json::from_slice(body.raw())
                                 .map_err(HttpError::SerdeJsonDeserialize)
                             {

@@ -37,7 +37,7 @@ pub use self::http::start_http_thread;
 pub mod http;
 pub mod http_endpoint;
 
-use crate::config::{DeviceConfig, DiskConfig, NetConfig, PmemConfig, VmConfig};
+use crate::config::{DeviceConfig, DiskConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig};
 use crate::vm::{Error as VmError, VmState};
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
@@ -158,13 +158,6 @@ pub struct VmSnapshotConfig {
     pub destination_url: String,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
-pub struct VmRestoreConfig {
-    /// The snapshot restore source URL.
-    /// This is where the VMM is going to get its snapshot to restore itself from.
-    pub source_url: String,
-}
-
 pub enum ApiResponsePayload {
     /// No data is sent on the channel.
     Empty,
@@ -247,7 +240,7 @@ pub enum ApiRequest {
     VmSnapshot(Arc<VmSnapshotConfig>, Sender<ApiResponse>),
 
     /// Restore from a VM snapshot
-    VmRestore(Arc<VmRestoreConfig>, Sender<ApiResponse>),
+    VmRestore(Arc<RestoreConfig>, Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -357,7 +350,7 @@ pub fn vm_snapshot(
 pub fn vm_restore(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
-    data: Arc<VmRestoreConfig>,
+    data: Arc<RestoreConfig>,
 ) -> ApiResult<()> {
     let (response_sender, response_receiver) = channel();
 

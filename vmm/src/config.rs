@@ -46,6 +46,8 @@ pub enum Error {
     ParseVsockSockMissing,
     /// Missing vsock cid parameter.
     ParseVsockCidMissing,
+    /// Missing restore source_url parameter.
+    ParseRestoreSourceUrlMissing,
     /// Error parsing CPU options
     ParseCpus(OptionParserError),
     /// Error parsing memory options
@@ -72,6 +74,8 @@ pub enum Error {
     ParseDevicePathMissing,
     /// Failed to parse vsock parameters
     ParseVsock(OptionParserError),
+    /// Failed to parse restore parameters
+    ParseRestore(OptionParserError),
 }
 
 impl fmt::Display for Error {
@@ -115,6 +119,10 @@ impl fmt::Display for Error {
             ParseNetwork(o) => write!(f, "Error parsing --net: {}", o),
             ParseDisk(o) => write!(f, "Error parsing --disk: {}", o),
             ParseRNG(o) => write!(f, "Error parsing --rng: {}", o),
+            ParseRestore(o) => write!(f, "Error parsing --restore: {}", o),
+            ParseRestoreSourceUrlMissing => {
+                write!(f, "Error parsing --restore: source_url missing")
+            }
         }
     }
 }
@@ -1103,6 +1111,29 @@ impl VsockConfig {
             .ok_or(Error::ParseVsockCidMissing)?;
 
         Ok(VsockConfig { cid, sock, iommu })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct RestoreConfig {
+    pub source_url: PathBuf,
+}
+
+impl RestoreConfig {
+    pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
+        Restore parameters \"source_url=<source_url>\" \
+        source_url should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo)";
+    pub fn parse(restore: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("source_url");
+        parser.parse(restore).map_err(Error::ParseRestore)?;
+
+        let source_url = parser
+            .get("source_url")
+            .map(PathBuf::from)
+            .ok_or(Error::ParseRestoreSourceUrlMissing)?;
+
+        Ok(RestoreConfig { source_url })
     }
 }
 
