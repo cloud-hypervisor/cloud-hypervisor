@@ -273,30 +273,9 @@ fn create_app<'a, 'b>(
 }
 
 fn start_vmm(cmd_arguments: ArgMatches) {
-    let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
-    let vm_config = match config::VmConfig::parse(vm_params) {
-        Ok(config) => config,
-        Err(e) => {
-            println!("{}", e);
-            process::exit(1);
-        }
-    };
-
     let api_socket_path = cmd_arguments
         .value_of("api-socket")
         .expect("Missing argument: api-socket");
-
-    println!(
-        "Cloud Hypervisor Guest\n\tAPI server: {}\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: \
-         {:?}\n\tInitramfs: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
-        api_socket_path,
-        vm_config.cpus.boot_vcpus,
-        vm_config.memory.size >> 20,
-        vm_config.kernel,
-        vm_config.initramfs,
-        vm_config.cmdline.args.as_str(),
-        vm_config.disks,
-    );
 
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).expect("Cannot create API EventFd");
@@ -334,6 +313,27 @@ fn start_vmm(cmd_arguments: ArgMatches) {
     // Can't test for "vm-config" group as some have default values. The kernel
     // is the only required option for booting the VM.
     if cmd_arguments.is_present("kernel") {
+        let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
+        let vm_config = match config::VmConfig::parse(vm_params) {
+            Ok(config) => config,
+            Err(e) => {
+                println!("{}", e);
+                process::exit(1);
+            }
+        };
+
+        println!(
+            "Cloud Hypervisor Guest\n\tAPI server: {}\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: \
+             {:?}\n\tInitramfs: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
+            api_socket_path,
+            vm_config.cpus.boot_vcpus,
+            vm_config.memory.size >> 20,
+            vm_config.kernel,
+            vm_config.initramfs,
+            vm_config.cmdline.args.as_str(),
+            vm_config.disks,
+        );
+
         // Create and boot the VM based off the VM config we just built.
         let sender = api_request_sender.clone();
         vmm::api::vm_create(
