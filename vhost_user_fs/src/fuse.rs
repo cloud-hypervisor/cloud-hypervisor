@@ -140,6 +140,9 @@ const ABORT_ERROR: u32 = 2_097_152;
 /// Init_out.max_pages contains the max number of req pages.
 const MAX_PAGES: u32 = 4_194_304;
 
+/// Cache READLINK responses
+const CACHE_SYMLINKS: u32 = 8_388_608;
+
 bitflags! {
     /// A bitfield passed in as a parameter to and returned from the `init` method of the
     /// `FileSystem` trait.
@@ -320,6 +323,11 @@ bitflags! {
         ///
         /// This feature is enabled by default if supported by the kernel.
         const MAX_PAGES = MAX_PAGES;
+
+        /// Indicates that the kernel supports caching READLINK responses.
+        ///
+        /// This feature is not currently supported.
+        const CACHE_SYMLINKS = CACHE_SYMLINKS;
     }
 }
 
