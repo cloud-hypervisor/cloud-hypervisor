@@ -393,6 +393,9 @@ const IOCTL_32BIT: u32 = 8;
 /// Is a directory
 const IOCTL_DIR: u32 = 16;
 
+/// x32 compat ioctl on 64bit machine (64bit time_t)
+const IOCTL_COMPAT_X32: u32 = 32;
+
 /// Maximum of in_iovecs + out_iovecs
 const IOCTL_MAX_IOV: u32 = 256;
 
@@ -412,6 +415,9 @@ bitflags! {
 
         /// Is a directory
         const IOCTL_DIR = IOCTL_DIR;
+
+        /// x32 compat ioctl on 64bit machine (64bit time_t)
+        const IOCTL_COMPAT_X32 = IOCTL_COMPAT_X32;
 
         /// Maximum of in_iovecs + out_iovecs
         const IOCTL_MAX_IOV = IOCTL_MAX_IOV;
