@@ -143,6 +143,9 @@ const MAX_PAGES: u32 = 4_194_304;
 /// Cache READLINK responses
 const CACHE_SYMLINKS: u32 = 8_388_608;
 
+/// Kernel supports zero-message opendir
+const NO_OPENDIR_SUPPORT: u32 = 16_777_216;
+
 bitflags! {
     /// A bitfield passed in as a parameter to and returned from the `init` method of the
     /// `FileSystem` trait.
@@ -328,6 +331,16 @@ bitflags! {
         ///
         /// This feature is not currently supported.
         const CACHE_SYMLINKS = CACHE_SYMLINKS;
+
+        /// Indicates support for zero-message opens. If this flag is set in the `capable` parameter
+        /// of the `init` trait method, then the file system may return `ENOSYS` from the opendir() handler
+        /// to indicate success. Further attempts to open directories will be handled in the kernel. (If
+        /// this flag is not set, returning ENOSYS will be treated as an error and signaled to the
+        /// caller).
+        ///
+        /// Setting (or not setting) the field in the `FsOptions` returned from the `init` method
+        /// has no effect.
+        const ZERO_MESSAGE_OPENDIR = NO_OPENDIR_SUPPORT;
     }
 }
 
