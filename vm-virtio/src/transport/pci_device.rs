@@ -13,6 +13,7 @@ extern crate vm_allocator;
 extern crate vm_memory;
 extern crate vmm_sys_util;
 
+use anyhow::anyhow;
 use super::VirtioPciCommonConfig;
 use crate::transport::VirtioTransport;
 use crate::{
@@ -41,7 +42,9 @@ use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
     GuestUsize, Le32,
 };
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable, Transportable,
+};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 #[allow(clippy::enum_variant_names)]
@@ -302,6 +305,15 @@ pub struct VirtioPciDevice {
     cap_pci_cfg_info: VirtioPciCfgCapInfo,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct VirtioPciDeviceState {
+    pub configuration: PciConfiguration,
+    pub common_config: VirtioPciCommonConfig,
+    pub device_activated: bool,
+    pub interrupt_status: Arc<AtomicUsize>,
+    pub queues: Vec<Queue>,
+}
+
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
     pub fn new(
@@ -559,6 +571,26 @@ impl VirtioPciDevice {
                 unsafe { std::mem::transmute(self.cap_pci_cfg_info.cap.cap.offset) };
             self.write_bar(0, bar_offset as u64, data)
         }
+    }
+
+    fn state(&self) -> VirtioPciDeviceState {
+        VirtioPciDeviceState {
+            configuration: self.configuration.clone(),
+            common_config: self.common_config.clone(),
+            device_activated: self.device_activated,
+            interrupt_status: Arc::clone(&self.interrupt_status),
+            queues: self.queues.clone(),
+        }
+    }
+
+    fn set_state(&mut self, state: &VirtioPciDeviceState) -> Result<()> {
+        self.configuration = state.configuration.clone();
+        self.common_config = state.common_config.clone();
+        self.device_activated = state.device_activated;
+        self.interrupt_status = Arc::clone(&state.interrupt_status);
+        self.queues = state.queues.clone();
+
+        Ok(())
     }
 }
 
@@ -916,6 +948,50 @@ impl Pausable for VirtioPciDevice {
     }
 }
 
-impl Snapshottable for VirtioPciDevice {}
+const VIRTIO_PCI_DEV_SNAPSHOT_ID: &str = "virtio_pci_device";
+impl Snapshottable for VirtioPciDevice {
+    fn id(&self) -> String {
+        VIRTIO_PCI_DEV_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut virtio_pci_dev_snapshot = Snapshot::new(VIRTIO_PCI_DEV_SNAPSHOT_ID);
+        virtio_pci_dev_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", VIRTIO_PCI_DEV_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(virtio_pci_dev_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(virtio_pci_dev_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", VIRTIO_PCI_DEV_SNAPSHOT_ID))
+        {
+            let virtio_pci_dev_state = match serde_json::from_slice(&virtio_pci_dev_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize VIRTIO_PCI_DEVICE {}",
+                        error
+                    )))
+                }
+            };
+
+            return self.set_state(&virtio_pci_dev_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore VIRTIO_PCI_DEVICE state {:?}", e))
+            });
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find VIRTIO_PCI_DEVICE snapshot section"
+        )))
+    }
+}
+
 impl Transportable for VirtioPciDevice {}
 impl Migratable for VirtioPciDevice {}

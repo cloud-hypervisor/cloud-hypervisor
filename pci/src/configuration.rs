@@ -244,11 +244,16 @@ pub trait PciCapability {
     fn id(&self) -> PciCapabilityID;
 }
 
+big_array! { PciRegistersArray; }
+
+#[derive(Clone, Serialize, Deserialize)]
 /// Contains the configuration space of a PCI node.
 /// See the [specification](https://en.wikipedia.org/wiki/PCI_configuration_space).
 /// The configuration space is accessed with DWORD reads and writes from the guest.
 pub struct PciConfiguration {
+    #[serde(with = "PciRegistersArray")]
     registers: [u32; NUM_CONFIGURATION_REGISTERS],
+    #[serde(with = "PciRegistersArray")]
     writable_bits: [u32; NUM_CONFIGURATION_REGISTERS], // writable bits for each register.
     bar_addr: [u32; NUM_BAR_REGS],
     bar_size: [u32; NUM_BAR_REGS],
@@ -260,11 +265,12 @@ pub struct PciConfiguration {
     // Contains the byte offset and size of the last capability.
     last_capability: Option<(usize, usize)>,
     msix_cap_reg_idx: Option<usize>,
+    #[serde(skip)]
     msix_config: Option<Arc<Mutex<MsixConfig>>>,
 }
 
 /// See pci_regs.h in kernel
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PciBarRegionType {
     Memory32BitRegion = 0,
     IORegion = 0x01,

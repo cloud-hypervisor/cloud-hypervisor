@@ -6,6 +6,11 @@
 #[macro_use]
 extern crate log;
 extern crate devices;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+#[macro_use]
+extern crate serde_big_array;
 extern crate vm_memory;
 
 mod bus;

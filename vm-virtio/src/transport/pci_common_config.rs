@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use vm_memory::GuestAddress;
 
+#[derive(Clone, Serialize, Deserialize)]
 /// Contains the data for reading and writing the common configuration structure of a virtio PCI
 /// device.
 ///
