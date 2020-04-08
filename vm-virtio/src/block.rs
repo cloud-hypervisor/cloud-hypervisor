@@ -14,6 +14,7 @@ use super::{
     VirtioDeviceType, VirtioInterruptType,
 };
 use crate::VirtioInterrupt;
+use anyhow::anyhow;
 use epoll;
 use libc::{c_void, EFD_NONBLOCK};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
@@ -35,7 +36,10 @@ use vm_memory::{
     ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap,
 };
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::{eventfd::EventFd, seek_hole::SeekHole, write_zeroes::PunchHole};
 
 const SECTOR_SHIFT: u8 = 9;
@@ -766,7 +770,7 @@ impl<T: DiskFile> BlockEpollHandler<T> {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 #[repr(C, packed)]
 pub struct VirtioBlockGeometry {
     pub cylinders: u16,
@@ -776,7 +780,7 @@ pub struct VirtioBlockGeometry {
 
 unsafe impl ByteValued for VirtioBlockGeometry {}
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 #[repr(C, packed)]
 pub struct VirtioBlockConfig {
     pub capacity: u64,
@@ -817,6 +821,15 @@ pub struct Block<T: DiskFile> {
     pause_evt: Option<EventFd>,
     paused: Arc<AtomicBool>,
     queue_size: Vec<u16>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct BlockState {
+    pub disk_path: PathBuf,
+    pub disk_nsectors: u64,
+    pub avail_features: u64,
+    pub acked_features: u64,
+    pub config: VirtioBlockConfig,
 }
 
 impl<T: DiskFile> Block<T> {
@@ -876,6 +889,26 @@ impl<T: DiskFile> Block<T> {
             paused: Arc::new(AtomicBool::new(false)),
             queue_size: vec![queue_size; num_queues],
         })
+    }
+
+    fn state(&self) -> BlockState {
+        BlockState {
+            disk_path: self.disk_path.clone(),
+            disk_nsectors: self.disk_nsectors,
+            avail_features: self.avail_features,
+            acked_features: self.acked_features,
+            config: self.config.clone(),
+        }
+    }
+
+    fn set_state(&mut self, state: &BlockState) -> io::Result<()> {
+        self.disk_path = state.disk_path.clone();
+        self.disk_nsectors = state.disk_nsectors;
+        self.avail_features = state.avail_features;
+        self.acked_features = state.acked_features;
+        self.config = state.config.clone();
+
+        Ok(())
     }
 }
 
@@ -1051,6 +1084,49 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 }
 
 virtio_pausable!(Block, T: 'static + DiskFile + Send);
-impl<T: 'static + DiskFile + Send> Snapshottable for Block<T> {}
+const BLOCK_SNAPSHOT_ID: &str = "virtio-block";
+impl<T: 'static + DiskFile + Send> Snapshottable for Block<T> {
+    fn id(&self) -> String {
+        BLOCK_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut block_snapshot = Snapshot::new(BLOCK_SNAPSHOT_ID);
+        block_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", BLOCK_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(block_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(block_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", BLOCK_SNAPSHOT_ID))
+        {
+            let block_state = match serde_json::from_slice(&block_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize BLOCK {}",
+                        error
+                    )))
+                }
+            };
+
+            return self.set_state(&block_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore BLOCK state {:?}", e))
+            });
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find BLOCK snapshot section"
+        )))
+    }
+}
 impl<T: 'static + DiskFile + Send> Transportable for Block<T> {}
 impl<T: 'static + DiskFile + Send> Migratable for Block<T> {}
