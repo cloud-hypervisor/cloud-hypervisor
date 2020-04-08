@@ -107,20 +107,30 @@ pub struct VhostUserNetBackend {
     taps: Vec<Tap>,
     num_queues: usize,
     queue_size: u16,
-    epoll_fd: RawFd,
-    worker_reset: Arc<Mutex<WorkerReset>>,
+    epoll_fds: Vec<RawFd>,
+    worker_resets: Vec<Arc<Mutex<WorkerReset>>>,
 }
 
 impl VhostUserNetBackend {
     /// Create a new virtio network device with the given TAP interface.
     pub fn new_with_tap(taps: Vec<Tap>, num_queues: usize, queue_size: u16) -> Result<Self> {
+        let epoll_count = num_queues / 2;
+        let mut epoll_fds = Vec::with_capacity(epoll_count);
+        let mut worker_resets = Vec::with_capacity(epoll_count);
+        for _ in 0..epoll_count {
+            let epoll_fd = epoll::create(true).map_err(Error::EpollCreateFd)?;
+            epoll_fds.push(epoll_fd);
+            let worker_reset = Arc::new(Mutex::new(WorkerReset::new().unwrap()));
+            worker_resets.push(worker_reset);
+        }
+
         Ok(VhostUserNetBackend {
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             taps,
             num_queues,
             queue_size,
-            epoll_fd: epoll::create(true).map_err(Error::EpollCreateFd)?,
-            worker_reset: Arc::new(Mutex::new(WorkerReset::new().unwrap())),
+            epoll_fds,
+            worker_resets,
         })
     }
 
@@ -165,9 +175,9 @@ impl VhostUserNetBackend {
                 tx,
                 rx_tap_listening: false,
                 kill_evt: self.kill_evt.try_clone().unwrap(),
-                epoll_fd: self.epoll_fd,
+                epoll_fd: self.epoll_fds[i],
                 num_queues: self.num_queues,
-                worker_reset: self.worker_reset.clone(),
+                worker_reset: self.worker_resets[i].clone(),
             };
 
             std::thread::Builder::new()
@@ -212,28 +222,40 @@ impl VhostUserBackend for VhostUserNetBackend {
     }
 
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.worker_reset
-            .lock()
-            .unwrap()
-            .set_mem(Some(GuestMemoryAtomic::new(mem)));
-        self.worker_reset
-            .lock()
-            .unwrap()
-            .get_evt()
-            .write(1)
-            .map_err(|_| Error::FailedUpdateMemory)?;
+        for i in 0..self.worker_resets.len() {
+            self.worker_resets[i]
+                .lock()
+                .unwrap()
+                .set_mem(Some(GuestMemoryAtomic::new(mem.clone())));
+            self.worker_resets[i]
+                .lock()
+                .unwrap()
+                .get_evt()
+                .write(1)
+                .map_err(|_| Error::FailedUpdateMemory)?;
+        }
         Ok(())
     }
 
     fn register_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
-        register_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
-            .map_err(|_| Error::FailedRegisterListener)?;
+        register_listener(
+            self.epoll_fds[(index / 2) as usize],
+            fd,
+            epoll::Events::EPOLLIN,
+            index,
+        )
+        .map_err(|_| Error::FailedRegisterListener)?;
         Ok(())
     }
 
     fn unregister_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
-        unregister_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
-            .map_err(|_| Error::FailedUnRegisterListener)?;
+        unregister_listener(
+            self.epoll_fds[(index / 2) as usize],
+            fd,
+            epoll::Events::EPOLLIN,
+            index,
+        )
+        .map_err(|_| Error::FailedUnRegisterListener)?;
         Ok(())
     }
 }
