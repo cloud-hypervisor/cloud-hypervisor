@@ -951,16 +951,21 @@ impl Pausable for VirtioPciDevice {
 const VIRTIO_PCI_DEV_SNAPSHOT_ID: &str = "virtio_pci_device";
 impl Snapshottable for VirtioPciDevice {
     fn id(&self) -> String {
-        VIRTIO_PCI_DEV_SNAPSHOT_ID.to_string()
+        format!(
+            "{}-{}",
+            VIRTIO_PCI_DEV_SNAPSHOT_ID,
+            VirtioDeviceType::from(self.device.lock().unwrap().device_type())
+        )
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        let mut virtio_pci_dev_snapshot = Snapshot::new(VIRTIO_PCI_DEV_SNAPSHOT_ID);
+        let snapshot_id = self.id();
+        let mut virtio_pci_dev_snapshot = Snapshot::new(&snapshot_id);
         virtio_pci_dev_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", VIRTIO_PCI_DEV_SNAPSHOT_ID),
+            id: format!("{}-section", snapshot_id),
             snapshot,
         });
 
@@ -968,9 +973,10 @@ impl Snapshottable for VirtioPciDevice {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        let snapshot_id = self.id();
         if let Some(virtio_pci_dev_section) = snapshot
             .snapshot_data
-            .get(&format!("{}-section", VIRTIO_PCI_DEV_SNAPSHOT_ID))
+            .get(&format!("{}-section", snapshot_id))
         {
             let virtio_pci_dev_state = match serde_json::from_slice(&virtio_pci_dev_section.snapshot) {
                 Ok(state) => state,
