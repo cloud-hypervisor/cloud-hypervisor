@@ -472,7 +472,10 @@ impl NetEpollHandler {
                             .map_err(|_| Error::FailedReadWorkerReset)?;
                         self.mem = self.worker_reset.lock().unwrap().get_mem();
                     }
-                    x if x == kill_index => break 'epoll,
+                    x if x == kill_index => {
+                        let _ = self.kill_evt.read();
+                        break 'epoll;
+                    }
                     _ => return Err(Error::HandleEventUnknownEvent.into()),
                 }
             }
