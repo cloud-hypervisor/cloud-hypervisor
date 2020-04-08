@@ -538,6 +538,8 @@ pub struct DiskConfig {
     pub wce: bool,
     #[serde(default = "default_diskconfig_poll_queue")]
     pub poll_queue: bool,
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 fn default_diskconfig_num_queues() -> usize {
@@ -569,6 +571,7 @@ impl Default for DiskConfig {
             vhost_socket: None,
             wce: default_diskconfig_wce(),
             poll_queue: default_diskconfig_poll_queue(),
+            id: None,
         }
     }
 }
@@ -577,7 +580,7 @@ impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
          \"path=<disk_image_path>,readonly=on|off,iommu=on|off,num_queues=<number_of_queues>,\
          queue_size=<size_of_each_queue>,vhost_user=<vhost_user_enable>,\
-         socket=<vhost_user_socket_path>,wce=<true|false, default true>\"";
+         socket=<vhost_user_socket_path>,wce=<true|false, default true>,id=<device_id>\"";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -591,7 +594,8 @@ impl DiskConfig {
             .add("vhost_user")
             .add("socket")
             .add("wce")
-            .add("poll_queue");
+            .add("poll_queue")
+            .add("id");
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
         let path = parser.get("path").map(PathBuf::from);
@@ -631,6 +635,7 @@ impl DiskConfig {
             .convert("poll_queue")
             .map_err(Error::ParseDisk)?
             .unwrap_or_else(default_diskconfig_poll_queue);
+        let id = parser.get("id");
 
         if parser.is_set("wce") && !vhost_user {
             warn!("wce parameter currently only has effect when used vhost_user=true");
@@ -651,6 +656,7 @@ impl DiskConfig {
             vhost_user,
             wce,
             poll_queue,
+            id,
         })
     }
 }
@@ -674,6 +680,8 @@ pub struct NetConfig {
     #[serde(default)]
     pub vhost_user: bool,
     pub vhost_socket: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 fn default_netconfig_tap() -> Option<String> {
@@ -712,6 +720,7 @@ impl Default for NetConfig {
             queue_size: default_netconfig_queue_size(),
             vhost_user: false,
             vhost_socket: None,
+            id: None,
         }
     }
 }
@@ -720,7 +729,7 @@ impl NetConfig {
     pub const SYNTAX: &'static str = "Network parameters \
     \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,iommu=on|off,\
     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
-    vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>\"";
+    vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,id=<device_id>\"";
 
     pub fn parse(net: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -734,7 +743,8 @@ impl NetConfig {
             .add("queue_size")
             .add("num_queues")
             .add("vhost_user")
-            .add("socket");
+            .add("socket")
+            .add("id");
         parser.parse(net).map_err(Error::ParseNetwork)?;
 
         let tap = parser.get("tap");
@@ -768,6 +778,7 @@ impl NetConfig {
             .map_err(Error::ParseNetwork)?
             .unwrap_or(false);
         let vhost_socket = parser.get("socket");
+        let id = parser.get("id");
 
         Ok(NetConfig {
             tap,
@@ -779,6 +790,7 @@ impl NetConfig {
             queue_size,
             vhost_user,
             vhost_socket,
+            id,
         })
     }
 }
@@ -924,12 +936,14 @@ pub struct PmemConfig {
     pub mergeable: bool,
     #[serde(default)]
     pub discard_writes: bool,
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
-    mergeable=on|off,discard_writes=on|off,\"";
+    mergeable=on|off,discard_writes=on|off,id=<device_id>\"";
     pub fn parse(pmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -937,7 +951,8 @@ impl PmemConfig {
             .add("file")
             .add("mergeable")
             .add("iommu")
-            .add("discard_writes");
+            .add("discard_writes")
+            .add("id");
         parser.parse(pmem).map_err(Error::ParsePersistentMemory)?;
 
         let file = PathBuf::from(parser.get("file").ok_or(Error::ParsePmemFileMissing)?);
@@ -961,6 +976,7 @@ impl PmemConfig {
             .map_err(Error::ParsePersistentMemory)?
             .unwrap_or(Toggle(false))
             .0;
+        let id = parser.get("id");
 
         Ok(PmemConfig {
             file,
@@ -968,6 +984,7 @@ impl PmemConfig {
             iommu,
             mergeable,
             discard_writes,
+            id,
         })
     }
 }
@@ -1456,6 +1473,14 @@ mod tests {
             }
         );
         assert_eq!(
+            DiskConfig::parse("path=/path/to_file,id=mydisk0")?,
+            DiskConfig {
+                path: Some(PathBuf::from("/path/to_file")),
+                id: Some("mydisk0".to_owned()),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
             DiskConfig::parse("path=/path/to_file,vhost_user=true")?,
             DiskConfig {
                 path: Some(PathBuf::from("/path/to_file")),
@@ -1541,6 +1566,15 @@ mod tests {
             NetConfig::parse("mac=de:ad:be:ef:12:34")?,
             NetConfig {
                 mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                ..Default::default()
+            }
+        );
+
+        assert_eq!(
+            NetConfig::parse("mac=de:ad:be:ef:12:34,id=mynet0")?,
+            NetConfig {
+                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                id: Some("mynet0".to_owned()),
                 ..Default::default()
             }
         );
@@ -1678,6 +1712,15 @@ mod tests {
             PmemConfig {
                 file: PathBuf::from("/tmp/pmem"),
                 size: 128 << 20,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            PmemConfig::parse("file=/tmp/pmem,size=128M,id=mypmem0")?,
+            PmemConfig {
+                file: PathBuf::from("/tmp/pmem"),
+                size: 128 << 20,
+                id: Some("mypmem0".to_owned()),
                 ..Default::default()
             }
         );
