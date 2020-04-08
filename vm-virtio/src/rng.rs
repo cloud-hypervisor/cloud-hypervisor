@@ -8,6 +8,7 @@ use super::{
     VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
+use anyhow::anyhow;
 use epoll;
 use libc::EFD_NONBLOCK;
 use std;
@@ -19,7 +20,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -189,6 +193,13 @@ pub struct Rng {
     paused: Arc<AtomicBool>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct RngState {
+    pub avail_features: u64,
+    pub acked_features: u64,
+    pub paused: Arc<AtomicBool>,
+}
+
 impl Rng {
     /// Create a new virtio rng device that gets random data from /dev/urandom.
     pub fn new(path: &str, iommu: bool) -> io::Result<Rng> {
@@ -210,6 +221,22 @@ impl Rng {
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    fn state(&self) -> RngState {
+        RngState {
+            avail_features: self.avail_features,
+            acked_features: self.acked_features,
+            paused: self.paused.clone(),
+        }
+    }
+
+    fn set_state(&mut self, state: &RngState) -> io::Result<()> {
+        self.avail_features = state.avail_features;
+        self.acked_features = state.acked_features;
+        self.paused = state.paused.clone();
+
+        Ok(())
     }
 }
 
@@ -357,6 +384,50 @@ impl VirtioDevice for Rng {
 }
 
 virtio_pausable!(Rng);
-impl Snapshottable for Rng {}
+const RNG_SNAPSHOT_ID: &str = "virtio-rng";
+impl Snapshottable for Rng {
+    fn id(&self) -> String {
+        RNG_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut rng_snapshot = Snapshot::new(RNG_SNAPSHOT_ID);
+        rng_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", RNG_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(rng_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(rng_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", RNG_SNAPSHOT_ID))
+        {
+            let rng_state = match serde_json::from_slice(&rng_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize RNG {}",
+                        error
+                    )))
+                }
+            };
+
+            return self.set_state(&rng_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore RNG state {:?}", e))
+            });
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find RNG snapshot section"
+        )))
+    }
+}
+
 impl Transportable for Rng {}
 impl Migratable for Rng {}
