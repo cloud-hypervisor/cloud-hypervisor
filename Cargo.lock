@@ -1454,6 +1454,7 @@ dependencies = [
 name = "vm-virtio"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "byteorder",
  "devices",
@@ -1463,6 +1464,9 @@ dependencies = [
  "net_gen",
  "net_util",
  "pci",
+ "serde",
+ "serde_derive",
+ "serde_json",
  "tempfile",
  "vhost",
  "virtio-bindings 0.1.0 (git+https://github.com/rust-vmm/virtio-bindings)",
