@@ -137,6 +137,9 @@ const POSIX_ACL: u32 = 1_048_576;
 /// Reading the device after abort returns ECONNABORTED.
 const ABORT_ERROR: u32 = 2_097_152;
 
+/// Init_out.max_pages contains the max number of req pages.
+const MAX_PAGES: u32 = 4_194_304;
+
 bitflags! {
     /// A bitfield passed in as a parameter to and returned from the `init` method of the
     /// `FileSystem` trait.
@@ -309,6 +312,14 @@ bitflags! {
         ///
         /// This feature is not currently supported.
         const ABORT_ERROR = ABORT_ERROR;
+
+        /// Indicates support for negotiating the maximum number of pages supported.
+        ///
+        /// If this feature is enabled, we can tell the kernel the maximum number of pages that we
+        /// support to transfer in a single request.
+        ///
+        /// This feature is enabled by default if supported by the kernel.
+        const MAX_PAGES = MAX_PAGES;
     }
 }
 
@@ -848,7 +859,9 @@ pub struct InitOut {
     pub congestion_threshold: u16,
     pub max_write: u32,
     pub time_gran: u32,
-    pub unused: [u32; 9],
+    pub max_pages: u16,
+    pub padding: u16,
+    pub unused: [u32; 8],
 }
 unsafe impl ByteValued for InitOut {}
 

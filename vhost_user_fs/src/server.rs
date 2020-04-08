@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+use std::convert::TryInto;
 use std::ffi::CStr;
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -903,9 +904,13 @@ impl<F: FileSystem + Sync> Server<F> {
             | FsOptions::HANDLE_KILLPRIV
             | FsOptions::ASYNC_DIO
             | FsOptions::HAS_IOCTL_DIR
-            | FsOptions::ATOMIC_O_TRUNC;
+            | FsOptions::ATOMIC_O_TRUNC
+            | FsOptions::MAX_PAGES;
 
         let capable = FsOptions::from_bits_truncate(flags);
+
+        let page_size: u32 = unsafe { libc::sysconf(libc::_SC_PAGESIZE).try_into().unwrap() };
+        let max_pages = ((MAX_BUFFER_SIZE - 1) / page_size) + 1;
 
         match self.fs.init(capable) {
             Ok(want) => {
@@ -920,6 +925,7 @@ impl<F: FileSystem + Sync> Server<F> {
                     congestion_threshold: (::std::u16::MAX / 4) * 3,
                     max_write: MAX_BUFFER_SIZE,
                     time_gran: 1, // nanoseconds
+                    max_pages: max_pages.try_into().unwrap(),
                     ..Default::default()
                 };
 
