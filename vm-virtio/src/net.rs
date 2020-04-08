@@ -15,6 +15,7 @@ use super::{
     ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
 };
 use crate::VirtioInterrupt;
+use anyhow::anyhow;
 use epoll;
 use libc::EAGAIN;
 use libc::EFD_NONBLOCK;
@@ -31,7 +32,10 @@ use std::thread;
 use std::vec::Vec;
 use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]
@@ -307,6 +311,14 @@ pub struct Net {
     queue_size: Vec<u16>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct NetState {
+    pub avail_features: u64,
+    pub acked_features: u64,
+    pub config: VirtioNetConfig,
+    pub queue_size: Vec<u16>,
+}
+
 impl Net {
     /// Create a new virtio network device with the given TAP interface.
     pub fn new_with_tap(
@@ -368,6 +380,24 @@ impl Net {
         let taps = open_tap(if_name, ip_addr, netmask, num_queues / 2).map_err(Error::OpenTap)?;
 
         Self::new_with_tap(taps, guest_mac, iommu, num_queues, queue_size)
+    }
+
+    fn state(&self) -> NetState {
+        NetState {
+            avail_features: self.avail_features,
+            acked_features: self.acked_features,
+            config: self.config.clone(),
+            queue_size: self.queue_size.clone(),
+        }
+    }
+
+    fn set_state(&mut self, state: &NetState) -> Result<()> {
+        self.avail_features = state.avail_features;
+        self.acked_features = state.acked_features;
+        self.config = state.config.clone();
+        self.queue_size = state.queue_size.clone();
+
+        Ok(())
     }
 }
 
@@ -567,6 +597,49 @@ impl VirtioDevice for Net {
 }
 
 virtio_ctrl_q_pausable!(Net);
-impl Snapshottable for Net {}
+const NET_SNAPSHOT_ID: &str = "virtio-net";
+impl Snapshottable for Net {
+    fn id(&self) -> String {
+        NET_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut net_snapshot = Snapshot::new(NET_SNAPSHOT_ID);
+        net_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", NET_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(net_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(net_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", NET_SNAPSHOT_ID))
+        {
+            let net_state = match serde_json::from_slice(&net_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize NET {}",
+                        error
+                    )))
+                }
+            };
+
+            return self.set_state(&net_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore NET state {:?}", e))
+            });
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find NET snapshot section"
+        )))
+    }
+}
 impl Transportable for Net {}
 impl Migratable for Net {}

@@ -47,7 +47,7 @@ const CTRL_QUEUE_EVENT: DeviceEventT = 0;
 const CTRL_EVENT_COUNT: usize = 3;
 
 #[repr(C, packed)]
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct VirtioNetConfig {
     pub mac: [u8; 6],
     pub status: u16,
