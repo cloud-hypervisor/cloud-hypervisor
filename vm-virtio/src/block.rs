@@ -14,8 +14,10 @@ use super::{
     VirtioDeviceType, VirtioInterruptType,
 };
 use crate::VirtioInterrupt;
+use anyhow::anyhow;
 use epoll;
 use libc::{c_void, EFD_NONBLOCK};
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cmp;
 use std::convert::TryInto;
@@ -35,7 +37,10 @@ use vm_memory::{
     ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap,
 };
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::{eventfd::EventFd, seek_hole::SeekHole, write_zeroes::PunchHole};
 
 const SECTOR_SHIFT: u8 = 9;
@@ -766,7 +771,7 @@ impl<T: DiskFile> BlockEpollHandler<T> {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Deserialize)]
 #[repr(C, packed)]
 pub struct VirtioBlockGeometry {
     pub cylinders: u16,
@@ -774,9 +779,31 @@ pub struct VirtioBlockGeometry {
     pub sectors: u8,
 }
 
+// We must explicitly implement Serialize since the structure is packed and
+// it's unsafe to borrow from a packed structure. And by default, if we derive
+// Serialize from serde, it will borrow the values from the structure.
+// That's why this implementation copies each field separately before it
+// serializes the entire structure field by field.
+impl Serialize for VirtioBlockGeometry {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let cylinders = self.cylinders;
+        let heads = self.heads;
+        let sectors = self.sectors;
+
+        let mut virtio_block_geometry = serializer.serialize_struct("VirtioBlockGeometry", 4)?;
+        virtio_block_geometry.serialize_field("cylinders", &cylinders)?;
+        virtio_block_geometry.serialize_field("heads", &heads)?;
+        virtio_block_geometry.serialize_field("sectors", &sectors)?;
+        virtio_block_geometry.end()
+    }
+}
+
 unsafe impl ByteValued for VirtioBlockGeometry {}
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Deserialize)]
 #[repr(C, packed)]
 pub struct VirtioBlockConfig {
     pub capacity: u64,
@@ -800,6 +827,62 @@ pub struct VirtioBlockConfig {
     unused1: [u8; 3],
 }
 
+// We must explicitly implement Serialize since the structure is packed and
+// it's unsafe to borrow from a packed structure. And by default, if we derive
+// Serialize from serde, it will borrow the values from the structure.
+// That's why this implementation copies each field separately before it
+// serializes the entire structure field by field.
+impl Serialize for VirtioBlockConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let capacity = self.capacity;
+        let size_max = self.size_max;
+        let seg_max = self.seg_max;
+        let geometry = self.geometry;
+        let blk_size = self.blk_size;
+        let physical_block_exp = self.physical_block_exp;
+        let alignment_offset = self.alignment_offset;
+        let min_io_size = self.min_io_size;
+        let opt_io_size = self.opt_io_size;
+        let wce = self.wce;
+        let unused = self.unused;
+        let num_queues = self.num_queues;
+        let max_discard_sectors = self.max_discard_sectors;
+        let max_discard_seg = self.max_discard_seg;
+        let discard_sector_alignment = self.discard_sector_alignment;
+        let max_write_zeroes_sectors = self.max_write_zeroes_sectors;
+        let max_write_zeroes_seg = self.max_write_zeroes_seg;
+        let write_zeroes_may_unmap = self.write_zeroes_may_unmap;
+        let unused1 = self.unused1;
+
+        let mut virtio_block_config = serializer.serialize_struct("VirtioBlockConfig", 60)?;
+        virtio_block_config.serialize_field("capacity", &capacity)?;
+        virtio_block_config.serialize_field("size_max", &size_max)?;
+        virtio_block_config.serialize_field("seg_max", &seg_max)?;
+        virtio_block_config.serialize_field("geometry", &geometry)?;
+        virtio_block_config.serialize_field("blk_size", &blk_size)?;
+        virtio_block_config.serialize_field("physical_block_exp", &physical_block_exp)?;
+        virtio_block_config.serialize_field("alignment_offset", &alignment_offset)?;
+        virtio_block_config.serialize_field("min_io_size", &min_io_size)?;
+        virtio_block_config.serialize_field("opt_io_size", &opt_io_size)?;
+        virtio_block_config.serialize_field("wce", &wce)?;
+        virtio_block_config.serialize_field("unused", &unused)?;
+        virtio_block_config.serialize_field("num_queues", &num_queues)?;
+        virtio_block_config.serialize_field("max_discard_sectors", &max_discard_sectors)?;
+        virtio_block_config.serialize_field("max_discard_seg", &max_discard_seg)?;
+        virtio_block_config
+            .serialize_field("discard_sector_alignment", &discard_sector_alignment)?;
+        virtio_block_config
+            .serialize_field("max_write_zeroes_sectors", &max_write_zeroes_sectors)?;
+        virtio_block_config.serialize_field("max_write_zeroes_seg", &max_write_zeroes_seg)?;
+        virtio_block_config.serialize_field("write_zeroes_may_unmap", &write_zeroes_may_unmap)?;
+        virtio_block_config.serialize_field("unused1", &unused1)?;
+        virtio_block_config.end()
+    }
+}
+
 unsafe impl ByteValued for VirtioBlockConfig {}
 
 /// Virtio device for exposing block level read/write operations on a host file.
@@ -817,6 +900,15 @@ pub struct Block<T: DiskFile> {
     pause_evt: Option<EventFd>,
     paused: Arc<AtomicBool>,
     queue_size: Vec<u16>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct BlockState {
+    pub disk_path: PathBuf,
+    pub disk_nsectors: u64,
+    pub avail_features: u64,
+    pub acked_features: u64,
+    pub config: VirtioBlockConfig,
 }
 
 impl<T: DiskFile> Block<T> {
@@ -876,6 +968,26 @@ impl<T: DiskFile> Block<T> {
             paused: Arc::new(AtomicBool::new(false)),
             queue_size: vec![queue_size; num_queues],
         })
+    }
+
+    fn state(&self) -> BlockState {
+        BlockState {
+            disk_path: self.disk_path.clone(),
+            disk_nsectors: self.disk_nsectors,
+            avail_features: self.avail_features,
+            acked_features: self.acked_features,
+            config: self.config,
+        }
+    }
+
+    fn set_state(&mut self, state: &BlockState) -> io::Result<()> {
+        self.disk_path = state.disk_path.clone();
+        self.disk_nsectors = state.disk_nsectors;
+        self.avail_features = state.avail_features;
+        self.acked_features = state.acked_features;
+        self.config = state.config;
+
+        Ok(())
     }
 }
 
@@ -1051,6 +1163,49 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 }
 
 virtio_pausable!(Block, T: 'static + DiskFile + Send);
-impl<T: 'static + DiskFile + Send> Snapshottable for Block<T> {}
+const BLOCK_SNAPSHOT_ID: &str = "virtio-block";
+impl<T: 'static + DiskFile + Send> Snapshottable for Block<T> {
+    fn id(&self) -> String {
+        BLOCK_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut block_snapshot = Snapshot::new(BLOCK_SNAPSHOT_ID);
+        block_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", BLOCK_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(block_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(block_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", BLOCK_SNAPSHOT_ID))
+        {
+            let block_state = match serde_json::from_slice(&block_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize BLOCK {}",
+                        error
+                    )))
+                }
+            };
+
+            return self.set_state(&block_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore BLOCK state {:?}", e))
+            });
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find BLOCK snapshot section"
+        )))
+    }
+}
 impl<T: 'static + DiskFile + Send> Transportable for Block<T> {}
 impl<T: 'static + DiskFile + Send> Migratable for Block<T> {}
