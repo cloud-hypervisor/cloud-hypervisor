@@ -262,10 +262,10 @@ impl VhostUserBackend for VhostUserNetBackend {
 
 struct NetEpollHandler {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    taps: Vec<(Tap, usize)>,
-    rxs: Vec<RxVirtio>,
-    txs: Vec<TxVirtio>,
-    rx_tap_listenings: Vec<bool>,
+    tap: (Tap, usize),
+    rx: RxVirtio,
+    tx: TxVirtio,
+    rx_tap_listening: bool,
     kill_evt: EventFd,
     epoll_fd: RawFd,
     num_queues: usize,
@@ -276,7 +276,7 @@ impl NetEpollHandler {
     // Copies a single frame from `self.rx.frame_buf` into the guest. Returns true
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
-    fn rx_single_frame(&mut self, mut queue: &mut Queue, index: usize) -> Result<bool> {
+    fn rx_single_frame(&mut self, mut queue: &mut Queue) -> Result<bool> {
         let atomic_mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
         let mem = atomic_mem.memory();
 
@@ -284,32 +284,32 @@ impl NetEpollHandler {
 
         if next_desc.is_none() {
             // Queue has no available descriptors
-            if self.rx_tap_listenings[index] {
+            if self.rx_tap_listening {
                 unregister_listener(
                     self.epoll_fd,
-                    self.taps[index].0.as_raw_fd(),
+                    self.tap.0.as_raw_fd(),
                     epoll::Events::EPOLLIN,
-                    u64::try_from(self.taps[index].1).unwrap(),
+                    u64::try_from(self.tap.1).unwrap(),
                 )
                 .unwrap();
-                self.rx_tap_listenings[index] = false;
+                self.rx_tap_listening = false;
             }
             return Ok(false);
         }
 
-        let write_complete = self.rxs[index].process_desc_chain(&mem, next_desc, &mut queue);
+        let write_complete = self.rx.process_desc_chain(&mem, next_desc, &mut queue);
 
         Ok(write_complete)
     }
 
-    fn process_rx(&mut self, vring: &mut Vring, index: usize) -> Result<()> {
+    fn process_rx(&mut self, vring: &mut Vring) -> Result<()> {
         // Read as many frames as possible.
         loop {
-            match self.read_tap(index) {
+            match self.read_tap() {
                 Ok(count) => {
-                    self.rxs[index].bytes_read = count;
-                    if !self.rx_single_frame(&mut vring.mut_queue(), index)? {
-                        self.rxs[index].deferred_frame = true;
+                    self.rx.bytes_read = count;
+                    if !self.rx_single_frame(&mut vring.mut_queue())? {
+                        self.rx.deferred_frame = true;
                         break;
                     }
                 }
@@ -327,8 +327,8 @@ impl NetEpollHandler {
                 }
             }
         }
-        if self.rxs[index].deferred_irqs {
-            self.rxs[index].deferred_irqs = false;
+        if self.rx.deferred_irqs {
+            self.rx.deferred_irqs = false;
             vring.signal_used_queue().unwrap();
             Ok(())
         } else {
@@ -336,15 +336,15 @@ impl NetEpollHandler {
         }
     }
 
-    fn resume_rx(&mut self, vring: &mut Vring, index: usize) -> Result<()> {
-        if self.rxs[index].deferred_frame {
-            if self.rx_single_frame(&mut vring.mut_queue(), index)? {
-                self.rxs[index].deferred_frame = false;
+    fn resume_rx(&mut self, vring: &mut Vring) -> Result<()> {
+        if self.rx.deferred_frame {
+            if self.rx_single_frame(&mut vring.mut_queue())? {
+                self.rx.deferred_frame = false;
                 // process_rx() was interrupted possibly before consuming all
                 // packets in the tap; try continuing now.
-                self.process_rx(vring, index)
-            } else if self.rxs[index].deferred_irqs {
-                self.rxs[index].deferred_irqs = false;
+                self.process_rx(vring)
+            } else if self.rx.deferred_irqs {
+                self.rx.deferred_irqs = false;
                 vring.signal_used_queue().unwrap();
                 Ok(())
             } else {
@@ -355,24 +355,22 @@ impl NetEpollHandler {
         }
     }
 
-    fn process_tx(&mut self, mut queue: &mut Queue, index: usize) -> Result<()> {
+    fn process_tx(&mut self, mut queue: &mut Queue) -> Result<()> {
         let atomic_mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
         let mem = atomic_mem.memory();
 
-        self.txs[index].process_desc_chain(&mem, &mut self.taps[index].0, &mut queue);
+        self.tx
+            .process_desc_chain(&mem, &mut self.tap.0, &mut queue);
 
         Ok(())
     }
 
-    fn read_tap(&mut self, index: usize) -> io::Result<usize> {
-        self.taps[index].0.read(&mut self.rxs[index].frame_buf)
+    fn read_tap(&mut self) -> io::Result<usize> {
+        self.tap.0.read(&mut self.rx.frame_buf)
     }
 
     fn handle_event(&mut self, vrings: Vec<Arc<RwLock<Vring>>>) -> VhostUserBackendResult<()> {
-        let tap_start_index = self.num_queues as u16;
-        let tap_end_index = (self.num_queues + self.num_queues / 2 - 1) as u16;
-
-        let worker_reset_index = tap_end_index + 1;
+        let worker_reset_index = (self.num_queues + self.num_queues / 2) as u16;
         register_listener(
             self.epoll_fd,
             self.worker_reset.lock().unwrap().get_evt().as_raw_fd(),
@@ -421,41 +419,38 @@ impl NetEpollHandler {
 
                 match device_event {
                     x if ((x < self.num_queues as u16) && (x % 2 == 0)) => {
-                        let index = (x / 2) as usize;
-                        let mut vring = vrings[x as usize].write().unwrap();
-                        self.resume_rx(&mut vring, index)?;
+                        let mut vring = vrings[0].write().unwrap();
+                        self.resume_rx(&mut vring)?;
 
-                        if !self.rx_tap_listenings[index] {
+                        if !self.rx_tap_listening {
                             register_listener(
                                 self.epoll_fd,
-                                self.taps[index].0.as_raw_fd(),
+                                self.tap.0.as_raw_fd(),
                                 epoll::Events::EPOLLIN,
-                                u64::try_from(self.taps[index].1).unwrap(),
+                                u64::try_from(self.tap.1).unwrap(),
                             )?;
-                            self.rx_tap_listenings[index] = true;
+                            self.rx_tap_listening = true;
                         }
                     }
                     x if ((x < self.num_queues as u16) && (x % 2 != 0)) => {
-                        let index = ((x - 1) / 2) as usize;
-                        let mut vring = vrings[x as usize].write().unwrap();
-                        self.process_tx(&mut vring.mut_queue(), index)?;
+                        let mut vring = vrings[1].write().unwrap();
+                        self.process_tx(&mut vring.mut_queue())?;
                     }
-                    x if x >= tap_start_index && x <= tap_end_index => {
-                        let index = x as usize - self.num_queues;
-                        let mut vring = vrings[2 * index].write().unwrap();
-                        if self.rxs[index].deferred_frame
+                    x if x == (self.tap.1 as u16) => {
+                        let mut vring = vrings[0].write().unwrap();
+                        if self.rx.deferred_frame
                         // Process a deferred frame first if available. Don't read from tap again
                         // until we manage to receive this deferred frame.
                         {
-                            if self.rx_single_frame(&mut vring.mut_queue(), index)? {
-                                self.rxs[index].deferred_frame = false;
-                                self.process_rx(&mut vring, index)?;
-                            } else if self.rxs[index].deferred_irqs {
-                                self.rxs[index].deferred_irqs = false;
-                                vring.signal_used_queue()?;
+                            if self.rx_single_frame(&mut vring.mut_queue())? {
+                                self.rx.deferred_frame = false;
+                                self.process_rx(&mut vring)?;
+                            } else if self.rx.deferred_irqs {
+                                self.rx.deferred_irqs = false;
+                                vring.signal_used_queue().unwrap();
                             }
                         } else {
-                            self.process_rx(&mut vring, index)?;
+                            self.process_rx(&mut vring)?;
                         }
                     }
                     x if x == worker_reset_index => {
