@@ -15,7 +15,7 @@ use futures::executor::{ThreadPool, ThreadPoolBuilder};
 use libc::EFD_NONBLOCK;
 use log::*;
 use std::num::Wrapping;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::{convert, error, fmt, io, process};
 
 use vhost_rs::vhost_user::message::*;
@@ -83,7 +83,7 @@ impl convert::From<Error> for io::Error {
     }
 }
 
-struct VhostUserFsBackend<F: FileSystem + Send + Sync + 'static> {
+struct VhostUserFsThread<F: FileSystem + Send + Sync + 'static> {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     kill_evt: EventFd,
     server: Arc<Server<F>>,
@@ -93,9 +93,9 @@ struct VhostUserFsBackend<F: FileSystem + Send + Sync + 'static> {
     pool: ThreadPool,
 }
 
-impl<F: FileSystem + Send + Sync + 'static> Clone for VhostUserFsBackend<F> {
+impl<F: FileSystem + Send + Sync + 'static> Clone for VhostUserFsThread<F> {
     fn clone(&self) -> Self {
-        VhostUserFsBackend {
+        VhostUserFsThread {
             mem: self.mem.clone(),
             kill_evt: self.kill_evt.try_clone().unwrap(),
             server: self.server.clone(),
@@ -106,9 +106,9 @@ impl<F: FileSystem + Send + Sync + 'static> Clone for VhostUserFsBackend<F> {
     }
 }
 
-impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
+impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
     fn new(fs: F, thread_pool_size: usize) -> Result<Self> {
-        Ok(VhostUserFsBackend {
+        Ok(VhostUserFsThread {
             mem: None,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             server: Arc::new(Server::new(fs)),
@@ -176,6 +176,17 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
     }
 }
 
+struct VhostUserFsBackend<F: FileSystem + Send + Sync + 'static> {
+    thread: Mutex<VhostUserFsThread<F>>,
+}
+
+impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
+    fn new(fs: F, thread_pool_size: usize) -> Result<Self> {
+        let thread = Mutex::new(VhostUserFsThread::new(fs, thread_pool_size)?);
+        Ok(VhostUserFsBackend { thread })
+    }
+}
+
 impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBackend<F> {
     fn num_queues(&self) -> usize {
         NUM_QUEUES
@@ -197,11 +208,11 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
-        self.event_idx = enabled;
+        self.thread.lock().unwrap().event_idx = enabled;
     }
 
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(GuestMemoryAtomic::new(mem));
+        self.thread.lock().unwrap().mem = Some(GuestMemoryAtomic::new(mem));
         Ok(())
     }
 
@@ -215,7 +226,8 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
             return Err(Error::HandleEventNotEpollIn.into());
         }
 
-        let mem = match &self.mem {
+        let mut thread = self.thread.lock().unwrap();
+        let mem = match &thread.mem {
             Some(m) => m.memory(),
             None => return Err(Error::NoMemoryConfigured.into()),
         };
@@ -232,7 +244,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
             _ => return Err(Error::HandleEventUnknownEvent.into()),
         };
 
-        if self.event_idx {
+        if thread.event_idx {
             // vm-virtio's Queue implementation only checks avail_index
             // once, so to properly support EVENT_IDX we need to keep
             // calling process_queue() until it stops finding new
@@ -242,24 +254,27 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
                     let mut vring = vring_lock.write().unwrap();
                     vring.mut_queue().update_avail_event(&mem);
                 }
-                if !self.process_queue(vring_lock.clone())? {
+                if !thread.process_queue(vring_lock.clone())? {
                     break;
                 }
             }
         } else {
             // Without EVENT_IDX, a single call is enough.
-            self.process_queue(vring_lock)?;
+            thread.process_queue(vring_lock)?;
         }
 
         Ok(false)
     }
 
     fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
-        Some((self.kill_evt.try_clone().unwrap(), Some(KILL_EVENT)))
+        Some((
+            self.thread.lock().unwrap().kill_evt.try_clone().unwrap(),
+            Some(KILL_EVENT),
+        ))
     }
 
     fn set_slave_req_fd(&mut self, vu_req: SlaveFsCacheReq) {
-        self.vu_req = Some(vu_req);
+        self.thread.lock().unwrap().vu_req = Some(vu_req);
     }
 }
 
@@ -338,7 +353,15 @@ fn main() {
         error!("Waiting for daemon failed: {:?}", e);
     }
 
-    let kill_evt = &fs_backend.read().unwrap().kill_evt;
+    let kill_evt = fs_backend
+        .read()
+        .unwrap()
+        .thread
+        .lock()
+        .unwrap()
+        .kill_evt
+        .try_clone()
+        .unwrap();
     if let Err(e) = kill_evt.write(1) {
         error!("Error shutting down worker thread: {:?}", e)
     }
