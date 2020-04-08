@@ -62,8 +62,6 @@ enum Error {
     FailedRegisterListener,
     /// Failed unregister listener for vring.
     FailedUnRegisterListener,
-    /// Failed to handle event other than input event.
-    HandleEventNotEpollIn,
     /// Failed to handle unknown event.
     HandleEventUnknownEvent,
     /// No memory configured.
@@ -130,7 +128,65 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
             epoll_fd: epoll::create(true).map_err(Error::EpollCreateFd)?,
         })
     }
+}
 
+impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBackend<F> {
+    fn num_queues(&self) -> usize {
+        NUM_QUEUES
+    }
+
+    fn max_queue_size(&self) -> usize {
+        QUEUE_SIZE
+    }
+
+    fn features(&self) -> u64 {
+        1 << VIRTIO_F_VERSION_1
+            | 1 << VIRTIO_RING_F_INDIRECT_DESC
+            | 1 << VIRTIO_RING_F_EVENT_IDX
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+    }
+
+    fn protocol_features(&self) -> VhostUserProtocolFeatures {
+        VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::SLAVE_REQ
+    }
+
+    fn set_event_idx(&mut self, enabled: bool) {
+        self.event_idx = enabled;
+    }
+
+    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
+        self.mem = Some(GuestMemoryAtomic::new(mem));
+        Ok(())
+    }
+
+    fn set_slave_req_fd(&mut self, vu_req: SlaveFsCacheReq) {
+        self.vu_req = Some(vu_req);
+    }
+
+    fn register_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
+        register_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
+            .map_err(|_| Error::FailedRegisterListener)?;
+        Ok(())
+    }
+
+    fn unregister_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
+        unregister_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
+            .map_err(|_| Error::FailedUnRegisterListener)?;
+        Ok(())
+    }
+}
+
+struct FsEpollHandler<F: FileSystem + Send + Sync + 'static> {
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    server: Arc<Server<F>>,
+    // handle request from slave to master
+    vu_req: Option<SlaveFsCacheReq>,
+    event_idx: bool,
+    pool: ThreadPool,
+    epoll_fd: RawFd,
+}
+
+impl<F: FileSystem + Send + Sync + 'static> FsEpollHandler<F> {
     fn process_queue(&mut self, vring_lock: Arc<RwLock<Vring>>) -> Result<bool> {
         let mut used_any = false;
         let (atomic_mem, mem) = match &self.mem {
@@ -185,98 +241,66 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsBackend<F> {
         Ok(used_any)
     }
 
-    fn handle_event(
-        &mut self,
-        device_event: u16,
-        evset: epoll::Events,
-        vrings: &[Arc<RwLock<Vring>>],
-    ) -> VhostUserBackendResult<bool> {
-        if evset != epoll::Events::EPOLLIN {
-            return Err(Error::HandleEventNotEpollIn.into());
-        }
+    fn handle_event(&mut self, vrings: Vec<Arc<RwLock<Vring>>>) -> VhostUserBackendResult<()> {
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); NUM_QUEUES];
 
-        let mem = match &self.mem {
-            Some(m) => m.memory(),
-            None => return Err(Error::NoMemoryConfigured.into()),
-        };
-
-        let vring_lock = match device_event {
-            HIPRIO_QUEUE_EVENT => {
-                debug!("HIPRIO_QUEUE_EVENT");
-                vrings[0].clone()
-            }
-            REQ_QUEUE_EVENT => {
-                debug!("QUEUE_EVENT");
-                vrings[1].clone()
-            }
-            _ => return Err(Error::HandleEventUnknownEvent.into()),
-        };
-
-        if self.event_idx {
-            // vm-virtio's Queue implementation only checks avail_index
-            // once, so to properly support EVENT_IDX we need to keep
-            // calling process_queue() until it stops finding new
-            // requests on the queue.
-            loop {
-                {
-                    let mut vring = vring_lock.write().unwrap();
-                    vring.mut_queue().update_avail_event(&mem);
+        'epoll: loop {
+            let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
+                Ok(res) => res,
+                Err(e) => {
+                    if e.kind() == io::ErrorKind::Interrupted {
+                        // It's well defined from the epoll_wait() syscall
+                        // documentation that the epoll loop can be interrupted
+                        // before any of the requested events occurred or the
+                        // timeout expired. In both those cases, epoll_wait()
+                        // returns an error of type EINTR, but this should not
+                        // be considered as a regular error. Instead it is more
+                        // appropriate to retry, by calling into epoll_wait().
+                        continue;
+                    }
+                    return Err(e);
                 }
-                if !self.process_queue(vring_lock.clone())? {
-                    break;
+            };
+
+            for event in events.iter().take(num_events) {
+                let device_event = event.data as u16;
+                let mem = match &self.mem {
+                    Some(m) => m.memory(),
+                    None => return Err(Error::NoMemoryConfigured.into()),
+                };
+
+                let vring_lock = match device_event {
+                    HIPRIO_QUEUE_EVENT => {
+                        debug!("HIPRIO_QUEUE_EVENT");
+                        vrings[0].clone()
+                    }
+                    REQ_QUEUE_EVENT => {
+                        debug!("QUEUE_EVENT");
+                        vrings[1].clone()
+                    }
+                    _ => return Err(Error::HandleEventUnknownEvent.into()),
+                };
+
+                if self.event_idx {
+                    // vm-virtio's Queue implementation only checks avail_index
+                    // once, so to properly support EVENT_IDX we need to keep
+                    // calling process_queue() until it stops finding new
+                    // requests on the queue.
+                    loop {
+                        {
+                            let mut vring = vring_lock.write().unwrap();
+                            vring.mut_queue().update_avail_event(&mem);
+                        }
+                        if !self.process_queue(vring_lock.clone())? {
+                            break;
+                        }
+                    }
+                } else {
+                    // Without EVENT_IDX, a single call is enough.
+                    self.process_queue(vring_lock)?;
                 }
             }
-        } else {
-            // Without EVENT_IDX, a single call is enough.
-            self.process_queue(vring_lock)?;
         }
-
-        Ok(false)
-    }
-}
-
-impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBackend<F> {
-    fn num_queues(&self) -> usize {
-        NUM_QUEUES
-    }
-
-    fn max_queue_size(&self) -> usize {
-        QUEUE_SIZE
-    }
-
-    fn features(&self) -> u64 {
-        1 << VIRTIO_F_VERSION_1
-            | 1 << VIRTIO_RING_F_INDIRECT_DESC
-            | 1 << VIRTIO_RING_F_EVENT_IDX
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
-    }
-
-    fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::SLAVE_REQ
-    }
-
-    fn set_event_idx(&mut self, enabled: bool) {
-        self.event_idx = enabled;
-    }
-
-    fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(GuestMemoryAtomic::new(mem));
-        Ok(())
-    }
-
-    fn set_slave_req_fd(&mut self, vu_req: SlaveFsCacheReq) {
-        self.vu_req = Some(vu_req);
-    }
-
-    fn register_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
-        register_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
-            .map_err(|_| Error::FailedRegisterListener)?;
-        Ok(())
-    }
-
-    fn unregister_listener(&mut self, fd: RawFd, index: u64) -> VhostUserBackendResult<()> {
-        unregister_listener(self.epoll_fd, fd, epoll::Events::EPOLLIN, index)
-            .map_err(|_| Error::FailedUnRegisterListener)?;
         Ok(())
     }
 }
