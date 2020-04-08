@@ -144,6 +144,9 @@ pub enum DeviceManagerError {
     /// Cannot register ioevent.
     RegisterIoevent(kvm_ioctls::Error),
 
+    /// Cannot unregister ioevent.
+    UnRegisterIoevent(kvm_ioctls::Error),
+
     /// Cannot create virtio device
     VirtioDevice(vmm_sys_util::errno::Error),
 
@@ -2043,16 +2046,36 @@ impl DeviceManager {
             .map_err(DeviceManagerError::PutPciDeviceId)?;
 
         if let Some(any_device) = self.pci_devices.remove(&pci_device_bdf) {
-            let (pci_device, bus_device, migratable_device) =
-                if let Ok(vfio_pci_device) = any_device.downcast::<Mutex<VfioPciDevice>>() {
-                    (
-                        Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
-                        Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>,
-                        None as Option<Arc<Mutex<dyn Migratable>>>,
-                    )
-                } else {
-                    return Ok(());
-                };
+            let (pci_device, bus_device, migratable_device, virtio_device) = if let Ok(
+                vfio_pci_device,
+            ) =
+                any_device.clone().downcast::<Mutex<VfioPciDevice>>()
+            {
+                (
+                    Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
+                    Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>,
+                    None as Option<Arc<Mutex<dyn Migratable>>>,
+                    None as Option<VirtioDeviceArc>,
+                )
+            } else if let Ok(virtio_pci_device) = any_device.downcast::<Mutex<VirtioPciDevice>>() {
+                let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
+                for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
+                    let io_addr = IoEventAddress::Mmio(addr);
+                    self.address_manager
+                        .vm_fd
+                        .unregister_ioevent(event, &io_addr)
+                        .map_err(DeviceManagerError::UnRegisterIoevent)?;
+                }
+
+                (
+                    Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn PciDevice>>,
+                    Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn BusDevice>>,
+                    Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>),
+                    Some(virtio_pci_device.lock().unwrap().virtio_device()),
+                )
+            } else {
+                return Ok(());
+            };
 
             // Free the allocated BARs
             pci_device
@@ -2086,6 +2109,13 @@ impl DeviceManager {
             if let Some(migratable_device) = &migratable_device {
                 let id = migratable_device.lock().unwrap().id();
                 self.migratable_devices.remove(&id);
+            }
+
+            // Shutdown and remove the underlying virtio-device if present
+            if let Some(virtio_device) = virtio_device {
+                virtio_device.lock().unwrap().shutdown();
+                self.virtio_devices
+                    .retain(|(d, _, _)| !Arc::ptr_eq(d, &virtio_device));
             }
 
             // At this point, the device has been removed from all the list and
