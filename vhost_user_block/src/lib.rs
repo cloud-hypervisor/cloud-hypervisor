@@ -27,7 +27,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process;
 use std::slice;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use std::vec::Vec;
 use std::{convert, error, fmt, io};
@@ -96,7 +96,7 @@ impl convert::From<Error> for io::Error {
     }
 }
 
-pub struct VhostUserBlkBackend {
+pub struct VhostUserBlkThread {
     mem: Option<GuestMemoryMmap>,
     vring_worker: Option<Arc<VringWorker>>,
     disk_image: Box<dyn DiskFile>,
@@ -109,7 +109,7 @@ pub struct VhostUserBlkBackend {
     kill_evt: EventFd,
 }
 
-impl VhostUserBlkBackend {
+impl VhostUserBlkThread {
     pub fn new(
         image_path: String,
         num_queues: usize,
@@ -145,7 +145,7 @@ impl VhostUserBlkBackend {
         config.num_queues = num_queues as u16;
         config.wce = 1;
 
-        Ok(VhostUserBlkBackend {
+        Ok(VhostUserBlkThread {
             mem: None,
             vring_worker: None,
             disk_image: image,
@@ -221,9 +221,29 @@ impl VhostUserBlkBackend {
     }
 }
 
+pub struct VhostUserBlkBackend {
+    thread: Mutex<VhostUserBlkThread>,
+}
+
+impl VhostUserBlkBackend {
+    pub fn new(
+        image_path: String,
+        num_queues: usize,
+        rdonly: bool,
+        direct: bool,
+        poll_queue: bool,
+    ) -> Result<Self> {
+        let thread = Mutex::new(VhostUserBlkThread::new(
+            image_path, num_queues, rdonly, direct, poll_queue,
+        )?);
+
+        Ok(VhostUserBlkBackend { thread })
+    }
+}
+
 impl VhostUserBackend for VhostUserBlkBackend {
     fn num_queues(&self) -> usize {
-        self.config.num_queues as usize
+        self.thread.lock().unwrap().config.num_queues as usize
     }
 
     fn max_queue_size(&self) -> usize {
@@ -237,7 +257,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
             | 1 << VIRTIO_F_VERSION_1
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
-        if self.rdonly {
+        if self.thread.lock().unwrap().rdonly {
             avail_features |= 1 << VIRTIO_BLK_F_RO;
         }
         avail_features
@@ -248,11 +268,11 @@ impl VhostUserBackend for VhostUserBlkBackend {
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
-        self.event_idx = enabled;
+        self.thread.lock().unwrap().event_idx = enabled;
     }
 
     fn update_memory(&mut self, mem: GuestMemoryMmap) -> VhostUserBackendResult<()> {
-        self.mem = Some(mem);
+        self.thread.lock().unwrap().mem = Some(mem);
         Ok(())
     }
 
@@ -268,16 +288,17 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
         debug!("event received: {:?}", device_event);
 
+        let mut thread = self.thread.lock().unwrap();
         match device_event {
-            q if device_event < self.config.num_queues => {
+            q if device_event < thread.config.num_queues => {
                 let mut vring = vrings[q as usize].write().unwrap();
 
-                if self.poll_queue {
+                if thread.poll_queue {
                     // Actively poll the queue until POLL_QUEUE_US has passed
                     // without seeing a new request.
                     let mut now = Instant::now();
                     loop {
-                        if self.process_queue(&mut vring) {
+                        if thread.process_queue(&mut vring) {
                             now = Instant::now();
                         } else if now.elapsed().as_micros() > POLL_QUEUE_US {
                             break;
@@ -285,7 +306,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
                     }
                 }
 
-                if self.event_idx {
+                if thread.event_idx {
                     // vm-virtio's Queue implementation only checks avail_index
                     // once, so to properly support EVENT_IDX we need to keep
                     // calling process_queue() until it stops finding new
@@ -293,14 +314,14 @@ impl VhostUserBackend for VhostUserBlkBackend {
                     loop {
                         vring
                             .mut_queue()
-                            .update_avail_event(self.mem.as_ref().unwrap());
-                        if !self.process_queue(&mut vring) {
+                            .update_avail_event(thread.mem.as_ref().unwrap());
+                        if !thread.process_queue(&mut vring) {
                             break;
                         }
                     }
                 } else {
                     // Without EVENT_IDX, a single call is enough.
-                    self.process_queue(&mut vring);
+                    thread.process_queue(&mut vring);
                 }
 
                 Ok(false)
@@ -313,7 +334,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
         // self.config is a statically allocated virtio_blk_config
         let buf = unsafe {
             slice::from_raw_parts(
-                &self.config as *const virtio_blk_config as *const _,
+                &self.thread.lock().unwrap().config as *const virtio_blk_config as *const _,
                 mem::size_of::<virtio_blk_config>(),
             )
         };
@@ -322,7 +343,10 @@ impl VhostUserBackend for VhostUserBlkBackend {
     }
 
     fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
-        Some((self.kill_evt.try_clone().unwrap(), None))
+        Some((
+            self.thread.lock().unwrap().kill_evt.try_clone().unwrap(),
+            None,
+        ))
     }
 }
 
@@ -429,6 +453,9 @@ pub fn start_block_backend(backend_command: &str) {
     blk_backend
         .write()
         .unwrap()
+        .thread
+        .lock()
+        .unwrap()
         .set_vring_worker(Some(vring_worker));
 
     if let Err(e) = blk_daemon.start() {
@@ -443,7 +470,15 @@ pub fn start_block_backend(backend_command: &str) {
         error!("Error from the main thread: {:?}", e);
     }
 
-    let kill_evt = &blk_backend.write().unwrap().kill_evt;
+    let kill_evt = blk_backend
+        .write()
+        .unwrap()
+        .thread
+        .lock()
+        .unwrap()
+        .kill_evt
+        .try_clone()
+        .unwrap();
     if let Err(e) = kill_evt.write(1) {
         error!("Error shutting down worker thread: {:?}", e)
     }
