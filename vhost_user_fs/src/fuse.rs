@@ -146,6 +146,9 @@ const CACHE_SYMLINKS: u32 = 8_388_608;
 /// Kernel supports zero-message opendir
 const NO_OPENDIR_SUPPORT: u32 = 16_777_216;
 
+/// Only invalidate cached pages on explicit request
+const EXPLICIT_INVAL_DATA: u32 = 33_554_432;
+
 bitflags! {
     /// A bitfield passed in as a parameter to and returned from the `init` method of the
     /// `FileSystem` trait.
@@ -341,6 +344,14 @@ bitflags! {
         /// Setting (or not setting) the field in the `FsOptions` returned from the `init` method
         /// has no effect.
         const ZERO_MESSAGE_OPENDIR = NO_OPENDIR_SUPPORT;
+
+        /// Indicates support for explicit data invalidation. If this feature is enabled, the
+        /// server is fully responsible for data cache invalidation, and the kernel won't
+        /// invalidate files data cache on size change and only truncate that cache to new size
+        /// in case the size decreased.
+        ///
+        /// This feature is not currently supported.
+        const EXPLICIT_INVAL_DATA = EXPLICIT_INVAL_DATA;
     }
 }
 
