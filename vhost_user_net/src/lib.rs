@@ -150,42 +150,34 @@ impl VhostUserNetBackend {
         &mut self,
         vrings: Vec<Arc<RwLock<Vring>>>,
     ) -> VhostUserBackendResult<()> {
-        let mut tap_set: Vec<(Tap, usize)> = Vec::new();
-        for (i, tap) in self.taps.iter().enumerate() {
-            tap_set.push((tap.clone(), self.num_queues + i));
-        }
-
-        let mut rxs: Vec<RxVirtio> = Vec::new();
-        let mut txs: Vec<TxVirtio> = Vec::new();
-        let mut rx_tap_listenings: Vec<bool> = Vec::new();
-
-        for _ in 0..self.taps.len() {
+        for i in 0..self.taps.len() {
             let rx = RxVirtio::new();
-            rxs.push(rx);
             let tx = TxVirtio::new();
-            txs.push(tx);
-            rx_tap_listenings.push(false);
+
+            let mut vrings_per_thread = Vec::new();
+            vrings_per_thread.push(Arc::clone(&vrings[2 * i]));
+            vrings_per_thread.push(Arc::clone(&vrings[2 * i + 1]));
+
+            let mut handler = NetEpollHandler {
+                mem: None,
+                tap: (self.taps[i].clone(), self.num_queues + i),
+                rx,
+                tx,
+                rx_tap_listening: false,
+                kill_evt: self.kill_evt.try_clone().unwrap(),
+                epoll_fd: self.epoll_fd,
+                num_queues: self.num_queues,
+                worker_reset: self.worker_reset.clone(),
+            };
+
+            std::thread::Builder::new()
+                .name("vring_worker".to_string())
+                .spawn(move || handler.handle_event(vrings_per_thread))
+                .map_err(|e| {
+                    error!("failed to clone queue EventFd: {}", e);
+                    e
+                })?;
         }
-
-        let mut handler = NetEpollHandler {
-            mem: None,
-            taps: tap_set,
-            rxs,
-            txs,
-            rx_tap_listenings,
-            kill_evt: self.kill_evt.try_clone().unwrap(),
-            epoll_fd: self.epoll_fd,
-            num_queues: self.num_queues,
-            worker_reset: self.worker_reset.clone(),
-        };
-
-        std::thread::Builder::new()
-            .name("vring_worker".to_string())
-            .spawn(move || handler.handle_event(vrings))
-            .map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                e
-            })?;
 
         Ok(())
     }
