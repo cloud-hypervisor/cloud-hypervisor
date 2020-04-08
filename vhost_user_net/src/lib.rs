@@ -408,18 +408,17 @@ impl NetEpollHandler {
             for event in events.iter().take(num_events) {
                 let device_event = event.data as u16;
 
-                if device_event < self.num_queues as u16 {
-                    if let Some(kick) = &vrings[device_event as usize].read().unwrap().get_kick() {
-                        kick.read().map_err(|_| Error::HandleEventReadKick)?;
-                    }
-                    if !vrings[device_event as usize].read().unwrap().get_enabled() {
-                        continue;
-                    }
-                }
-
                 match device_event {
                     x if ((x < self.num_queues as u16) && (x % 2 == 0)) => {
+                        if let Some(kick) = &vrings[0].read().unwrap().get_kick() {
+                            kick.read().map_err(|_| Error::HandleEventReadKick)?;
+                        }
+                        if !vrings[0].read().unwrap().get_enabled() {
+                            continue;
+                        }
+
                         let mut vring = vrings[0].write().unwrap();
+
                         self.resume_rx(&mut vring)?;
 
                         if !self.rx_tap_listening {
@@ -433,10 +432,21 @@ impl NetEpollHandler {
                         }
                     }
                     x if ((x < self.num_queues as u16) && (x % 2 != 0)) => {
+                        if let Some(kick) = &vrings[1].read().unwrap().get_kick() {
+                            kick.read().map_err(|_| Error::HandleEventReadKick)?;
+                        }
+                        if !vrings[1].read().unwrap().get_enabled() {
+                            continue;
+                        }
+
                         let mut vring = vrings[1].write().unwrap();
                         self.process_tx(&mut vring.mut_queue())?;
                     }
                     x if x == (self.tap.1 as u16) => {
+                        if !vrings[0].read().unwrap().get_enabled() {
+                            continue;
+                        }
+
                         let mut vring = vrings[0].write().unwrap();
                         if self.rx.deferred_frame
                         // Process a deferred frame first if available. Don't read from tap again
