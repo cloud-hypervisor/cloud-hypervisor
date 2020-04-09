@@ -564,6 +564,10 @@ impl VirtioPciDevice {
             self.write_bar(0, bar_offset as u64, data)
         }
     }
+
+    pub fn virtio_device(&self) -> Arc<Mutex<dyn VirtioDevice>> {
+        self.device.clone()
+    }
 }
 
 impl VirtioTransport for VirtioPciDevice {
