@@ -307,7 +307,7 @@ impl VhostUserBackend for VhostUserNetBackend {
     }
 
     fn handle_event(
-        &mut self,
+        &self,
         device_event: u16,
         evset: epoll::Events,
         vrings: &[Arc<RwLock<Vring>>],

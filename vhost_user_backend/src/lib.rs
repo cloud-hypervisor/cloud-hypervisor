@@ -81,7 +81,7 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// virtqueues on its own, but does not know what to do with events
     /// happening on custom listeners.
     fn handle_event(
-        &mut self,
+        &self,
         device_event: u16,
         evset: epoll::Events,
         vrings: &[Arc<RwLock<Vring>>],
@@ -310,7 +310,7 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
         }
 
         self.backend
-            .write()
+            .read()
             .unwrap()
             .handle_event(device_event, evset, &self.vrings)
             .map_err(VringEpollHandlerError::HandleEventBackendHandling)
