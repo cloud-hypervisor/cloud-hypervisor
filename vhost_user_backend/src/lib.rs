@@ -105,7 +105,7 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// When this EventFd is written to the worker thread will exit. An optional id may
     /// also be provided, if it not provided then the exit event will be first event id
     /// after the last queue
-    fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventFd, Option<u16>)> {
         None
     }
 
@@ -484,7 +484,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
 
         let mut workers = Vec::new();
         let mut worker_threads = Vec::new();
-        for queues_mask in queues_per_thread.iter() {
+        for (thread_index, queues_mask) in queues_per_thread.iter().enumerate() {
             // Create the epoll file descriptor
             let epoll_fd = epoll::create(true).map_err(VhostUserHandlerError::EpollCreateFd)?;
 
@@ -492,7 +492,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
             let worker = vring_worker.clone();
 
             let exit_event_id = if let Some((exit_event_fd, exit_event_id)) =
-                backend.read().unwrap().exit_event()
+                backend.read().unwrap().exit_event(thread_index)
             {
                 let exit_event_id = exit_event_id.unwrap_or(num_queues as u16);
                 worker

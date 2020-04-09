@@ -337,17 +337,17 @@ impl VhostUserBackend for VhostUserNetBackend {
         Ok(false)
     }
 
-    fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
-        let tap_end_index = (self.num_queues + self.num_queues / 2 - 1) as u16;
-        let kill_index = tap_end_index + 1;
+    fn exit_event(&self, thread_index: usize) -> Option<(EventFd, Option<u16>)> {
+        // The exit event is placed after the queues and the tap event, which
+        // is event index 3.
         Some((
-            self.threads[0]
+            self.threads[thread_index]
                 .lock()
                 .unwrap()
                 .kill_evt
                 .try_clone()
                 .unwrap(),
-            Some(kill_index),
+            Some(3),
         ))
     }
 }
