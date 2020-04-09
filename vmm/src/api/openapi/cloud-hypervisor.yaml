@@ -374,6 +374,7 @@ components:
           type: string
 
     InitramfsConfig:
+      nullable: true
       required:
       - path
       type: object
