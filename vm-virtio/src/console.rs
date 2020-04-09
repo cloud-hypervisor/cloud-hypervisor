@@ -7,8 +7,10 @@ use super::{
     VirtioInterruptType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::VirtioInterrupt;
+use anyhow::anyhow;
 use epoll;
 use libc::EFD_NONBLOCK;
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std;
 use std::cmp;
 use std::collections::VecDeque;
@@ -21,7 +23,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -43,13 +48,37 @@ const PAUSE_EVENT: DeviceEventT = 5;
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
 
-#[derive(Copy, Clone, Debug, Default)]
-#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, Deserialize)]
+#[repr(C, packed)]
 pub struct VirtioConsoleConfig {
     cols: u16,
     rows: u16,
     max_nr_ports: u32,
     emerg_wr: u32,
+}
+
+// We must explicitly implement Serialize since the structure is packed and
+// it's unsafe to borrow from a packed structure. And by default, if we derive
+// Serialize from serde, it will borrow the values from the structure.
+// That's why this implementation copies each field separately before it
+// serializes the entire structure field by field.
+impl Serialize for VirtioConsoleConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let cols = self.cols;
+        let rows = self.rows;
+        let max_nr_ports = self.max_nr_ports;
+        let emerg_wr = self.emerg_wr;
+
+        let mut virtio_console_config = serializer.serialize_struct("VirtioConsoleConfig", 12)?;
+        virtio_console_config.serialize_field("cols", &cols)?;
+        virtio_console_config.serialize_field("rows", &rows)?;
+        virtio_console_config.serialize_field("max_nr_ports", &max_nr_ports)?;
+        virtio_console_config.serialize_field("emerg_wr", &emerg_wr)?;
+        virtio_console_config.end()
+    }
 }
 
 // Safe because it only has data and has no implicit padding.
@@ -356,6 +385,14 @@ pub struct Console {
     paused: Arc<AtomicBool>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ConsoleState {
+    avail_features: u64,
+    acked_features: u64,
+    config: VirtioConsoleConfig,
+    in_buffer: VecDeque<u8>,
+}
+
 impl Console {
     /// Create a new virtio console device that gets random data from /dev/urandom.
     pub fn new(
@@ -397,6 +434,24 @@ impl Console {
             },
             console_input,
         ))
+    }
+
+    fn state(&self) -> ConsoleState {
+        ConsoleState {
+            avail_features: self.avail_features,
+            acked_features: self.acked_features,
+            config: *(self.config.lock().unwrap()),
+            in_buffer: self.input.in_buffer.lock().unwrap().clone(),
+        }
+    }
+
+    fn set_state(&mut self, state: &ConsoleState) -> io::Result<()> {
+        self.avail_features = state.avail_features;
+        self.acked_features = state.acked_features;
+        *(self.config.lock().unwrap()) = state.config;
+        *(self.input.in_buffer.lock().unwrap()) = state.in_buffer.clone();
+
+        Ok(())
     }
 }
 
@@ -563,6 +618,49 @@ impl VirtioDevice for Console {
 }
 
 virtio_pausable!(Console);
-impl Snapshottable for Console {}
+const CONSOLE_SNAPSHOT_ID: &str = "virtio-console";
+impl Snapshottable for Console {
+    fn id(&self) -> String {
+        CONSOLE_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut console_snapshot = Snapshot::new(CONSOLE_SNAPSHOT_ID);
+        console_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", CONSOLE_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(console_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(console_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", CONSOLE_SNAPSHOT_ID))
+        {
+            let console_state = match serde_json::from_slice(&console_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize CONSOLE {}",
+                        error
+                    )))
+                }
+            };
+
+            return self.set_state(&console_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore CONSOLE state {:?}", e))
+            });
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find CONSOLE snapshot section"
+        )))
+    }
+}
 impl Transportable for Console {}
 impl Migratable for Console {}
