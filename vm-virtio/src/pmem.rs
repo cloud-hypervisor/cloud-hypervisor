@@ -12,8 +12,10 @@ use super::{
     VirtioDevice, VirtioDeviceType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
+use anyhow::anyhow;
 use epoll;
 use libc::EFD_NONBLOCK;
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::fmt::{self, Display};
 use std::fs::File;
@@ -28,7 +30,10 @@ use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap, MmapRegion,
 };
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -46,11 +51,31 @@ const KILL_EVENT: DeviceEventT = 1;
 // The device should be paused.
 const PAUSE_EVENT: DeviceEventT = 2;
 
-#[derive(Copy, Clone, Debug, Default)]
-#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, Deserialize)]
+#[repr(C, packed)]
 struct VirtioPmemConfig {
     start: u64,
     size: u64,
+}
+
+// We must explicitly implement Serialize since the structure is packed and
+// it's unsafe to borrow from a packed structure. And by default, if we derive
+// Serialize from serde, it will borrow the values from the structure.
+// That's why this implementation copies each field separately before it
+// serializes the entire structure field by field.
+impl Serialize for VirtioPmemConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let start = self.start;
+        let size = self.size;
+
+        let mut virtio_pmem_config = serializer.serialize_struct("VirtioPmemConfig", 16)?;
+        virtio_pmem_config.serialize_field("start", &start)?;
+        virtio_pmem_config.serialize_field("size", &size)?;
+        virtio_pmem_config.end()
+    }
 }
 
 // Safe because it only has data and has no implicit padding.
@@ -329,6 +354,13 @@ pub struct Pmem {
     _region: MmapRegion,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct PmemState {
+    avail_features: u64,
+    acked_features: u64,
+    config: VirtioPmemConfig,
+}
+
 impl Pmem {
     pub fn new(
         disk: File,
@@ -362,6 +394,22 @@ impl Pmem {
             mapping,
             _region,
         })
+    }
+
+    fn state(&self) -> PmemState {
+        PmemState {
+            avail_features: self.avail_features,
+            acked_features: self.acked_features,
+            config: self.config,
+        }
+    }
+
+    fn set_state(&mut self, state: &PmemState) -> io::Result<()> {
+        self.avail_features = state.avail_features;
+        self.acked_features = state.acked_features;
+        self.config = state.config;
+
+        Ok(())
     }
 }
 
@@ -523,6 +571,50 @@ impl VirtioDevice for Pmem {
 }
 
 virtio_pausable!(Pmem);
-impl Snapshottable for Pmem {}
+const PMEM_SNAPSHOT_ID: &str = "virtio-pmem";
+impl Snapshottable for Pmem {
+    fn id(&self) -> String {
+        PMEM_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut pmem_snapshot = Snapshot::new(PMEM_SNAPSHOT_ID);
+        pmem_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", PMEM_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(pmem_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(pmem_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", PMEM_SNAPSHOT_ID))
+        {
+            let pmem_state = match serde_json::from_slice(&pmem_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize PMEM {}",
+                        error
+                    )))
+                }
+            };
+
+            return self.set_state(&pmem_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore PMEM state {:?}", e))
+            });
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find PMEM snapshot section"
+        )))
+    }
+}
+
 impl Transportable for Pmem {}
 impl Migratable for Pmem {}
