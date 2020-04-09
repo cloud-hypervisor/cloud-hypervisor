@@ -215,6 +215,7 @@ pub struct VhostUserNetBackend {
     threads: Vec<Mutex<VhostUserNetThread>>,
     num_queues: usize,
     queue_size: u16,
+    queues_per_thread: Vec<u64>,
 }
 
 impl VhostUserNetBackend {
@@ -228,16 +229,19 @@ impl VhostUserNetBackend {
         let mut taps = open_tap(ifname, Some(ip_addr), Some(netmask), num_queues / 2)
             .map_err(Error::OpenTap)?;
 
+        let mut queues_per_thread = Vec::new();
         let mut threads = Vec::new();
-        for tap in taps.drain(..) {
+        for (i, tap) in taps.drain(..).enumerate() {
             let thread = Mutex::new(VhostUserNetThread::new(tap)?);
             threads.push(thread);
+            queues_per_thread.push(0b11 << (i * 2));
         }
 
         Ok(VhostUserNetBackend {
             threads,
             num_queues,
             queue_size,
+            queues_per_thread,
         })
     }
 }
@@ -338,6 +342,10 @@ impl VhostUserBackend for VhostUserNetBackend {
                 .unwrap(),
             Some(3),
         ))
+    }
+
+    fn queues_per_thread(&self) -> Vec<u64> {
+        self.queues_per_thread.clone()
     }
 }
 
