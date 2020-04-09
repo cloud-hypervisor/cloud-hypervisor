@@ -787,6 +787,18 @@ impl PciDevice for VirtioPciDevice {
         Ok(())
     }
 
+    fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), std::io::Error> {
+        // We only update our idea of the bar in order to support free_bars() above.
+        // The majority of the reallocation is done inside DeviceManager.
+        for (addr, _, _) in self.bar_regions.iter_mut() {
+            if (*addr).0 == old_base {
+                *addr = GuestAddress(new_base);
+            }
+        }
+
+        Ok(())
+    }
+
     fn read_bar(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         match offset {
             o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => self.common_config.read(
