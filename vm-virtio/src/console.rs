@@ -7,6 +7,7 @@ use super::{
     VirtioInterruptType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::VirtioInterrupt;
+use anyhow::anyhow;
 use epoll;
 use libc::EFD_NONBLOCK;
 use std;
@@ -21,7 +22,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -43,7 +47,7 @@ const PAUSE_EVENT: DeviceEventT = 5;
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 #[repr(C)]
 pub struct VirtioConsoleConfig {
     cols: u16,
@@ -297,9 +301,12 @@ impl ConsoleEpollHandler {
 }
 
 /// Input device.
+#[derive(Serialize, Deserialize)]
 pub struct ConsoleInput {
-    input_evt: EventFd,
-    config_evt: EventFd,
+    #[serde(skip)]
+    input_evt: Option<EventFd>,
+    #[serde(skip)]
+    config_evt: Option<EventFd>,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
     config: Arc<Mutex<VirtioConsoleConfig>>,
     acked_features: AtomicU64,
@@ -309,7 +316,9 @@ impl ConsoleInput {
     pub fn queue_input_bytes(&self, input: &[u8]) {
         let mut in_buffer = self.in_buffer.lock().unwrap();
         in_buffer.extend(input);
-        let _ = self.input_evt.write(1);
+        if let Some(input_evt) = &self.input_evt {
+            let _ = input_evt.write(1);
+        }
     }
 
     pub fn update_console_size(&self, cols: u16, rows: u16) {
@@ -320,7 +329,9 @@ impl ConsoleInput {
         {
             self.config.lock().unwrap().update_console_size(cols, rows);
             //Send the interrupt to the driver
-            let _ = self.config_evt.write(1);
+            if let Some(config_evt) = &self.config_evt {
+                let _ = config_evt.write(1);
+            }
         }
     }
 }
@@ -356,6 +367,14 @@ pub struct Console {
     paused: Arc<AtomicBool>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ConsoleState {
+    avail_features: u64,
+    acked_features: u64,
+    config: Arc<Mutex<VirtioConsoleConfig>>,
+    input: Arc<ConsoleInput>,
+}
+
 impl Console {
     /// Create a new virtio console device that gets random data from /dev/urandom.
     pub fn new(
@@ -374,8 +393,8 @@ impl Console {
         let config_evt = EventFd::new(EFD_NONBLOCK).unwrap();
         let console_config = Arc::new(Mutex::new(VirtioConsoleConfig::new(cols, rows)));
         let console_input = Arc::new(ConsoleInput {
-            input_evt,
-            config_evt,
+            input_evt: Some(input_evt),
+            config_evt: Some(config_evt),
             in_buffer: Arc::new(Mutex::new(VecDeque::new())),
             config: console_config.clone(),
             acked_features: AtomicU64::new(0),
@@ -397,6 +416,24 @@ impl Console {
             },
             console_input,
         ))
+    }
+
+    fn state(&self) -> ConsoleState {
+        ConsoleState{
+            avail_features: self.avail_features,
+            acked_features: self.acked_features,
+            config: self.config.clone(),
+            input: self.input.clone(),
+        }
+    }
+
+    fn set_state(&mut self, state: &ConsoleState) -> io::Result<()> {
+        self.avail_features = state.avail_features;
+        self.acked_features = state.acked_features;
+        self.config = state.config.clone();
+        self.input = state.input.clone();
+
+        Ok(())
     }
 }
 
@@ -513,6 +550,16 @@ impl VirtioDevice for Console {
             }
         }
 
+        let input_evt = if let Some(input_evt) = &self.input.input_evt {
+            input_evt.try_clone().unwrap()
+        } else {
+            panic!("There is no valid input_evt!");
+        };
+        let config_evt = if let Some(config_evt) = &self.input.config_evt {
+            config_evt.try_clone().unwrap()
+        } else {
+            panic!("There is no valid config_evt!");
+        };
         let mut handler = ConsoleEpollHandler {
             queues,
             mem,
@@ -521,8 +568,8 @@ impl VirtioDevice for Console {
             out: self.out.clone(),
             input_queue_evt: queue_evts.remove(0),
             output_queue_evt: queue_evts.remove(0),
-            input_evt: self.input.input_evt.try_clone().unwrap(),
-            config_evt: self.input.config_evt.try_clone().unwrap(),
+            input_evt,
+            config_evt,
             kill_evt,
             pause_evt,
         };
@@ -563,6 +610,49 @@ impl VirtioDevice for Console {
 }
 
 virtio_pausable!(Console);
-impl Snapshottable for Console {}
+const CONSOLE_SNAPSHOT_ID: &str = "virtio-console";
+impl Snapshottable for Console {
+    fn id(&self) -> String {
+        CONSOLE_SNAPSHOT_ID.to_string()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut console_snapshot = Snapshot::new(CONSOLE_SNAPSHOT_ID);
+        console_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", CONSOLE_SNAPSHOT_ID),
+            snapshot,
+        });
+
+        Ok(console_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(console_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", CONSOLE_SNAPSHOT_ID))
+        {
+            let console_state = match serde_json::from_slice(&console_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize CONSOLE {}",
+                        error
+                    )))
+                }
+            };
+
+            return self.set_state(&console_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore CONSOLE state {:?}", e))
+            });
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find CONSOLE snapshot section"
+        )))
+    }
+}
 impl Transportable for Console {}
 impl Migratable for Console {}
