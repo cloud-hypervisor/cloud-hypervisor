@@ -221,6 +221,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
         device_event: u16,
         evset: epoll::Events,
         vrings: &[Arc<RwLock<Vring>>],
+        _thread_id: usize,
     ) -> VhostUserBackendResult<bool> {
         if evset != epoll::Events::EPOLLIN {
             return Err(Error::HandleEventNotEpollIn.into());
