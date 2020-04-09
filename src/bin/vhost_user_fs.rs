@@ -266,7 +266,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserBackend for VhostUserFsBack
         Ok(false)
     }
 
-    fn exit_event(&self) -> Option<(EventFd, Option<u16>)> {
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventFd, Option<u16>)> {
         Some((
             self.thread.lock().unwrap().kill_evt.try_clone().unwrap(),
             Some(KILL_EVENT),
