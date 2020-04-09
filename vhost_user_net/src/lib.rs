@@ -16,7 +16,6 @@ use epoll;
 use libc::{self, EAGAIN, EFD_NONBLOCK};
 use log::*;
 use net_util::Tap;
-use std::convert::TryFrom;
 use std::fmt;
 use std::io::Read;
 use std::io::{self};
@@ -96,7 +95,7 @@ struct VhostUserNetThread {
     mem: Option<GuestMemoryMmap>,
     vring_worker: Option<Arc<VringWorker>>,
     kill_evt: EventFd,
-    tap: (Tap, usize),
+    tap: Tap,
     rx: RxVirtio,
     tx: TxVirtio,
     rx_tap_listening: bool,
@@ -104,12 +103,12 @@ struct VhostUserNetThread {
 
 impl VhostUserNetThread {
     /// Create a new virtio network device with the given TAP interface.
-    fn new(tap: Tap, tap_evt_index: usize) -> Result<Self> {
+    fn new(tap: Tap) -> Result<Self> {
         Ok(VhostUserNetThread {
             mem: None,
             vring_worker: None,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
-            tap: (tap, tap_evt_index),
+            tap,
             rx: RxVirtio::new(),
             tx: TxVirtio::new(),
             rx_tap_listening: false,
@@ -130,11 +129,7 @@ impl VhostUserNetThread {
                 self.vring_worker
                     .as_ref()
                     .unwrap()
-                    .unregister_listener(
-                        self.tap.0.as_raw_fd(),
-                        epoll::Events::EPOLLIN,
-                        u64::try_from(self.tap.1).unwrap(),
-                    )
+                    .unregister_listener(self.tap.as_raw_fd(), epoll::Events::EPOLLIN, 2)
                     .unwrap();
                 self.rx_tap_listening = false;
             }
@@ -202,14 +197,13 @@ impl VhostUserNetThread {
     fn process_tx(&mut self, mut queue: &mut Queue) -> Result<()> {
         let mem = self.mem.as_ref().ok_or(Error::NoMemoryConfigured)?;
 
-        self.tx
-            .process_desc_chain(&mem, &mut self.tap.0, &mut queue);
+        self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
 
         Ok(())
     }
 
     fn read_tap(&mut self) -> io::Result<usize> {
-        self.tap.0.read(&mut self.rx.frame_buf)
+        self.tap.read(&mut self.rx.frame_buf)
     }
 
     pub fn set_vring_worker(&mut self, vring_worker: Option<Arc<VringWorker>>) {
@@ -236,7 +230,7 @@ impl VhostUserNetBackend {
 
         let mut threads = Vec::new();
         for tap in taps.drain(..) {
-            let thread = Mutex::new(VhostUserNetThread::new(tap, num_queues)?);
+            let thread = Mutex::new(VhostUserNetThread::new(tap)?);
             threads.push(thread);
         }
 
@@ -286,36 +280,31 @@ impl VhostUserBackend for VhostUserNetBackend {
         device_event: u16,
         evset: epoll::Events,
         vrings: &[Arc<RwLock<Vring>>],
+        thread_id: usize,
     ) -> VhostUserBackendResult<bool> {
         if evset != epoll::Events::EPOLLIN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
 
-        let tap_start_index = self.num_queues as u16;
-        let tap_end_index = (self.num_queues + self.num_queues / 2 - 1) as u16;
-
-        let mut thread = self.threads[0].lock().unwrap();
+        let mut thread = self.threads[thread_id].lock().unwrap();
         match device_event {
-            x if ((x < self.num_queues as u16) && (x % 2 == 0)) => {
-                let mut vring = vrings[x as usize].write().unwrap();
-                thread.resume_rx(&mut vring)?;
+            x if x == 0 => {
+                thread.resume_rx(&mut vrings[0].write().unwrap())?;
 
                 if !thread.rx_tap_listening {
                     thread.vring_worker.as_ref().unwrap().register_listener(
-                        thread.tap.0.as_raw_fd(),
+                        thread.tap.as_raw_fd(),
                         epoll::Events::EPOLLIN,
-                        u64::try_from(thread.tap.1).unwrap(),
+                        2,
                     )?;
                     thread.rx_tap_listening = true;
                 }
             }
-            x if ((x < self.num_queues as u16) && (x % 2 != 0)) => {
-                let mut vring = vrings[x as usize].write().unwrap();
-                thread.process_tx(&mut vring.mut_queue())?;
+            x if x == 1 => {
+                thread.process_tx(&mut vrings[1].write().unwrap().mut_queue())?;
             }
-            x if x >= tap_start_index && x <= tap_end_index => {
-                let index = x as usize - self.num_queues;
-                let mut vring = vrings[2 * index].write().unwrap();
+            x if x == 2 => {
+                let mut vring = vrings[0].write().unwrap();
                 if thread.rx.deferred_frame
                 // Process a deferred frame first if available. Don't read from tap again
                 // until we manage to receive this deferred frame.

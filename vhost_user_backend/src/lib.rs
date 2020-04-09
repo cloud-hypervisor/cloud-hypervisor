@@ -85,6 +85,7 @@ pub trait VhostUserBackend: Send + Sync + 'static {
         device_event: u16,
         evset: epoll::Events,
         vrings: &[Arc<RwLock<Vring>>],
+        thread_id: usize,
     ) -> result::Result<bool, io::Error>;
 
     /// Get virtio device configuration.
@@ -287,6 +288,7 @@ struct VringEpollHandler<S: VhostUserBackend> {
     backend: Arc<RwLock<S>>,
     vrings: Vec<Arc<RwLock<Vring>>>,
     exit_event_id: Option<u16>,
+    thread_id: usize,
 }
 
 impl<S: VhostUserBackend> VringEpollHandler<S> {
@@ -316,7 +318,7 @@ impl<S: VhostUserBackend> VringEpollHandler<S> {
         self.backend
             .read()
             .unwrap()
-            .handle_event(device_event, evset, &self.vrings)
+            .handle_event(device_event, evset, &self.vrings, self.thread_id)
             .map_err(VringEpollHandlerError::HandleEventBackendHandling)
     }
 }
@@ -484,7 +486,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
 
         let mut workers = Vec::new();
         let mut worker_threads = Vec::new();
-        for (thread_index, queues_mask) in queues_per_thread.iter().enumerate() {
+        for (thread_id, queues_mask) in queues_per_thread.iter().enumerate() {
             // Create the epoll file descriptor
             let epoll_fd = epoll::create(true).map_err(VhostUserHandlerError::EpollCreateFd)?;
 
@@ -492,7 +494,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
             let worker = vring_worker.clone();
 
             let exit_event_id = if let Some((exit_event_fd, exit_event_id)) =
-                backend.read().unwrap().exit_event(thread_index)
+                backend.read().unwrap().exit_event(thread_id)
             {
                 let exit_event_id = exit_event_id.unwrap_or(num_queues as u16);
                 worker
@@ -518,6 +520,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
                 backend: backend.clone(),
                 vrings: thread_vrings,
                 exit_event_id,
+                thread_id,
             };
 
             let worker_thread = thread::Builder::new()
