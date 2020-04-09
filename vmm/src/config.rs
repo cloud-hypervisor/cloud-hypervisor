@@ -1160,6 +1160,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub memory: MemoryConfig,
     pub kernel: Option<KernelConfig>,
+    #[serde(default)]
     pub initramfs: Option<InitramfsConfig>,
     #[serde(default)]
     pub cmdline: CmdlineConfig,
