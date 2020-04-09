@@ -473,7 +473,7 @@ pub fn start_net_backend(backend_command: &str) {
     )
     .unwrap();
 
-    let vring_worker = net_daemon.get_vring_worker();
+    let vring_worker = net_daemon.get_vring_workers();
 
     net_backend
         .write()
@@ -481,7 +481,7 @@ pub fn start_net_backend(backend_command: &str) {
         .thread
         .lock()
         .unwrap()
-        .set_vring_worker(Some(vring_worker));
+        .set_vring_worker(Some(vring_worker[0].clone()));
 
     if let Err(e) = net_daemon.start() {
         println!(

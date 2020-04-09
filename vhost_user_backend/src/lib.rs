@@ -191,8 +191,8 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
     /// Retrieve the vring worker. This is necessary to perform further
     /// actions like registering and unregistering some extra event file
     /// descriptors.
-    pub fn get_vring_worker(&self) -> Arc<VringWorker> {
-        self.handler.lock().unwrap().get_vring_worker()
+    pub fn get_vring_workers(&self) -> Vec<Arc<VringWorker>> {
+        self.handler.lock().unwrap().get_vring_workers()
     }
 }
 
@@ -545,8 +545,8 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
         })
     }
 
-    fn get_vring_worker(&self) -> Arc<VringWorker> {
-        self.workers[0].clone()
+    fn get_vring_workers(&self) -> Vec<Arc<VringWorker>> {
+        self.workers.clone()
     }
 
     fn vmm_va_to_gpa(&self, vmm_va: u64) -> VhostUserHandlerResult<u64> {

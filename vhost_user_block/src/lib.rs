@@ -449,14 +449,14 @@ pub fn start_block_backend(backend_command: &str) {
     .unwrap();
     debug!("blk_daemon is created!\n");
 
-    let vring_worker = blk_daemon.get_vring_worker();
+    let vring_worker = blk_daemon.get_vring_workers();
     blk_backend
         .write()
         .unwrap()
         .thread
         .lock()
         .unwrap()
-        .set_vring_worker(Some(vring_worker));
+        .set_vring_worker(Some(vring_worker[0].clone()));
 
     if let Err(e) = blk_daemon.start() {
         error!(
