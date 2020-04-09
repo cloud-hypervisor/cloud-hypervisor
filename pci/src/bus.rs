@@ -239,7 +239,10 @@ impl PciConfigIo {
                     device.deref_mut(),
                     params.region_type,
                 ) {
-                    error!("Failed moving device BAR: {}", e);
+                    error!(
+                        "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x})",
+                        e, params.old_base, params.new_base, params.len
+                    );
                 }
             }
 
@@ -355,7 +358,10 @@ impl PciConfigMmio {
                     device.deref_mut(),
                     params.region_type,
                 ) {
-                    error!("Failed moving device BAR: {}", e);
+                    error!(
+                        "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x})",
+                        e, params.old_base, params.new_base, params.len
+                    );
                 }
             }
 
