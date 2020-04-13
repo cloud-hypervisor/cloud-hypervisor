@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 bitflags = "1.1.0"
 epoll = ">=4.0.1"
-libc = "0.2.68"
+libc = "0.2.69"
 log = "0.4.8"
 net_util = { path = "../net_util" }
 vhost_user_backend = { path = "../vhost_user_backend" }
