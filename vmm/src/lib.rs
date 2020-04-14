@@ -18,7 +18,9 @@ extern crate url;
 extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
-use crate::config::{DeviceConfig, DiskConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig};
+use crate::config::{
+    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig,
+};
 use crate::migration::{recv_vm_snapshot, vm_config_from_snapshot};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
@@ -483,6 +485,19 @@ impl Vmm {
         }
     }
 
+    fn vm_add_fs(&mut self, fs_cfg: FsConfig) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            if let Err(e) = vm.add_fs(fs_cfg) {
+                error!("Error when adding new fs to the VM: {:?}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
             if let Err(e) = vm.add_pmem(pmem_cfg) {
@@ -698,6 +713,13 @@ impl Vmm {
                                     let response = self
                                         .vm_add_disk(add_disk_data.as_ref().clone())
                                         .map_err(ApiError::VmAddDisk)
+                                        .map(|_| ApiResponsePayload::Empty);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmAddFs(add_fs_data, sender) => {
+                                    let response = self
+                                        .vm_add_fs(add_fs_data.as_ref().clone())
+                                        .map_err(ApiError::VmAddFs)
                                         .map(|_| ApiResponsePayload::Empty);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }

@@ -26,7 +26,8 @@ extern crate vm_memory;
 extern crate vm_virtio;
 
 use crate::config::{
-    DeviceConfig, DiskConfig, HotplugMethod, NetConfig, PmemConfig, ValidationError, VmConfig,
+    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig, ValidationError,
+    VmConfig,
 };
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
@@ -762,6 +763,39 @@ impl Vm {
                         disks.push(_disk_cfg);
                     } else {
                         config.disks = Some(vec![_disk_cfg]);
+                    }
+                }
+
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+                    .map_err(Error::DeviceManager)?;
+            }
+            Ok(())
+        } else {
+            Err(Error::NoPciSupport)
+        }
+    }
+
+    pub fn add_fs(&mut self, mut _fs_cfg: FsConfig) -> Result<()> {
+        if cfg!(feature = "pci_support") {
+            #[cfg(feature = "pci_support")]
+            {
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .add_fs(&mut _fs_cfg)
+                    .map_err(Error::DeviceManager)?;
+
+                // Update VmConfig by adding the new device. This is important to
+                // ensure the device would be created in case of a reboot.
+                {
+                    let mut config = self.config.lock().unwrap();
+                    if let Some(fs_config) = config.fs.as_mut() {
+                        fs_config.push(_fs_cfg);
+                    } else {
+                        config.fs = Some(vec![_fs_cfg]);
                     }
                 }
 
