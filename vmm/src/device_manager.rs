@@ -472,12 +472,6 @@ pub struct DeviceManager {
     // IOAPIC
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
 
-    // List of mmap()ed regions managed through MmapRegion instances.
-    // Using MmapRegion will perform the unmapping automatically when
-    // the instance is dropped, which happens when the DeviceManager
-    // gets dropped.
-    _mmap_regions: Vec<MmapRegion>,
-
     // Things to be added to the commandline (i.e. for virtio-mmio)
     cmdline_additions: Vec<String>,
 
@@ -559,7 +553,6 @@ impl DeviceManager {
         let mut virtio_devices: Vec<(Arc<Mutex<dyn vm_virtio::VirtioDevice>>, bool)> = Vec::new();
         let migratable_devices: HashMap<String, Arc<Mutex<dyn Migratable>>> = HashMap::new();
         let mut bus_devices: Vec<Arc<Mutex<dyn BusDevice>>> = Vec::new();
-        let mut _mmap_regions = Vec::new();
 
         #[allow(unused_mut)]
         let mut cmdline_additions = Vec::new();
@@ -620,7 +613,6 @@ impl DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
             ioapic: Some(ioapic),
-            _mmap_regions,
             cmdline_additions,
             #[cfg(feature = "acpi")]
             ged_notification_device: None,
