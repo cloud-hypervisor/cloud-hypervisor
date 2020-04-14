@@ -5,11 +5,11 @@
 
 use crate::api::http::EndpointHandler;
 use crate::api::{
-    vm_add_device, vm_add_disk, vm_add_net, vm_add_pmem, vm_boot, vm_create, vm_delete, vm_info,
-    vm_pause, vm_reboot, vm_remove_device, vm_resize, vm_restore, vm_resume, vm_shutdown,
+    vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_boot, vm_create, vm_delete,
+    vm_info, vm_pause, vm_reboot, vm_remove_device, vm_resize, vm_restore, vm_resume, vm_shutdown,
     vm_snapshot, vmm_ping, vmm_shutdown, ApiError, ApiRequest, ApiResult, DeviceConfig, DiskConfig,
-    NetConfig, PmemConfig, RestoreConfig, VmAction, VmConfig, VmRemoveDeviceData, VmResizeData,
-    VmSnapshotConfig,
+    FsConfig, NetConfig, PmemConfig, RestoreConfig, VmAction, VmConfig, VmRemoveDeviceData,
+    VmResizeData, VmSnapshotConfig,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
@@ -70,6 +70,9 @@ pub enum HttpError {
 
     /// Could not add a disk to a VM
     VmAddDisk(ApiError),
+
+    /// Could not add a fs to a VM
+    VmAddFs(ApiError),
 
     /// Could not add a pmem device to a VM
     VmAddPmem(ApiError),
@@ -494,12 +497,33 @@ impl EndpointHandler for VmAddFs {
     fn handle_request(
         &self,
         req: &Request,
-        _api_notifier: EventFd,
-        _api_sender: Sender<ApiRequest>,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
     ) -> Response {
         match req.method() {
-            // Not implemented.
-            Method::Put => Response::new(Version::Http11, StatusCode::NotImplemented),
+            Method::Put => {
+                match &req.body {
+                    Some(body) => {
+                        // Deserialize into a FsConfig
+                        let vm_add_fs_data: FsConfig = match serde_json::from_slice(body.raw())
+                            .map_err(HttpError::SerdeJsonDeserialize)
+                        {
+                            Ok(config) => config,
+                            Err(e) => return error_response(e, StatusCode::BadRequest),
+                        };
+
+                        // Call vm_add_fs()
+                        match vm_add_fs(api_notifier, api_sender, Arc::new(vm_add_fs_data))
+                            .map_err(HttpError::VmAddFs)
+                        {
+                            Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
+                            Err(e) => error_response(e, StatusCode::InternalServerError),
+                        }
+                    }
+
+                    None => Response::new(Version::Http11, StatusCode::BadRequest),
+                }
+            }
             _ => Response::new(Version::Http11, StatusCode::BadRequest),
         }
     }
