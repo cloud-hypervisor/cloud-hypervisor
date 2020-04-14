@@ -93,8 +93,9 @@ Dump the VM information            | `/vm.info`          | N/A                  
 Add VFIO PCI device to the VM      | `/vm.add-device`    | `/schemas/VmAddDevice`    | N/A               | The VM is booted
 Remove VFIO PCI device from the VM | `/vm.remove-device` | `/schemas/VmRemoveDevice` | N/A               | The VM is booted
 Add disk device to the VM          | `/vm.add-disk`      | `/schemas/DiskConfig`     | N/A               | The VM is booted
+Add fs device to the VM            | `/vm.add-fs`        | `/schemas/FsConfig`       | N/A               | The VM is booted
 Add pmem device to the VM          | `/vm.add-pmem`      | `/schemas/PmemConfig`     | N/A               | The VM is booted
-Add network device to the VM       | `/vm.add-net`       | `/schemas/NetConfig`     | N/A               | The VM is booted
+Add network device to the VM       | `/vm.add-net`       | `/schemas/NetConfig`      | N/A               | The VM is booted
 
 ### REST API Examples
 

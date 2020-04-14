@@ -155,12 +155,7 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("fs")
                 .long("fs")
-                .help(
-                    "virtio-fs parameters \
-                     \"tag=<tag_name>,sock=<socket_path>,num_queues=<number_of_queues>,\
-                     queue_size=<size_of_each_queue>,dax=on|off,cache_size=<DAX cache size: \
-                     default 8Gib>\"",
-                )
+                .help(config::FsConfig::SYNTAX)
                 .takes_value(true)
                 .min_values(1)
                 .group("vm-config"),
