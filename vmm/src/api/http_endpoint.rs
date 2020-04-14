@@ -487,6 +487,24 @@ impl EndpointHandler for VmAddDisk {
     }
 }
 
+// /api/v1/vm.add-fs handler
+pub struct VmAddFs {}
+
+impl EndpointHandler for VmAddFs {
+    fn handle_request(
+        &self,
+        req: &Request,
+        _api_notifier: EventFd,
+        _api_sender: Sender<ApiRequest>,
+    ) -> Response {
+        match req.method() {
+            // Not implemented.
+            Method::Put => Response::new(Version::Http11, StatusCode::NotImplemented),
+            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+        }
+    }
+}
+
 // /api/v1/vm.add-pmem handler
 pub struct VmAddPmem {}
 

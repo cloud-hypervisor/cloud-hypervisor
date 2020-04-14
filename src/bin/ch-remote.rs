@@ -24,6 +24,7 @@ enum Error {
     InvalidMemorySize(std::num::ParseIntError),
     AddDeviceConfig(vmm::config::Error),
     AddDiskConfig(vmm::config::Error),
+    AddFsConfig(vmm::config::Error),
     AddPmemConfig(vmm::config::Error),
     AddNetConfig(vmm::config::Error),
     Restore(vmm::config::Error),
@@ -228,6 +229,17 @@ fn add_disk_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Err
     )
 }
 
+fn add_fs_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
+    let fs_config = vmm::config::FsConfig::parse(config).map_err(Error::AddFsConfig)?;
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "add-fs",
+        Some(&serde_json::to_string(&fs_config).unwrap()),
+    )
+}
+
 fn add_pmem_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
     let pmem_config = vmm::config::PmemConfig::parse(config).map_err(Error::AddPmemConfig)?;
 
@@ -315,6 +327,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .value_of("disk_config")
                 .unwrap(),
         ),
+        Some("add-fs") => add_fs_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("add-fs")
+                .unwrap()
+                .value_of("fs_config")
+                .unwrap(),
+        ),
         Some("add-pmem") => add_pmem_api_command(
             &mut socket,
             matches
@@ -381,6 +401,15 @@ fn main() {
                     Arg::with_name("disk_config")
                         .index(1)
                         .help(vmm::config::DiskConfig::SYNTAX),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("add-fs")
+                .about("Add virtio-fs backed fs device")
+                .arg(
+                    Arg::with_name("fs_config")
+                        .index(1)
+                        .help(vmm::config::FsConfig::SYNTAX),
                 ),
         )
         .subcommand(
