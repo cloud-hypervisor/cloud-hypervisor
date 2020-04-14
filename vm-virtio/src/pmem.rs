@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::thread;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryMmap, GuestUsize,
+    GuestMemoryError, GuestMemoryMmap, MmapRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -322,13 +322,22 @@ pub struct Pmem {
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     paused: Arc<AtomicBool>,
+
+    // Hold ownership of the memory that is allocated for the device
+    // which will be automatically dropped when the device is dropped
+    _region: MmapRegion,
 }
 
 impl Pmem {
-    pub fn new(disk: File, addr: GuestAddress, size: GuestUsize, iommu: bool) -> io::Result<Pmem> {
+    pub fn new(
+        disk: File,
+        addr: GuestAddress,
+        _region: MmapRegion,
+        iommu: bool,
+    ) -> io::Result<Pmem> {
         let config = VirtioPmemConfig {
             start: addr.raw_value().to_le(),
-            size: size.to_le(),
+            size: (_region.size() as u64).to_le(),
         };
 
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
@@ -348,6 +357,7 @@ impl Pmem {
             interrupt_cb: None,
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
+            _region,
         })
     }
 }

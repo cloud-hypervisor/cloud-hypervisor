@@ -1467,8 +1467,6 @@ impl DeviceManager {
         .map_err(DeviceManagerError::NewMmapRegion)?;
         let addr: u64 = mmap_region.as_ptr() as u64;
 
-        self._mmap_regions.push(mmap_region);
-
         self.memory_manager
             .lock()
             .unwrap()
@@ -1482,7 +1480,7 @@ impl DeviceManager {
             .map_err(DeviceManagerError::MemoryManager)?;
 
         let virtio_pmem_device = Arc::new(Mutex::new(
-            vm_virtio::Pmem::new(file, pmem_guest_addr, size as GuestUsize, pmem_cfg.iommu)
+            vm_virtio::Pmem::new(file, pmem_guest_addr, mmap_region, pmem_cfg.iommu)
                 .map_err(DeviceManagerError::CreateVirtioPmem)?,
         ));
 
