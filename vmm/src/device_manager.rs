@@ -1331,7 +1331,7 @@ impl DeviceManager {
         if let Some(fs_list_cfg) = &self.config.lock().unwrap().fs {
             for fs_cfg in fs_list_cfg.iter() {
                 if let Some(fs_sock) = fs_cfg.sock.to_str() {
-                    let cache: Option<(VirtioSharedMemoryList, u64)> = if fs_cfg.dax {
+                    let cache = if fs_cfg.dax {
                         let fs_cache = fs_cfg.cache_size;
                         // The memory needs to be 2MiB aligned in order to support
                         // hugepages.
@@ -1355,8 +1355,6 @@ impl DeviceManager {
                         )
                         .map_err(DeviceManagerError::NewMmapRegion)?;
                         let addr: u64 = mmap_region.as_ptr() as u64;
-
-                        self._mmap_regions.push(mmap_region);
 
                         self.memory_manager
                             .lock()
@@ -1383,6 +1381,7 @@ impl DeviceManager {
                                 region_list,
                             },
                             addr,
+                            mmap_region,
                         ))
                     } else {
                         None

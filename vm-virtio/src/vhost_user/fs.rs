@@ -28,6 +28,7 @@ use vhost_rs::vhost_user::{
 use vhost_rs::VhostBackend;
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+    MmapRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -258,7 +259,9 @@ pub struct Fs {
     config: VirtioFsConfig,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
-    cache: Option<(VirtioSharedMemoryList, u64)>,
+    // Hold ownership of the memory that is allocated for the device
+    // which will be automatically dropped when the device is dropped
+    cache: Option<(VirtioSharedMemoryList, u64, MmapRegion)>,
     slave_req_support: bool,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
@@ -273,7 +276,7 @@ impl Fs {
         tag: &str,
         req_num_queues: usize,
         queue_size: u16,
-        cache: Option<(VirtioSharedMemoryList, u64)>,
+        cache: Option<(VirtioSharedMemoryList, u64, MmapRegion)>,
     ) -> Result<Fs> {
         let mut slave_req_support = false;
 
@@ -471,7 +474,7 @@ impl VirtioDevice for Fs {
 
         // Initialize slave communication.
         let slave_req_handler = if self.slave_req_support {
-            if let Some(cache) = self.cache.clone() {
+            if let Some(cache) = self.cache.as_ref() {
                 let vu_master_req_handler = Arc::new(Mutex::new(SlaveReqHandler {
                     cache_offset: cache.0.addr,
                     cache_size: cache.0.len,
@@ -542,8 +545,8 @@ impl VirtioDevice for Fs {
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
-        if let Some(cache) = self.cache.clone() {
-            Some(cache.0)
+        if let Some(cache) = self.cache.as_ref() {
+            Some(cache.0.clone())
         } else {
             None
         }
