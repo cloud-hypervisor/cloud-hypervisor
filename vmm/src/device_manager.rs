@@ -73,6 +73,10 @@ const MMIO_LEN: u64 = 0x1000;
 #[cfg(feature = "pci_support")]
 const VFIO_DEVICE_NAME_PREFIX: &str = "vfio";
 
+const DISK_DEVICE_NAME_PREFIX: &str = "disk";
+const NET_DEVICE_NAME_PREFIX: &str = "net";
+const PMEM_DEVICE_NAME_PREFIX: &str = "pmem";
+
 /// Errors associated with device manager
 #[derive(Debug)]
 pub enum DeviceManagerError {
@@ -1092,8 +1096,12 @@ impl DeviceManager {
 
     fn make_virtio_block_device(
         &mut self,
-        disk_cfg: &DiskConfig,
+        disk_cfg: &mut DiskConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
+        if disk_cfg.id.is_none() {
+            disk_cfg.id = self.next_device_name(DISK_DEVICE_NAME_PREFIX)?;
+        }
+
         if disk_cfg.vhost_user {
             let sock = if let Some(sock) = disk_cfg.vhost_socket.clone() {
                 sock
@@ -1203,12 +1211,13 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool, Option<String>)>> {
         let mut devices = Vec::new();
 
-        let block_devices = self.config.lock().unwrap().disks.clone();
-        if let Some(disk_list_cfg) = &block_devices {
-            for disk_cfg in disk_list_cfg.iter() {
+        let mut block_devices = self.config.lock().unwrap().disks.clone();
+        if let Some(disk_list_cfg) = &mut block_devices {
+            for disk_cfg in disk_list_cfg.iter_mut() {
                 devices.push(self.make_virtio_block_device(disk_cfg)?);
             }
         }
+        self.config.lock().unwrap().disks = block_devices;
 
         Ok(devices)
     }
@@ -1240,8 +1249,12 @@ impl DeviceManager {
 
     fn make_virtio_net_device(
         &mut self,
-        net_cfg: &NetConfig,
+        net_cfg: &mut NetConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
+        if net_cfg.id.is_none() {
+            net_cfg.id = self.next_device_name(NET_DEVICE_NAME_PREFIX)?;
+        }
+
         if net_cfg.vhost_user {
             let sock = if let Some(sock) = net_cfg.vhost_socket.clone() {
                 sock
@@ -1309,12 +1322,13 @@ impl DeviceManager {
         &mut self,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool, Option<String>)>> {
         let mut devices = Vec::new();
-        let net_devices = self.config.lock().unwrap().net.clone();
-        if let Some(net_list_cfg) = &net_devices {
-            for net_cfg in net_list_cfg.iter() {
+        let mut net_devices = self.config.lock().unwrap().net.clone();
+        if let Some(net_list_cfg) = &mut net_devices {
+            for net_cfg in net_list_cfg.iter_mut() {
                 devices.push(self.make_virtio_net_device(net_cfg)?);
             }
         }
+        self.config.lock().unwrap().net = net_devices;
 
         Ok(devices)
     }
@@ -1438,8 +1452,12 @@ impl DeviceManager {
 
     fn make_virtio_pmem_device(
         &mut self,
-        pmem_cfg: &PmemConfig,
+        pmem_cfg: &mut PmemConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
+        if pmem_cfg.id.is_none() {
+            pmem_cfg.id = self.next_device_name(PMEM_DEVICE_NAME_PREFIX)?;
+        }
+
         let size = pmem_cfg.size;
 
         // The memory needs to be 2MiB aligned in order to support
@@ -1522,9 +1540,9 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool, Option<String>)>> {
         let mut devices = Vec::new();
         // Add virtio-pmem if required
-        let pmem_devices = self.config.lock().unwrap().pmem.clone();
-        if let Some(pmem_list_cfg) = &pmem_devices {
-            for pmem_cfg in pmem_list_cfg.iter() {
+        let mut pmem_devices = self.config.lock().unwrap().pmem.clone();
+        if let Some(pmem_list_cfg) = &mut pmem_devices {
+            for pmem_cfg in pmem_list_cfg.iter_mut() {
                 devices.push(self.make_virtio_pmem_device(pmem_cfg)?);
             }
         }
@@ -1606,8 +1624,13 @@ impl DeviceManager {
             .map_err(DeviceManagerError::CreateKvmDevice)
     }
 
+    #[cfg(not(feature = "pci_support"))]
+    fn next_device_name(&mut self, _prefix: &str) -> DeviceManagerResult<Option<String>> {
+        Ok(None)
+    }
+
     #[cfg(feature = "pci_support")]
-    fn next_device_name(&mut self, prefix: &str) -> DeviceManagerResult<String> {
+    fn next_device_name(&mut self, prefix: &str) -> DeviceManagerResult<Option<String>> {
         let start_id = self.device_id_cnt;
         loop {
             // Generate the temporary name.
@@ -1616,7 +1639,7 @@ impl DeviceManager {
             self.device_id_cnt += Wrapping(1);
             // Check if the name is already in use.
             if !self.pci_id_list.contains_key(&name) {
-                return Ok(name);
+                return Ok(Some(name));
             }
 
             if self.device_id_cnt == start_id {
@@ -1712,8 +1735,8 @@ impl DeviceManager {
             id.clone()
         } else {
             let id = self.next_device_name(VFIO_DEVICE_NAME_PREFIX)?;
-            device_cfg.id = Some(id.clone());
-            id
+            device_cfg.id = id.clone();
+            id.unwrap()
         };
         self.pci_id_list.insert(vfio_name, pci_device_bdf);
 
