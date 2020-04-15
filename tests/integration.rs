@@ -3668,7 +3668,10 @@ mod tests {
                 remote_command(
                     &api_socket,
                     "add-disk",
-                    Some(&format!("path={}", blk_file_path.to_str().unwrap()))
+                    Some(&format!(
+                        "path={},id=test0",
+                        blk_file_path.to_str().unwrap()
+                    ))
                 )
             );
 
@@ -3705,6 +3708,48 @@ mod tests {
                     .parse::<u32>()
                     .unwrap_or_default(),
                 1
+            );
+
+            aver!(
+                tb,
+                remote_command(&api_socket, "remove-device", Some("test0"))
+            );
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Check device has gone away
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                0
+            );
+
+            guest.ssh_command("sudo reboot").unwrap_or_default();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            aver_eq!(tb, reboot_count, 2);
+
+            // Check device still absent
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                0
             );
 
             let _ = child.kill();
