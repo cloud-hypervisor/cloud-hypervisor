@@ -233,9 +233,8 @@ pub enum DeviceManagerError {
     /// Missing PCI bus.
     NoPciBus,
 
-    /// Could not find an available VFIO device name.
-    #[cfg(feature = "pci_support")]
-    NoAvailableVfioDeviceName,
+    /// Could not find an available device name.
+    NoAvailableDeviceName,
 
     /// Missing PCI device.
     MissingPciDevice,
@@ -1648,7 +1647,7 @@ impl DeviceManager {
                 break;
             }
         }
-        Err(DeviceManagerError::NoAvailableVfioDeviceName)
+        Err(DeviceManagerError::NoAvailableDeviceName)
     }
 
     #[cfg(feature = "pci_support")]
