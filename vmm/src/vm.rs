@@ -482,7 +482,9 @@ impl Vm {
                 )
                 .map_err(Error::KernelLoad)?
             }
-            _ => panic!("Invalid elf file"),
+            Err(e) => {
+                return Err(Error::KernelLoad(e));
+            }
         };
 
         linux_loader::loader::load_cmdline(
