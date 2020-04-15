@@ -710,14 +710,25 @@ impl Vm {
                 // ensure the device would not be created in case of a reboot.
                 {
                     let mut config = self.config.lock().unwrap();
+
+                    // Remove if VFIO device
                     if let Some(devices) = config.devices.as_mut() {
-                        devices.retain(|dev| {
-                            if let Some(dev_id) = &dev.id {
-                                *dev_id != _id
-                            } else {
-                                true
-                            }
-                        });
+                        devices.retain(|dev| dev.id.as_ref() != Some(&_id));
+                    }
+
+                    // Remove if disk device
+                    if let Some(disks) = config.disks.as_mut() {
+                        disks.retain(|dev| dev.id.as_ref() != Some(&_id));
+                    }
+
+                    // Remove if net device
+                    if let Some(net) = config.net.as_mut() {
+                        net.retain(|dev| dev.id.as_ref() != Some(&_id));
+                    }
+
+                    // Remove if pmem device
+                    if let Some(pmem) = config.pmem.as_mut() {
+                        pmem.retain(|dev| dev.id.as_ref() != Some(&_id));
                     }
                 }
 
