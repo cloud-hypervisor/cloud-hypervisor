@@ -200,6 +200,13 @@ cmd_build() {
     cargo_args=("$@")
     [ $build = "release" ] && cargo_args+=("--release")
     cargo_args+=(--target "$target")
+    [ $(uname -m) = "aarch64" ] && cargo_args+=("--no-default-features")
+    [ $(uname -m) = "aarch64" ] && cargo_args+=(--features "mmio")
+
+    rustflags=""
+    if [ $(uname -m) = "aarch64" ] && [ $libc = "musl" ] ; then
+        rustflags="-C link-arg=-lgcc"
+    fi
 
     $DOCKER_RUNTIME run \
 	   --user "$(id -u):$(id -g)" \
@@ -207,6 +214,7 @@ cmd_build() {
 	   --rm \
 	   --volume /dev:/dev \
 	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	   --env RUSTFLAGS="$rustflags" \
 	   "$CTR_IMAGE" \
 	   cargo build \
 	         --target-dir "$CTR_CLH_CARGO_TARGET" \
@@ -336,6 +344,7 @@ cmd_build-container() {
 	   --target $container_type \
 	   -t $CTR_IMAGE \
 	   -f $BUILD_DIR/Dockerfile \
+	   --build-arg TARGETARCH="$(uname -m)" \
 	   $BUILD_DIR
 }
 
@@ -365,6 +374,13 @@ cmd=cmd_$1
 shift
 
 ensure_build_dir
-ensure_latest_ctr
+if [ $(uname -m) = "x86_64" ]; then
+    ensure_latest_ctr
+fi
+
+# Before a public image for AArch64 ready, we build the container if needed.
+if [ $(uname -m) = "aarch64" ]; then
+    cmd_build-container
+fi
 
 $cmd "$@"
