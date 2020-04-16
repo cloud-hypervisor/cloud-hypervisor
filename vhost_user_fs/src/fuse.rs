@@ -373,6 +373,9 @@ pub const WRITE_CACHE: u32 = 1;
 /// `lock_owner` field is valid.
 pub const WRITE_LOCKOWNER: u32 = 2;
 
+/// Kill suid and sgid bits
+pub const WRITE_KILL_PRIV: u32 = 4;
+
 // Read flags.
 pub const READ_LOCKOWNER: u32 = 2;
 
