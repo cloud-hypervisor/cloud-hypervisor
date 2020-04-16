@@ -292,7 +292,7 @@ impl VhostUserBackend for VhostUserNetBackend {
 
         let mut thread = self.threads[thread_id].lock().unwrap();
         match device_event {
-            x if x == 0 => {
+            0 => {
                 thread.resume_rx(&mut vrings[0].write().unwrap())?;
 
                 if !thread.rx_tap_listening {
@@ -304,10 +304,10 @@ impl VhostUserBackend for VhostUserNetBackend {
                     thread.rx_tap_listening = true;
                 }
             }
-            x if x == 1 => {
+            1 => {
                 thread.process_tx(&mut vrings[1].write().unwrap().mut_queue())?;
             }
-            x if x == 2 => {
+            2 => {
                 let mut vring = vrings[0].write().unwrap();
                 if thread.rx.deferred_frame
                 // Process a deferred frame first if available. Don't read from tap again
