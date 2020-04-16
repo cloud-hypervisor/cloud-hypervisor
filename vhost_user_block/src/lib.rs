@@ -36,7 +36,7 @@ use vhost_rs::vhost_user::message::*;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use vm_memory::{Bytes, GuestMemoryError, GuestMemoryMmap};
+use vm_memory::{Bytes, GuestMemoryMmap};
 use vm_virtio::block::{build_disk_image_id, Request};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -49,20 +49,14 @@ const BLK_SIZE: u32 = 512;
 // and the overhead of the emulation layer.
 const POLL_QUEUE_US: u128 = 50;
 
-pub trait DiskFile: Read + Seek + Write + Send + Sync {}
+trait DiskFile: Read + Seek + Write + Send + Sync {}
 impl<D: Read + Seek + Write + Send + Sync> DiskFile for D {}
 
-pub type Result<T> = std::result::Result<T, Error>;
-pub type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
+type Result<T> = std::result::Result<T, Error>;
+type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[derive(Debug)]
-pub enum Error {
-    /// Failed to detect image type.
-    DetectImageType,
-    /// Bad memory address.
-    GuestMemory(GuestMemoryError),
-    /// Can't open image file.
-    OpenImage,
+enum Error {
     /// Failed to parse direct parameter.
     ParseDirectParam,
     /// Failed to parse image parameter.
@@ -97,7 +91,7 @@ impl convert::From<Error> for io::Error {
     }
 }
 
-pub struct VhostUserBlkThread {
+struct VhostUserBlkThread {
     mem: Option<GuestMemoryMmap>,
     disk_image: Arc<Mutex<dyn DiskFile>>,
     disk_image_id: Vec<u8>,
@@ -107,7 +101,7 @@ pub struct VhostUserBlkThread {
 }
 
 impl VhostUserBlkThread {
-    pub fn new(
+    fn new(
         disk_image: Arc<Mutex<dyn DiskFile>>,
         disk_image_id: Vec<u8>,
         disk_nsectors: u64,
@@ -122,7 +116,7 @@ impl VhostUserBlkThread {
         })
     }
 
-    pub fn process_queue(&mut self, vring: &mut Vring) -> bool {
+    fn process_queue(&mut self, vring: &mut Vring) -> bool {
         let mut used_any = false;
         let mem = match self.mem.as_ref() {
             Some(m) => m,
@@ -180,7 +174,7 @@ impl VhostUserBlkThread {
     }
 }
 
-pub struct VhostUserBlkBackend {
+struct VhostUserBlkBackend {
     thread: Mutex<VhostUserBlkThread>,
     config: virtio_blk_config,
     rdonly: bool,
@@ -188,7 +182,7 @@ pub struct VhostUserBlkBackend {
 }
 
 impl VhostUserBlkBackend {
-    pub fn new(
+    fn new(
         image_path: String,
         num_queues: usize,
         rdonly: bool,
@@ -346,17 +340,17 @@ impl VhostUserBackend for VhostUserBlkBackend {
     }
 }
 
-pub struct VhostUserBlkBackendConfig<'a> {
-    pub image: &'a str,
-    pub sock: &'a str,
-    pub num_queues: usize,
-    pub readonly: bool,
-    pub direct: bool,
-    pub poll_queue: bool,
+struct VhostUserBlkBackendConfig<'a> {
+    image: &'a str,
+    sock: &'a str,
+    num_queues: usize,
+    readonly: bool,
+    direct: bool,
+    poll_queue: bool,
 }
 
 impl<'a> VhostUserBlkBackendConfig<'a> {
-    pub fn parse(backend: &'a str) -> Result<Self> {
+    fn parse(backend: &'a str) -> Result<Self> {
         let params_list: Vec<&str> = backend.split(',').collect();
 
         let mut image: &str = "";
