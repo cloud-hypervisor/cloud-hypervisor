@@ -648,6 +648,46 @@ impl Queue {
     pub fn go_to_previous_position(&mut self) {
         self.next_avail -= Wrapping(1);
     }
+
+    /// Get latest index from available ring.
+    pub fn update_avail_index_from_memory(&mut self, mem: &GuestMemoryMmap) {
+        let index_addr = match mem.checked_offset(self.avail_ring, 2) {
+            Some(ret) => ret,
+            None => {
+                error!("Invalid offset 0x{:x}", self.avail_ring.raw_value() + 2);
+                return;
+            }
+        };
+        let next_avail: u16 = match mem.read_obj::<u16>(index_addr) {
+            Ok(ret) => ret,
+            Err(e) => {
+                error!("Couldn't read `idx` field from memory: {}", e);
+                return;
+            }
+        };
+
+        self.next_avail = Wrapping(next_avail);
+    }
+
+    /// Get latest index from used ring.
+    pub fn update_used_index_from_memory(&mut self, mem: &GuestMemoryMmap) {
+        let index_addr = match mem.checked_offset(self.used_ring, 2) {
+            Some(ret) => ret,
+            None => {
+                error!("Invalid offset 0x{:x}", self.used_ring.raw_value() + 2);
+                return;
+            }
+        };
+        let next_used: u16 = match mem.read_obj::<u16>(index_addr) {
+            Ok(ret) => ret,
+            Err(e) => {
+                error!("Couldn't read `idx` field from memory: {}", e);
+                return;
+            }
+        };
+
+        self.next_used = Wrapping(next_used);
+    }
 }
 
 #[cfg(test)]
