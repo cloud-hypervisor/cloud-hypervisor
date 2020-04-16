@@ -4,10 +4,11 @@
 
 use crate::transport::{VirtioTransport, NOTIFY_REG_OFFSET};
 use crate::{
-    Queue, VirtioDevice, VirtioInterrupt, VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER,
-    DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT,
-    INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
+    Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
+    DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
+    DEVICE_INIT, INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
 };
+use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use libc::EFD_NONBLOCK;
@@ -16,7 +17,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 const VENDOR_ID: u32 = 0;
@@ -56,6 +60,18 @@ impl VirtioInterrupt for VirtioInterruptIntx {
 
         self.interrupt.trigger(0)
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct VirtioMmioDeviceState {
+    device_activated: bool,
+    features_select: u32,
+    acked_features_select: u32,
+    queue_select: u32,
+    interrupt_status: usize,
+    driver_status: u32,
+    queues: Vec<Queue>,
+    shm_region_select: u32,
 }
 
 /// Implements the
@@ -121,6 +137,43 @@ impl MmioDevice {
             mem: Some(mem),
             shm_region_select: 0,
         })
+    }
+
+    fn state(&self) -> VirtioMmioDeviceState {
+        VirtioMmioDeviceState {
+            device_activated: self.device_activated,
+            features_select: self.features_select,
+            acked_features_select: self.acked_features_select,
+            queue_select: self.queue_select,
+            interrupt_status: self.interrupt_status.load(Ordering::SeqCst),
+            driver_status: self.driver_status,
+            queues: self.queues.clone(),
+            shm_region_select: self.shm_region_select,
+        }
+    }
+
+    fn set_state(&mut self, state: &VirtioMmioDeviceState) -> Result<()> {
+        self.device_activated = state.device_activated;
+        self.features_select = state.features_select;
+        self.acked_features_select = state.acked_features_select;
+        self.queue_select = state.queue_select;
+        self.interrupt_status
+            .store(state.interrupt_status, Ordering::SeqCst);
+        self.driver_status = state.driver_status;
+        self.queues = state.queues.clone();
+
+        // Update virtqueues indexes for both available and used rings.
+        if let Some(mem) = self.mem.as_ref() {
+            let mem = mem.memory();
+            for queue in self.queues.iter_mut() {
+                queue.update_avail_index_from_memory(&mem);
+                queue.update_used_index_from_memory(&mem);
+            }
+        }
+
+        self.shm_region_select = state.shm_region_select;
+
+        Ok(())
     }
 
     /// Gets the list of queue events that must be triggered whenever the VM writes to
@@ -354,6 +407,89 @@ impl Pausable for MmioDevice {
     }
 }
 
-impl Snapshottable for MmioDevice {}
+const VIRTIO_MMIO_DEV_SNAPSHOT_ID: &str = "virtio_mmio_device";
+impl Snapshottable for MmioDevice {
+    fn id(&self) -> String {
+        format!(
+            "{}-{}",
+            VIRTIO_MMIO_DEV_SNAPSHOT_ID,
+            VirtioDeviceType::from(self.device.lock().unwrap().device_type())
+        )
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let snapshot_id = self.id();
+        let mut virtio_mmio_dev_snapshot = Snapshot::new(&snapshot_id);
+        virtio_mmio_dev_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", snapshot_id),
+            snapshot,
+        });
+
+        Ok(virtio_mmio_dev_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        let snapshot_id = self.id();
+        if let Some(virtio_mmio_dev_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", snapshot_id))
+        {
+            let virtio_mmio_dev_state =
+                match serde_json::from_slice(&virtio_mmio_dev_section.snapshot) {
+                    Ok(state) => state,
+                    Err(error) => {
+                        return Err(MigratableError::Restore(anyhow!(
+                            "Could not deserialize VIRTIO_MMIO_DEVICE {}",
+                            error
+                        )))
+                    }
+                };
+
+            // First restore the status of the virtqueues.
+            self.set_state(&virtio_mmio_dev_state).map_err(|e| {
+                MigratableError::Restore(anyhow!(
+                    "Could not restore VIRTIO_MMIO_DEVICE state {:?}",
+                    e
+                ))
+            })?;
+
+            // Then we can activate the device, as we know at this point that
+            // the virtqueues are in the right state and the device is ready
+            // to be activated, which will spawn each virtio worker thread.
+            if self.device_activated && self.is_driver_ready() && self.are_queues_valid() {
+                if let Some(interrupt_cb) = self.interrupt_cb.take() {
+                    if self.mem.is_some() {
+                        let mem = self.mem.as_ref().unwrap().clone();
+                        self.device
+                            .lock()
+                            .unwrap()
+                            .activate(
+                                mem,
+                                interrupt_cb,
+                                self.queues.clone(),
+                                self.queue_evts.split_off(0),
+                            )
+                            .map_err(|e| {
+                                MigratableError::Restore(anyhow!(
+                                    "Failed activating the device: {:?}",
+                                    e
+                                ))
+                            })?;
+                    }
+                }
+            }
+
+            return Ok(());
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find VIRTIO_MMIO_DEVICE snapshot section"
+        )))
+    }
+}
+
 impl Transportable for MmioDevice {}
 impl Migratable for MmioDevice {}
