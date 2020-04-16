@@ -636,6 +636,7 @@ impl<F: FileSystem + Sync> Server<F> {
         };
 
         let delayed_write = write_flags & WRITE_CACHE != 0;
+        let kill_priv = write_flags & WRITE_KILL_PRIV != 0;
 
         let data_reader = ZCReader(r);
 
@@ -648,6 +649,7 @@ impl<F: FileSystem + Sync> Server<F> {
             offset,
             owner,
             delayed_write,
+            kill_priv,
             flags,
         ) {
             Ok(count) => {

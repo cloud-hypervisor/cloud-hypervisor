@@ -682,10 +682,10 @@ pub trait FileSystem {
     /// implementation did not return a `Handle` from `open` then the contents of `handle` are
     /// undefined.
     ///
-    /// If the `FsOptions::HANDLE_KILLPRIV` feature is not enabled then then the file system is
-    /// expected to clear the setuid and setgid bits.
-    ///
     /// If `delayed_write` is true then it indicates that this is a write for buffered data.
+    ///
+    /// If `kill_priv` is true then it indicates that the file system is expected to clear the
+    /// setuid and setgid bits.
     ///
     /// This method should return exactly the number of bytes requested by the kernel, except in the
     /// case of error. An exception to this rule is if the file was opened with the "direct I/O"
@@ -702,6 +702,7 @@ pub trait FileSystem {
         offset: u64,
         lock_owner: Option<u64>,
         delayed_write: bool,
+        kill_priv: bool,
         flags: u32,
     ) -> io::Result<usize> {
         Err(io::Error::from_raw_os_error(libc::ENOSYS))
