@@ -32,7 +32,7 @@ use std::time::Instant;
 use std::vec::Vec;
 use std::{convert, error, fmt, io};
 use vhost_rs::vhost_user::message::*;
-use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
+use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{Bytes, GuestMemoryError, GuestMemoryMmap};
@@ -98,7 +98,6 @@ impl convert::From<Error> for io::Error {
 
 pub struct VhostUserBlkThread {
     mem: Option<GuestMemoryMmap>,
-    vring_worker: Option<Arc<VringWorker>>,
     disk_image: Box<dyn DiskFile>,
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
@@ -147,7 +146,6 @@ impl VhostUserBlkThread {
 
         Ok(VhostUserBlkThread {
             mem: None,
-            vring_worker: None,
             disk_image: image,
             disk_image_id: image_id,
             disk_nsectors: nsectors,
@@ -214,10 +212,6 @@ impl VhostUserBlkThread {
         }
 
         used_any
-    }
-
-    pub fn set_vring_worker(&mut self, vring_worker: Option<Arc<VringWorker>>) {
-        self.vring_worker = vring_worker;
     }
 }
 
@@ -449,15 +443,6 @@ pub fn start_block_backend(backend_command: &str) {
     )
     .unwrap();
     debug!("blk_daemon is created!\n");
-
-    let vring_worker = blk_daemon.get_vring_workers();
-    blk_backend
-        .write()
-        .unwrap()
-        .thread
-        .lock()
-        .unwrap()
-        .set_vring_worker(Some(vring_worker[0].clone()));
 
     if let Err(e) = blk_daemon.start() {
         error!(
