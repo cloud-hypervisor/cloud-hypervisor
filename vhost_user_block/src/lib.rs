@@ -49,7 +49,7 @@ const BLK_SIZE: u32 = 512;
 // and the overhead of the emulation layer.
 const POLL_QUEUE_US: u128 = 50;
 
-trait DiskFile: Read + Seek + Write + Send + Sync {}
+pub trait DiskFile: Read + Seek + Write + Send + Sync {}
 impl<D: Read + Seek + Write + Send + Sync> DiskFile for D {}
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -102,59 +102,21 @@ pub struct VhostUserBlkThread {
     disk_image: Arc<Mutex<dyn DiskFile>>,
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
-    config: virtio_blk_config,
-    rdonly: bool,
-    poll_queue: bool,
     event_idx: bool,
     kill_evt: EventFd,
 }
 
 impl VhostUserBlkThread {
     pub fn new(
-        image_path: String,
-        num_queues: usize,
-        rdonly: bool,
-        direct: bool,
-        poll_queue: bool,
+        disk_image: Arc<Mutex<dyn DiskFile>>,
+        disk_image_id: Vec<u8>,
+        disk_nsectors: u64,
     ) -> Result<Self> {
-        let mut options = OpenOptions::new();
-        options.read(true);
-        options.write(!rdonly);
-        if direct {
-            options.custom_flags(libc::O_DIRECT);
-        }
-        let image: File = options.open(&image_path).unwrap();
-        let mut raw_img: vm_virtio::RawFile = vm_virtio::RawFile::new(image, direct);
-
-        let image_id = build_disk_image_id(&PathBuf::from(&image_path));
-        let image_type = qcow::detect_image_type(&mut raw_img).unwrap();
-        let image = match image_type {
-            ImageType::Raw => Arc::new(Mutex::new(raw_img)) as Arc<Mutex<dyn DiskFile>>,
-            ImageType::Qcow2 => {
-                Arc::new(Mutex::new(QcowFile::from(raw_img).unwrap())) as Arc<Mutex<dyn DiskFile>>
-            }
-        };
-
-        let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap() as u64) / SECTOR_SIZE;
-        let mut config = virtio_blk_config::default();
-
-        config.capacity = nsectors;
-        config.blk_size = BLK_SIZE;
-        config.size_max = 65535;
-        config.seg_max = 128 - 2;
-        config.min_io_size = 1;
-        config.opt_io_size = 1;
-        config.num_queues = num_queues as u16;
-        config.wce = 1;
-
         Ok(VhostUserBlkThread {
             mem: None,
-            disk_image: image,
-            disk_image_id: image_id,
-            disk_nsectors: nsectors,
-            config,
-            rdonly,
-            poll_queue,
+            disk_image,
+            disk_image_id,
+            disk_nsectors,
             event_idx: false,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
         })
@@ -220,6 +182,9 @@ impl VhostUserBlkThread {
 
 pub struct VhostUserBlkBackend {
     thread: Mutex<VhostUserBlkThread>,
+    config: virtio_blk_config,
+    rdonly: bool,
+    poll_queue: bool,
 }
 
 impl VhostUserBlkBackend {
@@ -230,17 +195,50 @@ impl VhostUserBlkBackend {
         direct: bool,
         poll_queue: bool,
     ) -> Result<Self> {
-        let thread = Mutex::new(VhostUserBlkThread::new(
-            image_path, num_queues, rdonly, direct, poll_queue,
-        )?);
+        let mut options = OpenOptions::new();
+        options.read(true);
+        options.write(!rdonly);
+        if direct {
+            options.custom_flags(libc::O_DIRECT);
+        }
+        let image: File = options.open(&image_path).unwrap();
+        let mut raw_img: vm_virtio::RawFile = vm_virtio::RawFile::new(image, direct);
 
-        Ok(VhostUserBlkBackend { thread })
+        let image_id = build_disk_image_id(&PathBuf::from(&image_path));
+        let image_type = qcow::detect_image_type(&mut raw_img).unwrap();
+        let image = match image_type {
+            ImageType::Raw => Arc::new(Mutex::new(raw_img)) as Arc<Mutex<dyn DiskFile>>,
+            ImageType::Qcow2 => {
+                Arc::new(Mutex::new(QcowFile::from(raw_img).unwrap())) as Arc<Mutex<dyn DiskFile>>
+            }
+        };
+
+        let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap() as u64) / SECTOR_SIZE;
+        let mut config = virtio_blk_config::default();
+
+        config.capacity = nsectors;
+        config.blk_size = BLK_SIZE;
+        config.size_max = 65535;
+        config.seg_max = 128 - 2;
+        config.min_io_size = 1;
+        config.opt_io_size = 1;
+        config.num_queues = num_queues as u16;
+        config.wce = 1;
+
+        let thread = Mutex::new(VhostUserBlkThread::new(image, image_id, nsectors)?);
+
+        Ok(VhostUserBlkBackend {
+            thread,
+            config,
+            rdonly,
+            poll_queue,
+        })
     }
 }
 
 impl VhostUserBackend for VhostUserBlkBackend {
     fn num_queues(&self) -> usize {
-        self.thread.lock().unwrap().config.num_queues as usize
+        self.config.num_queues as usize
     }
 
     fn max_queue_size(&self) -> usize {
@@ -254,7 +252,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
             | 1 << VIRTIO_F_VERSION_1
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
-        if self.thread.lock().unwrap().rdonly {
+        if self.rdonly {
             avail_features |= 1 << VIRTIO_BLK_F_RO;
         }
         avail_features
@@ -288,10 +286,10 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
         let mut thread = self.thread.lock().unwrap();
         match device_event {
-            q if device_event < thread.config.num_queues => {
+            q if device_event < self.config.num_queues => {
                 let mut vring = vrings[q as usize].write().unwrap();
 
-                if thread.poll_queue {
+                if self.poll_queue {
                     // Actively poll the queue until POLL_QUEUE_US has passed
                     // without seeing a new request.
                     let mut now = Instant::now();
@@ -332,7 +330,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
         // self.config is a statically allocated virtio_blk_config
         let buf = unsafe {
             slice::from_raw_parts(
-                &self.thread.lock().unwrap().config as *const virtio_blk_config as *const _,
+                &self.config as *const virtio_blk_config as *const _,
                 mem::size_of::<virtio_blk_config>(),
             )
         };
