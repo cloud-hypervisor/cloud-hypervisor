@@ -23,6 +23,7 @@ use std::io::Read;
 use std::io::{Seek, SeekFrom, Write};
 use std::mem;
 use std::num::Wrapping;
+use std::ops::DerefMut;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process;
@@ -98,7 +99,7 @@ impl convert::From<Error> for io::Error {
 
 pub struct VhostUserBlkThread {
     mem: Option<GuestMemoryMmap>,
-    disk_image: Box<dyn DiskFile>,
+    disk_image: Arc<Mutex<dyn DiskFile>>,
     disk_image_id: Vec<u8>,
     disk_nsectors: u64,
     config: virtio_blk_config,
@@ -127,12 +128,14 @@ impl VhostUserBlkThread {
 
         let image_id = build_disk_image_id(&PathBuf::from(&image_path));
         let image_type = qcow::detect_image_type(&mut raw_img).unwrap();
-        let mut image = match image_type {
-            ImageType::Raw => Box::new(raw_img) as Box<dyn DiskFile>,
-            ImageType::Qcow2 => Box::new(QcowFile::from(raw_img).unwrap()) as Box<dyn DiskFile>,
+        let image = match image_type {
+            ImageType::Raw => Arc::new(Mutex::new(raw_img)) as Arc<Mutex<dyn DiskFile>>,
+            ImageType::Qcow2 => {
+                Arc::new(Mutex::new(QcowFile::from(raw_img).unwrap())) as Arc<Mutex<dyn DiskFile>>
+            }
         };
 
-        let nsectors = (image.seek(SeekFrom::End(0)).unwrap() as u64) / SECTOR_SIZE;
+        let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap() as u64) / SECTOR_SIZE;
         let mut config = virtio_blk_config::default();
 
         config.capacity = nsectors;
@@ -171,7 +174,7 @@ impl VhostUserBlkThread {
                 Ok(request) => {
                     debug!("element is a valid request");
                     let status = match request.execute(
-                        &mut self.disk_image,
+                        &mut self.disk_image.lock().unwrap().deref_mut(),
                         self.disk_nsectors,
                         mem,
                         &self.disk_image_id,
