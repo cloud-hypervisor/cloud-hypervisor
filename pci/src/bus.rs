@@ -53,6 +53,7 @@ impl PciRoot {
                 config: PciConfiguration::new(
                     VENDOR_ID_INTEL,
                     DEVICE_ID_INTEL_VIRT_PCIE_HOST,
+                    0,
                     PciClassCode::BridgeDevice,
                     &PciBridgeSubclass::HostBridge,
                     None,
