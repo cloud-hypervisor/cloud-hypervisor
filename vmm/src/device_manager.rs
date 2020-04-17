@@ -450,6 +450,48 @@ impl DeviceRelocation for AddressManager {
                         .register_ioevent(event, &io_addr, NoDatamatch)
                         .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
                 }
+            } else {
+                let virtio_dev = virtio_pci_dev.virtio_device();
+                let mut virtio_dev = virtio_dev.lock().unwrap();
+                if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
+                    if shm_regions.addr.raw_value() == old_base {
+                        // Remove old region from KVM by passing a size of 0.
+                        let mut mem_region = kvm_bindings::kvm_userspace_memory_region {
+                            slot: shm_regions.mem_slot,
+                            guest_phys_addr: old_base,
+                            memory_size: 0,
+                            userspace_addr: shm_regions.host_addr,
+                            flags: 0,
+                        };
+
+                        // Safe because removing an existing guest region.
+                        unsafe {
+                            self.vm_fd
+                                .set_user_memory_region(mem_region)
+                                .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
+                        }
+
+                        // Create new mapping by inserting new region to KVM.
+                        mem_region.guest_phys_addr = new_base;
+                        mem_region.memory_size = shm_regions.len;
+
+                        // Safe because the guest regions are guaranteed not to overlap.
+                        unsafe {
+                            self.vm_fd
+                                .set_user_memory_region(mem_region)
+                                .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
+                        }
+
+                        // Update shared memory regions to reflect the new mapping.
+                        shm_regions.addr = GuestAddress(new_base);
+                        virtio_dev.set_shm_regions(shm_regions).map_err(|e| {
+                            io::Error::new(
+                                io::ErrorKind::Other,
+                                format!("failed to update shared memory regions: {:?}", e),
+                            )
+                        })?;
+                    }
+                }
             }
         }
 
@@ -1403,15 +1445,16 @@ impl DeviceManager {
                             libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
                         )
                         .map_err(DeviceManagerError::NewMmapRegion)?;
-                        let addr: u64 = mmap_region.as_ptr() as u64;
+                        let host_addr: u64 = mmap_region.as_ptr() as u64;
 
-                        self.memory_manager
+                        let mem_slot = self
+                            .memory_manager
                             .lock()
                             .unwrap()
                             .create_userspace_mapping(
                                 fs_guest_addr.raw_value(),
                                 fs_cache,
-                                addr,
+                                host_addr,
                                 false,
                                 false,
                             )
@@ -1425,11 +1468,12 @@ impl DeviceManager {
 
                         Some((
                             VirtioSharedMemoryList {
+                                host_addr,
+                                mem_slot,
                                 addr: fs_guest_addr,
                                 len: fs_cache as GuestUsize,
                                 region_list,
                             },
-                            addr,
                             mmap_region,
                         ))
                     } else {

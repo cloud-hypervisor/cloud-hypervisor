@@ -186,4 +186,5 @@ pub enum Error {
     FailedSignalingDriver(io::Error),
     VhostUserUpdateMemory(vhost_user::Error),
     EventfdError(io::Error),
+    SetShmRegionsNotSupported,
 }
