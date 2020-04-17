@@ -337,6 +337,7 @@ impl PciConfiguration {
     pub fn new(
         vendor_id: u16,
         device_id: u16,
+        revision_id: u8,
         class_code: PciClassCode,
         subclass: &dyn PciSubclass,
         programming_interface: Option<&dyn PciProgrammingInterface>,
@@ -359,7 +360,8 @@ impl PciConfiguration {
         };
         registers[2] = u32::from(class_code.get_register_value()) << 24
             | u32::from(subclass.get_register_value()) << 16
-            | u32::from(pi) << 8;
+            | u32::from(pi) << 8
+            | u32::from(revision_id);
         writable_bits[3] = 0x0000_00ff; // Cacheline size (r/w)
         match header_type {
             PciHeaderType::Device => {
@@ -862,6 +864,7 @@ mod tests {
         let mut cfg = PciConfiguration::new(
             0x1234,
             0x5678,
+            0x1,
             PciClassCode::MultimediaController,
             &PciMultimediaSubclass::AudioController,
             None,
@@ -917,6 +920,7 @@ mod tests {
         let cfg = PciConfiguration::new(
             0x1234,
             0x5678,
+            0x1,
             PciClassCode::MultimediaController,
             &PciMultimediaSubclass::AudioController,
             Some(&TestPI::Test),

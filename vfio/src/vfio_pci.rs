@@ -299,6 +299,7 @@ impl VfioPciDevice {
         let configuration = PciConfiguration::new(
             0,
             0,
+            0,
             PciClassCode::Other,
             &PciVfioSubclass::VfioSubclass,
             None,
