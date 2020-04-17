@@ -261,7 +261,7 @@ pub struct Fs {
     pause_evt: Option<EventFd>,
     // Hold ownership of the memory that is allocated for the device
     // which will be automatically dropped when the device is dropped
-    cache: Option<(VirtioSharedMemoryList, u64, MmapRegion)>,
+    cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
     slave_req_support: bool,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
@@ -276,7 +276,7 @@ impl Fs {
         tag: &str,
         req_num_queues: usize,
         queue_size: u16,
-        cache: Option<(VirtioSharedMemoryList, u64, MmapRegion)>,
+        cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
     ) -> Result<Fs> {
         let mut slave_req_support = false;
 
@@ -478,7 +478,7 @@ impl VirtioDevice for Fs {
                 let vu_master_req_handler = Arc::new(Mutex::new(SlaveReqHandler {
                     cache_offset: cache.0.addr,
                     cache_size: cache.0.len,
-                    mmap_cache_addr: cache.1,
+                    mmap_cache_addr: cache.0.host_addr,
                 }));
 
                 let req_handler = MasterReqHandler::new(vu_master_req_handler).map_err(|e| {
@@ -549,6 +549,18 @@ impl VirtioDevice for Fs {
             Some(cache.0.clone())
         } else {
             None
+        }
+    }
+
+    fn set_shm_regions(
+        &mut self,
+        shm_regions: VirtioSharedMemoryList,
+    ) -> std::result::Result<(), crate::Error> {
+        if let Some(mut cache) = self.cache.as_mut() {
+            cache.0 = shm_regions;
+            Ok(())
+        } else {
+            Err(crate::Error::SetShmRegionsNotSupported)
         }
     }
 

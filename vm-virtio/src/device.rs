@@ -42,6 +42,8 @@ pub struct VirtioSharedMemory {
 
 #[derive(Clone)]
 pub struct VirtioSharedMemoryList {
+    pub host_addr: u64,
+    pub mem_slot: u32,
     pub addr: GuestAddress,
     pub len: GuestUsize,
     pub region_list: Vec<VirtioSharedMemory>,
@@ -95,6 +97,14 @@ pub trait VirtioDevice: Send {
     /// Returns the list of shared memory regions required by the device.
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
         None
+    }
+
+    /// Updates the list of shared memory regions required by the device.
+    fn set_shm_regions(
+        &mut self,
+        _shm_regions: VirtioSharedMemoryList,
+    ) -> std::result::Result<(), Error> {
+        std::unimplemented!()
     }
 
     fn iommu_translate(&self, addr: u64) -> u64 {
