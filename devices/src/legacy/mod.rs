@@ -7,10 +7,14 @@
 
 #[cfg(feature = "cmos")]
 mod cmos;
+#[cfg(feature = "fwdebug")]
+mod fwdebug;
 mod i8042;
 mod serial;
 
 #[cfg(feature = "cmos")]
 pub use self::cmos::Cmos;
+#[cfg(feature = "fwdebug")]
+pub use self::fwdebug::FwDebugDevice;
 pub use self::i8042::I8042Device;
 pub use self::serial::Serial;

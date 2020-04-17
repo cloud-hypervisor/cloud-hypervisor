@@ -26,3 +26,4 @@ tempfile = "3.1.0"
 default = []
 acpi = ["acpi_tables"]
 cmos = []
+fwdebug = []
