@@ -757,6 +757,11 @@ impl PciDevice for VirtioPciDevice {
                     PciDeviceError::IoRegistrationFailed(shm_list.addr.raw_value(), e)
                 })? as u8;
 
+            let region_type = PciBarRegionType::Memory64BitRegion;
+            ranges.push((shm_list.addr, shm_list.len, region_type));
+            self.bar_regions
+                .push((shm_list.addr, shm_list.len, region_type));
+
             for (idx, shm) in shm_list.region_list.iter().enumerate() {
                 let shm_cap = VirtioPciCap64::new(
                     PciCapabilityType::SharedMemoryConfig,
