@@ -8,8 +8,8 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, UserspaceMapping,
+    VirtioDevice, VirtioDeviceType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use epoll;
@@ -322,6 +322,7 @@ pub struct Pmem {
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     paused: Arc<AtomicBool>,
+    mapping: UserspaceMapping,
 
     // Hold ownership of the memory that is allocated for the device
     // which will be automatically dropped when the device is dropped
@@ -332,6 +333,7 @@ impl Pmem {
     pub fn new(
         disk: File,
         addr: GuestAddress,
+        mapping: UserspaceMapping,
         _region: MmapRegion,
         iommu: bool,
     ) -> io::Result<Pmem> {
@@ -357,6 +359,7 @@ impl Pmem {
             interrupt_cb: None,
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
+            mapping,
             _region,
         })
     }
@@ -512,6 +515,10 @@ impl VirtioDevice for Pmem {
             self.interrupt_cb.take().unwrap(),
             self.queue_evts.take().unwrap(),
         ))
+    }
+
+    fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
+        vec![self.mapping.clone()]
     }
 }
 
