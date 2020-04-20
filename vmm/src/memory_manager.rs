@@ -662,6 +662,60 @@ impl MemoryManager {
         Ok(slot)
     }
 
+    pub fn remove_userspace_mapping(
+        &mut self,
+        guest_phys_addr: u64,
+        memory_size: u64,
+        userspace_addr: u64,
+        mergeable: bool,
+        slot: u32,
+    ) -> Result<(), Error> {
+        let mem_region = kvm_userspace_memory_region {
+            slot,
+            guest_phys_addr,
+            memory_size: 0,
+            userspace_addr,
+            flags: 0,
+        };
+
+        // Safe to remove because we know the region exist.
+        unsafe { self.fd.set_user_memory_region(mem_region) }
+            .map_err(Error::SetUserMemoryRegion)?;
+
+        // Mark the pages as unmergeable if there were previously marked as
+        // mergeable.
+        if mergeable {
+            // Safe because the address and size are valid as the region was
+            // previously advised.
+            let ret = unsafe {
+                libc::madvise(
+                    userspace_addr as *mut libc::c_void,
+                    memory_size as libc::size_t,
+                    libc::MADV_UNMERGEABLE,
+                )
+            };
+            if ret != 0 {
+                let err = io::Error::last_os_error();
+                // Safe to unwrap because the error is constructed with
+                // last_os_error(), which ensures the output will be Some().
+                let errno = err.raw_os_error().unwrap();
+                if errno == libc::EINVAL {
+                    warn!("kernel not configured with CONFIG_KSM");
+                } else {
+                    warn!("madvise error: {}", err);
+                }
+                warn!("failed to mark pages as unmergeable");
+            }
+        }
+
+        info!(
+            "Removed userspace mapping: {:x} -> {:x} {:x}",
+            guest_phys_addr, userspace_addr, memory_size
+        );
+
+        Ok(())
+    }
+
     pub fn virtiomem_resize(&mut self, size: u64) -> Result<(), Error> {
         let region = self.virtiomem_region.take();
         if let Some(region) = region {
