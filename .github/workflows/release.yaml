@@ -6,6 +6,10 @@ jobs:
     if: github.event_name == 'create' && github.event.ref_type == 'tag'
     name: Release
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
     steps:
       - name: Code checkout
         uses: actions/checkout@v2
@@ -13,9 +17,10 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
             toolchain: stable
+            target: ${{ matrix.target }}
             override: true
       - name: Build
-        run: cargo build --release
+        run: cargo build --release --target=${{ matrix.target }}
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -33,7 +38,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/release/cloud-hypervisor
+          asset_path: target/x86_64-unknown-linux-gnu/release/cloud-hypervisor
           asset_name: cloud-hypervisor
           asset_content_type: application/octet-stream
       - name: Upload ch-remote
@@ -43,6 +48,36 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/release/ch-remote
+          asset_path: target/x86_64-unknown-linux-gnu/release/ch-remote
           asset_name: ch-remote
+          asset_content_type: application/octet-stream
+
+  release-static:
+    if: github.event_name == 'create' && github.event.ref_type == 'tag'
+    name: Release static binary
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v2
+      - name: Install Rust toolchain (stable)
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: stable
+            target: ${{ matrix.target }}
+            override: true
+      - name: Build
+        run: cargo build --release --target=${{ matrix.target }}
+      - name: Upload static cloud-hypervisor
+        id: upload-release-cloud-hypervisor-static
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ release.steps.create_release.outputs.upload_url }}
+          asset_path: target/x86_64-unknown-linux-musl/release/cloud-hypervisor
+          asset_name: cloud-hypervisor-static
           asset_content_type: application/octet-stream
