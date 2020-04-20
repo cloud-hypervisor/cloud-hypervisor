@@ -1775,6 +1775,7 @@ mod tests {
         cache_size: Option<u64>,
         virtiofsd_cache: &str,
         prepare_daemon: &dyn Fn(&TempDir, &str, &str) -> (std::process::Child, String),
+        hotplug: bool,
     ) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1803,26 +1804,35 @@ mod tests {
                 virtiofsd_cache,
             );
 
-            let mut child = GuestCommand::new(&guest)
+            let mut guest_command = GuestCommand::new(&guest);
+            guest_command
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M,hotplug_size=2048M,file=/dev/shm"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&[
-                    "--fs",
-                    format!(
-                        "tag=myfs,sock={},num_queues=1,queue_size=1024,dax={}{}",
-                        virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
-                    )
-                    .as_str(),
-                ])
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
-                .args(&["--api-socket", &api_socket])
-                .spawn()
-                .unwrap();
+                .args(&["--api-socket", &api_socket]);
+
+            let fs_params = format!(
+                "tag=myfs,sock={},num_queues=1,queue_size=1024,dax={}{}",
+                virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
+            );
+
+            if !hotplug {
+                guest_command.args(&["--fs", fs_params.as_str()]);
+            }
+
+            let mut child = guest_command.spawn().unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
+
+            if hotplug {
+                // Add fs to the VM
+                aver!(tb, remote_command(&api_socket, "add-fs", Some(&fs_params),));
+
+                thread::sleep(std::time::Duration::new(10, 0));
+            }
 
             // Mount shared directory through virtio_fs filesystem
             let mount_cmd = format!(
@@ -1912,140 +1922,24 @@ mod tests {
         });
     }
 
-    fn test_virtio_fs_hotplug(
-        dax: bool,
-        cache_size: Option<u64>,
-        virtiofsd_cache: &str,
-        prepare_daemon: &dyn Fn(&TempDir, &str, &str) -> (std::process::Child, String),
-    ) {
-        test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
-            let api_socket = temp_api_path(&guest.tmp_dir);
-
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut shared_dir = workload_path.clone();
-            shared_dir.push("shared_dir");
-
-            let mut kernel_path = workload_path;
-            kernel_path.push("vmlinux");
-
-            let (dax_vmm_param, dax_mount_param) = if dax { ("on", "-o dax") } else { ("off", "") };
-            let cache_size_vmm_param = if let Some(cache) = cache_size {
-                format!(",cache_size={}", cache)
-            } else {
-                "".to_string()
-            };
-
-            let (mut daemon_child, virtiofsd_socket_path) = prepare_daemon(
-                &guest.tmp_dir,
-                shared_dir.to_str().unwrap(),
-                virtiofsd_cache,
-            );
-
-            // Spawn without fs, since we'll add it later via API
-            let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .default_disks()
-                .default_net()
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
-                .args(&["--api-socket", &api_socket])
-                .spawn()
-                .unwrap();
-
-            thread::sleep(std::time::Duration::new(20, 0));
-
-            // Add fs to the VM
-            aver!(
-                tb,
-                remote_command(
-                    &api_socket,
-                    "add-fs",
-                    Some(&format!(
-                        "tag=myfs,sock={},num_queues=1,queue_size=1024,dax={}{}",
-                        virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
-                    )),
-                )
-            );
-
-            thread::sleep(std::time::Duration::new(10, 0));
-
-            // Mount shared directory through virtio_fs filesystem
-            let mount_cmd = format!(
-                "mkdir -p mount_dir && \
-                 sudo mount -t virtiofs {} myfs mount_dir/ 2>&1 && \
-                 echo ok",
-                dax_mount_param
-            );
-            aver_eq!(
-                tb,
-                guest.ssh_command(&mount_cmd).unwrap_or_default().trim(),
-                "ok"
-            );
-
-            // Check the cache size is the expected one.
-            // With virtio-mmio the cache doesn't appear in /proc/iomem
-            #[cfg(not(feature = "mmio"))]
-            aver_eq!(
-                tb,
-                guest
-                    .valid_virtio_fs_cache_size(dax, cache_size)
-                    .unwrap_or_default(),
-                true
-            );
-            // Check file1 exists and its content is "foo"
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("cat mount_dir/file1")
-                    .unwrap_or_default()
-                    .trim(),
-                "foo"
-            );
-
-            // Ensure the VM successfully reboots. The virtio-fs will not be
-            // automatically recreated since virtiofsd exits on disconnect.
-            guest.ssh_command("sudo reboot").unwrap_or_default();
-
-            thread::sleep(std::time::Duration::new(20, 0));
-            let reboot_count = guest
-                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                .unwrap_or_default()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default();
-            aver_eq!(tb, reboot_count, 1);
-
-            let _ = child.kill();
-            let _ = daemon_child.kill();
-            let _ = child.wait();
-            let _ = daemon_child.wait();
-            Ok(())
-        });
-    }
-
     #[test]
     fn test_virtio_fs_dax_on_default_cache_size() {
-        test_virtio_fs(true, None, "none", &prepare_virtiofsd)
+        test_virtio_fs(true, None, "none", &prepare_virtiofsd, false)
     }
 
     #[test]
     fn test_virtio_fs_dax_on_cache_size_1_gib() {
-        test_virtio_fs(true, Some(0x4000_0000), "none", &prepare_virtiofsd)
+        test_virtio_fs(true, Some(0x4000_0000), "none", &prepare_virtiofsd, false)
     }
 
     #[test]
     fn test_virtio_fs_dax_off() {
-        test_virtio_fs(false, None, "none", &prepare_virtiofsd)
+        test_virtio_fs(false, None, "none", &prepare_virtiofsd, false)
     }
 
     #[test]
     fn test_virtio_fs_dax_on_default_cache_size_w_vhost_user_fs_daemon() {
-        test_virtio_fs(true, None, "none", &prepare_vhost_user_fs_daemon)
+        test_virtio_fs(true, None, "none", &prepare_vhost_user_fs_daemon, false)
     }
 
     #[test]
@@ -2055,32 +1949,33 @@ mod tests {
             Some(0x4000_0000),
             "none",
             &prepare_vhost_user_fs_daemon,
+            false,
         )
     }
 
     #[test]
     fn test_virtio_fs_dax_off_w_vhost_user_fs_daemon() {
-        test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon)
+        test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon, false)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_hotplug_dax_on() {
-        test_virtio_fs_hotplug(true, None, "none", &prepare_virtiofsd)
+        test_virtio_fs(true, None, "none", &prepare_virtiofsd, true)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_hotplug_dax_off() {
-        test_virtio_fs_hotplug(false, None, "none", &prepare_virtiofsd)
+        test_virtio_fs(false, None, "none", &prepare_virtiofsd, true)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_hotplug_dax_on_w_vhost_user_fs_daemon() {
-        test_virtio_fs_hotplug(true, None, "none", &prepare_vhost_user_fs_daemon)
+        test_virtio_fs(true, None, "none", &prepare_vhost_user_fs_daemon, true)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_fs_hotplug_dax_off_w_vhost_user_fs_daemon() {
-        test_virtio_fs_hotplug(false, None, "none", &prepare_vhost_user_fs_daemon)
+        test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon, true)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
