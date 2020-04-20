@@ -6,8 +6,8 @@ use super::Error as DeviceError;
 use super::{Error, Result};
 use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::{
-    ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
-    VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioDevice, VirtioDeviceType,
+    VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
 };
 use libc::{self, c_void, off64_t, pread64, pwrite64, EFD_NONBLOCK};
 use std::cmp;
@@ -566,6 +566,21 @@ impl VirtioDevice for Fs {
 
     fn update_memory(&mut self, mem: &GuestMemoryMmap) -> std::result::Result<(), crate::Error> {
         update_mem_table(&mut self.vu, mem).map_err(crate::Error::VhostUserUpdateMemory)
+    }
+
+    fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
+        let mut mappings = Vec::new();
+        if let Some(cache) = self.cache.as_ref() {
+            mappings.push(UserspaceMapping {
+                host_addr: cache.0.host_addr,
+                mem_slot: cache.0.mem_slot,
+                addr: cache.0.addr,
+                len: cache.0.len,
+                mergeable: false,
+            })
+        }
+
+        mappings
     }
 }
 
