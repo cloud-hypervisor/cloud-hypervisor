@@ -2235,6 +2235,12 @@ impl DeviceManager {
 
         let interrupt_manager = Arc::clone(&self.msi_interrupt_manager);
 
+        // Add the virtio device to the device manager list. This is important
+        // as the list is used to notify virtio devices about memory updates
+        // for instance.
+        self.virtio_devices
+            .push((device.clone(), iommu_attached, id.clone()));
+
         let device_id = self.add_virtio_pci_device(
             device,
             &mut pci.lock().unwrap(),
