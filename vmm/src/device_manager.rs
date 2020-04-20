@@ -2209,7 +2209,22 @@ impl DeviceManager {
 
             // Shutdown and remove the underlying virtio-device if present
             if let Some(virtio_device) = virtio_device {
+                for mapping in virtio_device.lock().unwrap().userspace_mappings() {
+                    self.memory_manager
+                        .lock()
+                        .unwrap()
+                        .remove_userspace_mapping(
+                            mapping.addr.raw_value(),
+                            mapping.len,
+                            mapping.host_addr,
+                            mapping.mergeable,
+                            mapping.mem_slot,
+                        )
+                        .map_err(DeviceManagerError::MemoryManager)?;
+                }
+
                 virtio_device.lock().unwrap().shutdown();
+
                 self.virtio_devices
                     .retain(|(d, _, _)| !Arc::ptr_eq(d, &virtio_device));
             }
