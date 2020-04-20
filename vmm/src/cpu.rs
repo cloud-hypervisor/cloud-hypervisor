@@ -671,7 +671,7 @@ impl VcpuState {
     fn signal_thread(&self) {
         if let Some(handle) = self.handle.as_ref() {
             unsafe {
-                libc::pthread_kill(handle.as_pthread_t(), SIGRTMIN());
+                libc::pthread_kill(handle.as_pthread_t() as _, SIGRTMIN());
             }
         }
     }

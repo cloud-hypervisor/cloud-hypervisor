@@ -12,6 +12,9 @@ jobs:
           - stable
           - beta
           - nightly
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
     steps:
       - name: Code checkout
         uses: actions/checkout@v2
@@ -19,7 +22,8 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
             toolchain: ${{ matrix.rust }}
+            target: ${{ matrix.target }}
             override: true
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --release --target=${{ matrix.target }}

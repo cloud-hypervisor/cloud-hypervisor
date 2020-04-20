@@ -9,13 +9,20 @@ jobs:
     steps:
       - name: Code checkout
         uses: actions/checkout@v2
-      - name: Install Rust toolchain (stable)
+      - name: Install Rust toolchain (x86_64-unknown-linux-gnu)
         uses: actions-rs/toolchain@v1
         with:
             toolchain: stable
-            override: true
+            target: x86_64-unknown-linux-gnu
+      - name: Install Rust toolchain (x86_64-unknown-linux-musl)
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: stable
+            target: x86_64-unknown-linux-musl
       - name: Build
-        run: cargo build --release
+        run: cargo build --release --target=x86_64-unknown-linux-gnu
+      - name: Static Build
+        run: cargo build --release --target=x86_64-unknown-linux-musl
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -33,8 +40,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/release/cloud-hypervisor
+          asset_path: target/x86_64-unknown-linux-gnu/release/cloud-hypervisor
           asset_name: cloud-hypervisor
+          asset_content_type: application/octet-stream
+      - name: Upload static cloud-hypervisor
+        id: upload-release-static-cloud-hypervisor
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/x86_64-unknown-linux-musl/release/cloud-hypervisor
+          asset_name: cloud-hypervisor-static
           asset_content_type: application/octet-stream
       - name: Upload ch-remote
         id: upload-release-ch-remote
@@ -43,6 +60,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/release/ch-remote
+          asset_path: target/x86_64-unknown-linux-gnu/release/ch-remote
           asset_name: ch-remote
           asset_content_type: application/octet-stream
