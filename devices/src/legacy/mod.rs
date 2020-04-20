@@ -10,6 +10,8 @@ mod cmos;
 #[cfg(feature = "fwdebug")]
 mod fwdebug;
 mod i8042;
+#[cfg(target_arch = "aarch64")]
+mod rtc_pl031;
 mod serial;
 
 #[cfg(feature = "cmos")]
@@ -18,3 +20,6 @@ pub use self::cmos::Cmos;
 pub use self::fwdebug::FwDebugDevice;
 pub use self::i8042::I8042Device;
 pub use self::serial::Serial;
+
+#[cfg(target_arch = "aarch64")]
+pub use self::rtc_pl031::RTC;
