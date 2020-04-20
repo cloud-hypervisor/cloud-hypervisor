@@ -13,7 +13,7 @@ use libc::{self, c_void, off64_t, pread64, pwrite64, EFD_NONBLOCK};
 use std::cmp;
 use std::io;
 use std::io::Write;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -542,6 +542,10 @@ impl VirtioDevice for Fs {
             self.interrupt_cb.take().unwrap(),
             self.queue_evts.take().unwrap(),
         ))
+    }
+
+    fn shutdown(&mut self) {
+        let _ = unsafe { libc::close(self.vu.as_raw_fd()) };
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
