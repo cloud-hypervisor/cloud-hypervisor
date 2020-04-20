@@ -4,7 +4,6 @@
 
 use std::collections::btree_map;
 use std::collections::BTreeMap;
-use std::convert::TryInto;
 use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io;
@@ -1695,13 +1694,14 @@ impl FileSystem for PassthroughFs {
         // Safe because this will only modify `offset_in` and `offset_out` and we check
         // the return value.
         let res = unsafe {
-            libc::copy_file_range(
+            libc::syscall(
+                libc::SYS_copy_file_range,
                 fd_in,
                 &mut (offset_in as i64) as &mut _ as *mut _,
                 fd_out,
                 &mut (offset_out as i64) as &mut _ as *mut _,
-                len.try_into().unwrap(),
-                flags.try_into().unwrap(),
+                len,
+                flags,
             )
         };
         if res < 0 {
