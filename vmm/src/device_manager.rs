@@ -1569,22 +1569,31 @@ impl DeviceManager {
                 },
         )
         .map_err(DeviceManagerError::NewMmapRegion)?;
-        let addr: u64 = mmap_region.as_ptr() as u64;
+        let host_addr: u64 = mmap_region.as_ptr() as u64;
 
-        self.memory_manager
+        let mem_slot = self
+            .memory_manager
             .lock()
             .unwrap()
             .create_userspace_mapping(
                 pmem_guest_addr.raw_value(),
                 size,
-                addr,
+                host_addr,
                 pmem_cfg.mergeable,
                 pmem_cfg.discard_writes,
             )
             .map_err(DeviceManagerError::MemoryManager)?;
 
+        let mapping = vm_virtio::UserspaceMapping {
+            host_addr,
+            mem_slot,
+            addr: pmem_guest_addr,
+            len: size,
+            mergeable: pmem_cfg.mergeable,
+        };
+
         let virtio_pmem_device = Arc::new(Mutex::new(
-            vm_virtio::Pmem::new(file, pmem_guest_addr, mmap_region, pmem_cfg.iommu)
+            vm_virtio::Pmem::new(file, pmem_guest_addr, mapping, mmap_region, pmem_cfg.iommu)
                 .map_err(DeviceManagerError::CreateVirtioPmem)?,
         ));
 
