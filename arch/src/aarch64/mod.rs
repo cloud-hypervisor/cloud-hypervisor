@@ -1,6 +1,11 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+/// Module for the global interrupt controller configuration.
+pub mod gic;
+mod gicv2;
+mod gicv3;
+/// Layout for this aarch64 system.
 pub mod layout;
 
 use crate::RegionType;
