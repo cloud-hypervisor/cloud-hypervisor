@@ -5,6 +5,7 @@
 use super::Error as DeviceError;
 use super::{DescriptorChain, DeviceEventT, Queue};
 use net_util::{MacAddr, Tap, TapError};
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::fs;
 use std::io::{self, Write};
@@ -47,7 +48,7 @@ const CTRL_QUEUE_EVENT: DeviceEventT = 0;
 const CTRL_EVENT_COUNT: usize = 3;
 
 #[repr(C, packed)]
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Deserialize)]
 pub struct VirtioNetConfig {
     pub mac: [u8; 6],
     pub status: u16,
@@ -55,6 +56,34 @@ pub struct VirtioNetConfig {
     pub mtu: u16,
     pub speed: u32,
     pub duplex: u8,
+}
+
+// We must explicitly implement Serialize since the structure is packed and
+// it's unsafe to borrow from a packed structure. And by default, if we derive
+// Serialize from serde, it will borrow the values from the structure.
+// That's why this implementation copies each field separately before it
+// serializes the entire structure field by field.
+impl Serialize for VirtioNetConfig {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mac = self.mac;
+        let status = self.status;
+        let max_virtqueue_pairs = self.max_virtqueue_pairs;
+        let mtu = self.mtu;
+        let speed = self.speed;
+        let duplex = self.duplex;
+
+        let mut virtio_net_config = serializer.serialize_struct("VirtioNetConfig", 17)?;
+        virtio_net_config.serialize_field("mac", &mac)?;
+        virtio_net_config.serialize_field("status", &status)?;
+        virtio_net_config.serialize_field("max_virtqueue_pairs", &max_virtqueue_pairs)?;
+        virtio_net_config.serialize_field("mtu", &mtu)?;
+        virtio_net_config.serialize_field("speed", &speed)?;
+        virtio_net_config.serialize_field("duplex", &duplex)?;
+        virtio_net_config.end()
+    }
 }
 
 // Safe because it only has data and has no implicit padding.
