@@ -175,7 +175,7 @@ impl MmioDevice {
             for queue in self.queues.iter_mut() {
                 queue.next_avail = Wrapping(
                     queue
-                        .avail_index_from_memory(&mem)
+                        .used_index_from_memory(&mem)
                         .map_err(Error::QueueRingIndex)?,
                 );
                 queue.next_used = Wrapping(
