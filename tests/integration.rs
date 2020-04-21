@@ -18,6 +18,7 @@ extern crate lazy_static;
 mod tests {
     #![allow(dead_code)]
     use ssh2::Session;
+    use std::env;
     use std::ffi::OsStr;
     use std::fs;
     use std::io;
@@ -128,6 +129,13 @@ mod tests {
             }
         }
         Err(io::Error::last_os_error())
+    }
+
+    fn clh_command(cmd: &str) -> String {
+        env::var("BUILD_TARGET").map_or(
+            format!("target/x86_64-unknown-linux-gnu/release/{}", cmd),
+            |target| format!("target/{}/release/{}", target, cmd),
+        )
     }
 
     impl DiskConfig for ClearDiskConfig {
@@ -358,7 +366,7 @@ mod tests {
             String::from(tmp_dir.path().join("virtiofs.sock").to_str().unwrap());
 
         // Start the daemon
-        let child = Command::new("target/release/vhost_user_fs")
+        let child = Command::new(clh_command("vhost_user_fs"))
             .args(&["--shared-dir", shared_dir])
             .args(&["--sock", virtiofsd_socket_path.as_str()])
             .spawn()
@@ -386,7 +394,7 @@ mod tests {
         let vubd_socket_path = String::from(tmp_dir.path().join("vub.sock").to_str().unwrap());
 
         // Start the daemon
-        let child = Command::new("target/release/cloud-hypervisor")
+        let child = Command::new(clh_command("cloud-hypervisor"))
             .args(&[
                 "--block-backend",
                 format!(
@@ -445,7 +453,7 @@ mod tests {
             )
         };
 
-        let child = Command::new("target/release/cloud-hypervisor")
+        let child = Command::new(clh_command("cloud-hypervisor"))
             .args(&["--net-backend", net_params.as_str()])
             .spawn()
             .unwrap();
@@ -477,7 +485,7 @@ mod tests {
     }
 
     fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
-        let mut cmd = Command::new("target/release/ch-remote");
+        let mut cmd = Command::new(clh_command("ch-remote"));
         cmd.args(&[&format!("--api-socket={}", api_socket), command]);
 
         if let Some(arg) = arg {
@@ -492,7 +500,7 @@ mod tests {
         desired_vcpus: Option<u8>,
         desired_ram: Option<usize>,
     ) -> bool {
-        let mut cmd = Command::new("target/release/ch-remote");
+        let mut cmd = Command::new(clh_command("ch-remote"));
         cmd.args(&[&format!("--api-socket={}", api_socket), "resize"]);
 
         if let Some(desired_vcpus) = desired_vcpus {
@@ -813,7 +821,7 @@ mod tests {
     impl<'a> GuestCommand<'a> {
         fn new(guest: &'a Guest) -> Self {
             Self {
-                command: Command::new("target/release/cloud-hypervisor"),
+                command: Command::new(clh_command("cloud-hypervisor")),
                 guest,
                 capture_output: false,
             }

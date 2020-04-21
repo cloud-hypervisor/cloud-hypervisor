@@ -3,6 +3,8 @@ set -x
 
 source $HOME/.cargo/env
 
+export BUILD_TARGET=${BUILD_TARGET-x86_64-unknown-linux-gnu}
+
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
 
@@ -208,13 +210,13 @@ sudo ip tuntap add name vunet-tap0 mode tap
 # Create tap interface with multipe queues support for vhost_user_net test.
 sudo ip tuntap add name vunet-tap1 mode tap multi_queue
 
-cargo build --release
-sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
-sudo setcap cap_net_admin+ep target/release/vhost_user_net
+cargo build --release --target $BUILD_TARGET
+sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/cloud-hypervisor
+sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/vhost_user_net
 
 # We always copy a fresh version of our binary for our L2 guest.
-cp target/release/cloud-hypervisor $VFIO_DIR
-cp target/release/ch-remote $VFIO_DIR
+cp target/$BUILD_TARGET/release/cloud-hypervisor $VFIO_DIR
+cp target/$BUILD_TARGET/release/ch-remote $VFIO_DIR
 
 # Enable KSM with some reasonable parameters so that it won't take too long
 # for the memory to be merged between two processes.
@@ -239,8 +241,8 @@ RES=$?
 
 if [ $RES -eq 0 ]; then
     # virtio-mmio based testing
-    cargo build --release --no-default-features --features "mmio"
-    sudo setcap cap_net_admin+ep target/release/cloud-hypervisor
+    cargo build --release --target $BUILD_TARGET --no-default-features --features "mmio"
+    sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/cloud-hypervisor
 
     # Ensure test binary has the same caps as the cloud-hypervisor one
     time cargo test --no-run --features "integration_tests,mmio" -- --nocapture || exit 1
