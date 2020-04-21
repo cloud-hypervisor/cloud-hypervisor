@@ -430,7 +430,15 @@ impl RxVirtio {
         // Mark that we have at least one pending packet and we need to interrupt the guest.
         self.deferred_irqs = true;
 
-        write_count >= self.bytes_read
+        // Update the frame_buf buffer.
+        if write_count < self.bytes_read {
+            self.frame_buf.copy_within(write_count..self.bytes_read, 0);
+            self.bytes_read -= write_count;
+            false
+        } else {
+            self.bytes_read = 0;
+            true
+        }
     }
 }
 
