@@ -17,7 +17,8 @@ use std::sync::Arc;
 
 use crate::device::VirtioIommuRemapping;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestUsize,
+    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap,
+    GuestUsize,
 };
 
 pub(super) const VIRTQ_DESC_F_NEXT: u16 = 0x1;
@@ -29,6 +30,8 @@ pub enum Error {
     GuestMemoryError,
     InvalidIndirectDescriptor,
     InvalidChain,
+    InvalidOffset(u64),
+    InvalidRingIndexFromMemory(GuestMemoryError),
 }
 
 impl Display for Error {
@@ -39,6 +42,8 @@ impl Display for Error {
             GuestMemoryError => write!(f, "error accessing guest memory"),
             InvalidChain => write!(f, "invalid descriptor chain"),
             InvalidIndirectDescriptor => write!(f, "invalid indirect descriptor"),
+            InvalidOffset(o) => write!(f, "invalid offset {}", o),
+            InvalidRingIndexFromMemory(e) => write!(f, "invalid ring index from memory: {}", e),
         }
     }
 }
@@ -649,44 +654,27 @@ impl Queue {
         self.next_avail -= Wrapping(1);
     }
 
-    /// Get latest index from available ring.
-    pub fn update_avail_index_from_memory(&mut self, mem: &GuestMemoryMmap) {
-        let index_addr = match mem.checked_offset(self.avail_ring, 2) {
-            Some(ret) => ret,
-            None => {
-                error!("Invalid offset 0x{:x}", self.avail_ring.raw_value() + 2);
-                return;
-            }
-        };
-        let next_avail: u16 = match mem.read_obj::<u16>(index_addr) {
-            Ok(ret) => ret,
-            Err(e) => {
-                error!("Couldn't read `idx` field from memory: {}", e);
-                return;
-            }
-        };
+    /// Get ring's index from memory.
+    fn index_from_memory(&self, ring: GuestAddress, mem: &GuestMemoryMmap) -> Result<u16, Error> {
+        mem.read_obj::<u16>(
+            mem.checked_offset(ring, 2)
+                .ok_or_else(|| Error::InvalidOffset(ring.raw_value() + 2))?,
+        )
+        .map_err(Error::InvalidRingIndexFromMemory)
+    }
 
-        self.next_avail = Wrapping(next_avail);
+    /// Get latest index from available ring.
+    pub fn avail_index_from_memory(&self, mem: &GuestMemoryMmap) -> Result<u16, Error> {
+        self.index_from_memory(self.avail_ring, mem)
     }
 
     /// Get latest index from used ring.
-    pub fn update_used_index_from_memory(&mut self, mem: &GuestMemoryMmap) {
-        let index_addr = match mem.checked_offset(self.used_ring, 2) {
-            Some(ret) => ret,
-            None => {
-                error!("Invalid offset 0x{:x}", self.used_ring.raw_value() + 2);
-                return;
-            }
-        };
-        let next_used: u16 = match mem.read_obj::<u16>(index_addr) {
-            Ok(ret) => ret,
-            Err(e) => {
-                error!("Couldn't read `idx` field from memory: {}", e);
-                return;
-            }
-        };
+    pub fn used_index_from_memory(&self, mem: &GuestMemoryMmap) -> Result<u16, Error> {
+        self.index_from_memory(self.used_ring, mem)
+    }
 
-        self.next_used = Wrapping(next_used);
+    pub fn available_descriptors(&self, mem: &GuestMemoryMmap) -> Result<bool, Error> {
+        Ok(self.used_index_from_memory(mem)? < self.avail_index_from_memory(mem)?)
     }
 }
 
