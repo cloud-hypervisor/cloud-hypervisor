@@ -12,6 +12,7 @@ use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use libc::EFD_NONBLOCK;
+use std::num::Wrapping;
 use std::result;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -27,6 +28,12 @@ const VENDOR_ID: u32 = 0;
 
 const MMIO_MAGIC_VALUE: u32 = 0x7472_6976;
 const MMIO_VERSION: u32 = 2;
+
+#[derive(Debug)]
+enum Error {
+    /// Failed to retrieve queue ring's index.
+    QueueRingIndex(crate::queue::Error),
+}
 
 pub struct VirtioInterruptIntx {
     interrupt_status: Arc<AtomicUsize>,
@@ -152,7 +159,7 @@ impl MmioDevice {
         }
     }
 
-    fn set_state(&mut self, state: &VirtioMmioDeviceState) -> Result<()> {
+    fn set_state(&mut self, state: &VirtioMmioDeviceState) -> std::result::Result<(), Error> {
         self.device_activated = state.device_activated;
         self.features_select = state.features_select;
         self.acked_features_select = state.acked_features_select;
@@ -166,8 +173,16 @@ impl MmioDevice {
         if let Some(mem) = self.mem.as_ref() {
             let mem = mem.memory();
             for queue in self.queues.iter_mut() {
-                queue.update_avail_index_from_memory(&mem);
-                queue.update_used_index_from_memory(&mem);
+                queue.next_avail = Wrapping(
+                    queue
+                        .avail_index_from_memory(&mem)
+                        .map_err(Error::QueueRingIndex)?,
+                );
+                queue.next_used = Wrapping(
+                    queue
+                        .used_index_from_memory(&mem)
+                        .map_err(Error::QueueRingIndex)?,
+                );
             }
         }
 
