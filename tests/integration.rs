@@ -417,6 +417,13 @@ mod tests {
         )
     }
 
+    // Creates the directory and returns the path.
+    fn temp_snapshot_dir_path(tmp_dir: &TempDir) -> String {
+        let snapshot_dir = String::from(tmp_dir.path().join("snapshot").to_str().unwrap());
+        std::fs::create_dir(&snapshot_dir).unwrap();
+        snapshot_dir
+    }
+
     fn prepare_vhost_user_net_daemon(
         tmp_dir: &TempDir,
         ip: &str,
@@ -4032,6 +4039,137 @@ mod tests {
                         Err(_) => aver!(tb, false),
                     }
                 });
+            Ok(())
+        });
+    }
+
+    // One thing to note about this test. The virtio-net device is heavily used
+    // through each ssh command. There's no need to perform a dedicated test to
+    // verify the migration went well for virtio-net.
+    #[cfg_attr(feature = "mmio", test)]
+    fn test_snapshot_restore() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path;
+            kernel_path.push("bzImage");
+
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=4"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .default_disks()
+                .default_net()
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Check the number of vCPUs
+            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 4);
+            // Check the guest RAM
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_968_000);
+            // Check if the block device is readable
+            aver!(
+                tb,
+                guest
+                    .ssh_command("dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
+                    .is_ok()
+            );
+            // Check if the rng device is readable
+            aver!(
+                tb,
+                guest
+                    .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
+                    .is_ok()
+            );
+            // Check if the console is usable
+            let console_text = String::from("On a branch floating down river a cricket, singing.");
+            let console_cmd = format!("echo {} | sudo tee /dev/hvc0", console_text);
+            aver!(tb, guest.ssh_command(&console_cmd).is_ok());
+
+            // Pause the VM
+            aver!(tb, remote_command(&api_socket, "pause", None));
+
+            // Create the snapshot directory
+            let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+
+            // Take a snapshot from the VM
+            aver!(
+                tb,
+                remote_command(
+                    &api_socket,
+                    "snapshot",
+                    Some(format!("file://{}", snapshot_dir).as_str()),
+                )
+            );
+
+            // Wait to make sure the snapshot is completed
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Shutdown the source VM and check console output
+            let _ = child.kill();
+            match child.wait_with_output() {
+                Ok(out) => {
+                    aver!(
+                        tb,
+                        String::from_utf8_lossy(&out.stdout).contains(&console_text)
+                    );
+                }
+                Err(_) => aver!(tb, false),
+            }
+
+            // Restore the VM from the snapshot
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &api_socket])
+                .args(&[
+                    "--restore",
+                    format!("source_url=file://{}", snapshot_dir).as_str(),
+                ])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            // Wait for the VM to be restored
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Perform same checks to validate VM has been properly restored
+            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 4);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_968_000);
+            aver!(
+                tb,
+                guest
+                    .ssh_command("dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
+                    .is_ok()
+            );
+            aver!(
+                tb,
+                guest
+                    .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
+                    .is_ok()
+            );
+            aver!(tb, guest.ssh_command(&console_cmd).is_ok());
+
+            // Shutdown the target VM and check console output
+            let _ = child.kill();
+            match child.wait_with_output() {
+                Ok(out) => {
+                    aver!(
+                        tb,
+                        String::from_utf8_lossy(&out.stdout).contains(&console_text)
+                    );
+                }
+                Err(_) => aver!(tb, false),
+            }
+
             Ok(())
         });
     }
