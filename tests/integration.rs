@@ -1175,7 +1175,7 @@ mod tests {
 
             let mut cloud_child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=4"])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--memory", "size=512M,shared=on"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&[
                     "--disk",
@@ -1288,7 +1288,7 @@ mod tests {
 
             let mut cloud_child = GuestCommand::new(&guest)
                 .args(&["--cpus", format!("boot={}", num_queues / 2).as_str()])
-                .args(&["--memory", "size=512M,hotplug_size=2048M,file=/dev/shm"])
+                .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .default_disks()
@@ -1457,7 +1457,7 @@ mod tests {
 
             let mut cloud_child = GuestCommand::new(&guest)
                 .args(&["--cpus", format!("boot={}", num_queues).as_str()])
-                .args(&["--memory", "size=512M,hotplug_size=2048M,file=/dev/shm"])
+                .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .args(&[
@@ -1659,7 +1659,7 @@ mod tests {
 
             let mut cloud_child = GuestCommand::new(&guest)
                 .args(&["--cpus", format!("boot={}", num_queues).as_str()])
-                .args(&["--memory", "size=512M,file=/dev/shm"])
+                .args(&["--memory", "size=512M,shared=on"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .args(&[
@@ -1814,7 +1814,7 @@ mod tests {
             let mut guest_command = GuestCommand::new(&guest);
             guest_command
                 .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M,hotplug_size=2048M,file=/dev/shm"])
+                .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
@@ -2491,7 +2491,7 @@ mod tests {
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=4"])
-                .args(&["--memory", "size=2G,file=/dev/hugepages"])
+                .args(&["--memory", "size=2G,hugepages=on,shared=on"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .args(&[

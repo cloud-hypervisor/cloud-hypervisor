@@ -438,6 +438,10 @@ pub struct MemoryConfig {
     pub hotplug_method: HotplugMethod,
     #[serde(default)]
     pub hotplug_size: Option<u64>,
+    #[serde(default)]
+    pub shared: bool,
+    #[serde(default)]
+    pub hugepages: bool,
 }
 
 impl MemoryConfig {
@@ -448,7 +452,9 @@ impl MemoryConfig {
             .add("file")
             .add("mergeable")
             .add("hotplug_method")
-            .add("hotplug_size");
+            .add("hotplug_size")
+            .add("shared")
+            .add("hugepages");
         parser.parse(memory).map_err(Error::ParseMemory)?;
 
         let size = parser
@@ -470,6 +476,16 @@ impl MemoryConfig {
             .convert::<ByteSized>("hotplug_size")
             .map_err(Error::ParseMemory)?
             .map(|v| v.0);
+        let shared = parser
+            .convert::<Toggle>("shared")
+            .map_err(Error::ParseMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let hugepages = parser
+            .convert::<Toggle>("hugepages")
+            .map_err(Error::ParseMemory)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         Ok(MemoryConfig {
             size,
@@ -477,6 +493,8 @@ impl MemoryConfig {
             mergeable,
             hotplug_method,
             hotplug_size,
+            shared,
+            hugepages,
         })
     }
 }
@@ -489,6 +507,8 @@ impl Default for MemoryConfig {
             mergeable: false,
             hotplug_method: HotplugMethod::Acpi,
             hotplug_size: None,
+            shared: false,
+            hugepages: false,
         }
     }
 }
@@ -1223,6 +1243,10 @@ impl VmConfig {
             return Err(ValidationError::CpusMaxLowerThanBoot);
         }
 
+        if self.memory.file.is_some() {
+            error!("Use of backing file ('--memory file=') is deprecated. Use the 'shared' and 'hugepages' controls.");
+        }
+
         if let Some(disks) = &self.disks {
             for disk in disks {
                 if disk.vhost_socket.as_ref().and(disk.path.as_ref()).is_some() {
@@ -1869,6 +1893,8 @@ mod tests {
                 mergeable: false,
                 hotplug_method: HotplugMethod::Acpi,
                 hotplug_size: None,
+                shared: false,
+                hugepages: false,
             },
             kernel: Some(KernelConfig {
                 path: PathBuf::from("/path/to/kernel"),

@@ -15,7 +15,7 @@ use kvm_ioctls::*;
 use std::convert::TryInto;
 use std::fs::{File, OpenOptions};
 use std::io;
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use url::Url;
@@ -62,6 +62,8 @@ pub struct MemoryManager {
     pub virtiomem_region: Option<Arc<GuestRegionMmap>>,
     pub virtiomem_resize: Option<vm_virtio::Resize>,
     snapshot: Mutex<Option<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
+    shared: bool,
+    hugepages: bool,
 }
 
 #[derive(Debug)]
@@ -253,6 +255,8 @@ impl MemoryManager {
                     region.size as usize,
                     true,
                     prefault,
+                    false,
+                    false,
                 )?);
             }
         } else {
@@ -263,6 +267,8 @@ impl MemoryManager {
                     region.1,
                     false,
                     prefault,
+                    config.shared,
+                    config.hugepages,
                 )?);
             }
         }
@@ -294,6 +300,8 @@ impl MemoryManager {
                     size as usize,
                     false,
                     false,
+                    config.shared,
+                    config.hugepages,
                 )?);
 
                 virtiomem_resize = Some(vm_virtio::Resize::new().map_err(Error::EventFdFail)?);
@@ -344,6 +352,8 @@ impl MemoryManager {
             virtiomem_region: virtiomem_region.clone(),
             virtiomem_resize,
             snapshot: Mutex::new(None),
+            shared: config.shared,
+            hugepages: config.hugepages,
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -460,12 +470,24 @@ impl MemoryManager {
         }
     }
 
+    fn memfd_create(name: &std::ffi::CStr, flags: u32) -> Result<RawFd, io::Error> {
+        let res = unsafe { libc::syscall(libc::SYS_memfd_create, name.as_ptr(), flags) };
+
+        if res < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(res as RawFd)
+        }
+    }
+
     fn create_ram_region(
         backing_file: &Option<PathBuf>,
         start_addr: GuestAddress,
         size: usize,
         copy_on_write: bool,
         prefault: bool,
+        shared: bool,
+        hugepages: bool,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
         Ok(Arc::new(match backing_file {
             Some(ref file) => {
@@ -507,11 +529,38 @@ impl MemoryManager {
                 )
                 .map_err(Error::GuestMemory)?
             }
-            None => GuestRegionMmap::new(
-                MmapRegion::new(size).map_err(Error::GuestMemoryRegion)?,
-                start_addr,
-            )
-            .map_err(Error::GuestMemory)?,
+            None => {
+                let fd = Self::memfd_create(
+                    &std::ffi::CString::new("ch_ram").unwrap(),
+                    if hugepages {
+                        libc::MFD_HUGETLB | libc::MAP_HUGE_2MB as u32
+                    } else {
+                        0
+                    },
+                )
+                .map_err(Error::SharedFileCreate)?;
+
+                let f = unsafe { File::from_raw_fd(fd) };
+                f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
+
+                let mmap_flags = libc::MAP_NORESERVE
+                    | if shared {
+                        libc::MAP_SHARED
+                    } else {
+                        libc::MAP_PRIVATE
+                    };
+                GuestRegionMmap::new(
+                    MmapRegion::build(
+                        Some(FileOffset::new(f, 0)),
+                        size,
+                        libc::PROT_READ | libc::PROT_WRITE,
+                        mmap_flags,
+                    )
+                    .map_err(Error::GuestMemoryRegion)?,
+                    start_addr,
+                )
+                .map_err(Error::GuestMemory)?
+            }
         }))
     }
 
@@ -555,8 +604,15 @@ impl MemoryManager {
         }
 
         // Allocate memory for the region
-        let region =
-            MemoryManager::create_ram_region(&self.backing_file, start_addr, size, false, false)?;
+        let region = MemoryManager::create_ram_region(
+            &self.backing_file,
+            start_addr,
+            size,
+            false,
+            false,
+            self.shared,
+            self.hugepages,
+        )?;
 
         // Map it into the guest
         self.create_userspace_mapping(

@@ -380,6 +380,12 @@ components:
         hotplug_method:
           type: string
           default: "acpi"
+        shared:
+          type: boolean
+          default: false
+        hugepages:
+          type: boolean
+          default: false
 
     KernelConfig:
       required:
