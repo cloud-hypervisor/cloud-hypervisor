@@ -222,6 +222,7 @@ pub fn vmm_thread_filter() -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_listen),
             allow_syscall(libc::SYS_lseek),
             allow_syscall(libc::SYS_madvise),
+            allow_syscall(libc::SYS_memfd_create),
             allow_syscall(libc::SYS_mmap),
             allow_syscall(libc::SYS_mprotect),
             allow_syscall(libc::SYS_mremap),

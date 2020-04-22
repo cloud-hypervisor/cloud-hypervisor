@@ -99,7 +99,7 @@ fn create_app<'a, 'b>(
                 .long("memory")
                 .help(
                     "Memory parameters \
-                     \"size=<guest_memory_size>,file=<backing_file_path>,mergeable=on|off,\
+                     \"size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,\
                      hotplug_method=acpi|virtio-mem,\
                      hotplug_size=<hotpluggable_memory_size>\"",
                 )
@@ -501,6 +501,8 @@ mod unit_tests {
                     mergeable: false,
                     hotplug_method: HotplugMethod::Acpi,
                     hotplug_size: None,
+                    shared: false,
+                    hugepages: false,
                 },
                 kernel: Some(KernelConfig {
                     path: PathBuf::from("/path/to/kernel"),
