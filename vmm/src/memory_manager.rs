@@ -13,10 +13,12 @@ use devices::{ioapic, BusDevice};
 use kvm_bindings::{kvm_userspace_memory_region, KVM_MEM_READONLY};
 use kvm_ioctls::*;
 use std::convert::TryInto;
+use std::ffi;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::path::PathBuf;
+use std::result;
 use std::sync::{Arc, Mutex};
 use url::Url;
 use vm_allocator::{GsiApic, SystemAllocator};
@@ -99,10 +101,10 @@ pub enum Error {
     SetUserMemoryRegion(kvm_ioctls::Error),
 
     /// Failed to EventFd.
-    EventFdFail(std::io::Error),
+    EventFdFail(io::Error),
 
     /// Eventfd write error
-    EventfdError(std::io::Error),
+    EventfdError(io::Error),
 
     /// Failed to virtio-mem resize
     VirtioMemResizeFail(vm_virtio::mem::Error),
@@ -470,11 +472,11 @@ impl MemoryManager {
         }
     }
 
-    fn memfd_create(name: &std::ffi::CStr, flags: u32) -> Result<RawFd, io::Error> {
+    fn memfd_create(name: &ffi::CStr, flags: u32) -> Result<RawFd, io::Error> {
         let res = unsafe { libc::syscall(libc::SYS_memfd_create, name.as_ptr(), flags) };
 
         if res < 0 {
-            Err(std::io::Error::last_os_error())
+            Err(io::Error::last_os_error())
         } else {
             Ok(res as RawFd)
         }
@@ -493,7 +495,7 @@ impl MemoryManager {
             Some(ref file) => {
                 let f = if file.is_dir() {
                     let fs_str = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
-                    let fs = std::ffi::CString::new(fs_str).unwrap();
+                    let fs = ffi::CString::new(fs_str).unwrap();
                     let mut path = fs.as_bytes_with_nul().to_owned();
                     let path_ptr = path.as_mut_ptr() as *mut _;
                     let fd = unsafe { libc::mkstemp(path_ptr) };
@@ -531,7 +533,7 @@ impl MemoryManager {
             }
             None => {
                 let fd = Self::memfd_create(
-                    &std::ffi::CString::new("ch_ram").unwrap(),
+                    &ffi::CString::new("ch_ram").unwrap(),
                     if hugepages {
                         libc::MFD_HUGETLB | libc::MAP_HUGE_2MB as u32
                     } else {
@@ -1172,7 +1174,7 @@ impl Snapshottable for MemoryManager {
         MEMORY_MANAGER_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&self) -> result::Result<Snapshot, MigratableError> {
         let mut memory_manager_snapshot = Snapshot::new(MEMORY_MANAGER_SNAPSHOT_ID);
         let guest_memory = self.guest_memory.memory();
 
@@ -1213,7 +1215,7 @@ impl Transportable for MemoryManager {
         &self,
         _snapshot: &Snapshot,
         destination_url: &str,
-    ) -> std::result::Result<(), MigratableError> {
+    ) -> result::Result<(), MigratableError> {
         let url = Url::parse(destination_url).map_err(|e| {
             MigratableError::MigrateSend(anyhow!("Could not parse destination URL: {}", e))
         })?;
