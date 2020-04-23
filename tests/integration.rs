@@ -4046,6 +4046,7 @@ mod tests {
     // One thing to note about this test. The virtio-net device is heavily used
     // through each ssh command. There's no need to perform a dedicated test to
     // verify the migration went well for virtio-net.
+    #[ignore]
     #[cfg_attr(feature = "mmio", test)]
     fn test_snapshot_restore() {
         test_block!(tb, "", {
