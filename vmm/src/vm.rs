@@ -576,10 +576,15 @@ impl Vm {
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
-        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
+        let current_state = self.get_state()?;
         let new_state = VmState::Shutdown;
 
-        state.valid_transition(new_state)?;
+        current_state.valid_transition(new_state)?;
+        // If the current state is paused that means most of the handles got killed by pthread_kill
+        // We need to unpark those threads by calling resume
+        if current_state == VmState::Paused {
+            self.resume().map_err(Error::Resume)?;
+        }
 
         if self.on_tty {
             // Don't forget to set the terminal in canonical mode
@@ -605,6 +610,8 @@ impl Vm {
         for thread in self.threads.drain(..) {
             thread.join().map_err(Error::ThreadCleanup)?
         }
+
+        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         *state = new_state;
 
         Ok(())
