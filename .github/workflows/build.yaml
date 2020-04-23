@@ -1,4 +1,4 @@
-name: Cloud Hypervisor Actions
+name: Cloud Hypervisor Build
 on: [pull_request, create]
 
 jobs:
@@ -23,48 +23,3 @@ jobs:
 
       - name: Build
         run: cargo build --release
-
-  release:
-    if: github.event_name == 'create' && github.event.ref_type == 'tag'
-    name: Release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Code checkout
-        uses: actions/checkout@v2
-      - name: Install Rust toolchain (stable)
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: stable
-            override: true
-      - name: Build
-        run: cargo build --release
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: ${{ github.ref }}
-          draft: true
-          prerelease: true
-      - name: Upload cloud-hypervisor
-        id: upload-release-cloud-hypervisor
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/release/cloud-hypervisor
-          asset_name: cloud-hypervisor
-          asset_content_type: application/octet-stream
-      - name: Upload ch-remote
-        id: upload-release-ch-remote
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/release/ch-remote
-          asset_name: ch-remote
-          asset_content_type: application/octet-stream
