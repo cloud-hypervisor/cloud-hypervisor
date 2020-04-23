@@ -2,6 +2,6 @@ cf7cfa783082fc4d6b4d1c0a53e4402648c14b82 clear-31311-cloudguest.img
 142a410546b592ff9536b46bb410faf8ac11edee clear-31311-cloudguest-raw.img
 27f3b17962ace69b51f0ddc2012095e3109e6ed8 bionic-server-cloudimg-amd64.img
 8db9cc58b01452ce2d06c313177e6e74d8582d93 bionic-server-cloudimg-amd64-raw.img
-4a452cdcf781f95d31a1668ecb92a937c176709a eoan-server-cloudimg-amd64.img
-91fdfb21df8920fd55915edf7669282cda2505f6 eoan-server-cloudimg-amd64-raw.img
 d4a44acc6014d5f83dea1c625c43d677a95fa75f alpine-minirootfs-x86_64.tar.gz
+3cab64475048383e70a38550734e98961cfe0fd6 focal-server-cloudimg-amd64-raw.img
+c74a95665b189f93cb16a2c1770820c6a6a43fb0 focal-server-cloudimg-amd64.img

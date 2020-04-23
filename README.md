@@ -229,10 +229,10 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 
 `cloud-hypervisor` is in a very early, pre-alpha stage. Use at your own risk!
 
-As of 2019-12-12, the following cloud images are supported:
+As of 2020-04-23, the following cloud images are supported:
 * [Clear Linux](https://download.clearlinux.org/current/) (cloudguest and kvm)
 * [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (cloudimg)
-* [Ubuntu Eoan](https://cloud-images.ubuntu.com/eoan/current/) (cloudimg)
+* [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (cloudimg)
 
 Direct kernel boot to userspace should work with most rootfs.
 

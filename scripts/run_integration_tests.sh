@@ -51,20 +51,20 @@ if [ ! -f "$BIONIC_OS_RAW_IMAGE" ]; then
 fi
 
 
-EOAN_OS_IMAGE_NAME="eoan-server-cloudimg-amd64.img"
-EOAN_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$EOAN_OS_IMAGE_NAME"
-EOAN_OS_IMAGE="$WORKLOADS_DIR/$EOAN_OS_IMAGE_NAME"
-if [ ! -f "$EOAN_OS_IMAGE" ]; then
+FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64.img"
+FOCAL_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$FOCAL_OS_IMAGE_NAME"
+FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
+if [ ! -f "$FOCAL_OS_IMAGE" ]; then
     pushd $WORKLOADS_DIR
-    time wget --quiet $EOAN_OS_IMAGE_URL || exit 1
+    time wget --quiet $FOCAL_OS_IMAGE_URL || exit 1
     popd
 fi
 
-EOAN_OS_RAW_IMAGE_NAME="eoan-server-cloudimg-amd64-raw.img"
-EOAN_OS_RAW_IMAGE="$WORKLOADS_DIR/$EOAN_OS_RAW_IMAGE_NAME"
-if [ ! -f "$EOAN_OS_RAW_IMAGE" ]; then
+FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-amd64-raw.img"
+FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
+if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
     pushd $WORKLOADS_DIR
-    time qemu-img convert -p -f qcow2 -O raw $EOAN_OS_IMAGE_NAME $EOAN_OS_RAW_IMAGE_NAME || exit 1
+    time qemu-img convert -p -f qcow2 -O raw $FOCAL_OS_IMAGE_NAME $FOCAL_OS_RAW_IMAGE_NAME || exit 1
     popd
 fi
 
