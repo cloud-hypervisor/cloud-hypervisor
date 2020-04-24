@@ -238,6 +238,13 @@ pub struct Config {
     ///
     /// The default value for this options is `false`.
     pub xattr: bool,
+
+    /// Optional file descriptor for /proc/self/fd. Callers can obtain a file descriptor and pass it
+    /// here, so there's no need to open it in PassthroughFs::new(). This is specially useful for
+    /// sandboxing.
+    ///
+    /// The default is `None`.
+    pub proc_sfd_rawfd: Option<RawFd>,
 }
 
 impl Default for Config {
@@ -249,6 +256,7 @@ impl Default for Config {
             writeback: false,
             root_dir: String::from("/"),
             xattr: false,
+            proc_sfd_rawfd: None,
         }
     }
 }
@@ -286,22 +294,28 @@ pub struct PassthroughFs {
 
 impl PassthroughFs {
     pub fn new(cfg: Config) -> io::Result<PassthroughFs> {
-        // Safe because this is a constant value and a valid C string.
-        let proc_cstr = unsafe { CStr::from_bytes_with_nul_unchecked(PROC_CSTR) };
+        let fd = if let Some(fd) = cfg.proc_sfd_rawfd {
+            fd
+        } else {
+            // Safe because this is a constant value and a valid C string.
+            let proc_cstr = unsafe { CStr::from_bytes_with_nul_unchecked(PROC_CSTR) };
 
-        // Safe because this doesn't modify any memory and we check the return value.
-        let fd = unsafe {
-            libc::openat(
-                libc::AT_FDCWD,
-                proc_cstr.as_ptr(),
-                libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            )
+            // Safe because this doesn't modify any memory and we check the return value.
+            let fd = unsafe {
+                libc::openat(
+                    libc::AT_FDCWD,
+                    proc_cstr.as_ptr(),
+                    libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                )
+            };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+
+            fd
         };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
 
-        // Safe because we just opened this fd.
+        // Safe because we just opened this fd or it was provided by our caller.
         let proc_self_fd = unsafe { File::from_raw_fd(fd) };
 
         Ok(PassthroughFs {
