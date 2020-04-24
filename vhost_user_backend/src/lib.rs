@@ -20,7 +20,7 @@ use vhost_rs::vhost_user::message::{
     VhostUserVirtioFeatures, VhostUserVringAddrFlags, VhostUserVringState,
 };
 use vhost_rs::vhost_user::{
-    Error as VhostUserError, Result as VhostUserResult, SlaveFsCacheReq, SlaveListener,
+    Error as VhostUserError, Listener, Result as VhostUserResult, SlaveFsCacheReq, SlaveListener,
     VhostUserSlaveReqHandler,
 };
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
@@ -124,7 +124,6 @@ pub trait VhostUserBackend: Send + Sync + 'static {
 /// in order to run a fully functional vhost-user daemon.
 pub struct VhostUserDaemon<S: VhostUserBackend> {
     name: String,
-    sock_path: String,
     handler: Arc<Mutex<VhostUserHandler<S>>>,
     main_thread: Option<thread::JoinHandle<Result<()>>>,
 }
@@ -136,14 +135,13 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
     /// listening onto registered event. Those events can be vring events or
     /// custom events from the backend, but they get to be registered later
     /// during the sequence.
-    pub fn new(name: String, sock_path: String, backend: Arc<RwLock<S>>) -> Result<Self> {
+    pub fn new(name: String, backend: Arc<RwLock<S>>) -> Result<Self> {
         let handler = Arc::new(Mutex::new(
             VhostUserHandler::new(backend).map_err(Error::NewVhostUserHandler)?,
         ));
 
         Ok(VhostUserDaemon {
             name,
-            sock_path,
             handler,
             main_thread: None,
         })
@@ -153,10 +151,9 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
     /// all requests coming through this socket. This runs in an infinite loop
     /// that should be terminating once the other end of the socket (the VMM)
     /// disconnects.
-    pub fn start(&mut self) -> Result<()> {
-        let mut slave_listener =
-            SlaveListener::new(self.sock_path.as_str(), true, self.handler.clone())
-                .map_err(Error::CreateSlaveListener)?;
+    pub fn start(&mut self, listener: Listener) -> Result<()> {
+        let mut slave_listener = SlaveListener::new(listener, self.handler.clone())
+            .map_err(Error::CreateSlaveListener)?;
         let mut slave_handler = slave_listener
             .accept()
             .map_err(Error::CreateSlaveReqHandler)?
