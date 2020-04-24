@@ -84,6 +84,8 @@ pub enum ValidationError {
     CpusMaxLowerThanBoot,
     /// Both socket and path specified
     DiskSocketAndPath,
+    /// Using vhost user requires shared memory
+    VhostUserRequiresSharedMemory,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -97,6 +99,9 @@ impl fmt::Display for ValidationError {
             ConsoleFileMissing => write!(f, "Path missing when using file console mode"),
             CpusMaxLowerThanBoot => write!(f, "Max CPUs greater than boot CPUs"),
             DiskSocketAndPath => write!(f, "Disk path and vhost socket both provided"),
+            VhostUserRequiresSharedMemory => {
+                write!(f, "Using vhost-user requires using shared memory")
+            }
         }
     }
 }
@@ -1252,6 +1257,23 @@ impl VmConfig {
                 if disk.vhost_socket.as_ref().and(disk.path.as_ref()).is_some() {
                     return Err(ValidationError::DiskSocketAndPath);
                 }
+                if disk.vhost_user && !self.memory.shared {
+                    return Err(ValidationError::VhostUserRequiresSharedMemory);
+                }
+            }
+        }
+
+        if let Some(nets) = &self.net {
+            for net in nets {
+                if net.vhost_user && !self.memory.shared {
+                    return Err(ValidationError::VhostUserRequiresSharedMemory);
+                }
+            }
+        }
+
+        if let Some(fses) = &self.fs {
+            if !fses.is_empty() && !self.memory.shared {
+                return Err(ValidationError::VhostUserRequiresSharedMemory);
             }
         }
 
@@ -1954,6 +1976,49 @@ mod tests {
             ..Default::default()
         }]);
         assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            vhost_user: true,
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.disks = Some(vec![DiskConfig {
+            vhost_user: true,
+            ..Default::default()
+        }]);
+        still_valid_config.memory.shared = true;
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.net = Some(vec![NetConfig {
+            vhost_user: true,
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.net = Some(vec![NetConfig {
+            vhost_user: true,
+            ..Default::default()
+        }]);
+        still_valid_config.memory.shared = true;
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.fs = Some(vec![FsConfig {
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
+
+        let mut still_valid_config = valid_config.clone();
+        invalid_config.fs = Some(vec![FsConfig {
+            ..Default::default()
+        }]);
+        still_valid_config.memory.shared = true;
+        assert!(still_valid_config.validate().is_ok());
 
         Ok(())
     }
