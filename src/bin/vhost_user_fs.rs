@@ -25,6 +25,7 @@ use vhost_user_fs::descriptor_utils::Error as VufDescriptorError;
 use vhost_user_fs::descriptor_utils::{Reader, Writer};
 use vhost_user_fs::filesystem::FileSystem;
 use vhost_user_fs::passthrough::{self, PassthroughFs};
+use vhost_user_fs::sandbox::Sandbox;
 use vhost_user_fs::server::Server;
 use vhost_user_fs::Error as VhostUserFsError;
 use virtio_bindings::bindings::virtio_net::*;
@@ -310,6 +311,11 @@ fn main() {
                 .long("disable-xattr")
                 .help("Disable support for extended attributes"),
         )
+        .arg(
+            Arg::with_name("disable-sandbox")
+                .long("disable-sandbox")
+                .help("Don't set up a sandbox for the daemon"),
+        )
         .get_matches();
 
     // Retrieve arguments
@@ -324,14 +330,32 @@ fn main() {
         None => THREAD_POOL_SIZE,
     };
     let xattr: bool = !cmd_arguments.is_present("disable-xattr");
+    let create_sandbox: bool = !cmd_arguments.is_present("disable-sandbox");
 
     let listener = Listener::new(sock, true).unwrap();
 
-    let fs_cfg = passthrough::Config {
-        root_dir: shared_dir.to_string(),
-        xattr,
-        ..Default::default()
+    let fs_cfg = if create_sandbox {
+        let mut sandbox = Sandbox::new(shared_dir.to_string());
+        match sandbox.enter().unwrap() {
+            Some(child_pid) => {
+                unsafe { libc::waitpid(child_pid, std::ptr::null_mut(), 0) };
+                return;
+            }
+            None => passthrough::Config {
+                root_dir: "/".to_string(),
+                xattr,
+                proc_sfd_rawfd: sandbox.get_proc_self_fd(),
+                ..Default::default()
+            },
+        }
+    } else {
+        passthrough::Config {
+            root_dir: shared_dir.to_string(),
+            xattr,
+            ..Default::default()
+        }
     };
+
     let fs = PassthroughFs::new(fs_cfg).unwrap();
     let fs_backend = Arc::new(RwLock::new(
         VhostUserFsBackend::new(fs, thread_pool_size).unwrap(),
