@@ -514,7 +514,6 @@ components:
     PmemConfig:
       required:
       - file
-      - size
       type: object
       properties:
         file:

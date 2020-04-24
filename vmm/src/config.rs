@@ -34,8 +34,6 @@ pub enum Error {
     InvalidCacheSizeWithDaxOff,
     /// Missing persistant memory file parameter.
     ParsePmemFileMissing,
-    /// Missing persistant memory size parameter.
-    ParsePmemSizeMissing,
     /// Missing vsock socket path parameter.
     ParseVsockSockMissing,
     /// Missing vsock cid parameter.
@@ -126,8 +124,6 @@ impl fmt::Display for Error {
             }
             ParsePersistentMemory(o) => write!(f, "Error parsing --pmem: {}", o),
             ParsePmemFileMissing => write!(f, "Error parsing --pmem: file missing"),
-            ParsePmemSizeMissing => write!(f, "Error parsing --pmem: size missing"),
-
             ParseVsock(o) => write!(f, "Error parsing --vsock: {}", o),
             ParseVsockCidMissing => write!(f, "Error parsing --vsock: cid missing"),
             ParseVsockSockMissing => write!(f, "Error parsing --vsock: sock missing"),
@@ -959,7 +955,8 @@ impl FsConfig {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct PmemConfig {
     pub file: PathBuf,
-    pub size: u64,
+    #[serde(default)]
+    pub size: Option<u64>,
     #[serde(default)]
     pub iommu: bool,
     #[serde(default)]
@@ -988,9 +985,8 @@ impl PmemConfig {
         let file = PathBuf::from(parser.get("file").ok_or(Error::ParsePmemFileMissing)?);
         let size = parser
             .convert::<ByteSized>("size")
-            .map_err(Error::ParseMemory)?
-            .ok_or(Error::ParsePmemSizeMissing)?
-            .0;
+            .map_err(Error::ParsePersistentMemory)?
+            .map(|v| v.0);
         let mergeable = parser
             .convert::<Toggle>("mergeable")
             .map_err(Error::ParsePersistentMemory)?
@@ -1756,13 +1752,12 @@ mod tests {
     fn test_pmem_parsing() -> Result<()> {
         // Must always give a file and size
         assert!(PmemConfig::parse("").is_err());
-        assert!(PmemConfig::parse("file=/tmp/pmem").is_err());
         assert!(PmemConfig::parse("size=128M").is_err());
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M")?,
             PmemConfig {
                 file: PathBuf::from("/tmp/pmem"),
-                size: 128 << 20,
+                size: Some(128 << 20),
                 ..Default::default()
             }
         );
@@ -1770,7 +1765,7 @@ mod tests {
             PmemConfig::parse("file=/tmp/pmem,size=128M,id=mypmem0")?,
             PmemConfig {
                 file: PathBuf::from("/tmp/pmem"),
-                size: 128 << 20,
+                size: Some(128 << 20),
                 id: Some("mypmem0".to_owned()),
                 ..Default::default()
             }
@@ -1779,7 +1774,7 @@ mod tests {
             PmemConfig::parse("file=/tmp/pmem,size=128M,iommu=on,mergeable=on,discard_writes=on")?,
             PmemConfig {
                 file: PathBuf::from("/tmp/pmem"),
-                size: 128 << 20,
+                size: Some(128 << 20),
                 mergeable: true,
                 discard_writes: true,
                 iommu: true,

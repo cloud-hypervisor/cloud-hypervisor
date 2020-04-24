@@ -1987,15 +1987,20 @@ mod tests {
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_pmem_persist_writes() {
-        test_virtio_pmem(false)
+        test_virtio_pmem(false, false)
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_pmem_discard_writes() {
-        test_virtio_pmem(true)
+        test_virtio_pmem(true, false)
     }
 
-    fn test_virtio_pmem(discard_writes: bool) {
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_virtio_pmem_with_size() {
+        test_virtio_pmem(true, true)
+    }
+
+    fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
@@ -2020,9 +2025,9 @@ mod tests {
                 .args(&[
                     "--pmem",
                     format!(
-                        "file={},size={}{}",
+                        "file={}{}{}",
                         pmem_temp_file.path().to_str().unwrap(),
-                        "128M",
+                        if specify_size { ",size=128M" } else { "" },
                         if discard_writes {
                             ",discard_writes=on"
                         } else {
@@ -3836,7 +3841,7 @@ mod tests {
                     &api_socket,
                     "add-pmem",
                     Some(&format!(
-                        "file={},size=128M,id=test0",
+                        "file={},id=test0",
                         pmem_temp_file.path().to_str().unwrap()
                     ))
                 )
