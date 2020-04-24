@@ -39,7 +39,7 @@ use qcow::{self, ImageType, QcowFile};
 use std::any::Any;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{self, sink, stdout};
+use std::io::{self, sink, stdout, Seek, SeekFrom};
 #[cfg(feature = "pci_support")]
 use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
@@ -285,6 +285,12 @@ pub enum DeviceManagerError {
     /// Failed updating guest memory for VFIO PCI device.
     #[cfg(feature = "pci_support")]
     UpdateMemoryForVfioPciDevice(VfioPciError),
+
+    /// Trying to use a directory for pmem but no size specified
+    PmemWithDirectorySizeMissing,
+
+    /// Trying to use a size that is not multiple of 2MiB
+    PmemSizeNotAligned,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1522,7 +1528,36 @@ impl DeviceManager {
             pmem_cfg.id = self.next_device_name(PMEM_DEVICE_NAME_PREFIX)?;
         }
 
-        let size = pmem_cfg.size;
+        let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
+            if pmem_cfg.size.is_none() {
+                return Err(DeviceManagerError::PmemWithDirectorySizeMissing);
+            }
+            (O_TMPFILE, true)
+        } else {
+            (0, false)
+        };
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(!pmem_cfg.discard_writes)
+            .custom_flags(custom_flags)
+            .open(&pmem_cfg.file)
+            .map_err(DeviceManagerError::PmemFileOpen)?;
+
+        let size = if let Some(size) = pmem_cfg.size {
+            if set_len {
+                file.set_len(size)
+                    .map_err(DeviceManagerError::PmemFileSetLen)?;
+            }
+            size
+        } else {
+            file.seek(SeekFrom::End(0))
+                .map_err(DeviceManagerError::PmemFileSetLen)?
+        };
+
+        if size % 0x20_0000 != 0 {
+            return Err(DeviceManagerError::PmemSizeNotAligned);
+        }
 
         // The memory needs to be 2MiB aligned in order to support
         // hugepages.
@@ -1533,24 +1568,6 @@ impl DeviceManager {
             .unwrap()
             .allocate_mmio_addresses(None, size as GuestUsize, Some(0x0020_0000))
             .ok_or(DeviceManagerError::PmemRangeAllocation)?;
-
-        let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
-            (O_TMPFILE, true)
-        } else {
-            (0, false)
-        };
-
-        let file = OpenOptions::new()
-            .read(true)
-            .write(!pmem_cfg.discard_writes)
-            .custom_flags(custom_flags)
-            .open(&pmem_cfg.file)
-            .map_err(DeviceManagerError::PmemFileOpen)?;
-
-        if set_len {
-            file.set_len(size)
-                .map_err(DeviceManagerError::PmemFileSetLen)?;
-        }
 
         let cloned_file = file.try_clone().map_err(DeviceManagerError::CloneFile)?;
         let mmap_region = MmapRegion::build(
