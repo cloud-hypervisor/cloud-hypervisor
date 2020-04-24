@@ -33,6 +33,7 @@ use std::time::Instant;
 use std::vec::Vec;
 use std::{convert, error, fmt, io};
 use vhost_rs::vhost_user::message::*;
+use vhost_rs::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
@@ -452,12 +453,14 @@ pub fn start_block_backend(backend_command: &str) {
 
     debug!("blk_backend is created!\n");
 
+    let listener = Listener::new(&backend_config.socket, true).unwrap();
+
     let name = "vhost-user-blk-backend";
-    let mut blk_daemon =
-        VhostUserDaemon::new(name.to_string(), backend_config.socket, blk_backend.clone()).unwrap();
+    let mut blk_daemon = VhostUserDaemon::new(name.to_string(), blk_backend.clone()).unwrap();
+
     debug!("blk_daemon is created!\n");
 
-    if let Err(e) = blk_daemon.start() {
+    if let Err(e) = blk_daemon.start(listener) {
         error!(
             "Failed to start daemon for vhost-user-block with error: {:?}\n",
             e

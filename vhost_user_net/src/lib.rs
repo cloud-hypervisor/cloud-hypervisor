@@ -26,7 +26,7 @@ use std::process;
 use std::sync::{Arc, Mutex, RwLock};
 use std::vec::Vec;
 use vhost_rs::vhost_user::message::*;
-use vhost_rs::vhost_user::Error as VhostUserError;
+use vhost_rs::vhost_user::{Error as VhostUserError, Listener};
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::GuestMemoryMmap;
@@ -428,12 +428,10 @@ pub fn start_net_backend(backend_command: &str) {
         .unwrap(),
     ));
 
-    let mut net_daemon = VhostUserDaemon::new(
-        "vhost-user-net-backend".to_string(),
-        backend_config.socket.to_string(),
-        net_backend.clone(),
-    )
-    .unwrap();
+    let listener = Listener::new(&backend_config.socket, true).unwrap();
+
+    let mut net_daemon =
+        VhostUserDaemon::new("vhost-user-net-backend".to_string(), net_backend.clone()).unwrap();
 
     let mut vring_workers = net_daemon.get_vring_workers();
 
@@ -449,7 +447,7 @@ pub fn start_net_backend(backend_command: &str) {
             .set_vring_worker(Some(vring_workers.remove(0)));
     }
 
-    if let Err(e) = net_daemon.start() {
+    if let Err(e) = net_daemon.start(listener) {
         error!(
             "failed to start daemon for vhost-user-net with error: {:?}",
             e

@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::{convert, error, fmt, io, process};
 
 use vhost_rs::vhost_user::message::*;
-use vhost_rs::vhost_user::SlaveFsCacheReq;
+use vhost_rs::vhost_user::{Listener, SlaveFsCacheReq};
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use vhost_user_fs::descriptor_utils::Error as VufDescriptorError;
 use vhost_user_fs::descriptor_utils::{Reader, Writer};
@@ -325,8 +325,7 @@ fn main() {
     };
     let xattr: bool = !cmd_arguments.is_present("disable-xattr");
 
-    // Convert into appropriate types
-    let sock = String::from(sock);
+    let listener = Listener::new(sock, true).unwrap();
 
     let fs_cfg = passthrough::Config {
         root_dir: shared_dir.to_string(),
@@ -338,14 +337,10 @@ fn main() {
         VhostUserFsBackend::new(fs, thread_pool_size).unwrap(),
     ));
 
-    let mut daemon = VhostUserDaemon::new(
-        String::from("vhost-user-fs-backend"),
-        sock,
-        fs_backend.clone(),
-    )
-    .unwrap();
+    let mut daemon =
+        VhostUserDaemon::new(String::from("vhost-user-fs-backend"), fs_backend.clone()).unwrap();
 
-    if let Err(e) = daemon.start() {
+    if let Err(e) = daemon.start(listener) {
         error!("Failed to start daemon: {:?}", e);
         process::exit(1);
     }
