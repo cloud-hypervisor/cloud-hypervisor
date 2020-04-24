@@ -12,6 +12,7 @@ pub mod fs_cache_req_handler;
 pub mod fuse;
 pub mod multikey;
 pub mod passthrough;
+pub mod sandbox;
 pub mod server;
 
 use std::ffi::FromBytesWithNulError;

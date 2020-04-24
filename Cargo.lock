@@ -1414,6 +1414,7 @@ dependencies = [
  "bitflags 1.2.1",
  "libc",
  "log 0.4.8",
+ "tempdir",
  "vhost",
  "vm-memory",
  "vm-virtio",
