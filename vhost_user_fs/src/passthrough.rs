@@ -28,7 +28,7 @@ use crate::multikey::MultikeyBTreeMap;
 const CURRENT_DIR_CSTR: &[u8] = b".\0";
 const PARENT_DIR_CSTR: &[u8] = b"..\0";
 const EMPTY_CSTR: &[u8] = b"\0";
-const PROC_CSTR: &[u8] = b"/proc\0";
+const PROC_CSTR: &[u8] = b"/proc/self/fd\0";
 
 type Inode = u64;
 type Handle = u64;
@@ -271,11 +271,11 @@ pub struct PassthroughFs {
     handles: RwLock<BTreeMap<Handle, Arc<HandleData>>>,
     next_handle: AtomicU64,
 
-    // File descriptor pointing to the `/proc` directory. This is used to convert an fd from
+    // File descriptor pointing to the `/proc/self/fd` directory. This is used to convert an fd from
     // `inodes` into one that can go into `handles`. This is accomplished by reading the
-    // `self/fd/{}` symlink. We keep an open fd here in case the file system tree that we are meant
-    // to be serving doesn't have access to `/proc`.
-    proc: File,
+    // `/proc/self/fd/{}` symlink. We keep an open fd here in case the file system tree that we are
+    // meant to be serving doesn't have access to `/proc/self/fd`.
+    proc_self_fd: File,
 
     // Whether writeback caching is enabled for this directory. This will only be true when
     // `cfg.writeback` is true and `init` was called with `FsOptions::WRITEBACK_CACHE`.
@@ -302,7 +302,7 @@ impl PassthroughFs {
         }
 
         // Safe because we just opened this fd.
-        let proc = unsafe { File::from_raw_fd(fd) };
+        let proc_self_fd = unsafe { File::from_raw_fd(fd) };
 
         Ok(PassthroughFs {
             inodes: RwLock::new(MultikeyBTreeMap::new()),
@@ -311,7 +311,7 @@ impl PassthroughFs {
             handles: RwLock::new(BTreeMap::new()),
             next_handle: AtomicU64::new(0),
 
-            proc,
+            proc_self_fd,
 
             writeback: AtomicBool::new(false),
             cfg,
@@ -319,7 +319,7 @@ impl PassthroughFs {
     }
 
     pub fn keep_fds(&self) -> Vec<RawFd> {
-        vec![self.proc.as_raw_fd()]
+        vec![self.proc_self_fd.as_raw_fd()]
     }
 
     fn open_inode(&self, inode: Inode, mut flags: i32) -> io::Result<File> {
@@ -331,7 +331,7 @@ impl PassthroughFs {
             .map(Arc::clone)
             .ok_or_else(ebadf)?;
 
-        let pathname = CString::new(format!("self/fd/{}", data.file.as_raw_fd()))
+        let pathname = CString::new(format!("{}", data.file.as_raw_fd()))
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         // When writeback caching is enabled, the kernel may send read requests even if the
@@ -359,7 +359,7 @@ impl PassthroughFs {
         // to follow the `/proc/self/fd` symlink to get the file.
         let fd = unsafe {
             libc::openat(
-                self.proc.as_raw_fd(),
+                self.proc_self_fd.as_raw_fd(),
                 pathname.as_ptr(),
                 (flags | libc::O_CLOEXEC) & (!libc::O_NOFOLLOW),
             )
@@ -1065,7 +1065,7 @@ impl FileSystem for PassthroughFs {
             let fd = hd.file.write().unwrap().as_raw_fd();
             Data::Handle(hd, fd)
         } else {
-            let pathname = CString::new(format!("self/fd/{}", inode_data.file.as_raw_fd()))
+            let pathname = CString::new(format!("{}", inode_data.file.as_raw_fd()))
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             Data::ProcPath(pathname)
         };
@@ -1076,7 +1076,7 @@ impl FileSystem for PassthroughFs {
                 match data {
                     Data::Handle(_, fd) => libc::fchmod(fd, attr.st_mode),
                     Data::ProcPath(ref p) => {
-                        libc::fchmodat(self.proc.as_raw_fd(), p.as_ptr(), attr.st_mode, 0)
+                        libc::fchmodat(self.proc_self_fd.as_raw_fd(), p.as_ptr(), attr.st_mode, 0)
                     }
                 }
             };
@@ -1162,7 +1162,7 @@ impl FileSystem for PassthroughFs {
             let res = match data {
                 Data::Handle(_, fd) => unsafe { libc::futimens(fd, tvs.as_ptr()) },
                 Data::ProcPath(ref p) => unsafe {
-                    libc::utimensat(self.proc.as_raw_fd(), p.as_ptr(), tvs.as_ptr(), 0)
+                    libc::utimensat(self.proc_self_fd.as_raw_fd(), p.as_ptr(), tvs.as_ptr(), 0)
                 },
             };
             if res < 0 {
