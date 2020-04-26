@@ -365,7 +365,8 @@ impl Vmm {
         #[cfg(not(feature = "acpi"))]
         {
             if self.vm.is_some() {
-                return self.vm_shutdown();
+                self.exit_evt.write(1).unwrap();
+                return Ok(());
             }
         }
 
