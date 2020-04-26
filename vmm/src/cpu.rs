@@ -23,6 +23,8 @@ use arch::EntryPoint;
 #[cfg(target_arch = "x86_64")]
 use arch::{CpuidPatch, CpuidReg};
 use devices::{interrupt_controller::InterruptController, BusDevice};
+#[cfg(target_arch = "aarch64")]
+use kvm_bindings::KVM_SYSTEM_EVENT_SHUTDOWN;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_fpu, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events, kvm_xcrs,
@@ -367,6 +369,20 @@ impl Vcpu {
                 VcpuExit::Shutdown => {
                     // Triple fault to trigger a reboot
                     Ok(false)
+                }
+                #[cfg(target_arch = "aarch64")]
+                VcpuExit::SystemEvent(event_type, flags) => {
+                    // On Aarch64, when the VM is shutdown, run() returns
+                    // VcpuExit::SystemEvent with reason KVM_SYSTEM_EVENT_SHUTDOWN
+                    if event_type == KVM_SYSTEM_EVENT_SHUTDOWN {
+                        Ok(false)
+                    } else {
+                        error!(
+                            "Unexpected system event with type 0x{:x}, flags 0x{:x}",
+                            event_type, flags
+                        );
+                        Err(Error::VcpuUnhandledKvmExit)
+                    }
                 }
                 r => {
                     error!("Unexpected exit reason on vcpu run: {:?}", r);
