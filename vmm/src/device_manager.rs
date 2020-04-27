@@ -77,6 +77,7 @@ const DISK_DEVICE_NAME_PREFIX: &str = "disk";
 const FS_DEVICE_NAME_PREFIX: &str = "fs";
 const NET_DEVICE_NAME_PREFIX: &str = "net";
 const PMEM_DEVICE_NAME_PREFIX: &str = "pmem";
+const RNG_DEVICE_NAME: &str = "rng";
 const VSOCK_DEVICE_NAME_PREFIX: &str = "vsock";
 
 /// Errors associated with device manager
@@ -1415,6 +1416,8 @@ impl DeviceManager {
         // Add virtio-rng if required
         let rng_config = self.config.lock().unwrap().rng.clone();
         if let Some(rng_path) = rng_config.src.to_str() {
+            let id = String::from(RNG_DEVICE_NAME);
+
             let virtio_rng_device = Arc::new(Mutex::new(
                 vm_virtio::Rng::new(rng_path, rng_config.iommu)
                     .map_err(DeviceManagerError::CreateVirtioRng)?,
@@ -1422,7 +1425,7 @@ impl DeviceManager {
             devices.push((
                 Arc::clone(&virtio_rng_device) as VirtioDeviceArc,
                 rng_config.iommu,
-                None,
+                Some(id),
             ));
 
             self.add_migratable_device(
