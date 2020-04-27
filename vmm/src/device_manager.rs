@@ -73,6 +73,7 @@ const MMIO_LEN: u64 = 0x1000;
 #[cfg(feature = "pci_support")]
 const VFIO_DEVICE_NAME_PREFIX: &str = "vfio";
 
+const CONSOLE_DEVICE_NAME: &str = "console";
 const DISK_DEVICE_NAME_PREFIX: &str = "disk";
 const FS_DEVICE_NAME_PREFIX: &str = "fs";
 const MEM_DEVICE_NAME: &str = "mem";
@@ -1100,7 +1101,7 @@ impl DeviceManager {
             virtio_devices.push((
                 Arc::new(Mutex::new(virtio_console_device)) as VirtioDeviceArc,
                 console_config.iommu,
-                None,
+                Some(String::from(CONSOLE_DEVICE_NAME)),
             ));
             Some(console_input)
         } else {
