@@ -1458,9 +1458,13 @@ impl DeviceManager {
         &mut self,
         fs_cfg: &mut FsConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
-        if fs_cfg.id.is_none() {
-            fs_cfg.id = Some(self.next_device_name(FS_DEVICE_NAME_PREFIX)?);
-        }
+        let id = if let Some(id) = &fs_cfg.id {
+            id.clone()
+        } else {
+            let id = self.next_device_name(FS_DEVICE_NAME_PREFIX)?;
+            fs_cfg.id = Some(id.clone());
+            id
+        };
 
         if let Some(fs_sock) = fs_cfg.sock.to_str() {
             let cache = if fs_cfg.dax {
@@ -1519,6 +1523,7 @@ impl DeviceManager {
 
             let virtio_fs_device = Arc::new(Mutex::new(
                 vm_virtio::vhost_user::Fs::new(
+                    id,
                     fs_sock,
                     &fs_cfg.tag,
                     fs_cfg.num_queues,
