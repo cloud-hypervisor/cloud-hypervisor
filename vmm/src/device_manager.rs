@@ -9,8 +9,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-extern crate vm_device;
-
 use crate::config::ConsoleOutputMode;
 #[cfg(feature = "pci_support")]
 use crate::config::DeviceConfig;
@@ -52,6 +50,7 @@ use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
+use vm_device::Resource;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize, MmapRegion,
@@ -314,6 +313,9 @@ pub enum DeviceManagerError {
 
     /// Trying to use a size that is not multiple of 2MiB
     PmemSizeNotAligned,
+
+    /// Could not find the node in the device tree.
+    MissingNode,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -542,6 +544,14 @@ impl Drop for ActivatedBackend {
     }
 }
 
+#[allow(unused)]
+#[derive(Default)]
+struct Node {
+    resources: Vec<Resource>,
+    parent: Option<String>,
+    child: Option<String>,
+}
+
 pub struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
@@ -621,6 +631,10 @@ pub struct DeviceManager {
     // Hashmap of PCI b/d/f to their corresponding Arc<Mutex<dyn PciDevice>>.
     #[cfg(feature = "pci_support")]
     pci_devices: HashMap<u32, Arc<dyn Any + Send + Sync>>,
+
+    // Tree of devices, representing the dependencies between devices.
+    // Useful for introspection, snapshot and restore.
+    device_tree: HashMap<String, Node>,
 }
 
 impl DeviceManager {
@@ -636,6 +650,7 @@ impl DeviceManager {
         let mut virtio_devices: Vec<(VirtioDeviceArc, bool, String)> = Vec::new();
         let migratable_devices: Vec<(String, Arc<Mutex<dyn Migratable>>)> = Vec::new();
         let mut bus_devices: Vec<Arc<Mutex<dyn BusDevice>>> = Vec::new();
+        let mut device_tree = HashMap::new();
 
         #[allow(unused_mut)]
         let mut cmdline_additions = Vec::new();
@@ -667,8 +682,11 @@ impl DeviceManager {
                 Arc::clone(&kvm_gsi_msi_routes),
             ));
 
-        let ioapic =
-            DeviceManager::add_ioapic(&address_manager, Arc::clone(&msi_interrupt_manager))?;
+        let ioapic = DeviceManager::add_ioapic(
+            &address_manager,
+            Arc::clone(&msi_interrupt_manager),
+            &mut device_tree,
+        )?;
         let ioapic_migratable = Arc::clone(&ioapic) as Arc<Mutex<dyn Migratable>>;
         bus_devices.push(Arc::clone(&ioapic) as Arc<Mutex<dyn BusDevice>>);
 
@@ -723,6 +741,7 @@ impl DeviceManager {
             pci_id_list: HashMap::new(),
             #[cfg(feature = "pci_support")]
             pci_devices: HashMap::new(),
+            device_tree,
         };
 
         device_manager
@@ -797,6 +816,8 @@ impl DeviceManager {
             let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
             let (iommu_device, iommu_mapping) = if self.config.lock().unwrap().iommu {
+                self.device_tree.insert(iommu_id.clone(), Node::default());
+
                 let (device, mapping) = vm_virtio::Iommu::new(iommu_id.clone())
                     .map_err(DeviceManagerError::CreateVirtioIommu)?;
                 let device = Arc::new(Mutex::new(device));
@@ -908,8 +929,11 @@ impl DeviceManager {
     fn add_ioapic(
         address_manager: &Arc<AddressManager>,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        device_tree: &mut HashMap<String, Node>,
     ) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
         let id = String::from(IOAPIC_DEVICE_NAME);
+
+        device_tree.insert(id.clone(), Node::default());
 
         // Create IOAPIC
         let ioapic = Arc::new(Mutex::new(
@@ -1063,6 +1087,8 @@ impl DeviceManager {
 
             let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
 
+            self.device_tree.insert(id.clone(), Node::default());
+
             let interrupt_group = interrupt_manager
                 .create_group(LegacyIrqGroupConfig {
                     irq: serial_irq as InterruptIndex,
@@ -1111,6 +1137,9 @@ impl DeviceManager {
         let (col, row) = get_win_size();
         let console_input = if let Some(writer) = console_writer {
             let id = String::from(CONSOLE_DEVICE_NAME);
+
+            self.device_tree.insert(id.clone(), Node::default());
+
             let (virtio_console_device, console_input) =
                 vm_virtio::Console::new(id.clone(), writer, col, row, console_config.iommu)
                     .map_err(DeviceManagerError::CreateVirtioConsole)?;
@@ -1202,6 +1231,8 @@ impl DeviceManager {
             disk_cfg.id = Some(id.clone());
             id
         };
+
+        self.device_tree.insert(id.clone(), Node::default());
 
         if disk_cfg.vhost_user {
             let sock = if let Some(sock) = disk_cfg.vhost_socket.clone() {
@@ -1354,6 +1385,8 @@ impl DeviceManager {
             id
         };
 
+        self.device_tree.insert(id.clone(), Node::default());
+
         if net_cfg.vhost_user {
             let sock = if let Some(sock) = net_cfg.vhost_socket.clone() {
                 sock
@@ -1442,6 +1475,8 @@ impl DeviceManager {
         if let Some(rng_path) = rng_config.src.to_str() {
             let id = String::from(RNG_DEVICE_NAME);
 
+            self.device_tree.insert(id.clone(), Node::default());
+
             let virtio_rng_device = Arc::new(Mutex::new(
                 vm_virtio::Rng::new(id.clone(), rng_path, rng_config.iommu)
                     .map_err(DeviceManagerError::CreateVirtioRng)?,
@@ -1471,6 +1506,8 @@ impl DeviceManager {
             fs_cfg.id = Some(id.clone());
             id
         };
+
+        self.device_tree.insert(id.clone(), Node::default());
 
         if let Some(fs_sock) = fs_cfg.sock.to_str() {
             let cache = if fs_cfg.dax {
@@ -1574,6 +1611,8 @@ impl DeviceManager {
             pmem_cfg.id = Some(id.clone());
             id
         };
+
+        self.device_tree.insert(id.clone(), Node::default());
 
         let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
             if pmem_cfg.size.is_none() {
@@ -1705,6 +1744,8 @@ impl DeviceManager {
             id
         };
 
+        self.device_tree.insert(id.clone(), Node::default());
+
         let socket_path = vsock_cfg
             .sock
             .to_str()
@@ -1756,6 +1797,8 @@ impl DeviceManager {
         let mm = mm.lock().unwrap();
         if let (Some(region), Some(resize)) = (&mm.virtiomem_region, &mm.virtiomem_resize) {
             let id = String::from(MEM_DEVICE_NAME);
+
+            self.device_tree.insert(id.clone(), Node::default());
 
             let virtio_mem_device = Arc::new(Mutex::new(
                 vm_virtio::Mem::new(
@@ -1953,6 +1996,20 @@ impl DeviceManager {
     ) -> DeviceManagerResult<u32> {
         let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
 
+        // Add the new virtio-pci node to the device tree.
+        let node = Node {
+            child: Some(virtio_device_id.clone()),
+            ..Default::default()
+        };
+        self.device_tree.insert(id.clone(), node);
+
+        // Update the existing virtio node by setting the parent.
+        if let Some(node) = self.device_tree.get_mut(&virtio_device_id) {
+            node.parent = Some(id.clone());
+        } else {
+            return Err(DeviceManagerError::MissingNode);
+        }
+
         // Allows support for one MSI-X vector per queue. It also adds 1
         // as we need to take into account the dedicated vector to notify
         // about a virtio config change.
@@ -2052,6 +2109,21 @@ impl DeviceManager {
         mmio_base: GuestAddress,
     ) -> DeviceManagerResult<()> {
         let id = format!("{}-{}", VIRTIO_MMIO_DEVICE_NAME_PREFIX, virtio_device_id);
+
+        // Add the new virtio-mmio node to the device tree.
+        let node = Node {
+            child: Some(virtio_device_id.clone()),
+            ..Default::default()
+        };
+        self.device_tree.insert(id.clone(), node);
+
+        // Update the existing virtio node by setting the parent.
+        if let Some(node) = self.device_tree.get_mut(&virtio_device_id) {
+            node.parent = Some(id.clone());
+        } else {
+            return Err(DeviceManagerError::MissingNode);
+        }
+
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let mut mmio_device = vm_virtio::transport::MmioDevice::new(id, memory, virtio_device)
             .map_err(DeviceManagerError::VirtioDevice)?;
@@ -2236,6 +2308,13 @@ impl DeviceManager {
 
             // Update the PCID bitmap
             self.pci_devices_down |= 1 << (*pci_device_bdf >> 3);
+
+            // Remove the device from the device tree along with its parent.
+            if let Some(node) = self.device_tree.remove(&id) {
+                if let Some(parent) = &node.parent {
+                    self.device_tree.remove(parent);
+                }
+            }
 
             Ok(())
         } else {
