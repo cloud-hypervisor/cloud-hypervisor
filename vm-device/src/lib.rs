@@ -7,6 +7,39 @@ use vm_memory::{
     MemoryRegionAddress,
 };
 
+/// Type of Message Singaled Interrupt
+#[derive(Copy, Clone, PartialEq)]
+pub enum MsiIrqType {
+    /// PCI MSI IRQ numbers.
+    PciMsi,
+    /// PCI MSIx IRQ numbers.
+    PciMsix,
+    /// Generic MSI IRQ numbers.
+    GenericMsi,
+}
+
+/// Enumeration for device resources.
+#[allow(missing_docs)]
+#[derive(Clone)]
+pub enum Resource {
+    /// IO Port address range.
+    PioAddressRange { base: u16, size: u16 },
+    /// Memory Mapped IO address range.
+    MmioAddressRange { base: u64, size: u64 },
+    /// Legacy IRQ number.
+    LegacyIrq(u32),
+    /// Message Signaled Interrupt
+    MsiIrq {
+        ty: MsiIrqType,
+        base: u32,
+        size: u32,
+    },
+    /// Network Interface Card MAC address.
+    MacAddress(String),
+    /// KVM memslot index.
+    KvmMemSlot(u32),
+}
+
 /// Trait meant for triggering the DMA mapping update related to an external
 /// device not managed fully through virtio. It is dedicated to virtio-iommu
 /// in order to trigger the map update anytime the mapping is updated from the
