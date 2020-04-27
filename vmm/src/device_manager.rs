@@ -1683,7 +1683,7 @@ impl DeviceManager {
 
         Ok((
             Arc::clone(&vsock_device) as VirtioDeviceArc,
-            false,
+            vsock_cfg.iommu,
             vsock_cfg.id.clone(),
         ))
     }
