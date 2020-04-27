@@ -14,7 +14,7 @@ extern crate vm_device;
 use crate::config::ConsoleOutputMode;
 #[cfg(feature = "pci_support")]
 use crate::config::DeviceConfig;
-use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig};
+use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig, VsockConfig};
 use crate::interrupt::{
     KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager, KvmRoutingEntry,
 };
@@ -76,6 +76,7 @@ const VFIO_DEVICE_NAME_PREFIX: &str = "vfio";
 const DISK_DEVICE_NAME_PREFIX: &str = "disk";
 const NET_DEVICE_NAME_PREFIX: &str = "net";
 const PMEM_DEVICE_NAME_PREFIX: &str = "pmem";
+const VSOCK_DEVICE_NAME_PREFIX: &str = "vsock";
 
 /// Errors associated with device manager
 #[derive(Debug)]
@@ -1120,7 +1121,7 @@ impl DeviceManager {
         devices.append(&mut self.make_virtio_pmem_devices()?);
 
         // Add virtio-vsock if required
-        devices.append(&mut self.make_virtio_vsock_device()?);
+        devices.append(&mut self.make_virtio_vsock_devices()?);
 
         devices.append(&mut self.make_virtio_mem_devices()?);
 
@@ -1642,29 +1643,46 @@ impl DeviceManager {
 
     fn make_virtio_vsock_device(
         &mut self,
+        vsock_cfg: &mut VsockConfig,
+    ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
+        if vsock_cfg.id.is_none() {
+            vsock_cfg.id = self.next_device_name(VSOCK_DEVICE_NAME_PREFIX)?;
+        }
+
+        let socket_path = vsock_cfg
+            .sock
+            .to_str()
+            .ok_or(DeviceManagerError::CreateVsockConvertPath)?;
+        let backend =
+            vm_virtio::vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
+                .map_err(DeviceManagerError::CreateVsockBackend)?;
+
+        let vsock_device = Arc::new(Mutex::new(
+            vm_virtio::Vsock::new(vsock_cfg.cid, backend, vsock_cfg.iommu)
+                .map_err(DeviceManagerError::CreateVirtioVsock)?,
+        ));
+
+        let migratable = Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>;
+        let id = migratable.lock().unwrap().id();
+        self.migratable_devices.push((id, migratable));
+
+        Ok((
+            Arc::clone(&vsock_device) as VirtioDeviceArc,
+            false,
+            vsock_cfg.id.clone(),
+        ))
+    }
+
+    fn make_virtio_vsock_devices(
+        &mut self,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool, Option<String>)>> {
         let mut devices = Vec::new();
-        // Add vsock if required
-        if let Some(vsock_cfg) = &self.config.lock().unwrap().vsock {
-            let socket_path = vsock_cfg
-                .sock
-                .to_str()
-                .ok_or(DeviceManagerError::CreateVsockConvertPath)?;
-            let backend =
-                vm_virtio::vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
-                    .map_err(DeviceManagerError::CreateVsockBackend)?;
 
-            let vsock_device = Arc::new(Mutex::new(
-                vm_virtio::Vsock::new(vsock_cfg.cid, backend, vsock_cfg.iommu)
-                    .map_err(DeviceManagerError::CreateVirtioVsock)?,
-            ));
-
-            devices.push((Arc::clone(&vsock_device) as VirtioDeviceArc, false, None));
-
-            let migratable = Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>;
-            let id = migratable.lock().unwrap().id();
-            self.migratable_devices.push((id, migratable));
+        let mut vsock = self.config.lock().unwrap().vsock.clone();
+        if let Some(ref mut vsock_cfg) = &mut vsock {
+            devices.push(self.make_virtio_vsock_device(vsock_cfg)?);
         }
+        self.config.lock().unwrap().vsock = vsock;
 
         Ok(devices)
     }
