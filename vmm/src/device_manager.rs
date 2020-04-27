@@ -1360,7 +1360,7 @@ impl DeviceManager {
                 queue_size: net_cfg.queue_size,
             };
             let vhost_user_net_device = Arc::new(Mutex::new(
-                vm_virtio::vhost_user::Net::new(net_cfg.mac, vu_cfg)
+                vm_virtio::vhost_user::Net::new(id, net_cfg.mac, vu_cfg)
                     .map_err(DeviceManagerError::CreateVhostUserNet)?,
             ));
             self.add_migratable_device(
