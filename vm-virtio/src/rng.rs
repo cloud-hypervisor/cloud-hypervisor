@@ -182,6 +182,7 @@ impl RngEpollHandler {
 
 /// Virtio device for exposing entropy to the guest OS through virtio.
 pub struct Rng {
+    id: String,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
     random_file: Option<File>,
@@ -202,7 +203,7 @@ pub struct RngState {
 
 impl Rng {
     /// Create a new virtio rng device that gets random data from /dev/urandom.
-    pub fn new(path: &str, iommu: bool) -> io::Result<Rng> {
+    pub fn new(id: String, path: &str, iommu: bool) -> io::Result<Rng> {
         let random_file = File::open(path)?;
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
@@ -211,6 +212,7 @@ impl Rng {
         }
 
         Ok(Rng {
+            id,
             kill_evt: None,
             pause_evt: None,
             random_file: Some(random_file),
@@ -384,19 +386,18 @@ impl VirtioDevice for Rng {
 }
 
 virtio_pausable!(Rng);
-const RNG_SNAPSHOT_ID: &str = "virtio-rng";
 impl Snapshottable for Rng {
     fn id(&self) -> String {
-        RNG_SNAPSHOT_ID.to_string()
+        self.id.clone()
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        let mut rng_snapshot = Snapshot::new(RNG_SNAPSHOT_ID);
+        let mut rng_snapshot = Snapshot::new(self.id.as_str());
         rng_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", RNG_SNAPSHOT_ID),
+            id: format!("{}-section", self.id),
             snapshot,
         });
 
@@ -404,10 +405,7 @@ impl Snapshottable for Rng {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(rng_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", RNG_SNAPSHOT_ID))
-        {
+        if let Some(rng_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
             let rng_state = match serde_json::from_slice(&rng_section.snapshot) {
                 Ok(state) => state,
                 Err(error) => {
