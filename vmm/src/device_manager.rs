@@ -75,6 +75,7 @@ const VFIO_DEVICE_NAME_PREFIX: &str = "vfio";
 
 const DISK_DEVICE_NAME_PREFIX: &str = "disk";
 const FS_DEVICE_NAME_PREFIX: &str = "fs";
+const MEM_DEVICE_NAME: &str = "mem";
 const NET_DEVICE_NAME_PREFIX: &str = "net";
 const PMEM_DEVICE_NAME_PREFIX: &str = "pmem";
 const RNG_DEVICE_NAME: &str = "rng";
@@ -1725,7 +1726,7 @@ impl DeviceManager {
             devices.push((
                 Arc::clone(&virtio_mem_device) as VirtioDeviceArc,
                 false,
-                None,
+                Some(String::from(MEM_DEVICE_NAME)),
             ));
 
             let migratable = Arc::clone(&virtio_mem_device) as Arc<Mutex<dyn Migratable>>;
