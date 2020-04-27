@@ -1181,9 +1181,13 @@ impl DeviceManager {
         &mut self,
         disk_cfg: &mut DiskConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
-        if disk_cfg.id.is_none() {
-            disk_cfg.id = Some(self.next_device_name(DISK_DEVICE_NAME_PREFIX)?);
-        }
+        let id = if let Some(id) = &disk_cfg.id {
+            id.clone()
+        } else {
+            let id = self.next_device_name(DISK_DEVICE_NAME_PREFIX)?;
+            disk_cfg.id = Some(id.clone());
+            id
+        };
 
         if disk_cfg.vhost_user {
             let sock = if let Some(sock) = disk_cfg.vhost_socket.clone() {
@@ -1235,6 +1239,7 @@ impl DeviceManager {
             match image_type {
                 ImageType::Raw => {
                     let dev = vm_virtio::Block::new(
+                        id,
                         raw_img,
                         disk_cfg
                             .path
@@ -1262,6 +1267,7 @@ impl DeviceManager {
                     let qcow_img =
                         QcowFile::from(raw_img).map_err(DeviceManagerError::QcowDeviceCreate)?;
                     let dev = vm_virtio::Block::new(
+                        id,
                         qcow_img,
                         disk_cfg
                             .path

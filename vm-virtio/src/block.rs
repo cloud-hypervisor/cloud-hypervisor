@@ -887,6 +887,7 @@ unsafe impl ByteValued for VirtioBlockConfig {}
 
 /// Virtio device for exposing block level read/write operations on a host file.
 pub struct Block<T: DiskFile> {
+    id: String,
     kill_evt: Option<EventFd>,
     disk_image: Arc<Mutex<T>>,
     disk_path: PathBuf,
@@ -916,6 +917,7 @@ impl<T: DiskFile> Block<T> {
     ///
     /// The given file must be seekable and sizable.
     pub fn new(
+        id: String,
         mut disk_image: T,
         disk_path: PathBuf,
         is_disk_read_only: bool,
@@ -954,6 +956,7 @@ impl<T: DiskFile> Block<T> {
         }
 
         Ok(Block {
+            id,
             kill_evt: None,
             disk_image: Arc::new(Mutex::new(disk_image)),
             disk_path,
@@ -1163,19 +1166,18 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 }
 
 virtio_pausable!(Block, T: 'static + DiskFile + Send);
-const BLOCK_SNAPSHOT_ID: &str = "virtio-block";
 impl<T: 'static + DiskFile + Send> Snapshottable for Block<T> {
     fn id(&self) -> String {
-        BLOCK_SNAPSHOT_ID.to_string()
+        self.id.clone()
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        let mut block_snapshot = Snapshot::new(BLOCK_SNAPSHOT_ID);
+        let mut block_snapshot = Snapshot::new(self.id.as_str());
         block_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", BLOCK_SNAPSHOT_ID),
+            id: format!("{}-section", self.id),
             snapshot,
         });
 
@@ -1183,10 +1185,7 @@ impl<T: 'static + DiskFile + Send> Snapshottable for Block<T> {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(block_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", BLOCK_SNAPSHOT_ID))
-        {
+        if let Some(block_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
             let block_state = match serde_json::from_slice(&block_section.snapshot) {
                 Ok(state) => state,
                 Err(error) => {
