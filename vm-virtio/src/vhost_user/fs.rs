@@ -267,6 +267,7 @@ impl Default for VirtioFsConfig {
 unsafe impl ByteValued for VirtioFsConfig {}
 
 pub struct Fs {
+    id: String,
     vu: Master,
     queue_sizes: Vec<u16>,
     avail_features: u64,
@@ -287,6 +288,7 @@ pub struct Fs {
 impl Fs {
     /// Create a new virtio-fs device.
     pub fn new(
+        id: String,
         path: &str,
         tag: &str,
         req_num_queues: usize,
@@ -352,6 +354,7 @@ impl Fs {
         config.num_request_queues = req_num_queues as u32;
 
         Ok(Fs {
+            id,
             vu: master,
             queue_sizes: vec![queue_size; num_queues],
             avail_features,
@@ -605,6 +608,10 @@ impl VirtioDevice for Fs {
 }
 
 virtio_pausable!(Fs);
-impl Snapshottable for Fs {}
+impl Snapshottable for Fs {
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+}
 impl Transportable for Fs {}
 impl Migratable for Fs {}
