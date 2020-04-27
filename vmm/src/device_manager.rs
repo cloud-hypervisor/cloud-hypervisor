@@ -1340,9 +1340,13 @@ impl DeviceManager {
         &mut self,
         net_cfg: &mut NetConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
-        if net_cfg.id.is_none() {
-            net_cfg.id = Some(self.next_device_name(NET_DEVICE_NAME_PREFIX)?);
-        }
+        let id = if let Some(id) = &net_cfg.id {
+            id.clone()
+        } else {
+            let id = self.next_device_name(NET_DEVICE_NAME_PREFIX)?;
+            net_cfg.id = Some(id.clone());
+            id
+        };
 
         if net_cfg.vhost_user {
             let sock = if let Some(sock) = net_cfg.vhost_socket.clone() {
@@ -1371,6 +1375,7 @@ impl DeviceManager {
             let virtio_net_device = if let Some(ref tap_if_name) = net_cfg.tap {
                 Arc::new(Mutex::new(
                     vm_virtio::Net::new(
+                        id,
                         Some(tap_if_name),
                         None,
                         None,
@@ -1384,6 +1389,7 @@ impl DeviceManager {
             } else {
                 Arc::new(Mutex::new(
                     vm_virtio::Net::new(
+                        id,
                         None,
                         Some(net_cfg.ip),
                         Some(net_cfg.mask),

@@ -311,6 +311,7 @@ impl NetEpollHandler {
 }
 
 pub struct Net {
+    id: String,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
     taps: Option<Vec<Tap>>,
@@ -336,6 +337,7 @@ pub struct NetState {
 impl Net {
     /// Create a new virtio network device with the given TAP interface.
     pub fn new_with_tap(
+        id: String,
         taps: Vec<Tap>,
         guest_mac: Option<MacAddr>,
         iommu: bool,
@@ -365,6 +367,7 @@ impl Net {
         }
 
         Ok(Net {
+            id,
             kill_evt: None,
             pause_evt: None,
             taps: Some(taps),
@@ -382,7 +385,9 @@ impl Net {
 
     /// Create a new virtio network device with the given IP address and
     /// netmask.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
+        id: String,
         if_name: Option<&str>,
         ip_addr: Option<Ipv4Addr>,
         netmask: Option<Ipv4Addr>,
@@ -393,7 +398,7 @@ impl Net {
     ) -> Result<Self> {
         let taps = open_tap(if_name, ip_addr, netmask, num_queues / 2).map_err(Error::OpenTap)?;
 
-        Self::new_with_tap(taps, guest_mac, iommu, num_queues, queue_size)
+        Self::new_with_tap(id, taps, guest_mac, iommu, num_queues, queue_size)
     }
 
     fn state(&self) -> NetState {
@@ -611,19 +616,18 @@ impl VirtioDevice for Net {
 }
 
 virtio_ctrl_q_pausable!(Net);
-const NET_SNAPSHOT_ID: &str = "virtio-net";
 impl Snapshottable for Net {
     fn id(&self) -> String {
-        NET_SNAPSHOT_ID.to_string()
+        self.id.clone()
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        let mut net_snapshot = Snapshot::new(NET_SNAPSHOT_ID);
+        let mut net_snapshot = Snapshot::new(self.id.as_str());
         net_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", NET_SNAPSHOT_ID),
+            id: format!("{}-section", self.id),
             snapshot,
         });
 
@@ -631,10 +635,7 @@ impl Snapshottable for Net {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(net_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", NET_SNAPSHOT_ID))
-        {
+        if let Some(net_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
             let net_state = match serde_json::from_slice(&net_section.snapshot) {
                 Ok(state) => state,
                 Err(error) => {
