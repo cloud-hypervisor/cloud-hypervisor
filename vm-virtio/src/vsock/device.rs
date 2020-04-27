@@ -376,6 +376,7 @@ where
 
 /// Virtio device exposing virtual socket to the guest.
 pub struct Vsock<B: VsockBackend> {
+    id: String,
     cid: u64,
     backend: Arc<RwLock<B>>,
     kill_evt: Option<EventFd>,
@@ -394,7 +395,7 @@ where
 {
     /// Create a new virtio-vsock device with the given VM CID and vsock
     /// backend.
-    pub fn new(cid: u64, backend: B, iommu: bool) -> io::Result<Vsock<B>> {
+    pub fn new(id: String, cid: u64, backend: B, iommu: bool) -> io::Result<Vsock<B>> {
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_F_IN_ORDER;
 
         if iommu {
@@ -402,6 +403,7 @@ where
         }
 
         Ok(Vsock {
+            id,
             cid,
             backend: Arc::new(RwLock::new(backend)),
             kill_evt: None,
@@ -574,7 +576,14 @@ where
 
 virtio_pausable!(Vsock, T: 'static + VsockBackend + Sync);
 
-impl<B> Snapshottable for Vsock<B> where B: VsockBackend + Sync + 'static {}
+impl<B> Snapshottable for Vsock<B>
+where
+    B: VsockBackend + Sync + 'static,
+{
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+}
 impl<B> Transportable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 impl<B> Migratable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 

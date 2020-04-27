@@ -1690,9 +1690,13 @@ impl DeviceManager {
         &mut self,
         vsock_cfg: &mut VsockConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
-        if vsock_cfg.id.is_none() {
-            vsock_cfg.id = Some(self.next_device_name(VSOCK_DEVICE_NAME_PREFIX)?);
-        }
+        let id = if let Some(id) = &vsock_cfg.id {
+            id.clone()
+        } else {
+            let id = self.next_device_name(VSOCK_DEVICE_NAME_PREFIX)?;
+            vsock_cfg.id = Some(id.clone());
+            id
+        };
 
         let socket_path = vsock_cfg
             .sock
@@ -1703,18 +1707,16 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::CreateVsockBackend)?;
 
         let vsock_device = Arc::new(Mutex::new(
-            vm_virtio::Vsock::new(vsock_cfg.cid, backend, vsock_cfg.iommu)
+            vm_virtio::Vsock::new(id.clone(), vsock_cfg.cid, backend, vsock_cfg.iommu)
                 .map_err(DeviceManagerError::CreateVirtioVsock)?,
         ));
 
-        let migratable = Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>;
-        let id = migratable.lock().unwrap().id();
-        self.migratable_devices.push((id, migratable));
+        self.add_migratable_device(Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>);
 
         Ok((
             Arc::clone(&vsock_device) as VirtioDeviceArc,
             vsock_cfg.iommu,
-            vsock_cfg.id.clone(),
+            Some(id),
         ))
     }
 

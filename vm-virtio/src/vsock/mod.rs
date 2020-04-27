@@ -265,7 +265,7 @@ mod tests {
                 cid: CID,
                 mem: GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap(),
                 mem_size: MEM_SIZE,
-                device: Vsock::new(CID, TestBackend::new(), false).unwrap(),
+                device: Vsock::new(String::from("vsock"), CID, TestBackend::new(), false).unwrap(),
             }
         }
 
