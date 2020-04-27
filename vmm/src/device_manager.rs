@@ -40,7 +40,6 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout, Seek, SeekFrom};
-#[cfg(feature = "pci_support")]
 use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
@@ -582,6 +581,9 @@ pub struct DeviceManager {
     // Backends that have been spawned
     vhost_user_backends: Vec<ActivatedBackend>,
 
+    // Counter to keep track of the consumed device IDs.
+    device_id_cnt: Wrapping<usize>,
+
     // Keep a reference to the PCI bus
     #[cfg(feature = "pci_support")]
     pci_bus: Option<Arc<Mutex<PciBus>>>,
@@ -609,10 +611,6 @@ pub struct DeviceManager {
     // Hashmap of device's name to their corresponding PCI b/d/f.
     #[cfg(feature = "pci_support")]
     pci_id_list: HashMap<String, u32>,
-
-    // Counter to keep track of the consumed device IDs.
-    #[cfg(feature = "pci_support")]
-    device_id_cnt: Wrapping<usize>,
 
     // Hashmap of PCI b/d/f to their corresponding Arc<Mutex<dyn PciDevice>>.
     #[cfg(feature = "pci_support")]
@@ -702,6 +700,7 @@ impl DeviceManager {
             bus_devices,
             vmm_path,
             vhost_user_backends: Vec::new(),
+            device_id_cnt: Wrapping(0),
             #[cfg(feature = "pci_support")]
             pci_bus: None,
             #[cfg(feature = "pci_support")]
@@ -716,8 +715,6 @@ impl DeviceManager {
             pci_devices_down: 0,
             #[cfg(feature = "pci_support")]
             pci_id_list: HashMap::new(),
-            #[cfg(feature = "pci_support")]
-            device_id_cnt: Wrapping(0),
             #[cfg(feature = "pci_support")]
             pci_devices: HashMap::new(),
         };
@@ -1185,7 +1182,7 @@ impl DeviceManager {
         disk_cfg: &mut DiskConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
         if disk_cfg.id.is_none() {
-            disk_cfg.id = self.next_device_name(DISK_DEVICE_NAME_PREFIX)?;
+            disk_cfg.id = Some(self.next_device_name(DISK_DEVICE_NAME_PREFIX)?);
         }
 
         if disk_cfg.vhost_user {
@@ -1338,7 +1335,7 @@ impl DeviceManager {
         net_cfg: &mut NetConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
         if net_cfg.id.is_none() {
-            net_cfg.id = self.next_device_name(NET_DEVICE_NAME_PREFIX)?;
+            net_cfg.id = Some(self.next_device_name(NET_DEVICE_NAME_PREFIX)?);
         }
 
         if net_cfg.vhost_user {
@@ -1450,7 +1447,7 @@ impl DeviceManager {
         fs_cfg: &mut FsConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
         if fs_cfg.id.is_none() {
-            fs_cfg.id = self.next_device_name(FS_DEVICE_NAME_PREFIX)?;
+            fs_cfg.id = Some(self.next_device_name(FS_DEVICE_NAME_PREFIX)?);
         }
 
         if let Some(fs_sock) = fs_cfg.sock.to_str() {
@@ -1552,7 +1549,7 @@ impl DeviceManager {
         pmem_cfg: &mut PmemConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
         if pmem_cfg.id.is_none() {
-            pmem_cfg.id = self.next_device_name(PMEM_DEVICE_NAME_PREFIX)?;
+            pmem_cfg.id = Some(self.next_device_name(PMEM_DEVICE_NAME_PREFIX)?);
         }
 
         let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
@@ -1673,7 +1670,7 @@ impl DeviceManager {
         vsock_cfg: &mut VsockConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
         if vsock_cfg.id.is_none() {
-            vsock_cfg.id = self.next_device_name(VSOCK_DEVICE_NAME_PREFIX)?;
+            vsock_cfg.id = Some(self.next_device_name(VSOCK_DEVICE_NAME_PREFIX)?);
         }
 
         let socket_path = vsock_cfg
@@ -1758,12 +1755,17 @@ impl DeviceManager {
     }
 
     #[cfg(not(feature = "pci_support"))]
-    fn next_device_name(&mut self, _prefix: &str) -> DeviceManagerResult<Option<String>> {
-        Ok(None)
+    fn next_device_name(&mut self, prefix: &str) -> DeviceManagerResult<String> {
+        // Generate the temporary name.
+        let name = format!("{}{}", prefix, self.device_id_cnt);
+        // Increment the counter.
+        self.device_id_cnt += Wrapping(1);
+
+        Ok(name)
     }
 
     #[cfg(feature = "pci_support")]
-    fn next_device_name(&mut self, prefix: &str) -> DeviceManagerResult<Option<String>> {
+    fn next_device_name(&mut self, prefix: &str) -> DeviceManagerResult<String> {
         let start_id = self.device_id_cnt;
         loop {
             // Generate the temporary name.
@@ -1772,7 +1774,7 @@ impl DeviceManager {
             self.device_id_cnt += Wrapping(1);
             // Check if the name is already in use.
             if !self.pci_id_list.contains_key(&name) {
-                return Ok(Some(name));
+                return Ok(name);
             }
 
             if self.device_id_cnt == start_id {
@@ -1868,8 +1870,8 @@ impl DeviceManager {
             id.clone()
         } else {
             let id = self.next_device_name(VFIO_DEVICE_NAME_PREFIX)?;
-            device_cfg.id = id.clone();
-            id.unwrap()
+            device_cfg.id = Some(id.clone());
+            id
         };
         self.pci_id_list.insert(vfio_name, pci_device_bdf);
 
