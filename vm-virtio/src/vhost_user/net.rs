@@ -37,6 +37,7 @@ struct SlaveReqHandler {}
 impl VhostUserMasterReqHandler for SlaveReqHandler {}
 
 pub struct Net {
+    id: String,
     vhost_user_net: Master,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
@@ -55,7 +56,7 @@ pub struct Net {
 impl Net {
     /// Create a new vhost-user-net device
     /// Create a new vhost-user-net device
-    pub fn new(mac_addr: MacAddr, vu_cfg: VhostUserConfig) -> Result<Net> {
+    pub fn new(id: String, mac_addr: MacAddr, vu_cfg: VhostUserConfig) -> Result<Net> {
         let mut vhost_user_net = Master::connect(&vu_cfg.sock, vu_cfg.num_queues as u64)
             .map_err(Error::VhostUserCreateMaster)?;
 
@@ -141,6 +142,7 @@ impl Net {
         }
 
         Ok(Net {
+            id,
             vhost_user_net,
             kill_evt: None,
             pause_evt: None,
@@ -365,6 +367,10 @@ impl VirtioDevice for Net {
 }
 
 virtio_ctrl_q_pausable!(Net);
-impl Snapshottable for Net {}
+impl Snapshottable for Net {
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+}
 impl Transportable for Net {}
 impl Migratable for Net {}
