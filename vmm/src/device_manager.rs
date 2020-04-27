@@ -1621,7 +1621,7 @@ impl DeviceManager {
 
         Ok((
             Arc::clone(&virtio_pmem_device) as VirtioDeviceArc,
-            false,
+            pmem_cfg.iommu,
             pmem_cfg.id.clone(),
         ))
     }
@@ -1637,6 +1637,7 @@ impl DeviceManager {
                 devices.push(self.make_virtio_pmem_device(pmem_cfg)?);
             }
         }
+        self.config.lock().unwrap().pmem = pmem_devices;
 
         Ok(devices)
     }
