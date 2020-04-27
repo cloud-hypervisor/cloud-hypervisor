@@ -738,6 +738,7 @@ impl MemEpollHandler {
 
 // Virtio device for exposing entropy to the guest OS through virtio.
 pub struct Mem {
+    id: String,
     resize: Resize,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
@@ -754,7 +755,7 @@ pub struct Mem {
 
 impl Mem {
     // Create a new virtio-mem device.
-    pub fn new(region: &Arc<GuestRegionMmap>, resize: Resize) -> io::Result<Mem> {
+    pub fn new(id: String, region: &Arc<GuestRegionMmap>, resize: Resize) -> io::Result<Mem> {
         let region_len = region.len();
 
         if region_len != region_len / VIRTIO_MEM_DEFAULT_BLOCK_SIZE * VIRTIO_MEM_DEFAULT_BLOCK_SIZE
@@ -787,6 +788,7 @@ impl Mem {
         };
 
         Ok(Mem {
+            id,
             resize,
             kill_evt: None,
             pause_evt: None,
@@ -955,6 +957,10 @@ impl VirtioDevice for Mem {
 }
 
 virtio_pausable!(Mem);
-impl Snapshottable for Mem {}
+impl Snapshottable for Mem {
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+}
 impl Transportable for Mem {}
 impl Migratable for Mem {}

@@ -1737,10 +1737,14 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool, Option<String>)>> {
         let mut devices = Vec::new();
 
-        let mm = &self.memory_manager.lock().unwrap();
+        let mm = self.memory_manager.clone();
+        let mm = mm.lock().unwrap();
         if let (Some(region), Some(resize)) = (&mm.virtiomem_region, &mm.virtiomem_resize) {
+            let id = String::from(MEM_DEVICE_NAME);
+
             let virtio_mem_device = Arc::new(Mutex::new(
                 vm_virtio::Mem::new(
+                    id.clone(),
                     &region,
                     resize
                         .try_clone()
@@ -1752,12 +1756,10 @@ impl DeviceManager {
             devices.push((
                 Arc::clone(&virtio_mem_device) as VirtioDeviceArc,
                 false,
-                Some(String::from(MEM_DEVICE_NAME)),
+                Some(id),
             ));
 
-            let migratable = Arc::clone(&virtio_mem_device) as Arc<Mutex<dyn Migratable>>;
-            let id = migratable.lock().unwrap().id();
-            self.migratable_devices.push((id, migratable));
+            self.add_migratable_device(Arc::clone(&virtio_mem_device) as Arc<Mutex<dyn Migratable>>);
         }
 
         Ok(devices)
