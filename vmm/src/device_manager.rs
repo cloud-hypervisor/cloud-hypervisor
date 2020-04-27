@@ -86,6 +86,9 @@ const VSOCK_DEVICE_NAME_PREFIX: &str = "vsock";
 #[cfg(feature = "pci_support")]
 const IOMMU_DEVICE_NAME: &str = "iommu";
 
+#[cfg(feature = "mmio_support")]
+const VIRTIO_MMIO_DEVICE_NAME_PREFIX: &str = "virtio-mmio";
+
 /// Errors associated with device manager
 #[derive(Debug)]
 pub enum DeviceManagerError {
@@ -881,7 +884,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "mmio_support")]
         {
-            for (device, _, _) in virtio_devices {
+            for (device, _, id) in virtio_devices {
                 let mmio_addr = self
                     .address_manager
                     .allocator
@@ -889,7 +892,7 @@ impl DeviceManager {
                     .unwrap()
                     .allocate_mmio_addresses(None, MMIO_LEN, Some(MMIO_LEN));
                 if let Some(addr) = mmio_addr {
-                    self.add_virtio_mmio_device(device, interrupt_manager, addr)?;
+                    self.add_virtio_mmio_device(id, device, interrupt_manager, addr)?;
                 } else {
                     error!("Unable to allocate MMIO address!");
                 }
@@ -2025,12 +2028,14 @@ impl DeviceManager {
     #[cfg(feature = "mmio_support")]
     fn add_virtio_mmio_device(
         &mut self,
+        virtio_device_id: String,
         virtio_device: VirtioDeviceArc,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         mmio_base: GuestAddress,
     ) -> DeviceManagerResult<()> {
+        let id = format!("{}-{}", VIRTIO_MMIO_DEVICE_NAME_PREFIX, virtio_device_id);
         let memory = self.memory_manager.lock().unwrap().guest_memory();
-        let mut mmio_device = vm_virtio::transport::MmioDevice::new(memory, virtio_device)
+        let mut mmio_device = vm_virtio::transport::MmioDevice::new(id, memory, virtio_device)
             .map_err(DeviceManagerError::VirtioDevice)?;
 
         for (i, (event, addr)) in mmio_device.ioeventfds(mmio_base.0).iter().enumerate() {
