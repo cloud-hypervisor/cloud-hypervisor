@@ -82,6 +82,9 @@ const PMEM_DEVICE_NAME_PREFIX: &str = "pmem";
 const RNG_DEVICE_NAME: &str = "rng";
 const VSOCK_DEVICE_NAME_PREFIX: &str = "vsock";
 
+#[cfg(feature = "pci_support")]
+const IOMMU_DEVICE_NAME: &str = "iommu";
+
 /// Errors associated with device manager
 #[derive(Debug)]
 pub enum DeviceManagerError {
@@ -839,7 +842,7 @@ impl DeviceManager {
                     &mut pci_bus,
                     &None,
                     &interrupt_manager,
-                    None,
+                    Some(String::from(IOMMU_DEVICE_NAME)),
                 )?;
             }
 
