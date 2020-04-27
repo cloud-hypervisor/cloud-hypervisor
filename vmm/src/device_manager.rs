@@ -74,6 +74,7 @@ const MMIO_LEN: u64 = 0x1000;
 const VFIO_DEVICE_NAME_PREFIX: &str = "vfio";
 
 const DISK_DEVICE_NAME_PREFIX: &str = "disk";
+const FS_DEVICE_NAME_PREFIX: &str = "fs";
 const NET_DEVICE_NAME_PREFIX: &str = "net";
 const PMEM_DEVICE_NAME_PREFIX: &str = "pmem";
 const VSOCK_DEVICE_NAME_PREFIX: &str = "vsock";
@@ -1426,8 +1427,12 @@ impl DeviceManager {
 
     fn make_virtio_fs_device(
         &mut self,
-        fs_cfg: &FsConfig,
+        fs_cfg: &mut FsConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
+        if fs_cfg.id.is_none() {
+            fs_cfg.id = self.next_device_name(FS_DEVICE_NAME_PREFIX)?;
+        }
+
         if let Some(fs_sock) = fs_cfg.sock.to_str() {
             let cache = if fs_cfg.dax {
                 let fs_cache = fs_cfg.cache_size;
@@ -1499,7 +1504,7 @@ impl DeviceManager {
             Ok((
                 Arc::clone(&virtio_fs_device) as VirtioDeviceArc,
                 false,
-                None,
+                fs_cfg.id.clone(),
             ))
         } else {
             Err(DeviceManagerError::NoVirtioFsSock)
@@ -1511,12 +1516,13 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool, Option<String>)>> {
         let mut devices = Vec::new();
 
-        let fs_devices = self.config.lock().unwrap().fs.clone();
-        if let Some(fs_list_cfg) = &fs_devices {
-            for fs_cfg in fs_list_cfg.iter() {
+        let mut fs_devices = self.config.lock().unwrap().fs.clone();
+        if let Some(fs_list_cfg) = &mut fs_devices {
+            for fs_cfg in fs_list_cfg.iter_mut() {
                 devices.push(self.make_virtio_fs_device(fs_cfg)?);
             }
         }
+        self.config.lock().unwrap().fs = fs_devices;
 
         Ok(devices)
     }
