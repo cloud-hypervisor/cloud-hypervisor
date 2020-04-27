@@ -68,11 +68,11 @@ const VIRTIO_F_IOMMU_PLATFORM: u32 = 33;
 const VIRTIO_F_IN_ORDER: u32 = 35;
 
 // Types taken from linux/virtio_ids.h
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 #[allow(dead_code)]
 #[allow(non_camel_case_types)]
 #[repr(C)]
-enum VirtioDeviceType {
+pub enum VirtioDeviceType {
     TYPE_NET = 1,
     TYPE_BLOCK = 2,
     TYPE_CONSOLE = 3,

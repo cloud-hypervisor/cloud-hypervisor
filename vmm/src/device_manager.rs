@@ -63,7 +63,7 @@ use vm_virtio::transport::VirtioPciDevice;
 use vm_virtio::transport::VirtioTransport;
 use vm_virtio::vhost_user::VhostUserConfig;
 #[cfg(feature = "pci_support")]
-use vm_virtio::{DmaRemapping, IommuMapping, VirtioIommuRemapping};
+use vm_virtio::{DmaRemapping, IommuMapping, VirtioDeviceType, VirtioIommuRemapping};
 use vm_virtio::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -254,9 +254,17 @@ pub enum DeviceManagerError {
     /// Failed removing a bus device from the MMIO bus.
     RemoveDeviceFromMmioBus(devices::BusError),
 
-    /// Failed to find VFIO device corresponding to the given identifier.
+    /// Failed to find the device corresponding to a specific PCI b/d/f.
     #[cfg(feature = "pci_support")]
-    UnknownVfioDeviceId(String),
+    UnknownPciBdf(u32),
+
+    /// Not allowed to remove this type of device from the VM.
+    #[cfg(feature = "pci_support")]
+    RemovalNotAllowed(vm_virtio::VirtioDeviceType),
+
+    /// Failed to find device corresponding to the given identifier.
+    #[cfg(feature = "pci_support")]
+    UnknownDeviceId(String),
 
     /// Failed to find an available PCI device ID.
     #[cfg(feature = "pci_support")]
@@ -2150,12 +2158,38 @@ impl DeviceManager {
     #[cfg(feature = "pci_support")]
     pub fn remove_device(&mut self, id: String) -> DeviceManagerResult<()> {
         if let Some(pci_device_bdf) = self.pci_id_list.get(&id) {
+            if let Some(any_device) = self.pci_devices.get(&pci_device_bdf) {
+                if let Ok(virtio_pci_device) =
+                    Arc::clone(any_device).downcast::<Mutex<VirtioPciDevice>>()
+                {
+                    let device_type = VirtioDeviceType::from(
+                        virtio_pci_device
+                            .lock()
+                            .unwrap()
+                            .virtio_device()
+                            .lock()
+                            .unwrap()
+                            .device_type(),
+                    );
+                    match device_type {
+                        VirtioDeviceType::TYPE_NET
+                        | VirtioDeviceType::TYPE_BLOCK
+                        | VirtioDeviceType::TYPE_PMEM
+                        | VirtioDeviceType::TYPE_FS
+                        | VirtioDeviceType::TYPE_VSOCK => {}
+                        _ => return Err(DeviceManagerError::RemovalNotAllowed(device_type)),
+                    }
+                }
+            } else {
+                return Err(DeviceManagerError::UnknownPciBdf(*pci_device_bdf));
+            }
+
             // Update the PCID bitmap
             self.pci_devices_down |= 1 << (*pci_device_bdf >> 3);
 
             Ok(())
         } else {
-            Err(DeviceManagerError::UnknownVfioDeviceId(id))
+            Err(DeviceManagerError::UnknownDeviceId(id))
         }
     }
 
