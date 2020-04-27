@@ -865,6 +865,8 @@ pub struct FsConfig {
     pub dax: bool,
     #[serde(default = "default_fsconfig_cache_size")]
     pub cache_size: u64,
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 fn default_fsconfig_num_queues() -> usize {
@@ -892,6 +894,7 @@ impl Default for FsConfig {
             queue_size: default_fsconfig_queue_size(),
             dax: default_fsconfig_dax(),
             cache_size: default_fsconfig_cache_size(),
+            id: None,
         }
     }
 }
@@ -900,7 +903,7 @@ impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
     \"tag=<tag_name>,sock=<socket_path>,num_queues=<number_of_queues>,\
     queue_size=<size_of_each_queue>,dax=on|off,cache_size=<DAX cache size: \
-    default 8Gib>\"";
+    default 8Gib>,id=<device_id>\"";
 
     pub fn parse(fs: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -941,6 +944,8 @@ impl FsConfig {
             .unwrap_or_else(|| ByteSized(default_fsconfig_cache_size()))
             .0;
 
+        let id = parser.get("id");
+
         Ok(FsConfig {
             tag,
             sock,
@@ -948,6 +953,7 @@ impl FsConfig {
             queue_size,
             dax,
             cache_size,
+            id,
         })
     }
 }
