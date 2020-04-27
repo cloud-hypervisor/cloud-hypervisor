@@ -1560,9 +1560,13 @@ impl DeviceManager {
         &mut self,
         pmem_cfg: &mut PmemConfig,
     ) -> DeviceManagerResult<(VirtioDeviceArc, bool, Option<String>)> {
-        if pmem_cfg.id.is_none() {
-            pmem_cfg.id = Some(self.next_device_name(PMEM_DEVICE_NAME_PREFIX)?);
-        }
+        let id = if let Some(id) = &pmem_cfg.id {
+            id.clone()
+        } else {
+            let id = self.next_device_name(PMEM_DEVICE_NAME_PREFIX)?;
+            pmem_cfg.id = Some(id.clone());
+            id
+        };
 
         let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
             if pmem_cfg.size.is_none() {
@@ -1646,13 +1650,18 @@ impl DeviceManager {
         };
 
         let virtio_pmem_device = Arc::new(Mutex::new(
-            vm_virtio::Pmem::new(file, pmem_guest_addr, mapping, mmap_region, pmem_cfg.iommu)
-                .map_err(DeviceManagerError::CreateVirtioPmem)?,
+            vm_virtio::Pmem::new(
+                id,
+                file,
+                pmem_guest_addr,
+                mapping,
+                mmap_region,
+                pmem_cfg.iommu,
+            )
+            .map_err(DeviceManagerError::CreateVirtioPmem)?,
         ));
 
-        let migratable = Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn Migratable>>;
-        let id = migratable.lock().unwrap().id();
-        self.migratable_devices.push((id, migratable));
+        self.add_migratable_device(Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn Migratable>>);
 
         Ok((
             Arc::clone(&virtio_pmem_device) as VirtioDeviceArc,

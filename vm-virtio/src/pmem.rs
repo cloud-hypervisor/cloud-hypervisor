@@ -337,6 +337,7 @@ impl PmemEpollHandler {
 }
 
 pub struct Pmem {
+    id: String,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
     disk: Option<File>,
@@ -363,6 +364,7 @@ pub struct PmemState {
 
 impl Pmem {
     pub fn new(
+        id: String,
         disk: File,
         addr: GuestAddress,
         mapping: UserspaceMapping,
@@ -381,6 +383,7 @@ impl Pmem {
         }
 
         Ok(Pmem {
+            id,
             kill_evt: None,
             pause_evt: None,
             disk: Some(disk),
@@ -571,19 +574,18 @@ impl VirtioDevice for Pmem {
 }
 
 virtio_pausable!(Pmem);
-const PMEM_SNAPSHOT_ID: &str = "virtio-pmem";
 impl Snapshottable for Pmem {
     fn id(&self) -> String {
-        PMEM_SNAPSHOT_ID.to_string()
+        self.id.clone()
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        let mut pmem_snapshot = Snapshot::new(PMEM_SNAPSHOT_ID);
+        let mut pmem_snapshot = Snapshot::new(self.id.as_str());
         pmem_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", PMEM_SNAPSHOT_ID),
+            id: format!("{}-section", self.id),
             snapshot,
         });
 
@@ -591,10 +593,7 @@ impl Snapshottable for Pmem {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(pmem_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", PMEM_SNAPSHOT_ID))
-        {
+        if let Some(pmem_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
             let pmem_state = match serde_json::from_slice(&pmem_section.snapshot) {
                 Ok(state) => state,
                 Err(error) => {
