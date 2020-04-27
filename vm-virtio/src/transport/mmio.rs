@@ -4,9 +4,9 @@
 
 use crate::transport::{VirtioTransport, NOTIFY_REG_OFFSET};
 use crate::{
-    Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
-    DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
-    DEVICE_INIT, INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
+    Queue, VirtioDevice, VirtioInterrupt, VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER,
+    DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK, DEVICE_INIT,
+    INTERRUPT_STATUS_CONFIG_CHANGED, INTERRUPT_STATUS_USED_RING,
 };
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
@@ -96,6 +96,7 @@ struct VirtioMmioDeviceState {
 /// Typically one page (4096 bytes) of MMIO address space is sufficient to handle this transport
 /// and inner virtio device.
 pub struct MmioDevice {
+    id: String,
     device: Arc<Mutex<dyn VirtioDevice>>,
     device_activated: bool,
 
@@ -115,6 +116,7 @@ pub struct MmioDevice {
 impl MmioDevice {
     /// Constructs a new MMIO transport for the given virtio device.
     pub fn new(
+        id: String,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
         device: Arc<Mutex<dyn VirtioDevice>>,
     ) -> Result<MmioDevice> {
@@ -130,6 +132,7 @@ impl MmioDevice {
             .map(|&s| Queue::new(s))
             .collect();
         Ok(MmioDevice {
+            id,
             device,
             device_activated: false,
             features_select: 0,
@@ -422,24 +425,18 @@ impl Pausable for MmioDevice {
     }
 }
 
-const VIRTIO_MMIO_DEV_SNAPSHOT_ID: &str = "virtio_mmio_device";
 impl Snapshottable for MmioDevice {
     fn id(&self) -> String {
-        format!(
-            "{}-{}",
-            VIRTIO_MMIO_DEV_SNAPSHOT_ID,
-            VirtioDeviceType::from(self.device.lock().unwrap().device_type())
-        )
+        self.id.clone()
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        let snapshot_id = self.id();
-        let mut virtio_mmio_dev_snapshot = Snapshot::new(&snapshot_id);
+        let mut virtio_mmio_dev_snapshot = Snapshot::new(self.id.as_str());
         virtio_mmio_dev_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", snapshot_id),
+            id: format!("{}-section", self.id),
             snapshot,
         });
 
@@ -447,10 +444,8 @@ impl Snapshottable for MmioDevice {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        let snapshot_id = self.id();
-        if let Some(virtio_mmio_dev_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", snapshot_id))
+        if let Some(virtio_mmio_dev_section) =
+            snapshot.snapshot_data.get(&format!("{}-section", self.id))
         {
             let virtio_mmio_dev_state =
                 match serde_json::from_slice(&virtio_mmio_dev_section.snapshot) {
