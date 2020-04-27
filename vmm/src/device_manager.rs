@@ -1437,7 +1437,7 @@ impl DeviceManager {
             let id = String::from(RNG_DEVICE_NAME);
 
             let virtio_rng_device = Arc::new(Mutex::new(
-                vm_virtio::Rng::new(rng_path, rng_config.iommu)
+                vm_virtio::Rng::new(id.clone(), rng_path, rng_config.iommu)
                     .map_err(DeviceManagerError::CreateVirtioRng)?,
             ));
             devices.push((
