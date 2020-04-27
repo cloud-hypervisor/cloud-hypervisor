@@ -196,7 +196,8 @@ fn create_app<'a, 'b>(
             Arg::with_name("vsock")
                 .long("vsock")
                 .help(
-                    "Virtio VSOCK parameters \"cid=<context_id>,sock=<socket_path>,iommu=on|off\"",
+                    "Virtio VSOCK parameters \
+                    \"cid=<context_id>,sock=<socket_path>,iommu=on|off,id=<device_id>\"",
                 )
                 .takes_value(true)
                 .number_of_values(1)

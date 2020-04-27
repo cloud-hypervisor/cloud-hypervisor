@@ -1136,12 +1136,14 @@ pub struct VsockConfig {
     pub sock: PathBuf,
     #[serde(default)]
     pub iommu: bool,
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 impl VsockConfig {
     pub fn parse(vsock: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("sock").add("cid").add("iommu");
+        parser.add("sock").add("cid").add("iommu").add("id");
         parser.parse(vsock).map_err(Error::ParseVsock)?;
 
         let sock = parser
@@ -1157,8 +1159,14 @@ impl VsockConfig {
             .convert("cid")
             .map_err(Error::ParseVsock)?
             .ok_or(Error::ParseVsockCidMissing)?;
+        let id = parser.get("id");
 
-        Ok(VsockConfig { cid, sock, iommu })
+        Ok(VsockConfig {
+            cid,
+            sock,
+            iommu,
+            id,
+        })
     }
 }
 
@@ -1878,7 +1886,8 @@ mod tests {
             VsockConfig {
                 cid: 1,
                 sock: PathBuf::from("/tmp/sock"),
-                iommu: false
+                iommu: false,
+                id: None,
             }
         );
         assert_eq!(
@@ -1886,7 +1895,8 @@ mod tests {
             VsockConfig {
                 cid: 1,
                 sock: PathBuf::from("/tmp/sock"),
-                iommu: true
+                iommu: true,
+                id: None,
             }
         );
         Ok(())
