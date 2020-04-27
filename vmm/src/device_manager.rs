@@ -88,6 +88,8 @@ const IOMMU_DEVICE_NAME: &str = "iommu";
 
 #[cfg(feature = "mmio_support")]
 const VIRTIO_MMIO_DEVICE_NAME_PREFIX: &str = "virtio-mmio";
+#[cfg(feature = "pci_support")]
+const VIRTIO_PCI_DEVICE_NAME_PREFIX: &str = "virtio-pci";
 
 /// Errors associated with device manager
 #[derive(Debug)]
@@ -1933,8 +1935,10 @@ impl DeviceManager {
         pci: &mut PciBus,
         iommu_mapping: &Option<Arc<IommuMapping>>,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-        id: String,
+        virtio_device_id: String,
     ) -> DeviceManagerResult<u32> {
+        let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
+
         // Allows support for one MSI-X vector per queue. It also adds 1
         // as we need to take into account the dedicated vector to notify
         // about a virtio config change.
@@ -1972,6 +1976,7 @@ impl DeviceManager {
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let mut virtio_pci_device = VirtioPciDevice::new(
+            id,
             memory,
             virtio_device,
             msix_num,
@@ -1980,7 +1985,8 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 
-        let mut allocator = self.address_manager.allocator.lock().unwrap();
+        let allocator = self.address_manager.allocator.clone();
+        let mut allocator = allocator.lock().unwrap();
         let bars = virtio_pci_device
             .allocate_bars(&mut allocator)
             .map_err(DeviceManagerError::AllocateBars)?;
@@ -2005,10 +2011,10 @@ impl DeviceManager {
         self.bus_devices
             .push(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn BusDevice>>);
 
-        if self.pci_id_list.contains_key(&id) {
+        if self.pci_id_list.contains_key(&virtio_device_id) {
             return Err(DeviceManagerError::DeviceIdAlreadyInUse);
         }
-        self.pci_id_list.insert(id, pci_device_bdf);
+        self.pci_id_list.insert(virtio_device_id, pci_device_bdf);
 
         pci.register_mapping(
             virtio_pci_device.clone(),
@@ -2018,9 +2024,7 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::AddPciDevice)?;
 
-        let migratable = Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>;
-        let id = migratable.lock().unwrap().id();
-        self.migratable_devices.push((id, migratable));
+        self.add_migratable_device(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
 
         Ok(pci_device_bdf)
     }
