@@ -259,6 +259,8 @@ const VIRTIO_PCI_VENDOR_ID: u16 = 0x1af4;
 const VIRTIO_PCI_DEVICE_ID_BASE: u16 = 0x1040; // Add to device type to get device ID.
 
 pub struct VirtioPciDevice {
+    id: String,
+
     // PCI configuration registers.
     configuration: PciConfiguration,
 
@@ -308,6 +310,7 @@ pub struct VirtioPciDevice {
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
     pub fn new(
+        id: String,
         memory: GuestMemoryAtomic<GuestMemoryMmap>,
         device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
@@ -384,6 +387,7 @@ impl VirtioPciDevice {
         );
 
         let mut virtio_pci_device = VirtioPciDevice {
+            id,
             configuration,
             common_config: VirtioPciCommonConfig {
                 driver_status: 0,
@@ -962,6 +966,10 @@ impl Pausable for VirtioPciDevice {
     }
 }
 
-impl Snapshottable for VirtioPciDevice {}
+impl Snapshottable for VirtioPciDevice {
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+}
 impl Transportable for VirtioPciDevice {}
 impl Migratable for VirtioPciDevice {}
