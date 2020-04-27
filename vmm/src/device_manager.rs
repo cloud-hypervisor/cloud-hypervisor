@@ -1099,13 +1099,14 @@ impl DeviceManager {
         };
         let (col, row) = get_win_size();
         let console_input = if let Some(writer) = console_writer {
+            let id = String::from(CONSOLE_DEVICE_NAME);
             let (virtio_console_device, console_input) =
-                vm_virtio::Console::new(writer, col, row, console_config.iommu)
+                vm_virtio::Console::new(id.clone(), writer, col, row, console_config.iommu)
                     .map_err(DeviceManagerError::CreateVirtioConsole)?;
             virtio_devices.push((
                 Arc::new(Mutex::new(virtio_console_device)) as VirtioDeviceArc,
                 console_config.iommu,
-                Some(String::from(CONSOLE_DEVICE_NAME)),
+                Some(id),
             ));
             Some(console_input)
         } else {
