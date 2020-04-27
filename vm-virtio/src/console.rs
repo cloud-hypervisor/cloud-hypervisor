@@ -372,6 +372,7 @@ impl VirtioConsoleConfig {
 
 /// Virtio device for exposing console to the guest OS through virtio.
 pub struct Console {
+    id: String,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
     avail_features: u64,
@@ -396,6 +397,7 @@ pub struct ConsoleState {
 impl Console {
     /// Create a new virtio console device that gets random data from /dev/urandom.
     pub fn new(
+        id: String,
         out: Box<dyn io::Write + Send + Sync + 'static>,
         cols: u16,
         rows: u16,
@@ -420,6 +422,7 @@ impl Console {
 
         Ok((
             Console {
+                id,
                 kill_evt: None,
                 pause_evt: None,
                 avail_features,
@@ -618,19 +621,18 @@ impl VirtioDevice for Console {
 }
 
 virtio_pausable!(Console);
-const CONSOLE_SNAPSHOT_ID: &str = "virtio-console";
 impl Snapshottable for Console {
     fn id(&self) -> String {
-        CONSOLE_SNAPSHOT_ID.to_string()
+        self.id.clone()
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        let mut console_snapshot = Snapshot::new(CONSOLE_SNAPSHOT_ID);
+        let mut console_snapshot = Snapshot::new(self.id.as_str());
         console_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", CONSOLE_SNAPSHOT_ID),
+            id: format!("{}-section", self.id),
             snapshot,
         });
 
@@ -638,10 +640,7 @@ impl Snapshottable for Console {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(console_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", CONSOLE_SNAPSHOT_ID))
-        {
+        if let Some(console_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
             let console_state = match serde_json::from_slice(&console_section.snapshot) {
                 Ok(state) => state,
                 Err(error) => {
