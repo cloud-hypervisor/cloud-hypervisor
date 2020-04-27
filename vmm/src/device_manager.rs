@@ -1201,7 +1201,7 @@ impl DeviceManager {
                 queue_size: disk_cfg.queue_size,
             };
             let vhost_user_block_device = Arc::new(Mutex::new(
-                vm_virtio::vhost_user::Blk::new(disk_cfg.wce, vu_cfg)
+                vm_virtio::vhost_user::Blk::new(id, disk_cfg.wce, vu_cfg)
                     .map_err(DeviceManagerError::CreateVhostUserBlk)?,
             ));
 

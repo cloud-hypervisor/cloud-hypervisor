@@ -34,6 +34,7 @@ struct SlaveReqHandler {}
 impl VhostUserMasterReqHandler for SlaveReqHandler {}
 
 pub struct Blk {
+    id: String,
     vhost_user_blk: Master,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
@@ -49,7 +50,7 @@ pub struct Blk {
 
 impl Blk {
     /// Create a new vhost-user-blk device
-    pub fn new(wce: bool, vu_cfg: VhostUserConfig) -> Result<Blk> {
+    pub fn new(id: String, wce: bool, vu_cfg: VhostUserConfig) -> Result<Blk> {
         let mut vhost_user_blk = Master::connect(&vu_cfg.sock, vu_cfg.num_queues as u64)
             .map_err(Error::VhostUserCreateMaster)?;
 
@@ -140,6 +141,7 @@ impl Blk {
         }
 
         Ok(Blk {
+            id,
             vhost_user_blk,
             kill_evt: None,
             pause_evt: None,
@@ -328,6 +330,10 @@ impl VirtioDevice for Blk {
 }
 
 virtio_pausable!(Blk);
-impl Snapshottable for Blk {}
+impl Snapshottable for Blk {
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+}
 impl Transportable for Blk {}
 impl Migratable for Blk {}
