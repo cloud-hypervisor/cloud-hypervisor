@@ -793,6 +793,7 @@ impl DmaRemapping for IommuMapping {
 }
 
 pub struct Iommu {
+    id: String,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
     avail_features: u64,
@@ -808,7 +809,7 @@ pub struct Iommu {
 }
 
 impl Iommu {
-    pub fn new() -> io::Result<(Self, Arc<IommuMapping>)> {
+    pub fn new(id: String) -> io::Result<(Self, Arc<IommuMapping>)> {
         let config = VirtioIommuConfig {
             page_size_mask: VIRTIO_IOMMU_PAGE_SIZE_MASK,
             probe_size: PROBE_PROP_SIZE,
@@ -822,6 +823,7 @@ impl Iommu {
 
         Ok((
             Iommu {
+                id,
                 kill_evt: None,
                 pause_evt: None,
                 avail_features: 1u64 << VIRTIO_F_VERSION_1
@@ -1039,6 +1041,10 @@ impl VirtioDevice for Iommu {
 }
 
 virtio_pausable!(Iommu);
-impl Snapshottable for Iommu {}
+impl Snapshottable for Iommu {
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+}
 impl Transportable for Iommu {}
 impl Migratable for Iommu {}

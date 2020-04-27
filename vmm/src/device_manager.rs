@@ -788,9 +788,11 @@ impl DeviceManager {
                 Arc::clone(&self.address_manager) as Arc<dyn DeviceRelocation>,
             );
 
+            let iommu_id = String::from(IOMMU_DEVICE_NAME);
+
             let (iommu_device, iommu_mapping) = if self.config.lock().unwrap().iommu {
-                let (device, mapping) =
-                    vm_virtio::Iommu::new().map_err(DeviceManagerError::CreateVirtioIommu)?;
+                let (device, mapping) = vm_virtio::Iommu::new(iommu_id.clone())
+                    .map_err(DeviceManagerError::CreateVirtioIommu)?;
                 let device = Arc::new(Mutex::new(device));
                 self.iommu_device = Some(Arc::clone(&device));
                 (Some(device), Some(mapping))
@@ -841,7 +843,7 @@ impl DeviceManager {
                     &mut pci_bus,
                     &None,
                     &interrupt_manager,
-                    Some(String::from(IOMMU_DEVICE_NAME)),
+                    Some(iommu_id),
                 )?;
             }
 
