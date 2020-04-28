@@ -609,7 +609,6 @@ pub struct DeviceManager {
     pci_bus: Option<Arc<Mutex<PciBus>>>,
 
     // MSI Interrupt Manager
-    #[cfg(feature = "pci_support")]
     msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
 
     // VFIO KVM device
@@ -639,10 +638,15 @@ pub struct DeviceManager {
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
     device_tree: HashMap<String, Node>,
+
+    // Exit event
+    #[cfg(feature = "acpi")]
+    exit_evt: EventFd,
+    // Reset event
+    reset_evt: EventFd,
 }
 
 impl DeviceManager {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         vm_fd: Arc<VmFd>,
         config: Arc<Mutex<VmConfig>>,
@@ -651,13 +655,6 @@ impl DeviceManager {
         reset_evt: &EventFd,
         vmm_path: PathBuf,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
-        let mut virtio_devices: Vec<(VirtioDeviceArc, bool, String)> = Vec::new();
-        let mut bus_devices: Vec<Arc<Mutex<dyn BusDevice>>> = Vec::new();
-        let mut device_tree = HashMap::new();
-
-        #[allow(unused_mut)]
-        let mut cmdline_additions = Vec::new();
-
         let address_manager = Arc::new(AddressManager {
             allocator: memory_manager.lock().unwrap().allocator(),
             io_bus: Arc::new(devices::Bus::new()),
@@ -685,53 +682,24 @@ impl DeviceManager {
                 Arc::clone(&kvm_gsi_msi_routes),
             ));
 
-        let ioapic = DeviceManager::add_ioapic(
-            &address_manager,
-            Arc::clone(&msi_interrupt_manager),
-            &mut device_tree,
-        )?;
-        let ioapic_migratable = Arc::clone(&ioapic) as Arc<Mutex<dyn Migratable>>;
-        bus_devices.push(Arc::clone(&ioapic) as Arc<Mutex<dyn BusDevice>>);
-
-        // Now we can create the legacy interrupt manager, which needs the freshly
-        // formed IOAPIC device.
-        let legacy_interrupt_manager: Arc<
-            dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
-        > = Arc::new(KvmLegacyUserspaceInterruptManager::new(ioapic.clone()));
-
-        #[cfg(feature = "acpi")]
-        address_manager
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_io_addresses(Some(GuestAddress(0x0a00)), 0x18, None)
-            .ok_or(DeviceManagerError::AllocateIOPort)?;
-
-        #[cfg(feature = "acpi")]
-        address_manager
-            .io_bus
-            .insert(memory_manager.clone(), 0xa00, 0x18)
-            .map_err(DeviceManagerError::BusError)?;
-
-        let mut device_manager = DeviceManager {
+        let device_manager = DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
-            ioapic: Some(ioapic),
-            cmdline_additions,
+            ioapic: None,
+            cmdline_additions: Vec::new(),
             #[cfg(feature = "acpi")]
             ged_notification_device: None,
             config,
             migratable_devices: HashMap::new(),
             memory_manager,
             virtio_devices: Vec::new(),
-            bus_devices,
+            bus_devices: Vec::new(),
             vmm_path,
             vhost_user_backends: Vec::new(),
             device_id_cnt: Wrapping(0),
             #[cfg(feature = "pci_support")]
             pci_bus: None,
-            #[cfg(feature = "pci_support")]
-            msi_interrupt_manager: Arc::clone(&msi_interrupt_manager),
+            msi_interrupt_manager,
             #[cfg(feature = "pci_support")]
             kvm_device_fd: None,
             #[cfg(feature = "pci_support")]
@@ -744,38 +712,11 @@ impl DeviceManager {
             pci_id_list: HashMap::new(),
             #[cfg(feature = "pci_support")]
             pci_devices: HashMap::new(),
-            device_tree,
+            device_tree: HashMap::new(),
+            #[cfg(feature = "acpi")]
+            exit_evt: _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            reset_evt: reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
         };
-
-        device_manager
-            .add_legacy_devices(reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?)?;
-
-        device_manager.add_migratable_device(ioapic_migratable);
-
-        #[cfg(feature = "acpi")]
-        {
-            device_manager.ged_notification_device = device_manager.add_acpi_devices(
-                &legacy_interrupt_manager,
-                reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-                _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-            )?;
-        }
-
-        device_manager.console =
-            device_manager.add_console_device(&legacy_interrupt_manager, &mut virtio_devices)?;
-
-        #[cfg(any(feature = "pci_support", feature = "mmio_support"))]
-        virtio_devices.append(&mut device_manager.make_virtio_devices()?);
-
-        if cfg!(feature = "pci_support") {
-            device_manager.add_pci_devices(virtio_devices.clone())?;
-        } else if cfg!(feature = "mmio_support") {
-            device_manager.add_mmio_devices(virtio_devices.clone(), &legacy_interrupt_manager)?;
-        }
-
-        device_manager.virtio_devices = virtio_devices;
-
-        let device_manager = Arc::new(Mutex::new(device_manager));
 
         #[cfg(feature = "acpi")]
         address_manager
@@ -784,6 +725,8 @@ impl DeviceManager {
             .unwrap()
             .allocate_io_addresses(Some(GuestAddress(0xae00)), 0x10, None)
             .ok_or(DeviceManagerError::AllocateIOPort)?;
+
+        let device_manager = Arc::new(Mutex::new(device_manager));
 
         #[cfg(feature = "acpi")]
         address_manager
@@ -796,6 +739,70 @@ impl DeviceManager {
             .map_err(DeviceManagerError::BusError)?;
 
         Ok(device_manager)
+    }
+
+    pub fn create_devices(&mut self) -> DeviceManagerResult<()> {
+        let mut virtio_devices: Vec<(VirtioDeviceArc, bool, String)> = Vec::new();
+
+        let ioapic = self.add_ioapic()?;
+
+        // Now we can create the legacy interrupt manager, which needs the freshly
+        // formed IOAPIC device.
+        let legacy_interrupt_manager: Arc<
+            dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
+        > = Arc::new(KvmLegacyUserspaceInterruptManager::new(ioapic));
+
+        #[cfg(feature = "acpi")]
+        self.address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_io_addresses(Some(GuestAddress(0x0a00)), 0x18, None)
+            .ok_or(DeviceManagerError::AllocateIOPort)?;
+
+        #[cfg(feature = "acpi")]
+        self.address_manager
+            .io_bus
+            .insert(
+                Arc::clone(&self.memory_manager) as Arc<Mutex<dyn BusDevice>>,
+                0xa00,
+                0x18,
+            )
+            .map_err(DeviceManagerError::BusError)?;
+
+        self.add_legacy_devices(
+            self.reset_evt
+                .try_clone()
+                .map_err(DeviceManagerError::EventFd)?,
+        )?;
+
+        #[cfg(feature = "acpi")]
+        {
+            self.ged_notification_device = self.add_acpi_devices(
+                &legacy_interrupt_manager,
+                self.reset_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+            )?;
+        }
+
+        self.console = self.add_console_device(&legacy_interrupt_manager, &mut virtio_devices)?;
+
+        #[cfg(any(feature = "pci_support", feature = "mmio_support"))]
+        virtio_devices.append(&mut self.make_virtio_devices()?);
+
+        if cfg!(feature = "pci_support") {
+            self.add_pci_devices(virtio_devices.clone())?;
+        } else if cfg!(feature = "mmio_support") {
+            self.add_mmio_devices(virtio_devices.clone(), &legacy_interrupt_manager)?;
+        }
+
+        self.virtio_devices = virtio_devices;
+
+        Ok(())
     }
 
     fn state(&self) -> DeviceManagerState {
@@ -943,25 +950,28 @@ impl DeviceManager {
         Ok(())
     }
 
-    fn add_ioapic(
-        address_manager: &Arc<AddressManager>,
-        interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-        device_tree: &mut HashMap<String, Node>,
-    ) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
+    fn add_ioapic(&mut self) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
         let id = String::from(IOAPIC_DEVICE_NAME);
 
-        device_tree.insert(id.clone(), Node::default());
+        self.device_tree.insert(id.clone(), Node::default());
 
         // Create IOAPIC
         let ioapic = Arc::new(Mutex::new(
-            ioapic::Ioapic::new(id, APIC_START, interrupt_manager)
+            ioapic::Ioapic::new(id, APIC_START, Arc::clone(&self.msi_interrupt_manager))
                 .map_err(DeviceManagerError::CreateIoapic)?,
         ));
 
-        address_manager
+        self.ioapic = Some(ioapic.clone());
+
+        self.address_manager
             .mmio_bus
             .insert(ioapic.clone(), IOAPIC_START.0, IOAPIC_SIZE)
             .map_err(DeviceManagerError::BusError)?;
+
+        self.bus_devices
+            .push(Arc::clone(&ioapic) as Arc<Mutex<dyn BusDevice>>);
+
+        self.add_migratable_device(Arc::clone(&ioapic) as Arc<Mutex<dyn Migratable>>);
 
         Ok(ioapic)
     }
