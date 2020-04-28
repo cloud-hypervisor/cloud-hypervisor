@@ -1,3 +1,5 @@
+#[macro_use]
+extern crate serde_derive;
 extern crate vm_memory;
 
 pub mod interrupt;
@@ -8,7 +10,7 @@ use vm_memory::{
 };
 
 /// Type of Message Singaled Interrupt
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MsiIrqType {
     /// PCI MSI IRQ numbers.
     PciMsi,
@@ -20,7 +22,7 @@ pub enum MsiIrqType {
 
 /// Enumeration for device resources.
 #[allow(missing_docs)]
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum Resource {
     /// IO Port address range.
     PioAddressRange { base: u16, size: u16 },
