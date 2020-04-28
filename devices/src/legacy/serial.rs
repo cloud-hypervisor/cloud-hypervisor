@@ -60,6 +60,7 @@ const DEFAULT_BAUD_DIVISOR: u16 = 12; // 9600 bps
 /// This can optionally write the guest's output to a Write trait object. To send input to the
 /// guest, use `queue_input_bytes`.
 pub struct Serial {
+    id: String,
     interrupt_enable: u8,
     interrupt_identification: u8,
     interrupt: Arc<Box<dyn InterruptSourceGroup>>,
@@ -88,10 +89,12 @@ pub struct SerialState {
 
 impl Serial {
     pub fn new(
+        id: String,
         interrupt: Arc<Box<dyn InterruptSourceGroup>>,
         out: Option<Box<dyn io::Write + Send>>,
     ) -> Serial {
         Serial {
+            id,
             interrupt_enable: 0,
             interrupt_identification: DEFAULT_INTERRUPT_IDENTIFICATION,
             interrupt,
@@ -108,15 +111,16 @@ impl Serial {
 
     /// Constructs a Serial port ready for output.
     pub fn new_out(
+        id: String,
         interrupt: Arc<Box<dyn InterruptSourceGroup>>,
         out: Box<dyn io::Write + Send>,
     ) -> Serial {
-        Self::new(interrupt, Some(out))
+        Self::new(id, interrupt, Some(out))
     }
 
     /// Constructs a Serial port with no connected output.
-    pub fn new_sink(interrupt: Arc<Box<dyn InterruptSourceGroup>>) -> Serial {
-        Self::new(interrupt, None)
+    pub fn new_sink(id: String, interrupt: Arc<Box<dyn InterruptSourceGroup>>) -> Serial {
+        Self::new(id, interrupt, None)
     }
 
     /// Queues raw bytes for the guest to read and signals the interrupt if the line status would
@@ -280,19 +284,18 @@ impl BusDevice for Serial {
     }
 }
 
-const SERIAL_SNAPSHOT_ID: &str = "serial";
 impl Snapshottable for Serial {
     fn id(&self) -> String {
-        SERIAL_SNAPSHOT_ID.to_string()
+        self.id.clone()
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        let mut serial_snapshot = Snapshot::new(SERIAL_SNAPSHOT_ID);
+        let mut serial_snapshot = Snapshot::new(self.id.as_str());
         serial_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", SERIAL_SNAPSHOT_ID),
+            id: format!("{}-section", self.id),
             snapshot,
         });
 
@@ -300,10 +303,7 @@ impl Snapshottable for Serial {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(serial_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", SERIAL_SNAPSHOT_ID))
-        {
+        if let Some(serial_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
             let serial_state = match serde_json::from_slice(&serial_section.snapshot) {
                 Ok(state) => state,
                 Err(error) => {
@@ -336,6 +336,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
+
+    const SERIAL_NAME: &str = "serial";
 
     struct TestInterrupt {
         event_fd: EventFd,
@@ -387,6 +389,7 @@ mod tests {
         let intr_evt = EventFd::new(0).unwrap();
         let serial_out = SharedBuffer::new();
         let mut serial = Serial::new_out(
+            String::from(SERIAL_NAME),
             Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
             Box::new(serial_out.clone()),
         );
@@ -406,6 +409,7 @@ mod tests {
         let intr_evt = EventFd::new(0).unwrap();
         let serial_out = SharedBuffer::new();
         let mut serial = Serial::new_out(
+            String::from(SERIAL_NAME),
             Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
             Box::new(serial_out.clone()),
         );
@@ -443,9 +447,10 @@ mod tests {
     #[test]
     fn serial_thr() {
         let intr_evt = EventFd::new(0).unwrap();
-        let mut serial = Serial::new_sink(Arc::new(Box::new(TestInterrupt::new(
-            intr_evt.try_clone().unwrap(),
-        ))));
+        let mut serial = Serial::new_sink(
+            String::from(SERIAL_NAME),
+            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+        );
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
         // counter doesn't change (for 0 it blocks)
@@ -464,9 +469,10 @@ mod tests {
     #[test]
     fn serial_dlab() {
         let intr_evt = EventFd::new(0).unwrap();
-        let mut serial = Serial::new_sink(Arc::new(Box::new(TestInterrupt::new(
-            intr_evt.try_clone().unwrap(),
-        ))));
+        let mut serial = Serial::new_sink(
+            String::from(SERIAL_NAME),
+            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+        );
 
         serial.write(0, LCR as u64, &[LCR_DLAB_BIT as u8]);
         serial.write(0, DLAB_LOW as u64, &[0x12 as u8]);
@@ -484,9 +490,10 @@ mod tests {
     #[test]
     fn serial_modem() {
         let intr_evt = EventFd::new(0).unwrap();
-        let mut serial = Serial::new_sink(Arc::new(Box::new(TestInterrupt::new(
-            intr_evt.try_clone().unwrap(),
-        ))));
+        let mut serial = Serial::new_sink(
+            String::from(SERIAL_NAME),
+            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+        );
 
         serial.write(0, MCR as u64, &[MCR_LOOP_BIT as u8]);
         serial.write(0, DATA as u64, &['a' as u8]);
@@ -509,9 +516,10 @@ mod tests {
     #[test]
     fn serial_scratch() {
         let intr_evt = EventFd::new(0).unwrap();
-        let mut serial = Serial::new_sink(Arc::new(Box::new(TestInterrupt::new(
-            intr_evt.try_clone().unwrap(),
-        ))));
+        let mut serial = Serial::new_sink(
+            String::from(SERIAL_NAME),
+            Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
+        );
 
         serial.write(0, SCR as u64, &[0x12 as u8]);
 

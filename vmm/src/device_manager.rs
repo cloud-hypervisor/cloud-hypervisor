@@ -73,6 +73,7 @@ const MMIO_LEN: u64 = 0x1000;
 const VFIO_DEVICE_NAME_PREFIX: &str = "vfio";
 
 const IOAPIC_DEVICE_NAME: &str = "ioapic";
+const SERIAL_DEVICE_NAME_PREFIX: &str = "serial";
 
 const CONSOLE_DEVICE_NAME: &str = "console";
 const DISK_DEVICE_NAME_PREFIX: &str = "disk";
@@ -1060,6 +1061,8 @@ impl DeviceManager {
             // Serial is tied to IRQ #4
             let serial_irq = 4;
 
+            let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
+
             let interrupt_group = interrupt_manager
                 .create_group(LegacyIrqGroupConfig {
                     irq: serial_irq as InterruptIndex,
@@ -1067,6 +1070,7 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::CreateInterruptGroup)?;
 
             let serial = Arc::new(Mutex::new(devices::legacy::Serial::new(
+                id,
                 interrupt_group,
                 serial_writer,
             )));
