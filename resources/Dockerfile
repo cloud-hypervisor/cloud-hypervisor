@@ -21,6 +21,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -yq \
 	wget \
 	sudo \
 	mtools \
+	musl-tools \
 	libssl-dev \
 	pkg-config \
 	flex \
@@ -36,11 +37,20 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -yq \
 	dosfstools \
 	cpio \
 	bsdtar \
+	gcc-multilib \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Fix the libssl-dev install
+RUN cp /usr/include/x86_64-linux-gnu/openssl/opensslconf.h /usr/include/openssl/
+ENV OPENSSL_DIR=/usr/lib/x86_64-linux-gnu/
+ENV OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu/
+ENV OPENSSL_INCLUDE_DIR=/usr/include/
+
 # Install the rust toolchain
 RUN nohup curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "$RUST_TOOLCHAIN" \
+    && rustup target add x86_64-unknown-linux-musl --toolchain "$RUST_TOOLCHAIN" \
+    && rustup toolchain add $RUST_TOOLCHAIN-x86_64-unknown-linux-musl \
     && rustup component add rustfmt \
     && rustup component add clippy \
     && cargo install cargo-audit \
