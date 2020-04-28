@@ -27,7 +27,7 @@ extern crate vm_virtio;
 
 use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig, ValidationError,
-    VmConfig,
+    VmConfig, VsockConfig,
 };
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
@@ -197,6 +197,9 @@ pub enum Error {
 
     /// Failed to validate config
     ConfigValidation(ValidationError),
+
+    /// No more that one virtio-vsock device
+    TooManyVsockDevices,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -870,6 +873,39 @@ impl Vm {
                     } else {
                         config.net = Some(vec![_net_cfg]);
                     }
+                }
+
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+                    .map_err(Error::DeviceManager)?;
+            }
+            Ok(())
+        } else {
+            Err(Error::NoPciSupport)
+        }
+    }
+
+    pub fn add_vsock(&mut self, mut _vsock_cfg: VsockConfig) -> Result<()> {
+        if cfg!(feature = "pci_support") {
+            #[cfg(feature = "pci_support")]
+            {
+                if self.config.lock().unwrap().vsock.is_some() {
+                    return Err(Error::TooManyVsockDevices);
+                }
+
+                self.device_manager
+                    .lock()
+                    .unwrap()
+                    .add_vsock(&mut _vsock_cfg)
+                    .map_err(Error::DeviceManager)?;
+
+                // Update VmConfig by adding the new device. This is important to
+                // ensure the device would be created in case of a reboot.
+                {
+                    let mut config = self.config.lock().unwrap();
+                    config.vsock = Some(_vsock_cfg);
                 }
 
                 self.device_manager
