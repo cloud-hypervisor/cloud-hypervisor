@@ -73,6 +73,8 @@ const MMIO_LEN: u64 = 0x1000;
 #[cfg(feature = "pci_support")]
 const VFIO_DEVICE_NAME_PREFIX: &str = "vfio";
 
+const IOAPIC_DEVICE_NAME: &str = "ioapic";
+
 const CONSOLE_DEVICE_NAME: &str = "console";
 const DISK_DEVICE_NAME_PREFIX: &str = "disk";
 const FS_DEVICE_NAME_PREFIX: &str = "fs";
@@ -902,6 +904,8 @@ impl DeviceManager {
         address_manager: &Arc<AddressManager>,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
+        let _id = String::from(IOAPIC_DEVICE_NAME);
+
         // Create IOAPIC
         let ioapic = Arc::new(Mutex::new(
             ioapic::Ioapic::new(APIC_START, interrupt_manager)
