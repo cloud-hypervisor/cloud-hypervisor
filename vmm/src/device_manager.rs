@@ -1120,7 +1120,7 @@ impl DeviceManager {
         devices.append(&mut self.make_virtio_pmem_devices()?);
 
         // Add virtio-vsock if required
-        devices.append(&mut self.make_virtio_vsock_devices()?);
+        devices.append(&mut self.make_virtio_vsock_device()?);
 
         devices.append(&mut self.make_virtio_mem_devices()?);
 
@@ -1640,32 +1640,30 @@ impl DeviceManager {
         Ok(devices)
     }
 
-    fn make_virtio_vsock_devices(
+    fn make_virtio_vsock_device(
         &mut self,
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool, Option<String>)>> {
         let mut devices = Vec::new();
         // Add vsock if required
-        if let Some(vsock_list_cfg) = &self.config.lock().unwrap().vsock {
-            for vsock_cfg in vsock_list_cfg.iter() {
-                let socket_path = vsock_cfg
-                    .sock
-                    .to_str()
-                    .ok_or(DeviceManagerError::CreateVsockConvertPath)?;
-                let backend =
-                    vm_virtio::vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
-                        .map_err(DeviceManagerError::CreateVsockBackend)?;
+        if let Some(vsock_cfg) = &self.config.lock().unwrap().vsock {
+            let socket_path = vsock_cfg
+                .sock
+                .to_str()
+                .ok_or(DeviceManagerError::CreateVsockConvertPath)?;
+            let backend =
+                vm_virtio::vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
+                    .map_err(DeviceManagerError::CreateVsockBackend)?;
 
-                let vsock_device = Arc::new(Mutex::new(
-                    vm_virtio::Vsock::new(vsock_cfg.cid, backend, vsock_cfg.iommu)
-                        .map_err(DeviceManagerError::CreateVirtioVsock)?,
-                ));
+            let vsock_device = Arc::new(Mutex::new(
+                vm_virtio::Vsock::new(vsock_cfg.cid, backend, vsock_cfg.iommu)
+                    .map_err(DeviceManagerError::CreateVirtioVsock)?,
+            ));
 
-                devices.push((Arc::clone(&vsock_device) as VirtioDeviceArc, false, None));
+            devices.push((Arc::clone(&vsock_device) as VirtioDeviceArc, false, None));
 
-                let migratable = Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>;
-                let id = migratable.lock().unwrap().id();
-                self.migratable_devices.push((id, migratable));
-            }
+            let migratable = Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>;
+            let id = migratable.lock().unwrap().id();
+            self.migratable_devices.push((id, migratable));
         }
 
         Ok(devices)
