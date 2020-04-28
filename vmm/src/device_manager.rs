@@ -547,7 +547,6 @@ impl Drop for ActivatedBackend {
     }
 }
 
-#[allow(unused)]
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Node {
     resources: Vec<Resource>,
@@ -582,11 +581,7 @@ pub struct DeviceManager {
     config: Arc<Mutex<VmConfig>>,
 
     // Migratable devices
-    // This is important to keep this as a Vec<> because the order the elements
-    // are pushed into the list is important to restore them in the right order.
-    // This is particularly important for VirtioPciDevice (or MmioDevice) and
-    // their VirtioDevice counterpart.
-    migratable_devices: Vec<(String, Arc<Mutex<dyn Migratable>>)>,
+    migratable_devices: HashMap<String, Arc<Mutex<dyn Migratable>>>,
 
     // Memory Manager
     memory_manager: Arc<Mutex<MemoryManager>>,
@@ -657,7 +652,6 @@ impl DeviceManager {
         vmm_path: PathBuf,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let mut virtio_devices: Vec<(VirtioDeviceArc, bool, String)> = Vec::new();
-        let migratable_devices: Vec<(String, Arc<Mutex<dyn Migratable>>)> = Vec::new();
         let mut bus_devices: Vec<Arc<Mutex<dyn BusDevice>>> = Vec::new();
         let mut device_tree = HashMap::new();
 
@@ -727,7 +721,7 @@ impl DeviceManager {
             #[cfg(feature = "acpi")]
             ged_notification_device: None,
             config,
-            migratable_devices,
+            migratable_devices: HashMap::new(),
             memory_manager,
             virtio_devices: Vec::new(),
             bus_devices,
@@ -820,7 +814,7 @@ impl DeviceManager {
 
     fn add_migratable_device(&mut self, migratable_device: Arc<Mutex<dyn Migratable>>) {
         let id = migratable_device.lock().unwrap().id();
-        self.migratable_devices.push((id, migratable_device));
+        self.migratable_devices.insert(id, migratable_device);
     }
 
     #[allow(unused_variables)]
@@ -2430,7 +2424,7 @@ impl DeviceManager {
             // Remove the device from the list of Migratable devices.
             if let Some(migratable_device) = &migratable_device {
                 let id = migratable_device.lock().unwrap().id();
-                self.migratable_devices.retain(|(i, _)| *i != id);
+                self.migratable_devices.retain(|i, _| *i != id);
             }
 
             // Shutdown and remove the underlying virtio-device if present
@@ -2852,12 +2846,37 @@ impl Snapshottable for DeviceManager {
         }
 
         // Then restore all devices associated with the DeviceManager.
-        for (id, dev) in self.migratable_devices.iter() {
-            debug!("Restoring {} from DeviceManager", id);
-            if let Some(snapshot) = snapshot.snapshots.get(id) {
-                dev.lock().unwrap().restore(*snapshot.clone())?;
-            } else {
-                return Err(MigratableError::Restore(anyhow!("Missing device {}", id)));
+        // It's important to restore devices in the right order, that's why
+        // the device tree is the right way to ensure we restore a child before
+        // its parent node.
+        for (id, node) in self.device_tree.iter() {
+            if node.child.is_some() {
+                continue;
+            }
+
+            // Restore the node
+            if let Some(device) = self.migratable_devices.get(id) {
+                debug!("Restoring {} from DeviceManager", id);
+                if let Some(snapshot) = snapshot.snapshots.get(id) {
+                    device.lock().unwrap().restore(*snapshot.clone())?;
+                } else {
+                    return Err(MigratableError::Restore(anyhow!("Missing device {}", id)));
+                }
+            }
+
+            // Restore the parent if it exists
+            if let Some(parent) = &node.parent {
+                if let Some(device) = self.migratable_devices.get(parent) {
+                    debug!("Restoring {} from DeviceManager", parent);
+                    if let Some(snapshot) = snapshot.snapshots.get(parent) {
+                        device.lock().unwrap().restore(*snapshot.clone())?;
+                    } else {
+                        return Err(MigratableError::Restore(anyhow!(
+                            "Missing parent device {}",
+                            id
+                        )));
+                    }
+                }
             }
         }
 
