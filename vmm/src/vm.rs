@@ -334,6 +334,12 @@ impl Vm {
         )
         .map_err(Error::DeviceManager)?;
 
+        device_manager
+            .lock()
+            .unwrap()
+            .create_devices()
+            .map_err(Error::DeviceManager)?;
+
         let cpu_manager = cpu::CpuManager::new(
             &config.lock().unwrap().cpus.clone(),
             &device_manager,
