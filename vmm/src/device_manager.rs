@@ -2335,6 +2335,12 @@ impl DeviceManager {
         let (device, iommu_attached, id) = self.make_virtio_net_device(net_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
+
+    #[cfg(feature = "pci_support")]
+    pub fn add_vsock(&mut self, vsock_cfg: &mut VsockConfig) -> DeviceManagerResult<()> {
+        let (device, iommu_attached, id) = self.make_virtio_vsock_device(vsock_cfg)?;
+        self.hotplug_virtio_pci_device(device, iommu_attached, id)
+    }
 }
 
 #[cfg(feature = "acpi")]
