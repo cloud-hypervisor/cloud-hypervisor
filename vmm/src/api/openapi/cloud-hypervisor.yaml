@@ -581,6 +581,8 @@ components:
         iommu:
           type: boolean
           default: false
+        id:
+          type: string
 
     VmResize:
       type: object
