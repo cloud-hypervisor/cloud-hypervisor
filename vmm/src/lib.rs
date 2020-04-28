@@ -19,7 +19,7 @@ extern crate vmm_sys_util;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
 use crate::config::{
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig,
+    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig, VsockConfig,
 };
 use crate::migration::{recv_vm_snapshot, vm_config_from_snapshot};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -524,6 +524,19 @@ impl Vmm {
         }
     }
 
+    fn vm_add_vsock(&mut self, vsock_cfg: VsockConfig) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            if let Err(e) = vm.add_vsock(vsock_cfg) {
+                error!("Error when adding new vsock device to the VM: {:?}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -734,6 +747,13 @@ impl Vmm {
                                     let response = self
                                         .vm_add_net(add_net_data.as_ref().clone())
                                         .map_err(ApiError::VmAddNet)
+                                        .map(|_| ApiResponsePayload::Empty);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmAddVsock(add_vsock_data, sender) => {
+                                    let response = self
+                                        .vm_add_vsock(add_vsock_data.as_ref().clone())
+                                        .map_err(ApiError::VmAddVsock)
                                         .map(|_| ApiResponsePayload::Empty);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }

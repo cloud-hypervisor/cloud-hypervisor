@@ -96,6 +96,7 @@ Add disk device to the VM          | `/vm.add-disk`      | `/schemas/DiskConfig`
 Add fs device to the VM            | `/vm.add-fs`        | `/schemas/FsConfig`       | N/A               | The VM is booted
 Add pmem device to the VM          | `/vm.add-pmem`      | `/schemas/PmemConfig`     | N/A               | The VM is booted
 Add network device to the VM       | `/vm.add-net`       | `/schemas/NetConfig`      | N/A               | The VM is booted
+Add vsock device to the VM         | `/vm.add-vsock`     | `/schemas/VsockConfig`    | N/A               | The VM is booted
 
 ### REST API Examples
 
