@@ -5,11 +5,11 @@
 
 use crate::api::http::EndpointHandler;
 use crate::api::{
-    vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_boot, vm_create, vm_delete,
-    vm_info, vm_pause, vm_reboot, vm_remove_device, vm_resize, vm_restore, vm_resume, vm_shutdown,
-    vm_snapshot, vmm_ping, vmm_shutdown, ApiError, ApiRequest, ApiResult, DeviceConfig, DiskConfig,
-    FsConfig, NetConfig, PmemConfig, RestoreConfig, VmAction, VmConfig, VmRemoveDeviceData,
-    VmResizeData, VmSnapshotConfig,
+    vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_add_vsock, vm_boot,
+    vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_remove_device, vm_resize, vm_restore,
+    vm_resume, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown, ApiError, ApiRequest, ApiResult,
+    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmAction, VmConfig,
+    VmRemoveDeviceData, VmResizeData, VmSnapshotConfig, VsockConfig,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use serde_json::Error as SerdeError;
@@ -79,6 +79,9 @@ pub enum HttpError {
 
     /// Could not add a network device to a VM
     VmAddNet(ApiError),
+
+    /// Could not add a vsock device to a VM
+    VmAddVsock(ApiError),
 }
 
 fn error_response(error: HttpError, status: StatusCode) -> Response {
@@ -591,6 +594,45 @@ impl EndpointHandler for VmAddNet {
 
                         match vm_add_net(api_notifier, api_sender, Arc::new(vm_add_net_data))
                             .map_err(HttpError::VmAddNet)
+                        {
+                            Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
+                            Err(e) => error_response(e, StatusCode::InternalServerError),
+                        }
+                    }
+
+                    None => Response::new(Version::Http11, StatusCode::BadRequest),
+                }
+            }
+            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+        }
+    }
+}
+
+// /api/v1/vm.add-vsock handler
+pub struct VmAddVsock {}
+
+impl EndpointHandler for VmAddVsock {
+    fn handle_request(
+        &self,
+        req: &Request,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+    ) -> Response {
+        match req.method() {
+            Method::Put => {
+                match &req.body {
+                    Some(body) => {
+                        // Deserialize into a VsockConfig
+                        let vm_add_vsock_data: VsockConfig =
+                            match serde_json::from_slice(body.raw())
+                                .map_err(HttpError::SerdeJsonDeserialize)
+                            {
+                                Ok(config) => config,
+                                Err(e) => return error_response(e, StatusCode::BadRequest),
+                            };
+
+                        match vm_add_vsock(api_notifier, api_sender, Arc::new(vm_add_vsock_data))
+                            .map_err(HttpError::VmAddVsock)
                         {
                             Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
                             Err(e) => error_response(e, StatusCode::InternalServerError),

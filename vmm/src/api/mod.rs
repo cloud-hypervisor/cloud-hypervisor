@@ -38,7 +38,7 @@ pub mod http;
 pub mod http_endpoint;
 
 use crate::config::{
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig,
+    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig, VsockConfig,
 };
 use crate::vm::{Error as VmError, VmState};
 use std::io;
@@ -132,6 +132,9 @@ pub enum ApiError {
 
     /// The network device could not be added to the VM.
     VmAddNet(VmError),
+
+    /// The vsock device could not be added to the VM.
+    VmAddVsock(VmError),
 }
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
@@ -243,6 +246,9 @@ pub enum ApiRequest {
 
     /// Add a network device to the VM.
     VmAddNet(Arc<NetConfig>, Sender<ApiResponse>),
+
+    /// Add a vsock device to the VM.
+    VmAddVsock(Arc<VsockConfig>, Sender<ApiResponse>),
 
     /// Take a VM snapshot
     VmSnapshot(Arc<VmSnapshotConfig>, Sender<ApiResponse>),
@@ -538,6 +544,24 @@ pub fn vm_add_net(
     // Send the VM add-net request.
     api_sender
         .send(ApiRequest::VmAddNet(data, response_sender))
+        .map_err(ApiError::RequestSend)?;
+    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
+
+    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+
+    Ok(())
+}
+
+pub fn vm_add_vsock(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VsockConfig>,
+) -> ApiResult<()> {
+    let (response_sender, response_receiver) = channel();
+
+    // Send the VM add-vsock request.
+    api_sender
+        .send(ApiRequest::VmAddVsock(data, response_sender))
         .map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
