@@ -337,8 +337,6 @@ components:
           items:
             $ref: '#/components/schemas/DeviceConfig'
         vsock:
-          type: array
-          items:
             $ref: '#/components/schemas/VsockConfig'
         iommu:
           type: boolean

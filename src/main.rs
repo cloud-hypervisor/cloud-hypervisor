@@ -199,7 +199,7 @@ fn create_app<'a, 'b>(
                     "Virtio VSOCK parameters \"cid=<context_id>,sock=<socket_path>,iommu=on|off\"",
                 )
                 .takes_value(true)
-                .min_values(1)
+                .number_of_values(1)
                 .group("vm-config"),
         )
         .arg(
@@ -1435,33 +1435,12 @@ mod unit_tests {
                     "/path/to/kernel",
                     "--vsock",
                     "cid=123,sock=/path/to/sock/1",
-                    "cid=456,sock=/path/to/sock/2",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
-                    "vsock": [
-                        {"cid": 123, "sock": "/path/to/sock/1"},
-                        {"cid": 456, "sock": "/path/to/sock/2"}
-                    ]
+                    "vsock": {"cid": 123, "sock": "/path/to/sock/1"}
                 }"#,
                 true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor",
-                    "--kernel",
-                    "/path/to/kernel",
-                    "--vsock",
-                    "cid=123,sock=/path/to/sock/1",
-                    "cid=456,sock=/path/to/sock/2",
-                ],
-                r#"{
-                    "kernel": {"path": "/path/to/kernel"},
-                    "vsock": [
-                        {"cid": 123, "sock": "/path/to/sock/1"}
-                    ]
-                }"#,
-                false,
             ),
             (
                 vec![
@@ -1473,9 +1452,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
-                    "vsock": [
-                        {"cid": 123, "sock": "/path/to/sock/1"}
-                    ]
+                    "vsock": {"cid": 123, "sock": "/path/to/sock/1"}
                 }"#,
                 false,
             ),
@@ -1489,9 +1466,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
-                    "vsock": [
-                        {"cid": 123, "sock": "/path/to/sock/1", "iommu": true}
-                    ],
+                    "vsock": {"cid": 123, "sock": "/path/to/sock/1", "iommu": true},
                     "iommu": true
                 }"#,
                 true,
@@ -1506,9 +1481,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
-                    "vsock": [
-                        {"cid": 123, "sock": "/path/to/sock/1", "iommu": true}
-                    ]
+                    "vsock": {"cid": 123, "sock": "/path/to/sock/1", "iommu": true}
                 }"#,
                 false,
             ),
@@ -1522,9 +1495,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
-                    "vsock": [
-                        {"cid": 123, "sock": "/path/to/sock/1", "iommu": false}
-                    ]
+                    "vsock": {"cid": 123, "sock": "/path/to/sock/1", "iommu": false}
                 }"#,
                 true,
             ),

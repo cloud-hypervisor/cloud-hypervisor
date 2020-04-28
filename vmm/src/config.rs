@@ -269,7 +269,7 @@ pub struct VmParams<'a> {
     pub serial: &'a str,
     pub console: &'a str,
     pub devices: Option<Vec<&'a str>>,
-    pub vsock: Option<Vec<&'a str>>,
+    pub vsock: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -290,7 +290,7 @@ impl<'a> VmParams<'a> {
         let fs: Option<Vec<&str>> = args.values_of("fs").map(|x| x.collect());
         let pmem: Option<Vec<&str>> = args.values_of("pmem").map(|x| x.collect());
         let devices: Option<Vec<&str>> = args.values_of("device").map(|x| x.collect());
-        let vsock: Option<Vec<&str>> = args.values_of("vsock").map(|x| x.collect());
+        let vsock: Option<&str> = args.value_of("vsock");
 
         VmParams {
             cpus,
@@ -1218,7 +1218,7 @@ pub struct VmConfig {
     #[serde(default = "ConsoleConfig::default_console")]
     pub console: ConsoleConfig,
     pub devices: Option<Vec<DeviceConfig>>,
-    pub vsock: Option<Vec<VsockConfig>>,
+    pub vsock: Option<VsockConfig>,
     #[serde(default)]
     pub iommu: bool,
 }
@@ -1351,19 +1351,14 @@ impl VmConfig {
             devices = Some(device_config_list);
         }
 
-        let mut vsock: Option<Vec<VsockConfig>> = None;
-        if let Some(vsock_list) = &vm_params.vsock {
-            let mut vsock_config_list = Vec::new();
-            for item in vsock_list.iter() {
-                let vsock_config = VsockConfig::parse(item)?;
-                if vsock_config.iommu {
-                    iommu = true;
-                }
-                vsock_config_list.push(vsock_config);
+        let mut vsock: Option<VsockConfig> = None;
+        if let Some(vs) = &vm_params.vsock {
+            let vsock_config = VsockConfig::parse(vs)?;
+            if vsock_config.iommu {
+                iommu = true;
             }
-            vsock = Some(vsock_config_list);
+            vsock = Some(vsock_config);
         }
-
         let mut kernel: Option<KernelConfig> = None;
         if let Some(k) = vm_params.kernel {
             kernel = Some(KernelConfig {
