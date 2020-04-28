@@ -1114,11 +1114,15 @@ impl DeviceManager {
             let (virtio_console_device, console_input) =
                 vm_virtio::Console::new(id.clone(), writer, col, row, console_config.iommu)
                     .map_err(DeviceManagerError::CreateVirtioConsole)?;
+            let virtio_console_device = Arc::new(Mutex::new(virtio_console_device));
             virtio_devices.push((
-                Arc::new(Mutex::new(virtio_console_device)) as VirtioDeviceArc,
+                Arc::clone(&virtio_console_device) as VirtioDeviceArc,
                 console_config.iommu,
                 id,
             ));
+
+            self.add_migratable_device(virtio_console_device as Arc<Mutex<dyn Migratable>>);
+
             Some(console_input)
         } else {
             None
