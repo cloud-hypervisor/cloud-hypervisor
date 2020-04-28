@@ -445,6 +445,8 @@ components:
         poll_queue:
           type: boolean
           default: true
+        id:
+          type: string
 
     NetConfig:
       type: object
@@ -473,6 +475,8 @@ components:
           type: boolean
           default: false
         vhost_socket:
+          type: string
+        id:
           type: string
 
     RngConfig:
@@ -510,6 +514,8 @@ components:
           type: integer
           format: int64
           default: 8589934592
+        id:
+          type: string
 
     PmemConfig:
       required:
@@ -530,6 +536,8 @@ components:
         discard_writes:
           type: boolean
           default: false
+        id:
+          type: string
 
     ConsoleConfig:
       required:
