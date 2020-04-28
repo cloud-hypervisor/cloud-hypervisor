@@ -146,16 +146,18 @@ cmd_help() {
     echo ""
     echo "Available commands:"
     echo ""
-    echo "    build [--debug|--release] [-- [<cargo args>]]"
+    echo "    build [--debug|--release] [--libc musl|gnu] [-- [<cargo args>]]"
     echo "        Build the Cloud Hypervisor binaries."
     echo "        --debug               Build the debug binaries. This is the default."
     echo "        --release             Build the release binaries."
+    echo "        --libc                Select the C library Cloud Hypervisor will be built against. Default is gnu"
     echo ""
-    echo "    tests [--unit|--cargo|--all] [-- [<cargo test args>]]"
+    echo "    tests [--unit|--cargo|--all] [--libc musl|gnu] [-- [<cargo test args>]]"
     echo "        Run the Cloud Hypervisor tests."
     echo "        --unit               Run the unit tests."
     echo "        --cargo              Run the cargo tests."
     echo "        --integration        Run the integration tests."
+    echo "        --libc               Select the C library Cloud Hypervisor will be built against. Default is gnu"
     echo "        --all                Run all tests."
     echo ""
     echo "    build-container [--type]"
@@ -172,12 +174,19 @@ cmd_help() {
 
 cmd_build() {
     build="debug"
+    libc="gnu"
 
     while [ $# -gt 0 ]; do
 	case "$1" in
             "-h"|"--help")  { cmd_help; exit 1;     } ;;
             "--debug")      { build="debug";      } ;;
             "--release")    { build="release";    } ;;
+	    "--libc")
+                shift
+                [[ "$1" =~ ^(musl|gnu)$ ]] || \
+                    die "Invalid libc: $1. Valid options are \"musl\" and \"gnu\"."
+                libc="$1"
+                ;;
             "--")           { shift; break;         } ;;
             *)
 		die "Unknown build argument: $1. Please use --help for help."
@@ -186,8 +195,11 @@ cmd_build() {
 	shift
     done
 
+    target="$(uname -m)-unknown-linux-${libc}"
+
     cargo_args=("$@")
     [ $build = "release" ] && cargo_args+=("--release")
+    cargo_args+=(--target "$target")
 
     $DOCKER_RUNTIME run \
 	   --user "$(id -u):$(id -g)" \
@@ -198,7 +210,7 @@ cmd_build() {
 	   "$CTR_IMAGE" \
 	   cargo build \
 	         --target-dir "$CTR_CLH_CARGO_TARGET" \
-	         "${cargo_args[@]}" && say "Binaries placed under $CLH_CARGO_TARGET/$build"
+	         "${cargo_args[@]}" && say "Binaries placed under $CLH_CARGO_TARGET/$target/$build"
 }
 
 cmd_clean() {
@@ -219,15 +231,22 @@ cmd_tests() {
     unit=false
     cargo=false
     integration=false
+    libc="gnu"
 
     while [ $# -gt 0 ]; do
 	case "$1" in
-            "-h"|"--help")    { cmd_help; exit 1;     } ;;
-            "--unit")         { unit=true;      } ;;
-            "--cargo")        { cargo=true;    } ;;
-	    "--integration")  { integration=true;    } ;;
-	    "--all")          { cargo=true; unit=true; integration=true;  } ;;
-            "--")             { shift; break;         } ;;
+            "-h"|"--help")           { cmd_help; exit 1;     } ;;
+            "--unit")                { unit=true;      } ;;
+            "--cargo")               { cargo=true;    } ;;
+            "--integration")         { integration=true;    } ;;
+	    "--libc")
+                shift
+                [[ "$1" =~ ^(musl|gnu)$ ]] || \
+                    die "Invalid libc: $1. Valid options are \"musl\" and \"gnu\"."
+                libc="$1"
+                ;;
+	    "--all")                 { cargo=true; unit=true; integration=true;  } ;;
+            "--")                    { shift; break;         } ;;
             *)
 		die "Unknown tests argument: $1. Please use --help for help."
 		;;
@@ -235,8 +254,16 @@ cmd_tests() {
 	shift
     done
 
+    target="$(uname -m)-unknown-linux-${libc}"
+    cflags=""
+    target_cc=""
+    if [[ "$flag" == "x86_64" ]]; then
+	target_cc="musl-gcc"
+	cflags="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
+    fi
+
     if [ "$unit" = true ] ;  then
-	say "Running unit tests..."
+	say "Running unit tests for $target..."
 	$DOCKER_RUNTIME run \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
@@ -244,6 +271,9 @@ cmd_tests() {
 	       --device /dev/net/tun \
 	       --cap-add net_admin \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	       --env BUILD_TARGET="$target" \
+	       --env CFLAGS="$cflags" \
+	       --env TARGET_CC="$target_cc" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -259,7 +289,7 @@ cmd_tests() {
     fi
 
     if [ "$integration" = true ] ;  then
-	say "Running integration tests..."
+	say "Running integration tests for $target..."
 	$DOCKER_RUNTIME run \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
@@ -272,6 +302,9 @@ cmd_tests() {
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
+	       --env BUILD_TARGET="$target" \
+	       --env CFLAGS="$cflags" \
+	       --env TARGET_CC="$target_cc" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_integration_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
