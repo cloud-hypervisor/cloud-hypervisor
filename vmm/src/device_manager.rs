@@ -903,11 +903,11 @@ impl DeviceManager {
         address_manager: &Arc<AddressManager>,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
-        let _id = String::from(IOAPIC_DEVICE_NAME);
+        let id = String::from(IOAPIC_DEVICE_NAME);
 
         // Create IOAPIC
         let ioapic = Arc::new(Mutex::new(
-            ioapic::Ioapic::new(APIC_START, interrupt_manager)
+            ioapic::Ioapic::new(id, APIC_START, interrupt_manager)
                 .map_err(DeviceManagerError::CreateIoapic)?,
         ));
 
