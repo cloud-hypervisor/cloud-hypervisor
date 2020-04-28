@@ -1141,6 +1141,8 @@ pub struct VsockConfig {
 }
 
 impl VsockConfig {
+    pub const SYNTAX: &'static str = "Virtio VSOCK parameters \
+        \"cid=<context_id>,sock=<socket_path>,iommu=on|off,id=<device_id>\"";
     pub fn parse(vsock: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("sock").add("cid").add("iommu").add("id");

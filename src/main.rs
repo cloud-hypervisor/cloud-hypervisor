@@ -195,10 +195,7 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("vsock")
                 .long("vsock")
-                .help(
-                    "Virtio VSOCK parameters \
-                    \"cid=<context_id>,sock=<socket_path>,iommu=on|off,id=<device_id>\"",
-                )
+                .help(config::VsockConfig::SYNTAX)
                 .takes_value(true)
                 .number_of_values(1)
                 .group("vm-config"),
