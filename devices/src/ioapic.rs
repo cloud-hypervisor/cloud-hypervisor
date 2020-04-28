@@ -156,7 +156,8 @@ fn decode_irq_from_selector(selector: u8) -> (usize, bool) {
 }
 
 pub struct Ioapic {
-    id: u32,
+    id: String,
+    id_reg: u32,
     reg_sel: u32,
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
     used_entries: [bool; NUM_IOAPIC_PINS],
@@ -166,7 +167,7 @@ pub struct Ioapic {
 
 #[derive(Serialize, Deserialize)]
 pub struct IoapicState {
-    id: u32,
+    id_reg: u32,
     reg_sel: u32,
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
     used_entries: [bool; NUM_IOAPIC_PINS],
@@ -211,6 +212,7 @@ impl BusDevice for Ioapic {
 
 impl Ioapic {
     pub fn new(
+        id: String,
         apic_address: GuestAddress,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> Result<Ioapic> {
@@ -226,7 +228,8 @@ impl Ioapic {
             .map_err(Error::EnableInterrupt)?;
 
         Ok(Ioapic {
-            id: 0,
+            id,
+            id_reg: 0,
             reg_sel: 0,
             reg_entries: [0; NUM_IOAPIC_PINS],
             used_entries: [false; NUM_IOAPIC_PINS],
@@ -344,7 +347,7 @@ impl Ioapic {
         debug!("IOAPIC_W reg 0x{:x}, val 0x{:x}", self.reg_sel, val);
 
         match self.reg_sel as u8 {
-            IOAPIC_REG_ID => self.id = (val >> 24) & 0xf,
+            IOAPIC_REG_ID => self.id_reg = (val >> 24) & 0xf,
             IOWIN_OFF..=REG_MAX_OFFSET => {
                 let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
                 if is_high_bits {
@@ -374,7 +377,7 @@ impl Ioapic {
 
         match self.reg_sel as u8 {
             IOAPIC_REG_VERSION => IOAPIC_VERSION_ID,
-            IOAPIC_REG_ID | IOAPIC_REG_ARBITRATION_ID => (self.id & 0xf) << 24,
+            IOAPIC_REG_ID | IOAPIC_REG_ARBITRATION_ID => (self.id_reg & 0xf) << 24,
             IOWIN_OFF..=REG_MAX_OFFSET => {
                 let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
                 if is_high_bits {
@@ -392,7 +395,7 @@ impl Ioapic {
 
     fn state(&self) -> IoapicState {
         IoapicState {
-            id: self.id,
+            id_reg: self.id_reg,
             reg_sel: self.reg_sel,
             reg_entries: self.reg_entries,
             used_entries: self.used_entries,
@@ -401,7 +404,7 @@ impl Ioapic {
     }
 
     fn set_state(&mut self, state: &IoapicState) -> Result<()> {
-        self.id = state.id;
+        self.id_reg = state.id_reg;
         self.reg_sel = state.reg_sel;
         self.reg_entries = state.reg_entries;
         self.used_entries = state.used_entries;
@@ -416,19 +419,18 @@ impl Ioapic {
     }
 }
 
-const IOAPIC_SNAPSHOT_ID: &str = "ioapic";
 impl Snapshottable for Ioapic {
     fn id(&self) -> String {
-        IOAPIC_SNAPSHOT_ID.to_string()
+        self.id.clone()
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        let mut ioapic_snapshot = Snapshot::new(IOAPIC_SNAPSHOT_ID);
+        let mut ioapic_snapshot = Snapshot::new(self.id.as_str());
         ioapic_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", IOAPIC_SNAPSHOT_ID),
+            id: format!("{}-section", self.id),
             snapshot,
         });
 
@@ -436,10 +438,7 @@ impl Snapshottable for Ioapic {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(ioapic_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", IOAPIC_SNAPSHOT_ID))
-        {
+        if let Some(ioapic_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
             let ioapic_state = match serde_json::from_slice(&ioapic_section.snapshot) {
                 Ok(state) => state,
                 Err(error) => {
