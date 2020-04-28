@@ -741,6 +741,13 @@ impl Vm {
                     if let Some(pmem) = config.pmem.as_mut() {
                         pmem.retain(|dev| dev.id.as_ref() != Some(&_id));
                     }
+
+                    // Remove if vsock device
+                    if let Some(vsock) = config.vsock.as_ref() {
+                        if vsock.id.as_ref() == Some(&_id) {
+                            config.vsock = None;
+                        }
+                    }
                 }
 
                 self.device_manager
