@@ -10,7 +10,7 @@ use vm_memory::{
 };
 
 /// Type of Message Singaled Interrupt
-#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MsiIrqType {
     /// PCI MSI IRQ numbers.
     PciMsi,
@@ -22,7 +22,7 @@ pub enum MsiIrqType {
 
 /// Enumeration for device resources.
 #[allow(missing_docs)]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Resource {
     /// IO Port address range.
     PioAddressRange { base: u16, size: u16 },
