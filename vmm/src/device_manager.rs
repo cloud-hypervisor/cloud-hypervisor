@@ -1097,7 +1097,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::CreateVirtioConsole)?;
             virtio_devices.push((
                 Arc::new(Mutex::new(virtio_console_device)) as VirtioDeviceArc,
-                false,
+                console_config.iommu,
                 None,
             ));
             Some(console_input)
