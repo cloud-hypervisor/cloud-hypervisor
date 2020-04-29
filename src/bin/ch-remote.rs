@@ -27,6 +27,7 @@ enum Error {
     AddFsConfig(vmm::config::Error),
     AddPmemConfig(vmm::config::Error),
     AddNetConfig(vmm::config::Error),
+    AddVsockConfig(vmm::config::Error),
     Restore(vmm::config::Error),
 }
 
@@ -262,6 +263,17 @@ fn add_net_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Erro
     )
 }
 
+fn add_vsock_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
+    let vsock_config = vmm::config::VsockConfig::parse(config).map_err(Error::AddVsockConfig)?;
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "add-vsock",
+        Some(&serde_json::to_string(&vsock_config).unwrap()),
+    )
+}
+
 fn snapshot_api_command(socket: &mut UnixStream, url: &str) -> Result<(), Error> {
     let snapshot_config = vmm::api::VmSnapshotConfig {
         destination_url: String::from(url),
@@ -351,6 +363,14 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .value_of("net_config")
                 .unwrap(),
         ),
+        Some("add-vsock") => add_vsock_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("add-vsock")
+                .unwrap()
+                .value_of("vsock_config")
+                .unwrap(),
+        ),
         Some("snapshot") => snapshot_api_command(
             &mut socket,
             matches
@@ -428,6 +448,15 @@ fn main() {
                     Arg::with_name("net_config")
                         .index(1)
                         .help(vmm::config::NetConfig::SYNTAX),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("add-vsock")
+                .about("Add vsock device")
+                .arg(
+                    Arg::with_name("vsock_config")
+                        .index(1)
+                        .help(vmm::config::VsockConfig::SYNTAX),
                 ),
         )
         .subcommand(
