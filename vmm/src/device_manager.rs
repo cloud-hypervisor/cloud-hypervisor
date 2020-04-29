@@ -328,6 +328,9 @@ pub enum DeviceManagerError {
 
     /// Expected resources for virtio-mmio could not be found.
     MissingVirtioMmioResources,
+
+    /// Expected resources for virtio-fs could not be found.
+    MissingVirtioFsResources,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1533,24 +1536,82 @@ impl DeviceManager {
             id
         };
 
-        self.device_tree.insert(id.clone(), Node::default());
+        // Look for the id in the device tree. If it can be found, that means
+        // the device is being restored, otherwise it's created from scratch.
+        let cache_range = if let Some(node) = self.device_tree.get(&id) {
+            debug!("Restoring virtio-fs {} resources", id);
+
+            let mut cache_range: Option<(u64, u64)> = None;
+            for resource in node.resources.iter() {
+                match resource {
+                    Resource::MmioAddressRange { base, size } => {
+                        if cache_range.is_some() {
+                            return Err(DeviceManagerError::ResourceAlreadyExists);
+                        }
+
+                        cache_range = Some((*base, *size));
+                    }
+                    _ => {
+                        error!("Unexpected resource {:?} for {}", resource, id);
+                    }
+                }
+            }
+
+            if cache_range.is_none() {
+                return Err(DeviceManagerError::MissingVirtioFsResources);
+            }
+
+            cache_range
+        } else {
+            self.device_tree.insert(id.clone(), Node::default());
+            None
+        };
 
         if let Some(fs_sock) = fs_cfg.sock.to_str() {
             let cache = if fs_cfg.dax {
-                let fs_cache = fs_cfg.cache_size;
-                // The memory needs to be 2MiB aligned in order to support
-                // hugepages.
-                let fs_guest_addr = self
-                    .address_manager
-                    .allocator
-                    .lock()
-                    .unwrap()
-                    .allocate_mmio_addresses(None, fs_cache as GuestUsize, Some(0x0020_0000))
-                    .ok_or(DeviceManagerError::FsRangeAllocation)?;
+                let (cache_base, cache_size) = if let Some((base, size)) = cache_range {
+                    // The memory needs to be 2MiB aligned in order to support
+                    // hugepages.
+                    self.address_manager
+                        .allocator
+                        .lock()
+                        .unwrap()
+                        .allocate_mmio_addresses(
+                            Some(GuestAddress(base)),
+                            size as GuestUsize,
+                            Some(0x0020_0000),
+                        )
+                        .ok_or(DeviceManagerError::FsRangeAllocation)?;
+
+                    (base, size)
+                } else {
+                    let size = fs_cfg.cache_size;
+                    // The memory needs to be 2MiB aligned in order to support
+                    // hugepages.
+                    let base = self
+                        .address_manager
+                        .allocator
+                        .lock()
+                        .unwrap()
+                        .allocate_mmio_addresses(None, size as GuestUsize, Some(0x0020_0000))
+                        .ok_or(DeviceManagerError::FsRangeAllocation)?;
+
+                    (base.raw_value(), size)
+                };
+
+                // Update the device tree with correct resource information.
+                if let Some(node) = self.device_tree.get_mut(&id) {
+                    node.resources.push(Resource::MmioAddressRange {
+                        base: cache_base,
+                        size: cache_size,
+                    });
+                } else {
+                    return Err(DeviceManagerError::MissingNode);
+                }
 
                 let mmap_region = MmapRegion::build(
                     None,
-                    fs_cache as usize,
+                    cache_size as usize,
                     libc::PROT_NONE,
                     libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
                 )
@@ -1561,27 +1622,21 @@ impl DeviceManager {
                     .memory_manager
                     .lock()
                     .unwrap()
-                    .create_userspace_mapping(
-                        fs_guest_addr.raw_value(),
-                        fs_cache,
-                        host_addr,
-                        false,
-                        false,
-                    )
+                    .create_userspace_mapping(cache_base, cache_size, host_addr, false, false)
                     .map_err(DeviceManagerError::MemoryManager)?;
 
                 let mut region_list = Vec::new();
                 region_list.push(VirtioSharedMemory {
                     offset: 0,
-                    len: fs_cache,
+                    len: cache_size,
                 });
 
                 Some((
                     VirtioSharedMemoryList {
                         host_addr,
                         mem_slot,
-                        addr: fs_guest_addr,
-                        len: fs_cache as GuestUsize,
+                        addr: GuestAddress(cache_base),
+                        len: cache_size as GuestUsize,
                         region_list,
                     },
                     mmap_region,
