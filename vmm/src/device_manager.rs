@@ -1693,7 +1693,36 @@ impl DeviceManager {
             id
         };
 
-        self.device_tree.insert(id.clone(), Node::default());
+        // Look for the id in the device tree. If it can be found, that means
+        // the device is being restored, otherwise it's created from scratch.
+        let region_range = if let Some(node) = self.device_tree.get(&id) {
+            debug!("Restoring virtio-pmem {} resources", id);
+
+            let mut region_range: Option<(u64, u64)> = None;
+            for resource in node.resources.iter() {
+                match resource {
+                    Resource::MmioAddressRange { base, size } => {
+                        if region_range.is_some() {
+                            return Err(DeviceManagerError::ResourceAlreadyExists);
+                        }
+
+                        region_range = Some((*base, *size));
+                    }
+                    _ => {
+                        error!("Unexpected resource {:?} for {}", resource, id);
+                    }
+                }
+            }
+
+            if region_range.is_none() {
+                return Err(DeviceManagerError::MissingVirtioFsResources);
+            }
+
+            region_range
+        } else {
+            self.device_tree.insert(id.clone(), Node::default());
+            None
+        };
 
         let (custom_flags, set_len) = if pmem_cfg.file.is_dir() {
             if pmem_cfg.size.is_none() {
@@ -1726,20 +1755,49 @@ impl DeviceManager {
             return Err(DeviceManagerError::PmemSizeNotAligned);
         }
 
-        // The memory needs to be 2MiB aligned in order to support
-        // hugepages.
-        let pmem_guest_addr = self
-            .address_manager
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_mmio_addresses(None, size as GuestUsize, Some(0x0020_0000))
-            .ok_or(DeviceManagerError::PmemRangeAllocation)?;
+        let (region_base, region_size) = if let Some((base, size)) = region_range {
+            // The memory needs to be 2MiB aligned in order to support
+            // hugepages.
+            self.address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_mmio_addresses(
+                    Some(GuestAddress(base)),
+                    size as GuestUsize,
+                    Some(0x0020_0000),
+                )
+                .ok_or(DeviceManagerError::PmemRangeAllocation)?;
+
+            (base, size)
+        } else {
+            // The memory needs to be 2MiB aligned in order to support
+            // hugepages.
+            let base = self
+                .address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_mmio_addresses(None, size as GuestUsize, Some(0x0020_0000))
+                .ok_or(DeviceManagerError::PmemRangeAllocation)?;
+
+            (base.raw_value(), size)
+        };
+
+        // Update the device tree with correct resource information.
+        if let Some(node) = self.device_tree.get_mut(&id) {
+            node.resources.push(Resource::MmioAddressRange {
+                base: region_base,
+                size: region_size,
+            });
+        } else {
+            return Err(DeviceManagerError::MissingNode);
+        }
 
         let cloned_file = file.try_clone().map_err(DeviceManagerError::CloneFile)?;
         let mmap_region = MmapRegion::build(
             Some(FileOffset::new(cloned_file, 0)),
-            size as usize,
+            region_size as usize,
             if pmem_cfg.discard_writes {
                 PROT_READ
             } else {
@@ -1760,8 +1818,8 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .create_userspace_mapping(
-                pmem_guest_addr.raw_value(),
-                size,
+                region_base,
+                region_size,
                 host_addr,
                 pmem_cfg.mergeable,
                 pmem_cfg.discard_writes,
@@ -1771,8 +1829,8 @@ impl DeviceManager {
         let mapping = vm_virtio::UserspaceMapping {
             host_addr,
             mem_slot,
-            addr: pmem_guest_addr,
-            len: size,
+            addr: GuestAddress(region_base),
+            len: region_size,
             mergeable: pmem_cfg.mergeable,
         };
 
@@ -1780,7 +1838,7 @@ impl DeviceManager {
             vm_virtio::Pmem::new(
                 id.clone(),
                 file,
-                pmem_guest_addr,
+                GuestAddress(region_base),
                 mapping,
                 mmap_region,
                 pmem_cfg.iommu,
