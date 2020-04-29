@@ -32,6 +32,16 @@ pipeline{
 								checkout scm
 							}
 						}
+						stage ('Run unit tests for musl') {
+							steps {
+								sh "scripts/dev_cli.sh tests --unit --libc musl"
+							}
+						}
+						stage ('Run integration tests for musl') {
+							steps {
+								sh "scripts/dev_cli.sh tests --integration --libc musl"
+							}
+						}
 						stage ('Run Cargo tests') {
 							steps {
 								sh "scripts/dev_cli.sh tests --cargo"
