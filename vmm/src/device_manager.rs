@@ -70,27 +70,27 @@ use vmm_sys_util::eventfd::EventFd;
 const MMIO_LEN: u64 = 0x1000;
 
 #[cfg(feature = "pci_support")]
-const VFIO_DEVICE_NAME_PREFIX: &str = "vfio";
+const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
 
-const IOAPIC_DEVICE_NAME: &str = "ioapic";
-const SERIAL_DEVICE_NAME_PREFIX: &str = "serial";
+const IOAPIC_DEVICE_NAME: &str = "_ioapic";
+const SERIAL_DEVICE_NAME_PREFIX: &str = "_serial";
 
-const CONSOLE_DEVICE_NAME: &str = "console";
-const DISK_DEVICE_NAME_PREFIX: &str = "disk";
-const FS_DEVICE_NAME_PREFIX: &str = "fs";
-const MEM_DEVICE_NAME: &str = "mem";
-const NET_DEVICE_NAME_PREFIX: &str = "net";
-const PMEM_DEVICE_NAME_PREFIX: &str = "pmem";
-const RNG_DEVICE_NAME: &str = "rng";
-const VSOCK_DEVICE_NAME_PREFIX: &str = "vsock";
+const CONSOLE_DEVICE_NAME: &str = "_console";
+const DISK_DEVICE_NAME_PREFIX: &str = "_disk";
+const FS_DEVICE_NAME_PREFIX: &str = "_fs";
+const MEM_DEVICE_NAME: &str = "_mem";
+const NET_DEVICE_NAME_PREFIX: &str = "_net";
+const PMEM_DEVICE_NAME_PREFIX: &str = "_pmem";
+const RNG_DEVICE_NAME: &str = "_rng";
+const VSOCK_DEVICE_NAME_PREFIX: &str = "_vsock";
 
 #[cfg(feature = "pci_support")]
-const IOMMU_DEVICE_NAME: &str = "iommu";
+const IOMMU_DEVICE_NAME: &str = "_iommu";
 
 #[cfg(feature = "mmio_support")]
-const VIRTIO_MMIO_DEVICE_NAME_PREFIX: &str = "virtio-mmio";
+const VIRTIO_MMIO_DEVICE_NAME_PREFIX: &str = "_virtio-mmio";
 #[cfg(feature = "pci_support")]
-const VIRTIO_PCI_DEVICE_NAME_PREFIX: &str = "virtio-pci";
+const VIRTIO_PCI_DEVICE_NAME_PREFIX: &str = "_virtio-pci";
 
 /// Errors associated with device manager
 #[derive(Debug)]
