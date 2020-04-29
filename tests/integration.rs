@@ -2841,6 +2841,15 @@ mod tests {
 
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_vsock() {
+        _test_virtio_vsock(false)
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_virtio_vsock_hotplug() {
+        _test_virtio_vsock(true);
+    }
+
+    fn _test_virtio_vsock(hotplug: bool) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
@@ -2848,18 +2857,40 @@ mod tests {
             workload_path.push("workloads");
 
             let sock = temp_vsock_path(&guest.tmp_dir);
+            let api_socket = temp_api_path(&guest.tmp_dir);
 
-            let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
-                .default_disks()
-                .default_net()
-                .args(&["--vsock", format!("cid=3,sock={}", sock).as_str()])
-                .spawn()
-                .unwrap();
+            let mut cmd = GuestCommand::new(&guest);
+            cmd.args(&["--api-socket", &api_socket]);
+            cmd.args(&["--cpus", "boot=1"]);
+            cmd.args(&["--memory", "size=512M"]);
+            cmd.args(&["--kernel", guest.fw_path.as_str()]);
+            cmd.default_disks();
+            cmd.default_net();
+
+            if !hotplug {
+                cmd.args(&["--vsock", format!("cid=3,sock={}", sock).as_str()]);
+            }
+
+            let mut child = cmd.spawn().unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
+
+            if hotplug {
+                aver!(
+                    tb,
+                    remote_command(
+                        &api_socket,
+                        "add-vsock",
+                        Some(format!("cid=3,sock={},id=test0", sock).as_str())
+                    )
+                );
+                thread::sleep(std::time::Duration::new(10, 0));
+                // Check adding a second one fails
+                aver!(
+                    tb,
+                    !remote_command(&api_socket, "add-vsock", Some("cid=1234,sock=/tmp/fail"))
+                );
+            }
 
             // Listen from guest on vsock CID=3 PORT=16
             // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
@@ -2891,6 +2922,13 @@ mod tests {
                 guest.ssh_command("cat vsock_log").unwrap().trim(),
                 "HelloWorld!"
             );
+
+            if hotplug {
+                aver!(
+                    tb,
+                    remote_command(&api_socket, "remove-device", Some("test0"))
+                );
+            }
 
             let _ = child.kill();
             let _ = child.wait();
