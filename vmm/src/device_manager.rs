@@ -1421,7 +1421,7 @@ impl DeviceManager {
             ));
             devices.push((
                 Arc::clone(&virtio_rng_device) as VirtioDeviceArc,
-                false,
+                rng_config.iommu,
                 None,
             ));
 
