@@ -334,12 +334,6 @@ impl Vm {
         )
         .map_err(Error::DeviceManager)?;
 
-        device_manager
-            .lock()
-            .unwrap()
-            .create_devices()
-            .map_err(Error::DeviceManager)?;
-
         let cpu_manager = cpu::CpuManager::new(
             &config.lock().unwrap().cpus.clone(),
             &device_manager,
@@ -392,7 +386,7 @@ impl Vm {
         )
         .map_err(Error::MemoryManager)?;
 
-        Vm::new_from_memory_manager(
+        let vm = Vm::new_from_memory_manager(
             config,
             memory_manager,
             fd,
@@ -400,7 +394,17 @@ impl Vm {
             exit_evt,
             reset_evt,
             vmm_path,
-        )
+        )?;
+
+        // The device manager must create the devices from here as it is part
+        // of the regular code path creating everything from scratch.
+        vm.device_manager
+            .lock()
+            .unwrap()
+            .create_devices()
+            .map_err(Error::DeviceManager)?;
+
+        Ok(vm)
     }
 
     pub fn new_from_snapshot(

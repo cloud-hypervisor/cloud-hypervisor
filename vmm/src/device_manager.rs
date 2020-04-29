@@ -2855,7 +2855,12 @@ impl Snapshottable for DeviceManager {
             )));
         }
 
-        // Then restore all devices associated with the DeviceManager.
+        // Now that DeviceManager is updated with the right states, it's time
+        // to create the devices based on the configuration.
+        self.create_devices()
+            .map_err(|e| MigratableError::Restore(anyhow!("Could not create devices {:?}", e)))?;
+
+        // Finally, restore all devices associated with the DeviceManager.
         // It's important to restore devices in the right order, that's why
         // the device tree is the right way to ensure we restore a child before
         // its parent node.
