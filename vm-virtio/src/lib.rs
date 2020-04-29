@@ -187,4 +187,5 @@ pub enum Error {
     VhostUserUpdateMemory(vhost_user::Error),
     EventfdError(io::Error),
     SetShmRegionsNotSupported,
+    EpollHander(String),
 }
