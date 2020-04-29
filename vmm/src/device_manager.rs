@@ -319,6 +319,9 @@ pub enum DeviceManagerError {
 
     /// Could not find the node in the device tree.
     MissingNode,
+
+    /// Could not find a MMIO range.
+    MmioRangeAllocation,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -933,17 +936,7 @@ impl DeviceManager {
         #[cfg(feature = "mmio_support")]
         {
             for (device, _, id) in virtio_devices {
-                let mmio_addr = self
-                    .address_manager
-                    .allocator
-                    .lock()
-                    .unwrap()
-                    .allocate_mmio_addresses(None, MMIO_LEN, Some(MMIO_LEN));
-                if let Some(addr) = mmio_addr {
-                    self.add_virtio_mmio_device(id, device, interrupt_manager, addr)?;
-                } else {
-                    error!("Unable to allocate MMIO address!");
-                }
+                self.add_virtio_mmio_device(id, device, interrupt_manager)?;
             }
         }
 
@@ -2133,7 +2126,6 @@ impl DeviceManager {
         virtio_device_id: String,
         virtio_device: VirtioDeviceArc,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
-        mmio_base: GuestAddress,
     ) -> DeviceManagerResult<()> {
         let id = format!("{}-{}", VIRTIO_MMIO_DEVICE_NAME_PREFIX, virtio_device_id);
 
@@ -2150,6 +2142,14 @@ impl DeviceManager {
         } else {
             return Err(DeviceManagerError::MissingNode);
         }
+
+        let mmio_base = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_mmio_addresses(None, MMIO_LEN, Some(MMIO_LEN))
+            .ok_or(DeviceManagerError::MmioRangeAllocation)?;
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let mut mmio_device = vm_virtio::transport::MmioDevice::new(id, memory, virtio_device)
