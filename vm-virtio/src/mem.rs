@@ -263,8 +263,8 @@ impl Resize {
         self.size.load(Ordering::SeqCst)
     }
 
-    fn send(&self, r: Result<(), Error>) {
-        self.tx.send(r).unwrap();
+    fn send(&self, r: Result<(), Error>) -> Result<(), mpsc::SendError<Result<(), Error>>> {
+        self.tx.send(r)
     }
 }
 
@@ -657,12 +657,14 @@ impl MemEpollHandler {
                 match ev_type {
                     RESIZE_EVENT => {
                         if let Err(e) = self.resize.evt.read() {
-                            error!("Failed to get resize event: {:?}", e);
-                            break 'epoll;
+                            return Err(DeviceError::EpollHander(format!(
+                                "Failed to get resize event: {:?}",
+                                e
+                            )));
                         } else {
                             let size = self.resize.get_size();
                             let mut config = self.config.lock().unwrap();
-                            let mut need_break = false;
+                            let mut signal_error = false;
                             let r = if config.requested_size == size {
                                 Err(Error::ResizeInval(format!("Virtio-mem resize {} is same with current config.requested_size", size)))
                             } else if size > config.region_size {
@@ -686,29 +688,41 @@ impl MemEpollHandler {
                                 config.usable_region_size =
                                     cmp::max(config.usable_region_size, tmp_size);
                                 if let Err(e) = self.signal(&VirtioInterruptType::Config) {
-                                    need_break = true;
+                                    signal_error = true;
                                     Err(Error::ResizeTriggerFail(e))
                                 } else {
                                     Ok(())
                                 }
                             };
                             if let Err(e) = &r {
-                                error!("{:?}", e);
+                                // This error will send back to resize caller.
+                                error!("Handle resize event get error: {:?}", e);
                             }
-                            self.resize.send(r);
-                            if need_break {
-                                break 'epoll;
+                            if let Err(e) = self.resize.send(r) {
+                                return Err(DeviceError::EpollHander(format!(
+                                    "Sending \"resize\" generated error: {:?}",
+                                    e
+                                )));
+                            }
+                            if signal_error {
+                                return Err(DeviceError::EpollHander(String::from(
+                                    "Signal get error",
+                                )));
                             }
                         }
                     }
                     QUEUE_AVAIL_EVENT => {
                         if let Err(e) = self.queue_evt.read() {
-                            error!("Failed to get queue event: {:?}", e);
-                            break 'epoll;
+                            return Err(DeviceError::EpollHander(format!(
+                                "Failed to get queue event: {:?}",
+                                e
+                            )));
                         } else if self.process_queue() {
                             if let Err(e) = self.signal(&VirtioInterruptType::Queue) {
-                                error!("Failed to signal used queue: {:?}", e);
-                                break 'epoll;
+                                return Err(DeviceError::EpollHander(format!(
+                                    "Failed to signal used queue: {:?}",
+                                    e
+                                )));
                             }
                         }
                     }
@@ -726,7 +740,9 @@ impl MemEpollHandler {
                         }
                     }
                     _ => {
-                        error!("Unknown event for virtio-mem");
+                        return Err(DeviceError::EpollHander(String::from(
+                            "Unknown event for virtio-mem",
+                        )));
                     }
                 }
             }
