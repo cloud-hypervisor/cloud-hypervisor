@@ -644,18 +644,21 @@ impl DiskConfig {
             .map_err(Error::ParseDisk)?
             .unwrap_or_else(default_diskconfig_num_queues);
         let vhost_user = parser
-            .convert("vhost_user")
+            .convert::<Toggle>("vhost_user")
             .map_err(Error::ParseDisk)?
-            .unwrap_or(false);
+            .unwrap_or(Toggle(false))
+            .0;
         let vhost_socket = parser.get("socket");
         let wce = parser
-            .convert("wce")
+            .convert::<Toggle>("wce")
             .map_err(Error::ParseDisk)?
-            .unwrap_or_else(default_diskconfig_wce);
+            .unwrap_or_else(|| Toggle(default_diskconfig_wce()))
+            .0;
         let poll_queue = parser
-            .convert("poll_queue")
+            .convert::<Toggle>("poll_queue")
             .map_err(Error::ParseDisk)?
-            .unwrap_or_else(default_diskconfig_poll_queue);
+            .unwrap_or_else(|| Toggle(default_diskconfig_poll_queue()))
+            .0;
         let id = parser.get("id");
 
         if parser.is_set("wce") && !vhost_user {
@@ -795,9 +798,10 @@ impl NetConfig {
             .map_err(Error::ParseNetwork)?
             .unwrap_or_else(default_netconfig_num_queues);
         let vhost_user = parser
-            .convert("vhost_user")
+            .convert::<Toggle>("vhost_user")
             .map_err(Error::ParseNetwork)?
-            .unwrap_or(false);
+            .unwrap_or(Toggle(false))
+            .0;
         let vhost_socket = parser.get("socket");
         let id = parser.get("id");
 
