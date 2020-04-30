@@ -560,7 +560,7 @@ impl Drop for ActivatedBackend {
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
-struct Node {
+struct DeviceNode {
     resources: Vec<Resource>,
     parent: Option<String>,
     child: Option<String>,
@@ -568,7 +568,7 @@ struct Node {
 
 #[derive(Serialize, Deserialize)]
 struct DeviceManagerState {
-    device_tree: HashMap<String, Node>,
+    device_tree: HashMap<String, DeviceNode>,
     device_id_cnt: Wrapping<usize>,
 }
 
@@ -649,7 +649,7 @@ pub struct DeviceManager {
 
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
-    device_tree: HashMap<String, Node>,
+    device_tree: HashMap<String, DeviceNode>,
 
     // Exit event
     #[cfg(feature = "acpi")]
@@ -852,7 +852,8 @@ impl DeviceManager {
             let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
             let (iommu_device, iommu_mapping) = if self.config.lock().unwrap().iommu {
-                self.device_tree.insert(iommu_id.clone(), Node::default());
+                self.device_tree
+                    .insert(iommu_id.clone(), DeviceNode::default());
 
                 let (device, mapping) = vm_virtio::Iommu::new(iommu_id.clone())
                     .map_err(DeviceManagerError::CreateVirtioIommu)?;
@@ -955,7 +956,7 @@ impl DeviceManager {
     fn add_ioapic(&mut self) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
         let id = String::from(IOAPIC_DEVICE_NAME);
 
-        self.device_tree.insert(id.clone(), Node::default());
+        self.device_tree.insert(id.clone(), DeviceNode::default());
 
         // Create IOAPIC
         let ioapic = Arc::new(Mutex::new(
@@ -1116,7 +1117,7 @@ impl DeviceManager {
 
             let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
 
-            self.device_tree.insert(id.clone(), Node::default());
+            self.device_tree.insert(id.clone(), DeviceNode::default());
 
             let interrupt_group = interrupt_manager
                 .create_group(LegacyIrqGroupConfig {
@@ -1167,7 +1168,7 @@ impl DeviceManager {
         let console_input = if let Some(writer) = console_writer {
             let id = String::from(CONSOLE_DEVICE_NAME);
 
-            self.device_tree.insert(id.clone(), Node::default());
+            self.device_tree.insert(id.clone(), DeviceNode::default());
 
             let (virtio_console_device, console_input) =
                 vm_virtio::Console::new(id.clone(), writer, col, row, console_config.iommu)
@@ -1261,7 +1262,7 @@ impl DeviceManager {
             id
         };
 
-        self.device_tree.insert(id.clone(), Node::default());
+        self.device_tree.insert(id.clone(), DeviceNode::default());
 
         if disk_cfg.vhost_user {
             let sock = if let Some(sock) = disk_cfg.vhost_socket.clone() {
@@ -1414,7 +1415,7 @@ impl DeviceManager {
             id
         };
 
-        self.device_tree.insert(id.clone(), Node::default());
+        self.device_tree.insert(id.clone(), DeviceNode::default());
 
         if net_cfg.vhost_user {
             let sock = if let Some(sock) = net_cfg.vhost_socket.clone() {
@@ -1504,7 +1505,7 @@ impl DeviceManager {
         if let Some(rng_path) = rng_config.src.to_str() {
             let id = String::from(RNG_DEVICE_NAME);
 
-            self.device_tree.insert(id.clone(), Node::default());
+            self.device_tree.insert(id.clone(), DeviceNode::default());
 
             let virtio_rng_device = Arc::new(Mutex::new(
                 vm_virtio::Rng::new(id.clone(), rng_path, rng_config.iommu)
@@ -1563,7 +1564,7 @@ impl DeviceManager {
 
             cache_range
         } else {
-            self.device_tree.insert(id.clone(), Node::default());
+            self.device_tree.insert(id.clone(), DeviceNode::default());
             None
         };
 
@@ -1720,7 +1721,7 @@ impl DeviceManager {
 
             region_range
         } else {
-            self.device_tree.insert(id.clone(), Node::default());
+            self.device_tree.insert(id.clone(), DeviceNode::default());
             None
         };
 
@@ -1883,7 +1884,7 @@ impl DeviceManager {
             id
         };
 
-        self.device_tree.insert(id.clone(), Node::default());
+        self.device_tree.insert(id.clone(), DeviceNode::default());
 
         let socket_path = vsock_cfg
             .sock
@@ -1937,7 +1938,7 @@ impl DeviceManager {
         if let (Some(region), Some(resize)) = (&mm.virtiomem_region, &mm.virtiomem_resize) {
             let id = String::from(MEM_DEVICE_NAME);
 
-            self.device_tree.insert(id.clone(), Node::default());
+            self.device_tree.insert(id.clone(), DeviceNode::default());
 
             let virtio_mem_device = Arc::new(Mutex::new(
                 vm_virtio::Mem::new(
@@ -2136,7 +2137,7 @@ impl DeviceManager {
         let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
 
         // Add the new virtio-pci node to the device tree.
-        let node = Node {
+        let node = DeviceNode {
             child: Some(virtio_device_id.clone()),
             ..Default::default()
         };
@@ -2284,7 +2285,7 @@ impl DeviceManager {
             (mmio_range, mmio_irq)
         } else {
             // Add the new virtio-mmio node to the device tree.
-            let node = Node {
+            let node = DeviceNode {
                 child: Some(virtio_device_id.clone()),
                 ..Default::default()
             };
