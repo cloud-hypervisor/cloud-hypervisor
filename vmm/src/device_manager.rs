@@ -1167,7 +1167,7 @@ impl DeviceManager {
             .args(&[
                 "--block-backend",
                 &format!(
-                    "image={},sock={},num_queues={},queue_size={}",
+                    "path={},socket={},num_queues={},queue_size={}",
                     disk_cfg
                         .path
                         .as_ref()

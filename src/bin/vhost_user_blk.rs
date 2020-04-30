@@ -25,7 +25,7 @@ fn main() {
                 .long("block-backend")
                 .help(
                     "vhost-user-block backend parameters \
-                     \"image=<image_path>,sock=<socket_path>,num_queues=<number_of_queues>,\
+                     \"path=<image_path>,socket=<socket_path>,num_queues=<number_of_queues>,\
                      readonly=true|false,direct=true|false,poll_queue=true|false\"",
                 )
                 .takes_value(true)
