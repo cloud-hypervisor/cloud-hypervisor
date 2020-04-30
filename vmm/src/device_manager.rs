@@ -3162,9 +3162,11 @@ impl Snapshottable for DeviceManager {
         let mut snapshot = Snapshot::new(DEVICE_MANAGER_SNAPSHOT_ID);
 
         // We aggregate all devices snapshots.
-        for (_, dev) in self.migratable_devices.iter() {
-            let device_snapshot = dev.lock().unwrap().snapshot()?;
-            snapshot.add_snapshot(device_snapshot);
+        for (_, device_node) in self.device_tree.iter() {
+            if let Some(migratable) = &device_node.migratable {
+                let device_snapshot = migratable.lock().unwrap().snapshot()?;
+                snapshot.add_snapshot(device_snapshot);
+            }
         }
 
         // Then we store the DeviceManager state.
@@ -3212,10 +3214,10 @@ impl Snapshottable for DeviceManager {
             }
 
             // Restore the node
-            if let Some(device) = self.migratable_devices.get(id) {
+            if let Some(migratable) = &node.migratable {
                 debug!("Restoring {} from DeviceManager", id);
                 if let Some(snapshot) = snapshot.snapshots.get(id) {
-                    device.lock().unwrap().restore(*snapshot.clone())?;
+                    migratable.lock().unwrap().restore(*snapshot.clone())?;
                 } else {
                     return Err(MigratableError::Restore(anyhow!("Missing device {}", id)));
                 }
@@ -3223,15 +3225,17 @@ impl Snapshottable for DeviceManager {
 
             // Restore the parent if it exists
             if let Some(parent) = &node.parent {
-                if let Some(device) = self.migratable_devices.get(parent) {
-                    debug!("Restoring {} from DeviceManager", parent);
-                    if let Some(snapshot) = snapshot.snapshots.get(parent) {
-                        device.lock().unwrap().restore(*snapshot.clone())?;
-                    } else {
-                        return Err(MigratableError::Restore(anyhow!(
-                            "Missing parent device {}",
-                            id
-                        )));
+                if let Some(node) = self.device_tree.get(parent) {
+                    if let Some(migratable) = &node.migratable {
+                        debug!("Restoring {} from DeviceManager", parent);
+                        if let Some(snapshot) = snapshot.snapshots.get(parent) {
+                            migratable.lock().unwrap().restore(*snapshot.clone())?;
+                        } else {
+                            return Err(MigratableError::Restore(anyhow!(
+                                "Missing parent device {}",
+                                id
+                            )));
+                        }
                     }
                 }
             }
