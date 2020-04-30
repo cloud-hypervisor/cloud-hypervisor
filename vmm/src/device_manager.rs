@@ -563,7 +563,7 @@ impl Drop for ActivatedBackend {
 struct DeviceNode {
     resources: Vec<Resource>,
     parent: Option<String>,
-    child: Option<String>,
+    children: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2138,7 +2138,7 @@ impl DeviceManager {
 
         // Add the new virtio-pci node to the device tree.
         let node = DeviceNode {
-            child: Some(virtio_device_id.clone()),
+            children: vec![virtio_device_id.clone()],
             ..Default::default()
         };
         self.device_tree.insert(id.clone(), node);
@@ -2286,7 +2286,7 @@ impl DeviceManager {
         } else {
             // Add the new virtio-mmio node to the device tree.
             let node = DeviceNode {
-                child: Some(virtio_device_id.clone()),
+                children: vec![virtio_device_id.clone()],
                 ..Default::default()
             };
             self.device_tree.insert(id.clone(), node);
@@ -3052,7 +3052,7 @@ impl Snapshottable for DeviceManager {
         // the device tree is the right way to ensure we restore a child before
         // its parent node.
         for (id, node) in self.device_tree.iter() {
-            if node.child.is_some() {
+            if !node.children.is_empty() {
                 continue;
             }
 
