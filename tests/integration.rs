@@ -398,7 +398,7 @@ mod tests {
             .args(&[
                 "--block-backend",
                 format!(
-                    "image={},sock={},num_queues={},readonly={},direct={}",
+                    "path={},socket={},num_queues={},readonly={},direct={}",
                     blk_file_path, vubd_socket_path, num_queues, rdonly, direct
                 )
                 .as_str(),

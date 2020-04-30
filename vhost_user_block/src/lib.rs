@@ -387,10 +387,10 @@ impl<'a> VhostUserBlkBackendConfig<'a> {
         let mut poll_queue: bool = true;
 
         for param in params_list.iter() {
-            if param.starts_with("image=") {
-                image = &param[6..];
-            } else if param.starts_with("sock=") {
-                sock = &param[5..];
+            if param.starts_with("path=") {
+                image = &param[5..];
+            } else if param.starts_with("socket=") {
+                sock = &param[7..];
             } else if param.starts_with("num_queues=") {
                 num_queues_str = &param[11..];
             } else if param.starts_with("readonly=") {
