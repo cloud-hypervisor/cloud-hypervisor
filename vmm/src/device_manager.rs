@@ -578,9 +578,34 @@ impl DeviceNode {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct DeviceTree(HashMap<String, DeviceNode>);
+
+impl DeviceTree {
+    fn new() -> Self {
+        DeviceTree(HashMap::new())
+    }
+    fn get(&self, k: &str) -> Option<&DeviceNode> {
+        self.0.get(k)
+    }
+    fn get_mut(&mut self, k: &str) -> Option<&mut DeviceNode> {
+        self.0.get_mut(k)
+    }
+    fn insert(&mut self, k: String, v: DeviceNode) -> Option<DeviceNode> {
+        self.0.insert(k, v)
+    }
+    #[cfg(feature = "pci_support")]
+    fn remove(&mut self, k: &str) -> Option<DeviceNode> {
+        self.0.remove(k)
+    }
+    fn iter(&self) -> std::collections::hash_map::Iter<String, DeviceNode> {
+        self.0.iter()
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct DeviceManagerState {
-    device_tree: HashMap<String, DeviceNode>,
+    device_tree: DeviceTree,
     device_id_cnt: Wrapping<usize>,
 }
 
@@ -661,7 +686,7 @@ pub struct DeviceManager {
 
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
-    device_tree: HashMap<String, DeviceNode>,
+    device_tree: DeviceTree,
 
     // Exit event
     #[cfg(feature = "acpi")]
@@ -736,7 +761,7 @@ impl DeviceManager {
             pci_id_list: HashMap::new(),
             #[cfg(feature = "pci_support")]
             pci_devices: HashMap::new(),
-            device_tree: HashMap::new(),
+            device_tree: DeviceTree::new(),
             #[cfg(feature = "acpi")]
             exit_evt: _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             reset_evt: reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
