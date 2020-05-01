@@ -10,7 +10,7 @@ use crate::api::http_endpoint::{
 use crate::api::{ApiError, ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error, Result};
-use micro_http::{HttpServer, MediaType, Request, Response, StatusCode, Version};
+use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusCode, Version};
 use seccomp::{SeccompFilter, SeccompLevel};
 use serde_json::Error as SerdeError;
 use std::collections::HashMap;
@@ -24,6 +24,9 @@ use vmm_sys_util::eventfd::EventFd;
 pub enum HttpError {
     /// API request receive error
     SerdeJsonDeserialize(SerdeError),
+
+    /// Attempt to access unsupported HTTP method
+    BadRequest,
 
     /// Could not create a VM
     VmCreate(ApiError),
@@ -86,7 +89,20 @@ pub enum HttpError {
     VmAddVsock(ApiError),
 }
 
+impl From<serde_json::Error> for HttpError {
+    fn from(e: serde_json::Error) -> Self {
+        HttpError::SerdeJsonDeserialize(e)
+    }
+}
+
 const HTTP_ROOT: &str = "/api/v1";
+
+pub fn error_response(error: HttpError, status: StatusCode) -> Response {
+    let mut response = Response::new(Version::Http11, status);
+    response.set_body(Body::new(format!("{:?}", error)));
+
+    response
+}
 
 /// An HTTP endpoint handler interface
 pub trait EndpointHandler: Sync + Send {
@@ -100,7 +116,28 @@ pub trait EndpointHandler: Sync + Send {
         req: &Request,
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
-    ) -> Response;
+    ) -> Response {
+        match req.method() {
+            Method::Put => match self.put_handler(api_notifier, api_sender, &req.body) {
+                Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
+                Err(e @ HttpError::BadRequest) => error_response(e, StatusCode::BadRequest),
+                Err(e @ HttpError::SerdeJsonDeserialize(_)) => {
+                    error_response(e, StatusCode::BadRequest)
+                }
+                Err(e) => error_response(e, StatusCode::InternalServerError),
+            },
+            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+        }
+    }
+
+    fn put_handler(
+        &self,
+        _api_notifier: EventFd,
+        _api_sender: Sender<ApiRequest>,
+        _body: &Option<Body>,
+    ) -> std::result::Result<(), HttpError> {
+        Err(HttpError::BadRequest)
+    }
 }
 
 /// An HTTP routes structure.

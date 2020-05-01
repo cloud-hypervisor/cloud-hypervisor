@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::api::http::{EndpointHandler, HttpError};
+use crate::api::http::{error_response, EndpointHandler, HttpError};
 use crate::api::{
     vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_add_vsock, vm_boot,
     vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_remove_device, vm_resize, vm_restore,
@@ -15,13 +15,6 @@ use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
-
-fn error_response(error: HttpError, status: StatusCode) -> Response {
-    let mut response = Response::new(Version::Http11, status);
-    response.set_body(Body::new(format!("{:?}", error)));
-
-    response
-}
 
 // /api/v1/vm.create handler
 pub struct VmCreate {}
