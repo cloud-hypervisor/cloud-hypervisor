@@ -7,16 +7,84 @@ use crate::api::http_endpoint::{
     VmActionHandler, VmAddDevice, VmAddDisk, VmAddFs, VmAddNet, VmAddPmem, VmAddVsock, VmCreate,
     VmInfo, VmRemoveDevice, VmResize, VmRestore, VmSnapshot, VmmPing, VmmShutdown,
 };
-use crate::api::{ApiRequest, VmAction};
+use crate::api::{ApiError, ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error, Result};
 use micro_http::{HttpServer, MediaType, Request, Response, StatusCode, Version};
 use seccomp::{SeccompFilter, SeccompLevel};
+use serde_json::Error as SerdeError;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::thread;
 use vmm_sys_util::eventfd::EventFd;
+
+/// Errors associated with VMM management
+#[derive(Debug)]
+pub enum HttpError {
+    /// API request receive error
+    SerdeJsonDeserialize(SerdeError),
+
+    /// Could not create a VM
+    VmCreate(ApiError),
+
+    /// Could not boot a VM
+    VmBoot(ApiError),
+
+    /// Could not get the VM information
+    VmInfo(ApiError),
+
+    /// Could not pause the VM
+    VmPause(ApiError),
+
+    /// Could not pause the VM
+    VmResume(ApiError),
+
+    /// Could not shut a VM down
+    VmShutdown(ApiError),
+
+    /// Could not reboot a VM
+    VmReboot(ApiError),
+
+    /// Could not snapshot a VM
+    VmSnapshot(ApiError),
+
+    /// Could not restore a VM
+    VmRestore(ApiError),
+
+    /// Could not act on a VM
+    VmAction(ApiError),
+
+    /// Could not resize a VM
+    VmResize(ApiError),
+
+    /// Could not add a device to a VM
+    VmAddDevice(ApiError),
+
+    /// Could not remove a device from a VM
+    VmRemoveDevice(ApiError),
+
+    /// Could not shut the VMM down
+    VmmShutdown(ApiError),
+
+    /// Could not handle VMM ping
+    VmmPing(ApiError),
+
+    /// Could not add a disk to a VM
+    VmAddDisk(ApiError),
+
+    /// Could not add a fs to a VM
+    VmAddFs(ApiError),
+
+    /// Could not add a pmem device to a VM
+    VmAddPmem(ApiError),
+
+    /// Could not add a network device to a VM
+    VmAddNet(ApiError),
+
+    /// Could not add a vsock device to a VM
+    VmAddVsock(ApiError),
+}
 
 const HTTP_ROOT: &str = "/api/v1";
 
