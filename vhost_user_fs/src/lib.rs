@@ -13,6 +13,7 @@ pub mod fuse;
 pub mod multikey;
 pub mod passthrough;
 pub mod sandbox;
+pub mod seccomp;
 pub mod server;
 
 use std::ffi::FromBytesWithNulError;

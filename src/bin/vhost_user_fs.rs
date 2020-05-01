@@ -14,6 +14,7 @@ use epoll;
 use futures::executor::{ThreadPool, ThreadPoolBuilder};
 use libc::EFD_NONBLOCK;
 use log::*;
+use seccomp::SeccompAction;
 use std::num::Wrapping;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{convert, error, fmt, io, process};
@@ -26,6 +27,7 @@ use vhost_user_fs::descriptor_utils::{Reader, Writer};
 use vhost_user_fs::filesystem::FileSystem;
 use vhost_user_fs::passthrough::{self, PassthroughFs};
 use vhost_user_fs::sandbox::Sandbox;
+use vhost_user_fs::seccomp::enable_seccomp;
 use vhost_user_fs::server::Server;
 use vhost_user_fs::Error as VhostUserFsError;
 use virtio_bindings::bindings::virtio_net::*;
@@ -316,6 +318,13 @@ fn main() {
                 .long("disable-sandbox")
                 .help("Don't set up a sandbox for the daemon"),
         )
+        .arg(
+            Arg::with_name("seccomp")
+                .long("seccomp")
+                .help("Disable/debug seccomp security")
+                .possible_values(&["kill", "log", "trap", "none"])
+                .default_value("kill"),
+        )
         .get_matches();
 
     // Retrieve arguments
@@ -331,6 +340,13 @@ fn main() {
     };
     let xattr: bool = !cmd_arguments.is_present("disable-xattr");
     let create_sandbox: bool = !cmd_arguments.is_present("disable-sandbox");
+    let seccomp_mode: SeccompAction = match cmd_arguments.value_of("seccomp").unwrap() {
+        "none" => SeccompAction::Allow, // i.e. no seccomp
+        "kill" => SeccompAction::Kill,
+        "log" => SeccompAction::Log,
+        "trap" => SeccompAction::Trap,
+        _ => unreachable!(), // We told Arg possible_values
+    };
 
     let listener = Listener::new(sock, true).unwrap();
 
@@ -354,6 +370,11 @@ fn main() {
             xattr,
             ..Default::default()
         }
+    };
+
+    // Must happen before we start the thread pool
+    if seccomp_mode != SeccompAction::Allow {
+        enable_seccomp(seccomp_mode).unwrap();
     };
 
     let fs = PassthroughFs::new(fs_cfg).unwrap();
