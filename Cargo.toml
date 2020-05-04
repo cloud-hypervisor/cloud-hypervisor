@@ -29,7 +29,7 @@ vm-virtio = { path = "vm-virtio" }
 vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-slave"] }
 
 [dev-dependencies]
-ssh2 = "0.8.0"
+ssh2 = "0.8.1"
 dirs = "2.0.2"
 credibility = "0.1.3"
 tempdir= "0.3.7"
