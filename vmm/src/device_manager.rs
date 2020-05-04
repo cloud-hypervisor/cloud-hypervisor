@@ -604,6 +604,68 @@ impl DeviceTree {
     fn iter(&self) -> std::collections::hash_map::Iter<String, DeviceNode> {
         self.0.iter()
     }
+    fn breadth_first_traversal(&self) -> BftIter {
+        BftIter::new(&self.0)
+    }
+}
+
+// Breadth first traversal iterator.
+struct BftIter<'a> {
+    nodes: Vec<&'a DeviceNode>,
+}
+
+impl<'a> BftIter<'a> {
+    fn new(hash_map: &'a HashMap<String, DeviceNode>) -> Self {
+        let mut nodes = Vec::new();
+
+        for (_, node) in hash_map.iter() {
+            if node.parent.is_none() {
+                nodes.push(node);
+            }
+        }
+
+        let mut node_layer = nodes.as_slice();
+        loop {
+            let mut next_node_layer = Vec::new();
+
+            for node in node_layer.iter() {
+                for child_node_id in node.children.iter() {
+                    if let Some(child_node) = hash_map.get(child_node_id) {
+                        next_node_layer.push(child_node);
+                    }
+                }
+            }
+
+            if next_node_layer.is_empty() {
+                break;
+            }
+
+            let pos = nodes.len();
+            nodes.extend(next_node_layer);
+
+            node_layer = &nodes[pos..];
+        }
+
+        BftIter { nodes }
+    }
+}
+
+impl<'a> Iterator for BftIter<'a> {
+    type Item = &'a DeviceNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.nodes.is_empty() {
+            None
+        } else {
+            Some(self.nodes.remove(0))
+        }
+    }
+}
+
+impl<'a> DoubleEndedIterator for BftIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.nodes.pop()
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -3159,35 +3221,17 @@ impl Snapshottable for DeviceManager {
         // It's important to restore devices in the right order, that's why
         // the device tree is the right way to ensure we restore a child before
         // its parent node.
-        for (id, node) in self.device_tree.iter() {
-            if !node.children.is_empty() {
-                continue;
-            }
-
+        for node in self.device_tree.breadth_first_traversal().rev() {
             // Restore the node
             if let Some(migratable) = &node.migratable {
-                debug!("Restoring {} from DeviceManager", id);
-                if let Some(snapshot) = snapshot.snapshots.get(id) {
+                debug!("Restoring {} from DeviceManager", node.id);
+                if let Some(snapshot) = snapshot.snapshots.get(&node.id) {
                     migratable.lock().unwrap().restore(*snapshot.clone())?;
                 } else {
-                    return Err(MigratableError::Restore(anyhow!("Missing device {}", id)));
-                }
-            }
-
-            // Restore the parent if it exists
-            if let Some(parent) = &node.parent {
-                if let Some(node) = self.device_tree.get(parent) {
-                    if let Some(migratable) = &node.migratable {
-                        debug!("Restoring {} from DeviceManager", parent);
-                        if let Some(snapshot) = snapshot.snapshots.get(parent) {
-                            migratable.lock().unwrap().restore(*snapshot.clone())?;
-                        } else {
-                            return Err(MigratableError::Restore(anyhow!(
-                                "Missing parent device {}",
-                                id
-                            )));
-                        }
-                    }
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Missing device {}",
+                        node.id
+                    )));
                 }
             }
         }
