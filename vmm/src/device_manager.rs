@@ -581,6 +581,18 @@ impl DeviceNode {
     }
 }
 
+macro_rules! device_node {
+    ($id:ident) => {
+        DeviceNode::new($id.clone(), None)
+    };
+    ($id:ident, $device:ident) => {
+        DeviceNode::new(
+            $id.clone(),
+            Some(Arc::clone(&$device) as Arc<Mutex<dyn Migratable>>),
+        )
+    };
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 struct DeviceTree(HashMap<String, DeviceNode>);
 
@@ -953,13 +965,8 @@ impl DeviceManager {
                 // Fill the device tree with a new node. In case of restore, we
                 // know there is nothing to do, so we can simply override the
                 // existing entry.
-                self.device_tree.insert(
-                    iommu_id.clone(),
-                    DeviceNode::new(
-                        iommu_id.clone(),
-                        Some(Arc::clone(&device) as Arc<Mutex<dyn Migratable>>),
-                    ),
-                );
+                self.device_tree
+                    .insert(iommu_id.clone(), device_node!(iommu_id, device));
 
                 (Some(device), Some(mapping))
             } else {
@@ -1081,10 +1088,8 @@ impl DeviceManager {
         // Fill the device tree with a new node. In case of restore, we
         // know there is nothing to do, so we can simply override the
         // existing entry.
-        self.device_tree.insert(
-            id.clone(),
-            DeviceNode::new(id, Some(Arc::clone(&ioapic) as Arc<Mutex<dyn Migratable>>)),
-        );
+        self.device_tree
+            .insert(id.clone(), device_node!(id, ioapic));
 
         Ok(ioapic)
     }
@@ -1257,10 +1262,8 @@ impl DeviceManager {
             // Fill the device tree with a new node. In case of restore, we
             // know there is nothing to do, so we can simply override the
             // existing entry.
-            self.device_tree.insert(
-                id.clone(),
-                DeviceNode::new(id, Some(Arc::clone(&serial) as Arc<Mutex<dyn Migratable>>)),
-            );
+            self.device_tree
+                .insert(id.clone(), device_node!(id, serial));
 
             Some(serial)
         } else {
@@ -1295,13 +1298,8 @@ impl DeviceManager {
             // Fill the device tree with a new node. In case of restore, we
             // know there is nothing to do, so we can simply override the
             // existing entry.
-            self.device_tree.insert(
-                id.clone(),
-                DeviceNode::new(
-                    id,
-                    Some(Arc::clone(&virtio_console_device) as Arc<Mutex<dyn Migratable>>),
-                ),
-            );
+            self.device_tree
+                .insert(id.clone(), device_node!(id, virtio_console_device));
 
             Some(console_input)
         } else {
@@ -1402,13 +1400,8 @@ impl DeviceManager {
             // Fill the device tree with a new node. In case of restore, we
             // know there is nothing to do, so we can simply override the
             // existing entry.
-            self.device_tree.insert(
-                id.clone(),
-                DeviceNode::new(
-                    id.clone(),
-                    Some(Arc::clone(&vhost_user_block_device) as Arc<Mutex<dyn Migratable>>),
-                ),
-            );
+            self.device_tree
+                .insert(id.clone(), device_node!(id, vhost_user_block_device));
 
             Ok((
                 Arc::clone(&vhost_user_block_device) as VirtioDeviceArc,
@@ -1459,13 +1452,7 @@ impl DeviceManager {
                     // Fill the device tree with a new node. In case of restore, we
                     // know there is nothing to do, so we can simply override the
                     // existing entry.
-                    self.device_tree.insert(
-                        id.clone(),
-                        DeviceNode::new(
-                            id.clone(),
-                            Some(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>),
-                        ),
-                    );
+                    self.device_tree.insert(id.clone(), device_node!(id, block));
 
                     Ok((Arc::clone(&block) as VirtioDeviceArc, disk_cfg.iommu, id))
                 }
@@ -1492,13 +1479,7 @@ impl DeviceManager {
                     // Fill the device tree with a new node. In case of restore, we
                     // know there is nothing to do, so we can simply override the
                     // existing entry.
-                    self.device_tree.insert(
-                        id.clone(),
-                        DeviceNode::new(
-                            id.clone(),
-                            Some(Arc::clone(&block) as Arc<Mutex<dyn Migratable>>),
-                        ),
-                    );
+                    self.device_tree.insert(id.clone(), device_node!(id, block));
 
                     Ok((Arc::clone(&block) as VirtioDeviceArc, disk_cfg.iommu, id))
                 }
@@ -1578,13 +1559,8 @@ impl DeviceManager {
             // Fill the device tree with a new node. In case of restore, we
             // know there is nothing to do, so we can simply override the
             // existing entry.
-            self.device_tree.insert(
-                id.clone(),
-                DeviceNode::new(
-                    id.clone(),
-                    Some(Arc::clone(&vhost_user_net_device) as Arc<Mutex<dyn Migratable>>),
-                ),
-            );
+            self.device_tree
+                .insert(id.clone(), device_node!(id, vhost_user_net_device));
 
             Ok((
                 Arc::clone(&vhost_user_net_device) as VirtioDeviceArc,
@@ -1625,13 +1601,8 @@ impl DeviceManager {
             // Fill the device tree with a new node. In case of restore, we
             // know there is nothing to do, so we can simply override the
             // existing entry.
-            self.device_tree.insert(
-                id.clone(),
-                DeviceNode::new(
-                    id.clone(),
-                    Some(Arc::clone(&virtio_net_device) as Arc<Mutex<dyn Migratable>>),
-                ),
-            );
+            self.device_tree
+                .insert(id.clone(), device_node!(id, virtio_net_device));
 
             Ok((
                 Arc::clone(&virtio_net_device) as VirtioDeviceArc,
@@ -1680,13 +1651,8 @@ impl DeviceManager {
             // Fill the device tree with a new node. In case of restore, we
             // know there is nothing to do, so we can simply override the
             // existing entry.
-            self.device_tree.insert(
-                id.clone(),
-                DeviceNode::new(
-                    id,
-                    Some(Arc::clone(&virtio_rng_device) as Arc<Mutex<dyn Migratable>>),
-                ),
-            );
+            self.device_tree
+                .insert(id.clone(), device_node!(id, virtio_rng_device));
         }
 
         Ok(devices)
@@ -1704,7 +1670,7 @@ impl DeviceManager {
             id
         };
 
-        let mut node = DeviceNode::new(id.clone(), None);
+        let mut node = device_node!(id);
 
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
@@ -1860,7 +1826,7 @@ impl DeviceManager {
             id
         };
 
-        let mut node = DeviceNode::new(id.clone(), None);
+        let mut node = device_node!(id);
 
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
@@ -2070,13 +2036,8 @@ impl DeviceManager {
         // Fill the device tree with a new node. In case of restore, we
         // know there is nothing to do, so we can simply override the
         // existing entry.
-        self.device_tree.insert(
-            id.clone(),
-            DeviceNode::new(
-                id.clone(),
-                Some(Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>),
-            ),
-        );
+        self.device_tree
+            .insert(id.clone(), device_node!(id, vsock_device));
 
         Ok((
             Arc::clone(&vsock_device) as VirtioDeviceArc,
@@ -2129,13 +2090,8 @@ impl DeviceManager {
             // Fill the device tree with a new node. In case of restore, we
             // know there is nothing to do, so we can simply override the
             // existing entry.
-            self.device_tree.insert(
-                id.clone(),
-                DeviceNode::new(
-                    id,
-                    Some(Arc::clone(&virtio_mem_device) as Arc<Mutex<dyn Migratable>>),
-                ),
-            );
+            self.device_tree
+                .insert(id.clone(), device_node!(id, virtio_mem_device));
         }
 
         Ok(devices)
@@ -2319,7 +2275,7 @@ impl DeviceManager {
         let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
 
         // Add the new virtio-pci node to the device tree.
-        let mut node = DeviceNode::new(id.clone(), None);
+        let mut node = device_node!(id);
         node.children = vec![virtio_device_id.clone()];
 
         // Update the existing virtio node by setting the parent.
@@ -2431,7 +2387,7 @@ impl DeviceManager {
 
         // Create the new virtio-mmio node that will be added later to the
         // device tree.
-        let mut node = DeviceNode::new(id.clone(), None);
+        let mut node = device_node!(id);
         node.children = vec![virtio_device_id.clone()];
 
         // Look for the id in the device tree. If it can be found, that means
