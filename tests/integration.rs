@@ -3756,11 +3756,21 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
-            let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
-            eprintln!(
-                "Guest memory overhead: {} vs {}",
-                overhead, MAXIMUM_VMM_OVERHEAD_KB
-            );
+            let mut last_overhead = None;
+            let mut overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
+            let mut counter = 10;
+            while last_overhead != Some(overhead) {
+                eprintln!(
+                    "Guest memory overhead: {} vs {}",
+                    overhead, MAXIMUM_VMM_OVERHEAD_KB
+                );
+                thread::sleep(std::time::Duration::new(20, 0));
+                last_overhead = Some(overhead);
+                overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
+                counter -= 1;
+
+                aver!(tb, counter > 0);
+            }
             aver!(tb, overhead <= MAXIMUM_VMM_OVERHEAD_KB);
 
             let _ = child.kill();
