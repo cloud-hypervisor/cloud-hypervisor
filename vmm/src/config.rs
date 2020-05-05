@@ -84,6 +84,10 @@ pub enum ValidationError {
     DiskSocketAndPath,
     /// Using vhost user requires shared memory
     VhostUserRequiresSharedMemory,
+    /// Trying to use IOMMU without PCI
+    IommuUnsupported,
+    /// Trying to use VFIO without PCI
+    VfioUnsupported,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -100,6 +104,8 @@ impl fmt::Display for ValidationError {
             VhostUserRequiresSharedMemory => {
                 write!(f, "Using vhost-user requires using shared memory")
             }
+            IommuUnsupported => write!(f, "Using an IOMMU without PCI support is unsupported"),
+            VfioUnsupported => write!(f, "Using VFIO without PCI support is unsupported"),
         }
     }
 }
@@ -1290,6 +1296,15 @@ impl VmConfig {
         if let Some(fses) = &self.fs {
             if !fses.is_empty() && !self.memory.shared {
                 return Err(ValidationError::VhostUserRequiresSharedMemory);
+            }
+        }
+
+        if cfg!(not(feature = "pci_support")) {
+            if self.iommu {
+                return Err(ValidationError::IommuUnsupported);
+            }
+            if self.devices.is_some() {
+                return Err(ValidationError::VfioUnsupported);
             }
         }
 
