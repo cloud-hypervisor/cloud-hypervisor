@@ -128,3 +128,128 @@ impl<'a> DoubleEndedIterator for BftIter<'a> {
         self.nodes.pop()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{DeviceNode, DeviceTree};
+
+    #[test]
+    fn test_device_tree() {
+        test_block!(tb, "", {
+            // Check new()
+            let mut device_tree = DeviceTree::new();
+            aver_eq!(tb, device_tree.0.len(), 0);
+
+            // Check insert()
+            let id = String::from("id1");
+            device_tree.insert(id.clone(), DeviceNode::new(id.clone(), None));
+            aver_eq!(tb, device_tree.0.len(), 1);
+            let node = device_tree.0.get(&id);
+            aver!(tb, node.is_some());
+            let node = node.unwrap();
+            aver_eq!(tb, node.id, id);
+
+            // Check get()
+            let id2 = String::from("id2");
+            aver!(tb, device_tree.get(&id).is_some());
+            aver!(tb, device_tree.get(&id2).is_none());
+
+            // Check get_mut()
+            let node = device_tree.get_mut(&id).unwrap();
+            node.id = id2.clone();
+            let node = device_tree.0.get(&id).unwrap();
+            aver_eq!(tb, node.id, id2);
+
+            // Check remove()
+            let node = device_tree.remove(&id).unwrap();
+            aver_eq!(tb, node.id, id2);
+            aver_eq!(tb, device_tree.0.len(), 0);
+
+            // Check iter()
+            let disk_id = String::from("disk0");
+            let net_id = String::from("net0");
+            let rng_id = String::from("rng0");
+            let device_list = vec![
+                (disk_id.clone(), device_node!(disk_id)),
+                (net_id.clone(), device_node!(net_id)),
+                (rng_id.clone(), device_node!(rng_id)),
+            ];
+            device_tree.0.extend(device_list);
+            for (id, node) in device_tree.iter() {
+                if id == &disk_id {
+                    aver_eq!(tb, node.id, disk_id);
+                } else if id == &net_id {
+                    aver_eq!(tb, node.id, net_id);
+                } else if id == &rng_id {
+                    aver_eq!(tb, node.id, rng_id);
+                } else {
+                    aver!(tb, false);
+                }
+            }
+
+            // Check breadth_first_traversal() based on the following hierarchy
+            //
+            // 0
+            // | \
+            // 1  2
+            // |  | \
+            // 3  4  5
+            //
+            let mut device_tree = DeviceTree::new();
+            let child_1_id = String::from("child1");
+            let child_2_id = String::from("child2");
+            let child_3_id = String::from("child3");
+            let parent_1_id = String::from("parent1");
+            let parent_2_id = String::from("parent2");
+            let root_id = String::from("root");
+            let mut child_1_node = device_node!(child_1_id);
+            let mut child_2_node = device_node!(child_2_id);
+            let mut child_3_node = device_node!(child_3_id);
+            let mut parent_1_node = device_node!(parent_1_id);
+            let mut parent_2_node = device_node!(parent_2_id);
+            let mut root_node = device_node!(root_id);
+            child_1_node.parent = Some(parent_1_id.clone());
+            child_2_node.parent = Some(parent_2_id.clone());
+            child_3_node.parent = Some(parent_2_id.clone());
+            parent_1_node.children = vec![child_1_id.clone()];
+            parent_1_node.parent = Some(root_id.clone());
+            parent_2_node.children = vec![child_2_id.clone(), child_3_id.clone()];
+            parent_2_node.parent = Some(root_id.clone());
+            root_node.children = vec![parent_1_id.clone(), parent_2_id.clone()];
+            let device_list = vec![
+                (child_1_id.clone(), child_1_node),
+                (child_2_id.clone(), child_2_node),
+                (child_3_id.clone(), child_3_node),
+                (parent_1_id.clone(), parent_1_node),
+                (parent_2_id.clone(), parent_2_node),
+                (root_id.clone(), root_node),
+            ];
+            device_tree.0.extend(device_list);
+
+            let iter_vec = device_tree
+                .breadth_first_traversal()
+                .collect::<Vec<&DeviceNode>>();
+            aver_eq!(tb, iter_vec.len(), 6);
+            aver_eq!(tb, iter_vec[0].id, root_id);
+            aver_eq!(tb, iter_vec[1].id, parent_1_id);
+            aver_eq!(tb, iter_vec[2].id, parent_2_id);
+            aver_eq!(tb, iter_vec[3].id, child_1_id);
+            aver_eq!(tb, iter_vec[4].id, child_2_id);
+            aver_eq!(tb, iter_vec[5].id, child_3_id);
+
+            let iter_vec = device_tree
+                .breadth_first_traversal()
+                .rev()
+                .collect::<Vec<&DeviceNode>>();
+            aver_eq!(tb, iter_vec.len(), 6);
+            aver_eq!(tb, iter_vec[5].id, root_id);
+            aver_eq!(tb, iter_vec[4].id, parent_1_id);
+            aver_eq!(tb, iter_vec[3].id, parent_2_id);
+            aver_eq!(tb, iter_vec[2].id, child_1_id);
+            aver_eq!(tb, iter_vec[1].id, child_2_id);
+            aver_eq!(tb, iter_vec[0].id, child_3_id);
+
+            Ok(())
+        })
+    }
+}
