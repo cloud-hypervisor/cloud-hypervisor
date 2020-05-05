@@ -16,6 +16,9 @@ extern crate serde_json;
 extern crate tempfile;
 extern crate url;
 extern crate vmm_sys_util;
+#[cfg(test)]
+#[macro_use]
+extern crate credibility;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
 use crate::config::{

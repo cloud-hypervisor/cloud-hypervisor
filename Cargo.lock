@@ -1478,6 +1478,7 @@ dependencies = [
  "arc-swap",
  "arch",
  "clap",
+ "credibility",
  "devices",
  "epoll",
  "kvm-bindings",
