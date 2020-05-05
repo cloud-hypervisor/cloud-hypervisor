@@ -13,11 +13,12 @@ use crate::config::ConsoleOutputMode;
 #[cfg(feature = "pci_support")]
 use crate::config::DeviceConfig;
 use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig, VsockConfig};
+use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::{
     KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager, KvmRoutingEntry,
 };
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
-use crate::DEVICE_MANAGER_SNAPSHOT_ID;
+use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
@@ -556,127 +557,6 @@ struct ActivatedBackend {
 impl Drop for ActivatedBackend {
     fn drop(&mut self) {
         self.child.wait().ok();
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-struct DeviceNode {
-    id: String,
-    resources: Vec<Resource>,
-    parent: Option<String>,
-    children: Vec<String>,
-    #[serde(skip)]
-    migratable: Option<Arc<Mutex<dyn Migratable>>>,
-}
-
-impl DeviceNode {
-    fn new(id: String, migratable: Option<Arc<Mutex<dyn Migratable>>>) -> Self {
-        DeviceNode {
-            id,
-            resources: Vec::new(),
-            parent: None,
-            children: Vec::new(),
-            migratable,
-        }
-    }
-}
-
-macro_rules! device_node {
-    ($id:ident) => {
-        DeviceNode::new($id.clone(), None)
-    };
-    ($id:ident, $device:ident) => {
-        DeviceNode::new(
-            $id.clone(),
-            Some(Arc::clone(&$device) as Arc<Mutex<dyn Migratable>>),
-        )
-    };
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-struct DeviceTree(HashMap<String, DeviceNode>);
-
-impl DeviceTree {
-    fn new() -> Self {
-        DeviceTree(HashMap::new())
-    }
-    fn get(&self, k: &str) -> Option<&DeviceNode> {
-        self.0.get(k)
-    }
-    fn get_mut(&mut self, k: &str) -> Option<&mut DeviceNode> {
-        self.0.get_mut(k)
-    }
-    fn insert(&mut self, k: String, v: DeviceNode) -> Option<DeviceNode> {
-        self.0.insert(k, v)
-    }
-    #[cfg(feature = "pci_support")]
-    fn remove(&mut self, k: &str) -> Option<DeviceNode> {
-        self.0.remove(k)
-    }
-    fn iter(&self) -> std::collections::hash_map::Iter<String, DeviceNode> {
-        self.0.iter()
-    }
-    fn breadth_first_traversal(&self) -> BftIter {
-        BftIter::new(&self.0)
-    }
-}
-
-// Breadth first traversal iterator.
-struct BftIter<'a> {
-    nodes: Vec<&'a DeviceNode>,
-}
-
-impl<'a> BftIter<'a> {
-    fn new(hash_map: &'a HashMap<String, DeviceNode>) -> Self {
-        let mut nodes = Vec::new();
-
-        for (_, node) in hash_map.iter() {
-            if node.parent.is_none() {
-                nodes.push(node);
-            }
-        }
-
-        let mut node_layer = nodes.as_slice();
-        loop {
-            let mut next_node_layer = Vec::new();
-
-            for node in node_layer.iter() {
-                for child_node_id in node.children.iter() {
-                    if let Some(child_node) = hash_map.get(child_node_id) {
-                        next_node_layer.push(child_node);
-                    }
-                }
-            }
-
-            if next_node_layer.is_empty() {
-                break;
-            }
-
-            let pos = nodes.len();
-            nodes.extend(next_node_layer);
-
-            node_layer = &nodes[pos..];
-        }
-
-        BftIter { nodes }
-    }
-}
-
-impl<'a> Iterator for BftIter<'a> {
-    type Item = &'a DeviceNode;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.nodes.is_empty() {
-            None
-        } else {
-            Some(self.nodes.remove(0))
-        }
-    }
-}
-
-impl<'a> DoubleEndedIterator for BftIter<'a> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.nodes.pop()
     }
 }
 
