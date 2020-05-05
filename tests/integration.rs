@@ -1386,7 +1386,17 @@ mod tests {
     }
 
     #[test]
-    fn test_vhost_user_net_tap() {
+    fn test_vhost_user_net_named_tap() {
+        test_vhost_user_net(
+            Some("mytap0"),
+            2,
+            Some(&prepare_vhost_user_net_daemon),
+            false,
+        )
+    }
+
+    #[test]
+    fn test_vhost_user_net_existing_tap() {
         test_vhost_user_net(
             Some("vunet-tap0"),
             2,
@@ -2176,7 +2186,7 @@ mod tests {
                     "--net",
                     guest.default_net_string().as_str(),
                     "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
-                    "tap=,mac=fe:1f:9e:e1:60:f2,ip=192.168.4.1,mask=255.255.255.0",
+                    "tap=mytap1,mac=fe:1f:9e:e1:60:f2,ip=192.168.4.1,mask=255.255.255.0",
                 ])
                 .spawn()
                 .unwrap();
