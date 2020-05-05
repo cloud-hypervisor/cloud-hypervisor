@@ -1714,8 +1714,14 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::CreateVsockBackend)?;
 
         let vsock_device = Arc::new(Mutex::new(
-            vm_virtio::Vsock::new(id.clone(), vsock_cfg.cid, backend, vsock_cfg.iommu)
-                .map_err(DeviceManagerError::CreateVirtioVsock)?,
+            vm_virtio::Vsock::new(
+                id.clone(),
+                vsock_cfg.cid,
+                vsock_cfg.sock.clone(),
+                backend,
+                vsock_cfg.iommu,
+            )
+            .map_err(DeviceManagerError::CreateVirtioVsock)?,
         ));
 
         self.add_migratable_device(Arc::clone(&vsock_device) as Arc<Mutex<dyn Migratable>>);
