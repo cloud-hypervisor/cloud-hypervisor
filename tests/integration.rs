@@ -2931,6 +2931,56 @@ mod tests {
                 "HelloWorld!"
             );
 
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1);
+
+            aver_eq!(tb, reboot_count, 0);
+            guest.ssh_command("sudo reboot").unwrap_or_default();
+
+            thread::sleep(std::time::Duration::new(30, 0));
+            let reboot_count = guest
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap_or_default()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            aver_eq!(tb, reboot_count, 1);
+
+            // Listen from guest on vsock CID=3 PORT=16
+            // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
+            let guest_ip = guest.network.guest_ip.clone();
+            let listen_socat = thread::spawn(move || {
+                ssh_command_ip("sudo socat - SOCKET-LISTEN:40:0:x00x00x10x00x00x00x03x00x00x00x00x00x00x00 > vsock_log", &guest_ip, DEFAULT_SSH_RETRIES, DEFAULT_SSH_TIMEOUT).unwrap();
+            });
+
+            // Make sure socat is listening, which might take a few second on slow systems
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Write something to vsock from the host
+            Command::new("bash")
+                .arg("-c")
+                .arg(
+                    format!(
+                        "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{}",
+                        sock
+                    )
+                    .as_str(),
+                )
+                .output()
+                .unwrap();
+
+            // Wait for the thread to terminate.
+            listen_socat.join().unwrap();
+
+            assert_eq!(
+                guest.ssh_command("cat vsock_log").unwrap().trim(),
+                "HelloWorld!"
+            );
+
             if hotplug {
                 aver!(
                     tb,
