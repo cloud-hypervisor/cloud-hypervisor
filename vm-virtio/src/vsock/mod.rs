@@ -166,6 +166,7 @@ mod tests {
     use crate::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
     use libc::EFD_NONBLOCK;
     use std::os::unix::io::AsRawFd;
+    use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, RwLock};
     use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
@@ -265,7 +266,14 @@ mod tests {
                 cid: CID,
                 mem: GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap(),
                 mem_size: MEM_SIZE,
-                device: Vsock::new(String::from("vsock"), CID, TestBackend::new(), false).unwrap(),
+                device: Vsock::new(
+                    String::from("vsock"),
+                    CID,
+                    PathBuf::from("/test/sock"),
+                    TestBackend::new(),
+                    false,
+                )
+                .unwrap(),
             }
         }
 

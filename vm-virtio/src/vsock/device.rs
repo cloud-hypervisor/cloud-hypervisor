@@ -40,6 +40,7 @@ use libc::EFD_NONBLOCK;
 use std;
 use std::io;
 use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
@@ -387,6 +388,7 @@ pub struct Vsock<B: VsockBackend> {
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     paused: Arc<AtomicBool>,
+    path: PathBuf,
 }
 
 impl<B> Vsock<B>
@@ -395,7 +397,13 @@ where
 {
     /// Create a new virtio-vsock device with the given VM CID and vsock
     /// backend.
-    pub fn new(id: String, cid: u64, backend: B, iommu: bool) -> io::Result<Vsock<B>> {
+    pub fn new(
+        id: String,
+        cid: u64,
+        path: PathBuf,
+        backend: B,
+        iommu: bool,
+    ) -> io::Result<Vsock<B>> {
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_F_IN_ORDER;
 
         if iommu {
@@ -414,6 +422,7 @@ where
             interrupt_cb: None,
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
+            path,
         })
     }
 }
@@ -571,6 +580,10 @@ where
             self.interrupt_cb.take().unwrap(),
             self.queue_evts.take().unwrap(),
         ))
+    }
+
+    fn shutdown(&mut self) {
+        std::fs::remove_file(&self.path).ok();
     }
 }
 
