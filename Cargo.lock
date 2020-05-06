@@ -667,13 +667,18 @@ dependencies = [
 name = "pci"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "byteorder",
  "devices",
  "libc",
  "log 0.4.8",
+ "serde",
+ "serde_derive",
+ "serde_json",
  "vm-allocator",
  "vm-device",
  "vm-memory",
+ "vm-migration",
 ]
 
 [[package]]

@@ -6,14 +6,17 @@
 extern crate byteorder;
 extern crate vm_memory;
 
-use std::sync::Arc;
-
 use crate::{PciCapability, PciCapabilityID};
+use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
+use std::io;
+use std::result;
+use std::sync::Arc;
 use vm_device::interrupt::{
     InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
 };
 use vm_memory::ByteValued;
+use vm_migration::{MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable};
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
@@ -25,7 +28,15 @@ const FUNCTION_MASK_MASK: u16 = (1 << FUNCTION_MASK_BIT) as u16;
 const MSIX_ENABLE_MASK: u16 = (1 << MSIX_ENABLE_BIT) as u16;
 pub const MSIX_TABLE_ENTRY_SIZE: usize = 16;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+enum Error {
+    /// Failed enabling the interrupt route.
+    EnableInterruptRoute(io::Error),
+    /// Failed updating the interrupt route.
+    UpdateInterruptRoute(io::Error),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MsixTableEntry {
     pub msg_addr_lo: u32,
     pub msg_addr_hi: u32,
@@ -48,6 +59,14 @@ impl Default for MsixTableEntry {
             vector_ctl: 0,
         }
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct MsixConfigState {
+    table_entries: Vec<MsixTableEntry>,
+    pba_entries: Vec<u64>,
+    masked: bool,
+    enabled: bool,
 }
 
 pub struct MsixConfig {
@@ -78,6 +97,46 @@ impl MsixConfig {
             masked: false,
             enabled: false,
         }
+    }
+
+    fn state(&self) -> MsixConfigState {
+        MsixConfigState {
+            table_entries: self.table_entries.clone(),
+            pba_entries: self.pba_entries.clone(),
+            masked: self.masked,
+            enabled: self.enabled,
+        }
+    }
+
+    fn set_state(&mut self, state: &MsixConfigState) -> result::Result<(), Error> {
+        self.table_entries = state.table_entries.clone();
+        self.pba_entries = state.pba_entries.clone();
+        self.masked = state.masked;
+        self.enabled = state.enabled;
+
+        if self.enabled && !self.masked {
+            for (idx, table_entry) in self.table_entries.iter().enumerate() {
+                if table_entry.masked() {
+                    continue;
+                }
+
+                let config = MsiIrqSourceConfig {
+                    high_addr: table_entry.msg_addr_hi,
+                    low_addr: table_entry.msg_addr_lo,
+                    data: table_entry.msg_data,
+                };
+
+                self.interrupt_source_group
+                    .update(idx as InterruptIndex, InterruptSourceConfig::MsiIrq(config))
+                    .map_err(Error::UpdateInterruptRoute)?;
+
+                self.interrupt_source_group
+                    .enable()
+                    .map_err(Error::EnableInterruptRoute)?;
+            }
+        }
+
+        Ok(())
     }
 
     pub fn masked(&self) -> bool {
@@ -362,6 +421,52 @@ impl MsixConfig {
 
         // Clear the bit from PBA
         self.set_pba_bit(vector as u16, true);
+    }
+}
+
+impl Pausable for MsixConfig {}
+
+impl Snapshottable for MsixConfig {
+    fn id(&self) -> String {
+        String::from("msix_config")
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut msix_snapshot = Snapshot::new(self.id().as_str());
+        msix_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", self.id()),
+            snapshot,
+        });
+
+        Ok(msix_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(msix_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", self.id()))
+        {
+            let msix_state = match serde_json::from_slice(&msix_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize MSI-X {}",
+                        error
+                    )))
+                }
+            };
+
+            return self.set_state(&msix_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore MSI-X state {:?}", e))
+            });
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find MSI-X snapshot section"
+        )))
     }
 }
 
