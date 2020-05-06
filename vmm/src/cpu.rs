@@ -664,6 +664,7 @@ struct VcpuState {
     removing: bool,
     handle: Option<thread::JoinHandle<()>>,
     kill: Arc<AtomicBool>,
+    vcpu_run_interrupted: Arc<AtomicBool>,
 }
 
 impl VcpuState {
@@ -673,8 +674,17 @@ impl VcpuState {
 
     fn signal_thread(&self) {
         if let Some(handle) = self.handle.as_ref() {
-            unsafe {
-                libc::pthread_kill(handle.as_pthread_t() as _, SIGRTMIN());
+            loop {
+                unsafe {
+                    libc::pthread_kill(handle.as_pthread_t() as _, SIGRTMIN());
+                }
+                if self.vcpu_run_interrupted.load(Ordering::SeqCst) {
+                    break;
+                } else {
+                    // This is more effective than thread::yield_now() at
+                    // avoiding a priority inversion with the vCPU thread
+                    thread::sleep(std::time::Duration::from_millis(1));
+                }
             }
         }
     }
@@ -806,6 +816,9 @@ impl CpuManager {
         let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
 
         let vcpu_kill = self.vcpu_states[usize::from(cpu_id)].kill.clone();
+        let vcpu_run_interrupted = self.vcpu_states[usize::from(cpu_id)]
+            .vcpu_run_interrupted
+            .clone();
 
         if let Some(snapshot) = snapshot {
             let mut cpuid = self.cpuid.clone();
@@ -854,6 +867,7 @@ impl CpuManager {
                             }
                             Ok(true) => {}
                             Ok(false) => {
+                                vcpu_run_interrupted.store(true, Ordering::SeqCst);
                                 reset_evt.write(1).unwrap();
                                 break;
                             }
@@ -863,6 +877,7 @@ impl CpuManager {
                         if vcpu_kill_signalled.load(Ordering::SeqCst)
                             || vcpu_kill.load(Ordering::SeqCst)
                         {
+                            vcpu_run_interrupted.store(true, Ordering::SeqCst);
                             break;
                         }
 
@@ -873,14 +888,19 @@ impl CpuManager {
                         // We enter a loop because park() could spuriously
                         // return. We will then park() again unless the
                         // pause boolean has been toggled.
-                        while vcpu_pause_signalled.load(Ordering::SeqCst) {
-                            thread::park();
+                        if vcpu_pause_signalled.load(Ordering::SeqCst) {
+                            vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                            while vcpu_pause_signalled.load(Ordering::SeqCst) {
+                                thread::park();
+                            }
+                            vcpu_run_interrupted.store(false, Ordering::SeqCst);
                         }
 
                         // We've been told to terminate
                         if vcpu_kill_signalled.load(Ordering::SeqCst)
                             || vcpu_kill.load(Ordering::SeqCst)
                         {
+                            vcpu_run_interrupted.store(true, Ordering::SeqCst);
                             break;
                         }
                     }
