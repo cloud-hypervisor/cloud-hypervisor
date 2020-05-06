@@ -873,6 +873,13 @@ impl CpuManager {
                         while vcpu_pause_signalled.load(Ordering::SeqCst) {
                             thread::park();
                         }
+
+                        // We've been told to terminate
+                        if vcpu_kill_signalled.load(Ordering::SeqCst)
+                            || vcpu_kill.load(Ordering::SeqCst)
+                        {
+                            break;
+                        }
                     }
                 })
                 .map_err(Error::VcpuSpawn)?,
