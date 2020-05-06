@@ -193,6 +193,9 @@ pub enum Error {
 
     /// Failed to set KVM vcpu XCRS.
     VcpuSetXcrs(kvm_ioctls::Error),
+
+    /// Error resuming vCPU on shutdown
+    ResumeOnShutdown(MigratableError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -952,6 +955,9 @@ impl CpuManager {
     pub fn shutdown(&mut self) -> Result<()> {
         // Tell the vCPUs to stop themselves next time they go through the loop
         self.vcpus_kill_signalled.store(true, Ordering::SeqCst);
+
+        // Clear pause state and unpark the vCPU threads if they are parked.
+        self.resume().map_err(Error::ResumeOnShutdown)?;
 
         // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
         // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
