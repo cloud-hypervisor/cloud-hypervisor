@@ -2202,6 +2202,13 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
+            let tap_count = std::process::Command::new("bash")
+                .arg("-c")
+                .arg("ip link | grep -c mytap1")
+                .output()
+                .expect("Expected checking of tap count to succeed");
+            aver_eq!(tb, String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
+
             // 3 network interfaces + default localhost ==> 4 interfaces
             aver_eq!(
                 tb,
