@@ -477,6 +477,8 @@ impl Queue {
     pub fn reset(&mut self) {
         self.ready = false;
         self.size = self.max_size;
+        self.next_avail = Wrapping(0);
+        self.next_used = Wrapping(0);
     }
 
     pub fn is_valid(&self, mem: &GuestMemoryMmap) -> bool {
