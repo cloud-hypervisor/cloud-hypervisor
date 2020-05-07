@@ -211,6 +211,10 @@ sudo ip tuntap add name vunet-tap0 mode tap
 sudo ip tuntap add name vunet-tap1 mode tap multi_queue
 
 cargo build --release --target $BUILD_TARGET
+strip target/$BUILD_TARGET/release/cloud-hypervisor
+strip target/$BUILD_TARGET/release/vhost_user_net
+strip target/$BUILD_TARGET/release/ch-remote
+
 sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/cloud-hypervisor
 sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/vhost_user_net
 
@@ -242,6 +246,10 @@ RES=$?
 if [ $RES -eq 0 ]; then
     # virtio-mmio based testing
     cargo build --release --target $BUILD_TARGET --no-default-features --features "mmio"
+    strip target/$BUILD_TARGET/release/cloud-hypervisor
+    strip target/$BUILD_TARGET/release/vhost_user_net
+    strip target/$BUILD_TARGET/release/ch-remote
+
     sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/cloud-hypervisor
 
     # Ensure test binary has the same caps as the cloud-hypervisor one
