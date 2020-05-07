@@ -206,6 +206,11 @@ impl MmioDevice {
         self.driver_status == ready_bits && self.driver_status & DEVICE_FAILED == 0
     }
 
+    /// Determines if the driver has requested the device (re)init / reset itself
+    fn is_driver_init(&self) -> bool {
+        self.driver_status == DEVICE_INIT
+    }
+
     fn are_queues_valid(&self) -> bool {
         if let Some(mem) = self.mem.as_ref() {
             self.queues.iter().all(|q| q.is_valid(&mem.memory()))
@@ -410,6 +415,26 @@ impl BusDevice for MmioDevice {
                         .expect("Failed to activate device");
                     self.device_activated = true;
                 }
+            }
+        }
+
+        // Device has been reset by the driver
+        if self.device_activated && self.is_driver_init() {
+            let mut device = self.device.lock().unwrap();
+            if let Some((interrupt_cb, mut queue_evts)) = device.reset() {
+                // Upon reset the device returns its interrupt EventFD and it's queue EventFDs
+                self.interrupt_cb = Some(interrupt_cb);
+                self.queue_evts.append(&mut queue_evts);
+
+                self.device_activated = false;
+
+                // Reset queue readiness (changes queue_enable), queue sizes
+                // and selected_queue as per spec for reset
+                self.queues.iter_mut().for_each(Queue::reset);
+                self.queue_select = 0;
+            } else {
+                error!("Attempt to reset device when not implemented in underlying device");
+                self.driver_status = DEVICE_FAILED;
             }
         }
     }
