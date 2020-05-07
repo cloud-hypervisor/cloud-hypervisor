@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use std::sync::{Arc, Mutex};
-
 use crate::device::BarReprogrammingParams;
 use crate::{MsixConfig, PciInterruptPin};
+use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::fmt::{self, Display};
+use std::sync::{Arc, Mutex};
+use vm_migration::{MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable};
 
 // The number of 32bit registers in the config space, 4096 bytes.
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
@@ -276,6 +277,21 @@ fn decode_64_bits_bar_size(bar_size_hi: u32, bar_size_lo: u32) -> Option<u64> {
     None
 }
 
+#[derive(Serialize, Deserialize)]
+struct PciConfigurationState {
+    registers: Vec<u32>,
+    writable_bits: Vec<u32>,
+    bar_addr: Vec<u32>,
+    bar_size: Vec<u32>,
+    bar_used: Vec<bool>,
+    bar_type: Vec<Option<PciBarRegionType>>,
+    rom_bar_addr: u32,
+    rom_bar_size: u32,
+    rom_bar_used: bool,
+    last_capability: Option<(usize, usize)>,
+    msix_cap_reg_idx: Option<usize>,
+}
+
 /// Contains the configuration space of a PCI node.
 /// See the [specification](https://en.wikipedia.org/wiki/PCI_configuration_space).
 /// The configuration space is accessed with DWORD reads and writes from the guest.
@@ -296,7 +312,7 @@ pub struct PciConfiguration {
 }
 
 /// See pci_regs.h in kernel
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PciBarRegionType {
     Memory32BitRegion = 0,
     IORegion = 0x01,
@@ -430,6 +446,37 @@ impl PciConfiguration {
             msix_cap_reg_idx: None,
             msix_config,
         }
+    }
+
+    fn state(&self) -> PciConfigurationState {
+        PciConfigurationState {
+            registers: self.registers.to_vec(),
+            writable_bits: self.writable_bits.to_vec(),
+            bar_addr: self.bar_addr.to_vec(),
+            bar_size: self.bar_size.to_vec(),
+            bar_used: self.bar_used.to_vec(),
+            bar_type: self.bar_type.to_vec(),
+            rom_bar_addr: self.rom_bar_addr,
+            rom_bar_size: self.rom_bar_size,
+            rom_bar_used: self.rom_bar_used,
+            last_capability: self.last_capability,
+            msix_cap_reg_idx: self.msix_cap_reg_idx,
+        }
+    }
+
+    fn set_state(&mut self, state: &PciConfigurationState) {
+        self.registers.clone_from_slice(state.registers.as_slice());
+        self.writable_bits
+            .clone_from_slice(state.writable_bits.as_slice());
+        self.bar_addr.clone_from_slice(state.bar_addr.as_slice());
+        self.bar_size.clone_from_slice(state.bar_size.as_slice());
+        self.bar_used.clone_from_slice(state.bar_used.as_slice());
+        self.bar_type.clone_from_slice(state.bar_type.as_slice());
+        self.rom_bar_addr = state.rom_bar_addr;
+        self.rom_bar_size = state.rom_bar_size;
+        self.rom_bar_used = state.rom_bar_used;
+        self.last_capability = state.last_capability;
+        self.msix_cap_reg_idx = state.msix_cap_reg_idx;
     }
 
     /// Reads a 32bit register from `reg_idx` in the register map.
@@ -837,6 +884,54 @@ impl PciConfiguration {
         }
 
         None
+    }
+}
+
+impl Pausable for PciConfiguration {}
+
+impl Snapshottable for PciConfiguration {
+    fn id(&self) -> String {
+        String::from("pci_configuration")
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut config_snapshot = Snapshot::new(self.id().as_str());
+        config_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", self.id()),
+            snapshot,
+        });
+
+        Ok(config_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(config_section) = snapshot
+            .snapshot_data
+            .get(&format!("{}-section", self.id()))
+        {
+            let config_state = match serde_json::from_slice(&config_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize {}: {}",
+                        self.id(),
+                        error
+                    )))
+                }
+            };
+
+            self.set_state(&config_state);
+
+            return Ok(());
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find {} snapshot section",
+            self.id()
+        )))
     }
 }
 
