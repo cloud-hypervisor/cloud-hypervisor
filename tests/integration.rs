@@ -1306,6 +1306,15 @@ mod tests {
                 .unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
+
+            if let Some(tap_name) = tap {
+                let tap_count = std::process::Command::new("bash")
+                    .arg("-c")
+                    .arg(format!("ip link | grep -c {}", tap_name))
+                    .output()
+                    .expect("Expected checking of tap count to succeed");
+                aver_eq!(tb, String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
+            }
             // 1 network interface + default localhost ==> 2 interfaces
             // It's important to note that this test is fully exercising the
             // vhost-user-net implementation and the associated backend since
