@@ -18,6 +18,7 @@ extern crate lazy_static;
 mod tests {
     #![allow(dead_code)]
     use ssh2::Session;
+    use std::collections::HashMap;
     use std::env;
     use std::ffi::OsStr;
     use std::fs;
@@ -3720,14 +3721,23 @@ mod tests {
         });
     }
 
-    fn get_vmm_overhead(pid: u32, guest_memory_size: u32) -> u32 {
+    fn _get_vmm_overhead(pid: u32, guest_memory_size: u32) -> HashMap<String, u32> {
         let smaps = fs::File::open(format!("/proc/{}/smaps", pid)).unwrap();
         let reader = io::BufReader::new(smaps);
 
-        let mut total = 0;
         let mut skip_map: bool = false;
+        let mut region_name: String = "".to_string();
+        let mut region_maps = HashMap::new();
         for line in reader.lines() {
             let l = line.unwrap();
+
+            if l.contains('-') {
+                let values: Vec<&str> = l.split_whitespace().collect();
+                region_name = values.last().unwrap().trim().to_string();
+                if region_name == "0" {
+                    region_name = "anonymous".to_string()
+                }
+            }
 
             // Each section begins with something that looks like:
             // Size:               2184 kB
@@ -3743,11 +3753,24 @@ mod tests {
 
             // If this is a map we're taking into account, then we only
             // count the RSS. The sum of all counted RSS is the VMM overhead.
-            if !skip_map && l.starts_with("Rss") {
+            if !skip_map && l.starts_with("Rss:") {
                 let values: Vec<&str> = l.split_whitespace().collect();
-                total += values[1].trim().parse::<u32>().unwrap();
+                let value = values[1].trim().parse::<u32>().unwrap();
+                *region_maps.entry(region_name.clone()).or_insert(0) += value;
             }
         }
+
+        region_maps
+    }
+
+    fn get_vmm_overhead(pid: u32, guest_memory_size: u32) -> u32 {
+        let mut total = 0;
+
+        for (region_name, value) in &_get_vmm_overhead(pid, guest_memory_size) {
+            eprintln!("{}: {}", region_name, value);
+            total += value;
+        }
+
         total
     }
 
