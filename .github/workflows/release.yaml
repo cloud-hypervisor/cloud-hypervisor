@@ -23,6 +23,8 @@ jobs:
         run: cargo build --release --target=x86_64-unknown-linux-gnu
       - name: Static Build
         run: cargo build --release --target=x86_64-unknown-linux-musl
+      - name: Strip cloud-hypervisor binaries
+        run: strip target/*/release/cloud-hypervisor
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
