@@ -397,6 +397,7 @@ fn main() {
         .author(crate_authors!())
         .setting(AppSettings::SubcommandRequired)
         .about("Remotely control a cloud-hypervisor VMM.")
+        .usage("ch-remote --api-socket=<api-socket> <SUBCOMMAND>")
         .arg(
             Arg::with_name("api-socket")
                 .long("api-socket")
