@@ -3736,8 +3736,11 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path;
+            let mut kernel_path = workload_path.clone();
             kernel_path.push("vmlinux");
+
+            let mut initramfs_path = workload_path;
+            initramfs_path.push("alpine_initramfs.img");
 
             let guest_memory_size_kb = 512 * 1024;
 
@@ -3748,9 +3751,8 @@ mod tests {
                     format!("size={}K", guest_memory_size_kb).as_str(),
                 ])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .default_disks()
-                .default_net()
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--initramfs", initramfs_path.to_str().unwrap()])
+                .args(&["--cmdline", "console=hvc0"])
                 .spawn()
                 .unwrap();
 
