@@ -317,9 +317,9 @@ impl<'a> VmParams<'a> {
     }
 }
 
-struct Toggle(bool);
+pub struct Toggle(pub bool);
 
-enum ToggleParseError {
+pub enum ToggleParseError {
     InvalidValue(String),
 }
 

@@ -15,4 +15,5 @@ vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragon
 virtio-bindings = "0.1.0"
 vm-memory = "0.2.0"
 vm-virtio = { path = "../vm-virtio" }
+vmm = { path = "../vmm" }
 vmm-sys-util = ">=0.3.1"
