@@ -23,11 +23,7 @@ fn main() {
         .arg(
             Arg::with_name("block-backend")
                 .long("block-backend")
-                .help(
-                    "vhost-user-block backend parameters \
-                     \"path=<image_path>,socket=<socket_path>,num_queues=<number_of_queues>,\
-                     readonly=true|false,direct=true|false,poll_queue=true|false\"",
-                )
+                .help(vhost_user_block::SYNTAX)
                 .takes_value(true)
                 .min_values(1),
         )
