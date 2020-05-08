@@ -1392,7 +1392,7 @@ impl DeviceManager {
             .args(&[
                 "--net-backend",
                 &format!(
-                    "ip={},mask={},sock={},num_queues={},queue_size={}",
+                    "ip={},mask={},socket={},num_queues={},queue_size={}",
                     net_cfg.ip, net_cfg.mask, &sock, net_cfg.num_queues, net_cfg.queue_size
                 ),
             ])
