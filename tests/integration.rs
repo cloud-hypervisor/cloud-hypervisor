@@ -444,12 +444,12 @@ mod tests {
         // Start the daemon
         let net_params = if let Some(tap_str) = tap {
             format!(
-                "tap={},ip={},mask=255.255.255.0,sock={},num_queues={},queue_size=1024",
+                "tap={},ip={},mask=255.255.255.0,socket={},num_queues={},queue_size=1024",
                 tap_str, ip, vunet_socket_path, num_queues
             )
         } else {
             format!(
-                "ip={},mask=255.255.255.0,sock={},num_queues={},queue_size=1024",
+                "ip={},mask=255.255.255.0,socket={},num_queues={},queue_size=1024",
                 ip, vunet_socket_path, num_queues
             )
         };

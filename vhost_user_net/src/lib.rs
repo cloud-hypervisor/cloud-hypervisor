@@ -11,6 +11,7 @@ extern crate net_util;
 extern crate vhost_rs;
 extern crate vhost_user_backend;
 extern crate vm_virtio;
+extern crate vmm;
 
 use epoll;
 use libc::{self, EAGAIN, EFD_NONBLOCK};
@@ -31,6 +32,7 @@ use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::GuestMemoryMmap;
 use vm_virtio::net_util::{open_tap, RxVirtio, TxVirtio};
 use vm_virtio::Queue;
+use vmm::config::{OptionParser, OptionParserError};
 use vmm_sys_util::eventfd::EventFd;
 
 pub type VhostUserResult<T> = std::result::Result<T, VhostUserError>;
@@ -51,6 +53,8 @@ pub enum Error {
     EpollCreateFd,
     /// Failed to read Tap.
     FailedReadTap,
+    /// Failed to parse configuration string
+    FailedConfigParse(OptionParserError),
     /// Failed to signal used queue.
     FailedSignalingUsedQueue,
     /// Failed to handle event other than input event.
@@ -63,22 +67,14 @@ pub enum Error {
     NoVringCallFdNotify,
     /// No memory configured.
     NoMemoryConfigured,
-    /// Failed to parse sock parameter.
-    ParseSockParam,
-    /// Failed to parse ip parameter.
-    ParseIpParam(std::net::AddrParseError),
-    /// Failed to parse mask parameter.
-    ParseMaskParam(std::net::AddrParseError),
-    /// Failed to parse queue number.
-    ParseQueueNumParam(std::num::ParseIntError),
-    /// Failed to parse queue size.
-    ParseQueueSizeParam(std::num::ParseIntError),
     /// Open tap device failed.
     OpenTap(vm_virtio::net_util::Error),
+    /// No socket provided
+    SocketParameterMissing,
 }
 
 pub const SYNTAX: &str = "vhost-user-net backend parameters \
-\"ip=<ip_addr>,mask=<net_mask>,sock=<socket_path>,\
+\"ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,\
 num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"";
 
 impl fmt::Display for Error {
@@ -353,71 +349,52 @@ impl VhostUserBackend for VhostUserNetBackend {
     }
 }
 
-pub struct VhostUserNetBackendConfig<'a> {
+pub struct VhostUserNetBackendConfig {
     pub ip: Ipv4Addr,
     pub mask: Ipv4Addr,
-    pub sock: &'a str,
+    pub socket: String,
     pub num_queues: usize,
     pub queue_size: u16,
-    pub tap: Option<&'a str>,
+    pub tap: Option<String>,
 }
 
-impl<'a> VhostUserNetBackendConfig<'a> {
-    pub fn parse(backend: &'a str) -> Result<Self> {
-        let params_list: Vec<&str> = backend.split(',').collect();
+impl VhostUserNetBackendConfig {
+    pub fn parse(backend: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
 
-        let mut ip_str: &str = "";
-        let mut mask_str: &str = "";
-        let mut sock: &str = "";
-        let mut num_queues_str: &str = "";
-        let mut queue_size_str: &str = "";
-        let mut tap_str: &str = "";
+        parser
+            .add("tap")
+            .add("ip")
+            .add("mask")
+            .add("queue_size")
+            .add("num_queues")
+            .add("socket");
 
-        for param in params_list.iter() {
-            if param.starts_with("ip=") {
-                ip_str = &param[3..];
-            } else if param.starts_with("mask=") {
-                mask_str = &param[5..];
-            } else if param.starts_with("sock=") {
-                sock = &param[5..];
-            } else if param.starts_with("num_queues=") {
-                num_queues_str = &param[11..];
-            } else if param.starts_with("queue_size=") {
-                queue_size_str = &param[11..];
-            } else if param.starts_with("tap=") {
-                tap_str = &param[4..];
-            }
-        }
+        parser.parse(backend).map_err(Error::FailedConfigParse)?;
 
-        let mut ip: Ipv4Addr = Ipv4Addr::new(192, 168, 100, 1);
-        let mut mask: Ipv4Addr = Ipv4Addr::new(255, 255, 255, 0);
-        let mut num_queues: usize = 2;
-        let mut queue_size: u16 = 256;
-        let mut tap: Option<&str> = None;
-
-        if sock.is_empty() {
-            return Err(Error::ParseSockParam);
-        }
-        if !ip_str.is_empty() {
-            ip = ip_str.parse().map_err(Error::ParseIpParam)?;
-        }
-        if !mask_str.is_empty() {
-            mask = mask_str.parse().map_err(Error::ParseMaskParam)?;
-        }
-        if !num_queues_str.is_empty() {
-            num_queues = num_queues_str.parse().map_err(Error::ParseQueueNumParam)?;
-        }
-        if !queue_size_str.is_empty() {
-            queue_size = queue_size_str.parse().map_err(Error::ParseQueueSizeParam)?;
-        }
-        if !tap_str.is_empty() {
-            tap = Some(tap_str);
-        }
+        let tap = parser.get("tap");
+        let ip = parser
+            .convert("ip")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or_else(|| Ipv4Addr::new(192, 168, 100, 1));
+        let mask = parser
+            .convert("mask")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or_else(|| Ipv4Addr::new(255, 255, 255, 0));
+        let queue_size = parser
+            .convert("queue_size")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or(256);
+        let num_queues = parser
+            .convert("num_queues")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or(2);
+        let socket = parser.get("socket").ok_or(Error::SocketParameterMissing)?;
 
         Ok(VhostUserNetBackendConfig {
             ip,
             mask,
-            sock,
+            socket,
             num_queues,
             queue_size,
             tap,
@@ -434,20 +411,26 @@ pub fn start_net_backend(backend_command: &str) {
         }
     };
 
+    let tap = if let Some(tap) = backend_config.tap.as_ref() {
+        Some(tap.as_str())
+    } else {
+        None
+    };
+
     let net_backend = Arc::new(RwLock::new(
         VhostUserNetBackend::new(
             backend_config.ip,
             backend_config.mask,
             backend_config.num_queues,
             backend_config.queue_size,
-            backend_config.tap,
+            tap,
         )
         .unwrap(),
     ));
 
     let mut net_daemon = VhostUserDaemon::new(
         "vhost-user-net-backend".to_string(),
-        backend_config.sock.to_string(),
+        backend_config.socket.to_string(),
         net_backend.clone(),
     )
     .unwrap();
