@@ -77,6 +77,10 @@ pub enum Error {
     OpenTap(vm_virtio::net_util::Error),
 }
 
+pub const SYNTAX: &str = "vhost-user-net backend parameters \
+\"ip=<ip_addr>,mask=<net_mask>,sock=<socket_path>,\
+num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"";
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "vhost_user_net_error: {:?}", self)
