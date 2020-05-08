@@ -41,7 +41,6 @@ use vm_virtio::block::{build_disk_image_id, Request};
 use vmm::config::{OptionParser, OptionParserError, Toggle};
 use vmm_sys_util::eventfd::EventFd;
 
-const QUEUE_SIZE: usize = 1024;
 const SECTOR_SHIFT: u8 = 9;
 const SECTOR_SIZE: u64 = (0x01 as u64) << SECTOR_SHIFT;
 const BLK_SIZE: u32 = 512;
@@ -74,7 +73,8 @@ enum Error {
 
 pub const SYNTAX: &str = "vhost-user-block backend parameters \
  \"path=<image_path>,socket=<socket_path>,num_queues=<number_of_queues>,\
- readonly=true|false,direct=true|false,poll_queue=true|false\"";
+ queue_size=<size_of_each_queue>,readonly=true|false,direct=true|false,\
+ poll_queue=true|false\"";
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -179,6 +179,7 @@ struct VhostUserBlkBackend {
     rdonly: bool,
     poll_queue: bool,
     queues_per_thread: Vec<u64>,
+    queue_size: usize,
 }
 
 impl VhostUserBlkBackend {
@@ -188,6 +189,7 @@ impl VhostUserBlkBackend {
         rdonly: bool,
         direct: bool,
         poll_queue: bool,
+        queue_size: usize,
     ) -> Result<Self> {
         let mut options = OpenOptions::new();
         options.read(true);
@@ -237,6 +239,7 @@ impl VhostUserBlkBackend {
             rdonly,
             poll_queue,
             queues_per_thread,
+            queue_size,
         })
     }
 }
@@ -247,7 +250,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
     }
 
     fn max_queue_size(&self) -> usize {
-        QUEUE_SIZE
+        self.queue_size as usize
     }
 
     fn features(&self) -> u64 {
@@ -369,6 +372,7 @@ struct VhostUserBlkBackendConfig {
     path: String,
     socket: String,
     num_queues: usize,
+    queue_size: usize,
     readonly: bool,
     direct: bool,
     poll_queue: bool,
@@ -382,6 +386,7 @@ impl VhostUserBlkBackendConfig {
             .add("readonly")
             .add("direct")
             .add("num_queues")
+            .add("queue_size")
             .add("socket")
             .add("poll_queue");
         parser.parse(backend).map_err(Error::FailedConfigParse)?;
@@ -407,6 +412,10 @@ impl VhostUserBlkBackendConfig {
             .map_err(Error::FailedConfigParse)?
             .unwrap_or_else(|| Toggle(true))
             .0;
+        let queue_size = parser
+            .convert("queue_size")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or(1024);
 
         Ok(VhostUserBlkBackendConfig {
             path,
@@ -415,6 +424,7 @@ impl VhostUserBlkBackendConfig {
             readonly,
             direct,
             poll_queue,
+            queue_size,
         })
     }
 }
@@ -435,6 +445,7 @@ pub fn start_block_backend(backend_command: &str) {
             backend_config.readonly,
             backend_config.direct,
             backend_config.poll_queue,
+            backend_config.queue_size,
         )
         .unwrap(),
     ));
