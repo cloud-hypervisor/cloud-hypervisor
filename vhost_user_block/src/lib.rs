@@ -38,6 +38,7 @@ use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{Bytes, GuestMemoryMmap};
 use vm_virtio::block::{build_disk_image_id, Request};
+use vmm::config::{OptionParser, OptionParserError, Toggle};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: usize = 1024;
@@ -57,24 +58,18 @@ type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[derive(Debug)]
 enum Error {
-    /// Failed to parse direct parameter.
-    ParseDirectParam,
-    /// Failed to parse image parameter.
-    ParseImageParam,
-    /// Failed to parse sock parameter.
-    ParseSockParam,
-    /// Failed to parse readonly parameter.
-    ParseReadOnlyParam,
-    /// Failed parsing fs number of queues parameter.
-    ParseBlkNumQueuesParam(std::num::ParseIntError),
-    /// Failed to parse the poll_queue parameter.
-    ParsePollQueueParam,
-    /// Failed to handle event other than input event.
-    HandleEventNotEpollIn,
     /// Failed to create kill eventfd
     CreateKillEventFd(io::Error),
+    /// Failed to parse configuration string
+    FailedConfigParse(OptionParserError),
+    /// Failed to handle event other than input event.
+    HandleEventNotEpollIn,
     /// Failed to handle unknown event.
     HandleEventUnknownEvent,
+    /// No path provided
+    PathParameterMissing,
+    /// No socket provided
+    SocketParameterMissing,
 }
 
 pub const SYNTAX: &str = "vhost-user-block backend parameters \
@@ -370,66 +365,52 @@ impl VhostUserBackend for VhostUserBlkBackend {
     }
 }
 
-struct VhostUserBlkBackendConfig<'a> {
-    image: &'a str,
-    sock: &'a str,
+struct VhostUserBlkBackendConfig {
+    path: String,
+    socket: String,
     num_queues: usize,
     readonly: bool,
     direct: bool,
     poll_queue: bool,
 }
 
-impl<'a> VhostUserBlkBackendConfig<'a> {
-    fn parse(backend: &'a str) -> Result<Self> {
-        let params_list: Vec<&str> = backend.split(',').collect();
+impl VhostUserBlkBackendConfig {
+    fn parse(backend: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add("path")
+            .add("readonly")
+            .add("direct")
+            .add("num_queues")
+            .add("socket")
+            .add("poll_queue");
+        parser.parse(backend).map_err(Error::FailedConfigParse)?;
 
-        let mut image: &str = "";
-        let mut sock: &str = "";
-        let mut num_queues_str: &str = "";
-        let mut readonly: bool = false;
-        let mut direct: bool = false;
-        let mut poll_queue: bool = true;
+        let path = parser.get("path").ok_or(Error::PathParameterMissing)?;
+        let readonly = parser
+            .convert::<Toggle>("readonly")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let direct = parser
+            .convert::<Toggle>("direct")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let num_queues = parser
+            .convert("num_queues")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or(1);
+        let socket = parser.get("socket").ok_or(Error::SocketParameterMissing)?;
+        let poll_queue = parser
+            .convert::<Toggle>("poll_queue")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or_else(|| Toggle(true))
+            .0;
 
-        for param in params_list.iter() {
-            if param.starts_with("path=") {
-                image = &param[5..];
-            } else if param.starts_with("socket=") {
-                sock = &param[7..];
-            } else if param.starts_with("num_queues=") {
-                num_queues_str = &param[11..];
-            } else if param.starts_with("readonly=") {
-                readonly = match param[9..].parse::<bool>() {
-                    Ok(b) => b,
-                    Err(_) => return Err(Error::ParseReadOnlyParam),
-                }
-            } else if param.starts_with("direct=") {
-                direct = match param[7..].parse::<bool>() {
-                    Ok(b) => b,
-                    Err(_) => return Err(Error::ParseDirectParam),
-                }
-            } else if param.starts_with("poll_queue=") {
-                poll_queue = match param[11..].parse::<bool>() {
-                    Ok(b) => b,
-                    Err(_) => return Err(Error::ParsePollQueueParam),
-                }
-            }
-        }
-
-        let mut num_queues: usize = 1;
-        if image.is_empty() {
-            return Err(Error::ParseImageParam);
-        }
-        if sock.is_empty() {
-            return Err(Error::ParseSockParam);
-        }
-        if !num_queues_str.is_empty() {
-            num_queues = num_queues_str
-                .parse()
-                .map_err(Error::ParseBlkNumQueuesParam)?;
-        }
         Ok(VhostUserBlkBackendConfig {
-            image,
-            sock,
+            path,
+            socket,
             num_queues,
             readonly,
             direct,
@@ -449,7 +430,7 @@ pub fn start_block_backend(backend_command: &str) {
 
     let blk_backend = Arc::new(RwLock::new(
         VhostUserBlkBackend::new(
-            backend_config.image.to_string(),
+            backend_config.path,
             backend_config.num_queues,
             backend_config.readonly,
             backend_config.direct,
@@ -461,12 +442,8 @@ pub fn start_block_backend(backend_command: &str) {
     debug!("blk_backend is created!\n");
 
     let name = "vhost-user-blk-backend";
-    let mut blk_daemon = VhostUserDaemon::new(
-        name.to_string(),
-        backend_config.sock.to_string(),
-        blk_backend.clone(),
-    )
-    .unwrap();
+    let mut blk_daemon =
+        VhostUserDaemon::new(name.to_string(), backend_config.socket, blk_backend.clone()).unwrap();
     debug!("blk_daemon is created!\n");
 
     if let Err(e) = blk_daemon.start() {
