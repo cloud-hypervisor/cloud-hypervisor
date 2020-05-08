@@ -21,11 +21,7 @@ fn main() {
         .arg(
             Arg::with_name("net-backend")
                 .long("net-backend")
-                .help(
-                    "vhost-user-net backend parameters \
-                     \"ip=<ip_addr>,mask=<net_mask>,sock=<socket_path>,\
-                     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"",
-                )
+                .help(vhost_user_net::SYNTAX)
                 .takes_value(true)
                 .min_values(1),
         )
