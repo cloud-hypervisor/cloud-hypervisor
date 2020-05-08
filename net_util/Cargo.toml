@@ -6,7 +6,7 @@ authors = ["The Chromium OS Authors"]
 [dependencies]
 libc = "0.2.69"
 rand = "0.7.3"
-serde = "1.0.106"
+serde = "1.0.107"
 vmm-sys-util = ">=0.3.1"
 
 net_gen = { path = "../net_gen" }
