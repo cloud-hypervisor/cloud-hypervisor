@@ -402,7 +402,7 @@ fn main() {
                 .long("api-socket")
                 .help("HTTP API socket path (UNIX domain socket).")
                 .takes_value(true)
-                .min_values(1)
+                .number_of_values(1)
                 .required(true),
         )
         .subcommand(
