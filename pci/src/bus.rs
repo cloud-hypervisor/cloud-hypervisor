@@ -34,6 +34,8 @@ pub enum PciRootError {
     NoPciDeviceSlotAvailable,
     /// Invalid PCI device identifier provided.
     InvalidPciDeviceSlot(usize),
+    /// Valid PCI device identifier but already used.
+    AlreadyInUsePciDeviceSlot(usize),
 }
 pub type Result<T> = std::result::Result<T, PciRootError>;
 
@@ -153,6 +155,19 @@ impl PciBus {
         }
 
         Err(PciRootError::NoPciDeviceSlotAvailable)
+    }
+
+    pub fn get_device_id(&mut self, id: usize) -> Result<()> {
+        if id < NUM_DEVICE_IDS {
+            if !self.device_ids[id] {
+                self.device_ids[id] = true;
+                Ok(())
+            } else {
+                Err(PciRootError::AlreadyInUsePciDeviceSlot(id))
+            }
+        } else {
+            Err(PciRootError::InvalidPciDeviceSlot(id))
+        }
     }
 
     pub fn put_device_id(&mut self, id: usize) -> Result<()> {
