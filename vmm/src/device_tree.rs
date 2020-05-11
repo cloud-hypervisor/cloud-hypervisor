@@ -15,6 +15,8 @@ pub struct DeviceNode {
     pub children: Vec<String>,
     #[serde(skip)]
     pub migratable: Option<Arc<Mutex<dyn Migratable>>>,
+    #[cfg(feature = "pci_support")]
+    pub pci_bdf: Option<u32>,
 }
 
 impl DeviceNode {
@@ -25,6 +27,8 @@ impl DeviceNode {
             parent: None,
             children: Vec::new(),
             migratable,
+            #[cfg(feature = "pci_support")]
+            pci_bdf: None,
         }
     }
 }
