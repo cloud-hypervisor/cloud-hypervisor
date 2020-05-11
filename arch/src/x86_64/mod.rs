@@ -10,6 +10,7 @@
 mod gdt;
 pub mod interrupts;
 pub mod layout;
+#[cfg(not(feature = "acpi"))]
 mod mptable;
 pub mod regs;
 
@@ -90,6 +91,7 @@ unsafe impl ByteValued for BootParamsWrapper {}
 pub enum Error {
     /// Invalid e820 setup params.
     E820Configuration,
+    #[cfg(not(feature = "acpi"))]
     /// Error writing MP table to memory.
     MpTableSetup(mptable::Error),
 }
@@ -161,13 +163,14 @@ pub fn configure_system(
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
     initramfs: &Option<InitramfsConfig>,
-    num_cpus: u8,
+    _num_cpus: u8,
     setup_hdr: Option<setup_header>,
     rsdp_addr: Option<GuestAddress>,
     boot_prot: BootProtocol,
 ) -> super::Result<()> {
     // Note that this puts the mptable at the last 1k of Linux's 640k base RAM
-    mptable::setup_mptable(guest_mem, num_cpus).map_err(Error::MpTableSetup)?;
+    #[cfg(not(feature = "acpi"))]
+    mptable::setup_mptable(guest_mem, _num_cpus).map_err(Error::MpTableSetup)?;
 
     // Check that the RAM is not smaller than the RSDP start address
     if let Some(rsdp_addr) = rsdp_addr {
