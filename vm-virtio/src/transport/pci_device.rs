@@ -307,8 +307,9 @@ pub struct VirtioPciDevice {
     // Guest memory
     memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 
-    // Setting PCI BAR
+    // Settings PCI BAR
     settings_bar: u8,
+    settings_bar_addr: Option<GuestAddress>,
 
     // Whether to use 64-bit bar location or 32-bit
     use_64bit_bar: bool,
@@ -425,6 +426,7 @@ impl VirtioPciDevice {
             queue_evts,
             memory: Some(memory),
             settings_bar: 0,
+            settings_bar_addr: None,
             use_64bit_bar,
             interrupt_source_group,
             cap_pci_cfg_info: VirtioPciCfgCapInfo::default(),
@@ -501,6 +503,12 @@ impl VirtioPciDevice {
         } else {
             false
         }
+    }
+
+    // This function is used by the caller to provide the expected base address
+    // for the virtio-pci configuration BAR.
+    pub fn set_config_bar_addr(&mut self, bar_addr: u64) {
+        self.settings_bar_addr = Some(GuestAddress(bar_addr));
     }
 
     pub fn config_bar_addr(&self) -> u64 {
@@ -774,14 +782,14 @@ impl PciDevice for VirtioPciDevice {
         let (virtio_pci_bar_addr, region_type) = if self.use_64bit_bar {
             let region_type = PciBarRegionType::Memory64BitRegion;
             let addr = allocator
-                .allocate_mmio_addresses(None, CAPABILITY_BAR_SIZE, None)
+                .allocate_mmio_addresses(self.settings_bar_addr, CAPABILITY_BAR_SIZE, None)
                 .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
             ranges.push((addr, CAPABILITY_BAR_SIZE, region_type));
             (addr, region_type)
         } else {
             let region_type = PciBarRegionType::Memory32BitRegion;
             let addr = allocator
-                .allocate_mmio_hole_addresses(None, CAPABILITY_BAR_SIZE, None)
+                .allocate_mmio_hole_addresses(self.settings_bar_addr, CAPABILITY_BAR_SIZE, None)
                 .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
             ranges.push((addr, CAPABILITY_BAR_SIZE, region_type));
             (addr, region_type)
