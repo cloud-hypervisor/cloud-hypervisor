@@ -3798,7 +3798,6 @@ mod tests {
                 ])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .default_net()
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .spawn()
                 .unwrap();
