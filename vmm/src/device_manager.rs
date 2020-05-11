@@ -286,6 +286,10 @@ pub enum DeviceManagerError {
     #[cfg(feature = "pci_support")]
     NextPciDeviceId(pci::PciRootError),
 
+    /// Could not reserve the PCI device ID.
+    #[cfg(feature = "pci_support")]
+    GetPciDeviceId(pci::PciRootError),
+
     /// Could not give the PCI device ID back.
     #[cfg(feature = "pci_support")]
     PutPciDeviceId(pci::PciRootError),
@@ -332,6 +336,10 @@ pub enum DeviceManagerError {
 
     /// Expected resources for virtio-fs could not be found.
     MissingVirtioFsResources,
+
+    /// Missing PCI b/d/f from the DeviceNode.
+    #[cfg(feature = "pci_support")]
+    MissingDeviceNodePciBdf,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -2158,6 +2166,28 @@ impl DeviceManager {
         let mut node = device_node!(id);
         node.children = vec![virtio_device_id.clone()];
 
+        // Look for the id in the device tree. If it can be found, that means
+        // the device is being restored, otherwise it's created from scratch.
+        let pci_device_bdf = if let Some(node) = self.device_tree.get(&id) {
+            debug!("Restoring virtio-pci {} resources", id);
+            let pci_device_bdf = node
+                .pci_bdf
+                .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
+
+            pci.get_device_id((pci_device_bdf >> 3) as usize)
+                .map_err(DeviceManagerError::GetPciDeviceId)?;
+
+            pci_device_bdf
+        } else {
+            // We need to shift the device id since the 3 first bits are dedicated
+            // to the PCI function, and we know we don't do multifunction.
+            // Also, because we only support one PCI bus, the bus 0, we don't need
+            // to add anything to the global device ID.
+            pci.next_device_id()
+                .map_err(DeviceManagerError::NextPciDeviceId)?
+                << 3
+        };
+
         // Update the existing virtio node by setting the parent.
         if let Some(node) = self.device_tree.get_mut(&virtio_device_id) {
             node.parent = Some(id.clone());
@@ -2169,15 +2199,6 @@ impl DeviceManager {
         // as we need to take into account the dedicated vector to notify
         // about a virtio config change.
         let msix_num = (virtio_device.lock().unwrap().queue_max_sizes().len() + 1) as u16;
-
-        // We need to shift the device id since the 3 first bits are dedicated
-        // to the PCI function, and we know we don't do multifunction.
-        // Also, because we only support one PCI bus, the bus 0, we don't need
-        // to add anything to the global device ID.
-        let pci_device_bdf = pci
-            .next_device_id()
-            .map_err(DeviceManagerError::NextPciDeviceId)?
-            << 3;
 
         // Create the callback from the implementation of the DmaRemapping
         // trait. The point with the callback is to simplify the code as we
@@ -2251,6 +2272,7 @@ impl DeviceManager {
         .map_err(DeviceManagerError::AddPciDevice)?;
 
         node.migratable = Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
+        node.pci_bdf = Some(pci_device_bdf);
         self.device_tree.insert(id, node);
 
         Ok(pci_device_bdf)
