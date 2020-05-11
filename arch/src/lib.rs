@@ -45,6 +45,8 @@ pub enum Error {
     InitramfsAddress,
     /// Error writing module entry to guest memory.
     ModlistSetup(vm_memory::GuestMemoryError),
+    /// RSDP Beyond Guest Memory
+    RSDPPastRamEnd,
 }
 pub type Result<T> = result::Result<T, Error>;
 

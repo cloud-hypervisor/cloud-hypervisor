@@ -169,6 +169,13 @@ pub fn configure_system(
     // Note that this puts the mptable at the last 1k of Linux's 640k base RAM
     mptable::setup_mptable(guest_mem, num_cpus).map_err(Error::MpTableSetup)?;
 
+    // Check that the RAM is not smaller than the RSDP start address
+    if let Some(rsdp_addr) = rsdp_addr {
+        if rsdp_addr.0 > guest_mem.last_addr().0 {
+            return Err(super::Error::RSDPPastRamEnd);
+        }
+    }
+
     match boot_prot {
         BootProtocol::PvhBoot => {
             configure_pvh(guest_mem, cmdline_addr, initramfs, rsdp_addr)?;
@@ -481,7 +488,7 @@ mod tests {
             &None,
             1,
             None,
-            None,
+            Some(layout::RSDP_POINTER),
             BootProtocol::LinuxBoot,
         );
         assert!(config_err.is_err());
