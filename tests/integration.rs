@@ -2713,7 +2713,7 @@ mod tests {
         });
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
+    #[cfg_attr(feature = "mmio", test)]
     fn test_vmlinux_boot_noacpi() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -2742,16 +2742,6 @@ mod tests {
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
-            aver_eq!(
-                tb,
-                guest
-                    .ssh_command("grep -c PCI-MSI /proc/interrupts")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                12
-            );
 
             let _ = child.kill();
             let _ = child.wait();
