@@ -5,6 +5,7 @@ authors = ["The Chromium OS Authors"]
 
 [features]
 default = []
+acpi = ["acpi_tables"]
 
 [dependencies]
 byteorder = "1.3.4"
