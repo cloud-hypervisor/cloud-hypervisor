@@ -955,12 +955,12 @@ mod tests {
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
-    fn test_large_memory() {
+    fn test_large_vm() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
+                .args(&["--cpus", "boot=48"])
                 .args(&["--memory", "size=5120M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
