@@ -334,6 +334,9 @@ pub enum DeviceManagerError {
     /// Expected resources for virtio-mmio could not be found.
     MissingVirtioMmioResources,
 
+    /// Expected resources for virtio-pci could not be found.
+    MissingVirtioPciResources,
+
     /// Expected resources for virtio-fs could not be found.
     MissingVirtioFsResources,
 
@@ -2168,7 +2171,7 @@ impl DeviceManager {
 
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
-        let pci_device_bdf = if let Some(node) = self.device_tree.get(&id) {
+        let (pci_device_bdf, config_bar_addr) = if let Some(node) = self.device_tree.get(&id) {
             debug!("Restoring virtio-pci {} resources", id);
             let pci_device_bdf = node
                 .pci_bdf
@@ -2177,15 +2180,32 @@ impl DeviceManager {
             pci.get_device_id((pci_device_bdf >> 3) as usize)
                 .map_err(DeviceManagerError::GetPciDeviceId)?;
 
-            pci_device_bdf
+            if node.resources.is_empty() {
+                return Err(DeviceManagerError::MissingVirtioPciResources);
+            }
+
+            // We know the configuration BAR address is stored on the first
+            // resource in the list.
+            let config_bar_addr = match node.resources[0] {
+                Resource::MmioAddressRange { base, .. } => Some(base),
+                _ => {
+                    error!("Unexpected resource {:?} for {}", node.resources[0], id);
+                    return Err(DeviceManagerError::MissingVirtioPciResources);
+                }
+            };
+
+            (pci_device_bdf, config_bar_addr)
         } else {
             // We need to shift the device id since the 3 first bits are dedicated
             // to the PCI function, and we know we don't do multifunction.
             // Also, because we only support one PCI bus, the bus 0, we don't need
             // to add anything to the global device ID.
-            pci.next_device_id()
+            let pci_device_bdf = pci
+                .next_device_id()
                 .map_err(DeviceManagerError::NextPciDeviceId)?
-                << 3
+                << 3;
+
+            (pci_device_bdf, None)
         };
 
         // Update the existing virtio node by setting the parent.
@@ -2232,6 +2252,12 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 
+        // This is important as this will set the BAR address if it exists,
+        // which is mandatory on the restore path.
+        if let Some(addr) = config_bar_addr {
+            virtio_pci_device.set_config_bar_addr(addr);
+        }
+
         let allocator = self.address_manager.allocator.clone();
         let mut allocator = allocator.lock().unwrap();
         let bars = virtio_pci_device
@@ -2267,10 +2293,17 @@ impl DeviceManager {
             virtio_pci_device.clone(),
             self.address_manager.io_bus.as_ref(),
             self.address_manager.mmio_bus.as_ref(),
-            bars,
+            bars.clone(),
         )
         .map_err(DeviceManagerError::AddPciDevice)?;
 
+        // Update the device tree with correct resource information.
+        for pci_bar in bars.iter() {
+            node.resources.push(Resource::MmioAddressRange {
+                base: pci_bar.0.raw_value(),
+                size: pci_bar.1 as u64,
+            });
+        }
         node.migratable = Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
         node.pci_bdf = Some(pci_device_bdf);
         self.device_tree.insert(id, node);
