@@ -21,36 +21,46 @@ use anyhow::anyhow;
 use arch::layout;
 use arch::EntryPoint;
 use devices::{ioapic, BusDevice};
+#[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_fpu, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events, kvm_xcrs,
     kvm_xsave, CpuId, Msrs,
 };
 use kvm_ioctls::*;
+#[cfg(target_arch = "x86_64")]
 use libc::{c_void, siginfo_t};
 use serde_derive::{Deserialize, Serialize};
-use std::cmp;
+#[cfg(target_arch = "x86_64")]
+use std::fmt;
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
-use std::thread;
-use std::{fmt, io, result};
-use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use std::{cmp, io, result, thread};
+#[cfg(target_arch = "x86_64")]
+use vm_memory::{Address, GuestAddressSpace};
+use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
+#[cfg(target_arch = "x86_64")]
+use vmm_sys_util::signal::register_signal_handler;
+use vmm_sys_util::signal::SIGRTMIN;
 
 // CPUID feature bits
+#[cfg(target_arch = "x86_64")]
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
+#[cfg(target_arch = "x86_64")]
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 
 // Debug I/O port
 #[cfg(target_arch = "x86_64")]
 const DEBUG_IOPORT: u16 = 0x80;
+#[cfg(target_arch = "x86_64")]
 const DEBUG_IOPORT_PREFIX: &str = "Debug I/O port";
 
+#[cfg(target_arch = "x86_64")]
 /// Debug I/O port, see:
 /// https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html
 ///
@@ -63,7 +73,7 @@ pub enum DebugIoPortRange {
     Userspace,
     Custom,
 }
-
+#[cfg(target_arch = "x86_64")]
 impl DebugIoPortRange {
     fn from_u8(value: u8) -> DebugIoPortRange {
         match value {
@@ -76,6 +86,7 @@ impl DebugIoPortRange {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 impl fmt::Display for DebugIoPortRange {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -199,6 +210,7 @@ pub enum Error {
 }
 pub type Result<T> = result::Result<T, Error>;
 
+#[cfg(target_arch = "x86_64")]
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
 enum CpuidReg {
@@ -208,6 +220,7 @@ enum CpuidReg {
     EDX,
 }
 
+#[cfg(target_arch = "x86_64")]
 pub struct CpuidPatch {
     pub function: u32,
     pub index: u32,
@@ -218,6 +231,7 @@ pub struct CpuidPatch {
     pub edx_bit: Option<u8>,
 }
 
+#[cfg(target_arch = "x86_64")]
 impl CpuidPatch {
     fn set_cpuid_reg(
         cpuid: &mut CpuId,
@@ -311,12 +325,16 @@ struct InterruptSourceOverride {
 pub struct Vcpu {
     fd: VcpuFd,
     id: u8,
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm_ts: std::time::Instant,
 }
 
+#[cfg(target_arch = "x86_64")]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VcpuKvmState {
     msrs: Msrs,
@@ -329,6 +347,10 @@ pub struct VcpuKvmState {
     xcrs: kvm_xcrs,
     mp_state: kvm_mp_state,
 }
+
+#[cfg(target_arch = "aarch64")]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VcpuKvmState {}
 
 impl Vcpu {
     /// Constructs a new VCPU for `vm`.
@@ -357,6 +379,7 @@ impl Vcpu {
         })))
     }
 
+    #[cfg(target_arch = "x86_64")]
     /// Configures a x86_64 specific vcpu and should be called once per vcpu from the vcpu's thread.
     ///
     /// # Arguments
@@ -406,10 +429,12 @@ impl Vcpu {
     pub fn run(&self) -> Result<bool> {
         match self.fd.run() {
             Ok(run) => match run {
+                #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoIn(addr, data) => {
                     self.io_bus.read(u64::from(addr), data);
                     Ok(true)
                 }
+                #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoOut(addr, data) => {
                     if addr == DEBUG_IOPORT && data.len() == 1 {
                         self.log_debug_ioport(data[0]);
@@ -425,6 +450,7 @@ impl Vcpu {
                     self.mmio_bus.write(addr as u64, data);
                     Ok(true)
                 }
+                #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoapicEoi(vector) => {
                     if let Some(ioapic) = &self.ioapic {
                         ioapic.lock().unwrap().end_of_interrupt(vector);
@@ -451,6 +477,7 @@ impl Vcpu {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
     // Log debug io port codes.
     fn log_debug_ioport(&self, code: u8) {
         let ts = self.vm_ts.elapsed();
@@ -464,6 +491,7 @@ impl Vcpu {
         );
     }
 
+    #[cfg(target_arch = "x86_64")]
     fn kvm_state(&self) -> Result<VcpuKvmState> {
         let mut msrs = arch::x86_64::regs::boot_msr_entries();
         self.fd.get_msrs(&mut msrs).map_err(Error::VcpuGetMsrs)?;
@@ -493,6 +521,7 @@ impl Vcpu {
         })
     }
 
+    #[cfg(target_arch = "x86_64")]
     fn set_kvm_state(&mut self, state: &VcpuKvmState) -> Result<()> {
         self.fd.set_regs(&state.regs).map_err(Error::VcpuSetRegs)?;
 
@@ -518,6 +547,16 @@ impl Vcpu {
             .set_mp_state(state.mp_state)
             .map_err(Error::VcpuSetMpState)?;
 
+        Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn kvm_state(&self) -> Result<VcpuKvmState> {
+        unimplemented!();
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn set_kvm_state(&mut self, _state: &VcpuKvmState) -> Result<()> {
         Ok(())
     }
 }
@@ -576,13 +615,19 @@ pub struct CpuManager {
     boot_vcpus: u8,
     max_vcpus: u8,
     io_bus: Arc<devices::Bus>,
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     mmio_bus: Arc<devices::Bus>,
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    #[cfg(target_arch = "x86_64")]
     cpuid: CpuId,
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     fd: Arc<VmFd>,
     vcpus_kill_signalled: Arc<AtomicBool>,
     vcpus_pause_signalled: Arc<AtomicBool>,
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     reset_evt: EventFd,
     vcpu_states: Vec<VcpuState>,
     selected_cpu: u8,
@@ -709,7 +754,7 @@ impl CpuManager {
         config: &CpusConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-        kvm: &Kvm,
+        #[cfg_attr(target_arch = "aarch64", allow(unused_variables))] kvm: &Kvm,
         fd: Arc<VmFd>,
         reset_evt: EventFd,
     ) -> Result<Arc<Mutex<CpuManager>>> {
@@ -717,6 +762,7 @@ impl CpuManager {
         vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
 
         let device_manager = device_manager.lock().unwrap();
+        #[cfg(target_arch = "x86_64")]
         let cpuid = CpuManager::patch_cpuid(kvm)?;
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus: config.boot_vcpus,
@@ -725,6 +771,7 @@ impl CpuManager {
             mmio_bus: device_manager.mmio_bus().clone(),
             ioapic: device_manager.ioapic().clone(),
             vm_memory: guest_memory,
+            #[cfg(target_arch = "x86_64")]
             cpuid,
             fd,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
@@ -752,6 +799,7 @@ impl CpuManager {
         Ok(cpu_manager)
     }
 
+    #[cfg(target_arch = "x86_64")]
     fn patch_cpuid(kvm: &Kvm) -> Result<CpuId> {
         let mut cpuid_patches = Vec::new();
 
@@ -787,6 +835,20 @@ impl CpuManager {
         Ok(cpuid)
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn start_vcpu(
+        &mut self,
+        _cpu_id: u8,
+        _creation_ts: std::time::Instant,
+        _vcpu_thread_barrier: Arc<Barrier>,
+        _entry_point: Option<EntryPoint>,
+        _inserting: bool,
+        _snapshot: Option<Snapshot>,
+    ) -> Result<()> {
+        unimplemented!();
+    }
+
+    #[cfg(target_arch = "x86_64")]
     fn start_vcpu(
         &mut self,
         cpu_id: u8,

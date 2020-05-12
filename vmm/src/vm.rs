@@ -35,24 +35,37 @@ use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{url_to_path, vm_config_from_snapshot, VM_SNAPSHOT_FILE};
 use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID};
 use anyhow::anyhow;
-use arch::{BootProtocol, EntryPoint};
-use devices::{ioapic, HotPlugNotificationFlags};
+#[cfg(target_arch = "x86_64")]
+use arch::BootProtocol;
+use arch::{check_required_kvm_extensions, EntryPoint};
+#[cfg(target_arch = "x86_64")]
+use devices::ioapic;
+use devices::HotPlugNotificationFlags;
+#[cfg(target_arch = "x86_64")]
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::*;
+#[cfg(target_arch = "x86_64")]
 use linux_loader::cmdline::Cmdline;
+#[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
+#[cfg(target_arch = "x86_64")]
 use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
+#[cfg(target_arch = "x86_64")]
 use std::convert::TryInto;
+#[cfg(target_arch = "x86_64")]
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self, Write};
+#[cfg(target_arch = "x86_64")]
+use std::io::{Seek, SeekFrom};
+#[cfg(target_arch = "x86_64")]
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use url::Url;
+#[cfg(target_arch = "x86_64")]
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryMmap,
     GuestMemoryRegion,
@@ -65,6 +78,7 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
 
 // 64 bit direct boot entry offset for bzImage
+#[cfg(target_arch = "x86_64")]
 const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
 
 /// Errors associated with VM management
@@ -152,9 +166,6 @@ pub enum Error {
 
     /// Error from CPU handling
     CpuManager(cpu::Error),
-
-    /// Capability missing
-    CapabilityMissing(Cap),
 
     /// Cannot pause devices
     PauseDevices(MigratableError),
@@ -246,7 +257,9 @@ impl VmState {
 }
 
 pub struct Vm {
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     kernel: File,
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     initramfs: Option<File>,
     threads: Vec<thread::JoinHandle<()>>,
     device_manager: Arc<Mutex<DeviceManager>>,
@@ -262,18 +275,7 @@ impl Vm {
     fn kvm_new() -> Result<(Kvm, Arc<VmFd>)> {
         let kvm = Kvm::new().map_err(Error::KvmNew)?;
 
-        // Check required capabilities:
-        if !kvm.check_extension(Cap::SignalMsi) {
-            return Err(Error::CapabilityMissing(Cap::SignalMsi));
-        }
-
-        if !kvm.check_extension(Cap::TscDeadlineTimer) {
-            return Err(Error::CapabilityMissing(Cap::TscDeadlineTimer));
-        }
-
-        if !kvm.check_extension(Cap::SplitIrqchip) {
-            return Err(Error::CapabilityMissing(Cap::SplitIrqchip));
-        }
+        check_required_kvm_extensions(&kvm).expect("Missing KVM capabilities");
 
         let fd: VmFd;
         loop {
@@ -295,16 +297,20 @@ impl Vm {
         let fd = Arc::new(fd);
 
         // Set TSS
+        #[cfg(target_arch = "x86_64")]
         fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize)
             .map_err(Error::VmSetup)?;
 
-        // Create split irqchip
-        // Only the local APIC is emulated in kernel, both PICs and IOAPIC
-        // are not.
-        let mut cap: kvm_enable_cap = Default::default();
-        cap.cap = KVM_CAP_SPLIT_IRQCHIP;
-        cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
-        fd.enable_cap(&cap).map_err(Error::VmSetup)?;
+        #[cfg(target_arch = "x86_64")]
+        {
+            // Create split irqchip
+            // Only the local APIC is emulated in kernel, both PICs and IOAPIC
+            // are not.
+            let mut cap: kvm_enable_cap = Default::default();
+            cap.cap = KVM_CAP_SPLIT_IRQCHIP;
+            cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
+            fd.enable_cap(&cap).map_err(Error::VmSetup)?;
+        }
 
         Ok((kvm, fd))
     }
@@ -446,6 +452,7 @@ impl Vm {
         )
     }
 
+    #[cfg(target_arch = "x86_64")]
     fn load_initramfs(&mut self, guest_mem: &GuestMemoryMmap) -> Result<arch::InitramfsConfig> {
         let mut initramfs = self.initramfs.as_ref().unwrap();
         let size: usize = initramfs
@@ -468,6 +475,12 @@ impl Vm {
         Ok(arch::InitramfsConfig { address, size })
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn load_kernel(&mut self) -> Result<EntryPoint> {
+        unimplemented!();
+    }
+
+    #[cfg(target_arch = "x86_64")]
     fn load_kernel(&mut self) -> Result<EntryPoint> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE);
         cmdline
@@ -1276,6 +1289,7 @@ impl Transportable for Vm {
 }
 impl Migratable for Vm {}
 
+#[cfg(target_arch = "x86_64")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1334,6 +1348,7 @@ mod tests {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 #[allow(unused)]
 pub fn test_vm() {
     // This example based on https://lwn.net/Articles/658511/

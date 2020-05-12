@@ -39,10 +39,12 @@ fn vuf_filter(action: SeccompAction) -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_close),
             allow_syscall(libc::SYS_copy_file_range),
             allow_syscall(libc::SYS_dup),
+            #[cfg(target_arch = "x86_64")]
             allow_syscall(libc::SYS_epoll_create),
             allow_syscall(libc::SYS_epoll_create1),
             allow_syscall(libc::SYS_epoll_ctl),
             allow_syscall(libc::SYS_epoll_pwait),
+            #[cfg(target_arch = "x86_64")]
             allow_syscall(libc::SYS_epoll_wait),
             allow_syscall(libc::SYS_eventfd2),
             allow_syscall(libc::SYS_exit),
@@ -59,10 +61,13 @@ fn vuf_filter(action: SeccompAction) -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_fremovexattr),
             allow_syscall(libc::SYS_fsetxattr),
             allow_syscall(libc::SYS_fstat),
+            #[cfg(target_arch = "x86_64")]
             allow_syscall(libc::SYS_fstatfs),
             allow_syscall(libc::SYS_fsync),
+            #[cfg(target_arch = "x86_64")]
             allow_syscall(libc::SYS_ftruncate),
             allow_syscall(libc::SYS_futex),
+            #[cfg(target_arch = "x86_64")]
             allow_syscall(libc::SYS_getdents),
             allow_syscall(libc::SYS_getdents64),
             allow_syscall(libc::SYS_getegid),
@@ -82,6 +87,7 @@ fn vuf_filter(action: SeccompAction) -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_mremap),
             allow_syscall(libc::SYS_munmap),
             allow_syscall(libc::SYS_newfstatat),
+            #[cfg(target_arch = "x86_64")]
             allow_syscall(libc::SYS_open),
             allow_syscall(libc::SYS_openat),
             allow_syscall(libc::SYS_prctl), // TODO restrict to just PR_SET_NAME?
@@ -109,9 +115,11 @@ fn vuf_filter(action: SeccompAction) -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_sigaltstack),
             allow_syscall(libc::SYS_statx),
             allow_syscall(libc::SYS_symlinkat),
+            #[cfg(target_arch = "x86_64")]
             allow_syscall(libc::SYS_time), // Rarely needed, except on static builds
             allow_syscall(libc::SYS_tgkill),
             allow_syscall(libc::SYS_umask),
+            #[cfg(target_arch = "x86_64")]
             allow_syscall(libc::SYS_unlink),
             allow_syscall(libc::SYS_unlinkat),
             allow_syscall(libc::SYS_unshare),

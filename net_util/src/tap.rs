@@ -192,7 +192,7 @@ impl Tap {
         unsafe {
             let ifru_hwaddr = ifreq.ifr_ifru.ifru_hwaddr.as_mut();
             for (i, v) in addr.get_bytes().iter().enumerate() {
-                ifru_hwaddr.sa_data[i] = *v as i8;
+                ifru_hwaddr.sa_data[i] = *v as c_char;
             }
         }
 

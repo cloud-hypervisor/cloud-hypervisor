@@ -8,8 +8,12 @@ use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
-use arch::{layout, RegionType};
-use devices::{ioapic, BusDevice};
+#[cfg(target_arch = "x86_64")]
+use arch::layout;
+use arch::{get_host_cpu_phys_bits, RegionType};
+#[cfg(target_arch = "x86_64")]
+use devices::ioapic;
+use devices::BusDevice;
 use kvm_bindings::{kvm_userspace_memory_region, KVM_MEM_READONLY};
 use kvm_ioctls::*;
 use std::convert::TryInto;
@@ -21,7 +25,9 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Mutex};
 use url::Url;
-use vm_allocator::{GsiApic, SystemAllocator};
+#[cfg(target_arch = "x86_64")]
+use vm_allocator::GsiApic;
+use vm_allocator::SystemAllocator;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     mmap::MmapRegionError, Address, Bytes, Error as MmapError, GuestAddress, GuestAddressSpace,
@@ -33,6 +39,7 @@ use vm_migration::{
     Transportable,
 };
 
+#[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
 
 const HOTPLUG_COUNT: usize = 8;
@@ -118,34 +125,6 @@ pub enum Error {
     /// The number of external backing files doesn't match the number of
     /// memory regions.
     InvalidAmountExternalBackingFiles,
-}
-
-pub fn get_host_cpu_phys_bits() -> u8 {
-    use core::arch::x86_64;
-    unsafe {
-        let leaf = x86_64::__cpuid(0x8000_0000);
-
-        // Detect and handle AMD SME (Secure Memory Encryption) properly.
-        // Some physical address bits may become reserved when the feature is enabled.
-        // See AMD64 Architecture Programmer's Manual Volume 2, Section 7.10.1
-        let reduced = if leaf.eax >= 0x8000_001f
-            && leaf.ebx == 0x6874_7541    // Vendor ID: AuthenticAMD
-            && leaf.ecx == 0x444d_4163
-            && leaf.edx == 0x6974_6e65
-            && x86_64::__cpuid(0x8000_001f).eax & 0x1 != 0
-        {
-            (x86_64::__cpuid(0x8000_001f).ebx >> 6) & 0x3f
-        } else {
-            0
-        };
-
-        if leaf.eax >= 0x8000_0008 {
-            let leaf = x86_64::__cpuid(0x8000_0008);
-            ((leaf.eax & 0xff) - reduced) as u8
-        } else {
-            36
-        }
-    }
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -279,12 +258,8 @@ impl MemoryManager {
             GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
 
         let end_of_device_area = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
-        let mem_end = guest_memory.last_addr();
-        let mut start_of_device_area = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
-            arch::layout::RAM_64BIT_START
-        } else {
-            mem_end.unchecked_add(1)
-        };
+
+        let mut start_of_device_area = MemoryManager::start_addr(guest_memory.last_addr(), false);
 
         let mut virtiomem_region = None;
         let mut virtiomem_resize = None;
@@ -319,6 +294,7 @@ impl MemoryManager {
         let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
         hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
 
+        #[cfg(target_arch = "x86_64")]
         // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
@@ -332,6 +308,20 @@ impl MemoryManager {
                     X86_64_IRQ_BASE,
                     ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
                 )],
+            )
+            .ok_or(Error::CreateSystemAllocator)?,
+        ));
+
+        #[cfg(target_arch = "aarch64")]
+        let allocator = Arc::new(Mutex::new(
+            SystemAllocator::new(
+                GuestAddress(0),
+                0,
+                GuestAddress(0),
+                0,
+                GuestAddress(0),
+                0,
+                vec![],
             )
             .ok_or(Error::CreateSystemAllocator)?,
         ));
@@ -578,6 +568,30 @@ impl MemoryManager {
         Ok(())
     }
 
+    //
+    // Calculate the start address of an area next to RAM.
+    //
+    // If the next area is device space, there is no gap.
+    // If the next area is hotplugged RAM, the start address needs to be aligned
+    // to 128MiB boundary, and a gap of 256MiB need to be set before it.
+    // On x86_64, it must also start at the 64bit start.
+    fn start_addr(mem_end: GuestAddress, with_gap: bool) -> GuestAddress {
+        let start_addr = if with_gap {
+            GuestAddress((mem_end.0 + 1 + (256 << 20)) & !((128 << 20) - 1))
+        } else {
+            mem_end.unchecked_add(1)
+        };
+
+        #[cfg(target_arch = "x86_64")]
+        let start_addr = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
+            arch::layout::RAM_64BIT_START
+        } else {
+            start_addr
+        };
+
+        start_addr
+    }
+
     fn hotplug_ram_region(&mut self, size: usize) -> Result<Arc<GuestRegionMmap>, Error> {
         info!("Hotplugging new RAM: {}", size);
 
@@ -591,14 +605,7 @@ impl MemoryManager {
             return Err(Error::InvalidSize);
         }
 
-        // Start address needs to be non-contiguous with last memory added (leaving a gap of 256MiB)
-        // and also aligned to 128MiB boundary. It must also start at the 64bit start.
-        let mem_end = self.guest_memory.memory().last_addr();
-        let start_addr = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
-            arch::layout::RAM_64BIT_START
-        } else {
-            GuestAddress((mem_end.0 + 1 + (256 << 20)) & !((128 << 20) - 1))
-        };
+        let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true);
 
         if start_addr.checked_add(size.try_into().unwrap()).unwrap() >= self.start_of_device_area()
         {

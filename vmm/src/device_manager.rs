@@ -24,6 +24,7 @@ use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
 #[cfg(feature = "acpi")]
 use arch::layout;
+#[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use devices::{ioapic, BusDevice, HotPlugNotificationFlags};
 use kvm_ioctls::*;
@@ -75,6 +76,7 @@ const MMIO_LEN: u64 = 0x1000;
 #[cfg(feature = "pci_support")]
 const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
 
+#[cfg(target_arch = "x86_64")]
 const IOAPIC_DEVICE_NAME: &str = "_ioapic";
 const SERIAL_DEVICE_NAME_PREFIX: &str = "_serial";
 
@@ -662,6 +664,7 @@ pub struct DeviceManager {
     #[cfg(feature = "pci_support")]
     pci_bus: Option<Arc<Mutex<PciBus>>>,
 
+    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     // MSI Interrupt Manager
     msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
 
@@ -999,6 +1002,12 @@ impl DeviceManager {
         Ok(())
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn add_ioapic(&mut self) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
+        unimplemented!();
+    }
+
+    #[cfg(target_arch = "x86_64")]
     fn add_ioapic(&mut self) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
         let id = String::from(IOAPIC_DEVICE_NAME);
 
