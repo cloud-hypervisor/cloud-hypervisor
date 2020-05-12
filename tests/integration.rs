@@ -1850,7 +1850,7 @@ mod tests {
                 .args(&["--api-socket", &api_socket]);
 
             let fs_params = format!(
-                "tag=myfs,sock={},num_queues=1,queue_size=1024,dax={}{}",
+                "id=myfs0,tag=myfs,sock={},num_queues=1,queue_size=1024,dax={}{}",
                 virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
             );
 
@@ -1947,6 +1947,61 @@ mod tests {
                         .trim(),
                     "foo"
                 );
+            }
+
+            if hotplug {
+                // Remove from VM
+                aver_eq!(
+                    tb,
+                    guest
+                        .ssh_command("sudo umount mount_dir && echo ok")
+                        .unwrap_or_default()
+                        .trim(),
+                    "ok"
+                );
+                aver!(
+                    tb,
+                    remote_command(&api_socket, "remove-device", Some("myfs0"),)
+                );
+
+                thread::sleep(std::time::Duration::new(10, 0));
+                let (mut daemon_child, virtiofsd_socket_path) = prepare_daemon(
+                    &guest.tmp_dir,
+                    shared_dir.to_str().unwrap(),
+                    virtiofsd_cache,
+                );
+                thread::sleep(std::time::Duration::new(10, 0));
+                let fs_params = format!(
+                    "id=myfs0,tag=myfs,sock={},num_queues=1,queue_size=1024,dax={}{}",
+                    virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
+                );
+
+                // Add back and check it works
+                aver!(tb, remote_command(&api_socket, "add-fs", Some(&fs_params),));
+                thread::sleep(std::time::Duration::new(10, 0));
+                // Mount shared directory through virtio_fs filesystem
+                let mount_cmd = format!(
+                    "mkdir -p mount_dir && \
+                     sudo mount -t virtiofs {} myfs mount_dir/ && \
+                     echo ok",
+                    dax_mount_param
+                );
+                aver_eq!(
+                    tb,
+                    guest.ssh_command(&mount_cmd).unwrap_or_default().trim(),
+                    "ok"
+                );
+                // Check file1 exists and its content is "foo"
+                aver_eq!(
+                    tb,
+                    guest
+                        .ssh_command("cat mount_dir/file1")
+                        .unwrap_or_default()
+                        .trim(),
+                    "foo"
+                );
+                let _ = daemon_child.kill();
+                let _ = daemon_child.wait();
             }
 
             let _ = child.kill();
