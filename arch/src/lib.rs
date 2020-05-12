@@ -22,6 +22,7 @@ extern crate kvm_ioctls;
 extern crate linux_loader;
 extern crate vm_memory;
 
+use kvm_ioctls::*;
 use std::result;
 
 #[derive(Debug)]
@@ -47,6 +48,8 @@ pub enum Error {
     ModlistSetup(vm_memory::GuestMemoryError),
     /// RSDP Beyond Guest Memory
     RSDPPastRamEnd,
+    /// Capability missing
+    CapabilityMissing(Cap),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -73,8 +76,8 @@ pub mod aarch64;
 
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{
-    arch_memory_regions, configure_system, get_reserved_mem_addr, layout::CMDLINE_MAX_SIZE,
-    layout::CMDLINE_START,
+    arch_memory_regions, check_required_kvm_extensions, configure_system, get_host_cpu_phys_bits,
+    get_reserved_mem_addr, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START, EntryPoint,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -82,11 +85,13 @@ pub mod x86_64;
 
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    arch_memory_regions, configure_system, initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE,
-    layout::CMDLINE_START, regs, BootProtocol, EntryPoint,
+    arch_memory_regions, check_required_kvm_extensions, configure_system, get_host_cpu_phys_bits,
+    initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START, regs,
+    BootProtocol, EntryPoint,
 };
 
 /// Safe wrapper for `sysconf(_SC_PAGESIZE)`.
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 fn pagesize() -> usize {
     // Trivially safe

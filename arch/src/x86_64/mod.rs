@@ -13,9 +13,9 @@ pub mod layout;
 #[cfg(not(feature = "acpi"))]
 mod mptable;
 pub mod regs;
-
 use crate::InitramfsConfig;
 use crate::RegionType;
+use kvm_ioctls::*;
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
@@ -457,6 +457,47 @@ pub fn initramfs_load_addr(
 
     let aligned_addr: u64 = ((lowmem_size - initramfs_size) & !(crate::pagesize() - 1)) as u64;
     Ok(aligned_addr)
+}
+
+pub fn get_host_cpu_phys_bits() -> u8 {
+    use std::arch::x86_64;
+    unsafe {
+        let leaf = x86_64::__cpuid(0x8000_0000);
+
+        // Detect and handle AMD SME (Secure Memory Encryption) properly.
+        // Some physical address bits may become reserved when the feature is enabled.
+        // See AMD64 Architecture Programmer's Manual Volume 2, Section 7.10.1
+        let reduced = if leaf.eax >= 0x8000_001f
+            && leaf.ebx == 0x6874_7541    // Vendor ID: AuthenticAMD
+            && leaf.ecx == 0x444d_4163
+            && leaf.edx == 0x6974_6e65
+            && x86_64::__cpuid(0x8000_001f).eax & 0x1 != 0
+        {
+            (x86_64::__cpuid(0x8000_001f).ebx >> 6) & 0x3f
+        } else {
+            0
+        };
+
+        if leaf.eax >= 0x8000_0008 {
+            let leaf = x86_64::__cpuid(0x8000_0008);
+            ((leaf.eax & 0xff) - reduced) as u8
+        } else {
+            36
+        }
+    }
+}
+
+pub fn check_required_kvm_extensions(kvm: &Kvm) -> super::Result<()> {
+    if !kvm.check_extension(Cap::SignalMsi) {
+        return Err(super::Error::CapabilityMissing(Cap::SignalMsi));
+    }
+    if !kvm.check_extension(Cap::TscDeadlineTimer) {
+        return Err(super::Error::CapabilityMissing(Cap::TscDeadlineTimer));
+    }
+    if !kvm.check_extension(Cap::SplitIrqchip) {
+        return Err(super::Error::CapabilityMissing(Cap::SplitIrqchip));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
