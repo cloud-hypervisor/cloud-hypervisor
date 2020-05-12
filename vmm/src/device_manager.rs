@@ -651,7 +651,7 @@ pub struct DeviceManager {
 
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
-    device_tree: DeviceTree,
+    device_tree: Arc<Mutex<DeviceTree>>,
 
     // Exit event
     #[cfg(feature = "acpi")]
@@ -725,7 +725,7 @@ impl DeviceManager {
             pci_id_list: HashMap::new(),
             #[cfg(feature = "pci_support")]
             pci_devices: HashMap::new(),
-            device_tree: DeviceTree::new(),
+            device_tree: Arc::new(Mutex::new(DeviceTree::new())),
             #[cfg(feature = "acpi")]
             exit_evt: _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             reset_evt: reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
@@ -820,13 +820,13 @@ impl DeviceManager {
 
     fn state(&self) -> DeviceManagerState {
         DeviceManagerState {
-            device_tree: self.device_tree.clone(),
+            device_tree: self.device_tree.lock().unwrap().clone(),
             device_id_cnt: self.device_id_cnt,
         }
     }
 
     fn set_state(&mut self, state: &DeviceManagerState) -> DeviceManagerResult<()> {
-        self.device_tree = state.device_tree.clone();
+        self.device_tree = Arc::new(Mutex::new(state.device_tree.clone()));
         self.device_id_cnt = state.device_id_cnt;
 
         Ok(())
@@ -857,6 +857,8 @@ impl DeviceManager {
                 // know there is nothing to do, so we can simply override the
                 // existing entry.
                 self.device_tree
+                    .lock()
+                    .unwrap()
                     .insert(iommu_id.clone(), device_node!(iommu_id, device));
 
                 (Some(device), Some(mapping))
@@ -980,6 +982,8 @@ impl DeviceManager {
         // know there is nothing to do, so we can simply override the
         // existing entry.
         self.device_tree
+            .lock()
+            .unwrap()
             .insert(id.clone(), device_node!(id, ioapic));
 
         Ok(ioapic)
@@ -1154,6 +1158,8 @@ impl DeviceManager {
             // know there is nothing to do, so we can simply override the
             // existing entry.
             self.device_tree
+                .lock()
+                .unwrap()
                 .insert(id.clone(), device_node!(id, serial));
 
             Some(serial)
@@ -1190,6 +1196,8 @@ impl DeviceManager {
             // know there is nothing to do, so we can simply override the
             // existing entry.
             self.device_tree
+                .lock()
+                .unwrap()
                 .insert(id.clone(), device_node!(id, virtio_console_device));
 
             Some(console_input)
@@ -1292,6 +1300,8 @@ impl DeviceManager {
             // know there is nothing to do, so we can simply override the
             // existing entry.
             self.device_tree
+                .lock()
+                .unwrap()
                 .insert(id.clone(), device_node!(id, vhost_user_block_device));
 
             Ok((
@@ -1343,7 +1353,10 @@ impl DeviceManager {
                     // Fill the device tree with a new node. In case of restore, we
                     // know there is nothing to do, so we can simply override the
                     // existing entry.
-                    self.device_tree.insert(id.clone(), device_node!(id, block));
+                    self.device_tree
+                        .lock()
+                        .unwrap()
+                        .insert(id.clone(), device_node!(id, block));
 
                     Ok((Arc::clone(&block) as VirtioDeviceArc, disk_cfg.iommu, id))
                 }
@@ -1370,7 +1383,10 @@ impl DeviceManager {
                     // Fill the device tree with a new node. In case of restore, we
                     // know there is nothing to do, so we can simply override the
                     // existing entry.
-                    self.device_tree.insert(id.clone(), device_node!(id, block));
+                    self.device_tree
+                        .lock()
+                        .unwrap()
+                        .insert(id.clone(), device_node!(id, block));
 
                     Ok((Arc::clone(&block) as VirtioDeviceArc, disk_cfg.iommu, id))
                 }
@@ -1451,6 +1467,8 @@ impl DeviceManager {
             // know there is nothing to do, so we can simply override the
             // existing entry.
             self.device_tree
+                .lock()
+                .unwrap()
                 .insert(id.clone(), device_node!(id, vhost_user_net_device));
 
             Ok((
@@ -1493,6 +1511,8 @@ impl DeviceManager {
             // know there is nothing to do, so we can simply override the
             // existing entry.
             self.device_tree
+                .lock()
+                .unwrap()
                 .insert(id.clone(), device_node!(id, virtio_net_device));
 
             Ok((
@@ -1543,6 +1563,8 @@ impl DeviceManager {
             // know there is nothing to do, so we can simply override the
             // existing entry.
             self.device_tree
+                .lock()
+                .unwrap()
                 .insert(id.clone(), device_node!(id, virtio_rng_device));
         }
 
@@ -1565,7 +1587,7 @@ impl DeviceManager {
 
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
-        let cache_range = if let Some(node) = self.device_tree.get(&id) {
+        let cache_range = if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
             debug!("Restoring virtio-fs {} resources", id);
 
             let mut cache_range: Option<(u64, u64)> = None;
@@ -1681,7 +1703,7 @@ impl DeviceManager {
 
             // Update the device tree with the migratable device.
             node.migratable = Some(Arc::clone(&virtio_fs_device) as Arc<Mutex<dyn Migratable>>);
-            self.device_tree.insert(id.clone(), node);
+            self.device_tree.lock().unwrap().insert(id.clone(), node);
 
             Ok((Arc::clone(&virtio_fs_device) as VirtioDeviceArc, false, id))
         } else {
@@ -1721,7 +1743,7 @@ impl DeviceManager {
 
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
-        let region_range = if let Some(node) = self.device_tree.get(&id) {
+        let region_range = if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
             debug!("Restoring virtio-pmem {} resources", id);
 
             let mut region_range: Option<(u64, u64)> = None;
@@ -1868,7 +1890,7 @@ impl DeviceManager {
             size: region_size,
         });
         node.migratable = Some(Arc::clone(&virtio_pmem_device) as Arc<Mutex<dyn Migratable>>);
-        self.device_tree.insert(id.clone(), node);
+        self.device_tree.lock().unwrap().insert(id.clone(), node);
 
         Ok((
             Arc::clone(&virtio_pmem_device) as VirtioDeviceArc,
@@ -1928,6 +1950,8 @@ impl DeviceManager {
         // know there is nothing to do, so we can simply override the
         // existing entry.
         self.device_tree
+            .lock()
+            .unwrap()
             .insert(id.clone(), device_node!(id, vsock_device));
 
         Ok((
@@ -1982,6 +2006,8 @@ impl DeviceManager {
             // know there is nothing to do, so we can simply override the
             // existing entry.
             self.device_tree
+                .lock()
+                .unwrap()
                 .insert(id.clone(), device_node!(id, virtio_mem_device));
         }
 
@@ -2171,45 +2197,46 @@ impl DeviceManager {
 
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
-        let (pci_device_bdf, config_bar_addr) = if let Some(node) = self.device_tree.get(&id) {
-            debug!("Restoring virtio-pci {} resources", id);
-            let pci_device_bdf = node
-                .pci_bdf
-                .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
+        let (pci_device_bdf, config_bar_addr) =
+            if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
+                debug!("Restoring virtio-pci {} resources", id);
+                let pci_device_bdf = node
+                    .pci_bdf
+                    .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
 
-            pci.get_device_id((pci_device_bdf >> 3) as usize)
-                .map_err(DeviceManagerError::GetPciDeviceId)?;
+                pci.get_device_id((pci_device_bdf >> 3) as usize)
+                    .map_err(DeviceManagerError::GetPciDeviceId)?;
 
-            if node.resources.is_empty() {
-                return Err(DeviceManagerError::MissingVirtioPciResources);
-            }
-
-            // We know the configuration BAR address is stored on the first
-            // resource in the list.
-            let config_bar_addr = match node.resources[0] {
-                Resource::MmioAddressRange { base, .. } => Some(base),
-                _ => {
-                    error!("Unexpected resource {:?} for {}", node.resources[0], id);
+                if node.resources.is_empty() {
                     return Err(DeviceManagerError::MissingVirtioPciResources);
                 }
+
+                // We know the configuration BAR address is stored on the first
+                // resource in the list.
+                let config_bar_addr = match node.resources[0] {
+                    Resource::MmioAddressRange { base, .. } => Some(base),
+                    _ => {
+                        error!("Unexpected resource {:?} for {}", node.resources[0], id);
+                        return Err(DeviceManagerError::MissingVirtioPciResources);
+                    }
+                };
+
+                (pci_device_bdf, config_bar_addr)
+            } else {
+                // We need to shift the device id since the 3 first bits are dedicated
+                // to the PCI function, and we know we don't do multifunction.
+                // Also, because we only support one PCI bus, the bus 0, we don't need
+                // to add anything to the global device ID.
+                let pci_device_bdf = pci
+                    .next_device_id()
+                    .map_err(DeviceManagerError::NextPciDeviceId)?
+                    << 3;
+
+                (pci_device_bdf, None)
             };
 
-            (pci_device_bdf, config_bar_addr)
-        } else {
-            // We need to shift the device id since the 3 first bits are dedicated
-            // to the PCI function, and we know we don't do multifunction.
-            // Also, because we only support one PCI bus, the bus 0, we don't need
-            // to add anything to the global device ID.
-            let pci_device_bdf = pci
-                .next_device_id()
-                .map_err(DeviceManagerError::NextPciDeviceId)?
-                << 3;
-
-            (pci_device_bdf, None)
-        };
-
         // Update the existing virtio node by setting the parent.
-        if let Some(node) = self.device_tree.get_mut(&virtio_device_id) {
+        if let Some(node) = self.device_tree.lock().unwrap().get_mut(&virtio_device_id) {
             node.parent = Some(id.clone());
         } else {
             return Err(DeviceManagerError::MissingNode);
@@ -2306,7 +2333,7 @@ impl DeviceManager {
         }
         node.migratable = Some(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn Migratable>>);
         node.pci_bdf = Some(pci_device_bdf);
-        self.device_tree.insert(id, node);
+        self.device_tree.lock().unwrap().insert(id, node);
 
         Ok(pci_device_bdf)
     }
@@ -2327,7 +2354,7 @@ impl DeviceManager {
 
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
-        let (mmio_range, mmio_irq) = if let Some(node) = self.device_tree.get(&id) {
+        let (mmio_range, mmio_irq) = if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
             debug!("Restoring virtio-mmio {} resources", id);
 
             let mut mmio_range: Option<(u64, u64)> = None;
@@ -2364,7 +2391,7 @@ impl DeviceManager {
         };
 
         // Update the existing virtio node by setting the parent.
-        if let Some(node) = self.device_tree.get_mut(&virtio_device_id) {
+        if let Some(node) = self.device_tree.lock().unwrap().get_mut(&virtio_device_id) {
             node.parent = Some(id.clone());
         } else {
             return Err(DeviceManagerError::MissingNode);
@@ -2446,7 +2473,7 @@ impl DeviceManager {
         });
         node.resources.push(Resource::LegacyIrq(irq_num));
         node.migratable = Some(Arc::clone(&mmio_device_arc) as Arc<Mutex<dyn Migratable>>);
-        self.device_tree.insert(id, node);
+        self.device_tree.lock().unwrap().insert(id, node);
 
         Ok(())
     }
@@ -2589,9 +2616,10 @@ impl DeviceManager {
             self.pci_devices_down |= 1 << (*pci_device_bdf >> 3);
 
             // Remove the device from the device tree along with its parent.
-            if let Some(node) = self.device_tree.remove(&id) {
+            let mut device_tree = self.device_tree.lock().unwrap();
+            if let Some(node) = device_tree.remove(&id) {
                 if let Some(parent) = &node.parent {
-                    self.device_tree.remove(parent);
+                    device_tree.remove(parent);
                 }
             }
 
@@ -3037,7 +3065,7 @@ impl Aml for DeviceManager {
 
 impl Pausable for DeviceManager {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
-        for (_, device_node) in self.device_tree.iter() {
+        for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
                 migratable.lock().unwrap().pause()?;
             }
@@ -3047,7 +3075,7 @@ impl Pausable for DeviceManager {
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
-        for (_, device_node) in self.device_tree.iter() {
+        for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
                 migratable.lock().unwrap().resume()?;
             }
@@ -3066,7 +3094,7 @@ impl Snapshottable for DeviceManager {
         let mut snapshot = Snapshot::new(DEVICE_MANAGER_SNAPSHOT_ID);
 
         // We aggregate all devices snapshots.
-        for (_, device_node) in self.device_tree.iter() {
+        for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
                 let device_snapshot = migratable.lock().unwrap().snapshot()?;
                 snapshot.add_snapshot(device_snapshot);
@@ -3112,7 +3140,13 @@ impl Snapshottable for DeviceManager {
         // It's important to restore devices in the right order, that's why
         // the device tree is the right way to ensure we restore a child before
         // its parent node.
-        for node in self.device_tree.breadth_first_traversal().rev() {
+        for node in self
+            .device_tree
+            .lock()
+            .unwrap()
+            .breadth_first_traversal()
+            .rev()
+        {
             // Restore the node
             if let Some(migratable) = &node.migratable {
                 debug!("Restoring {} from DeviceManager", node.id);
