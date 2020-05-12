@@ -923,7 +923,8 @@ impl FsConfig {
             .add("cache_size")
             .add("queue_size")
             .add("num_queues")
-            .add("sock");
+            .add("sock")
+            .add("id");
         parser.parse(fs).map_err(Error::ParseFileSystem)?;
 
         let tag = parser.get("tag").ok_or(Error::ParseFsTagMissing)?;
