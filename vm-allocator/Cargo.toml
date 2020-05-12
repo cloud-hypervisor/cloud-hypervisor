@@ -5,5 +5,5 @@ authors = ["The Chromium OS Authors"]
 edition = "2018"
 
 [dependencies]
-libc = "0.2.69"
+libc = "0.2.70"
 vm-memory = "0.2.0"
