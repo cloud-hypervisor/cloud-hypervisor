@@ -411,6 +411,8 @@ struct AddressManager {
     io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
     vm_fd: Arc<VmFd>,
+    #[cfg(feature = "pci_support")]
+    device_tree: Arc<Mutex<DeviceTree>>,
 }
 
 #[cfg(feature = "pci_support")]
@@ -497,6 +499,44 @@ impl DeviceRelocation for AddressManager {
 
         let any_dev = pci_dev.as_any();
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
+            // Update the device_tree resources associated with the device
+            if let Some(node) = self
+                .device_tree
+                .lock()
+                .unwrap()
+                .get_mut(&virtio_pci_dev.id())
+            {
+                let mut resource_updated = false;
+                for resource in node.resources.iter_mut() {
+                    if let Resource::MmioAddressRange { base, .. } = resource {
+                        if *base == old_base {
+                            *base = new_base;
+                            resource_updated = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !resource_updated {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!(
+                            "Couldn't find a resource with base 0x{:x} for device {}",
+                            old_base,
+                            virtio_pci_dev.id()
+                        ),
+                    ));
+                }
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!(
+                        "Couldn't find device {} from device tree",
+                        virtio_pci_dev.id()
+                    ),
+                ));
+            }
+
             let bar_addr = virtio_pci_dev.config_bar_addr();
             if bar_addr == new_base {
                 for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
@@ -669,11 +709,15 @@ impl DeviceManager {
         reset_evt: &EventFd,
         vmm_path: PathBuf,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
+        let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
+
         let address_manager = Arc::new(AddressManager {
             allocator: memory_manager.lock().unwrap().allocator(),
             io_bus: Arc::new(devices::Bus::new()),
             mmio_bus: Arc::new(devices::Bus::new()),
             vm_fd: vm_fd.clone(),
+            #[cfg(feature = "pci_support")]
+            device_tree: Arc::clone(&device_tree),
         });
 
         // Create a shared list of GSI that can be shared through all PCI
@@ -725,7 +769,7 @@ impl DeviceManager {
             pci_id_list: HashMap::new(),
             #[cfg(feature = "pci_support")]
             pci_devices: HashMap::new(),
-            device_tree: Arc::new(Mutex::new(DeviceTree::new())),
+            device_tree,
             #[cfg(feature = "acpi")]
             exit_evt: _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             reset_evt: reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
