@@ -1426,7 +1426,7 @@ pub fn test_vm() {
             VcpuExit::Watchdog => {}
             VcpuExit::S390Tsch => {}
             VcpuExit::Epr => {}
-            VcpuExit::SystemEvent => {}
+            VcpuExit::SystemEvent(_, _) => {}
             VcpuExit::S390Stsi => {}
             VcpuExit::IoapicEoi(_vector) => {}
             VcpuExit::Hyperv => {}
