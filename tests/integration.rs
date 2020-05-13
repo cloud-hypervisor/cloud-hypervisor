@@ -4242,8 +4242,7 @@ mod tests {
     // One thing to note about this test. The virtio-net device is heavily used
     // through each ssh command. There's no need to perform a dedicated test to
     // verify the migration went well for virtio-net.
-    #[ignore]
-    #[cfg_attr(feature = "mmio", test)]
+    #[test]
     fn test_snapshot_restore() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -4258,7 +4257,7 @@ mod tests {
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--api-socket", &api_socket])
-                .args(&["--cpus", "boot=4"])
+                .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=4G"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
@@ -4271,7 +4270,7 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             // Check the number of vCPUs
-            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 4);
+            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
             // Check the guest RAM
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_968_000);
             // Check if the block device is readable
@@ -4339,7 +4338,7 @@ mod tests {
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Perform same checks to validate VM has been properly restored
-            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 4);
+            aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_968_000);
             aver!(
                 tb,
