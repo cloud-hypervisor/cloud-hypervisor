@@ -296,18 +296,59 @@ pub enum VmAction {
 
     /// Resume a VM
     Resume,
+
+    /// Add VFIO device
+    AddDevice(Arc<DeviceConfig>),
+
+    /// Add disk
+    AddDisk(Arc<DiskConfig>),
+
+    /// Add filesystem
+    AddFs(Arc<FsConfig>),
+
+    /// Add pmem
+    AddPmem(Arc<PmemConfig>),
+
+    /// Add network
+    AddNet(Arc<NetConfig>),
+
+    /// Add vsock
+    AddVsock(Arc<VsockConfig>),
+
+    /// Remove VFIO device
+    RemoveDevice(Arc<VmRemoveDeviceData>),
+
+    /// Resize VM
+    Resize(Arc<VmResizeData>),
+
+    /// Restore VM
+    Restore(Arc<RestoreConfig>),
+
+    /// Snapshot VM
+    Snapshot(Arc<VmSnapshotConfig>),
 }
 
 fn vm_action(api_evt: EventFd, api_sender: Sender<ApiRequest>, action: VmAction) -> ApiResult<()> {
     let (response_sender, response_receiver) = channel();
 
+    use VmAction::*;
     let request = match action {
-        VmAction::Boot => ApiRequest::VmBoot(response_sender),
-        VmAction::Delete => ApiRequest::VmDelete(response_sender),
-        VmAction::Shutdown => ApiRequest::VmShutdown(response_sender),
-        VmAction::Reboot => ApiRequest::VmReboot(response_sender),
-        VmAction::Pause => ApiRequest::VmPause(response_sender),
-        VmAction::Resume => ApiRequest::VmResume(response_sender),
+        Boot => ApiRequest::VmBoot(response_sender),
+        Delete => ApiRequest::VmDelete(response_sender),
+        Shutdown => ApiRequest::VmShutdown(response_sender),
+        Reboot => ApiRequest::VmReboot(response_sender),
+        Pause => ApiRequest::VmPause(response_sender),
+        Resume => ApiRequest::VmResume(response_sender),
+        AddDevice(v) => ApiRequest::VmAddDevice(v, response_sender),
+        AddDisk(v) => ApiRequest::VmAddDisk(v, response_sender),
+        AddFs(v) => ApiRequest::VmAddFs(v, response_sender),
+        AddPmem(v) => ApiRequest::VmAddPmem(v, response_sender),
+        AddNet(v) => ApiRequest::VmAddNet(v, response_sender),
+        AddVsock(v) => ApiRequest::VmAddVsock(v, response_sender),
+        RemoveDevice(v) => ApiRequest::VmRemoveDevice(v, response_sender),
+        Resize(v) => ApiRequest::VmResize(v, response_sender),
+        Restore(v) => ApiRequest::VmRestore(v, response_sender),
+        Snapshot(v) => ApiRequest::VmSnapshot(v, response_sender),
     };
 
     // Send the VM request.
@@ -343,22 +384,13 @@ pub fn vm_resume(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<
     vm_action(api_evt, api_sender, VmAction::Resume)
 }
 
+
 pub fn vm_snapshot(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VmSnapshotConfig>,
 ) -> ApiResult<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM snapshot request.
-    api_sender
-        .send(ApiRequest::VmSnapshot(data, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-
-    Ok(())
+    vm_action(api_evt, api_sender, VmAction::Snapshot(data))
 }
 
 pub fn vm_restore(
@@ -366,17 +398,7 @@ pub fn vm_restore(
     api_sender: Sender<ApiRequest>,
     data: Arc<RestoreConfig>,
 ) -> ApiResult<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM restore request.
-    api_sender
-        .send(ApiRequest::VmRestore(data, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-
-    Ok(())
+    vm_action(api_evt, api_sender, VmAction::Restore(data))
 }
 
 pub fn vm_info(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<VmInfo> {
@@ -431,17 +453,7 @@ pub fn vm_resize(
     api_sender: Sender<ApiRequest>,
     data: Arc<VmResizeData>,
 ) -> ApiResult<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM resizing request.
-    api_sender
-        .send(ApiRequest::VmResize(data, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-
-    Ok(())
+    vm_action(api_evt, api_sender, VmAction::Resize(data))
 }
 
 pub fn vm_add_device(
@@ -449,17 +461,7 @@ pub fn vm_add_device(
     api_sender: Sender<ApiRequest>,
     data: Arc<DeviceConfig>,
 ) -> ApiResult<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM add-device request.
-    api_sender
-        .send(ApiRequest::VmAddDevice(data, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-
-    Ok(())
+    vm_action(api_evt, api_sender, VmAction::AddDevice(data))
 }
 
 pub fn vm_remove_device(
@@ -467,17 +469,7 @@ pub fn vm_remove_device(
     api_sender: Sender<ApiRequest>,
     data: Arc<VmRemoveDeviceData>,
 ) -> ApiResult<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM remove-device request.
-    api_sender
-        .send(ApiRequest::VmRemoveDevice(data, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-
-    Ok(())
+    vm_action(api_evt, api_sender, VmAction::RemoveDevice(data))
 }
 
 pub fn vm_add_disk(
@@ -485,17 +477,7 @@ pub fn vm_add_disk(
     api_sender: Sender<ApiRequest>,
     data: Arc<DiskConfig>,
 ) -> ApiResult<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM add-disk request.
-    api_sender
-        .send(ApiRequest::VmAddDisk(data, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-
-    Ok(())
+    vm_action(api_evt, api_sender, VmAction::AddDisk(data))
 }
 
 pub fn vm_add_fs(
@@ -503,17 +485,7 @@ pub fn vm_add_fs(
     api_sender: Sender<ApiRequest>,
     data: Arc<FsConfig>,
 ) -> ApiResult<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM add-fs request.
-    api_sender
-        .send(ApiRequest::VmAddFs(data, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-
-    Ok(())
+    vm_action(api_evt, api_sender, VmAction::AddFs(data))
 }
 
 pub fn vm_add_pmem(
@@ -521,17 +493,7 @@ pub fn vm_add_pmem(
     api_sender: Sender<ApiRequest>,
     data: Arc<PmemConfig>,
 ) -> ApiResult<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM add-pmem request.
-    api_sender
-        .send(ApiRequest::VmAddPmem(data, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-
-    Ok(())
+    vm_action(api_evt, api_sender, VmAction::AddPmem(data))
 }
 
 pub fn vm_add_net(
@@ -539,17 +501,7 @@ pub fn vm_add_net(
     api_sender: Sender<ApiRequest>,
     data: Arc<NetConfig>,
 ) -> ApiResult<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM add-net request.
-    api_sender
-        .send(ApiRequest::VmAddNet(data, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-
-    Ok(())
+    vm_action(api_evt, api_sender, VmAction::AddNet(data))
 }
 
 pub fn vm_add_vsock(
@@ -557,15 +509,5 @@ pub fn vm_add_vsock(
     api_sender: Sender<ApiRequest>,
     data: Arc<VsockConfig>,
 ) -> ApiResult<()> {
-    let (response_sender, response_receiver) = channel();
-
-    // Send the VM add-vsock request.
-    api_sender
-        .send(ApiRequest::VmAddVsock(data, response_sender))
-        .map_err(ApiError::RequestSend)?;
-    api_evt.write(1).map_err(ApiError::EventFdWrite)?;
-
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
-
-    Ok(())
+    vm_action(api_evt, api_sender, VmAction::AddVsock(data))
 }
