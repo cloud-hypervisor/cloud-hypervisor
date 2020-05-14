@@ -3,10 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::api::http_endpoint::{
-    VmActionHandler, VmAddDevice, VmAddDisk, VmAddFs, VmAddNet, VmAddPmem, VmAddVsock, VmCreate,
-    VmInfo, VmRemoveDevice, VmResize, VmRestore, VmSnapshot, VmmPing, VmmShutdown,
-};
+use crate::api::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmPing, VmmShutdown};
 use crate::api::{ApiError, ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error, Result};
@@ -16,6 +13,7 @@ use serde_json::Error as SerdeError;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use std::thread;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -170,18 +168,18 @@ lazy_static! {
         r.routes.insert(endpoint!("/vm.resume"), Box::new(VmActionHandler::new(VmAction::Resume)));
         r.routes.insert(endpoint!("/vm.shutdown"), Box::new(VmActionHandler::new(VmAction::Shutdown)));
         r.routes.insert(endpoint!("/vm.reboot"), Box::new(VmActionHandler::new(VmAction::Reboot)));
-        r.routes.insert(endpoint!("/vm.snapshot"), Box::new(VmSnapshot {}));
-        r.routes.insert(endpoint!("/vm.restore"), Box::new(VmRestore {}));
+        r.routes.insert(endpoint!("/vm.snapshot"), Box::new(VmActionHandler::new(VmAction::Snapshot(Arc::default()))));
+        r.routes.insert(endpoint!("/vm.restore"), Box::new(VmActionHandler::new(VmAction::Restore(Arc::default()))));
         r.routes.insert(endpoint!("/vmm.shutdown"), Box::new(VmmShutdown {}));
         r.routes.insert(endpoint!("/vmm.ping"), Box::new(VmmPing {}));
-        r.routes.insert(endpoint!("/vm.resize"), Box::new(VmResize {}));
-        r.routes.insert(endpoint!("/vm.add-device"), Box::new(VmAddDevice {}));
-        r.routes.insert(endpoint!("/vm.remove-device"), Box::new(VmRemoveDevice {}));
-        r.routes.insert(endpoint!("/vm.add-disk"), Box::new(VmAddDisk {}));
-        r.routes.insert(endpoint!("/vm.add-fs"), Box::new(VmAddFs {}));
-        r.routes.insert(endpoint!("/vm.add-pmem"), Box::new(VmAddPmem {}));
-        r.routes.insert(endpoint!("/vm.add-net"), Box::new(VmAddNet {}));
-        r.routes.insert(endpoint!("/vm.add-vsock"), Box::new(VmAddVsock {}));
+        r.routes.insert(endpoint!("/vm.resize"), Box::new(VmActionHandler::new(VmAction::Resize(Arc::default()))));
+        r.routes.insert(endpoint!("/vm.add-device"), Box::new(VmActionHandler::new(VmAction::AddDevice(Arc::default()))));
+        r.routes.insert(endpoint!("/vm.remove-device"), Box::new(VmActionHandler::new(VmAction::RemoveDevice(Arc::default()))));
+        r.routes.insert(endpoint!("/vm.add-disk"), Box::new(VmActionHandler::new(VmAction::AddDisk(Arc::default()))));
+        r.routes.insert(endpoint!("/vm.add-fs"), Box::new(VmActionHandler::new(VmAction::AddFs(Arc::default()))));
+        r.routes.insert(endpoint!("/vm.add-pmem"), Box::new(VmActionHandler::new(VmAction::AddPmem(Arc::default()))));
+        r.routes.insert(endpoint!("/vm.add-net"), Box::new(VmActionHandler::new(VmAction::AddNet(Arc::default()))));
+        r.routes.insert(endpoint!("/vm.add-vsock"), Box::new(VmActionHandler::new(VmAction::AddVsock(Arc::default()))));
 
         r
     };

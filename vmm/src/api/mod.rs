@@ -149,18 +149,18 @@ pub struct VmmPingResponse {
     pub version: String,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, Default)]
 pub struct VmResizeData {
     pub desired_vcpus: Option<u8>,
     pub desired_ram: Option<u64>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, Default)]
 pub struct VmRemoveDeviceData {
     pub id: String,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, Default)]
 pub struct VmSnapshotConfig {
     /// The snapshot destination URL
     pub destination_url: String,
@@ -383,7 +383,6 @@ pub fn vm_pause(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<(
 pub fn vm_resume(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
     vm_action(api_evt, api_sender, VmAction::Resume)
 }
-
 
 pub fn vm_snapshot(
     api_evt: EventFd,
