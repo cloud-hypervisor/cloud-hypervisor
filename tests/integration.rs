@@ -4255,13 +4255,19 @@ mod tests {
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
+            let net_id = "net123";
+            let net_params = format!(
+                "id={},tap=,mac={},ip={},mask=255.255.255.0",
+                net_id, guest.network.guest_mac, guest.network.host_ip
+            );
+
             let mut child = GuestCommand::new(&guest)
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=4G"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .default_net()
+                .args(&["--net", net_params.as_str()])
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .capture_output()
                 .spawn()
@@ -4291,6 +4297,28 @@ mod tests {
             let console_text = String::from("On a branch floating down river a cricket, singing.");
             let console_cmd = format!("echo {} | sudo tee /dev/hvc0", console_text);
             aver!(tb, guest.ssh_command(&console_cmd).is_ok());
+
+            // Only for PCI, we can check that removing and adding back the
+            // virtio-net device does not break the snapshot/restore support
+            // for virtio-pci. This is an important thing to test as the
+            // hotplug will trigger a PCI BAR reprogramming, which is a good
+            // way of checking if the stored resources are correctly restored.
+            #[cfg(not(feature = "mmio"))]
+            {
+                // Unplug the virtio-net device
+                aver!(
+                    tb,
+                    remote_command(&api_socket, "remove-device", Some(net_id),)
+                );
+                thread::sleep(std::time::Duration::new(10, 0));
+
+                // Plug the virtio-net device again
+                aver!(
+                    tb,
+                    remote_command(&api_socket, "add-net", Some(net_params.as_str()),)
+                );
+                thread::sleep(std::time::Duration::new(10, 0));
+            }
 
             // Pause the VM
             aver!(tb, remote_command(&api_socket, "pause", None));
