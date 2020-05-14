@@ -34,6 +34,9 @@ pub enum HttpError {
     /// Could not boot a VM
     VmBoot(ApiError),
 
+    /// Could not delete a VM
+    VmDelete(ApiError),
+
     /// Could not get the VM information
     VmInfo(ApiError),
 

@@ -7,8 +7,8 @@ use crate::api::http::{error_response, EndpointHandler, HttpError};
 use crate::api::{
     vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_add_vsock, vm_boot,
     vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_remove_device, vm_resize, vm_restore,
-    vm_resume, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown, ApiError, ApiRequest, ApiResult,
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmAction, VmConfig,
+    vm_resume, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown, ApiRequest, DeviceConfig,
+    DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmAction, VmConfig,
     VmRemoveDeviceData, VmResizeData, VmSnapshotConfig, VsockConfig,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
@@ -58,23 +58,12 @@ impl EndpointHandler for VmCreate {
 
 // Common handler for boot, shutdown and reboot
 pub struct VmActionHandler {
-    action_fn: VmActionFn,
+    action: VmAction,
 }
-
-type VmActionFn = Box<dyn Fn(EventFd, Sender<ApiRequest>) -> ApiResult<()> + Send + Sync>;
 
 impl VmActionHandler {
     pub fn new(action: VmAction) -> Self {
-        let action_fn = Box::new(match action {
-            VmAction::Boot => vm_boot,
-            VmAction::Delete => vm_delete,
-            VmAction::Shutdown => vm_shutdown,
-            VmAction::Reboot => vm_reboot,
-            VmAction::Pause => vm_pause,
-            VmAction::Resume => vm_resume,
-        });
-
-        VmActionHandler { action_fn }
+        VmActionHandler { action }
     }
 }
 
@@ -87,14 +76,18 @@ impl EndpointHandler for VmActionHandler {
     ) -> Response {
         match req.method() {
             Method::Put => {
-                match (self.action_fn)(api_notifier, api_sender).map_err(|e| match e {
-                    ApiError::VmBoot(_) => HttpError::VmBoot(e),
-                    ApiError::VmShutdown(_) => HttpError::VmShutdown(e),
-                    ApiError::VmReboot(_) => HttpError::VmReboot(e),
-                    ApiError::VmPause(_) => HttpError::VmPause(e),
-                    ApiError::VmResume(_) => HttpError::VmResume(e),
-                    _ => HttpError::VmAction(e),
-                }) {
+                use VmAction::*;
+                match match self.action {
+                    Boot => vm_boot(api_notifier, api_sender).map_err(HttpError::VmBoot),
+                    Delete => vm_delete(api_notifier, api_sender).map_err(HttpError::VmDelete),
+                    Shutdown => {
+                        vm_shutdown(api_notifier, api_sender).map_err(HttpError::VmShutdown)
+                    }
+                    Reboot => vm_reboot(api_notifier, api_sender).map_err(HttpError::VmReboot),
+                    Pause => vm_pause(api_notifier, api_sender).map_err(HttpError::VmPause),
+                    Resume => vm_resume(api_notifier, api_sender).map_err(HttpError::VmResume),
+                    _ => Err(HttpError::BadRequest)
+                } {
                     Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
                     Err(e) => error_response(e, StatusCode::InternalServerError),
                 }
