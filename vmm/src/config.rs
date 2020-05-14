@@ -1116,7 +1116,7 @@ impl ConsoleConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct DeviceConfig {
     pub path: PathBuf,
     #[serde(default)]
@@ -1147,7 +1147,7 @@ impl DeviceConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct VsockConfig {
     pub cid: u64,
     pub sock: PathBuf,
@@ -1189,7 +1189,7 @@ impl VsockConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct RestoreConfig {
     pub source_url: PathBuf,
     #[serde(default)]
