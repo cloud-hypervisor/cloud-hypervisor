@@ -32,8 +32,9 @@
 ///    mapping `RawFd`s to `EpollListener`s.
 ///
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
 use std::io::{self, Read};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 
 use super::super::csm::ConnState;
@@ -107,8 +108,8 @@ pub struct VsockMuxer {
     /// The file system path of the host-side Unix socket. This is used to figure out the path
     /// to Unix sockets listening on specific ports. I.e. "<this path>_<port number>".
     host_sock_path: String,
-    /// The nested epoll FD, used to register epoll listeners.
-    epoll_fd: RawFd,
+    /// The nested epoll File, used to register epoll listeners.
+    epoll_file: File,
     /// A hash set used to keep track of used host-side (local) ports, in order to assign local
     /// ports to host-initiated connections.
     local_port_set: HashSet<u32>,
@@ -267,7 +268,7 @@ impl VsockEpollListener for VsockMuxer {
     /// This will be the muxer's nested epoll FD.
     ///
     fn get_polled_fd(&self) -> RawFd {
-        self.epoll_fd
+        self.epoll_file.as_raw_fd()
     }
 
     /// Get the epoll events to be polled upstream.
@@ -286,7 +287,7 @@ impl VsockEpollListener for VsockMuxer {
 
         let mut epoll_events = vec![epoll::Event::new(epoll::Events::empty(), 0); 32];
         'epoll: loop {
-            match epoll::wait(self.epoll_fd, 0, epoll_events.as_mut_slice()) {
+            match epoll::wait(self.epoll_file.as_raw_fd(), 0, epoll_events.as_mut_slice()) {
                 Ok(ev_cnt) => {
                     #[allow(clippy::needless_range_loop)]
                     for i in 0..ev_cnt {
@@ -327,6 +328,8 @@ impl VsockMuxer {
         // Create the nested epoll FD. This FD will be added to the VMM `EpollContext`, at
         // device activation time.
         let epoll_fd = epoll::create(true).map_err(Error::EpollFdCreate)?;
+        // Use 'File' to enforce closing on 'epoll_fd'
+        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         // Open/bind/listen on the host Unix socket, so we can accept host-initiated
         // connections.
@@ -338,7 +341,7 @@ impl VsockMuxer {
             cid,
             host_sock,
             host_sock_path,
-            epoll_fd,
+            epoll_file,
             rxq: MuxerRxQ::new(),
             conn_map: HashMap::with_capacity(defs::MAX_CONNECTIONS),
             listener_map: HashMap::with_capacity(defs::MAX_CONNECTIONS + 1),
@@ -559,7 +562,7 @@ impl VsockMuxer {
         };
 
         epoll::ctl(
-            self.epoll_fd,
+            self.epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             fd,
             epoll::Event::new(evset, fd as u64),
@@ -580,7 +583,7 @@ impl VsockMuxer {
 
         if maybe_listener.is_some() {
             epoll::ctl(
-                self.epoll_fd,
+                self.epoll_file.as_raw_fd(),
                 epoll::ControlOptions::EPOLL_CTL_DEL,
                 fd,
                 epoll::Event::new(epoll::Events::empty(), 0),
@@ -712,7 +715,7 @@ impl VsockMuxer {
 
                     *evset = new_evset;
                     epoll::ctl(
-                        self.epoll_fd,
+                        self.epoll_file.as_raw_fd(),
                         epoll::ControlOptions::EPOLL_CTL_MOD,
                         fd,
                         epoll::Event::new(new_evset, fd as u64),
@@ -979,7 +982,7 @@ mod tests {
     #[test]
     fn test_muxer_epoll_listener() {
         let ctx = MuxerTestContext::new("muxer_epoll_listener");
-        assert_eq!(ctx.muxer.get_polled_fd(), ctx.muxer.epoll_fd);
+        assert_eq!(ctx.muxer.get_polled_fd(), ctx.muxer.epoll_file.as_raw_fd());
         assert_eq!(ctx.muxer.get_polled_evset(), epoll::Events::EPOLLIN);
     }
 

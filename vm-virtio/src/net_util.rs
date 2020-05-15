@@ -8,10 +8,11 @@ use net_util::{MacAddr, Tap, TapError};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::fs;
+use std::fs::File;
 use std::io::{self, Write};
 use std::mem;
 use std::net::Ipv4Addr;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -247,23 +248,25 @@ impl NetCtrlEpollHandler {
     pub fn run_ctrl(&mut self, paused: Arc<AtomicBool>) -> std::result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         self.epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
+        // Use 'File' to enforce closing on 'epoll_fd'
+        let epoll_file = unsafe { File::from_raw_fd(self.epoll_fd) };
 
         register_listener(
-            self.epoll_fd,
+            epoll_file.as_raw_fd(),
             self.ctrl_q.queue_evt.as_raw_fd(),
             epoll::Events::EPOLLIN,
             u64::from(CTRL_QUEUE_EVENT),
         )
         .unwrap();
         register_listener(
-            self.epoll_fd,
+            epoll_file.as_raw_fd(),
             self.kill_evt.as_raw_fd(),
             epoll::Events::EPOLLIN,
             u64::from(KILL_EVENT),
         )
         .unwrap();
         register_listener(
-            self.epoll_fd,
+            epoll_file.as_raw_fd(),
             self.pause_evt.as_raw_fd(),
             epoll::Events::EPOLLIN,
             u64::from(PAUSE_EVENT),
@@ -273,7 +276,7 @@ impl NetCtrlEpollHandler {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); CTRL_EVENT_COUNT];
 
         'epoll: loop {
-            let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
+            let num_events = match epoll::wait(epoll_file.as_raw_fd(), -1, &mut events[..]) {
                 Ok(res) => res,
                 Err(e) => {
                     if e.kind() == std::io::ErrorKind::Interrupted {
