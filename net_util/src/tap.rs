@@ -5,15 +5,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use super::{create_sockaddr, create_socket, Error as NetUtilError, MacAddr};
+use libc;
+use net_gen;
 use std::fs::File;
 use std::io::{Error as IoError, Read, Result as IoResult, Write};
 use std::net;
 use std::os::raw::*;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-
-use super::{create_sockaddr, create_socket, Error as NetUtilError};
-use libc;
-use net_gen;
 use vmm_sys_util::ioctl::{ioctl_with_mut_ref, ioctl_with_ref, ioctl_with_val};
 
 #[derive(Debug)]
@@ -169,6 +168,38 @@ impl Tap {
         #[allow(clippy::cast_lossless)]
         let ret =
             unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFADDR as c_ulong, &ifreq) };
+        if ret < 0 {
+            return Err(Error::IoctlError(IoError::last_os_error()));
+        }
+
+        Ok(())
+    }
+
+    /// Set mac addr for tap interface.
+    pub fn set_mac_addr(&self, addr: MacAddr) -> Result<()> {
+        let sock = create_socket().map_err(Error::NetUtil)?;
+
+        let mut ifreq = self.get_ifreq();
+
+        // ioctl is safe. Called with a valid sock fd, and we check the return.
+        #[allow(clippy::cast_lossless)]
+        let ret =
+            unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFHWADDR as c_ulong, &ifreq) };
+        if ret < 0 {
+            return Err(Error::IoctlError(IoError::last_os_error()));
+        }
+        // We only access one field of the ifru union, hence this is safe.
+        unsafe {
+            let ifru_hwaddr = ifreq.ifr_ifru.ifru_hwaddr.as_mut();
+            for (i, v) in addr.get_bytes().iter().enumerate() {
+                ifru_hwaddr.sa_data[i] = *v as i8;
+            }
+        }
+
+        // ioctl is safe. Called with a valid sock fd, and we check the return.
+        #[allow(clippy::cast_lossless)]
+        let ret =
+            unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFHWADDR as c_ulong, &ifreq) };
         if ret < 0 {
             return Err(Error::IoctlError(IoError::last_os_error()));
         }
