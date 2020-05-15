@@ -798,11 +798,11 @@ mod unit_tests {
                 false,
             ),
             (
-                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--net", "mac=12:34:56:78:90:ab"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--net", "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd"],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "net": [
-                        {"mac": "12:34:56:78:90:ab"}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd"}
                     ]
                 }"#,
                 true,
@@ -811,12 +811,12 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0",
+                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0"}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0"}
                     ]
                 }"#,
                 true,
@@ -825,12 +825,12 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4",
+                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4"}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4"}
                     ]
                 }"#,
                 true,
@@ -839,12 +839,12 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8",
+                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8"}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8"}
                     ]
                 }"#,
                 true,
@@ -853,12 +853,12 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4",
+                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4}
                     ]
                 }"#,
                 true,
@@ -867,12 +867,12 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4,queue_size=128",
+                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4,queue_size=128",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4, "queue_size": 128}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4, "queue_size": 128}
                     ]
                 }"#,
                 true,
@@ -881,12 +881,12 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256",
+                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8"}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8"}
                     ]
                 }"#,
                 true,
@@ -895,12 +895,12 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8",
+                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256}
                     ]
                 }"#,
                 true,
@@ -909,12 +909,12 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=on",
+                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=on",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": true}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": true}
                     ]
                 }"#,
                 false,
@@ -923,12 +923,12 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=on",
+                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=on",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": true}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": true}
                     ],
                     "iommu": true
                 }"#,
@@ -938,23 +938,23 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
-                    "mac=12:34:56:78:90:ab,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=off",
+                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=2,queue_size=256,iommu=off",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": false}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "iommu": false}
                     ]
                 }"#,
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "shared=true", "--net", "mac=12:34:56:78:90:ab,vhost_user=true,socket=/tmp/socket"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "shared=true", "--net", "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,vhost_user=true,socket=/tmp/socket"],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "vhost_user": true, "vhost_socket": "/tmp/socket"}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "vhost_user": true, "vhost_socket": "/tmp/socket"}
                     ]
                 }"#,
                 true,

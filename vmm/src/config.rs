@@ -701,6 +701,8 @@ pub struct NetConfig {
     pub mask: Ipv4Addr,
     #[serde(default = "default_netconfig_mac")]
     pub mac: MacAddr,
+    #[serde(default = "default_netconfig_mac")]
+    pub host_mac: MacAddr,
     #[serde(default)]
     pub iommu: bool,
     #[serde(default = "default_netconfig_num_queues")]
@@ -745,6 +747,7 @@ impl Default for NetConfig {
             ip: default_netconfig_ip(),
             mask: default_netconfig_mask(),
             mac: default_netconfig_mac(),
+            host_mac: default_netconfig_mac(),
             iommu: false,
             num_queues: default_netconfig_num_queues(),
             queue_size: default_netconfig_queue_size(),
@@ -769,6 +772,7 @@ impl NetConfig {
             .add("ip")
             .add("mask")
             .add("mac")
+            .add("host_mac")
             .add("iommu")
             .add("queue_size")
             .add("num_queues")
@@ -788,6 +792,10 @@ impl NetConfig {
             .unwrap_or_else(default_netconfig_mask);
         let mac = parser
             .convert("mac")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or_else(default_netconfig_mac);
+        let host_mac = parser
+            .convert("host_mac")
             .map_err(Error::ParseNetwork)?
             .unwrap_or_else(default_netconfig_mac);
         let iommu = parser
@@ -816,6 +824,7 @@ impl NetConfig {
             ip,
             mask,
             mac,
+            host_mac,
             iommu,
             num_queues,
             queue_size,
@@ -1641,17 +1650,19 @@ mod tests {
     fn test_net_parsing() -> Result<()> {
         // mac address is random
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34")?,
+            NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef")?,
             NetConfig {
                 mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                host_mac: MacAddr::parse_str("12:34:de:ad:be:ef").unwrap(),
                 ..Default::default()
             }
         );
 
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34,id=mynet0")?,
+            NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,id=mynet0")?,
             NetConfig {
                 mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                host_mac: MacAddr::parse_str("12:34:de:ad:be:ef").unwrap(),
                 id: Some("mynet0".to_owned()),
                 ..Default::default()
             }
@@ -1659,10 +1670,11 @@ mod tests {
 
         assert_eq!(
             NetConfig::parse(
-                "mac=de:ad:be:ef:12:34,tap=tap0,ip=192.168.100.1,mask=255.255.255.128"
+                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,tap=tap0,ip=192.168.100.1,mask=255.255.255.128"
             )?,
             NetConfig {
                 mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                host_mac: MacAddr::parse_str("12:34:de:ad:be:ef").unwrap(),
                 tap: Some("tap0".to_owned()),
                 ip: "192.168.100.1".parse().unwrap(),
                 mask: "255.255.255.128".parse().unwrap(),
@@ -1671,9 +1683,10 @@ mod tests {
         );
 
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34,vhost_user=true,socket=/tmp/socket")?,
+            NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/socket")?,
             NetConfig {
                 mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                host_mac: MacAddr::parse_str("12:34:de:ad:be:ef").unwrap(),
                 vhost_user: true,
                 vhost_socket: Some("/tmp/socket".to_owned()),
                 ..Default::default()
@@ -1681,9 +1694,10 @@ mod tests {
         );
 
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34,num_queues=4,queue_size=1024,iommu=on")?,
+            NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,num_queues=4,queue_size=1024,iommu=on")?,
             NetConfig {
                 mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                host_mac: MacAddr::parse_str("12:34:de:ad:be:ef").unwrap(),
                 num_queues: 4,
                 queue_size: 1024,
                 iommu: true,

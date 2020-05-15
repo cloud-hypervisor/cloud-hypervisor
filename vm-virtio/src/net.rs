@@ -392,11 +392,13 @@ impl Net {
         ip_addr: Option<Ipv4Addr>,
         netmask: Option<Ipv4Addr>,
         guest_mac: Option<MacAddr>,
+        host_mac: Option<MacAddr>,
         iommu: bool,
         num_queues: usize,
         queue_size: u16,
     ) -> Result<Self> {
-        let taps = open_tap(if_name, ip_addr, netmask, num_queues / 2).map_err(Error::OpenTap)?;
+        let taps = open_tap(if_name, ip_addr, netmask, host_mac, num_queues / 2)
+            .map_err(Error::OpenTap)?;
 
         Self::new_with_tap(id, taps, guest_mac, iommu, num_queues, queue_size)
     }
