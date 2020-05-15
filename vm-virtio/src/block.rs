@@ -23,6 +23,7 @@ use std::cmp;
 use std::convert::TryInto;
 use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::num::Wrapping;
 use std::ops::DerefMut;
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -33,6 +34,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use virtio_bindings::bindings::virtio_blk::*;
+use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{
     ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap,
@@ -604,6 +606,8 @@ struct BlockEpollHandler<T: DiskFile> {
     disk_image_id: Vec<u8>,
     kill_evt: EventFd,
     pause_evt: EventFd,
+    event_idx: bool,
+    signalled_used: Option<Wrapping<u16>>,
 }
 
 impl<T: DiskFile> BlockEpollHandler<T> {
@@ -678,6 +682,25 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         Ok(())
     }
 
+    fn needs_notification(&mut self, mem: &GuestMemoryMmap, used_idx: Wrapping<u16>) -> bool {
+        if !self.event_idx {
+            return true;
+        }
+
+        let mut notify = true;
+
+        if let Some(old_idx) = self.signalled_used {
+            if let Some(used_event) = self.queue.get_used_event(&mem) {
+                if (used_idx - used_event - Wrapping(1u16)) >= (used_idx - old_idx) {
+                    notify = false;
+                }
+            }
+        }
+
+        self.signalled_used = Some(used_idx);
+        notify
+    }
+
     fn run(
         &mut self,
         queue_evt: EventFd,
@@ -738,6 +761,28 @@ impl<T: DiskFile> BlockEpollHandler<T> {
                         if let Err(e) = queue_evt.read() {
                             error!("Failed to get queue event: {:?}", e);
                             break 'epoll;
+                        } else if self.event_idx {
+                            // vm-virtio's Queue implementation only checks avail_index
+                            // once, so to properly support EVENT_IDX we need to keep
+                            // calling process_queue() until it stops finding new
+                            // requests on the queue.
+                            loop {
+                                if self.process_queue() {
+                                    self.queue.update_avail_event(&self.mem.memory());
+
+                                    if self.needs_notification(
+                                        &self.mem.memory(),
+                                        self.queue.next_used,
+                                    ) {
+                                        if let Err(e) = self.signal_used_queue() {
+                                            error!("Failed to signal used queue: {:?}", e);
+                                            break 'epoll;
+                                        }
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
                         } else if self.process_queue() {
                             if let Err(e) = self.signal_used_queue() {
                                 error!("Failed to signal used queue: {:?}", e);
@@ -934,7 +979,9 @@ impl<T: DiskFile> Block<T> {
             );
         }
 
-        let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_BLK_F_FLUSH);
+        let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
+            | (1u64 << VIRTIO_BLK_F_FLUSH)
+            | (1u64 << VIRTIO_RING_F_EVENT_IDX);
 
         if iommu {
             avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
@@ -1112,6 +1159,9 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         }
         self.queue_evts = Some(tmp_queue_evts);
 
+        let event_idx = self.acked_features & 1u64 << VIRTIO_RING_F_EVENT_IDX
+            == 1u64 << VIRTIO_RING_F_EVENT_IDX;
+
         let mut epoll_threads = Vec::new();
         for _ in 0..self.queue_size.len() {
             let mut handler = BlockEpollHandler {
@@ -1123,6 +1173,8 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                 disk_image_id: disk_image_id.clone(),
                 kill_evt: kill_evt.try_clone().unwrap(),
                 pause_evt: pause_evt.try_clone().unwrap(),
+                event_idx,
+                signalled_used: None,
             };
 
             let queue_evt = queue_evts.remove(0);
