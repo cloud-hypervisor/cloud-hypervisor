@@ -42,6 +42,7 @@ fn vuf_filter(action: SeccompAction) -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_epoll_create),
             allow_syscall(libc::SYS_epoll_create1),
             allow_syscall(libc::SYS_epoll_ctl),
+            allow_syscall(libc::SYS_epoll_pwait),
             allow_syscall(libc::SYS_epoll_wait),
             allow_syscall(libc::SYS_eventfd2),
             allow_syscall(libc::SYS_exit),
