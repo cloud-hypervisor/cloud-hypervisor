@@ -88,8 +88,10 @@ const TUNSETVNETHDRSZ: u64 = 0x4004_54d8;
 const TUNGETFEATURES: u64 = 0x8004_54cf;
 
 // See include/uapi/linux/sockios.h in the kernel code.
+const SIOCGIFHWADDR: u64 = 0x8927;
 const SIOCSIFFLAGS: u64 = 0x8914;
 const SIOCSIFADDR: u64 = 0x8916;
+const SIOCSIFHWADDR: u64 = 0x8924;
 const SIOCSIFNETMASK: u64 = 0x891c;
 
 // See include/uapi/linux/vfio.h in the kernel code.
@@ -148,8 +150,10 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_USER_MEMORY_REGION,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_XSAVE,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_XCRS,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, SIOCGIFHWADDR)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCSIFADDR)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCSIFFLAGS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, SIOCSIFHWADDR)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCSIFNETMASK)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TCSETS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TCGETS)?],
