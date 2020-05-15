@@ -29,8 +29,9 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
 use seccomp::{SeccompFilter, SeccompLevel};
+use std::fs::File;
 use std::io;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
@@ -115,13 +116,15 @@ pub enum EpollDispatch {
 }
 
 pub struct EpollContext {
-    raw_fd: RawFd,
+    epoll_file: File,
     dispatch_table: Vec<Option<EpollDispatch>>,
 }
 
 impl EpollContext {
     pub fn new() -> result::Result<EpollContext, io::Error> {
-        let raw_fd = epoll::create(true)?;
+        let epoll_fd = epoll::create(true)?;
+        // Use 'File' to enforce closing on 'epoll_fd'
+        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         // Initial capacity needs to be large enough to hold:
         // * 1 exit event
@@ -132,7 +135,7 @@ impl EpollContext {
         dispatch_table.push(None);
 
         Ok(EpollContext {
-            raw_fd,
+            epoll_file,
             dispatch_table,
         })
     }
@@ -140,7 +143,7 @@ impl EpollContext {
     pub fn add_stdin(&mut self) -> result::Result<(), io::Error> {
         let dispatch_index = self.dispatch_table.len() as u64;
         epoll::ctl(
-            self.raw_fd,
+            self.epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             libc::STDIN_FILENO,
             epoll::Event::new(epoll::Events::EPOLLIN, dispatch_index),
@@ -157,7 +160,7 @@ impl EpollContext {
     {
         let dispatch_index = self.dispatch_table.len() as u64;
         epoll::ctl(
-            self.raw_fd,
+            self.epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             fd.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, dispatch_index),
@@ -170,7 +173,7 @@ impl EpollContext {
 
 impl AsRawFd for EpollContext {
     fn as_raw_fd(&self) -> RawFd {
-        self.raw_fd
+        self.epoll_file.as_raw_fd()
     }
 }
 

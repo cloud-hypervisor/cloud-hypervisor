@@ -333,7 +333,7 @@ enum VringWorkerError {
 type VringWorkerResult<T> = std::result::Result<T, VringWorkerError>;
 
 pub struct VringWorker {
-    epoll_fd: RawFd,
+    epoll_file: File,
 }
 
 impl VringWorker {
@@ -342,7 +342,7 @@ impl VringWorker {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
         'epoll: loop {
-            let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
+            let num_events = match epoll::wait(self.epoll_file.as_raw_fd(), -1, &mut events[..]) {
                 Ok(res) => res,
                 Err(e) => {
                     if e.kind() == io::ErrorKind::Interrupted {
@@ -396,7 +396,7 @@ impl VringWorker {
         data: u64,
     ) -> result::Result<(), io::Error> {
         epoll::ctl(
-            self.epoll_fd,
+            self.epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             fd,
             epoll::Event::new(ev_type, data),
@@ -413,7 +413,7 @@ impl VringWorker {
         data: u64,
     ) -> result::Result<(), io::Error> {
         epoll::ctl(
-            self.epoll_fd,
+            self.epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_DEL,
             fd,
             epoll::Event::new(ev_type, data),
@@ -486,8 +486,10 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
         for (thread_id, queues_mask) in queues_per_thread.iter().enumerate() {
             // Create the epoll file descriptor
             let epoll_fd = epoll::create(true).map_err(VhostUserHandlerError::EpollCreateFd)?;
+            // Use 'File' to enforce closing on 'epoll_fd'
+            let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
-            let vring_worker = Arc::new(VringWorker { epoll_fd });
+            let vring_worker = Arc::new(VringWorker { epoll_file });
             let worker = vring_worker.clone();
 
             let exit_event_id = if let Some((exit_event_fd, exit_event_id)) =
