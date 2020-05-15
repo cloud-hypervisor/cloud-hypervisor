@@ -16,7 +16,7 @@ extern crate vmm;
 use epoll;
 use libc::{self, EAGAIN, EFD_NONBLOCK};
 use log::*;
-use net_util::Tap;
+use net_util::{MacAddr, Tap};
 use std::fmt;
 use std::io::Read;
 use std::io::{self};
@@ -221,13 +221,20 @@ pub struct VhostUserNetBackend {
 impl VhostUserNetBackend {
     fn new(
         ip_addr: Ipv4Addr,
+        host_mac: MacAddr,
         netmask: Ipv4Addr,
         num_queues: usize,
         queue_size: u16,
         ifname: Option<&str>,
     ) -> Result<Self> {
-        let mut taps = open_tap(ifname, Some(ip_addr), Some(netmask), num_queues / 2)
-            .map_err(Error::OpenTap)?;
+        let mut taps = open_tap(
+            ifname,
+            Some(ip_addr),
+            Some(netmask),
+            Some(host_mac),
+            num_queues / 2,
+        )
+        .map_err(Error::OpenTap)?;
 
         let mut queues_per_thread = Vec::new();
         let mut threads = Vec::new();
@@ -351,6 +358,7 @@ impl VhostUserBackend for VhostUserNetBackend {
 
 pub struct VhostUserNetBackendConfig {
     pub ip: Ipv4Addr,
+    pub host_mac: MacAddr,
     pub mask: Ipv4Addr,
     pub socket: String,
     pub num_queues: usize,
@@ -365,6 +373,7 @@ impl VhostUserNetBackendConfig {
         parser
             .add("tap")
             .add("ip")
+            .add("host_mac")
             .add("mask")
             .add("queue_size")
             .add("num_queues")
@@ -377,6 +386,10 @@ impl VhostUserNetBackendConfig {
             .convert("ip")
             .map_err(Error::FailedConfigParse)?
             .unwrap_or_else(|| Ipv4Addr::new(192, 168, 100, 1));
+        let host_mac = parser
+            .convert("host_mac")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or_else(MacAddr::local_random);
         let mask = parser
             .convert("mask")
             .map_err(Error::FailedConfigParse)?
@@ -393,6 +406,7 @@ impl VhostUserNetBackendConfig {
 
         Ok(VhostUserNetBackendConfig {
             ip,
+            host_mac,
             mask,
             socket,
             num_queues,
@@ -420,6 +434,7 @@ pub fn start_net_backend(backend_command: &str) {
     let net_backend = Arc::new(RwLock::new(
         VhostUserNetBackend::new(
             backend_config.ip,
+            backend_config.host_mac,
             backend_config.mask,
             backend_config.num_queues,
             backend_config.queue_size,
