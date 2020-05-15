@@ -183,6 +183,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "log 0.4.8",
+ "net_util",
  "seccomp",
  "serde_json",
  "ssh2",

@@ -36,6 +36,7 @@ tempdir= "0.3.7"
 lazy_static= "1.4.0"
 tempfile = "3.1.0"
 serde_json = ">=1.0.9"
+net_util = { path = "net_util" }
 
 [features]
 default = ["acpi", "pci", "cmos"]
