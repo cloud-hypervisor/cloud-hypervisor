@@ -196,6 +196,7 @@ pub fn vmm_thread_filter() -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_bind),
             allow_syscall(libc::SYS_brk),
             allow_syscall(libc::SYS_clock_gettime),
+            allow_syscall(libc::SYS_clock_nanosleep),
             allow_syscall(libc::SYS_clone),
             allow_syscall(libc::SYS_close),
             allow_syscall(libc::SYS_connect),
