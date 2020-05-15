@@ -26,7 +26,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::num::Wrapping;
 use std::ops::DerefMut;
 use std::os::linux::fs::MetadataExt;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::slice;
@@ -708,24 +708,26 @@ impl<T: DiskFile> BlockEpollHandler<T> {
     ) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
+        // Use 'File' to enforce closing on 'epoll_fd'
+        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         // Add events
         epoll::ctl(
-            epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             queue_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(QUEUE_AVAIL_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
         epoll::ctl(
-            epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
         epoll::ctl(
-            epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.pause_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
@@ -736,7 +738,7 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
         'epoll: loop {
-            let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
+            let num_events = match epoll::wait(epoll_file.as_raw_fd(), -1, &mut events[..]) {
                 Ok(res) => res,
                 Err(e) => {
                     if e.kind() == io::ErrorKind::Interrupted {

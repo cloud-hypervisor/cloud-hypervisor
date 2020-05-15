@@ -21,10 +21,11 @@ use libc::EAGAIN;
 use libc::EFD_NONBLOCK;
 use net_util::{MacAddr, Tap};
 use std::cmp;
+use std::fs::File;
 use std::io::Read;
 use std::io::{self, Write};
 use std::net::Ipv4Addr;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -206,31 +207,33 @@ impl NetEpollHandler {
     ) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         self.epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
-        // Add events
+        // Use 'File' to enforce closing on 'epoll_fd'
+        let epoll_file = unsafe { File::from_raw_fd(self.epoll_fd) };
+
         // Add events
         epoll::ctl(
-            self.epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             queue_evts[0].as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(RX_QUEUE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
         epoll::ctl(
-            self.epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             queue_evts[1].as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(TX_QUEUE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
         epoll::ctl(
-            self.epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
         epoll::ctl(
-            self.epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.pause_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
@@ -241,7 +244,7 @@ impl NetEpollHandler {
         // then we can start the thread while listening onto the TAP.
         if queues[0].available_descriptors(&self.mem.memory()).unwrap() {
             epoll::ctl(
-                self.epoll_fd,
+                epoll_file.as_raw_fd(),
                 epoll::ControlOptions::EPOLL_CTL_ADD,
                 self.tap.as_raw_fd(),
                 epoll::Event::new(epoll::Events::EPOLLIN, u64::from(RX_TAP_EVENT)),
@@ -253,7 +256,7 @@ impl NetEpollHandler {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); NET_EVENTS_COUNT];
 
         'epoll: loop {
-            let num_events = match epoll::wait(self.epoll_fd, -1, &mut events[..]) {
+            let num_events = match epoll::wait(epoll_file.as_raw_fd(), -1, &mut events[..]) {
                 Ok(res) => res,
                 Err(e) => {
                     if e.kind() == io::ErrorKind::Interrupted {

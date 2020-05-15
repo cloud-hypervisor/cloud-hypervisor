@@ -13,8 +13,9 @@ use epoll;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::VirtioInterrupt;
+use std::fs::File;
 use std::io;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -61,13 +62,15 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
     pub fn run(&mut self, paused: Arc<AtomicBool>) -> Result<()> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(Error::EpollCreateFd)?;
+        // Use 'File' to enforce closing on 'epoll_fd'
+        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         for (index, vhost_user_interrupt) in self.vu_epoll_cfg.vu_interrupt_list.iter().enumerate()
         {
             if let Some(eventfd) = &vhost_user_interrupt.0 {
                 // Add events
                 epoll::ctl(
-                    epoll_fd,
+                    epoll_file.as_raw_fd(),
                     epoll::ControlOptions::EPOLL_CTL_ADD,
                     eventfd.as_raw_fd(),
                     epoll::Event::new(epoll::Events::EPOLLIN, index as u64),
@@ -79,7 +82,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
         let kill_evt_index = self.vu_epoll_cfg.vu_interrupt_list.len();
 
         epoll::ctl(
-            epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.vu_epoll_cfg.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, kill_evt_index as u64),
@@ -89,7 +92,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
         let pause_evt_index = kill_evt_index + 1;
 
         epoll::ctl(
-            epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.vu_epoll_cfg.pause_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, pause_evt_index as u64),
@@ -101,7 +104,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
         let slave_evt_index = if let Some(self_req_handler) = &self.vu_epoll_cfg.slave_req_handler {
             index = pause_evt_index + 1;
             epoll::ctl(
-                epoll_fd,
+                epoll_file.as_raw_fd(),
                 epoll::ControlOptions::EPOLL_CTL_ADD,
                 self_req_handler.as_raw_fd(),
                 epoll::Event::new(epoll::Events::EPOLLIN, index as u64),
@@ -116,7 +119,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); index + 1];
 
         'poll: loop {
-            let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
+            let num_events = match epoll::wait(epoll_file.as_raw_fd(), -1, &mut events[..]) {
                 Ok(res) => res,
                 Err(e) => {
                     if e.kind() == io::ErrorKind::Interrupted {

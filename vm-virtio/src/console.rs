@@ -14,10 +14,11 @@ use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std;
 use std::cmp;
 use std::collections::VecDeque;
+use std::fs::File;
 use std::io;
 use std::io::Write;
 use std::ops::DerefMut;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -186,31 +187,33 @@ impl ConsoleEpollHandler {
     fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
         let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
+        // Use 'File' to enforce closing on 'epoll_fd'
+        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         // Add events
         epoll::ctl(
-            epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.input_queue_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(INPUT_QUEUE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
         epoll::ctl(
-            epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.output_queue_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(OUTPUT_QUEUE_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
         epoll::ctl(
-            epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.input_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(INPUT_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
         epoll::ctl(
-            epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.config_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(CONFIG_EVENT)),
@@ -218,14 +221,14 @@ impl ConsoleEpollHandler {
         .map_err(DeviceError::EpollCtl)?;
 
         epoll::ctl(
-            epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.kill_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
         )
         .map_err(DeviceError::EpollCtl)?;
         epoll::ctl(
-            epoll_fd,
+            epoll_file.as_raw_fd(),
             epoll::ControlOptions::EPOLL_CTL_ADD,
             self.pause_evt.as_raw_fd(),
             epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
@@ -236,7 +239,7 @@ impl ConsoleEpollHandler {
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
         'epoll: loop {
-            let num_events = match epoll::wait(epoll_fd, -1, &mut events[..]) {
+            let num_events = match epoll::wait(epoll_file.as_raw_fd(), -1, &mut events[..]) {
                 Ok(res) => res,
                 Err(e) => {
                     if e.kind() == io::ErrorKind::Interrupted {
