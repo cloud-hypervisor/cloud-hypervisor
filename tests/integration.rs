@@ -17,6 +17,7 @@ extern crate lazy_static;
 #[cfg(feature = "integration_tests")]
 mod tests {
     #![allow(dead_code)]
+    use net_util::MacAddr;
     use ssh2::Session;
     use std::collections::HashMap;
     use std::env;
@@ -1260,6 +1261,7 @@ mod tests {
         num_queues: usize,
         prepare_vhost_user_net_daemon: Option<&PrepareNetDaemon>,
         self_spawned: bool,
+        generate_host_mac: bool,
     ) {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
@@ -1272,11 +1274,22 @@ mod tests {
             let mut kernel_path = workload_path;
             kernel_path.push("vmlinux");
 
+            let host_mac = if generate_host_mac {
+                Some(MacAddr::local_random())
+            } else {
+                None
+            };
+
             let (net_params, daemon_child) = if self_spawned {
                 (
                     format!(
-                        "vhost_user=true,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size=1024",
+                        "vhost_user=true,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size=1024{}",
                         guest.network.guest_mac, guest.network.host_ip, num_queues,
+                        if let Some(host_mac) =host_mac {
+                            format!(",host_mac={}", host_mac)
+                        } else {
+                            "".to_owned()
+                        }
                     ),
                     None,
                 )
@@ -1288,8 +1301,15 @@ mod tests {
 
                 (
                     format!(
-                        "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024",
-                        guest.network.guest_mac, vunet_socket_path, num_queues,
+                        "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024{}",
+                        guest.network.guest_mac,
+                        vunet_socket_path,
+                        num_queues,
+                        if let Some(host_mac) = host_mac {
+                            format!(",host_mac={}", host_mac)
+                        } else {
+                            "".to_owned()
+                        }
                     ),
                     Some(daemon_child),
                 )
@@ -1316,6 +1336,16 @@ mod tests {
                     .expect("Expected checking of tap count to succeed");
                 aver_eq!(tb, String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
             }
+
+            if let Some(host_mac) = tap {
+                let mac_count = std::process::Command::new("bash")
+                    .arg("-c")
+                    .arg(format!("ip link | grep -c {}", host_mac))
+                    .output()
+                    .expect("Expected checking of host mac to succeed");
+                aver_eq!(tb, String::from_utf8_lossy(&mac_count.stdout).trim(), "1");
+            }
+
             // 1 network interface + default localhost ==> 2 interfaces
             // It's important to note that this test is fully exercising the
             // vhost-user-net implementation and the associated backend since
@@ -1392,7 +1422,7 @@ mod tests {
 
     #[test]
     fn test_vhost_user_net_default() {
-        test_vhost_user_net(None, 2, Some(&prepare_vhost_user_net_daemon), false)
+        test_vhost_user_net(None, 2, Some(&prepare_vhost_user_net_daemon), false, false)
     }
 
     #[test]
@@ -1401,6 +1431,7 @@ mod tests {
             Some("mytap0"),
             2,
             Some(&prepare_vhost_user_net_daemon),
+            false,
             false,
         )
     }
@@ -1412,12 +1443,13 @@ mod tests {
             2,
             Some(&prepare_vhost_user_net_daemon),
             false,
+            false,
         )
     }
 
     #[test]
     fn test_vhost_user_net_multiple_queues() {
-        test_vhost_user_net(None, 4, Some(&prepare_vhost_user_net_daemon), false)
+        test_vhost_user_net(None, 4, Some(&prepare_vhost_user_net_daemon), false, false)
     }
 
     #[test]
@@ -1427,12 +1459,23 @@ mod tests {
             4,
             Some(&prepare_vhost_user_net_daemon),
             false,
+            false,
         )
     }
 
     #[test]
     fn test_vhost_user_net_self_spawning() {
-        test_vhost_user_net(None, 4, None, true)
+        test_vhost_user_net(None, 4, None, true, false)
+    }
+
+    #[test]
+    fn test_vhost_user_net_self_spawning_host_mac() {
+        test_vhost_user_net(None, 2, None, true, true)
+    }
+
+    #[test]
+    fn test_vhost_user_net_host_mac() {
+        test_vhost_user_net(None, 2, None, true, true)
     }
 
     type PrepareBlkDaemon =
