@@ -312,7 +312,9 @@ impl VhostUserBackend for VhostUserNetBackend {
                 }
             }
             1 => {
-                thread.process_tx(&mut vrings[1].write().unwrap().mut_queue())?;
+                let mut vring = vrings[1].write().unwrap();
+                thread.process_tx(vring.mut_queue())?;
+                vring.signal_used_queue()?;
             }
             2 => {
                 let mut vring = vrings[0].write().unwrap();

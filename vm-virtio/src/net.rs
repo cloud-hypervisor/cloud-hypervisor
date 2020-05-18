@@ -148,8 +148,7 @@ impl NetEpollHandler {
         let mem = self.mem.memory();
 
         self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
-
-        Ok(())
+        self.signal_used_queue(queue)
     }
 
     fn read_tap(&mut self) -> io::Result<usize> {
