@@ -15,6 +15,7 @@ use crate::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
     VirtioInterruptType, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
+use anyhow::anyhow;
 /// This is the `VirtioDevice` implementation for our vsock device. It handles the virtio-level
 /// device logic: feature negociation, device configuration, and device activation.
 /// The run-time device logic (i.e. event-driven data handling) is implemented by
@@ -47,7 +48,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
+use vm_migration::{
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -394,6 +398,12 @@ pub struct Vsock<B: VsockBackend> {
     path: PathBuf,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct VsockState {
+    pub avail_features: u64,
+    pub acked_features: u64,
+}
+
 impl<B> Vsock<B>
 where
     B: VsockBackend,
@@ -427,6 +437,20 @@ where
             paused: Arc::new(AtomicBool::new(false)),
             path,
         })
+    }
+
+    fn state(&self) -> VsockState {
+        VsockState {
+            avail_features: self.avail_features,
+            acked_features: self.acked_features,
+        }
+    }
+
+    fn set_state(&mut self, state: &VsockState) -> io::Result<()> {
+        self.avail_features = state.avail_features;
+        self.acked_features = state.acked_features;
+
+        Ok(())
     }
 }
 
@@ -598,6 +622,41 @@ where
 {
     fn id(&self) -> String {
         self.id.clone()
+    }
+
+    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+        let snapshot =
+            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
+
+        let mut vsock_snapshot = Snapshot::new(self.id.as_str());
+        vsock_snapshot.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", self.id),
+            snapshot,
+        });
+
+        Ok(vsock_snapshot)
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        if let Some(vsock_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
+            let vsock_state = match serde_json::from_slice(&vsock_section.snapshot) {
+                Ok(state) => state,
+                Err(error) => {
+                    return Err(MigratableError::Restore(anyhow!(
+                        "Could not deserialize VSOCK {}",
+                        error
+                    )))
+                }
+            };
+
+            return self.set_state(&vsock_state).map_err(|e| {
+                MigratableError::Restore(anyhow!("Could not restore VSOCK state {:?}", e))
+            });
+        }
+
+        Err(MigratableError::Restore(anyhow!(
+            "Could not find VSOCK snapshot section"
+        )))
     }
 }
 impl<B> Transportable for Vsock<B> where B: VsockBackend + Sync + 'static {}
