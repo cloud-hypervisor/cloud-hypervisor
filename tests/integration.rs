@@ -4315,12 +4315,32 @@ mod tests {
                 net_id, guest.network.guest_mac, guest.network.host_ip
             );
 
+            let cloudinit_params = if cfg!(feature = "mmio") {
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+            } else {
+                format!(
+                    "path={},iommu=on",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+            };
+
             let mut child = GuestCommand::new(&guest)
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=4G"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .default_disks()
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    cloudinit_params.as_str(),
+                ])
                 .args(&["--net", net_params.as_str()])
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .capture_output()
@@ -4333,11 +4353,17 @@ mod tests {
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
             // Check the guest RAM
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_968_000);
-            // Check if the block device is readable
+            // Check block devices are readable
             aver!(
                 tb,
                 guest
                     .ssh_command("dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
+                    .is_ok()
+            );
+            aver!(
+                tb,
+                guest
+                    .ssh_command("dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
                     .is_ok()
             );
             // Check if the rng device is readable
@@ -4426,6 +4452,12 @@ mod tests {
                 tb,
                 guest
                     .ssh_command("dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
+                    .is_ok()
+            );
+            aver!(
+                tb,
+                guest
+                    .ssh_command("dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
                     .is_ok()
             );
             aver!(
