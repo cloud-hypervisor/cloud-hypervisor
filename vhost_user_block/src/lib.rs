@@ -259,6 +259,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
             | 1 << VIRTIO_BLK_F_CONFIG_WCE
             | 1 << VIRTIO_RING_F_EVENT_IDX
             | 1 << VIRTIO_F_VERSION_1
+            | 1 << VIRTIO_BLK_F_FLUSH
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
         if self.rdonly {
