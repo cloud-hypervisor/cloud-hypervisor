@@ -170,12 +170,18 @@ impl MmioDevice {
         self.interrupt_status
             .store(state.interrupt_status, Ordering::SeqCst);
         self.driver_status = state.driver_status;
-        self.queues = state.queues.clone();
 
         // Update virtqueues indexes for both available and used rings.
         if let Some(mem) = self.mem.as_ref() {
             let mem = mem.memory();
-            for queue in self.queues.iter_mut() {
+            for (i, queue) in self.queues.iter_mut().enumerate() {
+                queue.max_size = state.queues[i].max_size;
+                queue.size = state.queues[i].size;
+                queue.ready = state.queues[i].ready;
+                queue.vector = state.queues[i].vector;
+                queue.desc_table = state.queues[i].desc_table;
+                queue.avail_ring = state.queues[i].avail_ring;
+                queue.used_ring = state.queues[i].used_ring;
                 queue.next_avail = Wrapping(
                     queue
                         .used_index_from_memory(&mem)
