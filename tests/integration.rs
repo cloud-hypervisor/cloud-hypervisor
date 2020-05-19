@@ -2326,17 +2326,28 @@ mod tests {
         });
     }
 
-    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_serial_off() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
             let guest = Guest::new(&mut clear);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path;
+            kernel_path.push("bzImage");
+
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
+                .args(&[
+                    "--cmdline",
+                    CLEAR_KERNEL_CMDLINE
+                        .replace("console=ttyS0,115200n8 ", "")
+                        .as_str(),
+                ])
                 .args(&["--serial", "off"])
                 .spawn()
                 .unwrap();
