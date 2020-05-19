@@ -812,6 +812,39 @@ mod tests {
 
             Ok(cache == (end_addr - start_addr + 1))
         }
+
+        fn check_vsock(&self, sock: &str) {
+            // Listen from guest on vsock CID=3 PORT=16
+            // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
+            let guest_ip = self.network.guest_ip.clone();
+            let listen_socat = thread::spawn(move || {
+                ssh_command_ip("sudo socat - SOCKET-LISTEN:40:0:x00x00x10x00x00x00x03x00x00x00x00x00x00x00 > vsock_log", &guest_ip, DEFAULT_SSH_RETRIES, DEFAULT_SSH_TIMEOUT).unwrap();
+            });
+
+            // Make sure socat is listening, which might take a few second on slow systems
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Write something to vsock from the host
+            Command::new("bash")
+                .arg("-c")
+                .arg(
+                    format!(
+                        "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{}",
+                        sock
+                    )
+                    .as_str(),
+                )
+                .output()
+                .unwrap();
+
+            // Wait for the thread to terminate.
+            listen_socat.join().unwrap();
+
+            assert_eq!(
+                self.ssh_command("cat vsock_log").unwrap().trim(),
+                "HelloWorld!"
+            );
+        }
     }
 
     struct GuestCommand<'a> {
@@ -3026,36 +3059,8 @@ mod tests {
                 );
             }
 
-            // Listen from guest on vsock CID=3 PORT=16
-            // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
-            let guest_ip = guest.network.guest_ip.clone();
-            let listen_socat = thread::spawn(move || {
-                ssh_command_ip("sudo socat - SOCKET-LISTEN:40:0:x00x00x10x00x00x00x03x00x00x00x00x00x00x00 > vsock_log", &guest_ip, DEFAULT_SSH_RETRIES, DEFAULT_SSH_TIMEOUT).unwrap();
-            });
-
-            // Make sure socat is listening, which might take a few second on slow systems
-            thread::sleep(std::time::Duration::new(10, 0));
-
-            // Write something to vsock from the host
-            Command::new("bash")
-                .arg("-c")
-                .arg(
-                    format!(
-                        "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{}",
-                        sock
-                    )
-                    .as_str(),
-                )
-                .output()
-                .unwrap();
-
-            // Wait for the thread to terminate.
-            listen_socat.join().unwrap();
-
-            assert_eq!(
-                guest.ssh_command("cat vsock_log").unwrap().trim(),
-                "HelloWorld!"
-            );
+            // Validate vsock works as expected.
+            guest.check_vsock(sock.as_str());
 
             let reboot_count = guest
                 .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
@@ -3076,36 +3081,8 @@ mod tests {
                 .unwrap_or_default();
             aver_eq!(tb, reboot_count, 1);
 
-            // Listen from guest on vsock CID=3 PORT=16
-            // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
-            let guest_ip = guest.network.guest_ip.clone();
-            let listen_socat = thread::spawn(move || {
-                ssh_command_ip("sudo socat - SOCKET-LISTEN:40:0:x00x00x10x00x00x00x03x00x00x00x00x00x00x00 > vsock_log", &guest_ip, DEFAULT_SSH_RETRIES, DEFAULT_SSH_TIMEOUT).unwrap();
-            });
-
-            // Make sure socat is listening, which might take a few second on slow systems
-            thread::sleep(std::time::Duration::new(10, 0));
-
-            // Write something to vsock from the host
-            Command::new("bash")
-                .arg("-c")
-                .arg(
-                    format!(
-                        "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{}",
-                        sock
-                    )
-                    .as_str(),
-                )
-                .output()
-                .unwrap();
-
-            // Wait for the thread to terminate.
-            listen_socat.join().unwrap();
-
-            assert_eq!(
-                guest.ssh_command("cat vsock_log").unwrap().trim(),
-                "HelloWorld!"
-            );
+            // Validate vsock still works after a reboot.
+            guest.check_vsock(sock.as_str());
 
             if hotplug {
                 aver!(
@@ -4327,6 +4304,8 @@ mod tests {
                 )
             };
 
+            let sock = temp_vsock_path(&guest.tmp_dir);
+
             let mut child = GuestCommand::new(&guest)
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=1"])
@@ -4342,6 +4321,7 @@ mod tests {
                     cloudinit_params.as_str(),
                 ])
                 .args(&["--net", net_params.as_str()])
+                .args(&["--vsock", format!("cid=3,sock={}", sock).as_str()])
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .capture_output()
                 .spawn()
@@ -4373,6 +4353,8 @@ mod tests {
                     .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
                     .is_ok()
             );
+            // Check vsock
+            guest.check_vsock(sock.as_str());
             // Check if the console is usable
             let console_text = String::from("On a branch floating down river a cricket, singing.");
             let console_cmd = format!("echo {} | sudo tee /dev/hvc0", console_text);
@@ -4431,6 +4413,13 @@ mod tests {
                 Err(_) => aver!(tb, false),
             }
 
+            // Remove the vsock socket file.
+            Command::new("rm")
+                .arg("-f")
+                .arg(sock.as_str())
+                .output()
+                .unwrap();
+
             // Restore the VM from the snapshot
             let mut child = GuestCommand::new(&guest)
                 .args(&["--api-socket", &api_socket])
@@ -4466,6 +4455,7 @@ mod tests {
                     .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
                     .is_ok()
             );
+            guest.check_vsock(sock.as_str());
             aver!(tb, guest.ssh_command(&console_cmd).is_ok());
 
             // Shutdown the target VM and check console output
