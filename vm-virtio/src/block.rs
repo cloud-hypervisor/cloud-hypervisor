@@ -479,6 +479,7 @@ pub struct Request {
     data_addr: GuestAddress,
     data_len: u32,
     pub status_addr: GuestAddress,
+    writeback: bool,
 }
 
 impl Request {
@@ -497,6 +498,7 @@ impl Request {
             data_addr: GuestAddress(0),
             data_len: 0,
             status_addr: GuestAddress(0),
+            writeback: true,
         };
 
         let data_desc;
@@ -576,13 +578,11 @@ impl Request {
             RequestType::Out => {
                 mem.write_all_to(self.data_addr, disk, self.data_len as usize)
                     .map_err(ExecuteError::Write)?;
-            }
-            RequestType::Flush => match disk.flush() {
-                Ok(_) => {
-                    return Ok(0);
+                if !self.writeback {
+                    disk.flush().map_err(ExecuteError::Flush)?;
                 }
-                Err(e) => return Err(ExecuteError::Flush(e)),
-            },
+            }
+            RequestType::Flush => disk.flush().map_err(ExecuteError::Flush)?,
             RequestType::GetDeviceID => {
                 if (self.data_len as usize) < disk_id.len() {
                     return Err(ExecuteError::BadRequest(Error::InvalidOffset));
@@ -593,6 +593,10 @@ impl Request {
             RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
         };
         Ok(0)
+    }
+
+    pub fn set_writeback(&mut self, writeback: bool) {
+        self.writeback = writeback
     }
 }
 
