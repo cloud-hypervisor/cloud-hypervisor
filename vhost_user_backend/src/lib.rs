@@ -210,8 +210,6 @@ pub struct Vring {
     call: Option<EventFd>,
     err: Option<EventFd>,
     enabled: bool,
-    event_idx: bool,
-    signalled_used: Option<Wrapping<u16>>,
 }
 
 impl Vring {
@@ -222,38 +220,11 @@ impl Vring {
             call: None,
             err: None,
             enabled: false,
-            event_idx: false,
-            signalled_used: None,
         }
     }
 
     pub fn mut_queue(&mut self) -> &mut Queue {
         &mut self.queue
-    }
-
-    pub fn set_event_idx(&mut self, enabled: bool) {
-        /* Also reset the last signalled event */
-        self.signalled_used = None;
-        self.event_idx = enabled;
-    }
-
-    pub fn needs_notification(&mut self, mem: &GuestMemoryMmap, used_idx: Wrapping<u16>) -> bool {
-        if !self.event_idx {
-            return true;
-        }
-
-        let mut notify = true;
-
-        if let Some(old_idx) = self.signalled_used {
-            if let Some(used_event) = self.mut_queue().get_used_event(&mem) {
-                if (used_idx - used_event - Wrapping(1u16)) >= (used_idx - old_idx) {
-                    notify = false;
-                }
-            }
-        }
-
-        self.signalled_used = Some(used_idx);
-        notify
     }
 
     pub fn signal_used_queue(&mut self) -> result::Result<(), io::Error> {
@@ -724,6 +695,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
         self.vrings[index as usize]
             .write()
             .unwrap()
+            .mut_queue()
             .set_event_idx(event_idx);
         self.backend.write().unwrap().set_event_idx(event_idx);
         Ok(())
