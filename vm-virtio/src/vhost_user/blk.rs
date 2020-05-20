@@ -50,7 +50,7 @@ pub struct Blk {
 
 impl Blk {
     /// Create a new vhost-user-blk device
-    pub fn new(id: String, wce: bool, vu_cfg: VhostUserConfig) -> Result<Blk> {
+    pub fn new(id: String, vu_cfg: VhostUserConfig) -> Result<Blk> {
         let mut vhost_user_blk = Master::connect(&vu_cfg.sock, vu_cfg.num_queues as u64)
             .map_err(Error::VhostUserCreateMaster)?;
 
@@ -61,12 +61,9 @@ impl Blk {
             | 1 << VIRTIO_BLK_F_FLUSH
             | 1 << VIRTIO_BLK_F_TOPOLOGY
             | 1 << VIRTIO_RING_F_EVENT_IDX
+            | 1 << VIRTIO_BLK_F_CONFIG_WCE
             | 1 << VIRTIO_F_VERSION_1
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
-
-        if wce {
-            avail_features |= 1 << VIRTIO_BLK_F_CONFIG_WCE;
-        }
 
         if vu_cfg.num_queues > 1 {
             avail_features |= 1 << VIRTIO_BLK_F_MQ;

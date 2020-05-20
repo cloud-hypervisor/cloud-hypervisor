@@ -1539,7 +1539,7 @@ mod tests {
 
                 (
                     format!(
-                        "vhost_user=true,path={},num_queues={},queue_size=128,wce=true",
+                        "vhost_user=true,path={},num_queues={},queue_size=128",
                         blk_file_path, num_queues,
                     ),
                     None,
@@ -1552,7 +1552,7 @@ mod tests {
 
                 (
                     format!(
-                        "vhost_user=true,socket={},num_queues={},queue_size=128,wce=true",
+                        "vhost_user=true,socket={},num_queues={},queue_size=128",
                         vubd_socket_path, num_queues,
                     ),
                     Some(daemon_child),
@@ -1736,7 +1736,7 @@ mod tests {
             let (blk_boot_params, daemon_child) = if self_spawned {
                 (
                     format!(
-                        "vhost_user=true,path={},num_queues={},queue_size=128,wce=true",
+                        "vhost_user=true,path={},num_queues={},queue_size=128",
                         disk_path, num_queues,
                     ),
                     None,
@@ -1754,7 +1754,7 @@ mod tests {
 
                 (
                     format!(
-                        "vhost_user=true,socket={},num_queues={},queue_size=128,wce=true",
+                        "vhost_user=true,socket={},num_queues={},queue_size=128",
                         vubd_socket_path, num_queues,
                     ),
                     Some(daemon_child),

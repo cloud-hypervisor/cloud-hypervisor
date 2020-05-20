@@ -561,8 +561,6 @@ pub struct DiskConfig {
     #[serde(default)]
     pub vhost_user: bool,
     pub vhost_socket: Option<String>,
-    #[serde(default = "default_diskconfig_wce")]
-    pub wce: bool,
     #[serde(default = "default_diskconfig_poll_queue")]
     pub poll_queue: bool,
     #[serde(default)]
@@ -575,10 +573,6 @@ fn default_diskconfig_num_queues() -> usize {
 
 fn default_diskconfig_queue_size() -> u16 {
     DEFAULT_QUEUE_SIZE_VUBLK
-}
-
-fn default_diskconfig_wce() -> bool {
-    true
 }
 
 fn default_diskconfig_poll_queue() -> bool {
@@ -596,7 +590,6 @@ impl Default for DiskConfig {
             queue_size: default_diskconfig_queue_size(),
             vhost_user: false,
             vhost_socket: None,
-            wce: default_diskconfig_wce(),
             poll_queue: default_diskconfig_poll_queue(),
             id: None,
         }
@@ -607,7 +600,7 @@ impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
          \"path=<disk_image_path>,readonly=on|off,iommu=on|off,num_queues=<number_of_queues>,\
          queue_size=<size_of_each_queue>,vhost_user=<vhost_user_enable>,\
-         socket=<vhost_user_socket_path>,wce=<true|false, default true>,id=<device_id>\"";
+         socket=<vhost_user_socket_path>, default true>,id=<device_id>\"";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -620,7 +613,6 @@ impl DiskConfig {
             .add("num_queues")
             .add("vhost_user")
             .add("socket")
-            .add("wce")
             .add("poll_queue")
             .add("id");
         parser.parse(disk).map_err(Error::ParseDisk)?;
@@ -655,21 +647,12 @@ impl DiskConfig {
             .unwrap_or(Toggle(false))
             .0;
         let vhost_socket = parser.get("socket");
-        let wce = parser
-            .convert::<Toggle>("wce")
-            .map_err(Error::ParseDisk)?
-            .unwrap_or_else(|| Toggle(default_diskconfig_wce()))
-            .0;
         let poll_queue = parser
             .convert::<Toggle>("poll_queue")
             .map_err(Error::ParseDisk)?
             .unwrap_or_else(|| Toggle(default_diskconfig_poll_queue()))
             .0;
         let id = parser.get("id");
-
-        if parser.is_set("wce") && !vhost_user {
-            warn!("wce parameter currently only has effect when used vhost_user=true");
-        }
 
         if parser.is_set("poll_queue") && !vhost_user {
             warn!("poll_queue parameter currently only has effect when used vhost_user=true");
@@ -684,7 +667,6 @@ impl DiskConfig {
             queue_size,
             vhost_socket,
             vhost_user,
-            wce,
             poll_queue,
             id,
         })
@@ -1611,18 +1593,16 @@ mod tests {
             }
         );
         assert_eq!(
-            DiskConfig::parse("path=/path/to_file,wce=true")?,
+            DiskConfig::parse("path=/path/to_file")?,
             DiskConfig {
                 path: Some(PathBuf::from("/path/to_file")),
-                wce: true,
                 ..Default::default()
             }
         );
         assert_eq!(
-            DiskConfig::parse("path=/path/to_file,wce=false")?,
+            DiskConfig::parse("path=/path/to_file")?,
             DiskConfig {
                 path: Some(PathBuf::from("/path/to_file")),
-                wce: false,
                 ..Default::default()
             }
         );

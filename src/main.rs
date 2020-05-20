@@ -763,14 +763,14 @@ mod unit_tests {
                     "--memory",
                     "shared=true",
                     "--disk",
-                    "vhost_user=true,socket=/tmp/socket1,wce=true",
+                    "vhost_user=true,socket=/tmp/socket1",
                     "path=/path/to/disk/2",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "disks": [
-                        {"vhost_user":true, "vhost_socket":"/tmp/socket1", "wce":true},
+                        {"vhost_user":true, "vhost_socket":"/tmp/socket1"},
                         {"path": "/path/to/disk/2"}
                     ]
                 }"#,
