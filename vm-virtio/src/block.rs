@@ -23,7 +23,6 @@ use std::cmp;
 use std::convert::TryInto;
 use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::num::Wrapping;
 use std::ops::DerefMut;
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -607,7 +606,6 @@ struct BlockEpollHandler<T: DiskFile> {
     kill_evt: EventFd,
     pause_evt: EventFd,
     event_idx: bool,
-    signalled_used: Option<Wrapping<u16>>,
 }
 
 impl<T: DiskFile> BlockEpollHandler<T> {
@@ -682,25 +680,6 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         Ok(())
     }
 
-    fn needs_notification(&mut self, mem: &GuestMemoryMmap, used_idx: Wrapping<u16>) -> bool {
-        if !self.event_idx {
-            return true;
-        }
-
-        let mut notify = true;
-
-        if let Some(old_idx) = self.signalled_used {
-            if let Some(used_event) = self.queue.get_used_event(&mem) {
-                if (used_idx - used_event - Wrapping(1u16)) >= (used_idx - old_idx) {
-                    notify = false;
-                }
-            }
-        }
-
-        self.signalled_used = Some(used_idx);
-        notify
-    }
-
     fn run(
         &mut self,
         queue_evt: EventFd,
@@ -772,7 +751,7 @@ impl<T: DiskFile> BlockEpollHandler<T> {
                                 if self.process_queue() {
                                     self.queue.update_avail_event(&self.mem.memory());
 
-                                    if self.needs_notification(
+                                    if self.queue.needs_notification(
                                         &self.mem.memory(),
                                         self.queue.next_used,
                                     ) {
@@ -1176,8 +1155,9 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                 kill_evt: kill_evt.try_clone().unwrap(),
                 pause_evt: pause_evt.try_clone().unwrap(),
                 event_idx,
-                signalled_used: None,
             };
+
+            handler.queue.set_event_idx(event_idx);
 
             let queue_evt = queue_evts.remove(0);
             let paused = self.paused.clone();

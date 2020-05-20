@@ -401,7 +401,7 @@ pub struct Queue {
     /// The queue size in elements the driver selected
     pub size: u16,
 
-    /// Inidcates if the queue is finished with configuration
+    /// Indicates if the queue is finished with configuration
     pub ready: bool,
 
     /// Interrupt vector index of the queue
@@ -424,6 +424,12 @@ pub struct Queue {
 
     #[serde(skip)]
     pub iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
+
+    /// VIRTIO_F_RING_EVENT_IDX negotiated
+    event_idx: bool,
+
+    /// The last used value when using EVENT_IDX
+    signalled_used: Option<Wrapping<u16>>,
 }
 
 impl Queue {
@@ -440,6 +446,8 @@ impl Queue {
             next_avail: Wrapping(0),
             next_used: Wrapping(0),
             iommu_mapping_cb: None,
+            event_idx: false,
+            signalled_used: None,
         }
     }
 
@@ -677,6 +685,31 @@ impl Queue {
 
     pub fn available_descriptors(&self, mem: &GuestMemoryMmap) -> Result<bool, Error> {
         Ok(self.used_index_from_memory(mem)? < self.avail_index_from_memory(mem)?)
+    }
+
+    pub fn set_event_idx(&mut self, enabled: bool) {
+        /* Also reset the last signalled event */
+        self.signalled_used = None;
+        self.event_idx = enabled;
+    }
+
+    pub fn needs_notification(&mut self, mem: &GuestMemoryMmap, used_idx: Wrapping<u16>) -> bool {
+        if !self.event_idx {
+            return true;
+        }
+
+        let mut notify = true;
+
+        if let Some(old_idx) = self.signalled_used {
+            if let Some(used_event) = self.get_used_event(&mem) {
+                if (used_idx - used_event - Wrapping(1u16)) >= (used_idx - old_idx) {
+                    notify = false;
+                }
+            }
+        }
+
+        self.signalled_used = Some(used_idx);
+        notify
     }
 }
 

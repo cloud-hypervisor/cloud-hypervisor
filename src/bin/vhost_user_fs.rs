@@ -163,8 +163,9 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
                 let mut vring = vring_lock.write().unwrap();
 
                 if event_idx {
-                    if let Some(used_idx) = vring.mut_queue().add_used(&mem, head_index, 0) {
-                        if vring.needs_notification(&mem, Wrapping(used_idx)) {
+                    let queue = vring.mut_queue();
+                    if let Some(used_idx) = queue.add_used(&mem, head_index, 0) {
+                        if queue.needs_notification(&mem, Wrapping(used_idx)) {
                             vring.signal_used_queue().unwrap();
                         }
                     }
