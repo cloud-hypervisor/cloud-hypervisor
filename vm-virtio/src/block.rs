@@ -841,7 +841,7 @@ pub struct VirtioBlockConfig {
     pub alignment_offset: u8,
     pub min_io_size: u16,
     pub opt_io_size: u32,
-    pub wce: u8,
+    pub writeback: u8,
     unused: u8,
     pub num_queues: u16,
     pub max_discard_sectors: u32,
@@ -872,7 +872,7 @@ impl Serialize for VirtioBlockConfig {
         let alignment_offset = self.alignment_offset;
         let min_io_size = self.min_io_size;
         let opt_io_size = self.opt_io_size;
-        let wce = self.wce;
+        let writeback = self.writeback;
         let unused = self.unused;
         let num_queues = self.num_queues;
         let max_discard_sectors = self.max_discard_sectors;
@@ -893,7 +893,7 @@ impl Serialize for VirtioBlockConfig {
         virtio_block_config.serialize_field("alignment_offset", &alignment_offset)?;
         virtio_block_config.serialize_field("min_io_size", &min_io_size)?;
         virtio_block_config.serialize_field("opt_io_size", &opt_io_size)?;
-        virtio_block_config.serialize_field("wce", &wce)?;
+        virtio_block_config.serialize_field("writeback", &writeback)?;
         virtio_block_config.serialize_field("unused", &unused)?;
         virtio_block_config.serialize_field("num_queues", &num_queues)?;
         virtio_block_config.serialize_field("max_discard_sectors", &max_discard_sectors)?;
