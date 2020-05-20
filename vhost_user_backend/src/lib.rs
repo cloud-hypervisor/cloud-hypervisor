@@ -64,8 +64,11 @@ pub trait VhostUserBackend: Send + Sync + 'static {
     /// Depth of each queue.
     fn max_queue_size(&self) -> usize;
 
-    /// Virtio features.
+    /// Available virtio features.
     fn features(&self) -> u64;
+
+    /// Acked virtio features.
+    fn acked_features(&mut self, _features: u64) {}
 
     /// Virtio protocol features.
     fn protocol_features(&self) -> VhostUserProtocolFeatures;
@@ -576,6 +579,11 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
         for vring in self.vrings.iter_mut() {
             vring.write().unwrap().enabled = vring_enabled;
         }
+
+        self.backend
+            .write()
+            .unwrap()
+            .acked_features(self.acked_features);
 
         Ok(())
     }
