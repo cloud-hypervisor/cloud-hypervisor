@@ -194,7 +194,7 @@ dependencies = [
  "vhost_user_block",
  "vhost_user_fs",
  "vhost_user_net",
- "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "virtio-bindings",
  "vm-device",
  "vm-memory",
  "vm-virtio",
@@ -1384,7 +1384,7 @@ dependencies = [
  "libc",
  "log 0.4.8",
  "vhost",
- "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "virtio-bindings",
  "vm-memory",
  "vm-virtio",
  "vmm-sys-util",
@@ -1401,7 +1401,7 @@ dependencies = [
  "qcow",
  "vhost",
  "vhost_user_backend",
- "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "virtio-bindings",
  "vm-memory",
  "vm-virtio",
  "vmm",
@@ -1433,17 +1433,12 @@ dependencies = [
  "net_util",
  "vhost",
  "vhost_user_backend",
- "virtio-bindings 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "virtio-bindings",
  "vm-memory",
  "vm-virtio",
  "vmm",
  "vmm-sys-util",
 ]
-
-[[package]]
-name = "virtio-bindings"
-version = "0.1.0"
-source = "git+https://github.com/rust-vmm/virtio-bindings#921b722856335b799261b736cbb90e767e739dfc"
 
 [[package]]
 name = "virtio-bindings"
@@ -1513,7 +1508,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vhost",
- "virtio-bindings 0.1.0 (git+https://github.com/rust-vmm/virtio-bindings)",
+ "virtio-bindings",
  "vm-allocator",
  "vm-device",
  "vm-memory",
