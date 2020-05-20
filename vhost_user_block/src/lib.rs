@@ -26,6 +26,8 @@ use std::ops::DerefMut;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process;
+use std::result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use std::vec::Vec;
@@ -98,6 +100,7 @@ struct VhostUserBlkThread {
     disk_nsectors: u64,
     event_idx: bool,
     kill_evt: EventFd,
+    writeback: Arc<AtomicBool>,
 }
 
 impl VhostUserBlkThread {
@@ -105,6 +108,7 @@ impl VhostUserBlkThread {
         disk_image: Arc<Mutex<dyn DiskFile>>,
         disk_image_id: Vec<u8>,
         disk_nsectors: u64,
+        writeback: Arc<AtomicBool>,
     ) -> Result<Self> {
         Ok(VhostUserBlkThread {
             mem: None,
@@ -113,6 +117,7 @@ impl VhostUserBlkThread {
             disk_nsectors,
             event_idx: false,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
+            writeback,
         })
     }
 
@@ -127,8 +132,9 @@ impl VhostUserBlkThread {
             debug!("got an element in the queue");
             let len;
             match Request::parse(&head, mem) {
-                Ok(request) => {
+                Ok(mut request) => {
                     debug!("element is a valid request");
+                    request.set_writeback(self.writeback.load(Ordering::SeqCst));
                     let status = match request.execute(
                         &mut self.disk_image.lock().unwrap().deref_mut(),
                         self.disk_nsectors,
@@ -182,6 +188,8 @@ struct VhostUserBlkBackend {
     poll_queue: bool,
     queues_per_thread: Vec<u64>,
     queue_size: usize,
+    acked_features: u64,
+    writeback: Arc<AtomicBool>,
 }
 
 impl VhostUserBlkBackend {
@@ -225,11 +233,13 @@ impl VhostUserBlkBackend {
 
         let mut queues_per_thread = Vec::new();
         let mut threads = Vec::new();
+        let writeback = Arc::new(AtomicBool::new(true));
         for i in 0..num_queues {
             let thread = Mutex::new(VhostUserBlkThread::new(
                 image.clone(),
                 image_id.clone(),
                 nsectors,
+                writeback.clone(),
             )?);
             threads.push(thread);
             queues_per_thread.push(0b1 << i);
@@ -242,7 +252,30 @@ impl VhostUserBlkBackend {
             poll_queue,
             queues_per_thread,
             queue_size,
+            acked_features: 0,
+            writeback,
         })
+    }
+
+    fn update_writeback(&mut self) {
+        // Use writeback from config if VIRTIO_BLK_F_CONFIG_WCE
+        let writeback =
+            if self.acked_features & 1 << VIRTIO_BLK_F_CONFIG_WCE == 1 << VIRTIO_BLK_F_CONFIG_WCE {
+                self.config.writeback == 1
+            } else {
+                // Else check if VIRTIO_BLK_F_FLUSH negotiated
+                self.acked_features & 1 << VIRTIO_BLK_F_FLUSH == 1 << VIRTIO_BLK_F_FLUSH
+            };
+
+        info!(
+            "Changing cache mode to {}",
+            if writeback {
+                "writeback"
+            } else {
+                "writethrough"
+            }
+        );
+        self.writeback.store(writeback, Ordering::SeqCst);
     }
 }
 
@@ -267,6 +300,11 @@ impl VhostUserBackend for VhostUserBlkBackend {
             avail_features |= 1 << VIRTIO_BLK_F_RO;
         }
         avail_features
+    }
+
+    fn acked_features(&mut self, features: u64) {
+        self.acked_features = features;
+        self.update_writeback();
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
@@ -343,6 +381,20 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
     fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
         self.config.as_slice().to_vec()
+    }
+
+    fn set_config(&mut self, offset: u32, data: &[u8]) -> result::Result<(), io::Error> {
+        let config_slice = self.config.as_mut_slice();
+        let data_len = data.len() as u32;
+        let config_len = config_slice.len() as u32;
+        if offset + data_len > config_len {
+            error!("Failed to write config space");
+            return Err(io::Error::from_raw_os_error(libc::EINVAL));
+        }
+        let (_, right) = config_slice.split_at_mut(offset as usize);
+        right.copy_from_slice(&data[..]);
+        self.update_writeback();
+        Ok(())
     }
 
     fn exit_event(&self, thread_index: usize) -> Option<(EventFd, Option<u16>)> {
