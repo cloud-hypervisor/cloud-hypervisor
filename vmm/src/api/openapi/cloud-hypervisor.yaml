@@ -454,9 +454,6 @@ components:
           default: false
         vhost_socket:
           type: string
-        wce:
-          type: boolean
-          default: true
         poll_queue:
           type: boolean
           default: true

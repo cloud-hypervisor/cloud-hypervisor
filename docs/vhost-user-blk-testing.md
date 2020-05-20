@@ -76,7 +76,7 @@ VMs run in client mode. They connect to the socket created by the `dpdkvhostuser
         --memory size=1024M,file=/dev/hugepages \
         --kernel linux/arch/x86/boot/compressed/vmlinux.bin \
         --cmdline "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3 iommu=off" \
-        --disk "path=images/clear-kvm.img" "num_queues=4,queue_size=128,vhost_user=true,socket=/var/tmp/vhost.1,wce=true" \
+        --disk "path=images/clear-kvm.img" "num_queues=4,queue_size=128,vhost_user=true,socket=/var/tmp/vhost.1" \
         --console off \
         --serial tty \
         --rng
