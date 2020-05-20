@@ -20,7 +20,7 @@ vhost_user_backend = { path = "vhost_user_backend"}
 vhost_user_block = { path = "vhost_user_block"}
 vhost_user_fs = { path = "vhost_user_fs"}
 vhost_user_net = { path = "vhost_user_net"}
-virtio-bindings = "0.1.0"
+virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
 vmm = { path = "vmm" }
 vm-device = { path = "vm-device" }
 vm-memory = "0.2.0"
