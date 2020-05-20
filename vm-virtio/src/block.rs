@@ -351,7 +351,7 @@ impl Write for RawFile {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.file.flush()
+        self.file.sync_all()
     }
 }
 
