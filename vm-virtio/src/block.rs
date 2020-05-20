@@ -610,6 +610,7 @@ struct BlockEpollHandler<T: DiskFile> {
     kill_evt: EventFd,
     pause_evt: EventFd,
     event_idx: bool,
+    writeback: Arc<AtomicBool>,
 }
 
 impl<T: DiskFile> BlockEpollHandler<T> {
@@ -622,7 +623,9 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         for avail_desc in queue.iter(&mem) {
             let len;
             match Request::parse(&avail_desc, &mem) {
-                Ok(request) => {
+                Ok(mut request) => {
+                    request.set_writeback(self.writeback.load(Ordering::SeqCst));
+
                     let mut disk_image_locked = self.disk_image.lock().unwrap();
                     let mut disk_image = disk_image_locked.deref_mut();
                     let status = match request.execute(
@@ -931,6 +934,7 @@ pub struct Block<T: DiskFile> {
     pause_evt: Option<EventFd>,
     paused: Arc<AtomicBool>,
     queue_size: Vec<u16>,
+    writeback: Arc<AtomicBool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -966,7 +970,8 @@ impl<T: DiskFile> Block<T> {
 
         let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
             | (1u64 << VIRTIO_BLK_F_FLUSH)
-            | (1u64 << VIRTIO_RING_F_EVENT_IDX);
+            | (1u64 << VIRTIO_RING_F_EVENT_IDX)
+            | (1u64 << VIRTIO_BLK_F_CONFIG_WCE);
 
         if iommu {
             avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
@@ -979,6 +984,7 @@ impl<T: DiskFile> Block<T> {
         let disk_nsectors = disk_size / SECTOR_SIZE;
         let mut config = VirtioBlockConfig {
             capacity: disk_nsectors,
+            writeback: 1,
             ..Default::default()
         };
 
@@ -1002,6 +1008,7 @@ impl<T: DiskFile> Block<T> {
             pause_evt: None,
             paused: Arc::new(AtomicBool::new(false)),
             queue_size: vec![queue_size; num_queues],
+            writeback: Arc::new(AtomicBool::new(true)),
         })
     }
 
@@ -1023,6 +1030,27 @@ impl<T: DiskFile> Block<T> {
         self.config = state.config;
 
         Ok(())
+    }
+
+    fn update_writeback(&mut self) {
+        // Use writeback from config if VIRTIO_BLK_F_CONFIG_WCE
+        let writeback =
+            if self.acked_features & 1 << VIRTIO_BLK_F_CONFIG_WCE == 1 << VIRTIO_BLK_F_CONFIG_WCE {
+                self.config.writeback == 1
+            } else {
+                // Else check if VIRTIO_BLK_F_FLUSH negotiated
+                self.acked_features & 1 << VIRTIO_BLK_F_FLUSH == 1 << VIRTIO_BLK_F_FLUSH
+            };
+
+        info!(
+            "Changing cache mode to {}",
+            if writeback {
+                "writeback"
+            } else {
+                "writethrough"
+            }
+        );
+        self.writeback.store(writeback, Ordering::SeqCst);
     }
 }
 
@@ -1085,6 +1113,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         }
         let (_, right) = config_slice.split_at_mut(offset as usize);
         right.copy_from_slice(&data[..]);
+        self.update_writeback();
     }
 
     fn activate(
@@ -1146,6 +1175,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
 
         let event_idx = self.acked_features & 1u64 << VIRTIO_RING_F_EVENT_IDX
             == 1u64 << VIRTIO_RING_F_EVENT_IDX;
+        self.update_writeback();
 
         let mut epoll_threads = Vec::new();
         for _ in 0..self.queue_size.len() {
@@ -1159,6 +1189,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                 kill_evt: kill_evt.try_clone().unwrap(),
                 pause_evt: pause_evt.try_clone().unwrap(),
                 event_idx,
+                writeback: self.writeback.clone(),
             };
 
             handler.queue.set_event_idx(event_idx);
