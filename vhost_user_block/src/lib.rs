@@ -21,13 +21,11 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::{Seek, SeekFrom, Write};
-use std::mem;
 use std::num::Wrapping;
 use std::ops::DerefMut;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process;
-use std::slice;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use std::vec::Vec;
@@ -37,8 +35,10 @@ use vhost_rs::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
+use vm_memory::ByteValued;
 use vm_memory::{Bytes, GuestMemoryMmap};
 use vm_virtio::block::{build_disk_image_id, Request};
+use vm_virtio::VirtioBlockConfig;
 use vmm::config::{OptionParser, OptionParserError, Toggle};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -177,7 +177,7 @@ impl VhostUserBlkThread {
 
 struct VhostUserBlkBackend {
     threads: Vec<Mutex<VhostUserBlkThread>>,
-    config: virtio_blk_config,
+    config: VirtioBlockConfig,
     rdonly: bool,
     poll_queue: bool,
     queues_per_thread: Vec<u64>,
@@ -212,7 +212,7 @@ impl VhostUserBlkBackend {
         };
 
         let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap() as u64) / SECTOR_SIZE;
-        let mut config = virtio_blk_config::default();
+        let mut config = VirtioBlockConfig::default();
 
         config.capacity = nsectors;
         config.blk_size = BLK_SIZE;
@@ -221,7 +221,7 @@ impl VhostUserBlkBackend {
         config.min_io_size = 1;
         config.opt_io_size = 1;
         config.num_queues = num_queues as u16;
-        config.wce = 1;
+        config.writeback = 1;
 
         let mut queues_per_thread = Vec::new();
         let mut threads = Vec::new();
@@ -342,15 +342,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
     }
 
     fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
-        // self.config is a statically allocated virtio_blk_config
-        let buf = unsafe {
-            slice::from_raw_parts(
-                &self.config as *const virtio_blk_config as *const _,
-                mem::size_of::<virtio_blk_config>(),
-            )
-        };
-
-        buf.to_vec()
+        self.config.as_slice().to_vec()
     }
 
     fn exit_event(&self, thread_index: usize) -> Option<(EventFd, Option<u16>)> {
