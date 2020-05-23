@@ -841,9 +841,9 @@ checksum = "8e946095f9d3ed29ec38de908c22f95d9ac008e424c7bcae54c75a79c527c694"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.15"
+version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70a50b9351bfa8d65a7d93ce712dc63d2fd15ddbf2c36990fc7cac344859c04f"
+checksum = "beea5df443f6a414bca639a5e577bc8cfb21f7455ff4512bcfd64cf1e6785771"
 dependencies = [
  "unicode-xid 0.2.0",
 ]
