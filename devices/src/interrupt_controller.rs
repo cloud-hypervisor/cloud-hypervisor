@@ -54,5 +54,8 @@ pub struct MsiMessage {
 // IOAPIC (X86) or GIC (Arm).
 pub trait InterruptController: Send {
     fn service_irq(&mut self, irq: usize) -> Result<()>;
+    #[cfg(target_arch = "aarch64")]
+    fn enable(&self) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
     fn end_of_interrupt(&mut self, vec: u8);
 }

@@ -31,7 +31,10 @@ use std::io;
 #[cfg(feature = "acpi")]
 mod acpi;
 mod bus;
+#[cfg(target_arch = "aarch64")]
+pub mod gic;
 pub mod interrupt_controller;
+#[cfg(target_arch = "x86_64")]
 pub mod ioapic;
 pub mod legacy;
 
