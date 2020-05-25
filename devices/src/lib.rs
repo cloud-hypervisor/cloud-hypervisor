@@ -31,6 +31,7 @@ use std::io;
 #[cfg(feature = "acpi")]
 mod acpi;
 mod bus;
+pub mod interrupt_controller;
 pub mod ioapic;
 pub mod legacy;
 
