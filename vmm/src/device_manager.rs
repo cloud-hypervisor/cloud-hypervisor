@@ -26,7 +26,10 @@ use anyhow::anyhow;
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
-use devices::{ioapic, BusDevice, HotPlugNotificationFlags};
+use devices::{
+    interrupt_controller, interrupt_controller::InterruptController, ioapic, BusDevice,
+    HotPlugNotificationFlags,
+};
 use kvm_ioctls::*;
 use libc::TIOCGWINSZ;
 use libc::{MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE};
@@ -235,8 +238,8 @@ pub enum DeviceManagerError {
     /// Failed to update interrupt source group.
     UpdateInterruptGroup(io::Error),
 
-    /// Failed creating IOAPIC.
-    CreateIoapic(ioapic::Error),
+    /// Failed creating interrupt controller.
+    CreateInterruptController(interrupt_controller::Error),
 
     /// Failed creating a new MmapRegion instance.
     NewMmapRegion(vm_memory::mmap::MmapRegionError),
@@ -626,8 +629,8 @@ pub struct DeviceManager {
     // Console abstraction
     console: Arc<Console>,
 
-    // IOAPIC
-    ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
+    // Interrupt controller
+    interrupt_controller: Option<Arc<Mutex<ioapic::Ioapic>>>,
 
     // Things to be added to the commandline (i.e. for virtio-mmio)
     cmdline_additions: Vec<String>,
@@ -746,7 +749,7 @@ impl DeviceManager {
         let device_manager = DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
-            ioapic: None,
+            interrupt_controller: None,
             cmdline_additions: Vec::new(),
             #[cfg(feature = "acpi")]
             ged_notification_device: None,
@@ -804,13 +807,15 @@ impl DeviceManager {
     pub fn create_devices(&mut self) -> DeviceManagerResult<()> {
         let mut virtio_devices: Vec<(VirtioDeviceArc, bool, String)> = Vec::new();
 
-        let ioapic = self.add_ioapic()?;
+        let interrupt_controller = self.add_interrupt_controller()?;
 
         // Now we can create the legacy interrupt manager, which needs the freshly
         // formed IOAPIC device.
         let legacy_interrupt_manager: Arc<
             dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
-        > = Arc::new(KvmLegacyUserspaceInterruptManager::new(ioapic));
+        > = Arc::new(KvmLegacyUserspaceInterruptManager::new(Arc::clone(
+            &interrupt_controller,
+        )));
 
         #[cfg(feature = "acpi")]
         self.address_manager
@@ -1003,33 +1008,37 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn add_ioapic(&mut self) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
+    fn add_interrupt_controller(
+        &mut self,
+    ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
         unimplemented!();
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn add_ioapic(&mut self) -> DeviceManagerResult<Arc<Mutex<ioapic::Ioapic>>> {
+    fn add_interrupt_controller(
+        &mut self,
+    ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
         let id = String::from(IOAPIC_DEVICE_NAME);
 
         // Create IOAPIC
-        let ioapic = Arc::new(Mutex::new(
+        let interrupt_controller = Arc::new(Mutex::new(
             ioapic::Ioapic::new(
                 id.clone(),
                 APIC_START,
                 Arc::clone(&self.msi_interrupt_manager),
             )
-            .map_err(DeviceManagerError::CreateIoapic)?,
+            .map_err(DeviceManagerError::CreateInterruptController)?,
         ));
 
-        self.ioapic = Some(ioapic.clone());
+        self.interrupt_controller = Some(interrupt_controller.clone());
 
         self.address_manager
             .mmio_bus
-            .insert(ioapic.clone(), IOAPIC_START.0, IOAPIC_SIZE)
+            .insert(interrupt_controller.clone(), IOAPIC_START.0, IOAPIC_SIZE)
             .map_err(DeviceManagerError::BusError)?;
 
         self.bus_devices
-            .push(Arc::clone(&ioapic) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&interrupt_controller) as Arc<Mutex<dyn BusDevice>>);
 
         // Fill the device tree with a new node. In case of restore, we
         // know there is nothing to do, so we can simply override the
@@ -1037,9 +1046,9 @@ impl DeviceManager {
         self.device_tree
             .lock()
             .unwrap()
-            .insert(id.clone(), device_node!(id, ioapic));
+            .insert(id.clone(), device_node!(id, interrupt_controller));
 
-        Ok(ioapic)
+        Ok(interrupt_controller)
     }
 
     #[cfg(feature = "acpi")]
@@ -2550,8 +2559,12 @@ impl DeviceManager {
         &self.address_manager.allocator
     }
 
-    pub fn ioapic(&self) -> &Option<Arc<Mutex<ioapic::Ioapic>>> {
-        &self.ioapic
+    pub fn interrupt_controller(&self) -> Option<Arc<Mutex<dyn InterruptController>>> {
+        if let Some(interrupt_controller) = &self.interrupt_controller {
+            Some(interrupt_controller.clone() as Arc<Mutex<dyn InterruptController>>)
+        } else {
+            None
+        }
     }
 
     pub fn console(&self) -> &Arc<Console> {

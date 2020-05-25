@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use devices::ioapic;
+use devices::interrupt_controller::InterruptController;
 use kvm_bindings::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
 use kvm_ioctls::VmFd;
 use std::collections::HashMap;
@@ -281,12 +281,12 @@ impl InterruptSourceGroup for MsiInterruptGroup {
 }
 
 pub struct LegacyUserspaceInterruptGroup {
-    ioapic: Arc<Mutex<ioapic::Ioapic>>,
+    ioapic: Arc<Mutex<dyn InterruptController>>,
     irq: u32,
 }
 
 impl LegacyUserspaceInterruptGroup {
-    fn new(ioapic: Arc<Mutex<ioapic::Ioapic>>, irq: u32) -> Self {
+    fn new(ioapic: Arc<Mutex<dyn InterruptController>>, irq: u32) -> Self {
         LegacyUserspaceInterruptGroup { ioapic, irq }
     }
 }
@@ -311,7 +311,7 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
 }
 
 pub struct KvmLegacyUserspaceInterruptManager {
-    ioapic: Arc<Mutex<ioapic::Ioapic>>,
+    ioapic: Arc<Mutex<dyn InterruptController>>,
 }
 
 pub struct KvmMsiInterruptManager {
@@ -321,7 +321,7 @@ pub struct KvmMsiInterruptManager {
 }
 
 impl KvmLegacyUserspaceInterruptManager {
-    pub fn new(ioapic: Arc<Mutex<ioapic::Ioapic>>) -> Self {
+    pub fn new(ioapic: Arc<Mutex<dyn InterruptController>>) -> Self {
         KvmLegacyUserspaceInterruptManager { ioapic }
     }
 }

@@ -20,7 +20,7 @@ use anyhow::anyhow;
 #[cfg(feature = "acpi")]
 use arch::layout;
 use arch::EntryPoint;
-use devices::{ioapic, BusDevice};
+use devices::{interrupt_controller::InterruptController, BusDevice};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_fpu, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events, kvm_xcrs,
@@ -329,7 +329,7 @@ pub struct Vcpu {
     io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
+    interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm_ts: std::time::Instant,
 }
@@ -364,7 +364,7 @@ impl Vcpu {
         fd: &Arc<VmFd>,
         io_bus: Arc<devices::Bus>,
         mmio_bus: Arc<devices::Bus>,
-        ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
+        interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
         creation_ts: std::time::Instant,
     ) -> Result<Arc<Mutex<Self>>> {
         let kvm_vcpu = fd.create_vcpu(id).map_err(Error::VcpuFd)?;
@@ -374,7 +374,7 @@ impl Vcpu {
             id,
             io_bus,
             mmio_bus,
-            ioapic,
+            interrupt_controller,
             vm_ts: creation_ts,
         })))
     }
@@ -452,8 +452,11 @@ impl Vcpu {
                 }
                 #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoapicEoi(vector) => {
-                    if let Some(ioapic) = &self.ioapic {
-                        ioapic.lock().unwrap().end_of_interrupt(vector);
+                    if let Some(interrupt_controller) = &self.interrupt_controller {
+                        interrupt_controller
+                            .lock()
+                            .unwrap()
+                            .end_of_interrupt(vector);
                     }
                     Ok(true)
                 }
@@ -618,7 +621,7 @@ pub struct CpuManager {
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     mmio_bus: Arc<devices::Bus>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    ioapic: Option<Arc<Mutex<ioapic::Ioapic>>>,
+    interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     #[cfg(target_arch = "x86_64")]
@@ -769,7 +772,7 @@ impl CpuManager {
             max_vcpus: config.max_vcpus,
             io_bus: device_manager.io_bus().clone(),
             mmio_bus: device_manager.mmio_bus().clone(),
-            ioapic: device_manager.ioapic().clone(),
+            interrupt_controller: device_manager.interrupt_controller().clone(),
             vm_memory: guest_memory,
             #[cfg(target_arch = "x86_64")]
             cpuid,
@@ -858,8 +861,8 @@ impl CpuManager {
         inserting: bool,
         snapshot: Option<Snapshot>,
     ) -> Result<()> {
-        let ioapic = if let Some(ioapic) = &self.ioapic {
-            Some(ioapic.clone())
+        let interrupt_controller = if let Some(interrupt_controller) = &self.interrupt_controller {
+            Some(interrupt_controller.clone())
         } else {
             None
         };
@@ -869,7 +872,7 @@ impl CpuManager {
             &self.fd,
             self.io_bus.clone(),
             self.mmio_bus.clone(),
-            ioapic,
+            interrupt_controller,
             creation_ts,
         )?;
 

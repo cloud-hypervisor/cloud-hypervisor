@@ -9,10 +9,10 @@
 // Implementation of an intel 82093AA Input/Output Advanced Programmable Interrupt Controller
 // See https://pdos.csail.mit.edu/6.828/2016/readings/ia32/ioapic.pdf for a specification.
 
+use super::interrupt_controller::{Error, InterruptController};
 use crate::BusDevice;
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
-use std::io;
 use std::result;
 use std::sync::Arc;
 use vm_device::interrupt::{
@@ -28,28 +28,6 @@ use vm_migration::{
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "GuestAddress")]
 pub struct GuestAddressDef(pub u64);
-
-#[derive(Debug)]
-pub enum Error {
-    /// Invalid destination mode.
-    InvalidDestinationMode,
-    /// Invalid trigger mode.
-    InvalidTriggerMode,
-    /// Invalid delivery mode.
-    InvalidDeliveryMode,
-    /// Failed creating the interrupt source group.
-    CreateInterruptSourceGroup(io::Error),
-    /// Failed triggering the interrupt.
-    TriggerInterrupt(io::Error),
-    /// Failed masking the interrupt.
-    MaskInterrupt(io::Error),
-    /// Failed unmasking the interrupt.
-    UnmaskInterrupt(io::Error),
-    /// Failed updating the interrupt.
-    UpdateInterrupt(io::Error),
-    /// Failed enabling the interrupt.
-    EnableInterrupt(io::Error),
-}
 
 type Result<T> = result::Result<T, Error>;
 
@@ -238,35 +216,77 @@ impl Ioapic {
         })
     }
 
-    // The ioapic must be informed about EOIs in order to deassert interrupts
-    // already sent.
-    pub fn end_of_interrupt(&mut self, vec: u8) {
-        for i in 0..NUM_IOAPIC_PINS {
-            let entry = &mut self.reg_entries[i];
-            // Clear Remote IRR bit
-            if vector(*entry) == vec && trigger_mode(*entry) == 1 {
-                set_remote_irr(entry, 0);
+    fn ioapic_write(&mut self, val: u32) {
+        debug!("IOAPIC_W reg 0x{:x}, val 0x{:x}", self.reg_sel, val);
+
+        match self.reg_sel as u8 {
+            IOAPIC_REG_ID => self.id_reg = (val >> 24) & 0xf,
+            IOWIN_OFF..=REG_MAX_OFFSET => {
+                let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
+                if is_high_bits {
+                    self.reg_entries[index] &= 0xffff_ffff;
+                    self.reg_entries[index] |= u64::from(val) << 32;
+                } else {
+                    // Ensure not to override read-only bits:
+                    // - Delivery Status (bit 12)
+                    // - Remote IRR (bit 14)
+                    self.reg_entries[index] &= 0xffff_ffff_0000_5000;
+                    self.reg_entries[index] |= u64::from(val) & 0xffff_afff;
+                }
+                // The entry must be updated through the interrupt source
+                // group.
+                if let Err(e) = self.update_entry(index) {
+                    error!("Failed updating IOAPIC entry: {:?}", e);
+                }
+                // Store the information this IRQ is now being used.
+                self.used_entries[index] = true;
+            }
+            _ => error!("IOAPIC: invalid write to register offset"),
+        }
+    }
+
+    fn ioapic_read(&self) -> u32 {
+        debug!("IOAPIC_R reg 0x{:x}", self.reg_sel);
+
+        match self.reg_sel as u8 {
+            IOAPIC_REG_VERSION => IOAPIC_VERSION_ID,
+            IOAPIC_REG_ID | IOAPIC_REG_ARBITRATION_ID => (self.id_reg & 0xf) << 24,
+            IOWIN_OFF..=REG_MAX_OFFSET => {
+                let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
+                if is_high_bits {
+                    (self.reg_entries[index] >> 32) as u32
+                } else {
+                    (self.reg_entries[index] & 0xffff_ffff) as u32
+                }
+            }
+            _ => {
+                error!("IOAPIC: invalid read from register offset");
+                0
             }
         }
     }
 
-    // This should be called anytime an interrupt needs to be injected into the
-    // running guest.
-    pub fn service_irq(&mut self, irq: usize) -> Result<()> {
-        let entry = &mut self.reg_entries[irq];
-
-        self.interrupt_source_group
-            .trigger(irq as InterruptIndex)
-            .map_err(Error::TriggerInterrupt)?;
-        debug!("Interrupt successfully delivered");
-
-        // If trigger mode is level sensitive, set the Remote IRR bit.
-        // It will be cleared when the EOI is received.
-        if trigger_mode(*entry) == 1 {
-            set_remote_irr(entry, 1);
+    fn state(&self) -> IoapicState {
+        IoapicState {
+            id_reg: self.id_reg,
+            reg_sel: self.reg_sel,
+            reg_entries: self.reg_entries,
+            used_entries: self.used_entries,
+            apic_address: self.apic_address,
         }
-        // Clear the Delivery Status bit
-        set_delivery_status(entry, 0);
+    }
+
+    fn set_state(&mut self, state: &IoapicState) -> Result<()> {
+        self.id_reg = state.id_reg;
+        self.reg_sel = state.reg_sel;
+        self.reg_entries = state.reg_entries;
+        self.used_entries = state.used_entries;
+        self.apic_address = state.apic_address;
+        for (irq, entry) in self.used_entries.iter().enumerate() {
+            if *entry {
+                self.update_entry(irq)?;
+            }
+        }
 
         Ok(())
     }
@@ -342,78 +362,38 @@ impl Ioapic {
 
         Ok(())
     }
+}
 
-    fn ioapic_write(&mut self, val: u32) {
-        debug!("IOAPIC_W reg 0x{:x}, val 0x{:x}", self.reg_sel, val);
-
-        match self.reg_sel as u8 {
-            IOAPIC_REG_ID => self.id_reg = (val >> 24) & 0xf,
-            IOWIN_OFF..=REG_MAX_OFFSET => {
-                let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
-                if is_high_bits {
-                    self.reg_entries[index] &= 0xffff_ffff;
-                    self.reg_entries[index] |= u64::from(val) << 32;
-                } else {
-                    // Ensure not to override read-only bits:
-                    // - Delivery Status (bit 12)
-                    // - Remote IRR (bit 14)
-                    self.reg_entries[index] &= 0xffff_ffff_0000_5000;
-                    self.reg_entries[index] |= u64::from(val) & 0xffff_afff;
-                }
-                // The entry must be updated through the interrupt source
-                // group.
-                if let Err(e) = self.update_entry(index) {
-                    error!("Failed updating IOAPIC entry: {:?}", e);
-                }
-                // Store the information this IRQ is now being used.
-                self.used_entries[index] = true;
-            }
-            _ => error!("IOAPIC: invalid write to register offset"),
-        }
-    }
-
-    fn ioapic_read(&self) -> u32 {
-        debug!("IOAPIC_R reg 0x{:x}", self.reg_sel);
-
-        match self.reg_sel as u8 {
-            IOAPIC_REG_VERSION => IOAPIC_VERSION_ID,
-            IOAPIC_REG_ID | IOAPIC_REG_ARBITRATION_ID => (self.id_reg & 0xf) << 24,
-            IOWIN_OFF..=REG_MAX_OFFSET => {
-                let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
-                if is_high_bits {
-                    (self.reg_entries[index] >> 32) as u32
-                } else {
-                    (self.reg_entries[index] & 0xffff_ffff) as u32
-                }
-            }
-            _ => {
-                error!("IOAPIC: invalid read from register offset");
-                0
+impl InterruptController for Ioapic {
+    // The ioapic must be informed about EOIs in order to deassert interrupts
+    // already sent.
+    fn end_of_interrupt(&mut self, vec: u8) {
+        for i in 0..NUM_IOAPIC_PINS {
+            let entry = &mut self.reg_entries[i];
+            // Clear Remote IRR bit
+            if vector(*entry) == vec && trigger_mode(*entry) == 1 {
+                set_remote_irr(entry, 0);
             }
         }
     }
 
-    fn state(&self) -> IoapicState {
-        IoapicState {
-            id_reg: self.id_reg,
-            reg_sel: self.reg_sel,
-            reg_entries: self.reg_entries,
-            used_entries: self.used_entries,
-            apic_address: self.apic_address,
-        }
-    }
+    // This should be called anytime an interrupt needs to be injected into the
+    // running guest.
+    fn service_irq(&mut self, irq: usize) -> Result<()> {
+        let entry = &mut self.reg_entries[irq];
 
-    fn set_state(&mut self, state: &IoapicState) -> Result<()> {
-        self.id_reg = state.id_reg;
-        self.reg_sel = state.reg_sel;
-        self.reg_entries = state.reg_entries;
-        self.used_entries = state.used_entries;
-        self.apic_address = state.apic_address;
-        for (irq, entry) in self.used_entries.iter().enumerate() {
-            if *entry {
-                self.update_entry(irq)?;
-            }
+        self.interrupt_source_group
+            .trigger(irq as InterruptIndex)
+            .map_err(Error::TriggerInterrupt)?;
+        debug!("Interrupt successfully delivered");
+
+        // If trigger mode is level sensitive, set the Remote IRR bit.
+        // It will be cleared when the EOI is received.
+        if trigger_mode(*entry) == 1 {
+            set_remote_irr(entry, 1);
         }
+        // Clear the Delivery Status bit
+        set_delivery_status(entry, 0);
 
         Ok(())
     }
