@@ -26,8 +26,12 @@ use anyhow::anyhow;
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
+#[cfg(target_arch = "aarch64")]
+use devices::gic;
+#[cfg(target_arch = "x86_64")]
+use devices::ioapic;
 use devices::{
-    interrupt_controller, interrupt_controller::InterruptController, ioapic, BusDevice,
+    interrupt_controller, interrupt_controller::InterruptController, BusDevice,
     HotPlugNotificationFlags,
 };
 use kvm_ioctls::*;
@@ -81,6 +85,9 @@ const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
 
 #[cfg(target_arch = "x86_64")]
 const IOAPIC_DEVICE_NAME: &str = "_ioapic";
+#[cfg(target_arch = "aarch64")]
+const GIC_DEVICE_NAME: &str = "_gic";
+
 const SERIAL_DEVICE_NAME_PREFIX: &str = "_serial";
 
 const CONSOLE_DEVICE_NAME: &str = "_console";
@@ -630,7 +637,10 @@ pub struct DeviceManager {
     console: Arc<Console>,
 
     // Interrupt controller
+    #[cfg(target_arch = "x86_64")]
     interrupt_controller: Option<Arc<Mutex<ioapic::Ioapic>>>,
+    #[cfg(target_arch = "aarch64")]
+    interrupt_controller: Option<Arc<Mutex<gic::Gic>>>,
 
     // Things to be added to the commandline (i.e. for virtio-mmio)
     cmdline_additions: Vec<String>,
@@ -1011,7 +1021,27 @@ impl DeviceManager {
     fn add_interrupt_controller(
         &mut self,
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
-        unimplemented!();
+        let id = String::from(GIC_DEVICE_NAME);
+
+        let interrupt_controller: Arc<Mutex<gic::Gic>> = Arc::new(Mutex::new(
+            gic::Gic::new(
+                self.config.lock().unwrap().cpus.boot_vcpus,
+                Arc::clone(&self.msi_interrupt_manager),
+            )
+            .map_err(DeviceManagerError::CreateInterruptController)?,
+        ));
+
+        self.interrupt_controller = Some(interrupt_controller.clone());
+
+        // Fill the device tree with a new node. In case of restore, we
+        // know there is nothing to do, so we can simply override the
+        // existing entry.
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, interrupt_controller));
+
+        Ok(interrupt_controller)
     }
 
     #[cfg(target_arch = "x86_64")]
