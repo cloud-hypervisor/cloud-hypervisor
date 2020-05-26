@@ -27,7 +27,6 @@ use kvm_bindings::{
     kvm_xsave, CpuId, Msrs,
 };
 use kvm_ioctls::*;
-#[cfg(target_arch = "x86_64")]
 use libc::{c_void, siginfo_t};
 use serde_derive::{Deserialize, Serialize};
 #[cfg(target_arch = "x86_64")]
@@ -44,9 +43,7 @@ use vm_migration::{
     Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
-#[cfg(target_arch = "x86_64")]
-use vmm_sys_util::signal::register_signal_handler;
-use vmm_sys_util::signal::SIGRTMIN;
+use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
 // CPUID feature bits
 #[cfg(target_arch = "x86_64")]
@@ -379,14 +376,31 @@ impl Vcpu {
         })))
     }
 
-    #[cfg(target_arch = "x86_64")]
-    /// Configures a x86_64 specific vcpu and should be called once per vcpu from the vcpu's thread.
+    #[cfg(target_arch = "aarch64")]
+    /// Configures a aarch64 specific vcpu and should be called once per vcpu when created.
     ///
     /// # Arguments
     ///
     /// * `machine_config` - Specifies necessary info used for the CPUID configuration.
     /// * `kernel_entry_point` - Kernel entry point address in guest memory and boot protocol used.
-    /// * `vm` - The virtual machine this vcpu will get attached to.
+    /// * `vm_memory` - Guest memory.
+    pub fn configure(
+        &mut self,
+        _kernel_entry_point: Option<EntryPoint>,
+        _vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> Result<()> {
+        unimplemented!();
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    /// Configures a x86_64 specific vcpu and should be called once per vcpu when created.
+    ///
+    /// # Arguments
+    ///
+    /// * `machine_config` - Specifies necessary info used for the CPUID configuration.
+    /// * `kernel_entry_point` - Kernel entry point address in guest memory and boot protocol used.
+    /// * `vm_memory` - Guest memory.
+    /// * `cpuid` - CpuId, wrapper over the `kvm_cpuid2` structure.
     pub fn configure(
         &mut self,
         kernel_entry_point: Option<EntryPoint>,
@@ -838,34 +852,19 @@ impl CpuManager {
         Ok(cpuid)
     }
 
-    #[cfg(target_arch = "aarch64")]
-    fn start_vcpu(
-        &mut self,
-        _cpu_id: u8,
-        _creation_ts: std::time::Instant,
-        _vcpu_thread_barrier: Arc<Barrier>,
-        _entry_point: Option<EntryPoint>,
-        _inserting: bool,
-        _snapshot: Option<Snapshot>,
-    ) -> Result<()> {
-        unimplemented!();
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn start_vcpu(
+    fn create_vcpu(
         &mut self,
         cpu_id: u8,
-        creation_ts: std::time::Instant,
-        vcpu_thread_barrier: Arc<Barrier>,
         entry_point: Option<EntryPoint>,
-        inserting: bool,
         snapshot: Option<Snapshot>,
-    ) -> Result<()> {
+    ) -> Result<Arc<Mutex<Vcpu>>> {
         let interrupt_controller = if let Some(interrupt_controller) = &self.interrupt_controller {
             Some(interrupt_controller.clone())
         } else {
             None
         };
+
+        let creation_ts = std::time::Instant::now();
 
         let vcpu = Vcpu::new(
             cpu_id,
@@ -876,6 +875,63 @@ impl CpuManager {
             creation_ts,
         )?;
 
+        if let Some(snapshot) = snapshot {
+            #[cfg(target_arch = "x86_64")]
+            {
+                let mut cpuid = self.cpuid.clone();
+                CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(cpu_id));
+
+                vcpu.lock()
+                    .unwrap()
+                    .fd
+                    .set_cpuid2(&cpuid)
+                    .map_err(Error::SetSupportedCpusFailed)?;
+            }
+            vcpu.lock()
+                .unwrap()
+                .restore(snapshot)
+                .expect("Failed to restore vCPU");
+        } else {
+            let vm_memory = self.vm_memory.clone();
+
+            #[cfg(target_arch = "x86_64")]
+            vcpu.lock()
+                .unwrap()
+                .configure(entry_point, &vm_memory, self.cpuid.clone())
+                .expect("Failed to configure vCPU");
+
+            #[cfg(target_arch = "aarch64")]
+            vcpu.lock()
+                .unwrap()
+                .configure(entry_point, &vm_memory)
+                .expect("Failed to configure vCPU");
+        }
+
+        let vcpu_clone = Arc::clone(&vcpu);
+
+        Ok(vcpu_clone)
+    }
+
+    fn create_vcpus(&mut self, desired_vcpus: u8, entry_point: Option<EntryPoint>) -> Result<()> {
+        if desired_vcpus > self.max_vcpus {
+            return Err(Error::DesiredVCPUCountExceedsMax);
+        }
+
+        for cpu_id in self.present_vcpus()..desired_vcpus {
+            let vcpu = self.create_vcpu(cpu_id, entry_point, None)?;
+            self.vcpus.push(vcpu);
+        }
+
+        Ok(())
+    }
+
+    fn start_vcpu(
+        &mut self,
+        vcpu: Arc<Mutex<Vcpu>>,
+        vcpu_thread_barrier: Arc<Barrier>,
+        inserting: bool,
+    ) -> Result<()> {
+        let cpu_id = vcpu.lock().unwrap().id;
         let reset_evt = self.reset_evt.try_clone().unwrap();
         let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
         let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
@@ -884,32 +940,6 @@ impl CpuManager {
         let vcpu_run_interrupted = self.vcpu_states[usize::from(cpu_id)]
             .vcpu_run_interrupted
             .clone();
-
-        if let Some(snapshot) = snapshot {
-            let mut cpuid = self.cpuid.clone();
-            CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(cpu_id));
-
-            vcpu.lock()
-                .unwrap()
-                .fd
-                .set_cpuid2(&cpuid)
-                .map_err(Error::SetSupportedCpusFailed)?;
-
-            vcpu.lock()
-                .unwrap()
-                .restore(snapshot)
-                .expect("Failed to restore vCPU");
-        } else {
-            let vm_memory = self.vm_memory.clone();
-
-            vcpu.lock()
-                .unwrap()
-                .configure(entry_point, &vm_memory, self.cpuid.clone())
-                .expect("Failed to configure vCPU");
-        }
-
-        let vcpu_clone = Arc::clone(&vcpu);
-        self.vcpus.push(vcpu_clone);
 
         let handle = Some(
             thread::Builder::new()
@@ -981,25 +1011,18 @@ impl CpuManager {
         Ok(())
     }
 
-    fn activate_vcpus(&mut self, desired_vcpus: u8, entry_point: Option<EntryPoint>) -> Result<()> {
+    fn activate_vcpus(&mut self, desired_vcpus: u8, inserting: bool) -> Result<()> {
         if desired_vcpus > self.max_vcpus {
             return Err(Error::DesiredVCPUCountExceedsMax);
         }
 
-        let creation_ts = std::time::Instant::now();
         let vcpu_thread_barrier = Arc::new(Barrier::new(
             (desired_vcpus - self.present_vcpus() + 1) as usize,
         ));
 
         for cpu_id in self.present_vcpus()..desired_vcpus {
-            self.start_vcpu(
-                cpu_id,
-                creation_ts,
-                vcpu_thread_barrier.clone(),
-                entry_point,
-                entry_point.is_none(),
-                None,
-            )?;
+            let vcpu = Arc::clone(&self.vcpus[cpu_id as usize]);
+            self.start_vcpu(vcpu, vcpu_thread_barrier.clone(), inserting)?;
         }
 
         // Unblock all CPU threads.
@@ -1024,14 +1047,22 @@ impl CpuManager {
         Ok(())
     }
 
+    pub fn create_boot_vcpus(&mut self, entry_point: EntryPoint) -> Result<()> {
+        self.create_vcpus(self.boot_vcpus(), Some(entry_point))
+    }
+
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
-    pub fn start_boot_vcpus(&mut self, entry_point: EntryPoint) -> Result<()> {
-        self.activate_vcpus(self.boot_vcpus(), Some(entry_point))
+    pub fn start_boot_vcpus(&mut self) -> Result<()> {
+        self.activate_vcpus(self.boot_vcpus(), false)
     }
 
     pub fn resize(&mut self, desired_vcpus: u8) -> Result<bool> {
         match desired_vcpus.cmp(&self.present_vcpus()) {
-            cmp::Ordering::Greater => self.activate_vcpus(desired_vcpus, None).and(Ok(true)),
+            cmp::Ordering::Greater => {
+                self.create_vcpus(desired_vcpus, None)?;
+                self.activate_vcpus(desired_vcpus, true)?;
+                Ok(true)
+            }
             cmp::Ordering::Less => self.mark_vcpus_for_removal(desired_vcpus).and(Ok(true)),
             _ => Ok(false),
         }
@@ -1453,20 +1484,15 @@ impl Snapshottable for CpuManager {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        let creation_ts = std::time::Instant::now();
         let vcpu_thread_barrier = Arc::new(Barrier::new((snapshot.snapshots.len() + 1) as usize));
 
         for (cpu_id, snapshot) in snapshot.snapshots.iter() {
             debug!("Restoring VCPU {}", cpu_id);
-            self.start_vcpu(
-                cpu_id.parse::<u8>().unwrap(),
-                creation_ts,
-                vcpu_thread_barrier.clone(),
-                None,
-                false,
-                Some(*snapshot.clone()),
-            )
-            .map_err(|e| MigratableError::Restore(anyhow!("Could not restore vCPU {:?}", e)))?;
+            let vcpu = self
+                .create_vcpu(cpu_id.parse::<u8>().unwrap(), None, Some(*snapshot.clone()))
+                .map_err(|e| MigratableError::Restore(anyhow!("Could not create vCPU {:?}", e)))?;
+            self.start_vcpu(vcpu, vcpu_thread_barrier.clone(), false)
+                .map_err(|e| MigratableError::Restore(anyhow!("Could not restore vCPU {:?}", e)))?;
         }
 
         // Unblock all restored CPU threads.

@@ -527,7 +527,6 @@ impl Vm {
         };
 
         let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
-        let _max_vcpus = self.cpu_manager.lock().unwrap().max_vcpus();
 
         #[allow(unused_mut, unused_assignments)]
         let mut rsdp_addr: Option<GuestAddress> = None;
@@ -599,6 +598,11 @@ impl Vm {
                 })
             }
         }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn configure_system(&mut self) -> Result<()> {
+        unimplemented!();
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
@@ -980,12 +984,25 @@ impl Vm {
         let new_state = VmState::Running;
         current_state.valid_transition(new_state)?;
 
+        // On x86_64, load_kernel() invokes configure_system().
+        // But on aarch64, it only loads kernel, configure_system()
+        // need to be postponed after VCPU's are created.
         let entry_addr = self.load_kernel()?;
+
+        // create and configure vcpus
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .create_boot_vcpus(entry_addr)
+            .map_err(Error::CpuManager)?;
+
+        #[cfg(target_arch = "aarch64")]
+        self.configure_system()?;
 
         self.cpu_manager
             .lock()
             .unwrap()
-            .start_boot_vcpus(entry_addr)
+            .start_boot_vcpus()
             .map_err(Error::CpuManager)?;
 
         if self
