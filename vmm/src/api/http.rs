@@ -26,6 +26,12 @@ pub enum HttpError {
     /// Attempt to access unsupported HTTP method
     BadRequest,
 
+    /// Undefined endpoints
+    NotFound,
+
+    /// Internal Server Error
+    InternalServerError,
+
     /// Could not create a VM
     VmCreate(ApiError),
 
@@ -194,9 +200,12 @@ fn handle_http_request(
     let mut response = match HTTP_ROUTES.routes.get(&path) {
         Some(route) => match api_notifier.try_clone() {
             Ok(notifier) => route.handle_request(&request, notifier, api_sender.clone()),
-            Err(_) => Response::new(Version::Http11, StatusCode::InternalServerError),
+            Err(_) => error_response(
+                HttpError::InternalServerError,
+                StatusCode::InternalServerError,
+            ),
         },
-        None => Response::new(Version::Http11, StatusCode::NotFound),
+        None => error_response(HttpError::NotFound, StatusCode::NotFound),
     };
 
     response.set_server("Cloud Hypervisor API");
