@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["The Chromium OS Authors"]
 
 [dependencies]
-libc = "0.2.70"
+libc = "0.2.71"
 rand = "0.7.3"
 serde = "1.0.110"
 vmm-sys-util = ">=0.3.1"

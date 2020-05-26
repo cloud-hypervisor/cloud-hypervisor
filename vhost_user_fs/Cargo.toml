@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 bitflags = "1.1.0"
-libc = "0.2.70"
+libc = "0.2.71"
 log = "0.4.8"
 # Match the version in vmm
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.21.1" }

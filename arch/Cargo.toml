@@ -11,7 +11,7 @@ acpi = ["acpi_tables"]
 byteorder = "1.3.4"
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch" }
 kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
-libc = "0.2.70"
+libc = "0.2.71"
 vm-memory = { version = "0.2.0", features = ["backend-mmap"] }
 
 acpi_tables = { path = "../acpi_tables", optional = true }
