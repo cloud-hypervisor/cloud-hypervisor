@@ -15,7 +15,6 @@ use super::{
 };
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
-use epoll;
 use libc::{c_void, EFD_NONBLOCK};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::alloc::{alloc_zeroed, dealloc, Layout};

@@ -6,7 +6,6 @@
 // found in the THIRD-PARTY file.
 
 use super::{create_sockaddr, create_socket, Error as NetUtilError, MacAddr};
-use libc;
 use net_gen;
 use std::fs::File;
 use std::io::{Error as IoError, Read, Result as IoResult, Write};

@@ -9,7 +9,6 @@ use super::{
 };
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
-use epoll;
 use libc::EFD_NONBLOCK;
 use std::cmp;
 use std::collections::BTreeMap;

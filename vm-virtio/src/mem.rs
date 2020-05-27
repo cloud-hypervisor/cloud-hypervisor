@@ -18,8 +18,6 @@ use super::{
     VirtioDeviceType, VIRTIO_F_VERSION_1,
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
-use epoll;
-use libc;
 use libc::EFD_NONBLOCK;
 use std::cmp;
 use std::fs::File;

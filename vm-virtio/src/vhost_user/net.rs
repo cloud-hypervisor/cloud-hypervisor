@@ -11,7 +11,6 @@ use super::vu_common_ctrl::*;
 use super::Error as DeviceError;
 use super::{Error, Result};
 use crate::VirtioInterrupt;
-use libc;
 use libc::EFD_NONBLOCK;
 use net_util::MacAddr;
 use std::cmp;

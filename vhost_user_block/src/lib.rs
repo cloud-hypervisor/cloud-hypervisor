@@ -13,7 +13,6 @@ extern crate vhost_rs;
 extern crate vhost_user_backend;
 extern crate vm_virtio;
 
-use epoll;
 use libc::EFD_NONBLOCK;
 use log::*;
 use qcow::{self, ImageType, QcowFile};

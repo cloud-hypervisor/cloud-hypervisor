@@ -7,7 +7,6 @@ extern crate vhost_rs;
 extern crate virtio_bindings;
 extern crate vm_memory;
 
-use std;
 use std::io;
 use vhost_rs::Error as VhostError;
 use vm_memory::Error as MmapError;

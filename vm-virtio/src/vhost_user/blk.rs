@@ -8,7 +8,6 @@ use super::Error as DeviceError;
 use super::{Error, Result};
 use crate::block::VirtioBlockConfig;
 use crate::VirtioInterrupt;
-use libc;
 use libc::EFD_NONBLOCK;
 use std::cmp;
 use std::io::Write;

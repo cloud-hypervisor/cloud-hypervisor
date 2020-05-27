@@ -8,10 +8,8 @@ use super::{
 };
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
-use epoll;
 use libc::EFD_NONBLOCK;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
-use std;
 use std::cmp;
 use std::collections::VecDeque;
 use std::fs::File;

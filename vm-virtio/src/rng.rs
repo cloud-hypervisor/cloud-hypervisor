@@ -9,9 +9,7 @@ use super::{
 };
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
-use epoll;
 use libc::EFD_NONBLOCK;
-use std;
 use std::fs::File;
 use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd};

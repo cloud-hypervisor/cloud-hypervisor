@@ -1,24 +1,20 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use libc;
+use super::super::Queue;
+use super::{Error, Result};
+use crate::queue::Descriptor;
+use crate::{VirtioInterrupt, VirtioInterruptType};
 use libc::EFD_NONBLOCK;
 use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::vec::Vec;
-
-use crate::queue::Descriptor;
-use crate::{VirtioInterrupt, VirtioInterruptType};
-
+use vhost_rs::vhost_user::{Master, VhostUserMaster};
+use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use vm_device::get_host_address_range;
 use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
-
-use super::super::Queue;
-use super::{Error, Result};
-use vhost_rs::vhost_user::{Master, VhostUserMaster};
-use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 
 #[derive(Debug, Clone)]
 pub struct VhostUserConfig {

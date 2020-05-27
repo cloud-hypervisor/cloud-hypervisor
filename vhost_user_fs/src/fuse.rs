@@ -5,7 +5,6 @@
 use std::mem;
 
 use bitflags::bitflags;
-use libc;
 use vm_memory::ByteValued;
 
 /// Version number of this interface.
