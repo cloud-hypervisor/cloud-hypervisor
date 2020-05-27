@@ -9,7 +9,6 @@
 
 use super::super::{Queue, VirtioInterruptType};
 use super::{Error, Result};
-use epoll;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::VirtioInterrupt;

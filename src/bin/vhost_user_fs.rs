@@ -10,7 +10,6 @@ extern crate vhost_user_backend;
 extern crate vm_virtio;
 
 use clap::{App, Arg};
-use epoll;
 use futures::executor::{ThreadPool, ThreadPoolBuilder};
 use libc::EFD_NONBLOCK;
 use log::*;

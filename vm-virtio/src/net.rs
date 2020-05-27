@@ -16,7 +16,6 @@ use super::{
 };
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
-use epoll;
 use libc::EAGAIN;
 use libc::EFD_NONBLOCK;
 use net_util::{MacAddr, Tap};

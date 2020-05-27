@@ -36,9 +36,7 @@ use anyhow::anyhow;
 /// - a backend FD.
 ///
 use byteorder::{ByteOrder, LittleEndian};
-use epoll;
 use libc::EFD_NONBLOCK;
-use std;
 use std::fs::File;
 use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -688,15 +686,13 @@ mod tests {
             VirtioDeviceType::TYPE_VSOCK as u32
         );
         assert_eq!(ctx.device.queue_max_sizes(), QUEUE_SIZES);
-        assert_eq!((ctx.device.features() >> (0 * 32)) as u32, device_pages[0]);
-        assert_eq!((ctx.device.features() >> (1 * 32)) as u32, device_pages[1]);
+        assert_eq!(ctx.device.features() as u32, device_pages[0]);
+        assert_eq!((ctx.device.features() >> 32) as u32, device_pages[1]);
 
         // Ack device features, page 0.
-        ctx.device
-            .ack_features(u64::from(driver_pages[0]) << (0 * 32));
+        ctx.device.ack_features(u64::from(driver_pages[0]));
         // Ack device features, page 1.
-        ctx.device
-            .ack_features(u64::from(driver_pages[1]) << (1 * 32));
+        ctx.device.ack_features(u64::from(driver_pages[1]) << 32);
         // Check that no side effect are present, and that the acked features are exactly the same
         // as the device features.
         assert_eq!(ctx.device.acked_features, device_features & driver_features);

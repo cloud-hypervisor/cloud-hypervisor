@@ -2,6 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+use super::fs_cache_req_handler::FsCacheReqHandler;
+use crate::filesystem::{
+    Context, DirEntry, Entry, FileSystem, FsOptions, GetxattrReply, ListxattrReply, OpenOptions,
+    SetattrValid, ZeroCopyReader, ZeroCopyWriter,
+};
+use crate::fuse;
+use crate::multikey::MultikeyBTreeMap;
 use std::collections::btree_map;
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString};
@@ -13,17 +20,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-
-use libc;
 use vm_memory::ByteValued;
-
-use super::fs_cache_req_handler::FsCacheReqHandler;
-use crate::filesystem::{
-    Context, DirEntry, Entry, FileSystem, FsOptions, GetxattrReply, ListxattrReply, OpenOptions,
-    SetattrValid, ZeroCopyReader, ZeroCopyWriter,
-};
-use crate::fuse;
-use crate::multikey::MultikeyBTreeMap;
 
 const CURRENT_DIR_CSTR: &[u8] = b".\0";
 const PARENT_DIR_CSTR: &[u8] = b"..\0";

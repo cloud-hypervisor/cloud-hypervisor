@@ -2,15 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use std::convert::TryInto;
-use std::ffi::CStr;
-use std::fs::File;
-use std::io::{self, Read, Write};
-use std::mem::size_of;
-
-use libc;
-use vm_memory::ByteValued;
-
 use super::fs_cache_req_handler::FsCacheReqHandler;
 use crate::descriptor_utils::{Reader, Writer};
 use crate::filesystem::{
@@ -19,6 +10,12 @@ use crate::filesystem::{
 };
 use crate::fuse::*;
 use crate::{Error, Result};
+use std::convert::TryInto;
+use std::ffi::CStr;
+use std::fs::File;
+use std::io::{self, Read, Write};
+use std::mem::size_of;
+use vm_memory::ByteValued;
 
 const MAX_BUFFER_SIZE: u32 = 1 << 20;
 const DIRENT_PADDING: [u8; 8] = [0; 8];

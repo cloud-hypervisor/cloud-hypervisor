@@ -13,7 +13,6 @@ extern crate vhost_user_backend;
 extern crate vm_virtio;
 extern crate vmm;
 
-use epoll;
 use libc::{self, EAGAIN, EFD_NONBLOCK};
 use log::*;
 use net_util::{MacAddr, Tap};

@@ -8,7 +8,6 @@ use crate::configuration::{
 use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
-use std;
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
