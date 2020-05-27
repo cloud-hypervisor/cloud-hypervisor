@@ -359,6 +359,9 @@ fn start_vmm(cmd_arguments: ArgMatches) {
 }
 
 fn main() {
+    // Ensure all created files (.e.g sockets) are only accessible by this user
+    let _ = unsafe { libc::umask(0o077) };
+
     let pid = unsafe { libc::getpid() };
     let uid = unsafe { libc::getuid() };
 
