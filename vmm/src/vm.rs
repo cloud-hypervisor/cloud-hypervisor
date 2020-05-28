@@ -44,7 +44,6 @@ use devices::HotPlugNotificationFlags;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::*;
-#[cfg(target_arch = "x86_64")]
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
@@ -53,7 +52,6 @@ use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 #[cfg(target_arch = "x86_64")]
 use std::convert::TryInto;
-#[cfg(target_arch = "x86_64")]
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -475,13 +473,7 @@ impl Vm {
         Ok(arch::InitramfsConfig { address, size })
     }
 
-    #[cfg(target_arch = "aarch64")]
-    fn load_kernel(&mut self) -> Result<EntryPoint> {
-        unimplemented!();
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn load_kernel(&mut self) -> Result<EntryPoint> {
+    fn get_cmdline(&mut self) -> Result<CString> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE);
         cmdline
             .insert_str(self.config.lock().unwrap().cmdline.args.clone())
@@ -489,8 +481,17 @@ impl Vm {
         for entry in self.device_manager.lock().unwrap().cmdline_additions() {
             cmdline.insert_str(entry).map_err(Error::CmdLineInsertStr)?;
         }
+        Ok(CString::new(cmdline).map_err(Error::CmdLineCString)?)
+    }
 
-        let cmdline_cstring = CString::new(cmdline).map_err(Error::CmdLineCString)?;
+    #[cfg(target_arch = "aarch64")]
+    fn load_kernel(&mut self) -> Result<EntryPoint> {
+        unimplemented!();
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn load_kernel(&mut self) -> Result<EntryPoint> {
+        let cmdline_cstring = self.get_cmdline()?;
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
         let entry_addr = match linux_loader::loader::elf::Elf::load(
@@ -520,6 +521,46 @@ impl Vm {
             &cmdline_cstring,
         )
         .map_err(Error::LoadCmdLine)?;
+
+        if entry_addr.setup_header.is_some() {
+            let load_addr = entry_addr
+                .kernel_load
+                .raw_value()
+                .checked_add(KERNEL_64BIT_ENTRY_OFFSET)
+                .ok_or(Error::MemOverflow)?;
+
+            Ok(EntryPoint {
+                entry_addr: GuestAddress(load_addr),
+                protocol: BootProtocol::LinuxBoot,
+                setup_header: entry_addr.setup_header,
+            })
+        } else {
+            let entry_point_addr: GuestAddress;
+            let boot_prot: BootProtocol;
+
+            if let Some(pvh_entry_addr) = entry_addr.pvh_entry_addr {
+                // Use the PVH kernel entry point to boot the guest
+                entry_point_addr = pvh_entry_addr;
+                boot_prot = BootProtocol::PvhBoot;
+            } else {
+                // Use the Linux 64-bit boot protocol
+                entry_point_addr = entry_addr.kernel_load;
+                boot_prot = BootProtocol::LinuxBoot;
+            }
+
+            Ok(EntryPoint {
+                entry_addr: entry_point_addr,
+                protocol: boot_prot,
+                setup_header: None,
+            })
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn configure_system(&mut self, entry_addr: EntryPoint) -> Result<()> {
+        let cmdline_cstring = self.get_cmdline()?;
+        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+        let mem = guest_memory.memory();
 
         let initramfs_config = match self.initramfs {
             Some(_) => Some(self.load_initramfs(mem.deref())?),
@@ -554,32 +595,8 @@ impl Vm {
                     BootProtocol::LinuxBoot,
                 )
                 .map_err(Error::ConfigureSystem)?;
-
-                let load_addr = entry_addr
-                    .kernel_load
-                    .raw_value()
-                    .checked_add(KERNEL_64BIT_ENTRY_OFFSET)
-                    .ok_or(Error::MemOverflow)?;
-
-                Ok(EntryPoint {
-                    entry_addr: GuestAddress(load_addr),
-                    protocol: BootProtocol::LinuxBoot,
-                })
             }
             None => {
-                let entry_point_addr: GuestAddress;
-                let boot_prot: BootProtocol;
-
-                if let Some(pvh_entry_addr) = entry_addr.pvh_entry_addr {
-                    // Use the PVH kernel entry point to boot the guest
-                    entry_point_addr = pvh_entry_addr;
-                    boot_prot = BootProtocol::PvhBoot;
-                } else {
-                    // Use the Linux 64-bit boot protocol
-                    entry_point_addr = entry_addr.kernel_load;
-                    boot_prot = BootProtocol::LinuxBoot;
-                }
-
                 arch::configure_system(
                     &mem,
                     arch::layout::CMDLINE_START,
@@ -588,20 +605,20 @@ impl Vm {
                     boot_vcpus,
                     None,
                     rsdp_addr,
-                    boot_prot,
+                    entry_addr.protocol,
                 )
                 .map_err(Error::ConfigureSystem)?;
-
-                Ok(EntryPoint {
-                    entry_addr: entry_point_addr,
-                    protocol: boot_prot,
-                })
             }
         }
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn configure_system(&mut self) -> Result<()> {
+    fn configure_system(&mut self, _entry_addr: EntryPoint) -> Result<()> {
+        let _cmdline_cstring = self.get_cmdline()?;
+        // What to do on AArch64 is:
+        // - Setup GIC
+        // - Generate FDT
         unimplemented!();
     }
 
@@ -984,20 +1001,16 @@ impl Vm {
         let new_state = VmState::Running;
         current_state.valid_transition(new_state)?;
 
-        // On x86_64, load_kernel() invokes configure_system().
-        // But on aarch64, it only loads kernel, configure_system()
-        // need to be postponed after VCPU's are created.
-        let entry_addr = self.load_kernel()?;
+        let entry_point = self.load_kernel()?;
 
         // create and configure vcpus
         self.cpu_manager
             .lock()
             .unwrap()
-            .create_boot_vcpus(entry_addr)
+            .create_boot_vcpus(entry_point)
             .map_err(Error::CpuManager)?;
 
-        #[cfg(target_arch = "aarch64")]
-        self.configure_system()?;
+        self.configure_system(entry_point)?;
 
         self.cpu_manager
             .lock()
