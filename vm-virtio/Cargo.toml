@@ -27,7 +27,7 @@ tempfile = "3.1.0"
 virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.2.0", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.2.1", features = ["backend-mmap", "backend-atomic"] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = ">=0.3.1"
 vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-master", "vhost-user-slave"] }

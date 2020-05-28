@@ -1469,9 +1469,9 @@ dependencies = [
 
 [[package]]
 name = "vm-memory"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98d50eb34b2ec250e098fbad7486e81f592a1bdeff2b10f0433638f3ce6a0828"
+checksum = "41fb10d355a0de221e0524cb18491d3dc6e2a0981747f75fd0a3a12109f1712f"
 dependencies = [
  "arc-swap",
  "libc",
