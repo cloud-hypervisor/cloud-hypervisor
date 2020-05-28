@@ -30,6 +30,9 @@ pub enum Error {
     #[cfg(target_arch = "x86_64")]
     /// X86_64 specific error triggered during system configuration.
     X86_64Setup(x86_64::Error),
+    #[cfg(target_arch = "aarch64")]
+    /// AArch64 specific error triggered during system configuration.
+    AArch64Setup(aarch64::Error),
     /// The zero page extends past the end of guest_mem.
     ZeroPagePastRamEnd,
     /// Error writing the zero page of guest memory.
@@ -76,8 +79,9 @@ pub mod aarch64;
 
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{
-    arch_memory_regions, check_required_kvm_extensions, configure_system, get_host_cpu_phys_bits,
-    get_reserved_mem_addr, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START, EntryPoint,
+    arch_memory_regions, check_required_kvm_extensions, configure_system, configure_vcpu,
+    get_host_cpu_phys_bits, get_reserved_mem_addr, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START,
+    EntryPoint,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -85,9 +89,9 @@ pub mod x86_64;
 
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    arch_memory_regions, check_required_kvm_extensions, configure_system, get_host_cpu_phys_bits,
-    initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START, regs,
-    BootProtocol, EntryPoint,
+    arch_memory_regions, check_required_kvm_extensions, configure_system, configure_vcpu,
+    get_host_cpu_phys_bits, initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE,
+    layout::CMDLINE_START, regs, BootProtocol, CpuidPatch, CpuidReg, EntryPoint,
 };
 
 /// Safe wrapper for `sysconf(_SC_PAGESIZE)`.
