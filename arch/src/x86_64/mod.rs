@@ -15,6 +15,7 @@ mod mptable;
 pub mod regs;
 use crate::InitramfsConfig;
 use crate::RegionType;
+use kvm_bindings::CpuId;
 use kvm_ioctls::*;
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
@@ -22,8 +23,8 @@ use linux_loader::loader::elf::start_info::{
 };
 use std::mem;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryMmap, GuestMemoryRegion,
-    GuestUsize,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    GuestMemoryMmap, GuestMemoryRegion, GuestUsize,
 };
 
 #[derive(Debug, Copy, Clone)]
@@ -96,12 +97,137 @@ pub enum Error {
     #[cfg(not(feature = "acpi"))]
     /// Error writing MP table to memory.
     MpTableSetup(mptable::Error),
+
+    /// Error configuring the general purpose registers
+    REGSConfiguration(regs::Error),
+
+    /// Error configuring the special registers
+    SREGSConfiguration(regs::Error),
+
+    /// Error configuring the floating point related registers
+    FPUConfiguration(regs::Error),
+
+    /// Error configuring the MSR registers
+    MSRSConfiguration(regs::Error),
+
+    /// The call to KVM_SET_CPUID2 failed.
+    SetSupportedCpusFailed(kvm_ioctls::Error),
+
+    /// Cannot set the local interruption due to bad configuration.
+    LocalIntConfiguration(interrupts::Error),
 }
 
 impl From<Error> for super::Error {
     fn from(e: Error) -> super::Error {
         super::Error::X86_64Setup(e)
     }
+}
+
+#[allow(dead_code)]
+#[derive(Copy, Clone)]
+pub enum CpuidReg {
+    EAX,
+    EBX,
+    ECX,
+    EDX,
+}
+
+pub struct CpuidPatch {
+    pub function: u32,
+    pub index: u32,
+    pub flags_bit: Option<u8>,
+    pub eax_bit: Option<u8>,
+    pub ebx_bit: Option<u8>,
+    pub ecx_bit: Option<u8>,
+    pub edx_bit: Option<u8>,
+}
+
+impl CpuidPatch {
+    pub fn set_cpuid_reg(
+        cpuid: &mut CpuId,
+        function: u32,
+        index: Option<u32>,
+        reg: CpuidReg,
+        value: u32,
+    ) {
+        let entries = cpuid.as_mut_slice();
+
+        for entry in entries.iter_mut() {
+            if entry.function == function && (index == None || index.unwrap() == entry.index) {
+                match reg {
+                    CpuidReg::EAX => {
+                        entry.eax = value;
+                    }
+                    CpuidReg::EBX => {
+                        entry.ebx = value;
+                    }
+                    CpuidReg::ECX => {
+                        entry.ecx = value;
+                    }
+                    CpuidReg::EDX => {
+                        entry.edx = value;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn patch_cpuid(cpuid: &mut CpuId, patches: Vec<CpuidPatch>) {
+        let entries = cpuid.as_mut_slice();
+
+        for entry in entries.iter_mut() {
+            for patch in patches.iter() {
+                if entry.function == patch.function && entry.index == patch.index {
+                    if let Some(flags_bit) = patch.flags_bit {
+                        entry.flags |= 1 << flags_bit;
+                    }
+                    if let Some(eax_bit) = patch.eax_bit {
+                        entry.eax |= 1 << eax_bit;
+                    }
+                    if let Some(ebx_bit) = patch.ebx_bit {
+                        entry.ebx |= 1 << ebx_bit;
+                    }
+                    if let Some(ecx_bit) = patch.ecx_bit {
+                        entry.ecx |= 1 << ecx_bit;
+                    }
+                    if let Some(edx_bit) = patch.edx_bit {
+                        entry.edx |= 1 << edx_bit;
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn configure_vcpu(
+    fd: &VcpuFd,
+    id: u8,
+    kernel_entry_point: Option<EntryPoint>,
+    vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    cpuid: CpuId,
+) -> super::Result<()> {
+    let mut cpuid = cpuid;
+    CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
+    fd.set_cpuid2(&cpuid)
+        .map_err(Error::SetSupportedCpusFailed)?;
+
+    regs::setup_msrs(fd).map_err(Error::MSRSConfiguration)?;
+    if let Some(kernel_entry_point) = kernel_entry_point {
+        // Safe to unwrap because this method is called after the VM is configured
+        regs::setup_regs(
+            fd,
+            kernel_entry_point.entry_addr.raw_value(),
+            layout::BOOT_STACK_POINTER.raw_value(),
+            layout::ZERO_PAGE_START.raw_value(),
+            kernel_entry_point.protocol,
+        )
+        .map_err(Error::REGSConfiguration)?;
+        regs::setup_fpu(fd).map_err(Error::FPUConfiguration)?;
+        regs::setup_sregs(&vm_memory.memory(), fd, kernel_entry_point.protocol)
+            .map_err(Error::SREGSConfiguration)?;
+    }
+    interrupts::set_lint(fd).map_err(Error::LocalIntConfiguration)?;
+    Ok(())
 }
 
 /// Returns a Vec of the valid memory addresses.

@@ -20,6 +20,8 @@ use anyhow::anyhow;
 #[cfg(feature = "acpi")]
 use arch::layout;
 use arch::EntryPoint;
+#[cfg(target_arch = "x86_64")]
+use arch::{CpuidPatch, CpuidReg};
 use devices::{interrupt_controller::InterruptController, BusDevice};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
@@ -35,8 +37,6 @@ use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
-#[cfg(target_arch = "x86_64")]
-use vm_memory::{Address, GuestAddressSpace};
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
@@ -110,18 +110,6 @@ pub enum Error {
     /// Cannot patch the CPU ID
     PatchCpuId(kvm_ioctls::Error),
 
-    #[cfg(target_arch = "x86_64")]
-    /// Error configuring the general purpose registers
-    REGSConfiguration(arch::x86_64::regs::Error),
-
-    #[cfg(target_arch = "x86_64")]
-    /// Error configuring the special registers
-    SREGSConfiguration(arch::x86_64::regs::Error),
-
-    #[cfg(target_arch = "x86_64")]
-    /// Error configuring the floating point related registers
-    FPUConfiguration(arch::x86_64::regs::Error),
-
     /// The call to KVM_SET_CPUID2 failed.
     SetSupportedCpusFailed(kvm_ioctls::Error),
 
@@ -129,9 +117,8 @@ pub enum Error {
     /// Cannot set the local interruption due to bad configuration.
     LocalIntConfiguration(arch::x86_64::interrupts::Error),
 
-    #[cfg(target_arch = "x86_64")]
-    /// Error configuring the MSR registers
-    MSRSConfiguration(arch::x86_64::regs::Error),
+    /// Error configuring VCPU
+    VcpuConfiguration(arch::Error),
 
     /// Unexpected KVM_RUN exit reason
     VcpuUnhandledKvmExit,
@@ -206,85 +193,6 @@ pub enum Error {
     ResumeOnShutdown(MigratableError),
 }
 pub type Result<T> = result::Result<T, Error>;
-
-#[cfg(target_arch = "x86_64")]
-#[allow(dead_code)]
-#[derive(Copy, Clone)]
-enum CpuidReg {
-    EAX,
-    EBX,
-    ECX,
-    EDX,
-}
-
-#[cfg(target_arch = "x86_64")]
-pub struct CpuidPatch {
-    pub function: u32,
-    pub index: u32,
-    pub flags_bit: Option<u8>,
-    pub eax_bit: Option<u8>,
-    pub ebx_bit: Option<u8>,
-    pub ecx_bit: Option<u8>,
-    pub edx_bit: Option<u8>,
-}
-
-#[cfg(target_arch = "x86_64")]
-impl CpuidPatch {
-    fn set_cpuid_reg(
-        cpuid: &mut CpuId,
-        function: u32,
-        index: Option<u32>,
-        reg: CpuidReg,
-        value: u32,
-    ) {
-        let entries = cpuid.as_mut_slice();
-
-        for entry in entries.iter_mut() {
-            if entry.function == function && (index == None || index.unwrap() == entry.index) {
-                match reg {
-                    CpuidReg::EAX => {
-                        entry.eax = value;
-                    }
-                    CpuidReg::EBX => {
-                        entry.ebx = value;
-                    }
-                    CpuidReg::ECX => {
-                        entry.ecx = value;
-                    }
-                    CpuidReg::EDX => {
-                        entry.edx = value;
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn patch_cpuid(cpuid: &mut CpuId, patches: Vec<CpuidPatch>) {
-        let entries = cpuid.as_mut_slice();
-
-        for entry in entries.iter_mut() {
-            for patch in patches.iter() {
-                if entry.function == patch.function && entry.index == patch.index {
-                    if let Some(flags_bit) = patch.flags_bit {
-                        entry.flags |= 1 << flags_bit;
-                    }
-                    if let Some(eax_bit) = patch.eax_bit {
-                        entry.eax |= 1 << eax_bit;
-                    }
-                    if let Some(ebx_bit) = patch.ebx_bit {
-                        entry.ebx |= 1 << ebx_bit;
-                    }
-                    if let Some(ecx_bit) = patch.ecx_bit {
-                        entry.ecx |= 1 << ecx_bit;
-                    }
-                    if let Some(edx_bit) = patch.edx_bit {
-                        entry.edx |= 1 << edx_bit;
-                    }
-                }
-            }
-        }
-    }
-}
 
 #[cfg(feature = "acpi")]
 #[repr(packed)]
@@ -376,63 +284,28 @@ impl Vcpu {
         })))
     }
 
-    #[cfg(target_arch = "aarch64")]
-    /// Configures a aarch64 specific vcpu and should be called once per vcpu when created.
+    /// Configures a vcpu and should be called once per vcpu when created.
     ///
     /// # Arguments
     ///
-    /// * `machine_config` - Specifies necessary info used for the CPUID configuration.
+    /// * `fd` - VcpuFd.
     /// * `kernel_entry_point` - Kernel entry point address in guest memory and boot protocol used.
     /// * `vm_memory` - Guest memory.
+    /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
     pub fn configure(
-        &mut self,
-        _kernel_entry_point: Option<EntryPoint>,
-        _vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-    ) -> Result<()> {
-        unimplemented!();
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    /// Configures a x86_64 specific vcpu and should be called once per vcpu when created.
-    ///
-    /// # Arguments
-    ///
-    /// * `machine_config` - Specifies necessary info used for the CPUID configuration.
-    /// * `kernel_entry_point` - Kernel entry point address in guest memory and boot protocol used.
-    /// * `vm_memory` - Guest memory.
-    /// * `cpuid` - CpuId, wrapper over the `kvm_cpuid2` structure.
-    pub fn configure(
-        &mut self,
+        &self,
         kernel_entry_point: Option<EntryPoint>,
         vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-        cpuid: CpuId,
+        #[cfg(target_arch = "x86_64")] cpuid: CpuId,
     ) -> Result<()> {
-        let mut cpuid = cpuid;
-        CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(self.id));
-        self.fd
-            .set_cpuid2(&cpuid)
-            .map_err(Error::SetSupportedCpusFailed)?;
+        #[cfg(target_arch = "aarch64")]
+        arch::configure_vcpu(&self.fd, self.id, kernel_entry_point, vm_memory)
+            .map_err(Error::VcpuConfiguration)?;
 
-        arch::x86_64::regs::setup_msrs(&self.fd).map_err(Error::MSRSConfiguration)?;
-        if let Some(kernel_entry_point) = kernel_entry_point {
-            // Safe to unwrap because this method is called after the VM is configured
-            arch::x86_64::regs::setup_regs(
-                &self.fd,
-                kernel_entry_point.entry_addr.raw_value(),
-                arch::x86_64::layout::BOOT_STACK_POINTER.raw_value(),
-                arch::x86_64::layout::ZERO_PAGE_START.raw_value(),
-                kernel_entry_point.protocol,
-            )
-            .map_err(Error::REGSConfiguration)?;
-            arch::x86_64::regs::setup_fpu(&self.fd).map_err(Error::FPUConfiguration)?;
-            arch::x86_64::regs::setup_sregs(
-                &vm_memory.memory(),
-                &self.fd,
-                kernel_entry_point.protocol,
-            )
-            .map_err(Error::SREGSConfiguration)?;
-        }
-        arch::x86_64::interrupts::set_lint(&self.fd).map_err(Error::LocalIntConfiguration)?;
+        #[cfg(target_arch = "x86_64")]
+        arch::configure_vcpu(&self.fd, self.id, kernel_entry_point, vm_memory, cpuid)
+            .map_err(Error::VcpuConfiguration)?;
+
         Ok(())
     }
 
