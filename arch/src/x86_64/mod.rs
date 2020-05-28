@@ -50,6 +50,8 @@ pub struct EntryPoint {
     pub entry_addr: GuestAddress,
     /// Specifies which boot protocol to use
     pub protocol: BootProtocol,
+    /// This field is used for bzImage to fill zero page
+    pub setup_header: Option<setup_header>,
 }
 
 const E820_RAM: u32 = 1;
