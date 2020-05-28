@@ -14,7 +14,7 @@ log = "0.4.8"
 pci = { path = "../pci" }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.2.0", features = ["backend-mmap"] }
+vm-memory = { version = "0.2.1", features = ["backend-mmap"] }
 vmm-sys-util = ">=0.3.1"
 
 [dependencies.vfio-bindings]

@@ -37,7 +37,7 @@ url = "2.1.1"
 vfio = { path = "../vfio", optional = true }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.2.0", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.2.1", features = ["backend-mmap", "backend-atomic"] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = ">=0.5.0", features = ["with-serde"] }
