@@ -93,7 +93,7 @@ impl NetEpollHandler {
         self.rx.process_desc_chain(&mem, next_desc, &mut queue)
     }
 
-    fn process_rx(&mut self, queue: &mut Queue) -> result::Result<(), DeviceError> {
+    fn process_rx(&mut self, queue: &mut Queue) -> result::Result<bool, DeviceError> {
         // Read as many frames as possible.
         loop {
             match self.read_tap() {
@@ -120,47 +120,13 @@ impl NetEpollHandler {
         }
         if self.rx.deferred_irqs {
             self.rx.deferred_irqs = false;
-            self.signal_used_queue(queue)
+            Ok(true)
         } else {
-            Ok(())
+            Ok(false)
         }
     }
 
-    fn resume_rx(&mut self, queue: &mut Queue) -> result::Result<(), DeviceError> {
-        if self.rx.deferred_frame {
-            if self.rx_single_frame(queue) {
-                self.rx.deferred_frame = false;
-                // process_rx() was interrupted possibly before consuming all
-                // packets in the tap; try continuing now.
-                self.process_rx(queue)
-            } else if self.rx.deferred_irqs {
-                self.rx.deferred_irqs = false;
-                self.signal_used_queue(queue)
-            } else {
-                Ok(())
-            }
-        } else {
-            Ok(())
-        }
-    }
-
-    fn process_tx(&mut self, mut queue: &mut Queue) -> result::Result<(), DeviceError> {
-        let mem = self.mem.memory();
-
-        self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
-        self.signal_used_queue(queue)
-    }
-
-    fn read_tap(&mut self) -> io::Result<usize> {
-        self.tap.read(&mut self.rx.frame_buf)
-    }
-
-    fn handle_rx_event(&mut self, mut queue: &mut Queue, queue_evt: &EventFd) {
-        if let Err(e) = queue_evt.read() {
-            error!("Failed to get rx queue event: {:?}", e);
-        }
-
-        self.resume_rx(&mut queue).unwrap();
+    fn resume_rx(&mut self, queue: &mut Queue) -> result::Result<bool, DeviceError> {
         if !self.rx_tap_listening {
             register_listener(
                 self.epoll_fd,
@@ -171,31 +137,89 @@ impl NetEpollHandler {
             .unwrap();
             self.rx_tap_listening = true;
         }
-    }
-
-    fn handle_tx_event(&mut self, mut queue: &mut Queue, queue_evt: &EventFd) {
-        if let Err(e) = queue_evt.read() {
-            error!("Failed to get tx queue event: {:?}", e);
+        if self.rx.deferred_frame {
+            if self.rx_single_frame(queue) {
+                self.rx.deferred_frame = false;
+                // process_rx() was interrupted possibly before consuming all
+                // packets in the tap; try continuing now.
+                self.process_rx(queue)
+            } else if self.rx.deferred_irqs {
+                self.rx.deferred_irqs = false;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        } else {
+            Ok(false)
         }
-
-        self.process_tx(&mut queue).unwrap();
     }
 
-    fn handle_rx_tap_event(&mut self, mut queue: &mut Queue) {
+    fn process_tx(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
+        let mem = self.mem.memory();
+
+        self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
+        Ok(true)
+    }
+    fn process_rx_tap(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
         if self.rx.deferred_frame
         // Process a deferred frame first if available. Don't read from tap again
         // until we manage to receive this deferred frame.
         {
             if self.rx_single_frame(&mut queue) {
                 self.rx.deferred_frame = false;
-                self.process_rx(&mut queue).unwrap();
+                self.process_rx(&mut queue)
             } else if self.rx.deferred_irqs {
                 self.rx.deferred_irqs = false;
-                self.signal_used_queue(&queue).unwrap();
+                Ok(true)
+            } else {
+                Ok(false)
             }
         } else {
-            self.process_rx(&mut queue).unwrap();
+            self.process_rx(&mut queue)
         }
+    }
+
+    fn read_tap(&mut self) -> io::Result<usize> {
+        self.tap.read(&mut self.rx.frame_buf)
+    }
+
+    fn handle_rx_event(
+        &mut self,
+        mut queue: &mut Queue,
+        queue_evt: &EventFd,
+    ) -> result::Result<(), DeviceError> {
+        if let Err(e) = queue_evt.read() {
+            error!("Failed to get rx queue event: {:?}", e);
+        }
+
+        if self.resume_rx(&mut queue)? {
+            self.signal_used_queue(queue)?
+        }
+
+        Ok(())
+    }
+
+    fn handle_tx_event(
+        &mut self,
+        mut queue: &mut Queue,
+        queue_evt: &EventFd,
+    ) -> result::Result<(), DeviceError> {
+        if let Err(e) = queue_evt.read() {
+            error!("Failed to get tx queue event: {:?}", e);
+        }
+
+        if self.process_tx(&mut queue)? {
+            self.signal_used_queue(queue)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn handle_rx_tap_event(&mut self, queue: &mut Queue) -> result::Result<(), DeviceError> {
+        if self.process_rx_tap(queue)? {
+            self.signal_used_queue(queue)?
+        }
+        Ok(())
     }
 
     fn run(
@@ -277,13 +301,13 @@ impl NetEpollHandler {
 
                 match ev_type {
                     RX_QUEUE_EVENT => {
-                        self.handle_rx_event(&mut queues[0], &queue_evts[0]);
+                        self.handle_rx_event(&mut queues[0], &queue_evts[0])?;
                     }
                     TX_QUEUE_EVENT => {
-                        self.handle_tx_event(&mut queues[1], &queue_evts[1]);
+                        self.handle_tx_event(&mut queues[1], &queue_evts[1])?;
                     }
                     RX_TAP_EVENT => {
-                        self.handle_rx_tap_event(&mut queues[0]);
+                        self.handle_rx_tap_event(&mut queues[0])?;
                     }
                     KILL_EVENT => {
                         debug!("KILL_EVENT received, stopping epoll loop");
