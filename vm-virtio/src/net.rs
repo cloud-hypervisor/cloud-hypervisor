@@ -71,7 +71,7 @@ impl NetEpollHandler {
     // Copies a single frame from `self.rx.frame_buf` into the guest. Returns true
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
-    fn rx_single_frame(&mut self, mut queue: &mut Queue) -> bool {
+    fn rx_single_frame(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
         let mem = self.mem.memory();
         let next_desc = queue.iter(&mem).next();
 
@@ -87,10 +87,10 @@ impl NetEpollHandler {
                 .map_err(DeviceError::UnregisterListener)?;
                 self.rx_tap_listening = false;
             }
-            return false;
+            return Ok(false);
         }
 
-        self.rx.process_desc_chain(&mem, next_desc, &mut queue)
+        Ok(self.rx.process_desc_chain(&mem, next_desc, &mut queue))
     }
 
     fn process_rx(&mut self, queue: &mut Queue) -> result::Result<bool, DeviceError> {
@@ -99,7 +99,7 @@ impl NetEpollHandler {
             match self.read_tap() {
                 Ok(count) => {
                     self.rx.bytes_read = count;
-                    if !self.rx_single_frame(queue) {
+                    if !self.rx_single_frame(queue)? {
                         self.rx.deferred_frame = true;
                         break;
                     }
@@ -138,7 +138,7 @@ impl NetEpollHandler {
             self.rx_tap_listening = true;
         }
         if self.rx.deferred_frame {
-            if self.rx_single_frame(queue) {
+            if self.rx_single_frame(queue)? {
                 self.rx.deferred_frame = false;
                 // process_rx() was interrupted possibly before consuming all
                 // packets in the tap; try continuing now.
@@ -165,7 +165,7 @@ impl NetEpollHandler {
         // Process a deferred frame first if available. Don't read from tap again
         // until we manage to receive this deferred frame.
         {
-            if self.rx_single_frame(&mut queue) {
+            if self.rx_single_frame(&mut queue)? {
                 self.rx.deferred_frame = false;
                 self.process_rx(&mut queue)
             } else if self.rx.deferred_irqs {
