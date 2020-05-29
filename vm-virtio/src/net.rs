@@ -46,28 +46,16 @@ pub enum Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
-struct NetEpollHandler {
+struct NetQueuePair {
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     tap: Tap,
     rx: RxVirtio,
     tx: TxVirtio,
-    interrupt_cb: Arc<dyn VirtioInterrupt>,
-    kill_evt: EventFd,
-    pause_evt: EventFd,
     epoll_fd: RawFd,
     rx_tap_listening: bool,
 }
 
-impl NetEpollHandler {
-    fn signal_used_queue(&self, queue: &Queue) -> result::Result<(), DeviceError> {
-        self.interrupt_cb
-            .trigger(&VirtioInterruptType::Queue, Some(queue))
-            .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
-                DeviceError::FailedSignalingUsedQueue(e)
-            })
-    }
-
+impl NetQueuePair {
     // Copies a single frame from `self.rx.frame_buf` into the guest. Returns true
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
@@ -160,6 +148,7 @@ impl NetEpollHandler {
         self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
         Ok(true)
     }
+
     fn process_rx_tap(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
         if self.rx.deferred_frame
         // Process a deferred frame first if available. Don't read from tap again
@@ -182,6 +171,24 @@ impl NetEpollHandler {
     fn read_tap(&mut self) -> io::Result<usize> {
         self.tap.read(&mut self.rx.frame_buf)
     }
+}
+
+struct NetEpollHandler {
+    net: NetQueuePair,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
+    kill_evt: EventFd,
+    pause_evt: EventFd,
+}
+
+impl NetEpollHandler {
+    fn signal_used_queue(&self, queue: &Queue) -> result::Result<(), DeviceError> {
+        self.interrupt_cb
+            .trigger(&VirtioInterruptType::Queue, Some(queue))
+            .map_err(|e| {
+                error!("Failed to signal used queue: {:?}", e);
+                DeviceError::FailedSignalingUsedQueue(e)
+            })
+    }
 
     fn handle_rx_event(
         &mut self,
@@ -192,7 +199,7 @@ impl NetEpollHandler {
             error!("Failed to get rx queue event: {:?}", e);
         }
 
-        if self.resume_rx(&mut queue)? {
+        if self.net.resume_rx(&mut queue)? {
             self.signal_used_queue(queue)?
         }
 
@@ -208,15 +215,14 @@ impl NetEpollHandler {
             error!("Failed to get tx queue event: {:?}", e);
         }
 
-        if self.process_tx(&mut queue)? {
-            self.signal_used_queue(queue)
-        } else {
-            Ok(())
+        if self.net.process_tx(&mut queue)? {
+            self.signal_used_queue(queue)?
         }
+        Ok(())
     }
 
     fn handle_rx_tap_event(&mut self, queue: &mut Queue) -> result::Result<(), DeviceError> {
-        if self.process_rx_tap(queue)? {
+        if self.net.process_rx_tap(queue)? {
             self.signal_used_queue(queue)?
         }
         Ok(())
@@ -229,9 +235,9 @@ impl NetEpollHandler {
         queue_evts: Vec<EventFd>,
     ) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
-        self.epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
+        self.net.epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
         // Use 'File' to enforce closing on 'epoll_fd'
-        let epoll_file = unsafe { File::from_raw_fd(self.epoll_fd) };
+        let epoll_file = unsafe { File::from_raw_fd(self.net.epoll_fd) };
 
         // Add events
         epoll::ctl(
@@ -265,15 +271,18 @@ impl NetEpollHandler {
 
         // If there are some already available descriptors on the RX queue,
         // then we can start the thread while listening onto the TAP.
-        if queues[0].available_descriptors(&self.mem.memory()).unwrap() {
+        if queues[0]
+            .available_descriptors(&self.net.mem.memory())
+            .unwrap()
+        {
             epoll::ctl(
                 epoll_file.as_raw_fd(),
                 epoll::ControlOptions::EPOLL_CTL_ADD,
-                self.tap.as_raw_fd(),
+                self.net.tap.as_raw_fd(),
                 epoll::Event::new(epoll::Events::EPOLLIN, u64::from(RX_TAP_EVENT)),
             )
             .map_err(DeviceError::EpollCtl)?;
-            self.rx_tap_listening = true;
+            self.net.rx_tap_listening = true;
         }
 
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); NET_EVENTS_COUNT];
@@ -594,15 +603,17 @@ impl VirtioDevice for Net {
                 queue_evt_pair.push(queue_evts.remove(0));
 
                 let mut handler = NetEpollHandler {
-                    mem: mem.clone(),
-                    tap: taps.remove(0),
-                    rx,
-                    tx,
+                    net: NetQueuePair {
+                        mem: mem.clone(),
+                        tap: taps.remove(0),
+                        rx,
+                        tx,
+                        epoll_fd: 0,
+                        rx_tap_listening,
+                    },
                     interrupt_cb: interrupt_cb.clone(),
                     kill_evt: kill_evt.try_clone().unwrap(),
                     pause_evt: pause_evt.try_clone().unwrap(),
-                    epoll_fd: 0,
-                    rx_tap_listening,
                 };
 
                 let paused = self.paused.clone();
