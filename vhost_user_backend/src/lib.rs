@@ -310,6 +310,12 @@ pub struct VringWorker {
     epoll_file: File,
 }
 
+impl AsRawFd for VringWorker {
+    fn as_raw_fd(&self) -> RawFd {
+        self.epoll_file.as_raw_fd()
+    }
+}
+
 impl VringWorker {
     fn run<S: VhostUserBackend>(&self, handler: VringEpollHandler<S>) -> VringWorkerResult<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
