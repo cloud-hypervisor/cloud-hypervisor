@@ -180,6 +180,8 @@ pub enum Error {
         event: DeviceEventT,
     },
     IoError(io::Error),
+    RegisterListener(io::Error),
+    UnregisterListener(io::Error),
     EpollCreateFd(io::Error),
     EpollCtl(io::Error),
     EpollWait(io::Error),

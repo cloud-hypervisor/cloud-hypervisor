@@ -84,7 +84,7 @@ impl NetEpollHandler {
                     epoll::Events::EPOLLIN,
                     u64::from(RX_TAP_EVENT),
                 )
-                .unwrap();
+                .map_err(DeviceError::UnregisterListener)?;
                 self.rx_tap_listening = false;
             }
             return false;
@@ -134,7 +134,7 @@ impl NetEpollHandler {
                 epoll::Events::EPOLLIN,
                 u64::from(RX_TAP_EVENT),
             )
-            .unwrap();
+            .map_err(DeviceError::RegisterListener)?;
             self.rx_tap_listening = true;
         }
         if self.rx.deferred_frame {
