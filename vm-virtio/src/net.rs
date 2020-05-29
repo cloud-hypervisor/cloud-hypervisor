@@ -46,13 +46,13 @@ pub enum Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
-struct NetQueuePair {
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    tap: Tap,
-    rx: RxVirtio,
-    tx: TxVirtio,
-    epoll_fd: RawFd,
-    rx_tap_listening: bool,
+pub struct NetQueuePair {
+    pub mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    pub tap: Tap,
+    pub rx: RxVirtio,
+    pub tx: TxVirtio,
+    pub epoll_fd: Option<RawFd>,
+    pub rx_tap_listening: bool,
 }
 
 impl NetQueuePair {
@@ -60,14 +60,18 @@ impl NetQueuePair {
     // if a buffer was used, and false if the frame must be deferred until a buffer
     // is made available by the driver.
     fn rx_single_frame(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
-        let mem = self.mem.memory();
+        let mem = self
+            .mem
+            .as_ref()
+            .ok_or(DeviceError::NoMemoryConfigured)
+            .map(|m| m.memory())?;
         let next_desc = queue.iter(&mem).next();
 
         if next_desc.is_none() {
             // Queue has no available descriptors
             if self.rx_tap_listening {
                 unregister_listener(
-                    self.epoll_fd,
+                    self.epoll_fd.unwrap(),
                     self.tap.as_raw_fd(),
                     epoll::Events::EPOLLIN,
                     u64::from(RX_TAP_EVENT),
@@ -114,10 +118,10 @@ impl NetQueuePair {
         }
     }
 
-    fn resume_rx(&mut self, queue: &mut Queue) -> result::Result<bool, DeviceError> {
+    pub fn resume_rx(&mut self, queue: &mut Queue) -> result::Result<bool, DeviceError> {
         if !self.rx_tap_listening {
             register_listener(
-                self.epoll_fd,
+                self.epoll_fd.unwrap(),
                 self.tap.as_raw_fd(),
                 epoll::Events::EPOLLIN,
                 u64::from(RX_TAP_EVENT),
@@ -142,14 +146,17 @@ impl NetQueuePair {
         }
     }
 
-    fn process_tx(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
-        let mem = self.mem.memory();
-
+    pub fn process_tx(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
+        let mem = self
+            .mem
+            .as_ref()
+            .ok_or(DeviceError::NoMemoryConfigured)
+            .map(|m| m.memory())?;
         self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
         Ok(true)
     }
 
-    fn process_rx_tap(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
+    pub fn process_rx_tap(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
         if self.rx.deferred_frame
         // Process a deferred frame first if available. Don't read from tap again
         // until we manage to receive this deferred frame.
@@ -235,9 +242,10 @@ impl NetEpollHandler {
         queue_evts: Vec<EventFd>,
     ) -> result::Result<(), DeviceError> {
         // Create the epoll file descriptor
-        self.net.epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
+        let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
         // Use 'File' to enforce closing on 'epoll_fd'
-        let epoll_file = unsafe { File::from_raw_fd(self.net.epoll_fd) };
+        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
+        self.net.epoll_fd = Some(epoll_fd);
 
         // Add events
         epoll::ctl(
@@ -272,7 +280,7 @@ impl NetEpollHandler {
         // If there are some already available descriptors on the RX queue,
         // then we can start the thread while listening onto the TAP.
         if queues[0]
-            .available_descriptors(&self.net.mem.memory())
+            .available_descriptors(&self.net.mem.as_ref().unwrap().memory())
             .unwrap()
         {
             epoll::ctl(
@@ -604,11 +612,11 @@ impl VirtioDevice for Net {
 
                 let mut handler = NetEpollHandler {
                     net: NetQueuePair {
-                        mem: mem.clone(),
+                        mem: Some(mem.clone()),
                         tap: taps.remove(0),
                         rx,
                         tx,
-                        epoll_fd: 0,
+                        epoll_fd: None,
                         rx_tap_listening,
                     },
                     interrupt_cb: interrupt_cb.clone(),

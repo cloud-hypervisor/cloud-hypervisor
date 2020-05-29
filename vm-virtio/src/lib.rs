@@ -190,4 +190,5 @@ pub enum Error {
     EventfdError(io::Error),
     SetShmRegionsNotSupported,
     EpollHander(String),
+    NoMemoryConfigured,
 }
