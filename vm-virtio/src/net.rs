@@ -31,6 +31,7 @@ use std::sync::Arc;
 use std::thread;
 use std::vec::Vec;
 use virtio_bindings::bindings::virtio_net::*;
+use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
@@ -113,7 +114,12 @@ impl NetQueuePair {
         }
         if self.rx.deferred_irqs {
             self.rx.deferred_irqs = false;
-            Ok(true)
+            let mem = self
+                .mem
+                .as_ref()
+                .ok_or(DeviceError::NoMemoryConfigured)
+                .map(|m| m.memory())?;
+            Ok(queue.needs_notification(&mem, queue.next_used))
         } else {
             Ok(false)
         }
@@ -139,7 +145,12 @@ impl NetQueuePair {
                 self.process_rx(queue)
             } else if self.rx.deferred_irqs {
                 self.rx.deferred_irqs = false;
-                Ok(true)
+                let mem = self
+                    .mem
+                    .as_ref()
+                    .ok_or(DeviceError::NoMemoryConfigured)
+                    .map(|m| m.memory())?;
+                Ok(queue.needs_notification(&mem, queue.next_used))
             } else {
                 Ok(false)
             }
@@ -155,7 +166,7 @@ impl NetQueuePair {
             .ok_or(DeviceError::NoMemoryConfigured)
             .map(|m| m.memory())?;
         self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
-        Ok(true)
+        Ok(queue.needs_notification(&mem, queue.next_used))
     }
 
     pub fn process_rx_tap(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
@@ -411,6 +422,7 @@ impl Net {
             | 1 << VIRTIO_NET_F_GUEST_UFO
             | 1 << VIRTIO_NET_F_HOST_TSO4
             | 1 << VIRTIO_NET_F_HOST_UFO
+            | 1 << VIRTIO_RING_F_EVENT_IDX
             | 1 << VIRTIO_F_VERSION_1;
 
         if iommu {
@@ -615,6 +627,8 @@ impl VirtioDevice for Net {
                     })?;
             }
 
+            let event_idx = self.acked_features & 1 << VIRTIO_RING_F_EVENT_IDX != 0;
+
             let mut epoll_threads = Vec::new();
             for _ in 0..taps.len() {
                 let rx = RxVirtio::new();
@@ -624,6 +638,8 @@ impl VirtioDevice for Net {
                 let mut queue_pair = Vec::new();
                 queue_pair.push(queues.remove(0));
                 queue_pair.push(queues.remove(0));
+                queue_pair[0].set_event_idx(event_idx);
+                queue_pair[1].set_event_idx(event_idx);
 
                 let mut queue_evt_pair = Vec::new();
                 queue_evt_pair.push(queue_evts.remove(0));
