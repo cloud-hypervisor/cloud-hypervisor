@@ -27,6 +27,7 @@ use vhost_rs::vhost_user::message::*;
 use vhost_rs::vhost_user::{Error as VhostUserError, Listener};
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
+use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 use vm_virtio::net_util::{open_tap, RxVirtio, TxVirtio};
 use vm_virtio::NetQueuePair;
@@ -179,6 +180,7 @@ impl VhostUserBackend for VhostUserNetBackend {
             | 1 << VIRTIO_NET_F_HOST_TSO4
             | 1 << VIRTIO_NET_F_HOST_UFO
             | 1 << VIRTIO_F_VERSION_1
+            | 1 << VIRTIO_RING_F_EVENT_IDX
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 
