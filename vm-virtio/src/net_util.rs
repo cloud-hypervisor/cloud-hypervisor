@@ -202,6 +202,7 @@ impl CtrlVirtio {
         }
         for &(desc_index, len) in &used_desc_heads[..used_count] {
             self.queue.add_used(&mem, desc_index, len);
+            self.queue.update_avail_event(&mem);
         }
 
         Ok(())
@@ -389,6 +390,7 @@ impl TxVirtio {
                 }
             };
             queue.add_used(&mem, head_index, 0);
+            queue.update_avail_event(&mem);
         }
     }
 }
@@ -460,6 +462,7 @@ impl RxVirtio {
         }
 
         queue.add_used(&mem, head_index, write_count as u32);
+        queue.update_avail_event(&mem);
 
         // Mark that we have at least one pending packet and we need to interrupt the guest.
         self.deferred_irqs = true;
