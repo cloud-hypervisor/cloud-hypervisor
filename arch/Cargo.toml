@@ -8,7 +8,9 @@ default = []
 acpi = ["acpi_tables"]
 
 [dependencies]
+anyhow = "1.0"
 byteorder = "1.3.4"
+hypervisor = { path = "../hypervisor" }
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch" }
 kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
 libc = "0.2.71"

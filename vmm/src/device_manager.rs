@@ -40,7 +40,10 @@ use devices::{
     interrupt_controller, interrupt_controller::InterruptController, legacy::Serial, BusDevice,
     HotPlugNotificationFlags,
 };
-use kvm_ioctls::*;
+use hypervisor::kvm_ioctls;
+use hypervisor::kvm_ioctls::*;
+#[cfg(feature = "mmio_support")]
+use hypervisor::vm::DataMatch;
 use libc::TIOCGWINSZ;
 use libc::{MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE};
 #[cfg(feature = "pci_support")]
@@ -186,10 +189,10 @@ pub enum DeviceManagerError {
     FreePciBars(pci::PciDeviceError),
 
     /// Cannot register ioevent.
-    RegisterIoevent(kvm_ioctls::Error),
+    RegisterIoevent(anyhow::Error),
 
     /// Cannot unregister ioevent.
-    UnRegisterIoevent(kvm_ioctls::Error),
+    UnRegisterIoevent(anyhow::Error),
 
     /// Cannot create virtio device
     VirtioDevice(vmm_sys_util::errno::Error),
@@ -229,7 +232,7 @@ pub enum DeviceManagerError {
     VfioMapRegion(pci::VfioPciError),
 
     /// Failed to create the KVM device.
-    CreateKvmDevice(kvm_ioctls::Error),
+    CreateKvmDevice(anyhow::Error),
 
     /// Failed to memory map.
     Mmap(io::Error),
@@ -430,7 +433,7 @@ struct AddressManager {
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
-    vm_fd: Arc<VmFd>,
+    vm_fd: Arc<dyn hypervisor::Vm>,
     #[cfg(feature = "pci_support")]
     device_tree: Arc<Mutex<DeviceTree>>,
 }
@@ -561,15 +564,16 @@ impl DeviceRelocation for AddressManager {
             if bar_addr == new_base {
                 for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm_fd
-                        .unregister_ioevent(event, &io_addr)
-                        .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
+                    self.vm_fd.unregister_ioevent(event, &io_addr).unwrap();
+                    /*
+                    map_err(io::Error::from_raw_os_error(
+                        hypervisor::HypervisorVmError::UnregisterIoEvent,
+                    ))?; */
                 }
                 for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm_fd
-                        .register_ioevent(event, &io_addr, NoDatamatch)
-                        .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
+                    self.vm_fd.register_ioevent(event, &io_addr, None).unwrap();
+                    //.map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
                 }
             } else {
                 let virtio_dev = virtio_pci_dev.virtio_device();
@@ -577,7 +581,7 @@ impl DeviceRelocation for AddressManager {
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     if shm_regions.addr.raw_value() == old_base {
                         // Remove old region from KVM by passing a size of 0.
-                        let mut mem_region = kvm_bindings::kvm_userspace_memory_region {
+                        let mut mem_region = hypervisor::kvm::kvm_userspace_memory_region {
                             slot: shm_regions.mem_slot,
                             guest_phys_addr: old_base,
                             memory_size: 0,
@@ -585,23 +589,19 @@ impl DeviceRelocation for AddressManager {
                             flags: 0,
                         };
 
-                        // Safe because removing an existing guest region.
-                        unsafe {
-                            self.vm_fd
-                                .set_user_memory_region(mem_region)
-                                .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
-                        }
+                        self.vm_fd.set_user_memory_region(mem_region).unwrap();
+                        //.map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
 
                         // Create new mapping by inserting new region to KVM.
                         mem_region.guest_phys_addr = new_base;
                         mem_region.memory_size = shm_regions.len;
 
-                        // Safe because the guest regions are guaranteed not to overlap.
-                        unsafe {
-                            self.vm_fd
-                                .set_user_memory_region(mem_region)
-                                .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
-                        }
+                        self.vm_fd.set_user_memory_region(mem_region).map_err(|e| {
+                            io::Error::new(
+                                io::ErrorKind::Other,
+                                format!("failed to set user memory regions: {:?}", e),
+                            )
+                        })?;
 
                         // Update shared memory regions to reflect the new mapping.
                         shm_regions.addr = GuestAddress(new_base);
@@ -753,7 +753,7 @@ pub struct DeviceManager {
 
 impl DeviceManager {
     pub fn new(
-        vm_fd: Arc<VmFd>,
+        vm_fd: Arc<dyn hypervisor::Vm>,
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
@@ -2291,15 +2291,15 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
-    fn create_kvm_device(vm: &Arc<VmFd>) -> DeviceManagerResult<DeviceFd> {
-        let mut vfio_dev = kvm_bindings::kvm_create_device {
-            type_: kvm_bindings::kvm_device_type_KVM_DEV_TYPE_VFIO,
+    fn create_kvm_device(vm: &Arc<dyn hypervisor::Vm>) -> DeviceManagerResult<DeviceFd> {
+        let mut vfio_dev = hypervisor::kvm::kvm_create_device {
+            type_: hypervisor::kvm::kvm_device_type_KVM_DEV_TYPE_VFIO,
             fd: 0,
             flags: 0,
         };
 
         vm.create_device(&mut vfio_dev)
-            .map_err(DeviceManagerError::CreateKvmDevice)
+            .map_err(|e| DeviceManagerError::CreateKvmDevice(e.into()))
     }
 
     #[cfg(not(feature = "pci_support"))]
@@ -2582,8 +2582,8 @@ impl DeviceManager {
             let io_addr = IoEventAddress::Mmio(addr);
             self.address_manager
                 .vm_fd
-                .register_ioevent(event, &io_addr, NoDatamatch)
-                .map_err(DeviceManagerError::RegisterIoevent)?;
+                .register_ioevent(event, &io_addr, None)
+                .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
         }
 
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
@@ -2739,8 +2739,8 @@ impl DeviceManager {
             let io_addr = IoEventAddress::Mmio(*addr);
             self.address_manager
                 .vm_fd
-                .register_ioevent(event, &io_addr, i as u32)
-                .map_err(DeviceManagerError::RegisterIoevent)?;
+                .register_ioevent(event, &io_addr, Some(DataMatch::DataMatch32(i as u32)))
+                .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
         }
 
         let interrupt_group = interrupt_manager
@@ -2979,7 +2979,7 @@ impl DeviceManager {
                     self.address_manager
                         .vm_fd
                         .unregister_ioevent(event, &io_addr)
-                        .map_err(DeviceManagerError::UnRegisterIoevent)?;
+                        .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
                 }
 
                 (
