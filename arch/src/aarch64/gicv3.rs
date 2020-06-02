@@ -1,11 +1,10 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{boxed::Box, result};
-
-use kvm_ioctls::DeviceFd;
-
 use super::gic::{Error, GICDevice};
+use kvm_ioctls::DeviceFd;
+use std::sync::Arc;
+use std::{boxed::Box, result};
 
 type Result<T> = result::Result<T, Error>;
 
@@ -23,30 +22,30 @@ pub struct GICv3 {
 impl GICv3 {
     // Unfortunately bindgen omits defines that are based on other defines.
     // See arch/arm64/include/uapi/asm/kvm.h file from the linux kernel.
-    const SZ_64K: u64 = 0x0001_0000;
+    pub const SZ_64K: u64 = 0x0001_0000;
     const KVM_VGIC_V3_DIST_SIZE: u64 = GICv3::SZ_64K;
     const KVM_VGIC_V3_REDIST_SIZE: u64 = (2 * GICv3::SZ_64K);
 
     // Device trees specific constants
-    const ARCH_GIC_V3_MAINT_IRQ: u32 = 9;
+    pub const ARCH_GIC_V3_MAINT_IRQ: u32 = 9;
 
     /// Get the address of the GIC distributor.
-    fn get_dist_addr() -> u64 {
+    pub fn get_dist_addr() -> u64 {
         super::layout::MAPPED_IO_START - GICv3::KVM_VGIC_V3_DIST_SIZE
     }
 
     /// Get the size of the GIC distributor.
-    fn get_dist_size() -> u64 {
+    pub fn get_dist_size() -> u64 {
         GICv3::KVM_VGIC_V3_DIST_SIZE
     }
 
     /// Get the address of the GIC redistributors.
-    fn get_redists_addr(vcpu_count: u64) -> u64 {
+    pub fn get_redists_addr(vcpu_count: u64) -> u64 {
         GICv3::get_dist_addr() - GICv3::get_redists_size(vcpu_count)
     }
 
     /// Get the size of the GIC redistributors.
-    fn get_redists_size(vcpu_count: u64) -> u64 {
+    pub fn get_redists_size(vcpu_count: u64) -> u64 {
         vcpu_count * GICv3::KVM_VGIC_V3_REDIST_SIZE
     }
 }
@@ -89,7 +88,10 @@ impl GICDevice for GICv3 {
         })
     }
 
-    fn init_device_attributes(gic_device: &Box<dyn GICDevice>) -> Result<()> {
+    fn init_device_attributes(
+        _vm: &Arc<dyn hypervisor::Vm>,
+        gic_device: &Box<dyn GICDevice>,
+    ) -> Result<()> {
         /* Setting up the distributor attribute.
          We are placing the GIC below 1GB so we need to substract the size of the distributor.
         */

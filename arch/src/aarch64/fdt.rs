@@ -23,8 +23,11 @@ use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError, Gue
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
 const GIC_PHANDLE: u32 = 1;
+// This is a value for uniquely identifying the FDT node declaring the MSI controller.
+const MSI_PHANDLE: u32 = 2;
 // This is a value for uniquely identifying the FDT node containing the clock definition.
-const CLOCK_PHANDLE: u32 = 2;
+const CLOCK_PHANDLE: u32 = 3;
+
 // Read the documentation specified when appending the root node to the FDT.
 const ADDRESS_CELLS: u32 = 0x2;
 const SIZE_CELLS: u32 = 0x2;
@@ -389,6 +392,17 @@ fn create_gic_node(fdt: &mut Vec<u8>, gic_device: &Box<dyn GICDevice>) -> Result
     let gic_intr_prop = generate_prop32(&gic_intr);
 
     append_property(fdt, "interrupts", &gic_intr_prop)?;
+
+    if gic_device.msi_compatible() {
+        append_begin_node(fdt, "msic")?;
+        append_property_string(fdt, "compatible", gic_device.msi_compatiblility())?;
+        append_property_null(fdt, "msi-controller")?;
+        append_property_u32(fdt, "phandle", MSI_PHANDLE)?;
+        let msi_reg_prop = generate_prop64(gic_device.msi_properties());
+        append_property(fdt, "reg", &msi_reg_prop)?;
+        append_end_node(fdt)?;
+    }
+
     append_end_node(fdt)?;
 
     Ok(())
