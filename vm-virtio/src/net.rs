@@ -78,6 +78,7 @@ impl NetQueuePair {
                 )
                 .map_err(DeviceError::UnregisterListener)?;
                 self.rx_tap_listening = false;
+                info!("Listener unregistered");
             }
             return Ok(false);
         }
@@ -128,6 +129,7 @@ impl NetQueuePair {
             )
             .map_err(DeviceError::RegisterListener)?;
             self.rx_tap_listening = true;
+            info!("Listener registered");
         }
         if self.rx.deferred_frame {
             if self.rx_single_frame(queue)? {
@@ -207,7 +209,10 @@ impl NetEpollHandler {
         }
 
         if self.net.resume_rx(&mut queue)? {
-            self.signal_used_queue(queue)?
+            self.signal_used_queue(queue)?;
+            info!("Signalling RX queue");
+        } else {
+            info!("Not signalling RX queue");
         }
 
         Ok(())
@@ -221,16 +226,21 @@ impl NetEpollHandler {
         if let Err(e) = queue_evt.read() {
             error!("Failed to get tx queue event: {:?}", e);
         }
-
         if self.net.process_tx(&mut queue)? {
-            self.signal_used_queue(queue)?
+            self.signal_used_queue(queue)?;
+            info!("Signalling TX queue");
+        } else {
+            info!("Not signalling TX queue");
         }
         Ok(())
     }
 
     fn handle_rx_tap_event(&mut self, queue: &mut Queue) -> result::Result<(), DeviceError> {
-        if self.net.process_rx_tap(queue)? {
-            self.signal_used_queue(queue)?
+        if self.net.process_rx_tap(queue)? || !self.driver_awake {
+            self.signal_used_queue(queue)?;
+            info!("Signalling RX queue");
+        } else {
+            info!("Not signalling RX queue");
         }
         Ok(())
     }
@@ -291,6 +301,7 @@ impl NetEpollHandler {
             )
             .map_err(DeviceError::EpollCtl)?;
             self.net.rx_tap_listening = true;
+            error!("Listener registered at start");
         }
 
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); NET_EVENTS_COUNT];
