@@ -4,8 +4,8 @@
 //
 
 use devices::interrupt_controller::InterruptController;
-use kvm_bindings::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
-use kvm_ioctls::VmFd;
+use hypervisor::kvm::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
+
 use std::collections::HashMap;
 use std::io;
 use std::mem::size_of;
@@ -70,7 +70,7 @@ impl InterruptRoute {
         })
     }
 
-    pub fn enable(&self, vm: &Arc<VmFd>) -> Result<()> {
+    pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if !self.registered.load(Ordering::SeqCst) {
             vm.register_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
                 io::Error::new(
@@ -86,7 +86,7 @@ impl InterruptRoute {
         Ok(())
     }
 
-    pub fn disable(&self, vm: &Arc<VmFd>) -> Result<()> {
+    pub fn disable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if self.registered.load(Ordering::SeqCst) {
             vm.unregister_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
                 io::Error::new(
@@ -109,14 +109,14 @@ pub struct KvmRoutingEntry {
 }
 
 pub struct MsiInterruptGroup {
-    vm_fd: Arc<VmFd>,
+    vm_fd: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
 }
 
 impl MsiInterruptGroup {
     fn new(
-        vm_fd: Arc<VmFd>,
+        vm_fd: Arc<dyn hypervisor::Vm>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
         irq_routes: HashMap<InterruptIndex, InterruptRoute>,
     ) -> Self {
@@ -316,7 +316,7 @@ pub struct KvmLegacyUserspaceInterruptManager {
 
 pub struct KvmMsiInterruptManager {
     allocator: Arc<Mutex<SystemAllocator>>,
-    vm_fd: Arc<VmFd>,
+    vm_fd: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
 }
 
@@ -329,7 +329,7 @@ impl KvmLegacyUserspaceInterruptManager {
 impl KvmMsiInterruptManager {
     pub fn new(
         allocator: Arc<Mutex<SystemAllocator>>,
-        vm_fd: Arc<VmFd>,
+        vm_fd: Arc<dyn hypervisor::Vm>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
     ) -> Self {
         KvmMsiInterruptManager {

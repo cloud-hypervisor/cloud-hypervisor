@@ -14,7 +14,7 @@
 extern crate arch;
 extern crate devices;
 extern crate epoll;
-extern crate kvm_ioctls;
+extern crate hypervisor;
 extern crate libc;
 extern crate linux_loader;
 extern crate net_util;
@@ -38,17 +38,13 @@ use crate::{
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::BootProtocol;
-use arch::{check_required_kvm_extensions, EntryPoint};
-#[cfg(target_arch = "x86_64")]
-use devices::ioapic;
+use arch::EntryPoint;
 use devices::HotPlugNotificationFlags;
-#[cfg(target_arch = "x86_64")]
-use kvm_bindings::{kvm_enable_cap, KVM_CAP_SPLIT_IRQCHIP};
-use kvm_ioctls::*;
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
 use linux_loader::loader::KernelLoader;
+
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 #[cfg(target_arch = "x86_64")]
 use std::convert::TryInto;
@@ -81,12 +77,6 @@ const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
 pub enum Error {
     /// Cannot open the VM file descriptor.
     VmFd(io::Error),
-
-    /// Cannot create the KVM instance
-    VmCreate(kvm_ioctls::Error),
-
-    /// Cannot set the VM up
-    VmSetup(kvm_ioctls::Error),
 
     /// Cannot open the kernel image
     KernelFile(io::Error),
@@ -143,9 +133,6 @@ pub enum Error {
 
     /// Failed to join on vCPU threads
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
-
-    /// Failed to create a new KVM instance
-    KvmNew(kvm_ioctls::Error),
 
     /// VM is not created
     VmNotCreated,
@@ -272,57 +259,14 @@ pub struct Vm {
 }
 
 impl Vm {
-    fn kvm_new() -> Result<(Kvm, Arc<VmFd>)> {
-        let kvm = Kvm::new().map_err(Error::KvmNew)?;
-
-        check_required_kvm_extensions(&kvm).expect("Missing KVM capabilities");
-
-        let fd: VmFd;
-        loop {
-            match kvm.create_vm() {
-                Ok(res) => fd = res,
-                Err(e) => {
-                    if e.errno() == libc::EINTR {
-                        // If the error returned is EINTR, which means the
-                        // ioctl has been interrupted, we have to retry as
-                        // this can't be considered as a regular error.
-                        continue;
-                    } else {
-                        return Err(Error::VmCreate(e));
-                    }
-                }
-            }
-            break;
-        }
-        let fd = Arc::new(fd);
-
-        // Set TSS
-        #[cfg(target_arch = "x86_64")]
-        fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize)
-            .map_err(Error::VmSetup)?;
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            // Create split irqchip
-            // Only the local APIC is emulated in kernel, both PICs and IOAPIC
-            // are not.
-            let mut cap: kvm_enable_cap = Default::default();
-            cap.cap = KVM_CAP_SPLIT_IRQCHIP;
-            cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
-            fd.enable_cap(&cap).map_err(Error::VmSetup)?;
-        }
-
-        Ok((kvm, fd))
-    }
-
     fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        fd: Arc<VmFd>,
-        kvm: Kvm,
+        fd: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
+        hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
         config
             .lock()
@@ -344,9 +288,9 @@ impl Vm {
             &config.lock().unwrap().cpus.clone(),
             &device_manager,
             memory_manager.lock().unwrap().guest_memory(),
-            &kvm,
             fd,
             reset_evt,
+            hypervisor,
         )
         .map_err(Error::CpuManager)?;
 
@@ -382,8 +326,13 @@ impl Vm {
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
+        hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
-        let (kvm, fd) = Vm::kvm_new()?;
+        #[cfg(target_arch = "x86_64")]
+        hypervisor.check_required_extensions().unwrap();
+        let fd = hypervisor.create_vm().unwrap();
+        #[cfg(target_arch = "x86_64")]
+        fd.enable_split_irq().unwrap();
         let memory_manager = MemoryManager::new(
             fd.clone(),
             &config.lock().unwrap().memory.clone(),
@@ -396,10 +345,10 @@ impl Vm {
             config,
             memory_manager,
             fd,
-            kvm,
             exit_evt,
             reset_evt,
             vmm_path,
+            hypervisor,
         )?;
 
         // The device manager must create the devices from here as it is part
@@ -420,8 +369,13 @@ impl Vm {
         vmm_path: PathBuf,
         source_url: &str,
         prefault: bool,
+        hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
-        let (kvm, fd) = Vm::kvm_new()?;
+        #[cfg(target_arch = "x86_64")]
+        hypervisor.check_required_extensions().unwrap();
+        let fd = hypervisor.create_vm().unwrap();
+        #[cfg(target_arch = "x86_64")]
+        fd.enable_split_irq().unwrap();
         let config = vm_config_from_snapshot(snapshot).map_err(Error::Restore)?;
 
         let memory_manager = if let Some(memory_manager_snapshot) =
@@ -445,10 +399,10 @@ impl Vm {
             config,
             memory_manager,
             fd,
-            kvm,
             exit_evt,
             reset_evt,
             vmm_path,
+            hypervisor,
         )
     }
 
@@ -1432,9 +1386,8 @@ mod tests {
 #[cfg(target_arch = "x86_64")]
 #[test]
 pub fn test_vm() {
-    use kvm_bindings::kvm_userspace_memory_region;
+    use hypervisor::VcpuExit;
     use vm_memory::{GuestMemory, GuestMemoryRegion};
-
     // This example based on https://lwn.net/Articles/658511/
     let code = [
         0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
@@ -1450,11 +1403,12 @@ pub fn test_vm() {
     let load_addr = GuestAddress(0x1000);
     let mem = GuestMemoryMmap::from_ranges(&[(load_addr, mem_size)]).unwrap();
 
-    let kvm = Kvm::new().expect("new KVM instance creation failed");
-    let vm_fd = kvm.create_vm().expect("new VM fd creation failed");
+    let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+    let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+    let vm_fd = hv.create_vm().expect("new VM fd creation failed");
 
     mem.with_regions(|index, region| {
-        let mem_region = kvm_userspace_memory_region {
+        let mem_region = hypervisor::kvm_userspace_memory_region {
             slot: index as u32,
             guest_phys_addr: region.start_addr().raw_value(),
             memory_size: region.len() as u64,
@@ -1463,7 +1417,7 @@ pub fn test_vm() {
         };
 
         // Safe because the guest regions are guaranteed not to overlap.
-        unsafe { vm_fd.set_user_memory_region(mem_region) }
+        vm_fd.set_user_memory_region(mem_region)
     })
     .expect("Cannot configure guest memory");
     mem.write_slice(&code, load_addr)

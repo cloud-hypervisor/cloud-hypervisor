@@ -24,15 +24,13 @@ use arch::EntryPoint;
 use arch::{CpuidPatch, CpuidReg};
 use devices::{interrupt_controller::InterruptController, BusDevice};
 #[cfg(target_arch = "aarch64")]
-use kvm_bindings::KVM_SYSTEM_EVENT_SHUTDOWN;
+use hypervisor::kvm::kvm_bindings::KVM_SYSTEM_EVENT_SHUTDOWN;
 #[cfg(target_arch = "x86_64")]
-use kvm_bindings::{
-    kvm_fpu, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events, kvm_xcrs,
-    kvm_xsave, CpuId, Msrs,
-};
-use kvm_ioctls::*;
+use hypervisor::CpuId;
+use hypervisor::VcpuExit;
+
 use libc::{c_void, siginfo_t};
-use serde_derive::{Deserialize, Serialize};
+
 #[cfg(target_arch = "x86_64")]
 use std::fmt;
 use std::os::unix::thread::JoinHandleExt;
@@ -103,23 +101,23 @@ impl fmt::Display for DebugIoPortRange {
 #[derive(Debug)]
 pub enum Error {
     /// Cannot open the VCPU file descriptor.
-    VcpuFd(kvm_ioctls::Error),
+    VcpuFd(anyhow::Error),
 
     /// Cannot run the VCPUs.
-    VcpuRun(kvm_ioctls::Error),
+    VcpuRun(anyhow::Error),
 
     /// Cannot spawn a new vCPU thread.
     VcpuSpawn(io::Error),
 
     /// Cannot patch the CPU ID
-    PatchCpuId(kvm_ioctls::Error),
+    PatchCpuId(anyhow::Error),
 
     /// The call to KVM_SET_CPUID2 failed.
-    SetSupportedCpusFailed(kvm_ioctls::Error),
+    SetSupportedCpusFailed(anyhow::Error),
 
     #[cfg(target_arch = "x86_64")]
     /// Cannot set the local interruption due to bad configuration.
-    LocalIntConfiguration(arch::x86_64::interrupts::Error),
+    LocalIntConfiguration(anyhow::Error),
 
     /// Error configuring VCPU
     VcpuConfiguration(arch::Error),
@@ -140,58 +138,58 @@ pub enum Error {
     DesiredVCPUCountExceedsMax,
 
     /// Failed to get KVM vcpu lapic.
-    VcpuGetLapic(kvm_ioctls::Error),
+    VcpuGetLapic(anyhow::Error),
 
     /// Failed to set KVM vcpu lapic.
-    VcpuSetLapic(kvm_ioctls::Error),
+    VcpuSetLapic(anyhow::Error),
 
     /// Failed to get KVM vcpu MP state.
-    VcpuGetMpState(kvm_ioctls::Error),
+    VcpuGetMpState(anyhow::Error),
 
     /// Failed to set KVM vcpu MP state.
-    VcpuSetMpState(kvm_ioctls::Error),
+    VcpuSetMpState(anyhow::Error),
 
     /// Failed to get KVM vcpu msrs.
-    VcpuGetMsrs(kvm_ioctls::Error),
+    VcpuGetMsrs(anyhow::Error),
 
     /// Failed to set KVM vcpu msrs.
-    VcpuSetMsrs(kvm_ioctls::Error),
+    VcpuSetMsrs(anyhow::Error),
 
     /// Failed to get KVM vcpu regs.
-    VcpuGetRegs(kvm_ioctls::Error),
+    VcpuGetRegs(anyhow::Error),
 
     /// Failed to set KVM vcpu regs.
-    VcpuSetRegs(kvm_ioctls::Error),
+    VcpuSetRegs(anyhow::Error),
 
     /// Failed to get KVM vcpu sregs.
-    VcpuGetSregs(kvm_ioctls::Error),
+    VcpuGetSregs(anyhow::Error),
 
     /// Failed to set KVM vcpu sregs.
-    VcpuSetSregs(kvm_ioctls::Error),
+    VcpuSetSregs(anyhow::Error),
 
     /// Failed to get KVM vcpu events.
-    VcpuGetVcpuEvents(kvm_ioctls::Error),
+    VcpuGetVcpuEvents(anyhow::Error),
 
     /// Failed to set KVM vcpu events.
-    VcpuSetVcpuEvents(kvm_ioctls::Error),
+    VcpuSetVcpuEvents(anyhow::Error),
 
     /// Failed to get KVM vcpu FPU.
-    VcpuGetFpu(kvm_ioctls::Error),
+    VcpuGetFpu(anyhow::Error),
 
     /// Failed to set KVM vcpu FPU.
-    VcpuSetFpu(kvm_ioctls::Error),
+    VcpuSetFpu(anyhow::Error),
 
     /// Failed to get KVM vcpu XSAVE.
-    VcpuGetXsave(kvm_ioctls::Error),
+    VcpuGetXsave(anyhow::Error),
 
     /// Failed to set KVM vcpu XSAVE.
-    VcpuSetXsave(kvm_ioctls::Error),
+    VcpuSetXsave(anyhow::Error),
 
     /// Failed to get KVM vcpu XCRS.
-    VcpuGetXcrs(kvm_ioctls::Error),
+    VcpuGetXcrs(anyhow::Error),
 
     /// Failed to set KVM vcpu XCRS.
-    VcpuSetXcrs(kvm_ioctls::Error),
+    VcpuSetXcrs(anyhow::Error),
 
     /// Error resuming vCPU on shutdown
     ResumeOnShutdown(MigratableError),
@@ -232,7 +230,7 @@ struct InterruptSourceOverride {
 
 /// A wrapper around creating and using a kvm-based VCPU.
 pub struct Vcpu {
-    fd: VcpuFd,
+    fd: Arc<dyn hypervisor::Vcpu>,
     id: u8,
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<devices::Bus>,
@@ -245,24 +243,6 @@ pub struct Vcpu {
     mpidr: u64,
 }
 
-#[cfg(target_arch = "x86_64")]
-#[derive(Clone, Serialize, Deserialize)]
-pub struct VcpuKvmState {
-    msrs: Msrs,
-    vcpu_events: kvm_vcpu_events,
-    regs: kvm_regs,
-    sregs: kvm_sregs,
-    fpu: kvm_fpu,
-    lapic_state: kvm_lapic_state,
-    xsave: kvm_xsave,
-    xcrs: kvm_xcrs,
-    mp_state: kvm_mp_state,
-}
-
-#[cfg(target_arch = "aarch64")]
-#[derive(Clone, Serialize, Deserialize)]
-pub struct VcpuKvmState {}
-
 impl Vcpu {
     /// Constructs a new VCPU for `vm`.
     ///
@@ -272,13 +252,13 @@ impl Vcpu {
     /// * `vm` - The virtual machine this vcpu will get attached to.
     pub fn new(
         id: u8,
-        fd: &Arc<VmFd>,
+        fd: &Arc<dyn hypervisor::Vm>,
         #[cfg(target_arch = "x86_64")] io_bus: Arc<devices::Bus>,
         mmio_bus: Arc<devices::Bus>,
         interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
         creation_ts: std::time::Instant,
     ) -> Result<Arc<Mutex<Self>>> {
-        let kvm_vcpu = fd.create_vcpu(id).map_err(Error::VcpuFd)?;
+        let kvm_vcpu = fd.create_vcpu(id).map_err(|e| Error::VcpuFd(e.into()))?;
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Arc::new(Mutex::new(Vcpu {
             fd: kvm_vcpu,
@@ -303,7 +283,7 @@ impl Vcpu {
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
     pub fn configure(
         &mut self,
-        #[cfg(target_arch = "aarch64")] vm_fd: &VmFd,
+        #[cfg(target_arch = "aarch64")] vm_fd: &Arc<dyn hypervisor::Vm>,
         kernel_entry_point: Option<EntryPoint>,
         vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         #[cfg(target_arch = "x86_64")] cpuid: CpuId,
@@ -413,75 +393,6 @@ impl Vcpu {
             ts.as_micros()
         );
     }
-
-    #[cfg(target_arch = "x86_64")]
-    fn kvm_state(&self) -> Result<VcpuKvmState> {
-        let mut msrs = arch::x86_64::regs::boot_msr_entries();
-        self.fd.get_msrs(&mut msrs).map_err(Error::VcpuGetMsrs)?;
-
-        let vcpu_events = self
-            .fd
-            .get_vcpu_events()
-            .map_err(Error::VcpuGetVcpuEvents)?;
-        let regs = self.fd.get_regs().map_err(Error::VcpuGetRegs)?;
-        let sregs = self.fd.get_sregs().map_err(Error::VcpuGetSregs)?;
-        let lapic_state = self.fd.get_lapic().map_err(Error::VcpuGetLapic)?;
-        let fpu = self.fd.get_fpu().map_err(Error::VcpuGetFpu)?;
-        let xsave = self.fd.get_xsave().map_err(Error::VcpuGetXsave)?;
-        let xcrs = self.fd.get_xcrs().map_err(Error::VcpuGetXsave)?;
-        let mp_state = self.fd.get_mp_state().map_err(Error::VcpuGetMpState)?;
-
-        Ok(VcpuKvmState {
-            msrs,
-            vcpu_events,
-            regs,
-            sregs,
-            fpu,
-            lapic_state,
-            xsave,
-            xcrs,
-            mp_state,
-        })
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn set_kvm_state(&mut self, state: &VcpuKvmState) -> Result<()> {
-        self.fd.set_regs(&state.regs).map_err(Error::VcpuSetRegs)?;
-
-        self.fd.set_fpu(&state.fpu).map_err(Error::VcpuSetFpu)?;
-
-        self.fd
-            .set_xsave(&state.xsave)
-            .map_err(Error::VcpuSetXsave)?;
-
-        self.fd
-            .set_sregs(&state.sregs)
-            .map_err(Error::VcpuSetSregs)?;
-
-        self.fd.set_xcrs(&state.xcrs).map_err(Error::VcpuSetXcrs)?;
-
-        self.fd.set_msrs(&state.msrs).map_err(Error::VcpuSetMsrs)?;
-
-        self.fd
-            .set_lapic(&state.lapic_state)
-            .map_err(Error::VcpuSetLapic)?;
-
-        self.fd
-            .set_mp_state(state.mp_state)
-            .map_err(Error::VcpuSetMpState)?;
-
-        Ok(())
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    fn kvm_state(&self) -> Result<VcpuKvmState> {
-        unimplemented!();
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    fn set_kvm_state(&mut self, _state: &VcpuKvmState) -> Result<()> {
-        Ok(())
-    }
 }
 
 const VCPU_SNAPSHOT_ID: &str = "vcpu";
@@ -492,7 +403,7 @@ impl Snapshottable for Vcpu {
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot = serde_json::to_vec(&self.kvm_state().map_err(|e| {
+        let snapshot = serde_json::to_vec(&self.fd.cpu_state().map_err(|e| {
             MigratableError::Snapshot(anyhow!("Could not get vCPU KVM state {:?}", e))
         })?)
         .map_err(|e| MigratableError::Snapshot(e.into()))?;
@@ -521,7 +432,7 @@ impl Snapshottable for Vcpu {
                 }
             };
 
-            self.set_kvm_state(&vcpu_state).map_err(|e| {
+            self.fd.set_cpu_state(&vcpu_state).map_err(|e| {
                 MigratableError::Restore(anyhow!("Could not set the vCPU KVM state {:?}", e))
             })?;
 
@@ -547,7 +458,7 @@ pub struct CpuManager {
     #[cfg(target_arch = "x86_64")]
     cpuid: CpuId,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    fd: Arc<VmFd>,
+    fd: Arc<dyn hypervisor::Vm>,
     vcpus_kill_signalled: Arc<AtomicBool>,
     vcpus_pause_signalled: Arc<AtomicBool>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -677,16 +588,16 @@ impl CpuManager {
         config: &CpusConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-        #[cfg_attr(target_arch = "aarch64", allow(unused_variables))] kvm: &Kvm,
-        fd: Arc<VmFd>,
+        fd: Arc<dyn hypervisor::Vm>,
         reset_evt: EventFd,
+        hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
         vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
 
         let device_manager = device_manager.lock().unwrap();
         #[cfg(target_arch = "x86_64")]
-        let cpuid = CpuManager::patch_cpuid(kvm, &config.topology)?;
+        let cpuid = CpuManager::patch_cpuid(hypervisor, &config.topology)?;
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             #[cfg(target_arch = "x86_64")]
@@ -725,7 +636,10 @@ impl CpuManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn patch_cpuid(kvm: &Kvm, topology: &Option<CpuTopology>) -> Result<CpuId> {
+    fn patch_cpuid(
+        hypervisor: Arc<dyn hypervisor::Hypervisor>,
+        topology: &Option<CpuTopology>,
+    ) -> Result<CpuId> {
         let mut cpuid_patches = Vec::new();
 
         // Patch tsc deadline timer bit
@@ -751,9 +665,9 @@ impl CpuManager {
         });
 
         // Supported CPUID
-        let mut cpuid = kvm
-            .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
-            .map_err(Error::PatchCpuId)?;
+        let mut cpuid = hypervisor
+            .get_cpuid()
+            .map_err(|e| Error::PatchCpuId(e.into()))?;
 
         CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
 
@@ -804,7 +718,7 @@ impl CpuManager {
                     .unwrap()
                     .fd
                     .set_cpuid2(&cpuid)
-                    .map_err(Error::SetSupportedCpusFailed)?;
+                    .map_err(|e| Error::SetSupportedCpusFailed(e.into()))?;
             }
             vcpu.lock()
                 .unwrap()

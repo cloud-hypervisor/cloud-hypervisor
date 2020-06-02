@@ -20,6 +20,3 @@
 #[allow(non_upper_case_globals)]
 #[allow(clippy::unreadable_literal, clippy::redundant_static_lifetimes)]
 pub mod mpspec;
-#[allow(non_upper_case_globals)]
-#[allow(clippy::unreadable_literal, clippy::redundant_static_lifetimes)]
-pub mod msr_index;

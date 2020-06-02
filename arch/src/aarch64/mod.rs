@@ -20,6 +20,7 @@ use kvm_ioctls::*;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
+use std::sync::Arc;
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap,
     GuestUsize,
@@ -41,10 +42,10 @@ pub enum Error {
     REGSConfiguration(regs::Error),
 
     /// Error fetching prefered target
-    VcpuArmPreferredTarget(kvm_ioctls::Error),
+    VcpuArmPreferredTarget(hypervisor::HypervisorVmError),
 
     /// Error doing Vcpu Init on Arm.
-    VcpuArmInit(kvm_ioctls::Error),
+    VcpuArmInit(hypervisor::HypervisorCpuError),
 }
 
 impl From<Error> for super::Error {
@@ -63,9 +64,9 @@ pub struct EntryPoint {
 
 /// Configure the specified VCPU, and return its MPIDR.
 pub fn configure_vcpu(
-    fd: &VcpuFd,
+    fd: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
-    vm_fd: &VmFd,
+    vm_fd: &Arc<dyn hypervisor::Vm>,
     kernel_entry_point: Option<EntryPoint>,
     vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
 ) -> super::Result<u64> {
@@ -138,7 +139,7 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)]
 pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
-    vm_fd: &VmFd,
+    vm_fd: &Arc<dyn hypervisor::Vm>,
     guest_mem: &GuestMemoryMmap,
     cmdline_cstring: &CStr,
     vcpu_count: u64,
@@ -198,13 +199,6 @@ pub fn get_host_cpu_phys_bits() -> u8 {
     // It will be replace once rust-vmm/kvm-ioctls is ready.
     //
     40
-}
-
-pub fn check_required_kvm_extensions(kvm: &Kvm) -> super::Result<()> {
-    if !kvm.check_extension(Cap::SignalMsi) {
-        return Err(super::Error::CapabilityMissing(Cap::SignalMsi));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

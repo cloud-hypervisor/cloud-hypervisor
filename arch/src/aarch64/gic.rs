@@ -1,9 +1,9 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{boxed::Box, result};
-
 use kvm_ioctls::{DeviceFd, VmFd};
+use std::sync::Arc;
+use std::{boxed::Box, result};
 
 use super::gicv2::GICv2;
 use super::gicv3::GICv3;
@@ -12,7 +12,7 @@ use super::gicv3::GICv3;
 #[derive(Debug)]
 pub enum Error {
     /// Error while calling KVM ioctl for setting up the global interrupt controller.
-    CreateGIC(kvm_ioctls::Error),
+    CreateGIC(hypervisor::HypervisorVmError),
     /// Error while setting device attributes for the GIC.
     SetDeviceAttribute(kvm_ioctls::Error),
 }
@@ -51,7 +51,7 @@ pub trait GICDevice: Send + Sync {
         Self: Sized;
 
     /// Initialize a GIC device
-    fn init_device(vm: &VmFd) -> Result<DeviceFd>
+    fn init_device(vm: &Arc<dyn hypervisor::Vm>) -> Result<DeviceFd>
     where
         Self: Sized,
     {
@@ -120,7 +120,7 @@ pub trait GICDevice: Send + Sync {
     }
 
     /// Method to initialize the GIC device
-    fn new(vm: &VmFd, vcpu_count: u64) -> Result<Box<dyn GICDevice>>
+    fn new(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GICDevice>>
     where
         Self: Sized,
     {
@@ -140,7 +140,7 @@ pub trait GICDevice: Send + Sync {
 ///
 /// It will try to create by default a GICv3 device. If that fails it will try
 /// to fall-back to a GICv2 device.
-pub fn create_gic(vm: &VmFd, vcpu_count: u64) -> Result<Box<dyn GICDevice>> {
+pub fn create_gic(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GICDevice>> {
     GICv3::new(vm, vcpu_count).or_else(|_| GICv2::new(vm, vcpu_count))
 }
 

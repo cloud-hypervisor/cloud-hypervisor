@@ -6,7 +6,7 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-
+use std::sync::Arc;
 mod gdt;
 pub mod interrupts;
 pub mod layout;
@@ -15,8 +15,7 @@ mod mptable;
 pub mod regs;
 use crate::InitramfsConfig;
 use crate::RegionType;
-use kvm_bindings::CpuId;
-use kvm_ioctls::*;
+use hypervisor::CpuId;
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
@@ -111,10 +110,10 @@ pub enum Error {
     MSRSConfiguration(regs::Error),
 
     /// The call to KVM_SET_CPUID2 failed.
-    SetSupportedCpusFailed(kvm_ioctls::Error),
+    SetSupportedCpusFailed(anyhow::Error),
 
     /// Cannot set the local interruption due to bad configuration.
-    LocalIntConfiguration(interrupts::Error),
+    LocalIntConfiguration(anyhow::Error),
 }
 
 impl From<Error> for super::Error {
@@ -200,7 +199,7 @@ impl CpuidPatch {
 }
 
 pub fn configure_vcpu(
-    fd: &VcpuFd,
+    fd: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
     kernel_entry_point: Option<EntryPoint>,
     vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
@@ -210,7 +209,7 @@ pub fn configure_vcpu(
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(id));
     fd.set_cpuid2(&cpuid)
-        .map_err(Error::SetSupportedCpusFailed)?;
+        .map_err(|e| Error::SetSupportedCpusFailed(e.into()))?;
 
     regs::setup_msrs(fd).map_err(Error::MSRSConfiguration)?;
     if let Some(kernel_entry_point) = kernel_entry_point {
@@ -227,7 +226,7 @@ pub fn configure_vcpu(
         regs::setup_sregs(&vm_memory.memory(), fd, kernel_entry_point.protocol)
             .map_err(Error::SREGSConfiguration)?;
     }
-    interrupts::set_lint(fd).map_err(Error::LocalIntConfiguration)?;
+    interrupts::set_lint(fd).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
     Ok(())
 }
 
@@ -614,19 +613,6 @@ pub fn get_host_cpu_phys_bits() -> u8 {
             36
         }
     }
-}
-
-pub fn check_required_kvm_extensions(kvm: &Kvm) -> super::Result<()> {
-    if !kvm.check_extension(Cap::SignalMsi) {
-        return Err(super::Error::CapabilityMissing(Cap::SignalMsi));
-    }
-    if !kvm.check_extension(Cap::TscDeadlineTimer) {
-        return Err(super::Error::CapabilityMissing(Cap::TscDeadlineTimer));
-    }
-    if !kvm.check_extension(Cap::SplitIrqchip) {
-        return Err(super::Error::CapabilityMissing(Cap::SplitIrqchip));
-    }
-    Ok(())
 }
 
 pub fn update_cpuid_topology(

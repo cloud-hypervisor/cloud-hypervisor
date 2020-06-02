@@ -10,6 +10,7 @@ extern crate vmm_sys_util;
 extern crate clap;
 
 use clap::{App, Arg, ArgGroup, ArgMatches};
+use hypervisor::kvm::KvmHyperVisor as Hypervisor;
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use seccomp::SeccompLevel;
@@ -282,7 +283,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
     } else {
         SeccompLevel::Advanced
     };
-
+    let hypervisor = Hypervisor::new().unwrap();
     let vmm_thread = match vmm::start_vmm_thread(
         env!("CARGO_PKG_VERSION").to_string(),
         api_socket_path,
@@ -290,6 +291,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         http_sender,
         api_request_receiver,
         &seccomp_level,
+        Arc::new(hypervisor),
     ) {
         Ok(t) => t,
         Err(e) => {

@@ -5,8 +5,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use std::{mem, result};
-
 use super::get_fdt_addr;
 use kvm_bindings::{
     user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK,
@@ -16,16 +14,17 @@ use kvm_bindings::{
     KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
 };
 use kvm_ioctls::VcpuFd;
-
+use std::sync::Arc;
+use std::{mem, result};
 use vm_memory::GuestMemoryMmap;
 
 /// Errors thrown while setting aarch64 registers.
 #[derive(Debug)]
 pub enum Error {
     /// Failed to set core register (PC, PSTATE or general purpose ones).
-    SetCoreRegister(kvm_ioctls::Error),
+    SetCoreRegister(hypervisor::HypervisorCpuError),
     /// Failed to get a system register.
-    GetSysRegister(kvm_ioctls::Error),
+    GetSysRegister(hypervisor::HypervisorCpuError),
 }
 type Result<T> = result::Result<T, Error>;
 
@@ -122,7 +121,12 @@ arm64_sys_reg!(MPIDR_EL1, 3, 0, 0, 0, 5);
 /// * `cpu_id` - Index of current vcpu.
 /// * `boot_ip` - Starting instruction pointer.
 /// * `mem` - Reserved DRAM for current VM.
-pub fn setup_regs(vcpu: &VcpuFd, cpu_id: u8, boot_ip: u64, mem: &GuestMemoryMmap) -> Result<()> {
+pub fn setup_regs(
+    vcpu: &Arc<dyn hypervisor::Vcpu>,
+    cpu_id: u8,
+    boot_ip: u64,
+    mem: &GuestMemoryMmap,
+) -> Result<()> {
     // Get the register index of the PSTATE (Processor State) register.
     vcpu.set_one_reg(arm64_core_reg!(pstate), PSTATE_FAULT_BITS_64)
         .map_err(Error::SetCoreRegister)?;
@@ -148,7 +152,7 @@ pub fn setup_regs(vcpu: &VcpuFd, cpu_id: u8, boot_ip: u64, mem: &GuestMemoryMmap
 /// # Arguments
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn read_mpidr(vcpu: &VcpuFd) -> Result<u64> {
+pub fn read_mpidr(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<u64> {
     vcpu.get_one_reg(MPIDR_EL1).map_err(Error::GetSysRegister)
 }
 
