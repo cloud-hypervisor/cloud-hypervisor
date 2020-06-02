@@ -187,6 +187,12 @@ struct NetEpollHandler {
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     kill_evt: EventFd,
     pause_evt: EventFd,
+
+    // Always generate interrupts until the driver has signalled to the device.
+    // This mitigates a problem with interrupts from tap events being "lost" upon
+    // a restore as the vCPU thread isn't ready to handle the interrupt. This causes
+    // issues when combined with VIRTIO_RING_F_EVENT_IDX interrupt suppression.
+    driver_awake: bool,
 }
 
 impl NetEpollHandler {
@@ -208,7 +214,7 @@ impl NetEpollHandler {
             error!("Failed to get rx queue event: {:?}", e);
         }
 
-        if self.net.resume_rx(&mut queue)? {
+        if self.net.resume_rx(&mut queue)? || !self.driver_awake {
             self.signal_used_queue(queue)?;
             info!("Signalling RX queue");
         } else {
@@ -226,7 +232,7 @@ impl NetEpollHandler {
         if let Err(e) = queue_evt.read() {
             error!("Failed to get tx queue event: {:?}", e);
         }
-        if self.net.process_tx(&mut queue)? {
+        if self.net.process_tx(&mut queue)? || !self.driver_awake {
             self.signal_used_queue(queue)?;
             info!("Signalling TX queue");
         } else {
@@ -329,9 +335,11 @@ impl NetEpollHandler {
 
                 match ev_type {
                     RX_QUEUE_EVENT => {
+                        self.driver_awake = true;
                         self.handle_rx_event(&mut queues[0], &queue_evts[0])?;
                     }
                     TX_QUEUE_EVENT => {
+                        self.driver_awake = true;
                         self.handle_tx_event(&mut queues[1], &queue_evts[1])?;
                     }
                     RX_TAP_EVENT => {
@@ -633,6 +641,7 @@ impl VirtioDevice for Net {
                     interrupt_cb: interrupt_cb.clone(),
                     kill_evt: kill_evt.try_clone().unwrap(),
                     pause_evt: pause_evt.try_clone().unwrap(),
+                    driver_awake: false,
                 };
 
                 let paused = self.paused.clone();
