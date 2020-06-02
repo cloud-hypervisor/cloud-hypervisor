@@ -1361,7 +1361,7 @@ dependencies = [
 [[package]]
 name = "vfio-bindings"
 version = "0.2.0"
-source = "git+https://github.com/rust-vmm/vfio-bindings#887b3cf877cd4807a2047d6aac1cb94e3861a240"
+source = "git+https://github.com/rust-vmm/vfio-bindings#f08cbcbf4041c981441d9c036c49ebad5098ed1c"
 dependencies = [
  "vmm-sys-util",
 ]
