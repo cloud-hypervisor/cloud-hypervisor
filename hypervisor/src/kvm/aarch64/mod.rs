@@ -9,6 +9,7 @@
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 use crate::kvm::{KvmError, KvmResult};
+pub use kvm_bindings::kvm_vcpu_init as VcpuInit;
 use serde_derive::{Deserialize, Serialize};
 pub use {kvm_ioctls::Cap, kvm_ioctls::Kvm};
 
@@ -18,3 +19,6 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     }
     Ok(())
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VcpuKvmState {}

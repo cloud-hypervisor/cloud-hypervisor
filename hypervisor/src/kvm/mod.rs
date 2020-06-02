@@ -15,7 +15,7 @@ use vm_memory::Address;
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "aarch64")]
-use crate::aarch64::{check_required_kvm_extensions, VcpuInit};
+pub use crate::aarch64::{check_required_kvm_extensions, VcpuInit, VcpuKvmState as CpuState};
 use crate::cpu;
 use crate::hypervisor;
 use crate::vm;
@@ -24,10 +24,15 @@ use crate::vm;
 pub mod x86_64;
 
 #[cfg(target_arch = "x86_64")]
-use x86_64::{check_required_kvm_extensions, KVM_TSS_ADDRESS};
+use x86_64::{
+    boot_msr_entries, check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters,
+    KVM_TSS_ADDRESS,
+};
 
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsave};
+pub use x86_64::{
+    CpuId, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState, Xsave,
+};
 
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{kvm_enable_cap, KVM_CAP_SPLIT_IRQCHIP};
@@ -40,6 +45,10 @@ use crate::arch::x86::NUM_IOAPIC_PINS;
 pub mod aarch64;
 
 pub use kvm_bindings;
+pub use kvm_bindings::{
+    kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing, kvm_irq_routing_entry,
+    kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI, KVM_MEM_READONLY,
+};
 pub use kvm_ioctls;
 pub use kvm_ioctls::{Cap, Kvm};
 
@@ -47,9 +56,8 @@ pub use kvm_ioctls::{Cap, Kvm};
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_create_device as CreateDevice, kvm_bindings::kvm_fpu as FpuState,
-    kvm_bindings::kvm_irq_routing as IrqRouting, kvm_bindings::kvm_mp_state as MpState,
-    kvm_bindings::kvm_regs as StandardRegisters, kvm_bindings::kvm_sregs as SpecialRegisters,
+    kvm_bindings::kvm_create_device as CreateDevice, kvm_bindings::kvm_irq_routing as IrqRouting,
+    kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_userspace_memory_region as MemoryRegion,
     kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
     kvm_ioctls::VcpuExit,
@@ -525,5 +533,92 @@ impl cpu::Vcpu for KvmVcpu {
         self.fd
             .get_one_reg(reg_id)
             .map_err(|e| cpu::HypervisorCpuError::GetOneReg(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    /// Get the current CPU state
+    ///
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # extern crate hypervisor;
+    /// # use hypervisor::KvmHyperVisor;
+    /// # use std::sync::Arc;
+    /// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+    /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+    /// let vm = hv.create_vm().expect("new VM fd creation failed");
+    /// vm.enable_split_irq().unwrap();
+    /// let vcpu = vm.create_vcpu(0).unwrap();
+    /// let state = vcpu.cpu_state().unwrap();
+    ///
+    fn cpu_state(&self) -> cpu::Result<CpuState> {
+        let mut msrs = boot_msr_entries();
+        self.get_msrs(&mut msrs)?;
+
+        let vcpu_events = self.get_vcpu_events()?;
+        let regs = self.get_regs()?;
+        let sregs = self.get_sregs()?;
+        let lapic_state = self.get_lapic()?;
+        let fpu = self.get_fpu()?;
+        let xsave = self.get_xsave()?;
+        let xcrs = self.get_xcrs()?;
+        let mp_state = self.get_mp_state()?;
+
+        Ok(CpuState {
+            msrs,
+            vcpu_events,
+            regs,
+            sregs,
+            fpu,
+            lapic_state,
+            xsave,
+            xcrs,
+            mp_state,
+        })
+    }
+    #[cfg(target_arch = "aarch64")]
+    fn cpu_state(&self) -> cpu::Result<CpuState> {
+        unimplemented!();
+    }
+    #[cfg(target_arch = "x86_64")]
+    /// Restore the previously saved CPU state
+    ///
+    /// Arguments: CpuState
+    /// # Example
+    ///
+    /// ```rust
+    /// # extern crate hypervisor;
+    /// # use hypervisor::KvmHyperVisor;
+    /// # use std::sync::Arc;
+    /// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+    /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+    /// let vm = hv.create_vm().expect("new VM fd creation failed");
+    /// vm.enable_split_irq().unwrap();
+    /// let vcpu = vm.create_vcpu(0).unwrap();
+    /// let state = vcpu.cpu_state().unwrap();
+    /// vcpu.set_cpu_state(&state).unwrap();
+    ///
+    fn set_cpu_state(&self, state: &CpuState) -> cpu::Result<()> {
+        self.set_regs(&state.regs)?;
+
+        self.set_fpu(&state.fpu)?;
+
+        self.set_xsave(&state.xsave)?;
+
+        self.set_sregs(&state.sregs)?;
+
+        self.set_xcrs(&state.xcrs)?;
+
+        self.set_msrs(&state.msrs)?;
+
+        self.set_lapic(&state.lapic_state)?;
+
+        self.set_mp_state(state.mp_state)?;
+
+        Ok(())
+    }
+    #[cfg(target_arch = "aarch64")]
+    fn set_cpu_state(&self, state: &CpuState) -> cpu::Result<()> {
+        Ok(())
     }
 }
