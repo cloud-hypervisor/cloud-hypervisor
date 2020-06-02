@@ -7,6 +7,7 @@ use std::{boxed::Box, result};
 
 use super::gicv2::GICv2;
 use super::gicv3::GICv3;
+use super::gicv3_its::GICv3ITS;
 
 /// Errors thrown while setting up the GIC.
 #[derive(Debug)]
@@ -40,13 +41,31 @@ pub trait GICDevice: Send + Sync {
     where
         Self: Sized;
 
+    /// Returns whether the GIC device is MSI compatible or not
+    fn msi_compatible(&self) -> bool {
+        false
+    }
+
+    /// Returns the MSI compatibility property of the device
+    fn msi_compatiblility(&self) -> &str {
+        ""
+    }
+
+    /// Returns the MSI reg property of the device
+    fn msi_properties(&self) -> &[u64] {
+        &[]
+    }
+
     /// Create the GIC device object
     fn create_device(fd: DeviceFd, vcpu_count: u64) -> Box<dyn GICDevice>
     where
         Self: Sized;
 
     /// Setup the device-specific attributes
-    fn init_device_attributes(gic_device: &Box<dyn GICDevice>) -> Result<()>
+    fn init_device_attributes(
+        vm: &Arc<dyn hypervisor::Vm>,
+        gic_device: &Box<dyn GICDevice>,
+    ) -> Result<()>
     where
         Self: Sized;
 
@@ -128,7 +147,7 @@ pub trait GICDevice: Send + Sync {
 
         let device = Self::create_device(vgic_fd, vcpu_count);
 
-        Self::init_device_attributes(&device)?;
+        Self::init_device_attributes(vm, &device)?;
 
         Self::finalize_device(&device)?;
 
@@ -141,7 +160,8 @@ pub trait GICDevice: Send + Sync {
 /// It will try to create by default a GICv3 device. If that fails it will try
 /// to fall-back to a GICv2 device.
 pub fn create_gic(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GICDevice>> {
-    GICv3::new(vm, vcpu_count).or_else(|_| GICv2::new(vm, vcpu_count))
+    GICv3ITS::new(vm, vcpu_count)
+        .or_else(|_| GICv3::new(vm, vcpu_count).or_else(|_| GICv2::new(vm, vcpu_count)))
 }
 
 #[cfg(test)]

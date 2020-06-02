@@ -8,6 +8,7 @@ pub mod fdt;
 pub mod gic;
 mod gicv2;
 mod gicv3;
+mod gicv3_its;
 /// Layout for this aarch64 system.
 pub mod layout;
 /// Logic for configuring aarch64 registers.

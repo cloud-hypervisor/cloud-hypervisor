@@ -1,11 +1,10 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{boxed::Box, result};
-
-use kvm_ioctls::DeviceFd;
-
 use super::gic::{Error, GICDevice};
+use kvm_ioctls::DeviceFd;
+use std::sync::Arc;
+use std::{boxed::Box, result};
 
 type Result<T> = result::Result<T, Error>;
 
@@ -89,7 +88,10 @@ impl GICDevice for GICv2 {
         })
     }
 
-    fn init_device_attributes(gic_device: &Box<dyn GICDevice>) -> Result<()> {
+    fn init_device_attributes(
+        _vm: &Arc<dyn hypervisor::Vm>,
+        gic_device: &Box<dyn GICDevice>,
+    ) -> Result<()> {
         /* Setting up the distributor attribute.
         We are placing the GIC below 1GB so we need to substract the size of the distributor. */
         Self::set_device_attribute(
