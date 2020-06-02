@@ -10,13 +10,15 @@
 
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::VcpuInit;
+use crate::{CpuState, MpState, VcpuExit};
+
 #[cfg(target_arch = "x86_64")]
-pub use crate::x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsave};
-use crate::{FpuState, MpState, SpecialRegisters, StandardRegisters, VcpuEvents, VcpuExit};
+use crate::x86_64::{
+    CpuId, ExtendedControlRegisters, FpuState, LapicState, MsrEntries, SpecialRegisters,
+    StandardRegisters, VcpuEvents, Xsave,
+};
 use thiserror::Error;
 use vmm_sys_util::errno::Error as RunError;
-
-pub struct CpuState {}
 
 #[derive(Error, Debug)]
 ///
