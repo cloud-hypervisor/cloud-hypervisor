@@ -21,6 +21,9 @@
 /// KVM implementation module
 pub mod kvm;
 
+/// Vm related module
+pub mod vm;
+
 /// CPU related module
 mod cpu;
 
