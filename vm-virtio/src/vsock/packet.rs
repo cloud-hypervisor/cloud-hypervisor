@@ -20,7 +20,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use super::super::DescriptorChain;
 use super::defs;
 use super::{Result, VsockError};
-use vm_device::get_host_address_range;
+use vfio_ioctls::get_host_address_range;
 
 // The vsock packet header is defined by the C struct:
 //
@@ -117,7 +117,7 @@ impl VsockPacket {
         }
 
         let mut pkt = Self {
-            hdr: get_host_address_range(&head.mem, head.addr, VSOCK_PKT_HDR_SIZE)
+            hdr: get_host_address_range(head.mem, head.addr, VSOCK_PKT_HDR_SIZE)
                 .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
             buf: None,
             buf_size: 0,
@@ -150,7 +150,7 @@ impl VsockPacket {
 
         pkt.buf_size = buf_desc.len as usize;
         pkt.buf = Some(
-            get_host_address_range(&buf_desc.mem, buf_desc.addr, pkt.buf_size)
+            get_host_address_range(buf_desc.mem, buf_desc.addr, pkt.buf_size)
                 .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
         );
 
@@ -182,10 +182,10 @@ impl VsockPacket {
         let buf_size = buf_desc.len as usize;
 
         Ok(Self {
-            hdr: get_host_address_range(&head.mem, head.addr, VSOCK_PKT_HDR_SIZE)
+            hdr: get_host_address_range(head.mem, head.addr, VSOCK_PKT_HDR_SIZE)
                 .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
             buf: Some(
-                get_host_address_range(&buf_desc.mem, buf_desc.addr, buf_size)
+                get_host_address_range(buf_desc.mem, buf_desc.addr, buf_size)
                     .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
             ),
             buf_size,
@@ -377,7 +377,7 @@ mod tests {
 
     fn set_pkt_len(len: u32, guest_desc: &GuestQDesc, mem: &GuestMemoryMmap) {
         let hdr_gpa = guest_desc.addr.get();
-        let hdr_ptr = get_host_address_range(&mem, GuestAddress(hdr_gpa), VSOCK_PKT_HDR_SIZE)
+        let hdr_ptr = get_host_address_range(mem, GuestAddress(hdr_gpa), VSOCK_PKT_HDR_SIZE)
             .unwrap() as *mut u8;
         let len_ptr = unsafe { hdr_ptr.add(HDROFF_LEN) };
 
