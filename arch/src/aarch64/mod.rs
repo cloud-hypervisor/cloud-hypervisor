@@ -135,8 +135,6 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
 ///
 /// * `guest_mem` - The memory to be used by the guest.
 /// * `num_cpus` - Number of virtual CPUs the guest will have.
-#[allow(clippy::too_many_arguments)]
-#[allow(unused_variables)]
 pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
     vm: &Arc<dyn hypervisor::Vm>,
     guest_mem: &GuestMemoryMmap,
@@ -145,16 +143,22 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
     vcpu_mpidr: Vec<u64>,
     device_info: &HashMap<(DeviceType, String), T>,
     initrd: &Option<super::InitramfsConfig>,
+    pci_space_address: &Option<(u64, u64)>,
 ) -> super::Result<()> {
-    let gic_device = gic::create_gic(vm, vcpu_count).map_err(Error::SetupGIC)?;
+    // If pci_space_address is present, it means PCI devices are used ("pci" feature enabled).
+    // Then GITv3-ITS is required for MSI messaging.
+    // Otherwise ("mmio" feature enabled), any version of GIC is OK.
+    let gic_device =
+        gic::create_gic(vm, vcpu_count, pci_space_address.is_some()).map_err(Error::SetupGIC)?;
 
-    let dtb = fdt::create_fdt(
+    fdt::create_fdt(
         guest_mem,
         cmdline_cstring,
         vcpu_mpidr,
         device_info,
         &gic_device,
         initrd,
+        pci_space_address,
     )
     .map_err(Error::SetupFDT)?;
 

@@ -1,13 +1,12 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use kvm_ioctls::DeviceFd;
-use std::sync::Arc;
-use std::{boxed::Box, result};
-
 use super::gicv2::GICv2;
 use super::gicv3::GICv3;
 use super::gicv3_its::GICv3ITS;
+use kvm_ioctls::DeviceFd;
+use std::sync::Arc;
+use std::{boxed::Box, result};
 
 /// Errors thrown while setting up the GIC.
 #[derive(Debug)]
@@ -159,9 +158,17 @@ pub trait GICDevice: Send + Sync {
 ///
 /// It will try to create by default a GICv3 device. If that fails it will try
 /// to fall-back to a GICv2 device.
-pub fn create_gic(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GICDevice>> {
-    GICv3ITS::new(vm, vcpu_count)
-        .or_else(|_| GICv3::new(vm, vcpu_count).or_else(|_| GICv2::new(vm, vcpu_count)))
+pub fn create_gic(
+    vm: &Arc<dyn hypervisor::Vm>,
+    vcpu_count: u64,
+    its_required: bool,
+) -> Result<Box<dyn GICDevice>> {
+    if its_required {
+        GICv3ITS::new(vm, vcpu_count)
+    } else {
+        GICv3ITS::new(vm, vcpu_count)
+            .or_else(|_| GICv3::new(vm, vcpu_count).or_else(|_| GICv2::new(vm, vcpu_count)))
+    }
 }
 
 #[cfg(test)]
@@ -174,6 +181,6 @@ mod tests {
         let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
         let vm = hv.create_vm().unwrap();
 
-        assert!(create_gic(&vm, 1).is_ok());
+        assert!(create_gic(&vm, 1, false).is_ok());
     }
 }
