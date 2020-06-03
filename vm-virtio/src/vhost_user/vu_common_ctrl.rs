@@ -10,9 +10,9 @@ use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::vec::Vec;
+use vfio_ioctls::get_host_address_range;
 use vhost_rs::vhost_user::{Master, VhostUserMaster};
 use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
-use vm_device::get_host_address_range;
 use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -74,18 +74,18 @@ pub fn setup_vhost_user_vring(
             queue_size: queue.actual_size(),
             flags: 0u32,
             desc_table_addr: get_host_address_range(
-                &mem,
+                mem,
                 queue.desc_table,
                 actual_size * std::mem::size_of::<Descriptor>(),
             )
             .ok_or_else(|| Error::DescriptorTableAddress)? as u64,
             // The used ring is {flags: u16; idx: u16; virtq_used_elem [{id: u16, len: u16}; actual_size]},
             // i.e. 4 + (4 + 4) * actual_size.
-            used_ring_addr: get_host_address_range(&mem, queue.used_ring, 4 + actual_size * 8)
+            used_ring_addr: get_host_address_range(mem, queue.used_ring, 4 + actual_size * 8)
                 .ok_or_else(|| Error::UsedAddress)? as u64,
             // The used ring is {flags: u16; idx: u16; elem [u16; actual_size]},
             // i.e. 4 + (2) * actual_size.
-            avail_ring_addr: get_host_address_range(&mem, queue.avail_ring, 4 + actual_size * 2)
+            avail_ring_addr: get_host_address_range(mem, queue.avail_ring, 4 + actual_size * 2)
                 .ok_or_else(|| Error::AvailAddress)? as u64,
             log_addr: None,
         };
