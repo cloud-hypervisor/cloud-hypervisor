@@ -27,9 +27,13 @@ pub mod hypervisor;
 /// Vm related module
 pub mod vm;
 
+/// Architecture specific definitions
+pub mod arch;
+
 /// CPU related module
 mod cpu;
 
 pub use crate::hypervisor::{Hypervisor, HypervisorError};
 pub use cpu::{HypervisorCpuError, Vcpu};
 pub use kvm::*;
+pub use vm::{DataMatch, HypervisorVmError, Vm};
