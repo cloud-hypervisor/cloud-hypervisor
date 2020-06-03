@@ -1,0 +1,273 @@
+// Copyright © 2019 Intel Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+// Copyright © 2020, Microsoft  Corporation
+//
+// Copyright 2018-2019 CrowdStrike, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+#[cfg(target_arch = "aarch64")]
+use crate::aarch64::VcpuInit;
+#[cfg(target_arch = "x86_64")]
+pub use crate::x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsave};
+use crate::{FpuState, MpState, SpecialRegisters, StandardRegisters, VcpuEvents, VcpuExit};
+use thiserror::Error;
+use vmm_sys_util::errno::Error as RunError;
+
+pub struct CpuState {}
+
+#[derive(Error, Debug)]
+///
+/// Enum for CPU error
+pub enum HypervisorCpuError {
+    ///
+    /// Setting standard registers error
+    ///
+    #[error("Failed to set standard register: {0}")]
+    SetStandardRegs(#[source] anyhow::Error),
+    ///
+    /// Setting standard registers error
+    ///
+    #[error("Failed to get standard registers: {0}")]
+    GetStandardRegs(#[source] anyhow::Error),
+    ///
+    /// Setting special register error
+    ///
+    #[error("Failed to set special registers: {0}")]
+    SetSpecialRegs(#[source] anyhow::Error),
+    ///
+    /// Getting standard register error
+    ///
+    #[error("Failed to get special registers: {0}")]
+    GetSpecialRegs(#[source] anyhow::Error),
+    ///
+    /// Setting floating point registers error
+    ///
+    #[error("Failed to set special register: {0}")]
+    SetFloatingPointRegs(#[source] anyhow::Error),
+    ///
+    /// Getting floating point register error
+    ///
+    #[error("Failed to get special register: {0}")]
+    GetFloatingPointRegs(#[source] anyhow::Error),
+    ///
+    /// Setting Cpuid error
+    ///
+    #[error("Failed to set Cpuid: {0}")]
+    SetCpuid(#[source] anyhow::Error),
+    ///
+    /// Getting Cpuid error
+    ///
+    #[error("Failed to get Cpuid: {0}")]
+    GetCpuid(#[source] anyhow::Error),
+    ///
+    /// Setting lapic state error
+    ///
+    #[error("Failed to set Lapic state: {0}")]
+    SetLapicState(#[source] anyhow::Error),
+    ///
+    /// Getting Lapic state error
+    ///
+    #[error("Failed to get Lapic state: {0}")]
+    GetlapicState(#[source] anyhow::Error),
+    ///
+    /// Setting MSR entries error
+    ///
+    #[error("Failed to set Msr entries: {0}")]
+    SetMsrEntries(#[source] anyhow::Error),
+    ///
+    /// Getting Msr entries error
+    ///
+    #[error("Failed to get Msr entries: {0}")]
+    GetMsrEntries(#[source] anyhow::Error),
+    ///
+    /// Setting MSR entries error
+    ///
+    #[error("Failed to set MP state: {0}")]
+    SetMpState(#[source] anyhow::Error),
+    ///
+    /// Getting Msr entries error
+    ///
+    #[error("Failed to get MP state: {0}")]
+    GetMpState(#[source] anyhow::Error),
+    ///
+    /// Setting Saved Processor Extended States error
+    ///
+    #[error("Failed to set Saved Processor Extended States: {0}")]
+    SetXsaveState(#[source] anyhow::Error),
+    ///
+    /// Getting Saved Processor Extended States error
+    ///
+    #[error("Failed to get Saved Processor Extended States: {0}")]
+    GetXsaveState(#[source] anyhow::Error),
+    ///
+    /// Setting Extended Control Registers error
+    ///
+    #[error("Failed to set Extended Control Registers: {0}")]
+    SetXcsr(#[source] anyhow::Error),
+    ///
+    /// Getting Extended Control Registers error
+    ///
+    #[error("Failed to get Extended Control Registers: {0}")]
+    GetXcsr(#[source] anyhow::Error),
+    ///
+    /// Running Vcpu error
+    ///
+    #[error("Failed to run vcpu: {0}")]
+    RunVcpu(#[source] anyhow::Error),
+    ///
+    /// Getting Vcpu events error
+    ///
+    #[error("Failed to get Vcpu events: {0}")]
+    GetVcpuEvents(#[source] anyhow::Error),
+    ///
+    /// Vcpu Init error
+    ///
+    #[error("Failed to init vcpu: {0}")]
+    VcpuInit(#[source] anyhow::Error),
+    ///
+    /// Setting one reg error
+    ///
+    #[error("Failed to init vcpu: {0}")]
+    SetOneReg(#[source] anyhow::Error),
+    ///
+    /// Getting one reg error
+    ///
+    #[error("Failed to init vcpu: {0}")]
+    GetOneReg(#[source] anyhow::Error),
+}
+
+///
+/// Result type for returning from a function
+///
+pub type Result<T> = anyhow::Result<T, HypervisorCpuError>;
+///
+/// Trait to represent a generic Vcpu
+///
+pub trait Vcpu: Send + Sync {
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns the vCPU general purpose registers.
+    ///
+    fn get_regs(&self) -> Result<StandardRegisters>;
+
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Sets the vCPU general purpose registers.
+    ///
+    fn set_regs(&self, regs: &StandardRegisters) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns the vCPU special registers.
+    ///
+    fn get_sregs(&self) -> Result<SpecialRegisters>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Sets the vCPU special registers
+    ///
+    fn set_sregs(&self, sregs: &SpecialRegisters) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns the floating point state (FPU) from the vCPU.
+    ///
+    fn get_fpu(&self) -> Result<FpuState>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Set the floating point state (FPU) of a vCPU
+    ///
+    fn set_fpu(&self, fpu: &FpuState) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call to setup the CPUID registers.
+    ///
+    fn set_cpuid2(&self, cpuid: &CpuId) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call to retrieve the CPUID registers.
+    ///
+    fn get_cpuid2(&self, num_entries: usize) -> Result<CpuId>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
+    ///
+    fn get_lapic(&self) -> Result<LapicState>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Sets the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
+    ///
+    fn set_lapic(&self, lapic: &LapicState) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns the model-specific registers (MSR) for this vCPU.
+    ///
+    fn get_msrs(&self, msrs: &mut MsrEntries) -> Result<usize>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Setup the model-specific registers (MSR) for this vCPU.
+    ///
+    fn set_msrs(&self, msrs: &MsrEntries) -> Result<usize>;
+    ///
+    /// Returns the vcpu's current "multiprocessing state".
+    ///
+    fn get_mp_state(&self) -> Result<MpState>;
+    ///
+    /// Sets the vcpu's current "multiprocessing state".
+    ///
+    fn set_mp_state(&self, mp_state: MpState) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that returns the vcpu's current "xsave struct".
+    ///
+    fn get_xsave(&self) -> Result<Xsave>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that sets the vcpu's current "xsave struct".
+    ///
+    fn set_xsave(&self, xsave: &Xsave) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that returns the vcpu's current "xcrs".
+    ///
+    fn get_xcrs(&self) -> Result<ExtendedControlRegisters>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that sets the vcpu's current "xcrs".
+    ///
+    fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> Result<()>;
+    ///
+    /// Triggers the running of the current virtual CPU returning an exit reason.
+    ///
+    fn run(&self) -> std::result::Result<VcpuExit, RunError>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns currently pending exceptions, interrupts, and NMIs as well as related
+    /// states of the vcpu.
+    ///
+    fn get_vcpu_events(&self) -> Result<VcpuEvents>;
+    ///
+    /// Sets the type of CPU to be exposed to the guest and optional features.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn vcpu_init(&self, kvi: &VcpuInit) -> Result<()>;
+    ///
+    /// Sets the value of one register for this vCPU.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn set_one_reg(&self, reg_id: u64, data: u64) -> Result<()>;
+    ///
+    /// Sets the value of one register for this vCPU.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn get_one_reg(&self, reg_id: u64) -> Result<u64>;
+    ///
+    /// Retrieve the current cpu states. This function is necessary to snapshot the VM
+    ///
+    fn cpu_state(&self) -> Result<CpuState>;
+    ///
+    /// Setting the FPU state this.
+    /// This function is required when restoring the VM
+    ///
+    fn set_cpu_state(&self, state: &CpuState) -> Result<()>;
+}
