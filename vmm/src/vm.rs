@@ -60,9 +60,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use url::Url;
+use vm_memory::{Address, GuestAddress, GuestAddressSpace};
 #[cfg(target_arch = "x86_64")]
-use vm_memory::{Address, Bytes, GuestMemoryMmap};
-use vm_memory::{GuestAddress, GuestAddressSpace};
+use vm_memory::{Bytes, GuestMemoryMmap};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
@@ -618,6 +618,31 @@ impl Vm {
             .get_device_info()
             .clone();
 
+        let pci_space: Option<(u64, u64)> = if cfg!(feature = "pci_support") {
+            let pci_space_start: GuestAddress = self
+                .memory_manager
+                .lock()
+                .as_ref()
+                .unwrap()
+                .start_of_device_area();
+
+            let pci_space_end: GuestAddress = self
+                .memory_manager
+                .lock()
+                .as_ref()
+                .unwrap()
+                .end_of_device_area();
+
+            let pci_space_size = pci_space_end
+                .checked_offset_from(pci_space_start)
+                .ok_or(Error::MemOverflow)?
+                + 1;
+
+            Some((pci_space_start.0, pci_space_size))
+        } else {
+            None
+        };
+
         arch::configure_system(
             &self.memory_manager.lock().as_ref().unwrap().vm,
             &mem,
@@ -626,6 +651,7 @@ impl Vm {
             vcpu_mpidrs,
             device_info,
             &None,
+            &pci_space,
         )
         .map_err(Error::ConfigureSystem)?;
 
