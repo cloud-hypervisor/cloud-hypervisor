@@ -7,10 +7,15 @@ mod gicv2;
 mod gicv3;
 /// Layout for this aarch64 system.
 pub mod layout;
+/// Logic for configuring aarch64 registers.
+pub mod regs;
 
 use crate::RegionType;
 use kvm_ioctls::*;
-use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize};
+use std::fmt::Debug;
+use vm_memory::{
+    Address, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize,
+};
 
 #[derive(Debug)]
 pub enum Error {}
@@ -57,6 +62,21 @@ pub fn configure_system(
 /// Stub function that needs to be implemented when aarch64 functionality is added.
 pub fn get_reserved_mem_addr() -> usize {
     0
+}
+
+// Auxiliary function to get the address where the device tree blob is loaded.
+fn get_fdt_addr(mem: &GuestMemoryMmap) -> u64 {
+    // If the memory allocated is smaller than the size allocated for the FDT,
+    // we return the start of the DRAM so that
+    // we allow the code to try and load the FDT.
+
+    if let Some(addr) = mem.last_addr().checked_sub(layout::FDT_MAX_SIZE as u64 - 1) {
+        if mem.address_in_range(addr) {
+            return addr.raw_value();
+        }
+    }
+
+    layout::RAM_64BIT_START
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
