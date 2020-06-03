@@ -2891,6 +2891,10 @@ mod tests {
         });
     }
 
+    fn get_fd_count(pid: u32) -> usize {
+        fs::read_dir(format!("/proc/{}/fd", pid)).unwrap().count()
+    }
+
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_reboot() {
         test_block!(tb, "", {
@@ -2918,7 +2922,7 @@ mod tests {
                     .unwrap();
 
                 thread::sleep(std::time::Duration::new(20, 0));
-
+                let fd_count_1 = get_fd_count(child.id());
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
                     .unwrap_or_default()
@@ -2930,6 +2934,7 @@ mod tests {
                 guest.ssh_command("sudo reboot").unwrap_or_default();
 
                 thread::sleep(std::time::Duration::new(20, 0));
+                let fd_count_2 = get_fd_count(child.id());
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
                     .unwrap_or_default()
@@ -2937,6 +2942,7 @@ mod tests {
                     .parse::<u32>()
                     .unwrap_or_default();
                 aver_eq!(tb, reboot_count, 1);
+                aver_eq!(tb, fd_count_1, fd_count_2);
 
                 guest
                     .ssh_command("sudo shutdown -h now")
@@ -2974,7 +2980,7 @@ mod tests {
                 .unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
-
+            let fd_count_1 = get_fd_count(child.id());
             let reboot_count = guest
                 .ssh_command("journalctl | grep -c -- \"-- Reboot --\"")
                 .unwrap_or_default()
@@ -2986,6 +2992,7 @@ mod tests {
             guest.ssh_command("sudo reboot")?;
 
             thread::sleep(std::time::Duration::new(20, 0));
+            let fd_count_2 = get_fd_count(child.id());
             let reboot_count = guest
                 .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
                 .unwrap_or_default()
@@ -2993,6 +3000,7 @@ mod tests {
                 .parse::<u32>()
                 .unwrap_or_default();
             aver_eq!(tb, reboot_count, 1);
+            aver_eq!(tb, fd_count_1, fd_count_2);
 
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(20, 0));
