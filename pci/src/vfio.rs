@@ -762,7 +762,7 @@ impl PciDevice for VfioPciDevice {
                         .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
                 }
                 #[cfg(target_arch = "aarch64")]
-                unimplemented!();
+                unimplemented!()
             } else {
                 if is_64bit_bar {
                     // 64 bits Memory BAR
@@ -875,7 +875,7 @@ impl PciDevice for VfioPciDevice {
                     #[cfg(target_arch = "x86_64")]
                     allocator.free_io_addresses(region.start, region.length);
                     #[cfg(target_arch = "aarch64")]
-                    unimplemented!();
+                    error!("I/O region is not supported");
                 }
                 PciBarRegionType::Memory32BitRegion => {
                     allocator.free_mmio_hole_addresses(region.start, region.length);

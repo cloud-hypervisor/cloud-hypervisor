@@ -87,7 +87,7 @@ use vm_migration::{
 use vm_virtio::{VirtioDeviceType, VirtioIommuRemapping};
 use vmm_sys_util::eventfd::EventFd;
 
-#[cfg(feature = "mmio_support")]
+#[cfg(any(feature = "mmio_support", target_arch = "aarch64"))]
 const MMIO_LEN: u64 = 0x1000;
 
 #[cfg(feature = "pci_support")]
@@ -454,24 +454,33 @@ impl DeviceRelocation for AddressManager {
     ) -> std::result::Result<(), std::io::Error> {
         match region_type {
             PciBarRegionType::IORegion => {
-                // Update system allocator
-                self.allocator
-                    .lock()
-                    .unwrap()
-                    .free_io_addresses(GuestAddress(old_base), len as GuestUsize);
+                #[cfg(target_arch = "x86_64")]
+                {
+                    // Update system allocator
+                    self.allocator
+                        .lock()
+                        .unwrap()
+                        .free_io_addresses(GuestAddress(old_base), len as GuestUsize);
 
-                self.allocator
-                    .lock()
-                    .unwrap()
-                    .allocate_io_addresses(Some(GuestAddress(new_base)), len as GuestUsize, None)
-                    .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::Other, "failed allocating new IO range")
-                    })?;
+                    self.allocator
+                        .lock()
+                        .unwrap()
+                        .allocate_io_addresses(
+                            Some(GuestAddress(new_base)),
+                            len as GuestUsize,
+                            None,
+                        )
+                        .ok_or_else(|| {
+                            io::Error::new(io::ErrorKind::Other, "failed allocating new IO range")
+                        })?;
 
-                // Update PIO bus
-                self.io_bus
-                    .update_range(old_base, len, new_base, len)
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                    // Update PIO bus
+                    self.io_bus
+                        .update_range(old_base, len, new_base, len)
+                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                }
+                #[cfg(target_arch = "aarch64")]
+                error!("I/O region is not supported");
             }
             PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
                 // Update system allocator
@@ -2457,6 +2466,7 @@ impl DeviceManager {
 
         pci.register_mapping(
             vfio_pci_device,
+            #[cfg(target_arch = "x86_64")]
             self.address_manager.io_bus.as_ref(),
             self.address_manager.mmio_bus.as_ref(),
             bars,
