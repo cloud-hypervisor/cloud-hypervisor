@@ -457,6 +457,19 @@ dependencies = [
 [[package]]
 name = "hypervisor"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "kvm-bindings",
+ "kvm-ioctls",
+ "libc",
+ "linux-loader",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "thiserror",
+ "vm-memory",
+ "vmm-sys-util",
+]
 
 [[package]]
 name = "idna"

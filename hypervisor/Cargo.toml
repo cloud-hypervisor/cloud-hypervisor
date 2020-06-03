@@ -6,3 +6,17 @@ edition = "2018"
 
 
 [dependencies]
+anyhow = "1.0"
+thiserror = "1.0"
+libc = "0.2.69"
+kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
+kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch", features = ["with-serde", "fam-wrappers"] }
+serde = {version = ">=1.0.27", features = ["rc"] }
+serde_derive = ">=1.0.27"
+serde_json = ">=1.0.9"
+vm-memory = { version = "0.2.0", features = ["backend-mmap", "backend-atomic"] }
+vmm-sys-util = { version = ">=0.5.0", features = ["with-serde"] }
+
+[dependencies.linux-loader]
+git = "https://github.com/rust-vmm/linux-loader"
+features = ["elf", "bzimage"]
