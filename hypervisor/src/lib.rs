@@ -21,11 +21,15 @@
 /// KVM implementation module
 pub mod kvm;
 
+/// Hypevisor related module
+pub mod hypervisor;
+
 /// Vm related module
 pub mod vm;
 
 /// CPU related module
 mod cpu;
 
+pub use crate::hypervisor::{Hypervisor, HypervisorError};
 pub use cpu::{HypervisorCpuError, Vcpu};
 pub use kvm::*;
