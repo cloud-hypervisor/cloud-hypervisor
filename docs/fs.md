@@ -59,21 +59,21 @@ Assuming you have `clear-kvm.img` and `custom-vmlinux.bin` on your system, here 
     --memory "size=512,file=/dev/shm" \
     --disk path=clear-kvm.img \
     --kernel custom-vmlinux.bin \
-    --cmdline "console=ttyS0 reboot=k panic=1 nomodules root=/dev/vda3" \ 
-    --fs tag=myfs,sock=/tmp/virtiofs,num_queues=1,queue_size=512
+    --cmdline "console=ttyS0 reboot=k panic=1 nomodules root=/dev/vda3" \
+    --fs tag=myfs,socket=/tmp/virtiofs,num_queues=1,queue_size=512
 ```
 
 By default, DAX is enabled with a cache window of 8GiB. You can specify a custom size (let's say 4GiB for this example) for the cache by explicitly setting DAX and the cache size:
 
 ```bash
---fs tag=virtiofs,sock=/tmp/virtiofs,num_queues=1,queue_size=512,dax=on,cache_size=4G
+--fs tag=virtiofs,socket=/tmp/virtiofs,num_queues=1,queue_size=512,dax=on,cache_size=4G
 
 ```
 
 In case you don't want to use a shared window of cache to pass the shared files content, this means you will have to explicitly disable DAX with `dax=off`. Note that in this case, the `cache_size` parameter will be ignored.
 
 ```bash
---fs tag=virtiofs,sock=/tmp/virtiofs,num_queues=1,queue_size=512,dax=off
+--fs tag=virtiofs,socket=/tmp/virtiofs,num_queues=1,queue_size=512,dax=off
 
 ```
 

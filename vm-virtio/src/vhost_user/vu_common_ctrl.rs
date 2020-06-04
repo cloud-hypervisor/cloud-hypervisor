@@ -18,7 +18,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug, Clone)]
 pub struct VhostUserConfig {
-    pub sock: String,
+    pub socket: String,
     pub num_queues: usize,
     pub queue_size: u16,
 }
