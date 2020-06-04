@@ -56,7 +56,7 @@ impl Net {
     /// Create a new vhost-user-net device
     /// Create a new vhost-user-net device
     pub fn new(id: String, mac_addr: MacAddr, vu_cfg: VhostUserConfig) -> Result<Net> {
-        let mut vhost_user_net = Master::connect(&vu_cfg.sock, vu_cfg.num_queues as u64)
+        let mut vhost_user_net = Master::connect(&vu_cfg.socket, vu_cfg.num_queues as u64)
             .map_err(Error::VhostUserCreateMaster)?;
 
         // Filling device and vring features VMM supports.

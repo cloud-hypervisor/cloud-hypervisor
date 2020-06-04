@@ -135,7 +135,7 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-fs device
     CreateVirtioFs(vm_virtio::vhost_user::Error),
 
-    /// Virtio-fs device was created without a sock.
+    /// Virtio-fs device was created without a socket.
     NoVirtioFsSock,
 
     /// Cannot create vhost-user-blk device
@@ -1331,7 +1331,7 @@ impl DeviceManager {
     /// Launch block backend
     fn start_block_backend(&mut self, disk_cfg: &DiskConfig) -> DeviceManagerResult<String> {
         let _socket_file = NamedTempFile::new().map_err(DeviceManagerError::CreateSocketFile)?;
-        let sock = _socket_file.path().to_str().unwrap().to_owned();
+        let socket = _socket_file.path().to_str().unwrap().to_owned();
 
         let child = std::process::Command::new(&self.vmm_path)
             .args(&[
@@ -1344,7 +1344,7 @@ impl DeviceManager {
                         .ok_or(DeviceManagerError::NoDiskPath)?
                         .to_str()
                         .unwrap(),
-                    &sock,
+                    &socket,
                     disk_cfg.num_queues,
                     disk_cfg.queue_size
                 ),
@@ -1358,7 +1358,7 @@ impl DeviceManager {
             _socket_file,
         });
 
-        Ok(sock)
+        Ok(socket)
     }
 
     fn make_virtio_block_device(
@@ -1374,13 +1374,13 @@ impl DeviceManager {
         };
 
         if disk_cfg.vhost_user {
-            let sock = if let Some(sock) = disk_cfg.vhost_socket.clone() {
-                sock
+            let socket = if let Some(socket) = disk_cfg.vhost_socket.clone() {
+                socket
             } else {
                 self.start_block_backend(disk_cfg)?
             };
             let vu_cfg = VhostUserConfig {
-                sock,
+                socket,
                 num_queues: disk_cfg.num_queues,
                 queue_size: disk_cfg.queue_size,
             };
@@ -1506,7 +1506,7 @@ impl DeviceManager {
     /// Launch network backend
     fn start_net_backend(&mut self, net_cfg: &NetConfig) -> DeviceManagerResult<String> {
         let _socket_file = NamedTempFile::new().map_err(DeviceManagerError::CreateSocketFile)?;
-        let sock = _socket_file.path().to_str().unwrap().to_owned();
+        let socket = _socket_file.path().to_str().unwrap().to_owned();
 
         let child = std::process::Command::new(&self.vmm_path)
             .args(&[
@@ -1515,7 +1515,7 @@ impl DeviceManager {
                     "ip={},mask={},socket={},num_queues={},queue_size={},host_mac={}",
                     net_cfg.ip,
                     net_cfg.mask,
-                    &sock,
+                    &socket,
                     net_cfg.num_queues,
                     net_cfg.queue_size,
                     net_cfg.host_mac
@@ -1530,7 +1530,7 @@ impl DeviceManager {
             _socket_file,
         });
 
-        Ok(sock)
+        Ok(socket)
     }
 
     fn make_virtio_net_device(
@@ -1546,13 +1546,13 @@ impl DeviceManager {
         };
 
         if net_cfg.vhost_user {
-            let sock = if let Some(sock) = net_cfg.vhost_socket.clone() {
-                sock
+            let socket = if let Some(socket) = net_cfg.vhost_socket.clone() {
+                socket
             } else {
                 self.start_net_backend(net_cfg)?
             };
             let vu_cfg = VhostUserConfig {
-                sock,
+                socket,
                 num_queues: net_cfg.num_queues,
                 queue_size: net_cfg.queue_size,
             };
@@ -1715,7 +1715,7 @@ impl DeviceManager {
             None
         };
 
-        if let Some(fs_sock) = fs_cfg.sock.to_str() {
+        if let Some(fs_socket) = fs_cfg.socket.to_str() {
             let cache = if fs_cfg.dax {
                 let (cache_base, cache_size) = if let Some((base, size)) = cache_range {
                     // The memory needs to be 2MiB aligned in order to support
@@ -1792,7 +1792,7 @@ impl DeviceManager {
             let virtio_fs_device = Arc::new(Mutex::new(
                 vm_virtio::vhost_user::Fs::new(
                     id.clone(),
-                    fs_sock,
+                    fs_socket,
                     &fs_cfg.tag,
                     fs_cfg.num_queues,
                     fs_cfg.queue_size,
@@ -2028,7 +2028,7 @@ impl DeviceManager {
         };
 
         let socket_path = vsock_cfg
-            .sock
+            .socket
             .to_str()
             .ok_or(DeviceManagerError::CreateVsockConvertPath)?;
         let backend =
@@ -2039,7 +2039,7 @@ impl DeviceManager {
             vm_virtio::Vsock::new(
                 id.clone(),
                 vsock_cfg.cid,
-                vsock_cfg.sock.clone(),
+                vsock_cfg.socket.clone(),
                 backend,
                 vsock_cfg.iommu,
             )

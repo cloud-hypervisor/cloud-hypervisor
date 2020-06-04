@@ -745,14 +745,14 @@ mod unit_tests {
                     "--memory",
                     "shared=true",
                     "--disk",
-                    "vhost_user=true,socket=/tmp/socket1",
+                    "vhost_user=true,socket=/tmp/sock1",
                     "path=/path/to/disk/2",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "disks": [
-                        {"vhost_user":true, "vhost_socket":"/tmp/socket1"},
+                        {"vhost_user":true, "vhost_socket":"/tmp/sock1"},
                         {"path": "/path/to/disk/2"}
                     ]
                 }"#,
@@ -766,14 +766,14 @@ mod unit_tests {
                     "--memory",
                     "shared=true",
                     "--disk",
-                    "vhost_user=true,socket=/tmp/socket1",
+                    "vhost_user=true,socket=/tmp/sock1",
                     "path=/path/to/disk/2",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "disks": [
-                        {"vhost_user":true, "vhost_socket":"/tmp/socket1"},
+                        {"vhost_user":true, "vhost_socket":"/tmp/sock1"},
                         {"path": "/path/to/disk/2"}
                     ]
                 }"#,
@@ -952,12 +952,12 @@ mod unit_tests {
                 true,
             ),
             (
-                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "shared=true", "--net", "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,vhost_user=true,socket=/tmp/socket"],
+                vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "shared=true", "--net", "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,vhost_user=true,socket=/tmp/sock"],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "net": [
-                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "vhost_user": true, "vhost_socket": "/tmp/socket"}
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "vhost_user": true, "vhost_socket": "/tmp/sock"}
                     ]
                 }"#,
                 true,
@@ -999,15 +999,15 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,sock=/path/to/sock1",
-                    "tag=virtiofs2,sock=/path/to/sock2",
+                    "tag=virtiofs1,socket=/path/to/sock1",
+                    "tag=virtiofs2,socket=/path/to/sock2",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "sock": "/path/to/sock1"},
-                        {"tag": "virtiofs2", "sock": "/path/to/sock2"}
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1"},
+                        {"tag": "virtiofs2", "socket": "/path/to/sock2"}
                     ]
                 }"#,
                 true,
@@ -1017,14 +1017,14 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,sock=/path/to/sock1",
-                    "tag=virtiofs2,sock=/path/to/sock2",
+                    "tag=virtiofs1,socket=/path/to/sock1",
+                    "tag=virtiofs2,socket=/path/to/sock2",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "sock": "/path/to/sock1"}
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1"}
                     ]
                 }"#,
                 false,
@@ -1034,13 +1034,13 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,sock=/path/to/sock1,num_queues=4",
+                    "tag=virtiofs1,socket=/path/to/sock1,num_queues=4",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4}
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4}
                     ]
                 }"#,
                 true,
@@ -1050,13 +1050,13 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128"
+                    "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
                 }"#,
                 true,
@@ -1066,13 +1066,13 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128,dax=on"
+                    "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,dax=on"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
                 }"#,
                 true,
@@ -1082,13 +1082,13 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128,dax=on"
+                    "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,dax=on"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "dax": true}
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "dax": true}
                     ]
                 }"#,
                 true,
@@ -1098,13 +1098,13 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128"
+                    "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "dax": true}
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "dax": true}
                     ]
                 }"#,
                 true,
@@ -1114,13 +1114,13 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128,cache_size=8589934592"
+                    "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,cache_size=8589934592"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
                 }"#,
                 true,
@@ -1130,13 +1130,13 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128"
+                    "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "cache_size": 8589934592}
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "cache_size": 8589934592}
                     ]
                 }"#,
                 true,
@@ -1146,13 +1146,13 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128,cache_size=4294967296"
+                    "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,cache_size=4294967296"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "cache_size": 4294967296}
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "cache_size": 4294967296}
                     ]
                 }"#,
                 true,
@@ -1162,13 +1162,13 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,sock=/path/to/sock1,num_queues=4,queue_size=128,cache_size=4294967296"
+                    "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,cache_size=4294967296"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "sock": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
                 }"#,
                 false,
@@ -1427,11 +1427,11 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--vsock",
-                    "cid=123,sock=/path/to/sock/1",
+                    "cid=123,socket=/path/to/sock/1",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
-                    "vsock": {"cid": 123, "sock": "/path/to/sock/1"}
+                    "vsock": {"cid": 123, "socket": "/path/to/sock/1"}
                 }"#,
                 true,
             ),
@@ -1441,11 +1441,11 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--vsock",
-                    "cid=124,sock=/path/to/sock/1",
+                    "cid=124,socket=/path/to/sock/1",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
-                    "vsock": {"cid": 123, "sock": "/path/to/sock/1"}
+                    "vsock": {"cid": 123, "socket": "/path/to/sock/1"}
                 }"#,
                 false,
             ),
@@ -1455,11 +1455,11 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--vsock",
-                    "cid=123,sock=/path/to/sock/1,iommu=on",
+                    "cid=123,socket=/path/to/sock/1,iommu=on",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
-                    "vsock": {"cid": 123, "sock": "/path/to/sock/1", "iommu": true},
+                    "vsock": {"cid": 123, "socket": "/path/to/sock/1", "iommu": true},
                     "iommu": true
                 }"#,
                 true,
@@ -1470,11 +1470,11 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--vsock",
-                    "cid=123,sock=/path/to/sock/1,iommu=on",
+                    "cid=123,socket=/path/to/sock/1,iommu=on",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
-                    "vsock": {"cid": 123, "sock": "/path/to/sock/1", "iommu": true}
+                    "vsock": {"cid": 123, "socket": "/path/to/sock/1", "iommu": true}
                 }"#,
                 false,
             ),
@@ -1484,11 +1484,11 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--vsock",
-                    "cid=123,sock=/path/to/sock/1,iommu=off",
+                    "cid=123,socket=/path/to/sock/1,iommu=off",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
-                    "vsock": {"cid": 123, "sock": "/path/to/sock/1", "iommu": false}
+                    "vsock": {"cid": 123, "socket": "/path/to/sock/1", "iommu": false}
                 }"#,
                 true,
             ),

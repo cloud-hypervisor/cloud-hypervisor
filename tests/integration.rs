@@ -370,7 +370,7 @@ mod tests {
         // Start the daemon
         let child = Command::new(clh_command("vhost_user_fs"))
             .args(&["--shared-dir", shared_dir])
-            .args(&["--sock", virtiofsd_socket_path.as_str()])
+            .args(&["--socket", virtiofsd_socket_path.as_str()])
             .spawn()
             .unwrap();
 
@@ -813,7 +813,7 @@ mod tests {
             Ok(cache == (end_addr - start_addr + 1))
         }
 
-        fn check_vsock(&self, sock: &str) {
+        fn check_vsock(&self, socket: &str) {
             // Listen from guest on vsock CID=3 PORT=16
             // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
             let guest_ip = self.network.guest_ip.clone();
@@ -830,7 +830,7 @@ mod tests {
                 .arg(
                     format!(
                         "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{}",
-                        sock
+                        socket
                     )
                     .as_str(),
                 )
@@ -1926,7 +1926,7 @@ mod tests {
                 .args(&["--api-socket", &api_socket]);
 
             let fs_params = format!(
-                "id=myfs0,tag=myfs,sock={},num_queues=1,queue_size=1024,dax={}{}",
+                "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024,dax={}{}",
                 virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
             );
 
@@ -2048,7 +2048,7 @@ mod tests {
                 );
                 thread::sleep(std::time::Duration::new(10, 0));
                 let fs_params = format!(
-                    "id=myfs0,tag=myfs,sock={},num_queues=1,queue_size=1024,dax={}{}",
+                    "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024,dax={}{}",
                     virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
                 );
 
@@ -2706,7 +2706,7 @@ mod tests {
                 .args(&[
                     "--fs",
                     format!(
-                        "tag=myfs,sock={},num_queues=1,queue_size=1024,dax=on",
+                        "tag=myfs,socket={},num_queues=1,queue_size=1024,dax=on",
                         virtiofsd_socket_path,
                     )
                     .as_str(),
@@ -3023,7 +3023,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let sock = temp_vsock_path(&guest.tmp_dir);
+            let socket = temp_vsock_path(&guest.tmp_dir);
             let api_socket = temp_api_path(&guest.tmp_dir);
 
             let mut cmd = GuestCommand::new(&guest);
@@ -3035,7 +3035,7 @@ mod tests {
             cmd.default_net();
 
             if !hotplug {
-                cmd.args(&["--vsock", format!("cid=3,sock={}", sock).as_str()]);
+                cmd.args(&["--vsock", format!("cid=3,socket={}", socket).as_str()]);
             }
 
             let mut child = cmd.spawn().unwrap();
@@ -3048,19 +3048,19 @@ mod tests {
                     remote_command(
                         &api_socket,
                         "add-vsock",
-                        Some(format!("cid=3,sock={},id=test0", sock).as_str())
+                        Some(format!("cid=3,socket={},id=test0", socket).as_str())
                     )
                 );
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Check adding a second one fails
                 aver!(
                     tb,
-                    !remote_command(&api_socket, "add-vsock", Some("cid=1234,sock=/tmp/fail"))
+                    !remote_command(&api_socket, "add-vsock", Some("cid=1234,socket=/tmp/fail"))
                 );
             }
 
             // Validate vsock works as expected.
-            guest.check_vsock(sock.as_str());
+            guest.check_vsock(socket.as_str());
 
             let reboot_count = guest
                 .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
@@ -3082,7 +3082,7 @@ mod tests {
             aver_eq!(tb, reboot_count, 1);
 
             // Validate vsock still works after a reboot.
-            guest.check_vsock(sock.as_str());
+            guest.check_vsock(socket.as_str());
 
             if hotplug {
                 aver!(
@@ -4304,7 +4304,7 @@ mod tests {
                 )
             };
 
-            let sock = temp_vsock_path(&guest.tmp_dir);
+            let socket = temp_vsock_path(&guest.tmp_dir);
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--api-socket", &api_socket])
@@ -4321,7 +4321,7 @@ mod tests {
                     cloudinit_params.as_str(),
                 ])
                 .args(&["--net", net_params.as_str()])
-                .args(&["--vsock", format!("cid=3,sock={}", sock).as_str()])
+                .args(&["--vsock", format!("cid=3,socket={}", socket).as_str()])
                 .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .capture_output()
                 .spawn()
@@ -4354,7 +4354,7 @@ mod tests {
                     .is_ok()
             );
             // Check vsock
-            guest.check_vsock(sock.as_str());
+            guest.check_vsock(socket.as_str());
             // Check if the console is usable
             let console_text = String::from("On a branch floating down river a cricket, singing.");
             let console_cmd = format!("echo {} | sudo tee /dev/hvc0", console_text);
@@ -4416,7 +4416,7 @@ mod tests {
             // Remove the vsock socket file.
             Command::new("rm")
                 .arg("-f")
-                .arg(sock.as_str())
+                .arg(socket.as_str())
                 .output()
                 .unwrap();
 
@@ -4455,7 +4455,7 @@ mod tests {
                     .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
                     .is_ok()
             );
-            guest.check_vsock(sock.as_str());
+            guest.check_vsock(socket.as_str());
             aver!(tb, guest.ssh_command(&console_cmd).is_ok());
 
             // Shutdown the target VM and check console output

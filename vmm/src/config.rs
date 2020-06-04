@@ -123,7 +123,7 @@ impl fmt::Display for Error {
             ParseDevice(o) => write!(f, "Error parsing --device: {}", o),
             ParseDevicePathMissing => write!(f, "Error parsing --device: path missing"),
             ParseFileSystem(o) => write!(f, "Error parsing --fs: {}", o),
-            ParseFsSockMissing => write!(f, "Error parsing --fs: sock missing"),
+            ParseFsSockMissing => write!(f, "Error parsing --fs: socket missing"),
             ParseFsTagMissing => write!(f, "Error parsing --fs: tag missing"),
             InvalidCacheSizeWithDaxOff => {
                 write!(f, "Error parsing --fs: cache_size used with dax=on")
@@ -132,7 +132,7 @@ impl fmt::Display for Error {
             ParsePmemFileMissing => write!(f, "Error parsing --pmem: file missing"),
             ParseVsock(o) => write!(f, "Error parsing --vsock: {}", o),
             ParseVsockCidMissing => write!(f, "Error parsing --vsock: cid missing"),
-            ParseVsockSockMissing => write!(f, "Error parsing --vsock: sock missing"),
+            ParseVsockSockMissing => write!(f, "Error parsing --vsock: socket missing"),
             ParseMemory(o) => write!(f, "Error parsing --memory: {}", o),
             ParseNetwork(o) => write!(f, "Error parsing --net: {}", o),
             ParseDisk(o) => write!(f, "Error parsing --disk: {}", o),
@@ -857,7 +857,7 @@ impl Default for RngConfig {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct FsConfig {
     pub tag: String,
-    pub sock: PathBuf,
+    pub socket: PathBuf,
     #[serde(default = "default_fsconfig_num_queues")]
     pub num_queues: usize,
     #[serde(default = "default_fsconfig_queue_size")]
@@ -890,7 +890,7 @@ impl Default for FsConfig {
     fn default() -> Self {
         Self {
             tag: "".to_owned(),
-            sock: PathBuf::new(),
+            socket: PathBuf::new(),
             num_queues: default_fsconfig_num_queues(),
             queue_size: default_fsconfig_queue_size(),
             dax: default_fsconfig_dax(),
@@ -902,7 +902,7 @@ impl Default for FsConfig {
 
 impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
-    \"tag=<tag_name>,sock=<socket_path>,num_queues=<number_of_queues>,\
+    \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
     queue_size=<size_of_each_queue>,dax=on|off,cache_size=<DAX cache size: \
     default 8Gib>,id=<device_id>\"";
 
@@ -914,12 +914,12 @@ impl FsConfig {
             .add("cache_size")
             .add("queue_size")
             .add("num_queues")
-            .add("sock")
+            .add("socket")
             .add("id");
         parser.parse(fs).map_err(Error::ParseFileSystem)?;
 
         let tag = parser.get("tag").ok_or(Error::ParseFsTagMissing)?;
-        let sock = PathBuf::from(parser.get("sock").ok_or(Error::ParseFsSockMissing)?);
+        let socket = PathBuf::from(parser.get("socket").ok_or(Error::ParseFsSockMissing)?);
 
         let queue_size = parser
             .convert("queue_size")
@@ -950,7 +950,7 @@ impl FsConfig {
 
         Ok(FsConfig {
             tag,
-            sock,
+            socket,
             num_queues,
             queue_size,
             dax,
@@ -1141,7 +1141,7 @@ impl DeviceConfig {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct VsockConfig {
     pub cid: u64,
-    pub sock: PathBuf,
+    pub socket: PathBuf,
     #[serde(default)]
     pub iommu: bool,
     #[serde(default)]
@@ -1150,14 +1150,14 @@ pub struct VsockConfig {
 
 impl VsockConfig {
     pub const SYNTAX: &'static str = "Virtio VSOCK parameters \
-        \"cid=<context_id>,sock=<socket_path>,iommu=on|off,id=<device_id>\"";
+        \"cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>\"";
     pub fn parse(vsock: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("sock").add("cid").add("iommu").add("id");
+        parser.add("socket").add("cid").add("iommu").add("id");
         parser.parse(vsock).map_err(Error::ParseVsock)?;
 
-        let sock = parser
-            .get("sock")
+        let socket = parser
+            .get("socket")
             .map(PathBuf::from)
             .ok_or(Error::ParseVsockSockMissing)?;
         let iommu = parser
@@ -1173,7 +1173,7 @@ impl VsockConfig {
 
         Ok(VsockConfig {
             cid,
-            sock,
+            socket,
             iommu,
             id,
         })
@@ -1663,12 +1663,14 @@ mod tests {
         );
 
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/socket")?,
+            NetConfig::parse(
+                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_user=true,socket=/tmp/sock"
+            )?,
             NetConfig {
                 mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
                 host_mac: MacAddr::parse_str("12:34:de:ad:be:ef").unwrap(),
                 vhost_user: true,
-                vhost_socket: Some("/tmp/socket".to_owned()),
+                vhost_socket: Some("/tmp/sock".to_owned()),
                 ..Default::default()
             }
         );
@@ -1720,27 +1722,27 @@ mod tests {
         // "tag" and "socket" must be supplied
         assert!(FsConfig::parse("").is_err());
         assert!(FsConfig::parse("tag=mytag").is_err());
-        assert!(FsConfig::parse("sock=/tmp/sock").is_err());
+        assert!(FsConfig::parse("socket=/tmp/sock").is_err());
         assert_eq!(
-            FsConfig::parse("tag=mytag,sock=/tmp/sock")?,
+            FsConfig::parse("tag=mytag,socket=/tmp/sock")?,
             FsConfig {
-                sock: PathBuf::from("/tmp/sock"),
+                socket: PathBuf::from("/tmp/sock"),
                 tag: "mytag".to_owned(),
                 ..Default::default()
             }
         );
         assert_eq!(
-            FsConfig::parse("tag=mytag,sock=/tmp/sock")?,
+            FsConfig::parse("tag=mytag,socket=/tmp/sock")?,
             FsConfig {
-                sock: PathBuf::from("/tmp/sock"),
+                socket: PathBuf::from("/tmp/sock"),
                 tag: "mytag".to_owned(),
                 ..Default::default()
             }
         );
         assert_eq!(
-            FsConfig::parse("tag=mytag,sock=/tmp/sock,num_queues=4,queue_size=1024")?,
+            FsConfig::parse("tag=mytag,socket=/tmp/sock,num_queues=4,queue_size=1024")?,
             FsConfig {
-                sock: PathBuf::from("/tmp/sock"),
+                socket: PathBuf::from("/tmp/sock"),
                 tag: "mytag".to_owned(),
                 num_queues: 4,
                 queue_size: 1024,
@@ -1749,9 +1751,9 @@ mod tests {
         );
         // DAX on -> default cache size
         assert_eq!(
-            FsConfig::parse("tag=mytag,sock=/tmp/sock,dax=on")?,
+            FsConfig::parse("tag=mytag,socket=/tmp/sock,dax=on")?,
             FsConfig {
-                sock: PathBuf::from("/tmp/sock"),
+                socket: PathBuf::from("/tmp/sock"),
                 tag: "mytag".to_owned(),
                 dax: true,
                 cache_size: default_fsconfig_cache_size(),
@@ -1759,9 +1761,9 @@ mod tests {
             }
         );
         assert_eq!(
-            FsConfig::parse("tag=mytag,sock=/tmp/sock,dax=on,cache_size=4G")?,
+            FsConfig::parse("tag=mytag,socket=/tmp/sock,dax=on,cache_size=4G")?,
             FsConfig {
-                sock: PathBuf::from("/tmp/sock"),
+                socket: PathBuf::from("/tmp/sock"),
                 tag: "mytag".to_owned(),
                 dax: true,
                 cache_size: 4 << 30,
@@ -1769,7 +1771,7 @@ mod tests {
             }
         );
         // Cache size without DAX is an error
-        assert!(FsConfig::parse("tag=mytag,sock=/tmp/sock,dax=off,cache_size=4G").is_err());
+        assert!(FsConfig::parse("tag=mytag,socket=/tmp/sock,dax=off,cache_size=4G").is_err());
         Ok(())
     }
 
@@ -1901,22 +1903,22 @@ mod tests {
 
     #[test]
     fn test_vsock_parsing() -> Result<()> {
-        // sock and cid is required
+        // socket and cid is required
         assert!(VsockConfig::parse("").is_err());
         assert_eq!(
-            VsockConfig::parse("sock=/tmp/sock,cid=1")?,
+            VsockConfig::parse("socket=/tmp/sock,cid=1")?,
             VsockConfig {
                 cid: 1,
-                sock: PathBuf::from("/tmp/sock"),
+                socket: PathBuf::from("/tmp/sock"),
                 iommu: false,
                 id: None,
             }
         );
         assert_eq!(
-            VsockConfig::parse("sock=/tmp/sock,cid=1,iommu=on")?,
+            VsockConfig::parse("socket=/tmp/sock,cid=1,iommu=on")?,
             VsockConfig {
                 cid: 1,
-                sock: PathBuf::from("/tmp/sock"),
+                socket: PathBuf::from("/tmp/sock"),
                 iommu: true,
                 id: None,
             }
@@ -1993,7 +1995,7 @@ mod tests {
 
         let mut invalid_config = valid_config.clone();
         invalid_config.disks = Some(vec![DiskConfig {
-            vhost_socket: Some("/path/to/socket".to_owned()),
+            vhost_socket: Some("/path/to/sock".to_owned()),
             path: Some(PathBuf::from("/path/to/image")),
             ..Default::default()
         }]);
