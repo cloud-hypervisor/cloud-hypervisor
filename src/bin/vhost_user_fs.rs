@@ -297,6 +297,13 @@ fn main() {
         .arg(
             Arg::with_name("sock")
                 .long("sock")
+                .help("vhost-user socket path (deprecated)")
+                .takes_value(true)
+                .min_values(1),
+        )
+        .arg(
+            Arg::with_name("socket")
+                .long("socket")
                 .help("vhost-user socket path")
                 .takes_value(true)
                 .min_values(1),
@@ -331,9 +338,16 @@ fn main() {
     let shared_dir = cmd_arguments
         .value_of("shared-dir")
         .expect("Failed to retrieve shared directory path");
-    let sock = cmd_arguments
-        .value_of("sock")
-        .expect("Failed to retrieve vhost-user socket path");
+    let socket = match cmd_arguments.value_of("socket") {
+        Some(path) => path,
+        None => {
+            println!("warning: use of deprecated parameter '--sock': Please use the '--socket' option instead.");
+            cmd_arguments
+                .value_of("sock")
+                .expect("Failed to retrieve vhost-user socket path")
+        }
+    };
+
     let thread_pool_size: usize = match cmd_arguments.value_of("thread-pool-size") {
         Some(size) => size.parse().expect("Invalid argument for thread-pool-size"),
         None => THREAD_POOL_SIZE,
@@ -348,7 +362,7 @@ fn main() {
         _ => unreachable!(), // We told Arg possible_values
     };
 
-    let listener = Listener::new(sock, true).unwrap();
+    let listener = Listener::new(socket, true).unwrap();
 
     let fs_cfg = if create_sandbox {
         let mut sandbox = Sandbox::new(shared_dir.to_string());
