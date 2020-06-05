@@ -249,9 +249,26 @@ impl Tap {
 
         let mut ifreq = self.get_ifreq();
 
+        #[allow(clippy::cast_lossless)]
+        let ret =
+            unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFFLAGS as c_ulong, &ifreq) };
+        if ret < 0 {
+            return Err(Error::IoctlError(IoError::last_os_error()));
+        }
+
+        // If TAP device is already up don't try and enable it
+        let ifru_flags = unsafe { ifreq.ifr_ifru.ifru_flags.as_ref() };
+        if ifru_flags
+            & (net_gen::net_device_flags_IFF_UP | net_gen::net_device_flags_IFF_RUNNING) as i16
+            == (net_gen::net_device_flags_IFF_UP | net_gen::net_device_flags_IFF_RUNNING) as i16
+        {
+            return Ok(());
+        }
+
         // We only access one field of the ifru union, hence this is safe.
         unsafe {
             let ifru_flags = ifreq.ifr_ifru.ifru_flags.as_mut();
+
             *ifru_flags =
                 (net_gen::net_device_flags_IFF_UP | net_gen::net_device_flags_IFF_RUNNING) as i16;
         }
