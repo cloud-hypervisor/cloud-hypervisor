@@ -1,3 +1,4 @@
+// Copyright 2020 Arm Limited (or its affiliates). All rights reserved.
 // Copyright © 2020, Oracle and/or its affiliates.
 //
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
@@ -80,8 +81,8 @@ pub mod aarch64;
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{
     arch_memory_regions, check_required_kvm_extensions, configure_system, configure_vcpu,
-    get_host_cpu_phys_bits, get_reserved_mem_addr, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START,
-    EntryPoint,
+    get_host_cpu_phys_bits, get_reserved_mem_addr, layout, layout::CMDLINE_MAX_SIZE,
+    layout::IRQ_BASE, layout::IRQ_MAX, EntryPoint,
 };
 
 #[cfg(target_arch = "x86_64")]
