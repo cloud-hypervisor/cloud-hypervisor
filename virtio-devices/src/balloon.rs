@@ -32,7 +32,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryError, GuestMemoryMmap, GuestMemoryRegion,
+    GuestMemoryError, GuestMemoryMmap,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -183,26 +183,26 @@ impl BalloonEpollHandler {
             used_desc_heads[used_count] = avail_desc.index;
             used_count += 1;
 
+            let data_chunk_size = size_of::<u32>();
+
             // The head contains the request type which MUST be readable.
             if avail_desc.is_write_only() {
                 error!("The head contains the request type is not right");
                 return Err(Error::UnexpectedWriteOnlyDescriptor);
             }
-            if avail_desc.len as usize % size_of::<u32>() != 0 {
+            if avail_desc.len as usize % data_chunk_size != 0 {
                 error!("the request size {} is not right", avail_desc.len);
                 return Err(Error::InvalidRequest);
             }
 
             let mut offset = 0u64;
             while offset < avail_desc.len as u64 {
-                let pfn: u32 = mem
-                    .read_obj(GuestAddress(avail_desc.addr.0 + offset))
-                    .map_err(Error::GuestMemory)?;
-                offset += size_of::<u32>() as u64;
+                let addr = avail_desc.addr.checked_add(offset).unwrap();
+                let pfn: u32 = mem.read_obj(addr).map_err(Error::GuestMemory)?;
+                offset += data_chunk_size as u64;
 
-                let pa = pfn << VIRTIO_BALLOON_PFN_SHIFT;
-                if let Some(region) = mem.find_region(GuestAddress(pa as u64)) {
-                    let addr = region.as_ptr() as u64 + pa as u64 - region.start_addr().raw_value();
+                let gpa = (pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT;
+                if let Ok(hva) = mem.get_host_address(GuestAddress(gpa)) {
                     let advice = match ev_type {
                         INFLATE_QUEUE_EVENT => libc::MADV_DONTNEED,
                         DEFLATE_QUEUE_EVENT => libc::MADV_WILLNEED,
@@ -211,7 +211,7 @@ impl BalloonEpollHandler {
                     // Need unsafe to do syscall madvise
                     let res = unsafe {
                         libc::madvise(
-                            addr as *mut libc::c_void,
+                            hva as *mut libc::c_void,
                             (1 << PAGE_SHIFT) as libc::size_t,
                             advice,
                         )
@@ -220,7 +220,7 @@ impl BalloonEpollHandler {
                         return Err(Error::MadviseFail(io::Error::last_os_error()));
                     }
                 } else {
-                    error!("Address {} is not available", pa);
+                    error!("Address 0x{:x} is not available", gpa);
                     return Err(Error::InvalidRequest);
                 }
             }
