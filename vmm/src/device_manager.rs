@@ -1512,13 +1512,17 @@ impl DeviceManager {
             .args(&[
                 "--net-backend",
                 &format!(
-                    "ip={},mask={},socket={},num_queues={},queue_size={},host_mac={}",
+                    "ip={},mask={},socket={},num_queues={},queue_size={}{}",
                     net_cfg.ip,
                     net_cfg.mask,
                     &sock,
                     net_cfg.num_queues,
                     net_cfg.queue_size,
-                    net_cfg.host_mac
+                    if let Some(mac) = net_cfg.host_mac {
+                        format!(",host_mac={:}", mac)
+                    } else {
+                        "".to_owned()
+                    }
                 ),
             ])
             .spawn()
@@ -1583,7 +1587,7 @@ impl DeviceManager {
                         None,
                         None,
                         Some(net_cfg.mac),
-                        Some(net_cfg.host_mac),
+                        &mut net_cfg.host_mac,
                         net_cfg.iommu,
                         net_cfg.num_queues,
                         net_cfg.queue_size,
@@ -1598,7 +1602,7 @@ impl DeviceManager {
                         Some(net_cfg.ip),
                         Some(net_cfg.mask),
                         Some(net_cfg.mac),
-                        Some(net_cfg.host_mac),
+                        &mut net_cfg.host_mac,
                         net_cfg.iommu,
                         net_cfg.num_queues,
                         net_cfg.queue_size,

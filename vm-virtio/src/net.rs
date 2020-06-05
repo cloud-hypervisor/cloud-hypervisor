@@ -465,7 +465,7 @@ impl Net {
         ip_addr: Option<Ipv4Addr>,
         netmask: Option<Ipv4Addr>,
         guest_mac: Option<MacAddr>,
-        host_mac: Option<MacAddr>,
+        host_mac: &mut Option<MacAddr>,
         iommu: bool,
         num_queues: usize,
         queue_size: u16,

@@ -122,6 +122,8 @@ pub enum Error {
     TapSetNetmask(TapError),
     /// Setting MAC address failed
     TapSetMac(TapError),
+    /// Getting MAC address failed
+    TapGetMac(TapError),
     /// Setting tap interface offload flags failed.
     TapSetOffload(TapError),
     /// Setting vnet header size failed.
@@ -539,7 +541,7 @@ pub fn open_tap(
     if_name: Option<&str>,
     ip_addr: Option<Ipv4Addr>,
     netmask: Option<Ipv4Addr>,
-    host_mac: Option<MacAddr>,
+    host_mac: &mut Option<MacAddr>,
     num_rx_q: usize,
 ) -> Result<Vec<Tap>> {
     let mut taps: Vec<Tap> = Vec::new();
@@ -568,7 +570,9 @@ pub fn open_tap(
                 tap.set_netmask(mask).map_err(Error::TapSetNetmask)?;
             }
             if let Some(mac) = host_mac {
-                tap.set_mac_addr(mac).map_err(Error::TapSetMac)?
+                tap.set_mac_addr(*mac).map_err(Error::TapSetMac)?
+            } else {
+                *host_mac = Some(tap.get_mac_addr().map_err(Error::TapGetMac)?)
             }
             tap.enable().map_err(Error::TapEnable)?;
             tap.set_offload(flag).map_err(Error::TapSetOffload)?;
