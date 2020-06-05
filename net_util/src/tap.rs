@@ -6,6 +6,7 @@
 // found in the THIRD-PARTY file.
 
 use super::{create_sockaddr, create_socket, Error as NetUtilError, MacAddr};
+use mac::MAC_ADDR_LEN;
 use net_gen;
 use std::fs::File;
 use std::io::{Error as IoError, Read, Result as IoResult, Write};
@@ -29,6 +30,8 @@ pub enum Error {
     /// Failed to create a socket.
     NetUtil(NetUtilError),
     InvalidIfname,
+    /// Error parsing MAC data
+    MacParsing(()),
 }
 
 pub type Result<T> = ::std::result::Result<T, Error>;
@@ -176,6 +179,15 @@ impl Tap {
 
     /// Set mac addr for tap interface.
     pub fn set_mac_addr(&self, addr: MacAddr) -> Result<()> {
+        // Checking if the mac address already matches the desired one
+        // is useful to avoid making the "set ioctl" in the case where
+        // the VMM is running without the privilege to do that.
+        // In practice this comes from a reboot after the configuration
+        // has been update with the kernel generated address.
+        if self.get_mac_addr()? == addr {
+            return Ok(());
+        }
+
         let sock = create_socket().map_err(Error::NetUtil)?;
 
         let mut ifreq = self.get_ifreq();
@@ -204,6 +216,31 @@ impl Tap {
         }
 
         Ok(())
+    }
+
+    /// Get mac addr for tap interface.
+    pub fn get_mac_addr(&self) -> Result<MacAddr> {
+        let sock = create_socket().map_err(Error::NetUtil)?;
+
+        let ifreq = self.get_ifreq();
+
+        // ioctl is safe. Called with a valid sock fd, and we check the return.
+        #[allow(clippy::cast_lossless)]
+        let ret =
+            unsafe { ioctl_with_ref(&sock, net_gen::sockios::SIOCGIFHWADDR as c_ulong, &ifreq) };
+        if ret < 0 {
+            return Err(Error::IoctlError(IoError::last_os_error()));
+        }
+
+        // We only access one field of the ifru union, hence this is safe.
+        let addr = unsafe {
+            let ifru_hwaddr = ifreq.ifr_ifru.ifru_hwaddr.as_ref();
+            MacAddr::from_bytes(
+                &*(&ifru_hwaddr.sa_data[0..MAC_ADDR_LEN] as *const _ as *const [u8]),
+            )
+            .map_err(Error::MacParsing)?
+        };
+        Ok(addr)
     }
 
     /// Set the netmask for the subnet that the tap interface will exist on.
