@@ -210,10 +210,14 @@ sudo ip tuntap add name vunet-tap0 mode tap
 # Create tap interface with multipe queues support for vhost_user_net test.
 sudo ip tuntap add name vunet-tap1 mode tap multi_queue
 
+
 cargo build --release --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
 strip target/$BUILD_TARGET/release/ch-remote
+
+# Copy for non-privileged net test
+cp target/$BUILD_TARGET/release/cloud-hypervisor target/$BUILD_TARGET/release/cloud-hypervisor-unprivileged
 
 sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/cloud-hypervisor
 sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/vhost_user_net

@@ -855,8 +855,12 @@ mod tests {
 
     impl<'a> GuestCommand<'a> {
         fn new(guest: &'a Guest) -> Self {
+            Self::new_with_binary_name(guest, "cloud-hypervisor")
+        }
+
+        fn new_with_binary_name(guest: &'a Guest, binary_name: &str) -> Self {
             Self {
-                command: Command::new(clh_command("cloud-hypervisor")),
+                command: Command::new(clh_command(binary_name)),
                 guest,
                 capture_output: false,
             }
@@ -2351,6 +2355,62 @@ mod tests {
                     .parse::<u32>()
                     .unwrap_or_default(),
                 4
+            );
+
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_unprivileged_net() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+
+            let host_ip = &guest.network.host_ip;
+
+            std::process::Command::new("bash")
+                .args(&["-c", "sudo ip tuntap add name chtap0 mode tap"])
+                .status()
+                .expect("Expected creating interface to work");
+
+            std::process::Command::new("bash")
+                .args(&["-c", &format!("sudo ip addr add {}/24 dev chtap0", host_ip)])
+                .status()
+                .expect("Expected programming interface to work");
+
+            std::process::Command::new("bash")
+                .args(&["-c", "sudo ip link set dev chtap0 up"])
+                .status()
+                .expect("Expected upping interface to work");
+
+            let mut child =
+                GuestCommand::new_with_binary_name(&guest, "cloud-hypervisor-unprivileged")
+                    .args(&["--cpus", "boot=1"])
+                    .args(&["--memory", "size=512M"])
+                    .args(&["--kernel", guest.fw_path.as_str()])
+                    .default_disks()
+                    .args(&[
+                        "--net",
+                        format!("tap=chtap0,mac={}", guest.network.guest_mac).as_str(),
+                    ])
+                    .spawn()
+                    .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // 1 network interfaces + default localhost ==> 2 interfaces
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("ip -o link | wc -l")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                2
             );
 
             let _ = child.kill();
