@@ -81,8 +81,8 @@ Shut the VMM down                   | `/vmm.shutdown` | N/A          | N/A      
 Action                             | Endpoint            | Request Body              | Response Body     | Prerequisites
 -----------------------------------|---------------------|---------------------------|-------------------|---------------------------
 Create the VM                      | `/vm.create`        | `/schemas/VmConfig`       | N/A               | The VM is not created yet
-Delete the VM                      | `/vm.delete`        | N/A                       | N/A               | The VM is created but not booted
-Boot the VM                        | `/vm.boot`          | N/A                       | N/A               | The VM is created
+Delete the VM                      | `/vm.delete`        | N/A                       | N/A               | N/A
+Boot the VM                        | `/vm.boot`          | N/A                       | N/A               | The VM is created but not booted
 Shut the VM down                   | `/vm.shutdown`      | N/A                       | N/A               | The VM is booted
 Reboot the VM                      | `/vm.reboot`        | N/A                       | N/A               | The VM is booted
 Pause the VM                       | `/vm.pause`         | N/A                       | N/A               | The VM is booted
@@ -274,7 +274,7 @@ are received and processed by the VMM control loop.
 In order for the VMM control loop to respond to any internal API command, it
 must be able to send a response back to the MPSC sender. For that purpose, all
 internal API command payload carry the [Sender](https://doc.rust-lang.org/std/sync/mpsc/struct.Sender.html)
-end of an [MPSC](https://doc.rust-lang.org/std/sync/mpsc/) channel. 
+end of an [MPSC](https://doc.rust-lang.org/std/sync/mpsc/) channel.
 
 The sender of any internal API command is therefore responsible for:
 
@@ -354,7 +354,7 @@ APIs work together, let's look at a complete VM creation flow, from the
 		   } else {
 			   Err(ApiError::VmAlreadyCreated)
 		   };
-		   
+
 	       sender.send(response).map_err(Error::ApiResponseSend)?;
 	   }
    ```
@@ -375,4 +375,3 @@ APIs work together, let's look at a complete VM creation flow, from the
    user. This is abstracted by the
    [micro_http](https://github.com/firecracker-microvm/firecracker/tree/master/src/micro_http)
    crate.
-   
