@@ -9,6 +9,7 @@ extern crate serde_json;
 extern crate vmm;
 
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
+use std::fmt;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::process;
@@ -19,7 +20,7 @@ enum Error {
     StatusCodeParsing(std::num::ParseIntError),
     MissingProtocol,
     ContentLengthParsing(std::num::ParseIntError),
-    ServerResponse(StatusCode),
+    ServerResponse(StatusCode, Option<String>),
     InvalidCPUCount(std::num::ParseIntError),
     InvalidMemorySize(std::num::ParseIntError),
     AddDeviceConfig(vmm::config::Error),
@@ -29,6 +30,34 @@ enum Error {
     AddNetConfig(vmm::config::Error),
     AddVsockConfig(vmm::config::Error),
     Restore(vmm::config::Error),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use Error::*;
+        match self {
+            Socket(e) => write!(f, "Error writing to HTTP socket: {}", e),
+            StatusCodeParsing(e) => write!(f, "Error parsing HTTP status code: {}", e),
+            MissingProtocol => write!(f, "HTTP output is missing protocol statement"),
+            ContentLengthParsing(e) => write!(f, "Error parsing HTTP Content-Length field: {}", e),
+            ServerResponse(s, o) => {
+                if let Some(o) = o {
+                    write!(f, "Server responded with an error: {:?}: {}", s, o)
+                } else {
+                    write!(f, "Server responded with an error: {:?}", s)
+                }
+            }
+            InvalidCPUCount(e) => write!(f, "Error parsing CPU count: {}", e),
+            InvalidMemorySize(e) => write!(f, "Error parsing memory size: {}", e),
+            AddDeviceConfig(e) => write!(f, "Error parsing device syntax: {}", e),
+            AddDiskConfig(e) => write!(f, "Error parsing disk syntax: {}", e),
+            AddFsConfig(e) => write!(f, "Error parsing filesystem syntax: {}", e),
+            AddPmemConfig(e) => write!(f, "Error parsing persistent memory syntax: {}", e),
+            AddNetConfig(e) => write!(f, "Error parsing network syntax: {}", e),
+            AddVsockConfig(e) => write!(f, "Error parsing vsock syntax: {}", e),
+            Restore(e) => write!(f, "Error parsing restore syntax: {}", e),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -63,10 +92,10 @@ impl StatusCode {
         ))
     }
 
-    fn check(self) -> Result<(), Error> {
+    fn is_server_error(self) -> bool {
         match self {
-            StatusCode::OK | StatusCode::Continue | StatusCode::NoContent => Ok(()),
-            _ => Err(Error::ServerResponse(self)),
+            StatusCode::OK | StatusCode::Continue | StatusCode::NoContent => false,
+            _ => true,
         }
     }
 }
@@ -123,10 +152,14 @@ fn parse_http_response(socket: &mut UnixStream) -> Result<Option<String>, Error>
             }
         }
     }
+    let body_string = content_length.and(Some(String::from(&res[body_offset.unwrap()..])));
+    let status_code = get_status_code(&res)?;
 
-    get_status_code(&res)?.check()?;
-
-    Ok(content_length.and(Some(String::from(&res[body_offset.unwrap()..]))))
+    if status_code.is_server_error() {
+        Err(Error::ServerResponse(status_code, body_string))
+    } else {
+        Ok(body_string)
+    }
 }
 
 fn simple_api_command(
@@ -509,7 +542,7 @@ fn main() {
     let matches = app.get_matches();
 
     if let Err(e) = do_command(&matches) {
-        eprintln!("Error running command: {:?}", e);
+        eprintln!("Error running command: {}", e);
         process::exit(1)
     };
 }
