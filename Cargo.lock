@@ -187,6 +187,7 @@ dependencies = [
  "dirs",
  "epoll",
  "futures",
+ "hypervisor",
  "lazy_static",
  "libc",
  "log 0.4.8",
@@ -452,6 +453,10 @@ checksum = "b9586eedd4ce6b3c498bc3b4dd92fc9f11166aa908a914071953768066c67909"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "hypervisor"
+version = "0.1.0"
 
 [[package]]
 name = "idna"
