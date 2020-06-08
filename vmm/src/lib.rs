@@ -424,8 +424,10 @@ impl Vmm {
             return Ok(());
         }
 
-        // First we try to shut the current VM down.
-        self.vm_shutdown()?;
+        // If a VM is booted, we first try to shut it down.
+        if self.vm.is_some() {
+            self.vm_shutdown()?;
+        }
 
         self.vm_config = None;
 
