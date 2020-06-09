@@ -239,6 +239,8 @@ pub struct Vcpu {
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm_ts: std::time::Instant,
+    #[cfg(target_arch = "aarch64")]
+    mpidr: u64,
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -284,6 +286,8 @@ impl Vcpu {
             mmio_bus,
             interrupt_controller,
             vm_ts: creation_ts,
+            #[cfg(target_arch = "aarch64")]
+            mpidr: 0,
         })))
     }
 
@@ -296,20 +300,30 @@ impl Vcpu {
     /// * `vm_memory` - Guest memory.
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
     pub fn configure(
-        &self,
+        &mut self,
+        #[cfg(target_arch = "aarch64")] vm_fd: &VmFd,
         kernel_entry_point: Option<EntryPoint>,
         vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         #[cfg(target_arch = "x86_64")] cpuid: CpuId,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
-        arch::configure_vcpu(&self.fd, self.id, kernel_entry_point, vm_memory)
-            .map_err(Error::VcpuConfiguration)?;
+        {
+            self.mpidr =
+                arch::configure_vcpu(&self.fd, self.id, vm_fd, kernel_entry_point, vm_memory)
+                    .map_err(Error::VcpuConfiguration)?;
+        }
 
         #[cfg(target_arch = "x86_64")]
         arch::configure_vcpu(&self.fd, self.id, kernel_entry_point, vm_memory, cpuid)
             .map_err(Error::VcpuConfiguration)?;
 
         Ok(())
+    }
+
+    /// Gets the MPIDR register value.
+    #[cfg(target_arch = "aarch64")]
+    pub fn get_mpidr(&self) -> u64 {
+        self.mpidr
     }
 
     /// Runs the VCPU until it exits, returning the reason.
@@ -784,7 +798,7 @@ impl CpuManager {
             #[cfg(target_arch = "aarch64")]
             vcpu.lock()
                 .unwrap()
-                .configure(entry_point, &vm_memory)
+                .configure(&self.fd, entry_point, &vm_memory)
                 .expect("Failed to configure vCPU");
         }
 
@@ -983,6 +997,16 @@ impl CpuManager {
         self.vcpu_states
             .iter()
             .fold(0, |acc, state| acc + state.active() as u8)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn get_mpidr(&self) -> Vec<u64> {
+        let vcpu_mpidr = self
+            .vcpus
+            .iter()
+            .map(|cpu| cpu.lock().unwrap().get_mpidr())
+            .collect();
+        vcpu_mpidr
     }
 
     #[cfg(feature = "acpi")]

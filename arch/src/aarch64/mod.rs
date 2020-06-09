@@ -13,6 +13,8 @@ pub mod layout;
 /// Logic for configuring aarch64 registers.
 pub mod regs;
 
+pub use self::fdt::DeviceInfoForFDT;
+use crate::DeviceType;
 use crate::RegionType;
 use aarch64::gic::GICDevice;
 use kvm_ioctls::*;
@@ -20,8 +22,34 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
 use vm_memory::{
-    Address, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize,
+    Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap,
+    GuestUsize,
 };
+
+/// Errors thrown while configuring aarch64 system.
+#[derive(Debug)]
+pub enum Error {
+    /// Failed to create a Flattened Device Tree for this aarch64 VM.
+    SetupFDT(fdt::Error),
+
+    /// Failed to compute the initrd address.
+    InitrdAddress,
+
+    /// Error configuring the general purpose registers
+    REGSConfiguration(regs::Error),
+
+    /// Error fetching prefered target
+    VcpuArmPreferredTarget(kvm_ioctls::Error),
+
+    /// Error doing Vcpu Init on Arm.
+    VcpuArmInit(kvm_ioctls::Error),
+}
+
+impl From<Error> for super::Error {
+    fn from(e: Error) -> super::Error {
+        super::Error::AArch64Setup(e)
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 /// Specifies the entry point address where the guest must start
@@ -31,32 +59,41 @@ pub struct EntryPoint {
     pub entry_addr: GuestAddress,
 }
 
+/// Configure the specified VCPU, and return its MPIDR.
 pub fn configure_vcpu(
-    _fd: &VcpuFd,
-    _id: u8,
-    _kernel_entry_point: Option<EntryPoint>,
-    _vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-) -> super::Result<()> {
-    unimplemented!();
-}
+    fd: &VcpuFd,
+    id: u8,
+    vm_fd: &VmFd,
+    kernel_entry_point: Option<EntryPoint>,
+    vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+) -> super::Result<u64> {
+    let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
 
-/// Errors thrown while configuring aarch64 system.
-#[derive(Debug)]
-pub enum Error {
-    /// Failed to create a Flattened Device Tree for this aarch64 VM.
-    SetupFDT(fdt::Error),
-    /// Failed to compute the initrd address.
-    InitrdAddress,
-}
-
-impl From<Error> for super::Error {
-    fn from(e: Error) -> super::Error {
-        super::Error::AArch64Setup(e)
+    // This reads back the kernel's preferred target type.
+    vm_fd
+        .get_preferred_target(&mut kvi)
+        .map_err(Error::VcpuArmPreferredTarget)?;
+    // We already checked that the capability is supported.
+    kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
+    // Non-boot cpus are powered off initially.
+    if id > 0 {
+        kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_POWER_OFF;
     }
-}
 
-pub use self::fdt::DeviceInfoForFDT;
-use crate::DeviceType;
+    fd.vcpu_init(&kvi).map_err(Error::VcpuArmInit)?;
+    if let Some(kernel_entry_point) = kernel_entry_point {
+        regs::setup_regs(
+            fd,
+            id,
+            kernel_entry_point.entry_addr.raw_value(),
+            &vm_memory.memory(),
+        )
+        .map_err(Error::REGSConfiguration)?;
+    }
+
+    let mpidr = regs::read_mpidr(fd).map_err(Error::REGSConfiguration)?;
+    Ok(mpidr)
+}
 
 pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, RegionType)> {
     let mut regions = Vec::new();
