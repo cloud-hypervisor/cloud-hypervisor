@@ -7,3 +7,4 @@ edition = "2018"
 [dependencies]
 libc = "0.2.71"
 vm-memory = "0.2.1"
+arch = { path = "../arch" }
