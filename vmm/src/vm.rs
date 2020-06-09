@@ -29,7 +29,7 @@ use crate::config::{
     VmConfig, VsockConfig,
 };
 use crate::cpu;
-use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
+use crate::device_manager::{self, get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{url_to_path, vm_config_from_snapshot, VM_SNAPSHOT_FILE};
 use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID};
@@ -46,7 +46,6 @@ use kvm_ioctls::*;
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
-#[cfg(target_arch = "x86_64")]
 use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 #[cfg(target_arch = "x86_64")]
@@ -56,17 +55,14 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 #[cfg(target_arch = "x86_64")]
 use std::io::{Seek, SeekFrom};
-#[cfg(target_arch = "x86_64")]
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use url::Url;
 #[cfg(target_arch = "x86_64")]
-use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryMmap,
-    GuestMemoryRegion,
-};
+use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
+use vm_memory::{GuestAddress, GuestAddressSpace};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
@@ -113,6 +109,9 @@ pub enum Error {
 
     /// Cannot configure system
     ConfigureSystem(arch::Error),
+
+    /// Cannot enable interrupt controller
+    EnableInterruptController(device_manager::DeviceManagerError),
 
     PoisonedState,
 
@@ -254,7 +253,6 @@ impl VmState {
 }
 
 pub struct Vm {
-    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     kernel: File,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     initramfs: Option<File>,
@@ -485,7 +483,25 @@ impl Vm {
 
     #[cfg(target_arch = "aarch64")]
     fn load_kernel(&mut self) -> Result<EntryPoint> {
-        unimplemented!();
+        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+        let mem = guest_memory.memory();
+        let entry_addr = match linux_loader::loader::pe::PE::load(
+            mem.deref(),
+            Some(GuestAddress(arch::get_kernel_start())),
+            &mut self.kernel,
+            None,
+        ) {
+            Ok(entry_addr) => entry_addr,
+            Err(e) => {
+                return Err(Error::KernelLoad(e));
+            }
+        };
+
+        let entry_point_addr: GuestAddress = entry_addr.kernel_load;
+
+        Ok(EntryPoint {
+            entry_addr: entry_point_addr,
+        })
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -614,11 +630,36 @@ impl Vm {
 
     #[cfg(target_arch = "aarch64")]
     fn configure_system(&mut self, _entry_addr: EntryPoint) -> Result<()> {
-        let _cmdline_cstring = self.get_cmdline()?;
-        // What to do on AArch64 is:
-        // - Setup GIC
-        // - Generate FDT
-        unimplemented!();
+        let cmdline_cstring = self.get_cmdline()?;
+        let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
+        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+        let mem = guest_memory.memory();
+
+        let device_info = &self
+            .device_manager
+            .lock()
+            .unwrap()
+            .get_device_info()
+            .clone();
+
+        arch::configure_system(
+            &self.memory_manager.lock().as_ref().unwrap().fd,
+            &mem,
+            &cmdline_cstring,
+            self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
+            vcpu_mpidrs,
+            device_info,
+            &None,
+        )
+        .map_err(Error::ConfigureSystem)?;
+
+        self.device_manager
+            .lock()
+            .unwrap()
+            .enable_interrupt_controller()
+            .map_err(Error::EnableInterruptController)?;
+
+        Ok(())
     }
 
     pub fn shutdown(&mut self) -> Result<()> {

@@ -46,7 +46,7 @@ tempfile = "3.1.0"
 
 [dependencies.linux-loader]
 git = "https://github.com/rust-vmm/linux-loader"
-features = ["elf", "bzimage"]
+features = ["elf", "bzimage", "pe"]
 
 [dev-dependencies]
 credibility = "0.1.3"
