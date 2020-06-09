@@ -14,7 +14,7 @@ use std::ptr::null;
 use std::{io, result};
 
 use super::super::DeviceType;
-use super::super::InitrdConfig;
+use super::super::InitramfsConfig;
 use super::get_fdt_addr;
 use super::gic::GICDevice;
 use super::layout::FDT_MAX_SIZE;
@@ -90,7 +90,7 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug>(
     vcpu_mpidr: Vec<u64>,
     device_info: &HashMap<(DeviceType, String), T>,
     gic_device: &Box<dyn GICDevice>,
-    initrd: &Option<InitrdConfig>,
+    initrd: &Option<InitramfsConfig>,
 ) -> Result<Vec<u8>> {
     // Alocate stuff necessary for the holding the blob.
     let mut fdt = vec![0; FDT_MAX_SIZE];
@@ -343,7 +343,7 @@ fn create_memory_node(fdt: &mut Vec<u8>, guest_mem: &GuestMemoryMmap) -> Result<
 fn create_chosen_node(
     fdt: &mut Vec<u8>,
     cmdline: &CStr,
-    initrd: &Option<InitrdConfig>,
+    initrd: &Option<InitramfsConfig>,
 ) -> Result<()> {
     append_begin_node(fdt, "chosen")?;
     append_property_cstring(fdt, "bootargs", cmdline)?;

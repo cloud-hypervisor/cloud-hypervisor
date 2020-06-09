@@ -104,7 +104,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
     vcpu_mpidr: Vec<u64>,
     device_info: &HashMap<(DeviceType, String), T>,
     gic_device: &Box<dyn GICDevice>,
-    initrd: &Option<super::InitrdConfig>,
+    initrd: &Option<super::InitramfsConfig>,
 ) -> super::Result<()> {
     let dtb = fdt::create_fdt(
         guest_mem,
