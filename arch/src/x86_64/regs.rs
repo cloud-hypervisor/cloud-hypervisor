@@ -138,6 +138,7 @@ const EFER_LME: u64 = 0x100;
 const X86_CR0_PE: u64 = 0x1;
 const X86_CR0_PG: u64 = 0x80000000;
 const X86_CR4_PAE: u64 = 0x20;
+const X86_CR4_LA57: u64 = 0x1000;
 
 fn write_gdt_table(table: &[u64], guest_mem: &GuestMemoryMmap) -> Result<()> {
     let boot_gdt_addr = BOOT_GDT_START;
@@ -239,6 +240,11 @@ fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut kvm_sregs) -> Result<()>
     sregs.cr3 = PML4_START.raw_value();
     sregs.cr4 |= X86_CR4_PAE;
     sregs.cr0 |= X86_CR0_PG;
+
+    if unsafe { std::arch::x86_64::__cpuid(7).ecx } & (1 << 16) != 0 {
+        sregs.cr4 |= X86_CR4_LA57;
+    }
+
     Ok(())
 }
 
