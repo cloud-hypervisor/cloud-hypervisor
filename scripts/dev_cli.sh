@@ -208,6 +208,11 @@ cmd_build() {
         rustflags="-C link-arg=-lgcc"
     fi
 
+    # A workaround on Arm64 to avoid build errors in kvm-bindings
+    if [ $(uname -m) = "aarch64" ]; then
+        sed -i 's/"with-serde",\ //g' "$CLH_ROOT_DIR"/vmm/Cargo.toml
+    fi
+
     $DOCKER_RUNTIME run \
 	   --user "$(id -u):$(id -g)" \
 	   --workdir "$CTR_CLH_ROOT_DIR" \
