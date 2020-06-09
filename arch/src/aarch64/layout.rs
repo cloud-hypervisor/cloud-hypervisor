@@ -56,8 +56,8 @@ pub const LEGACY_RTC_MAPPED_IO_START: u64 = 0x0901_0000;
 pub const LEGACY_DEVICES_MAPPED_IO_SIZE: u64 = 0x0700_0000;
 
 /// Starting from 0x1000_0000 (256MiB), the 768MiB (ends at 1 GiB) is used for PCIE MMIO
-pub const PCI_DEVICES_MAPPED_IO_START: u64 = 0x1000_0000;
-pub const PCI_DEVICES_MAPPED_IO_SIZE: u64 = 0x3000_0000;
+pub const MEM_32BIT_DEVICES_START: GuestAddress = GuestAddress(0x1000_0000);
+pub const MEM_32BIT_DEVICES_SIZE: u64 = 0x3000_0000;
 
 /// PCI MMCONFIG space (start: after the device space at 1 GiB, length: 256MiB)
 pub const PCI_MMCONFIG_START: GuestAddress = GuestAddress(0x4000_0000);

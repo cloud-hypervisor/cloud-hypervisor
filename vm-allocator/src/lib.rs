@@ -18,5 +18,7 @@ mod gsi;
 mod system;
 
 pub use crate::address::AddressAllocator;
-pub use crate::gsi::{GsiAllocator, GsiApic};
+pub use crate::gsi::GsiAllocator;
+#[cfg(target_arch = "x86_64")]
+pub use crate::gsi::GsiApic;
 pub use crate::system::SystemAllocator;

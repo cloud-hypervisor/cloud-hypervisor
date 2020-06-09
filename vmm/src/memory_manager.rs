@@ -8,9 +8,7 @@ use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
-#[cfg(target_arch = "x86_64")]
-use arch::layout;
-use arch::{get_host_cpu_phys_bits, RegionType};
+use arch::{get_host_cpu_phys_bits, layout, RegionType};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 use devices::BusDevice;
@@ -301,7 +299,6 @@ impl MemoryManager {
         let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
         hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
 
-        #[cfg(target_arch = "x86_64")]
         // Both MMIO and PIO address spaces start at address 0.
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
@@ -309,26 +306,13 @@ impl MemoryManager {
                 1 << 16 as GuestUsize,
                 GuestAddress(0),
                 mmio_address_space_size(),
-                layout::MEM_32BIT_RESERVED_START,
+                layout::MEM_32BIT_DEVICES_START,
                 layout::MEM_32BIT_DEVICES_SIZE,
+                #[cfg(target_arch = "x86_64")]
                 vec![GsiApic::new(
                     X86_64_IRQ_BASE,
                     ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
                 )],
-            )
-            .ok_or(Error::CreateSystemAllocator)?,
-        ));
-
-        #[cfg(target_arch = "aarch64")]
-        let allocator = Arc::new(Mutex::new(
-            SystemAllocator::new(
-                GuestAddress(0),
-                0,
-                GuestAddress(0),
-                0,
-                GuestAddress(0),
-                0,
-                vec![],
             )
             .ok_or(Error::CreateSystemAllocator)?,
         ));

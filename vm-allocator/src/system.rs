@@ -10,7 +10,9 @@
 use vm_memory::{GuestAddress, GuestUsize};
 
 use crate::address::AddressAllocator;
-use crate::gsi::{GsiAllocator, GsiApic};
+use crate::gsi::GsiAllocator;
+#[cfg(target_arch = "x86_64")]
+use crate::gsi::GsiApic;
 
 use libc::{sysconf, _SC_PAGESIZE};
 
@@ -53,7 +55,10 @@ impl SystemAllocator {
     /// * `io_size` - The size of IO memory.
     /// * `mmio_base` - The starting address of MMIO memory.
     /// * `mmio_size` - The size of MMIO memory.
-    /// * `first_irq` - The first irq number to give out.
+    /// * `mmio_hole_base` - The starting address of MMIO memory in 32-bit address space.
+    /// * `mmio_hole_size` - The size of MMIO memory in 32-bit address space.
+    /// * `apics` - (X86) Vector of APIC's.
+    ///
     pub fn new(
         io_base: GuestAddress,
         io_size: GuestUsize,
@@ -61,13 +66,16 @@ impl SystemAllocator {
         mmio_size: GuestUsize,
         mmio_hole_base: GuestAddress,
         mmio_hole_size: GuestUsize,
-        apics: Vec<GsiApic>,
+        #[cfg(target_arch = "x86_64")] apics: Vec<GsiApic>,
     ) -> Option<Self> {
         Some(SystemAllocator {
             io_address_space: AddressAllocator::new(io_base, io_size)?,
             mmio_address_space: AddressAllocator::new(mmio_base, mmio_size)?,
             mmio_hole_address_space: AddressAllocator::new(mmio_hole_base, mmio_hole_size)?,
+            #[cfg(target_arch = "x86_64")]
             gsi_allocator: GsiAllocator::new(apics),
+            #[cfg(target_arch = "aarch64")]
+            gsi_allocator: GsiAllocator::new(),
         })
     }
 

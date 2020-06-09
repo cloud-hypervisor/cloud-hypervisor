@@ -63,14 +63,14 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
     // 0 ~ 256 MiB: Reserved
     regions.push((
         GuestAddress(0),
-        layout::PCI_DEVICES_MAPPED_IO_START as usize,
+        layout::MEM_32BIT_DEVICES_START.0 as usize,
         RegionType::Reserved,
     ));
 
     // 256 MiB ~ 1 G: MMIO space
     regions.push((
-        GuestAddress(layout::PCI_DEVICES_MAPPED_IO_START),
-        layout::PCI_DEVICES_MAPPED_IO_SIZE as usize,
+        layout::MEM_32BIT_DEVICES_START,
+        layout::MEM_32BIT_DEVICES_SIZE as usize,
         RegionType::SubRegion,
     ));
 
