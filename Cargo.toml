@@ -28,6 +28,9 @@ vmm-sys-util = "0.6.0"
 vm-virtio = { path = "vm-virtio" }
 vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-slave"] }
 
+[patch.crates-io]
+vm-memory = { git = "https://github.com/cloud-hypervisor/vm-memory", branch = "ch" }
+
 [dev-dependencies]
 ssh2 = "0.8.1"
 dirs = "2.0.2"
