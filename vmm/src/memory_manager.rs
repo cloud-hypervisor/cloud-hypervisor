@@ -56,7 +56,7 @@ pub struct MemoryManager {
     next_kvm_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
-    fd: Arc<VmFd>,
+    pub fd: Arc<VmFd>,
     hotplug_slots: Vec<HotPlugState>,
     selected_slot: usize,
     backing_file: Option<PathBuf>,

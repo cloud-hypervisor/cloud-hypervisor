@@ -16,7 +16,6 @@ pub mod regs;
 pub use self::fdt::DeviceInfoForFDT;
 use crate::DeviceType;
 use crate::RegionType;
-use aarch64::gic::GICDevice;
 use kvm_ioctls::*;
 use std::collections::HashMap;
 use std::ffi::CStr;
@@ -29,8 +28,11 @@ use vm_memory::{
 /// Errors thrown while configuring aarch64 system.
 #[derive(Debug)]
 pub enum Error {
-    /// Failed to create a Flattened Device Tree for this aarch64 VM.
+    /// Failed to create a FDT.
     SetupFDT(fdt::Error),
+
+    /// Failed to create a GIC.
+    SetupGIC(gic::Error),
 
     /// Failed to compute the initrd address.
     InitrdAddress,
@@ -136,19 +138,22 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)]
 pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
+    vm_fd: &VmFd,
     guest_mem: &GuestMemoryMmap,
     cmdline_cstring: &CStr,
+    vcpu_count: u64,
     vcpu_mpidr: Vec<u64>,
     device_info: &HashMap<(DeviceType, String), T>,
-    gic_device: &Box<dyn GICDevice>,
     initrd: &Option<super::InitramfsConfig>,
 ) -> super::Result<()> {
+    let gic_device = gic::create_gic(vm_fd, vcpu_count).map_err(Error::SetupGIC)?;
+
     let dtb = fdt::create_fdt(
         guest_mem,
         cmdline_cstring,
         vcpu_mpidr,
         device_info,
-        gic_device,
+        &gic_device,
         initrd,
     )
     .map_err(Error::SetupFDT)?;
