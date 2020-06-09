@@ -139,6 +139,13 @@ const LENGTH_OFFSET_HIGH: u64 = 0xC;
 const STATUS_OFFSET: u64 = 0x14;
 const SELECTION_OFFSET: u64 = 0;
 
+// The MMIO address space size is substracted with the size of a 4k page. This
+// is done on purpose to workaround a Linux bug when the VMM allocates devices
+// at the end of the addressable space.
+fn mmio_address_space_size() -> u64 {
+    (1 << get_host_cpu_phys_bits()) - 0x1000
+}
+
 impl BusDevice for MemoryManager {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         if self.selected_slot < self.hotplug_slots.len() {
@@ -257,7 +264,7 @@ impl MemoryManager {
         let guest_memory =
             GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
 
-        let end_of_device_area = GuestAddress((1 << get_host_cpu_phys_bits()) - 1);
+        let end_of_device_area = GuestAddress(mmio_address_space_size() - 1);
 
         let mut start_of_device_area = MemoryManager::start_addr(guest_memory.last_addr(), false);
 
@@ -295,13 +302,13 @@ impl MemoryManager {
         hotplug_slots.resize_with(HOTPLUG_COUNT, HotPlugState::default);
 
         #[cfg(target_arch = "x86_64")]
-        // Let's allocate 64 GiB of addressable MMIO space, starting at 0.
+        // Both MMIO and PIO address spaces start at address 0.
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
                 GuestAddress(0),
                 1 << 16 as GuestUsize,
                 GuestAddress(0),
-                1 << get_host_cpu_phys_bits(),
+                mmio_address_space_size(),
                 layout::MEM_32BIT_RESERVED_START,
                 layout::MEM_32BIT_DEVICES_SIZE,
                 vec![GsiApic::new(
