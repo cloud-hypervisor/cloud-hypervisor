@@ -302,8 +302,10 @@ impl MemoryManager {
         // Both MMIO and PIO address spaces start at address 0.
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
+                #[cfg(target_arch = "x86_64")]
                 GuestAddress(0),
-                1 << 16 as GuestUsize,
+                #[cfg(target_arch = "x86_64")]
+                (1 << 16 as GuestUsize),
                 GuestAddress(0),
                 mmio_address_space_size(),
                 layout::MEM_32BIT_DEVICES_START,

@@ -37,7 +37,9 @@ use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
-use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+#[cfg(target_arch = "x86_64")]
+use vm_memory::GuestAddress;
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
@@ -675,6 +677,7 @@ impl CpuManager {
             vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
         }));
 
+        #[cfg(target_arch = "x86_64")]
         device_manager
             .allocator()
             .lock()
