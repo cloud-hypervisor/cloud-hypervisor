@@ -2951,6 +2951,10 @@ mod tests {
         });
     }
 
+    fn get_fd_count(pid: u32) -> usize {
+        fs::read_dir(format!("/proc/{}/fd", pid)).unwrap().count()
+    }
+
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_reboot() {
         test_block!(tb, "", {
@@ -2985,6 +2989,7 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or(1);
+                let fd_count_1 = get_fd_count(child.id());
 
                 aver_eq!(tb, reboot_count, 0);
                 guest.ssh_command("sudo reboot").unwrap_or_default();
@@ -2996,7 +3001,9 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
+                let fd_count_2 = get_fd_count(child.id());
                 aver_eq!(tb, reboot_count, 1);
+                aver_eq!(tb, fd_count_1, fd_count_2);
 
                 guest
                     .ssh_command("sudo shutdown -h now")
@@ -3041,6 +3048,7 @@ mod tests {
                 .trim()
                 .parse::<u32>()
                 .unwrap_or(1);
+            let fd_count_1 = get_fd_count(child.id());
 
             aver_eq!(tb, reboot_count, 0);
             guest.ssh_command("sudo reboot")?;
@@ -3052,7 +3060,9 @@ mod tests {
                 .trim()
                 .parse::<u32>()
                 .unwrap_or_default();
+            let fd_count_2 = get_fd_count(child.id());
             aver_eq!(tb, reboot_count, 1);
+            aver_eq!(tb, fd_count_1, fd_count_2);
 
             guest.ssh_command("sudo shutdown -h now")?;
             thread::sleep(std::time::Duration::new(20, 0));
