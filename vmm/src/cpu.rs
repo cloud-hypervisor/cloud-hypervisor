@@ -230,7 +230,7 @@ struct InterruptSourceOverride {
 pub struct Vcpu {
     fd: VcpuFd,
     id: u8,
-    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
+    #[cfg(target_arch = "x86_64")]
     io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -267,7 +267,7 @@ impl Vcpu {
     pub fn new(
         id: u8,
         fd: &Arc<VmFd>,
-        io_bus: Arc<devices::Bus>,
+        #[cfg(target_arch = "x86_64")] io_bus: Arc<devices::Bus>,
         mmio_bus: Arc<devices::Bus>,
         interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
         creation_ts: std::time::Instant,
@@ -277,6 +277,7 @@ impl Vcpu {
         Ok(Arc::new(Mutex::new(Vcpu {
             fd: kvm_vcpu,
             id,
+            #[cfg(target_arch = "x86_64")]
             io_bus,
             mmio_bus,
             interrupt_controller,
@@ -504,6 +505,7 @@ impl Snapshottable for Vcpu {
 pub struct CpuManager {
     boot_vcpus: u8,
     max_vcpus: u8,
+    #[cfg(target_arch = "x86_64")]
     io_bus: Arc<devices::Bus>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     mmio_bus: Arc<devices::Bus>,
@@ -657,6 +659,7 @@ impl CpuManager {
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus: config.boot_vcpus,
             max_vcpus: config.max_vcpus,
+            #[cfg(target_arch = "x86_64")]
             io_bus: device_manager.io_bus().clone(),
             mmio_bus: device_manager.mmio_bus().clone(),
             interrupt_controller: device_manager.interrupt_controller().clone(),
@@ -679,6 +682,7 @@ impl CpuManager {
             .allocate_io_addresses(Some(GuestAddress(0x0cd8)), 0x8, None)
             .ok_or(Error::AllocateIOPort)?;
 
+        #[cfg(target_arch = "x86_64")]
         cpu_manager
             .lock()
             .unwrap()
@@ -742,6 +746,7 @@ impl CpuManager {
         let vcpu = Vcpu::new(
             cpu_id,
             &self.fd,
+            #[cfg(target_arch = "x86_64")]
             self.io_bus.clone(),
             self.mmio_bus.clone(),
             interrupt_controller,

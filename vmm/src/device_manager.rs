@@ -22,16 +22,20 @@ use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
+#[cfg(target_arch = "aarch64")]
+use arch::aarch64::DeviceInfoForFDT;
 #[cfg(feature = "acpi")]
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 #[cfg(target_arch = "aarch64")]
+use arch::DeviceType;
+#[cfg(target_arch = "aarch64")]
 use devices::gic;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 use devices::{
-    interrupt_controller, interrupt_controller::InterruptController, BusDevice,
+    interrupt_controller, interrupt_controller::InterruptController, legacy::Serial, BusDevice,
     HotPlugNotificationFlags,
 };
 use kvm_ioctls::*;
@@ -382,7 +386,7 @@ pub fn get_win_size() -> (u16, u16) {
 #[derive(Default)]
 pub struct Console {
     // Serial port on 0x3f8
-    serial: Option<Arc<Mutex<devices::legacy::Serial>>>,
+    serial: Option<Arc<Mutex<Serial>>>,
     console_input: Option<Arc<vm_virtio::ConsoleInput>>,
     input_enabled: bool,
 }
@@ -421,6 +425,7 @@ impl Console {
 
 struct AddressManager {
     allocator: Arc<Mutex<SystemAllocator>>,
+    #[cfg(target_arch = "x86_64")]
     io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
     vm_fd: Arc<VmFd>,
@@ -630,6 +635,28 @@ struct DeviceManagerState {
     device_id_cnt: Wrapping<usize>,
 }
 
+/// Private structure for storing information about the MMIO device registered at some address on the bus.
+#[derive(Clone, Debug)]
+#[cfg(target_arch = "aarch64")]
+pub struct MMIODeviceInfo {
+    addr: u64,
+    irq: u32,
+    len: u64,
+}
+
+#[cfg(target_arch = "aarch64")]
+impl DeviceInfoForFDT for MMIODeviceInfo {
+    fn addr(&self) -> u64 {
+        self.addr
+    }
+    fn irq(&self) -> u32 {
+        self.irq
+    }
+    fn length(&self) -> u64 {
+        self.len
+    }
+}
+
 pub struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
@@ -713,8 +740,13 @@ pub struct DeviceManager {
     // Exit event
     #[cfg(feature = "acpi")]
     exit_evt: EventFd,
+
     // Reset event
+    #[cfg(target_arch = "x86_64")]
     reset_evt: EventFd,
+
+    #[cfg(target_arch = "aarch64")]
+    id_to_dev_info: HashMap<(DeviceType, String), MMIODeviceInfo>,
 }
 
 impl DeviceManager {
@@ -723,13 +755,14 @@ impl DeviceManager {
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
-        reset_evt: &EventFd,
+        #[cfg_attr(target_arch = "aarch64", allow(unused_variables))] reset_evt: &EventFd,
         vmm_path: PathBuf,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
 
         let address_manager = Arc::new(AddressManager {
             allocator: memory_manager.lock().unwrap().allocator(),
+            #[cfg(target_arch = "x86_64")]
             io_bus: Arc::new(devices::Bus::new()),
             mmio_bus: Arc::new(devices::Bus::new()),
             vm_fd: vm_fd.clone(),
@@ -789,7 +822,10 @@ impl DeviceManager {
             device_tree,
             #[cfg(feature = "acpi")]
             exit_evt: _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            #[cfg(target_arch = "x86_64")]
             reset_evt: reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
+            #[cfg(target_arch = "aarch64")]
+            id_to_dev_info: HashMap::new(),
         };
 
         #[cfg(feature = "acpi")]
@@ -846,11 +882,15 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::BusError)?;
 
+        #[cfg(target_arch = "x86_64")]
         self.add_legacy_devices(
             self.reset_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
         )?;
+
+        #[cfg(target_arch = "aarch64")]
+        self.add_legacy_devices(&legacy_interrupt_manager)?;
 
         #[cfg(feature = "acpi")]
         {
@@ -893,6 +933,12 @@ impl DeviceManager {
         self.device_id_cnt = state.device_id_cnt;
 
         Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    /// Gets the information of the devices registered up to some point in time.
+    pub fn get_device_info(&self) -> &HashMap<(DeviceType, String), MMIODeviceInfo> {
+        &self.id_to_dev_info
     }
 
     #[allow(unused_variables)]
@@ -980,6 +1026,7 @@ impl DeviceManager {
             let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&pci_bus))));
             self.bus_devices
                 .push(Arc::clone(&pci_config_io) as Arc<Mutex<dyn BusDevice>>);
+            #[cfg(target_arch = "x86_64")]
             self.address_manager
                 .io_bus
                 .insert(pci_config_io, 0xcf8, 0x8)
@@ -1144,6 +1191,7 @@ impl DeviceManager {
         Ok(Some(ged_device))
     }
 
+    #[cfg(target_arch = "x86_64")]
     fn add_legacy_devices(&mut self, reset_evt: EventFd) -> DeviceManagerResult<()> {
         // Add a shutdown device (i8042)
         let i8042 = Arc::new(Mutex::new(devices::legacy::I8042Device::new(reset_evt)));
@@ -1200,6 +1248,160 @@ impl DeviceManager {
         Ok(())
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn add_legacy_devices(
+        &mut self,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+    ) -> DeviceManagerResult<()> {
+        // Add a RTC device
+        let rtc_irq = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_irq()
+            .unwrap();
+
+        let interrupt_group = interrupt_manager
+            .create_group(LegacyIrqGroupConfig {
+                irq: rtc_irq as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+
+        let rtc_device = Arc::new(Mutex::new(devices::legacy::RTC::new(interrupt_group)));
+
+        self.bus_devices
+            .push(Arc::clone(&rtc_device) as Arc<Mutex<dyn BusDevice>>);
+
+        let addr = GuestAddress(arch::layout::LEGACY_RTC_MAPPED_IO_START);
+
+        self.address_manager
+            .mmio_bus
+            .insert(rtc_device.clone(), addr.0, MMIO_LEN)
+            .map_err(DeviceManagerError::BusError)?;
+
+        self.id_to_dev_info.insert(
+            (DeviceType::RTC, "rtc".to_string()),
+            MMIODeviceInfo {
+                addr: addr.0,
+                len: MMIO_LEN,
+                irq: rtc_irq,
+            },
+        );
+
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn add_serial_device(
+        &mut self,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        serial_writer: Option<Box<dyn io::Write + Send>>,
+    ) -> DeviceManagerResult<Arc<Mutex<Serial>>> {
+        // Serial is tied to IRQ #4
+        let serial_irq = 4;
+
+        let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
+
+        let interrupt_group = interrupt_manager
+            .create_group(LegacyIrqGroupConfig {
+                irq: serial_irq as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+
+        let serial = Arc::new(Mutex::new(Serial::new(
+            id.clone(),
+            interrupt_group,
+            serial_writer,
+        )));
+
+        self.bus_devices
+            .push(Arc::clone(&serial) as Arc<Mutex<dyn BusDevice>>);
+
+        self.address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_io_addresses(Some(GuestAddress(0x3f8)), 0x8, None)
+            .ok_or(DeviceManagerError::AllocateIOPort)?;
+
+        self.address_manager
+            .io_bus
+            .insert(serial.clone(), 0x3f8, 0x8)
+            .map_err(DeviceManagerError::BusError)?;
+
+        // Fill the device tree with a new node. In case of restore, we
+        // know there is nothing to do, so we can simply override the
+        // existing entry.
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, serial));
+
+        Ok(serial)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn add_serial_device(
+        &mut self,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        serial_writer: Option<Box<dyn io::Write + Send>>,
+    ) -> DeviceManagerResult<Arc<Mutex<Serial>>> {
+        let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
+
+        let serial_irq = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_irq()
+            .unwrap();
+
+        let interrupt_group = interrupt_manager
+            .create_group(LegacyIrqGroupConfig {
+                irq: serial_irq as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+
+        let serial = Arc::new(Mutex::new(Serial::new(
+            id.clone(),
+            interrupt_group,
+            serial_writer,
+        )));
+
+        self.bus_devices
+            .push(Arc::clone(&serial) as Arc<Mutex<dyn BusDevice>>);
+
+        let addr = GuestAddress(arch::layout::LEGACY_SERIAL_MAPPED_IO_START);
+
+        self.address_manager
+            .mmio_bus
+            .insert(serial.clone(), addr.0, MMIO_LEN)
+            .map_err(DeviceManagerError::BusError)?;
+
+        self.id_to_dev_info.insert(
+            (DeviceType::Serial, DeviceType::Serial.to_string()),
+            MMIODeviceInfo {
+                addr: addr.0,
+                len: MMIO_LEN,
+                irq: serial_irq,
+            },
+        );
+
+        self.cmdline_additions
+            .push(format!("earlycon=uart,mmio,0x{:08x}", addr.0));
+
+        // Fill the device tree with a new node. In case of restore, we
+        // know there is nothing to do, so we can simply override the
+        // existing entry.
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, serial));
+
+        Ok(serial)
+    }
+
     fn add_console_device(
         &mut self,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
@@ -1215,47 +1417,7 @@ impl DeviceManager {
             ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
         };
         let serial = if serial_config.mode != ConsoleOutputMode::Off {
-            // Serial is tied to IRQ #4
-            let serial_irq = 4;
-
-            let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
-
-            let interrupt_group = interrupt_manager
-                .create_group(LegacyIrqGroupConfig {
-                    irq: serial_irq as InterruptIndex,
-                })
-                .map_err(DeviceManagerError::CreateInterruptGroup)?;
-
-            let serial = Arc::new(Mutex::new(devices::legacy::Serial::new(
-                id.clone(),
-                interrupt_group,
-                serial_writer,
-            )));
-
-            self.bus_devices
-                .push(Arc::clone(&serial) as Arc<Mutex<dyn BusDevice>>);
-
-            self.address_manager
-                .allocator
-                .lock()
-                .unwrap()
-                .allocate_io_addresses(Some(GuestAddress(0x3f8)), 0x8, None)
-                .ok_or(DeviceManagerError::AllocateIOPort)?;
-
-            self.address_manager
-                .io_bus
-                .insert(serial.clone(), 0x3f8, 0x8)
-                .map_err(DeviceManagerError::BusError)?;
-
-            // Fill the device tree with a new node. In case of restore, we
-            // know there is nothing to do, so we can simply override the
-            // existing entry.
-            self.device_tree
-                .lock()
-                .unwrap()
-                .insert(id.clone(), device_node!(id, serial));
-
-            Some(serial)
+            Some(self.add_serial_device(interrupt_manager, serial_writer)?)
         } else {
             None
         };
@@ -2432,6 +2594,7 @@ impl DeviceManager {
 
         pci.register_mapping(
             virtio_pci_device.clone(),
+            #[cfg(target_arch = "x86_64")]
             self.address_manager.io_bus.as_ref(),
             self.address_manager.mmio_bus.as_ref(),
             bars.clone(),
@@ -2533,6 +2696,30 @@ impl DeviceManager {
             (base.raw_value(), size)
         };
 
+        let irq_num = if let Some(irq) = mmio_irq {
+            irq
+        } else {
+            self.address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_irq()
+                .ok_or(DeviceManagerError::AllocateIrq)?
+        };
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            let device_type = virtio_device.lock().unwrap().device_type();
+            self.id_to_dev_info.insert(
+                (DeviceType::Virtio(device_type), virtio_device_id),
+                MMIODeviceInfo {
+                    addr: mmio_base,
+                    len: mmio_size,
+                    irq: irq_num,
+                },
+            );
+        }
+
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let mut mmio_device =
             vm_virtio::transport::MmioDevice::new(id.clone(), memory, virtio_device)
@@ -2545,17 +2732,6 @@ impl DeviceManager {
                 .register_ioevent(event, &io_addr, i as u32)
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
-
-        let irq_num = if let Some(irq) = mmio_irq {
-            irq
-        } else {
-            self.address_manager
-                .allocator
-                .lock()
-                .unwrap()
-                .allocate_irq()
-                .ok_or(DeviceManagerError::AllocateIrq)?
-        };
 
         let interrupt_group = interrupt_manager
             .create_group(LegacyIrqGroupConfig {
@@ -2573,6 +2749,7 @@ impl DeviceManager {
             .insert(mmio_device_arc.clone(), mmio_base, MMIO_LEN)
             .map_err(DeviceManagerError::BusError)?;
 
+        #[cfg(target_arch = "x86_64")]
         self.cmdline_additions.push(format!(
             "virtio_mmio.device={}K@0x{:08x}:{}",
             mmio_size / 1024,
@@ -2592,6 +2769,7 @@ impl DeviceManager {
         Ok(())
     }
 
+    #[cfg(target_arch = "x86_64")]
     pub fn io_bus(&self) -> &Arc<devices::Bus> {
         &self.address_manager.io_bus
     }
@@ -2810,6 +2988,7 @@ impl DeviceManager {
                 .remove_by_device(&pci_device)
                 .map_err(DeviceManagerError::RemoveDeviceFromPciBus)?;
 
+            #[cfg(target_arch = "x86_64")]
             // Remove the device from the IO bus
             self.io_bus()
                 .remove_by_device(&bus_device)
