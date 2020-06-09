@@ -133,14 +133,6 @@ pub enum DeviceType {
     RTC,
 }
 
-/// Type for passing information about the initrd in the guest memory.
-pub struct InitrdConfig {
-    /// Load address of initrd in guest memory
-    pub address: vm_memory::GuestAddress,
-    /// Size of initrd in guest memory
-    pub size: usize,
-}
-
 /// Default (smallest) memory page size for the supported architectures.
 pub const PAGE_SIZE: usize = 4096;
 
