@@ -24,7 +24,7 @@ virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
 vmm = { path = "vmm" }
 vm-device = { path = "vm-device" }
 vm-memory = "0.2.1"
-vmm-sys-util = "0.6.0"
+vmm-sys-util = "0.6.1"
 vm-virtio = { path = "vm-virtio" }
 vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-slave"] }
 
