@@ -47,9 +47,10 @@ pub const BOOT_STACK_START: GuestAddress = GuestAddress(0x8000);
 pub const BOOT_STACK_POINTER: GuestAddress = GuestAddress(0x8ff0);
 
 // Initial pagetables.
-pub const PML4_START: GuestAddress = GuestAddress(0x9000);
-pub const PDPTE_START: GuestAddress = GuestAddress(0xa000);
-pub const PDE_START: GuestAddress = GuestAddress(0xb000);
+pub const PML5_START: GuestAddress = GuestAddress(0x9000);
+pub const PML4_START: GuestAddress = GuestAddress(0xa000);
+pub const PDPTE_START: GuestAddress = GuestAddress(0xb000);
+pub const PDE_START: GuestAddress = GuestAddress(0xc000);
 
 /// Kernel command line start address.
 pub const CMDLINE_START: GuestAddress = GuestAddress(0x20000);

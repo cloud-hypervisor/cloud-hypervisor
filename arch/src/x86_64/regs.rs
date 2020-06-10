@@ -14,7 +14,9 @@ use super::BootProtocol;
 use arch_gen::x86::msr_index;
 use kvm_bindings::{kvm_fpu, kvm_msr_entry, kvm_regs, kvm_sregs, Msrs};
 use kvm_ioctls::VcpuFd;
-use layout::{BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START, PVH_INFO_START};
+use layout::{
+    BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START, PML5_START, PVH_INFO_START,
+};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 
 // MTRR constants
@@ -45,6 +47,8 @@ pub enum Error {
     WritePDEAddress(GuestMemoryError),
     /// Writing PML4 to RAM failed.
     WritePML4Address(GuestMemoryError),
+    /// Writing PML5 to RAM failed.
+    WritePML5Address(GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -221,7 +225,18 @@ fn configure_segments_and_sregs(
 }
 
 fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut kvm_sregs) -> Result<()> {
-    // Puts PML4 right after zero page but aligned to 4k.
+    // Puts PML5 or PML4 right after zero page but aligned to 4k.
+
+    if unsafe { std::arch::x86_64::__cpuid(7).ecx } & (1 << 16) != 0 {
+        // Entry covering VA [0..256TB)
+        mem.write_obj(PML4_START.raw_value() | 0x03, PML5_START)
+            .map_err(Error::WritePML5Address)?;
+
+        sregs.cr3 = PML5_START.raw_value();
+        sregs.cr4 |= X86_CR4_LA57;
+    } else {
+        sregs.cr3 = PML4_START.raw_value();
+    }
 
     // Entry covering VA [0..512GB)
     mem.write_obj(PDPTE_START.raw_value() | 0x03, PML4_START)
@@ -230,6 +245,7 @@ fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut kvm_sregs) -> Result<()>
     // Entry covering VA [0..1GB)
     mem.write_obj(PDE_START.raw_value() | 0x03, PDPTE_START)
         .map_err(Error::WritePDPTEAddress)?;
+
     // 512 2MB entries together covering VA [0..1GB). Note we are assuming
     // CPU supports 2MB pages (/proc/cpuinfo has 'pse'). All modern CPUs do.
     for i in 0..512 {
@@ -237,13 +253,8 @@ fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut kvm_sregs) -> Result<()>
             .map_err(Error::WritePDEAddress)?;
     }
 
-    sregs.cr3 = PML4_START.raw_value();
     sregs.cr4 |= X86_CR4_PAE;
     sregs.cr0 |= X86_CR0_PG;
-
-    if unsafe { std::arch::x86_64::__cpuid(7).ecx } & (1 << 16) != 0 {
-        sregs.cr4 |= X86_CR4_LA57;
-    }
 
     Ok(())
 }
@@ -374,8 +385,11 @@ mod tests {
         let gm = create_guest_mem();
         setup_page_tables(&gm, &mut sregs).unwrap();
 
-        assert_eq!(0xa003, read_u64(&gm, PML4_START));
-        assert_eq!(0xb003, read_u64(&gm, PDPTE_START));
+        if unsafe { std::arch::x86_64::__cpuid(7).ecx } & (1 << 16) != 0 {
+            assert_eq!(0xa003, read_u64(&gm, PML5_START));
+        }
+        assert_eq!(0xb003, read_u64(&gm, PML4_START));
+        assert_eq!(0xc003, read_u64(&gm, PDPTE_START));
         for i in 0..512 {
             assert_eq!(
                 (i << 21) + 0x83u64,
@@ -383,7 +397,11 @@ mod tests {
             );
         }
 
-        assert_eq!(PML4_START.raw_value(), sregs.cr3);
+        if unsafe { std::arch::x86_64::__cpuid(7).ecx } & (1 << 16) != 0 {
+            assert_eq!(PML5_START.raw_value(), sregs.cr3);
+        } else {
+            assert_eq!(PML4_START.raw_value(), sregs.cr3);
+        }
         assert_eq!(X86_CR4_PAE, sregs.cr4);
         assert_eq!(X86_CR0_PG, sregs.cr0);
     }
