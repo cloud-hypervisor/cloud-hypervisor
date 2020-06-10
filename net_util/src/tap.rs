@@ -527,7 +527,7 @@ mod tests {
         let interface = interfaces.into_iter().find(interface_name_matches).unwrap();
 
         if let Ok(Ethernet(tx, rx)) = datalink::channel(&interface, Default::default()) {
-            (interface.mac_address(), tx, rx)
+            (interface.mac.unwrap(), tx, rx)
         } else {
             panic!("datalink channel error or unhandled channel type");
         }
