@@ -210,6 +210,13 @@ sudo ip tuntap add name vunet-tap0 mode tap
 # Create tap interface with multipe queues support for vhost_user_net test.
 sudo ip tuntap add name vunet-tap1 mode tap multi_queue
 
+BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
+CFLAGS=""
+TARGET_CC=""
+if [[ "$target" == "x86_64-unknown-linux-musl" ]]; then
+TARGET_CC="musl-gcc"
+CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
+fi
 
 cargo build --release --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor
