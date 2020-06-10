@@ -310,9 +310,7 @@ cmd_tests() {
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
-	       --env BUILD_TARGET="$target" \
-	       --env CFLAGS="$cflags" \
-	       --env TARGET_CC="$target_cc" \
+	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_integration_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
