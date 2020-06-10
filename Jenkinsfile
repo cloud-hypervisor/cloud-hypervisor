@@ -65,14 +65,25 @@ pipeline{
 								sh "scripts/dev_cli.sh tests --integration"
 							}
 						}
+					}
+				}
+				stage ('Worker build (musl)') {
+					agent { node { label 'bionic' } }
+					options {
+						timeout(time: 1, unit: 'HOURS')
+					}
+					stages {
+						stage ('Checkout') {
+							steps {
+								checkout scm
+							}
+						}
 						stage ('Run unit tests for musl') {
-							when { branch 'master' }
 							steps {
 								sh "scripts/dev_cli.sh tests --unit --libc musl"
 							}
 						}
 						stage ('Run integration tests for musl') {
-							when { branch 'master' }
 							steps {
 								sh "scripts/dev_cli.sh tests --integration --libc musl"
 							}
