@@ -32,7 +32,9 @@ use crate::cpu;
 use crate::device_manager::{self, get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{url_to_path, vm_config_from_snapshot, VM_SNAPSHOT_FILE};
-use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID};
+use crate::{
+    PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
+};
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::BootProtocol;
@@ -758,37 +760,38 @@ impl Vm {
         Ok(())
     }
 
-    pub fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<()> {
-        if cfg!(feature = "pci_support") {
-            #[cfg(feature = "pci_support")]
-            {
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .add_device(&mut _device_cfg)
-                    .map_err(Error::DeviceManager)?;
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
+    }
 
-                // Update VmConfig by adding the new device. This is important to
-                // ensure the device would be created in case of a reboot.
-                {
-                    let mut config = self.config.lock().unwrap();
-                    if let Some(devices) = config.devices.as_mut() {
-                        devices.push(_device_cfg);
-                    } else {
-                        config.devices = Some(vec![_device_cfg]);
-                    }
-                }
+    #[cfg(feature = "pci_support")]
+    pub fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
+        let pci_device_info = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .add_device(&mut _device_cfg)
+            .map_err(Error::DeviceManager)?;
 
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
-                    .map_err(Error::DeviceManager)?;
+        // Update VmConfig by adding the new device. This is important to
+        // ensure the device would be created in case of a reboot.
+        {
+            let mut config = self.config.lock().unwrap();
+            if let Some(devices) = config.devices.as_mut() {
+                devices.push(_device_cfg);
+            } else {
+                config.devices = Some(vec![_device_cfg]);
             }
-            Ok(())
-        } else {
-            Err(Error::NoPciSupport)
         }
+
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .map_err(Error::DeviceManager)?;
+
+        Ok(pci_device_info)
     }
 
     pub fn remove_device(&mut self, _id: String) -> Result<()> {
@@ -846,169 +849,174 @@ impl Vm {
         }
     }
 
-    pub fn add_disk(&mut self, mut _disk_cfg: DiskConfig) -> Result<()> {
-        if cfg!(feature = "pci_support") {
-            #[cfg(feature = "pci_support")]
-            {
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .add_disk(&mut _disk_cfg)
-                    .map_err(Error::DeviceManager)?;
-
-                // Update VmConfig by adding the new device. This is important to
-                // ensure the device would be created in case of a reboot.
-                {
-                    let mut config = self.config.lock().unwrap();
-                    if let Some(disks) = config.disks.as_mut() {
-                        disks.push(_disk_cfg);
-                    } else {
-                        config.disks = Some(vec![_disk_cfg]);
-                    }
-                }
-
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
-                    .map_err(Error::DeviceManager)?;
-            }
-            Ok(())
-        } else {
-            Err(Error::NoPciSupport)
-        }
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_disk(&mut self, mut _disk_cfg: DiskConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
     }
 
-    pub fn add_fs(&mut self, mut _fs_cfg: FsConfig) -> Result<()> {
-        if cfg!(feature = "pci_support") {
-            #[cfg(feature = "pci_support")]
-            {
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .add_fs(&mut _fs_cfg)
-                    .map_err(Error::DeviceManager)?;
+    #[cfg(feature = "pci_support")]
+    pub fn add_disk(&mut self, mut _disk_cfg: DiskConfig) -> Result<PciDeviceInfo> {
+        let pci_device_info = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .add_disk(&mut _disk_cfg)
+            .map_err(Error::DeviceManager)?;
 
-                // Update VmConfig by adding the new device. This is important to
-                // ensure the device would be created in case of a reboot.
-                {
-                    let mut config = self.config.lock().unwrap();
-                    if let Some(fs_config) = config.fs.as_mut() {
-                        fs_config.push(_fs_cfg);
-                    } else {
-                        config.fs = Some(vec![_fs_cfg]);
-                    }
-                }
-
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
-                    .map_err(Error::DeviceManager)?;
+        // Update VmConfig by adding the new device. This is important to
+        // ensure the device would be created in case of a reboot.
+        {
+            let mut config = self.config.lock().unwrap();
+            if let Some(disks) = config.disks.as_mut() {
+                disks.push(_disk_cfg);
+            } else {
+                config.disks = Some(vec![_disk_cfg]);
             }
-            Ok(())
-        } else {
-            Err(Error::NoPciSupport)
         }
+
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .map_err(Error::DeviceManager)?;
+
+        Ok(pci_device_info)
     }
 
-    pub fn add_pmem(&mut self, mut _pmem_cfg: PmemConfig) -> Result<()> {
-        if cfg!(feature = "pci_support") {
-            #[cfg(feature = "pci_support")]
-            {
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .add_pmem(&mut _pmem_cfg)
-                    .map_err(Error::DeviceManager)?;
-
-                // Update VmConfig by adding the new device. This is important to
-                // ensure the device would be created in case of a reboot.
-                {
-                    let mut config = self.config.lock().unwrap();
-                    if let Some(pmem) = config.pmem.as_mut() {
-                        pmem.push(_pmem_cfg);
-                    } else {
-                        config.pmem = Some(vec![_pmem_cfg]);
-                    }
-                }
-
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
-                    .map_err(Error::DeviceManager)?;
-            }
-            Ok(())
-        } else {
-            Err(Error::NoPciSupport)
-        }
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_fs(&mut self, mut _fs_cfg: FsConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
     }
 
-    pub fn add_net(&mut self, mut _net_cfg: NetConfig) -> Result<()> {
-        if cfg!(feature = "pci_support") {
-            #[cfg(feature = "pci_support")]
-            {
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .add_net(&mut _net_cfg)
-                    .map_err(Error::DeviceManager)?;
+    #[cfg(feature = "pci_support")]
+    pub fn add_fs(&mut self, mut _fs_cfg: FsConfig) -> Result<PciDeviceInfo> {
+        let pci_device_info = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .add_fs(&mut _fs_cfg)
+            .map_err(Error::DeviceManager)?;
 
-                // Update VmConfig by adding the new device. This is important to
-                // ensure the device would be created in case of a reboot.
-                {
-                    let mut config = self.config.lock().unwrap();
-                    if let Some(net) = config.net.as_mut() {
-                        net.push(_net_cfg);
-                    } else {
-                        config.net = Some(vec![_net_cfg]);
-                    }
-                }
-
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
-                    .map_err(Error::DeviceManager)?;
+        // Update VmConfig by adding the new device. This is important to
+        // ensure the device would be created in case of a reboot.
+        {
+            let mut config = self.config.lock().unwrap();
+            if let Some(fs_config) = config.fs.as_mut() {
+                fs_config.push(_fs_cfg);
+            } else {
+                config.fs = Some(vec![_fs_cfg]);
             }
-            Ok(())
-        } else {
-            Err(Error::NoPciSupport)
         }
+
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .map_err(Error::DeviceManager)?;
+
+        Ok(pci_device_info)
     }
 
-    pub fn add_vsock(&mut self, mut _vsock_cfg: VsockConfig) -> Result<()> {
-        if cfg!(feature = "pci_support") {
-            #[cfg(feature = "pci_support")]
-            {
-                if self.config.lock().unwrap().vsock.is_some() {
-                    return Err(Error::TooManyVsockDevices);
-                }
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_pmem(&mut self, mut _pmem_cfg: PmemConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
+    }
 
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .add_vsock(&mut _vsock_cfg)
-                    .map_err(Error::DeviceManager)?;
+    #[cfg(feature = "pci_support")]
+    pub fn add_pmem(&mut self, mut _pmem_cfg: PmemConfig) -> Result<PciDeviceInfo> {
+        let pci_device_info = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .add_pmem(&mut _pmem_cfg)
+            .map_err(Error::DeviceManager)?;
 
-                // Update VmConfig by adding the new device. This is important to
-                // ensure the device would be created in case of a reboot.
-                {
-                    let mut config = self.config.lock().unwrap();
-                    config.vsock = Some(_vsock_cfg);
-                }
-
-                self.device_manager
-                    .lock()
-                    .unwrap()
-                    .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
-                    .map_err(Error::DeviceManager)?;
+        // Update VmConfig by adding the new device. This is important to
+        // ensure the device would be created in case of a reboot.
+        {
+            let mut config = self.config.lock().unwrap();
+            if let Some(pmem) = config.pmem.as_mut() {
+                pmem.push(_pmem_cfg);
+            } else {
+                config.pmem = Some(vec![_pmem_cfg]);
             }
-            Ok(())
-        } else {
-            Err(Error::NoPciSupport)
         }
+
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .map_err(Error::DeviceManager)?;
+
+        Ok(pci_device_info)
+    }
+
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_net(&mut self, mut _net_cfg: NetConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
+    }
+
+    #[cfg(feature = "pci_support")]
+    pub fn add_net(&mut self, mut _net_cfg: NetConfig) -> Result<PciDeviceInfo> {
+        let pci_device_info = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .add_net(&mut _net_cfg)
+            .map_err(Error::DeviceManager)?;
+
+        // Update VmConfig by adding the new device. This is important to
+        // ensure the device would be created in case of a reboot.
+        {
+            let mut config = self.config.lock().unwrap();
+            if let Some(net) = config.net.as_mut() {
+                net.push(_net_cfg);
+            } else {
+                config.net = Some(vec![_net_cfg]);
+            }
+        }
+
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .map_err(Error::DeviceManager)?;
+
+        Ok(pci_device_info)
+    }
+
+    #[cfg(not(feature = "pci_support"))]
+    pub fn add_vsock(&mut self, mut _vsock_cfg: VsockConfig) -> Result<PciDeviceInfo> {
+        Err(Error::NoPciSupport)
+    }
+
+    #[cfg(feature = "pci_support")]
+    pub fn add_vsock(&mut self, mut _vsock_cfg: VsockConfig) -> Result<PciDeviceInfo> {
+        if self.config.lock().unwrap().vsock.is_some() {
+            return Err(Error::TooManyVsockDevices);
+        }
+
+        let pci_device_info = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .add_vsock(&mut _vsock_cfg)
+            .map_err(Error::DeviceManager)?;
+
+        // Update VmConfig by adding the new device. This is important to
+        // ensure the device would be created in case of a reboot.
+        {
+            let mut config = self.config.lock().unwrap();
+            config.vsock = Some(_vsock_cfg);
+        }
+
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .map_err(Error::DeviceManager)?;
+
+        Ok(pci_device_info)
     }
 
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>, on_tty: bool) {
