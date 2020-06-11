@@ -1455,6 +1455,7 @@ checksum = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
 name = "vm-allocator"
 version = "0.1.0"
 dependencies = [
+ "arch",
  "libc",
  "vm-memory",
 ]
