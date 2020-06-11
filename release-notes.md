@@ -1,3 +1,12 @@
+- [v0.8.0](#v080)
+    - [Experimental Snapshot and Restore Support](#experimental-snapshot-and-restore-support)
+    - [Experimental ARM64 Support](#experimental-arm64-support)
+    - [Support for Using 5-level Paging in Guests](#support-for-using-5-level-paging-in-guests)
+    - [Virtio Device Interrupt Suppression for Network Devices](#virtio-device-interrupt-suppression-for-network-devices)
+    - [`vhost_user_fs` Improvements](#vhost_user_fs-improvements)
+    - [Notable Bug Fixes](#notable-bug-fixes)
+    - [Command Line and API Changes](#command-line-and-api-changes)
+    - [Contributors](#contributors)
 - [v0.7.0](#v070)
     - [Block, Network, Persistent Memory (PMEM), VirtioFS and Vsock hotplug](#block-network-persistent-memory-pmem-virtiofs-and-vsock-hotplug)
     - [Alternative `libc` Support](#alternative-libc-support)
@@ -6,15 +15,15 @@
     - [Alternative Memory Hotplug: `virtio-mem`](#alternative-memory-hotplug-virtio-mem)
     - [`Seccomp` Sandboxing](#seccomp-sandboxing)
     - [Updated Distribution Support](#updated-distribution-support)
-    - [Command Line and API Changes](#command-line-and-api-changes)
-    - [Contributors](#contributors)
+    - [Command Line and API Changes](#command-line-and-api-changes-1)
+    - [Contributors](#contributors-1)
 - [v0.6.0](#v060)
     - [Directly Assigned Devices Hotplug](#directly-assigned-devices-hotplug)
     - [Shared Filesystem Improvements](#shared-filesystem-improvements)
     - [Block and Networking IO Self Offloading](#block-and-networking-io-self-offloading)
     - [Command Line Interface](#command-line-interface)
     - [PVH Boot](#pvh-boot)
-    - [Contributors](#contributors-1)
+    - [Contributors](#contributors-2)
 - [v0.5.1](#v051)
 - [v0.5.0](#v050)
     - [Virtual Machine Dynamic Resizing](#virtual-machine-dynamic-resizing)
@@ -22,7 +31,7 @@
     - [New Interrupt Management Framework](#new-interrupt-management-framework)
     - [Development Tools](#development-tools)
     - [Kata Containers Integration](#kata-containers-integration)
-    - [Contributors](#contributors-2)
+    - [Contributors](#contributors-3)
 - [v0.4.0](#v040)
     - [Dynamic virtual CPUs addition](#dynamic-virtual-cpus-addition)
     - [Programmatic firmware tables generation](#programmatic-firmware-tables-generation)
@@ -31,7 +40,7 @@
     - [Userspace IOAPIC by default](#userspace-ioapic-by-default)
     - [PCI BAR reprogramming](#pci-bar-reprogramming)
     - [New `cloud-hypervisor` organization](#new-cloud-hypervisor-organization)
-    - [Contributors](#contributors-3)
+    - [Contributors](#contributors-4)
 - [v0.3.0](#v030)
     - [Block device offloading](#block-device-offloading)
     - [Network device backend](#network-device-backend)
@@ -57,6 +66,96 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v0.8.0
+
+This release has been tracked through the [0.8.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/10).
+
+Highlights for `cloud-hypervisor` version 0.8.0 include:
+
+### Experimental Snapshot and Restore Support
+
+This release includes the first version of the snapshot and restore feature.
+This allows a VM to be paused and then subsequently snapshotted. At a later
+point that snapshot may be restored into a new running VM identical to the
+original VM at the point it was paused.
+
+This feature can be used for offline migration from one VM host to another, to
+allow the upgrading or rebooting of the host machine transparently to the guest
+or for templating the VM. This is an experimental feature and cannot be used on
+a VM using passthrough (VFIO) devices. Issues with SMP have also been observed
+(#1176).
+
+### Experimental ARM64 Support
+
+Included in this release is experimental support for running on ARM64.
+Currently only `virtio-mmio` devices and a serial port are supported. Full
+details can be found in the [ARM64 documentation](docs/arm64.md).
+
+### Support for Using 5-level Paging in Guests
+
+If the host supports it the guest is now enabled for 5-level paging (aka LA57).
+This works when booting the Linux kernel with a vmlinux, bzImage or firmware
+based boot. However booting an ELF kernel built with `CONFIG_PVH=y` does not
+work due to current limitations in the PVH boot process.
+
+### Virtio Device Interrupt Suppression for Network Devices
+
+With `virtio-net` and `vhost-user-net` devices the guest can suppress
+interrupts from the VMM by using the `VIRTIO_RING_F_EVENT_IDX` feature. This
+can lead to an improvement in performance by reducing the number of interrupts
+the guest must service.
+
+### `vhost_user_fs` Improvements
+
+The implementation in Cloud Hypervisor of the VirtioFS server now supports sandboxing itself with `seccomp`.
+
+
+### Notable Bug Fixes
+
+* VMs that have not yet been booted can now be deleted (#1110).
+* By creating the `tap` device ahead of creating the VM it is not required to
+  run the `cloud-hypervisor` binary with `CAP_NET_ADMIN` (#1273).
+* Block I/O via `virtio-block` or `vhost-user-block` now correctly adheres to
+  the specification and synchronizes to the underlying filesystem as required
+  based on guest feature negotiation. This avoids potential data loss (#399,
+  #1216).
+* When booting with a large number of vCPUs then the ACPI table would be
+  overwritten by the SMP `MPTABLE`. When compiled with the `acpi` feature the
+  `MPTABLE` will no longer be generated (#1132).
+* Shutting down VMs that have been paused is now supported (#816).
+* Created socket files are deleted on shutdown (#1083).
+* Trying to use passthrough devices (VFIO) will be rejected on `mmio` builds
+  (#751).
+
+### Command Line and API Changes
+
+This is non exhaustive list of HTTP API and command line changes:
+
+* All user visible socket parameters are now consistently called `socket`
+  rather than `sock` in some cases.
+* The `ch-remote` tool now shows any error message generated by the VMM
+* The `wce` parameter has been removed from `--disk` as the feature is always
+  offered for negotiation.
+* `--net` has gained a `host_mac` option that allows the setting of the MAC
+  address for the `tap` device on the host.
+
+### Contributors
+
+Many thanks to everyone who has contributed to our 0.8.0 release including some new faces.
+
+* Anatol Belski <ab@php.net>
+* Arron Wang <arron.wang@intel.com>
+* Bo Chen <chen.bo@intel.com>
+* Dr. David Alan Gilbert <dgilbert@redhat.com>
+* Henry Wang <Henry.Wang@arm.com>
+* Hui Zhu <teawater@antfin.com>
+* LiYa'nan <oliverliyn@gmail.com>
+* Michael Zhao <michael.zhao@arm.com>
+* Rob Bradford <robert.bradford@intel.com>
+* Samuel Ortiz <sameo@linux.intel.com>
+* Sebastien Boeuf <sebastien.boeuf@intel.com>
+* Sergio Lopez <slp@redhat.com>
 
 # v0.7.0
 
