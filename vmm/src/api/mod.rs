@@ -28,7 +28,6 @@
 //!    response channel Receiver.
 //! 5. The thread handles the response and forwards potential errors.
 
-extern crate micro_http;
 extern crate vm_device;
 extern crate vmm_sys_util;
 
@@ -41,6 +40,7 @@ use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig, VsockConfig,
 };
 use crate::vm::{Error as VmError, VmState};
+use micro_http::Body;
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
@@ -175,6 +175,9 @@ pub enum ApiResponsePayload {
 
     /// Vmm ping response
     VmmPing(VmmPingResponse),
+
+    /// Vm action response
+    VmAction(Vec<u8>),
 }
 
 /// This is the response sent by the VMM API server through the mpsc channel.
@@ -328,7 +331,11 @@ pub enum VmAction {
     Snapshot(Arc<VmSnapshotConfig>),
 }
 
-fn vm_action(api_evt: EventFd, api_sender: Sender<ApiRequest>, action: VmAction) -> ApiResult<()> {
+fn vm_action(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    action: VmAction,
+) -> ApiResult<Option<Body>> {
     let (response_sender, response_receiver) = channel();
 
     use VmAction::*;
@@ -355,32 +362,36 @@ fn vm_action(api_evt: EventFd, api_sender: Sender<ApiRequest>, action: VmAction)
     api_sender.send(request).map_err(ApiError::RequestSend)?;
     api_evt.write(1).map_err(ApiError::EventFdWrite)?;
 
-    response_receiver.recv().map_err(ApiError::ResponseRecv)??;
+    let body = match response_receiver.recv().map_err(ApiError::ResponseRecv)?? {
+        ApiResponsePayload::VmAction(response) => Some(Body::new(response)),
+        ApiResponsePayload::Empty => None,
+        _ => return Err(ApiError::ResponsePayloadType),
+    };
 
-    Ok(())
+    Ok(body)
 }
 
-pub fn vm_boot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
+pub fn vm_boot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Boot)
 }
 
-pub fn vm_delete(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
+pub fn vm_delete(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Delete)
 }
 
-pub fn vm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
+pub fn vm_shutdown(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Shutdown)
 }
 
-pub fn vm_reboot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
+pub fn vm_reboot(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Reboot)
 }
 
-pub fn vm_pause(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
+pub fn vm_pause(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Pause)
 }
 
-pub fn vm_resume(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<()> {
+pub fn vm_resume(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Resume)
 }
 
@@ -388,7 +399,7 @@ pub fn vm_snapshot(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VmSnapshotConfig>,
-) -> ApiResult<()> {
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Snapshot(data))
 }
 
@@ -396,7 +407,7 @@ pub fn vm_restore(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<RestoreConfig>,
-) -> ApiResult<()> {
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Restore(data))
 }
 
@@ -451,7 +462,7 @@ pub fn vm_resize(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VmResizeData>,
-) -> ApiResult<()> {
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Resize(data))
 }
 
@@ -459,7 +470,7 @@ pub fn vm_add_device(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<DeviceConfig>,
-) -> ApiResult<()> {
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::AddDevice(data))
 }
 
@@ -467,7 +478,7 @@ pub fn vm_remove_device(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VmRemoveDeviceData>,
-) -> ApiResult<()> {
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::RemoveDevice(data))
 }
 
@@ -475,7 +486,7 @@ pub fn vm_add_disk(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<DiskConfig>,
-) -> ApiResult<()> {
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::AddDisk(data))
 }
 
@@ -483,7 +494,7 @@ pub fn vm_add_fs(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<FsConfig>,
-) -> ApiResult<()> {
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::AddFs(data))
 }
 
@@ -491,7 +502,7 @@ pub fn vm_add_pmem(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<PmemConfig>,
-) -> ApiResult<()> {
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::AddPmem(data))
 }
 
@@ -499,7 +510,7 @@ pub fn vm_add_net(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<NetConfig>,
-) -> ApiResult<()> {
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::AddNet(data))
 }
 
@@ -507,6 +518,6 @@ pub fn vm_add_vsock(
     api_evt: EventFd,
     api_sender: Sender<ApiRequest>,
     data: Arc<VsockConfig>,
-) -> ApiResult<()> {
+) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::AddVsock(data))
 }
