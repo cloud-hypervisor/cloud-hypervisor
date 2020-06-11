@@ -1493,6 +1493,7 @@ pub fn test_vm() {
             VcpuExit::Debug => {}
             VcpuExit::Hlt => {
                 println!("HLT");
+                break;
             }
             VcpuExit::IrqWindowOpen => {}
             VcpuExit::Shutdown => {}
