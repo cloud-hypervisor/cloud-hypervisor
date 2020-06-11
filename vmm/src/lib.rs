@@ -177,6 +177,7 @@ impl AsRawFd for EpollContext {
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct PciDeviceInfo {
     pub id: String,
     pub bdf: u32,
@@ -461,14 +462,13 @@ impl Vmm {
         }
     }
 
-    fn vm_add_device(&mut self, device_cfg: DeviceConfig) -> result::Result<(), VmError> {
+    fn vm_add_device(&mut self, device_cfg: DeviceConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.add_device(device_cfg) {
+            let info = vm.add_device(device_cfg).map_err(|e| {
                 error!("Error when adding new device to the VM: {:?}", e);
-                Err(e)
-            } else {
-                Ok(())
-            }
+                e
+            })?;
+            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
         } else {
             Err(VmError::VmNotRunning)
         }
@@ -487,66 +487,61 @@ impl Vmm {
         }
     }
 
-    fn vm_add_disk(&mut self, disk_cfg: DiskConfig) -> result::Result<(), VmError> {
+    fn vm_add_disk(&mut self, disk_cfg: DiskConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.add_disk(disk_cfg) {
+            let info = vm.add_disk(disk_cfg).map_err(|e| {
                 error!("Error when adding new disk to the VM: {:?}", e);
-                Err(e)
-            } else {
-                Ok(())
-            }
+                e
+            })?;
+            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
         } else {
             Err(VmError::VmNotRunning)
         }
     }
 
-    fn vm_add_fs(&mut self, fs_cfg: FsConfig) -> result::Result<(), VmError> {
+    fn vm_add_fs(&mut self, fs_cfg: FsConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.add_fs(fs_cfg) {
+            let info = vm.add_fs(fs_cfg).map_err(|e| {
                 error!("Error when adding new fs to the VM: {:?}", e);
-                Err(e)
-            } else {
-                Ok(())
-            }
+                e
+            })?;
+            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
         } else {
             Err(VmError::VmNotRunning)
         }
     }
 
-    fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> result::Result<(), VmError> {
+    fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.add_pmem(pmem_cfg) {
+            let info = vm.add_pmem(pmem_cfg).map_err(|e| {
                 error!("Error when adding new pmem device to the VM: {:?}", e);
-                Err(e)
-            } else {
-                Ok(())
-            }
+                e
+            })?;
+            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
         } else {
             Err(VmError::VmNotRunning)
         }
     }
 
-    fn vm_add_net(&mut self, net_cfg: NetConfig) -> result::Result<(), VmError> {
+    fn vm_add_net(&mut self, net_cfg: NetConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.add_net(net_cfg) {
+            let info = vm.add_net(net_cfg).map_err(|e| {
                 error!("Error when adding new network device to the VM: {:?}", e);
-                Err(e)
-            } else {
-                Ok(())
-            }
+                e
+            })?;
+            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
         } else {
             Err(VmError::VmNotRunning)
         }
     }
 
-    fn vm_add_vsock(&mut self, vsock_cfg: VsockConfig) -> result::Result<(), VmError> {
+    fn vm_add_vsock(&mut self, vsock_cfg: VsockConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.add_vsock(vsock_cfg) {
+            let info = vm.add_vsock(vsock_cfg).map_err(|e| {
                 error!("Error when adding new vsock device to the VM: {:?}", e);
-                Err(e)
-            } else {
-                Ok(())
-            }
+                e
+            })?;
+            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
         } else {
             Err(VmError::VmNotRunning)
         }
@@ -727,7 +722,7 @@ impl Vmm {
                                     let response = self
                                         .vm_add_device(add_device_data.as_ref().clone())
                                         .map_err(ApiError::VmAddDevice)
-                                        .map(|_| ApiResponsePayload::Empty);
+                                        .map(ApiResponsePayload::VmAction);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmRemoveDevice(remove_device_data, sender) => {
@@ -741,35 +736,35 @@ impl Vmm {
                                     let response = self
                                         .vm_add_disk(add_disk_data.as_ref().clone())
                                         .map_err(ApiError::VmAddDisk)
-                                        .map(|_| ApiResponsePayload::Empty);
+                                        .map(ApiResponsePayload::VmAction);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmAddFs(add_fs_data, sender) => {
                                     let response = self
                                         .vm_add_fs(add_fs_data.as_ref().clone())
                                         .map_err(ApiError::VmAddFs)
-                                        .map(|_| ApiResponsePayload::Empty);
+                                        .map(ApiResponsePayload::VmAction);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmAddPmem(add_pmem_data, sender) => {
                                     let response = self
                                         .vm_add_pmem(add_pmem_data.as_ref().clone())
                                         .map_err(ApiError::VmAddPmem)
-                                        .map(|_| ApiResponsePayload::Empty);
+                                        .map(ApiResponsePayload::VmAction);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmAddNet(add_net_data, sender) => {
                                     let response = self
                                         .vm_add_net(add_net_data.as_ref().clone())
                                         .map_err(ApiError::VmAddNet)
-                                        .map(|_| ApiResponsePayload::Empty);
+                                        .map(ApiResponsePayload::VmAction);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmAddVsock(add_vsock_data, sender) => {
                                     let response = self
                                         .vm_add_vsock(add_vsock_data.as_ref().clone())
                                         .map_err(ApiError::VmAddVsock)
-                                        .map(|_| ApiResponsePayload::Empty);
+                                        .map(ApiResponsePayload::VmAction);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                             }

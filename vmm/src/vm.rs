@@ -209,6 +209,9 @@ pub enum Error {
 
     /// No more that one virtio-vsock device
     TooManyVsockDevices,
+
+    /// Failed serializing into JSON
+    SerializeJson(serde_json::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 

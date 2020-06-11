@@ -73,7 +73,6 @@ impl EndpointHandler for VmActionHandler {
         body: &Option<Body>,
     ) -> std::result::Result<Option<Body>, HttpError> {
         use VmAction::*;
-        let response_body: Option<Body> = None;
         if let Some(body) = body {
             match self.action {
                 AddDevice(_) => vm_add_device(
@@ -81,86 +80,84 @@ impl EndpointHandler for VmActionHandler {
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
-                .map_err(HttpError::VmAddDevice)?,
+                .map_err(HttpError::VmAddDevice),
 
                 AddDisk(_) => vm_add_disk(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
-                .map_err(HttpError::VmAddDisk)?,
+                .map_err(HttpError::VmAddDisk),
 
                 AddFs(_) => vm_add_fs(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
-                .map_err(HttpError::VmAddFs)?,
+                .map_err(HttpError::VmAddFs),
 
                 AddPmem(_) => vm_add_pmem(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
-                .map_err(HttpError::VmAddPmem)?,
+                .map_err(HttpError::VmAddPmem),
 
                 AddNet(_) => vm_add_net(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
-                .map_err(HttpError::VmAddNet)?,
+                .map_err(HttpError::VmAddNet),
 
                 AddVsock(_) => vm_add_vsock(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
-                .map_err(HttpError::VmAddVsock)?,
+                .map_err(HttpError::VmAddVsock),
 
                 RemoveDevice(_) => vm_remove_device(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
-                .map_err(HttpError::VmRemoveDevice)?,
+                .map_err(HttpError::VmRemoveDevice),
 
                 Resize(_) => vm_resize(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
-                .map_err(HttpError::VmResize)?,
+                .map_err(HttpError::VmResize),
 
                 Restore(_) => vm_restore(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
-                .map_err(HttpError::VmRestore)?,
+                .map_err(HttpError::VmRestore),
 
                 Snapshot(_) => vm_snapshot(
                     api_notifier,
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
-                .map_err(HttpError::VmSnapshot)?,
+                .map_err(HttpError::VmSnapshot),
 
-                _ => return Err(HttpError::BadRequest),
-            };
+                _ => Err(HttpError::BadRequest),
+            }
         } else {
             match self.action {
-                Boot => vm_boot(api_notifier, api_sender).map_err(HttpError::VmBoot)?,
-                Delete => vm_delete(api_notifier, api_sender).map_err(HttpError::VmDelete)?,
-                Shutdown => vm_shutdown(api_notifier, api_sender).map_err(HttpError::VmShutdown)?,
-                Reboot => vm_reboot(api_notifier, api_sender).map_err(HttpError::VmReboot)?,
-                Pause => vm_pause(api_notifier, api_sender).map_err(HttpError::VmPause)?,
-                Resume => vm_resume(api_notifier, api_sender).map_err(HttpError::VmResume)?,
-                _ => return Err(HttpError::BadRequest),
-            };
+                Boot => vm_boot(api_notifier, api_sender).map_err(HttpError::VmBoot),
+                Delete => vm_delete(api_notifier, api_sender).map_err(HttpError::VmDelete),
+                Shutdown => vm_shutdown(api_notifier, api_sender).map_err(HttpError::VmShutdown),
+                Reboot => vm_reboot(api_notifier, api_sender).map_err(HttpError::VmReboot),
+                Pause => vm_pause(api_notifier, api_sender).map_err(HttpError::VmPause),
+                Resume => vm_resume(api_notifier, api_sender).map_err(HttpError::VmResume),
+                _ => Err(HttpError::BadRequest),
+            }
         }
-
-        Ok(response_body)
     }
 }
 
