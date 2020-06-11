@@ -126,7 +126,15 @@ pub trait EndpointHandler: Sync + Send {
     ) -> Response {
         match req.method() {
             Method::Put => match self.put_handler(api_notifier, api_sender, &req.body) {
-                Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),
+                Ok(response_body) => {
+                    if let Some(body) = response_body {
+                        let mut response = Response::new(Version::Http11, StatusCode::OK);
+                        response.set_body(body);
+                        response
+                    } else {
+                        Response::new(Version::Http11, StatusCode::NoContent)
+                    }
+                }
                 Err(e @ HttpError::BadRequest) => error_response(e, StatusCode::BadRequest),
                 Err(e @ HttpError::SerdeJsonDeserialize(_)) => {
                     error_response(e, StatusCode::BadRequest)
@@ -142,7 +150,7 @@ pub trait EndpointHandler: Sync + Send {
         _api_notifier: EventFd,
         _api_sender: Sender<ApiRequest>,
         _body: &Option<Body>,
-    ) -> std::result::Result<(), HttpError> {
+    ) -> std::result::Result<Option<Body>, HttpError> {
         Err(HttpError::BadRequest)
     }
 }
