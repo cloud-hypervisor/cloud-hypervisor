@@ -29,6 +29,7 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
 use seccomp::{SeccompFilter, SeccompLevel};
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::fs::File;
 use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -177,10 +178,32 @@ impl AsRawFd for EpollContext {
     }
 }
 
-#[derive(Deserialize, Serialize)]
 pub struct PciDeviceInfo {
     pub id: String,
     pub bdf: u32,
+}
+
+impl Serialize for PciDeviceInfo {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Transform the PCI b/d/f into a standardized string.
+        let segment = (self.bdf >> 16) & 0xffff;
+        let bus = (self.bdf >> 8) & 0xff;
+        let device = (self.bdf >> 3) & 0x1f;
+        let function = self.bdf & 0x7;
+        let bdf_str = format!(
+            "{:04x}:{:02x}:{:02x}.{:01x}",
+            segment, bus, device, function
+        );
+
+        // Serialize the structure.
+        let mut state = serializer.serialize_struct("PciDeviceInfo", 2)?;
+        state.serialize_field("id", &self.id)?;
+        state.serialize_field("bdf", &bdf_str)?;
+        state.end()
+    }
 }
 
 pub fn start_vmm_thread(
