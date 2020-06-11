@@ -177,6 +177,11 @@ impl AsRawFd for EpollContext {
     }
 }
 
+pub struct PciDeviceInfo {
+    pub id: String,
+    pub bdf: u32,
+}
+
 pub fn start_vmm_thread(
     vmm_version: String,
     http_path: &str,
