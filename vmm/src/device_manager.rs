@@ -18,6 +18,8 @@ use crate::interrupt::{
     KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager, KvmRoutingEntry,
 };
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+#[cfg(feature = "pci_support")]
+use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
@@ -2339,7 +2341,7 @@ impl DeviceManager {
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         device_fd: &Arc<DeviceFd>,
         device_cfg: &mut DeviceConfig,
-    ) -> DeviceManagerResult<u32> {
+    ) -> DeviceManagerResult<(u32, String)> {
         // We need to shift the device id since the 3 first bits
         // are dedicated to the PCI function, and we know we don't
         // do multifunction. Also, because we only support one PCI
@@ -2429,9 +2431,9 @@ impl DeviceManager {
             device_cfg.id = Some(id.clone());
             id
         };
-        self.pci_id_list.insert(vfio_name, pci_device_bdf);
+        self.pci_id_list.insert(vfio_name.clone(), pci_device_bdf);
 
-        Ok(pci_device_bdf)
+        Ok((pci_device_bdf, vfio_name))
     }
 
     #[cfg(feature = "pci_support")]
@@ -2450,7 +2452,7 @@ impl DeviceManager {
             self.kvm_device_fd = Some(Arc::clone(&device_fd));
 
             for device_cfg in device_list_cfg.iter_mut() {
-                let device_id =
+                let (device_id, _) =
                     self.add_vfio_device(pci, interrupt_manager, &device_fd, device_cfg)?;
                 if device_cfg.iommu && self.iommu_device.is_some() {
                     iommu_attached_device_ids.push(device_id);
@@ -2853,7 +2855,10 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
-    pub fn add_device(&mut self, device_cfg: &mut DeviceConfig) -> DeviceManagerResult<()> {
+    pub fn add_device(
+        &mut self,
+        device_cfg: &mut DeviceConfig,
+    ) -> DeviceManagerResult<PciDeviceInfo> {
         let pci = if let Some(pci_bus) = &self.pci_bus {
             Arc::clone(&pci_bus)
         } else {
@@ -2874,7 +2879,7 @@ impl DeviceManager {
             device_fd
         };
 
-        let device_id = self.add_vfio_device(
+        let (device_id, device_name) = self.add_vfio_device(
             &mut pci.lock().unwrap(),
             &interrupt_manager,
             &device_fd,
@@ -2884,7 +2889,10 @@ impl DeviceManager {
         // Update the PCIU bitmap
         self.pci_devices_up |= 1 << (device_id >> 3);
 
-        Ok(())
+        Ok(PciDeviceInfo {
+            id: device_name,
+            bdf: device_id,
+        })
     }
 
     #[cfg(feature = "pci_support")]
@@ -3051,7 +3059,7 @@ impl DeviceManager {
         device: VirtioDeviceArc,
         iommu_attached: bool,
         id: String,
-    ) -> DeviceManagerResult<()> {
+    ) -> DeviceManagerResult<PciDeviceInfo> {
         if iommu_attached {
             warn!("Placing device behind vIOMMU is not available for hotplugged devices");
         }
@@ -3075,41 +3083,41 @@ impl DeviceManager {
             &mut pci.lock().unwrap(),
             &None,
             &interrupt_manager,
-            id,
+            id.clone(),
         )?;
 
         // Update the PCIU bitmap
         self.pci_devices_up |= 1 << (device_id >> 3);
 
-        Ok(())
+        Ok(PciDeviceInfo { id, bdf: device_id })
     }
 
     #[cfg(feature = "pci_support")]
-    pub fn add_disk(&mut self, disk_cfg: &mut DiskConfig) -> DeviceManagerResult<()> {
+    pub fn add_disk(&mut self, disk_cfg: &mut DiskConfig) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_block_device(disk_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
 
     #[cfg(feature = "pci_support")]
-    pub fn add_fs(&mut self, fs_cfg: &mut FsConfig) -> DeviceManagerResult<()> {
+    pub fn add_fs(&mut self, fs_cfg: &mut FsConfig) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_fs_device(fs_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
 
     #[cfg(feature = "pci_support")]
-    pub fn add_pmem(&mut self, pmem_cfg: &mut PmemConfig) -> DeviceManagerResult<()> {
+    pub fn add_pmem(&mut self, pmem_cfg: &mut PmemConfig) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_pmem_device(pmem_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
 
     #[cfg(feature = "pci_support")]
-    pub fn add_net(&mut self, net_cfg: &mut NetConfig) -> DeviceManagerResult<()> {
+    pub fn add_net(&mut self, net_cfg: &mut NetConfig) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_net_device(net_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
 
     #[cfg(feature = "pci_support")]
-    pub fn add_vsock(&mut self, vsock_cfg: &mut VsockConfig) -> DeviceManagerResult<()> {
+    pub fn add_vsock(&mut self, vsock_cfg: &mut VsockConfig) -> DeviceManagerResult<PciDeviceInfo> {
         let (device, iommu_attached, id) = self.make_virtio_vsock_device(vsock_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
