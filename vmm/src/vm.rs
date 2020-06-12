@@ -43,7 +43,7 @@ use arch::{check_required_kvm_extensions, EntryPoint};
 use devices::ioapic;
 use devices::HotPlugNotificationFlags;
 #[cfg(target_arch = "x86_64")]
-use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
+use kvm_bindings::{kvm_enable_cap, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::*;
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
@@ -63,7 +63,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use url::Url;
 #[cfg(target_arch = "x86_64")]
-use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
+use vm_memory::{Address, Bytes, GuestMemoryMmap};
 use vm_memory::{GuestAddress, GuestAddressSpace};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
@@ -1432,6 +1432,9 @@ mod tests {
 #[cfg(target_arch = "x86_64")]
 #[allow(unused)]
 pub fn test_vm() {
+    use kvm_bindings::kvm_userspace_memory_region;
+    use vm_memory::{GuestMemory, GuestMemoryRegion};
+
     // This example based on https://lwn.net/Articles/658511/
     let code = [
         0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
