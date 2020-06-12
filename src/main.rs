@@ -908,6 +908,7 @@ mod unit_tests {
                 }"#,
                 true,
             ),
+            #[cfg(target_arch = "x86_64")]
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
@@ -922,6 +923,7 @@ mod unit_tests {
                 }"#,
                 false,
             ),
+            #[cfg(target_arch = "x86_64")]
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
@@ -1201,6 +1203,7 @@ mod unit_tests {
                 }"#,
                 true,
             ),
+            #[cfg(target_arch = "x86_64")]
             (
                 vec![
                     "cloud-hypervisor",
@@ -1218,6 +1221,7 @@ mod unit_tests {
                 }"#,
                 true,
             ),
+            #[cfg(target_arch = "x86_64")]
             (
                 vec![
                     "cloud-hypervisor",
@@ -1234,6 +1238,7 @@ mod unit_tests {
                 }"#,
                 false,
             ),
+            #[cfg(target_arch = "x86_64")]
             (
                 vec![
                     "cloud-hypervisor",
@@ -1250,6 +1255,7 @@ mod unit_tests {
                 }"#,
                 true,
             ),
+            #[cfg(target_arch = "x86_64")]
             (
                 vec![
                     "cloud-hypervisor",
@@ -1325,6 +1331,7 @@ mod unit_tests {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
     fn test_valid_vm_config_devices() {
         vec![
             (
@@ -1449,6 +1456,7 @@ mod unit_tests {
                 }"#,
                 false,
             ),
+            #[cfg(target_arch = "x86_64")]
             (
                 vec![
                     "cloud-hypervisor",
@@ -1464,6 +1472,7 @@ mod unit_tests {
                 }"#,
                 true,
             ),
+            #[cfg(target_arch = "x86_64")]
             (
                 vec![
                     "cloud-hypervisor",

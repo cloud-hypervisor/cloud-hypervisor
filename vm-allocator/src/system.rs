@@ -28,16 +28,26 @@ fn pagesize() -> usize {
 /// # Example - Use the `SystemAddress` builder.
 ///
 /// ```
+/// # #[cfg(target_arch = "x86_64")]
 /// # use vm_allocator::{GsiApic, SystemAllocator};
+/// # #[cfg(target_arch = "aarch64")]
+/// # use vm_allocator::SystemAllocator;
 /// # use vm_memory::{Address, GuestAddress, GuestUsize};
 ///   let mut allocator = SystemAllocator::new(
-///           GuestAddress(0x1000), 0x10000,
+///           #[cfg(target_arch = "x86_64")] GuestAddress(0x1000),
+///           #[cfg(target_arch = "x86_64")] 0x10000,
 ///           GuestAddress(0x10000000), 0x10000000,
 ///           GuestAddress(0x20000000), 0x100000,
-///           vec![GsiApic::new(5, 19)]).unwrap();
-///    assert_eq!(allocator.allocate_irq(), Some(5));
-///    assert_eq!(allocator.allocate_irq(), Some(6));
-///    assert_eq!(allocator.allocate_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fff_f000)));
+///           #[cfg(target_arch = "x86_64")] vec![GsiApic::new(5, 19)]).unwrap();
+///   #[cfg(target_arch = "x86_64")]
+///   assert_eq!(allocator.allocate_irq(), Some(5));
+///   #[cfg(target_arch = "aarch64")]
+///   assert_eq!(allocator.allocate_irq(), Some(32));
+///   #[cfg(target_arch = "x86_64")]
+///   assert_eq!(allocator.allocate_irq(), Some(6));
+///   #[cfg(target_arch = "aarch64")]
+///   assert_eq!(allocator.allocate_irq(), Some(33));
+///   assert_eq!(allocator.allocate_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fff_f000)));
 ///
 /// ```
 pub struct SystemAllocator {

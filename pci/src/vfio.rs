@@ -748,20 +748,25 @@ impl PciDevice for VfioPciDevice {
             let mut region_type = PciBarRegionType::Memory32BitRegion;
 
             if io_bar {
-                // IO BAR
-                region_type = PciBarRegionType::IORegion;
+                #[cfg(target_arch = "x86_64")]
+                {
+                    // IO BAR
+                    region_type = PciBarRegionType::IORegion;
 
-                // Clear first bit.
-                lsb_size &= 0xffff_fffc;
+                    // Clear first bit.
+                    lsb_size &= 0xffff_fffc;
 
-                // Find the first bit that's set to 1.
-                let first_bit = lsb_size.trailing_zeros();
-                region_size = 2u64.pow(first_bit);
-                // We need to allocate a guest PIO address range for that BAR.
-                // The address needs to be 4 bytes aligned.
-                bar_addr = allocator
-                    .allocate_io_addresses(None, region_size, Some(0x4))
-                    .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
+                    // Find the first bit that's set to 1.
+                    let first_bit = lsb_size.trailing_zeros();
+                    region_size = 2u64.pow(first_bit);
+                    // We need to allocate a guest PIO address range for that BAR.
+                    // The address needs to be 4 bytes aligned.
+                    bar_addr = allocator
+                        .allocate_io_addresses(None, region_size, Some(0x4))
+                        .ok_or_else(|| PciDeviceError::IoAllocationFailed(region_size))?;
+                }
+                #[cfg(target_arch = "aarch64")]
+                unimplemented!();
             } else {
                 if is_64bit_bar {
                     // 64 bits Memory BAR
@@ -871,7 +876,10 @@ impl PciDevice for VfioPciDevice {
         for region in self.mmio_regions.iter() {
             match region.type_ {
                 PciBarRegionType::IORegion => {
+                    #[cfg(target_arch = "x86_64")]
                     allocator.free_io_addresses(region.start, region.length);
+                    #[cfg(target_arch = "aarch64")]
+                    unimplemented!();
                 }
                 PciBarRegionType::Memory32BitRegion => {
                     allocator.free_mmio_hole_addresses(region.start, region.length);
