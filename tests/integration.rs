@@ -497,6 +497,23 @@ mod tests {
         cmd.status().expect("Failed to launch ch-remote").success()
     }
 
+    fn remote_command_w_output(
+        api_socket: &str,
+        command: &str,
+        arg: Option<&str>,
+    ) -> (bool, Vec<u8>) {
+        let mut cmd = Command::new(clh_command("ch-remote"));
+        cmd.args(&[&format!("--api-socket={}", api_socket), command]);
+
+        if let Some(arg) = arg {
+            cmd.arg(arg);
+        }
+
+        let output = cmd.output().expect("Failed to launch ch-remote");
+
+        (output.status.success(), output.stdout)
+    }
+
     fn resize_command(
         api_socket: &str,
         desired_vcpus: Option<u8>,
@@ -1944,7 +1961,14 @@ mod tests {
 
             if hotplug {
                 // Add fs to the VM
-                aver!(tb, remote_command(&api_socket, "add-fs", Some(&fs_params),));
+                let (cmd_success, cmd_output) =
+                    remote_command_w_output(&api_socket, "add-fs", Some(&fs_params));
+                aver!(tb, cmd_success);
+                aver!(
+                    tb,
+                    String::from_utf8_lossy(&cmd_output)
+                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}")
+                );
 
                 thread::sleep(std::time::Duration::new(10, 0));
             }
@@ -2057,7 +2081,14 @@ mod tests {
                 );
 
                 // Add back and check it works
-                aver!(tb, remote_command(&api_socket, "add-fs", Some(&fs_params),));
+                let (cmd_success, cmd_output) =
+                    remote_command_w_output(&api_socket, "add-fs", Some(&fs_params));
+                aver!(tb, cmd_success);
+                aver!(
+                    tb,
+                    String::from_utf8_lossy(&cmd_output)
+                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}")
+                );
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Mount shared directory through virtio_fs filesystem
                 let mount_cmd = format!(
@@ -2826,11 +2857,15 @@ mod tests {
             )?;
             guest
                 .ssh_command_l1("echo 1af4 1041 | sudo tee /sys/bus/pci/drivers/vfio-pci/new_id")?;
-            guest.ssh_command_l1(
+            let vfio_hotplug_output = guest.ssh_command_l1(
                 "sudo /mnt/ch-remote \
                  --api-socket=/tmp/ch_api.sock \
                  add-device path=/sys/bus/pci/devices/0000:00:07.0,id=vfio123",
             )?;
+            aver!(
+                tb,
+                vfio_hotplug_output.contains("{\"id\":\"vfio123\",\"bdf\":\"0000:00:07.0\"}")
+            );
 
             thread::sleep(std::time::Duration::new(10, 0));
 
@@ -3113,13 +3148,16 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             if hotplug {
+                let (cmd_success, cmd_output) = remote_command_w_output(
+                    &api_socket,
+                    "add-vsock",
+                    Some(format!("cid=3,socket={},id=test0", socket).as_str()),
+                );
+                aver!(tb, cmd_success);
                 aver!(
                     tb,
-                    remote_command(
-                        &api_socket,
-                        "add-vsock",
-                        Some(format!("cid=3,socket={},id=test0", socket).as_str())
-                    )
+                    String::from_utf8_lossy(&cmd_output)
+                        .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
                 );
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Check adding a second one fails
@@ -3998,16 +4036,16 @@ mod tests {
             let mut blk_file_path = dirs::home_dir().unwrap();
             blk_file_path.push("workloads");
             blk_file_path.push("blk.img");
+            let (cmd_success, cmd_output) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+            );
+            aver!(tb, cmd_success);
             aver!(
                 tb,
-                remote_command(
-                    &api_socket,
-                    "add-disk",
-                    Some(&format!(
-                        "path={},id=test0",
-                        blk_file_path.to_str().unwrap()
-                    ))
-                )
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
             );
 
             // Check that if /dev/vdc exists and the block size is 16M.
@@ -4127,16 +4165,19 @@ mod tests {
 
             let mut pmem_temp_file = NamedTempFile::new().unwrap();
             pmem_temp_file.as_file_mut().set_len(128 << 20).unwrap();
+            let (cmd_success, cmd_output) = remote_command_w_output(
+                &api_socket,
+                "add-pmem",
+                Some(&format!(
+                    "file={},id=test0",
+                    pmem_temp_file.path().to_str().unwrap()
+                )),
+            );
+            aver!(tb, cmd_success);
             aver!(
                 tb,
-                remote_command(
-                    &api_socket,
-                    "add-pmem",
-                    Some(&format!(
-                        "file={},id=test0",
-                        pmem_temp_file.path().to_str().unwrap()
-                    ))
-                )
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
             );
 
             // Check that /dev/pmem0 exists and the block size is 128M
@@ -4243,13 +4284,16 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             // Add network
+            let (cmd_success, cmd_output) = remote_command_w_output(
+                &api_socket,
+                "add-net",
+                Some(guest.default_net_string().as_str()),
+            );
+            aver!(tb, cmd_success);
             aver!(
                 tb,
-                remote_command(
-                    &api_socket,
-                    "add-net",
-                    Some(guest.default_net_string().as_str())
-                )
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"_net2\",\"bdf\":\"0000:00:05.0\"}")
             );
 
             // 1 network interfaces + default localhost ==> 2 interfaces
