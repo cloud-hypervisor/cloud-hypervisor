@@ -1430,7 +1430,7 @@ mod tests {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[allow(unused)]
+#[test]
 pub fn test_vm() {
     use kvm_bindings::kvm_userspace_memory_region;
     use vm_memory::{GuestMemory, GuestMemoryRegion};
