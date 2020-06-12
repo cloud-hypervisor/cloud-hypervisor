@@ -1,11 +1,11 @@
-# How to build and run Cloud-hypervisor on Arm64
+# How to build and run Cloud-hypervisor on AArch64
 
 Cloud-hypervisor is partially enabled on AArch64 architecture.
-Although all features are not ready yet, you can begin to test Cloud-hypervisor on a Arm64 host by following this guide.
+Although all features are not ready yet, you can begin to test Cloud-hypervisor on a AArch64 host by following this guide.
 
 ## Prerequisites
 
-On Arm64 machines, Cloud-hypervisor depends on an external library `libfdt-dev` for generating Flatted Device Tree (FDT).
+On AArch64 machines, Cloud-hypervisor depends on an external library `libfdt-dev` for generating Flattened Device Tree (FDT).
 
 The long-term plan is to replace `libfdt-dev` with some pure-Rust component to get rid of such dependency.
 
