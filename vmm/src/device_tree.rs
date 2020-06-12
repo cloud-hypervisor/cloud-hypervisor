@@ -62,7 +62,6 @@ impl DeviceTree {
     pub fn insert(&mut self, k: String, v: DeviceNode) -> Option<DeviceNode> {
         self.0.insert(k, v)
     }
-    #[cfg(feature = "pci_support")]
     pub fn remove(&mut self, k: &str) -> Option<DeviceNode> {
         self.0.remove(k)
     }
