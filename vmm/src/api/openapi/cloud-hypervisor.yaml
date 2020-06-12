@@ -150,8 +150,12 @@ paths:
               $ref: '#/components/schemas/VmAddDevice'
         required: true
       responses:
-        204:
+        200:
           description: The new device was successfully added to the VM instance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PciDeviceInfo'
         404:
           description: The new device could not be added to the VM instance.
 
@@ -182,8 +186,12 @@ paths:
               $ref: '#/components/schemas/DiskConfig'
         required: true
       responses:
-        204:
+        200:
           description: The new disk was successfully added to the VM instance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PciDeviceInfo'
         500:
           description: The new disk could not be added to the VM instance.
 
@@ -198,8 +206,12 @@ paths:
               $ref: '#/components/schemas/FsConfig'
         required: true
       responses:
-        204:
+        200:
           description: The new device was successfully added to the VM instance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PciDeviceInfo'
         500:
           description: The new device could not be added to the VM instance.
 
@@ -214,8 +226,12 @@ paths:
               $ref: '#/components/schemas/PmemConfig'
         required: true
       responses:
-        204:
+        200:
           description: The new device was successfully added to the VM instance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PciDeviceInfo'
         500:
           description: The new device could not be added to the VM instance.
 
@@ -230,8 +246,12 @@ paths:
               $ref: '#/components/schemas/NetConfig'
         required: true
       responses:
-        204:
+        200:
           description: The new device was successfully added to the VM instance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PciDeviceInfo'
         500:
           description: The new device could not be added to the VM instance.
 
@@ -246,8 +266,12 @@ paths:
               $ref: '#/components/schemas/VsockConfig'
         required: true
       responses:
-        204:
+        200:
           description: The new device was successfully added to the VM instance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PciDeviceInfo'
         500:
           description: The new device could not be added to the VM instance.
 
@@ -310,6 +334,18 @@ components:
           type: string
           enum: [Created, Running, Shutdown, Paused]
       description: Virtual Machine information
+
+    PciDeviceInfo:
+      required:
+      - id
+      - bdf
+      type: object
+      properties:
+        id:
+          type: string
+        bdf:
+          type: string
+      description: Information about a PCI device
 
     VmConfig:
       required:
