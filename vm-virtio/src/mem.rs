@@ -159,10 +159,10 @@ unsafe impl ByteValued for VirtioMemResp {}
 #[derive(Copy, Clone, Debug, Default)]
 struct VirtioMemConfig {
     // Block size and alignment. Cannot change.
-    block_size: u32,
+    block_size: u64,
     // Valid with VIRTIO_MEM_F_ACPI_PXM. Cannot change.
     node_id: u16,
-    padding: u16,
+    padding: [u8; 6],
     // Start address of the memory region. Cannot change.
     addr: u64,
     // Region size (maximum). Cannot change.
@@ -790,7 +790,7 @@ impl Mem {
         let avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
         let mut config = VirtioMemConfig::default();
-        config.block_size = VIRTIO_MEM_DEFAULT_BLOCK_SIZE as u32;
+        config.block_size = VIRTIO_MEM_DEFAULT_BLOCK_SIZE;
         config.addr = region.start_addr().raw_value();
         config.region_size = region.len();
         config.usable_region_size = cmp::min(
