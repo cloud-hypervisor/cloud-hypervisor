@@ -1,4 +1,4 @@
-FROM ubuntu:18.04 as dev
+FROM ubuntu:18.04 as {NAME}
 
 ARG TARGETARCH="x86_64"
 ARG RUST_TOOLCHAIN="1.43.0"
@@ -39,6 +39,7 @@ RUN apt-get update \
 	cpio \
 	bsdtar \
 	libfdt-dev \
+	lcov \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -78,6 +79,7 @@ RUN nohup curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -
     && if [ "$TARGETARCH" = "x86_64" ]; then rustup component add rustfmt; fi \
     && if [ "$TARGETARCH" = "x86_64" ]; then rustup component add clippy; fi \
     && cargo install cargo-audit \
+    && cargo install grcov \
     && rm -rf "$CARGO_HOME/registry" \
     && ln -s "$CARGO_REGISTRY_DIR" "$CARGO_HOME/registry" \
     && rm -rf "$CARGO_HOME/git" \

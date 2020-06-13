@@ -46,6 +46,9 @@ CARGO_GIT_REGISTRY_DIR="${CLH_BUILD_DIR}/cargo_git_registry"
 # Full path to the cargo target dir on the host.
 CARGO_TARGET_DIR="${CLH_BUILD_DIR}/cargo_target"
 
+# Save script args for better error message.
+ARGS=$@
+
 # Send a decorated message to stdout, followed by a new line
 #
 say() {
@@ -86,7 +89,7 @@ die() {
         code="$2"
         shift 2
     }
-    say_err "$@"
+    say_err "$ARGS"
     exit $code
 }
 
@@ -94,7 +97,7 @@ die() {
 #
 ok_or_die() {
     code=$?
-    [[ $code -eq 0 ]] || die -c $code "$@"
+    [[ $code -eq 0 ]] || die -c $code "$ARGS"
 }
 
 # Make sure the build/ dirs are available. Exit if we can't create them.
@@ -119,9 +122,19 @@ ensure_build_dir() {
 
 # Make sure we're using the latest dev container, by just pulling it.
 ensure_latest_ctr() {
-    $DOCKER_RUNTIME pull "$CTR_IMAGE"
+    # XXX Allow enforcing dev-nightly once it's pushed.
+    if [ $(uname -m) = "x86_64" ] && [ "cloudhypervisor/dev-nightly" != "$CTR_IMAGE_TAG" ]; then
+        $DOCKER_RUNTIME pull "$CTR_IMAGE"
 
-    ok_or_die "Error pulling container image. Aborting."
+        ok_or_die "Error pulling container image. Aborting."
+    fi
+}
+
+update_ctr_image_info() {
+    container_type=$1
+
+    CTR_IMAGE_TAG="cloudhypervisor/$container_type"
+    CTR_IMAGE="${CTR_IMAGE_TAG}:${CTR_IMAGE_VERSION}"
 }
 
 # Fix main directory permissions after a container ran as root.
@@ -163,10 +176,12 @@ cmd_help() {
     echo "        --integration        Run the integration tests."
     echo "        --libc               Select the C library Cloud Hypervisor will be built against. Default is gnu"
     echo "        --all                Run all tests."
+    echo "        --coverage           Enable coverage. Note, that this will require a rebuild with specific flags and a nightly toolset."
     echo ""
     echo "    build-container [--type]"
     echo "        Build the Cloud Hypervisor container."
     echo "        --dev                Build dev container. This is the default."
+    echo "        --nightly            Use the nightly Rust toolset."
     echo ""
     echo "    clean [<cargo args>]]"
     echo "        Remove the Cloud Hypervisor artifacts."
@@ -182,6 +197,8 @@ cmd_help() {
 cmd_build() {
     build="debug"
     libc="gnu"
+
+    ensure_latest_ctr
 
     while [ $# -gt 0 ]; do
 	case "$1" in
@@ -231,6 +248,8 @@ cmd_build() {
 cmd_clean() {
     cargo_args=("$@")
 
+    ensure_latest_ctr
+
     $DOCKER_RUNTIME run \
 	   --user "$(id -u):$(id -g)" \
 	   --workdir "$CTR_CLH_ROOT_DIR" \
@@ -247,6 +266,7 @@ cmd_tests() {
     cargo=false
     integration=false
     libc="gnu"
+    coverage=false
 
     while [ $# -gt 0 ]; do
 	case "$1" in
@@ -261,6 +281,7 @@ cmd_tests() {
                 libc="$1"
                 ;;
 	    "--all")                 { cargo=true; unit=true; integration=true;  } ;;
+	    "--coverage")            { coverage=true; } ;;
             "--")                    { shift; break;         } ;;
             *)
 		die "Unknown tests argument: $1. Please use --help for help."
@@ -277,6 +298,13 @@ cmd_tests() {
 	cflags="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
     fi
 
+    if [ true = "$coverage" ]; then
+	# XXX the image might need to include arch into name
+	update_ctr_image_info "dev-nightly"
+    fi
+
+    ensure_latest_ctr
+
     if [ "$unit" = true ] ;  then
 	say "Running unit tests for $target..."
 	$DOCKER_RUNTIME run \
@@ -289,6 +317,7 @@ cmd_tests() {
 	       --env BUILD_TARGET="$target" \
 	       --env CFLAGS="$cflags" \
 	       --env TARGET_CC="$target_cc" \
+	       --env COVERAGE="$coverage" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -318,6 +347,7 @@ cmd_tests() {
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
+	       --env COVERAGE="$coverage" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_integration_tests_$(uname -m).sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -327,11 +357,13 @@ cmd_tests() {
 
 cmd_build-container() {
     container_type="dev"
+    nightly=false
 
     while [ $# -gt 0 ]; do
 	case "$1" in
             "-h"|"--help")  { cmd_help; exit 1;     } ;;
             "--dev")        { container_type="dev"; } ;;
+            "--nightly")    { nightly=true; } ;;
             "--")           { shift; break;         } ;;
             *)
 		die "Unknown build-container argument: $1. Please use --help for help."
@@ -345,11 +377,18 @@ cmd_build-container() {
     mkdir -p $BUILD_DIR
     cp $CLH_DOCKERFILE $BUILD_DIR
 
+    if [ true = "$nightly" ]; then
+	container_type="$container_type-nightly"
+	update_ctr_image_info "$container_type"
+    fi
+    sed -i 's,as {NAME},as '$container_type',g' $BUILD_DIR/Dockerfile
+
     $DOCKER_RUNTIME build \
 	   --target $container_type \
 	   -t $CTR_IMAGE \
 	   -f $BUILD_DIR/Dockerfile \
 	   --build-arg TARGETARCH="$(uname -m)" \
+	   $([ true = "$nightly" ] && echo -n "--build-arg RUST_TOOLCHAIN=nightly") \
 	   $BUILD_DIR
 }
 
@@ -401,9 +440,6 @@ cmd=cmd_$1
 shift
 
 ensure_build_dir
-if [ $(uname -m) = "x86_64" ]; then
-    ensure_latest_ctr
-fi
 
 # Before a public image for AArch64 ready, we build the container if needed.
 if [ $(uname -m) = "aarch64" ]; then
