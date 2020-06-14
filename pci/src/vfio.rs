@@ -645,7 +645,7 @@ impl Drop for VfioPciDevice {
 
         if self
             .device
-            .setup_dma_map(self.mem.memory().deref())
+            .unset_dma_map(self.mem.memory().deref())
             .is_err()
         {
             error!("failed to remove all guest memory regions from iommu table");
