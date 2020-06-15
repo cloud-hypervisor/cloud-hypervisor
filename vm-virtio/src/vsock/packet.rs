@@ -124,7 +124,7 @@ impl VsockPacket {
         };
 
         // No point looking for a data/buffer descriptor, if the packet is zero-lengthed.
-        if pkt.len() == 0 {
+        if pkt.is_empty() {
             return Ok(pkt);
         }
 
@@ -276,6 +276,10 @@ impl VsockPacket {
 
     pub fn len(&self) -> u32 {
         LittleEndian::read_u32(&self.hdr()[HDROFF_LEN..])
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn set_len(&mut self, len: u32) -> &mut Self {
