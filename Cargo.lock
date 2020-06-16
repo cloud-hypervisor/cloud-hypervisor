@@ -1005,9 +1005,9 @@ checksum = "26412eb97c6b088a6997e05f69403a802a92d520de2f8e63c2b65f9e0f47c4e8"
 
 [[package]]
 name = "remain"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99c861227fc40c8da6fdaa3d58144ac84c0537080a43eb1d7d45c28f88dcb888"
+checksum = "70ba1e78fa68412cb93ef642fd4d20b9a941be49ee9333875ebaf13112673ea7"
 dependencies = [
  "proc-macro2",
  "quote",
