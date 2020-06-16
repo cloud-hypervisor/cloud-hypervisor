@@ -396,6 +396,18 @@ components:
           default: false
       description: Virtual machine configuration
 
+    CpuTopology:
+      type: object
+      properties:
+        threads_per_core:
+          type: integer
+        cores_per_die:
+          type: integer
+        dies_per_package:
+          type: integer
+        packages:
+          type: integer
+
     CpusConfig:
       required:
       - boot_vcpus
@@ -410,6 +422,8 @@ components:
           minimum: 1
           default: 1
           type: integer
+        topology:
+            $ref: '#/components/schemas/CpuTopology'
 
     MemoryConfig:
       required:
