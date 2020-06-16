@@ -535,8 +535,7 @@ impl Snapshottable for Vcpu {
 }
 
 pub struct CpuManager {
-    boot_vcpus: u8,
-    max_vcpus: u8,
+    config: CpusConfig,
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<devices::Bus>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -689,8 +688,7 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let cpuid = CpuManager::patch_cpuid(kvm)?;
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
-            boot_vcpus: config.boot_vcpus,
-            max_vcpus: config.max_vcpus,
+            config: config.clone(),
             #[cfg(target_arch = "x86_64")]
             io_bus: device_manager.io_bus().clone(),
             mmio_bus: device_manager.mmio_bus().clone(),
@@ -824,7 +822,7 @@ impl CpuManager {
     }
 
     fn create_vcpus(&mut self, desired_vcpus: u8, entry_point: Option<EntryPoint>) -> Result<()> {
-        if desired_vcpus > self.max_vcpus {
+        if desired_vcpus > self.config.max_vcpus {
             return Err(Error::DesiredVCPUCountExceedsMax);
         }
 
@@ -923,7 +921,7 @@ impl CpuManager {
     }
 
     fn activate_vcpus(&mut self, desired_vcpus: u8, inserting: bool) -> Result<()> {
-        if desired_vcpus > self.max_vcpus {
+        if desired_vcpus > self.config.max_vcpus {
             return Err(Error::DesiredVCPUCountExceedsMax);
         }
 
@@ -1002,11 +1000,11 @@ impl CpuManager {
     }
 
     pub fn boot_vcpus(&self) -> u8 {
-        self.boot_vcpus
+        self.config.boot_vcpus
     }
 
     pub fn max_vcpus(&self) -> u8 {
-        self.max_vcpus
+        self.config.max_vcpus
     }
 
     fn present_vcpus(&self) -> u8 {
@@ -1028,18 +1026,18 @@ impl CpuManager {
     #[cfg(feature = "acpi")]
     pub fn create_madt(&self) -> SDT {
         // This is also checked in the commandline parsing.
-        assert!(self.boot_vcpus <= self.max_vcpus);
+        assert!(self.config.boot_vcpus <= self.config.max_vcpus);
 
         let mut madt = SDT::new(*b"APIC", 44, 5, *b"CLOUDH", *b"CHMADT  ", 1);
         madt.write(36, layout::APIC_START);
 
-        for cpu in 0..self.max_vcpus {
+        for cpu in 0..self.config.max_vcpus {
             let lapic = LocalAPIC {
                 r#type: 0,
                 length: 8,
                 processor_id: cpu,
                 apic_id: cpu,
-                flags: if cpu < self.boot_vcpus {
+                flags: if cpu < self.config.boot_vcpus {
                     1 << MADT_CPU_ENABLE_FLAG
                 } else {
                     0
@@ -1335,12 +1333,12 @@ impl Aml for CpuManager {
         let uid = aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A05"));
         // Bundle methods together under a common object
         let methods = CPUMethods {
-            max_vcpus: self.max_vcpus,
+            max_vcpus: self.config.max_vcpus,
         };
         let mut cpu_data_inner: Vec<&dyn aml::Aml> = vec![&hid, &uid, &methods];
 
         let mut cpu_devices = Vec::new();
-        for cpu_id in 0..self.max_vcpus {
+        for cpu_id in 0..self.config.max_vcpus {
             let cpu_device = CPU { cpu_id };
 
             cpu_devices.push(cpu_device);
