@@ -25,7 +25,7 @@ pub struct TxBuf {
 impl TxBuf {
     /// Total buffer size, in bytes.
     ///
-    const SIZE: usize = defs::CONN_TX_BUF_SIZE;
+    const SIZE: usize = defs::CONN_TX_BUF_SIZE as usize;
 
     /// Ring-buffer constructor.
     ///
