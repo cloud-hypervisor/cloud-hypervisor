@@ -208,6 +208,7 @@ pub fn configure_vcpu(
 ) -> super::Result<()> {
     let mut cpuid = cpuid;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
+    CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(id));
     fd.set_cpuid2(&cpuid)
         .map_err(Error::SetSupportedCpusFailed)?;
 

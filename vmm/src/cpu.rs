@@ -789,6 +789,7 @@ impl CpuManager {
             {
                 let mut cpuid = self.cpuid.clone();
                 CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(cpu_id));
+                CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(cpu_id));
 
                 vcpu.lock()
                     .unwrap()
