@@ -487,6 +487,7 @@ mod unit_tests {
                 cpus: CpusConfig {
                     boot_vcpus: 1,
                     max_vcpus: 1,
+                    topology: None,
                 },
                 memory: MemoryConfig {
                     size: 536_870_912,

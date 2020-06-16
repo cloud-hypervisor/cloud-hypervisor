@@ -88,6 +88,10 @@ pub enum ValidationError {
     IommuUnsupported,
     /// Trying to use VFIO without PCI
     VfioUnsupported,
+    /// CPU topology count doesn't match max
+    CpuTopologyCount,
+    /// One part of the CPU topology was zero
+    CpuTopologyZeroPart,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -106,6 +110,11 @@ impl fmt::Display for ValidationError {
             }
             IommuUnsupported => write!(f, "Using an IOMMU without PCI support is unsupported"),
             VfioUnsupported => write!(f, "Using VFIO without PCI support is unsupported"),
+            CpuTopologyZeroPart => write!(f, "No part of the CPU topology can be zero"),
+            CpuTopologyCount => write!(
+                f,
+                "Product of CPU topology parts does not match maximum vCPUs"
+            ),
         }
     }
 }
@@ -397,16 +406,59 @@ impl FromStr for ByteSized {
     }
 }
 
+pub enum CpuTopologyParseError {
+    InvalidValue(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct CpuTopology {
+    pub threads_per_core: u8,
+    pub cores_per_die: u8,
+    pub dies_per_package: u8,
+    pub packages: u8,
+}
+
+impl FromStr for CpuTopology {
+    type Err = CpuTopologyParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split(':').collect();
+
+        if parts.len() != 4 {
+            return Err(Self::Err::InvalidValue(s.to_owned()));
+        }
+
+        let t = CpuTopology {
+            threads_per_core: parts[0]
+                .parse()
+                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
+            cores_per_die: parts[1]
+                .parse()
+                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
+            dies_per_package: parts[2]
+                .parse()
+                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
+            packages: parts[3]
+                .parse()
+                .map_err(|_| Self::Err::InvalidValue(s.to_owned()))?,
+        };
+
+        Ok(t)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct CpusConfig {
     pub boot_vcpus: u8,
     pub max_vcpus: u8,
+    #[serde(default)]
+    pub topology: Option<CpuTopology>,
 }
 
 impl CpusConfig {
     pub fn parse(cpus: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("boot").add("max");
+        parser.add("boot").add("max").add("topology");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
         let boot_vcpus: u8 = parser
@@ -417,10 +469,12 @@ impl CpusConfig {
             .convert("max")
             .map_err(Error::ParseCpus)?
             .unwrap_or(boot_vcpus);
+        let topology = parser.convert("topology").map_err(Error::ParseCpus)?;
 
         Ok(CpusConfig {
             boot_vcpus,
             max_vcpus,
+            topology,
         })
     }
 }
@@ -430,6 +484,7 @@ impl Default for CpusConfig {
         CpusConfig {
             boot_vcpus: DEFAULT_VCPUS,
             max_vcpus: DEFAULT_VCPUS,
+            topology: None,
         }
     }
 }
@@ -1297,6 +1352,21 @@ impl VmConfig {
             }
         }
 
+        if let Some(t) = &self.cpus.topology {
+            if t.threads_per_core == 0
+                || t.cores_per_die == 0
+                || t.dies_per_package == 0
+                || t.packages == 0
+            {
+                return Err(ValidationError::CpuTopologyZeroPart);
+            }
+
+            let total = t.threads_per_core * t.cores_per_die * t.dies_per_package * t.packages;
+            if total != self.cpus.max_vcpus {
+                return Err(ValidationError::CpuTopologyCount);
+            }
+        }
+
         Ok(())
     }
 
@@ -1456,7 +1526,8 @@ mod tests {
             CpusConfig::parse("boot=1")?,
             CpusConfig {
                 boot_vcpus: 1,
-                max_vcpus: 1
+                max_vcpus: 1,
+                topology: None
             }
         );
         assert_eq!(
@@ -1464,8 +1535,26 @@ mod tests {
             CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 2,
+                topology: None
             }
         );
+        assert_eq!(
+            CpusConfig::parse("boot=8,topology=2:2:1:2")?,
+            CpusConfig {
+                boot_vcpus: 8,
+                max_vcpus: 8,
+                topology: Some(CpuTopology {
+                    threads_per_core: 2,
+                    cores_per_die: 2,
+                    dies_per_package: 1,
+                    packages: 2
+                })
+            }
+        );
+
+        assert!(CpusConfig::parse("boot=8,topology=2:2:1").is_err());
+        assert!(CpusConfig::parse("boot=8,topology=2:2:1:x").is_err());
+
         Ok(())
     }
 
@@ -1929,6 +2018,7 @@ mod tests {
             cpus: CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 1,
+                topology: None,
             },
             memory: MemoryConfig {
                 size: 536_870_912,
@@ -1988,6 +2078,17 @@ mod tests {
         let mut invalid_config = valid_config.clone();
         invalid_config.cpus.max_vcpus = 16;
         invalid_config.cpus.boot_vcpus = 32;
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.cpus.max_vcpus = 16;
+        invalid_config.cpus.boot_vcpus = 16;
+        invalid_config.cpus.topology = Some(CpuTopology {
+            threads_per_core: 2,
+            cores_per_die: 8,
+            dies_per_package: 1,
+            packages: 2,
+        });
         assert!(invalid_config.validate().is_err());
 
         let mut invalid_config = valid_config.clone();
