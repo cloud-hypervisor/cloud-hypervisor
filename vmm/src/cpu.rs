@@ -11,7 +11,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::CpusConfig;
+use crate::config::{CpuTopology, CpusConfig};
 use crate::device_manager::DeviceManager;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
@@ -686,7 +686,7 @@ impl CpuManager {
 
         let device_manager = device_manager.lock().unwrap();
         #[cfg(target_arch = "x86_64")]
-        let cpuid = CpuManager::patch_cpuid(kvm)?;
+        let cpuid = CpuManager::patch_cpuid(kvm, &config.topology)?;
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             #[cfg(target_arch = "x86_64")]
@@ -725,7 +725,7 @@ impl CpuManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn patch_cpuid(kvm: &Kvm) -> Result<CpuId> {
+    fn patch_cpuid(kvm: &Kvm, topology: &Option<CpuTopology>) -> Result<CpuId> {
         let mut cpuid_patches = Vec::new();
 
         // Patch tsc deadline timer bit
@@ -756,6 +756,15 @@ impl CpuManager {
             .map_err(Error::PatchCpuId)?;
 
         CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
+
+        if let Some(t) = topology {
+            arch::x86_64::update_cpuid_topology(
+                &mut cpuid,
+                t.threads_per_core,
+                t.cores_per_die,
+                t.dies_per_package,
+            );
+        }
 
         Ok(cpuid)
     }

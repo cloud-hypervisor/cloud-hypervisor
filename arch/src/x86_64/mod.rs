@@ -629,6 +629,69 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> super::Result<()> {
     Ok(())
 }
 
+pub fn update_cpuid_topology(
+    cpuid: &mut CpuId,
+    threads_per_core: u8,
+    cores_per_die: u8,
+    dies_per_package: u8,
+) {
+    let thread_width = 8 - (threads_per_core - 1).leading_zeros();
+    let core_width = (8 - (cores_per_die - 1).leading_zeros()) + thread_width;
+    let die_width = (8 - (dies_per_package - 1).leading_zeros()) + core_width;
+
+    // CPU Topology leaf 0xb
+    CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(0), CpuidReg::EAX, thread_width);
+    CpuidPatch::set_cpuid_reg(
+        cpuid,
+        0xb,
+        Some(0),
+        CpuidReg::EBX,
+        u32::from(threads_per_core),
+    );
+    CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(0), CpuidReg::ECX, 1 << 8);
+
+    CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::EAX, die_width);
+    CpuidPatch::set_cpuid_reg(
+        cpuid,
+        0xb,
+        Some(1),
+        CpuidReg::EBX,
+        u32::from(dies_per_package * cores_per_die * threads_per_core),
+    );
+    CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::ECX, 2 << 8);
+
+    // CPU Topology leaf 0x1f
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::EAX, thread_width);
+    CpuidPatch::set_cpuid_reg(
+        cpuid,
+        0x1f,
+        Some(0),
+        CpuidReg::EBX,
+        u32::from(threads_per_core),
+    );
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::ECX, 1 << 8);
+
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(1), CpuidReg::EAX, core_width);
+    CpuidPatch::set_cpuid_reg(
+        cpuid,
+        0x1f,
+        Some(1),
+        CpuidReg::EBX,
+        u32::from(cores_per_die * threads_per_core),
+    );
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(1), CpuidReg::ECX, 2 << 8);
+
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::EAX, die_width);
+    CpuidPatch::set_cpuid_reg(
+        cpuid,
+        0x1f,
+        Some(2),
+        CpuidReg::EBX,
+        u32::from(dies_per_package * cores_per_die * threads_per_core),
+    );
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::ECX, 5 << 8);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
