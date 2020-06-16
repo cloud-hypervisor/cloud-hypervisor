@@ -90,7 +90,10 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("cpus")
                 .long("cpus")
-                .help("Number of virtual CPUs")
+                .help(
+                    "boot=<boot_vcpus>,max=<max_vcpus>,\
+                    topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>",
+                )
                 .default_value(&default_vcpus)
                 .group("vm-config"),
         )
