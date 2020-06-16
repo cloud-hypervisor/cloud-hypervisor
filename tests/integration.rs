@@ -1010,6 +1010,87 @@ mod tests {
     }
 
     #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_cpu_topology_421() {
+        test_cpu_topology(4, 2, 1);
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_cpu_topology_142() {
+        test_cpu_topology(1, 4, 2);
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_cpu_topology_262() {
+        test_cpu_topology(2, 6, 2);
+    }
+
+    fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8) {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let total_vcpus = threads_per_core * cores_per_package * packages;
+            let mut child = GuestCommand::new(&guest)
+                .args(&[
+                    "--cpus",
+                    &format!(
+                        "boot={},topology={}:{}:1:{}",
+                        total_vcpus, threads_per_core, cores_per_package, packages
+                    ),
+                ])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .default_disks()
+                .default_net()
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            aver_eq!(
+                tb,
+                guest.get_cpu_count().unwrap_or_default(),
+                u32::from(total_vcpus)
+            );
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lscpu | grep \"per core\" | cut -f 2 -d \":\" | sed \"s# *##\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u8>()
+                    .unwrap_or(0),
+                threads_per_core
+            );
+
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lscpu | grep \"per socket\" | cut -f 2 -d \":\" | sed \"s# *##\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u8>()
+                    .unwrap_or(0),
+                cores_per_package
+            );
+
+            aver_eq!(
+                tb,
+                guest
+                    .ssh_command("lscpu | grep \"Socket\" | cut -f 2 -d \":\" | sed \"s# *##\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u8>()
+                    .unwrap_or(0),
+                packages
+            );
+
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
     fn test_large_vm() {
         test_block!(tb, "", {
             let mut clear = ClearDiskConfig::new();
