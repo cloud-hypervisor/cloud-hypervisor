@@ -107,6 +107,12 @@ impl MuxerRxQ {
         false
     }
 
+    /// Peek into the front of the queue.
+    ///
+    pub fn peek(&self) -> Option<MuxerRx> {
+        self.q.front().copied()
+    }
+
     /// Pop an RX item from the front of the queue.
     ///
     pub fn pop(&mut self) -> Option<MuxerRx> {
