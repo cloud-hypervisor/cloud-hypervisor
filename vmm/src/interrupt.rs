@@ -4,7 +4,6 @@
 //
 
 use devices::interrupt_controller::InterruptController;
-
 use std::collections::HashMap;
 use std::io;
 use std::mem::size_of;
@@ -118,7 +117,11 @@ pub trait MsiInterruptGroupOps {
 }
 
 pub trait RoutingEntryExt {
-    fn make_entry(gsi: u32, config: &InterruptSourceConfig) -> Result<Box<Self>>;
+    fn make_entry(
+        vm: &Arc<dyn hypervisor::Vm>,
+        gsi: u32,
+        config: &InterruptSourceConfig,
+    ) -> Result<Box<Self>>;
 }
 
 impl<E> MsiInterruptGroup<E> {
@@ -178,7 +181,7 @@ where
 
     fn update(&self, index: InterruptIndex, config: InterruptSourceConfig) -> Result<()> {
         if let Some(route) = self.irq_routes.get(&index) {
-            let entry = RoutingEntry::<_>::make_entry(route.gsi, &config)?;
+            let entry = RoutingEntry::<_>::make_entry(&self.vm, route.gsi, &config)?;
             self.gsi_msi_routes
                 .lock()
                 .unwrap()
@@ -353,6 +356,7 @@ where
 
 pub mod kvm {
     use super::*;
+    use hypervisor::kvm::KVM_MSI_VALID_DEVID;
     use hypervisor::kvm::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
 
     type KvmMsiInterruptGroup = MsiInterruptGroup<kvm_irq_routing_entry>;
@@ -360,7 +364,11 @@ pub mod kvm {
     pub type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
 
     impl RoutingEntryExt for KvmRoutingEntry {
-        fn make_entry(gsi: u32, config: &InterruptSourceConfig) -> Result<Box<Self>> {
+        fn make_entry(
+            vm: &Arc<dyn hypervisor::Vm>,
+            gsi: u32,
+            config: &InterruptSourceConfig,
+        ) -> Result<Box<Self>> {
             if let InterruptSourceConfig::MsiIrq(cfg) = &config {
                 let mut kvm_route = kvm_irq_routing_entry {
                     gsi,
@@ -371,6 +379,11 @@ pub mod kvm {
                 kvm_route.u.msi.address_lo = cfg.low_addr;
                 kvm_route.u.msi.address_hi = cfg.high_addr;
                 kvm_route.u.msi.data = cfg.data;
+
+                if vm.check_extension(hypervisor::Cap::MsiDevid) {
+                    kvm_route.flags = KVM_MSI_VALID_DEVID;
+                    kvm_route.u.msi.__bindgen_anon_1.devid = cfg.devid;
+                }
 
                 let kvm_entry = KvmRoutingEntry {
                     route: kvm_route,

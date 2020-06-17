@@ -344,6 +344,7 @@ impl Ioapic {
             high_addr: 0x0,
             low_addr,
             data,
+            devid: 0,
         };
 
         self.interrupt_source_group
