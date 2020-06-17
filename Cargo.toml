@@ -6,6 +6,9 @@ edition = "2018"
 default-run = "cloud-hypervisor"
 build = "build.rs"
 
+[profile.release]
+lto = true
+
 [dependencies]
 arc-swap = ">=0.4.4"
 clap = { version = "2.33.1", features=["wrap_help"] }
