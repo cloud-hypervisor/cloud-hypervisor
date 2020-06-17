@@ -80,8 +80,18 @@ mod tests {
         image_name: String,
     }
 
+    #[cfg(target_arch = "x86_64")]
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64";
+    #[cfg(target_arch = "x86_64")]
     const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom";
+    #[cfg(target_arch = "aarch64")]
+    const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64";
+    #[cfg(target_arch = "aarch64")]
+    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64";
+
+    #[cfg(target_arch = "aarch64")]
+    const ARM64_KERNEL_CMDLINE: &str =
+        "keep_bootcon console=hvc0 reboot=k panic=1 pci=off root=/dev/vdb1 rw";
 
     const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=ttyS0 console=hvc0 quiet rw";
 
@@ -2177,6 +2187,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_vmlinux_boot() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -2222,6 +2233,52 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_arch = "aarch64")]
+        fn test_aarch64_pe_boot() {
+            test_block!(tb, "", {
+                let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
+                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+
+                vec![
+                    &mut bionic as &mut dyn DiskConfig,
+                    &mut focal as &mut dyn DiskConfig,
+                ]
+                .iter_mut()
+                .for_each(|disk_config| {
+                    let guest = Guest::new(*disk_config);
+
+                    let mut workload_path = dirs::home_dir().unwrap();
+                    workload_path.push("workloads");
+
+                    let mut kernel_path = workload_path;
+                    kernel_path.push("Image");
+
+                    let mut child = GuestCommand::new(&guest)
+                        .args(&["--cpus", "boot=1"])
+                        .args(&["--memory", "size=512M"])
+                        .args(&["--kernel", kernel_path.to_str().unwrap()])
+                        .default_disks()
+                        .default_net()
+                        .args(&["--cmdline", ARM64_KERNEL_CMDLINE])
+                        .args(&["--seccomp", "false"])
+                        .spawn()
+                        .unwrap();
+
+                    thread::sleep(std::time::Duration::new(20, 0));
+
+                    aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
+                    aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
+                    aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
+
+                    let _ = child.kill();
+                    let _ = child.wait();
+                });
+                Ok(())
+            });
+        }
+
+        #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_pvh_boot() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -2267,6 +2324,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_bzimage_boot() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
