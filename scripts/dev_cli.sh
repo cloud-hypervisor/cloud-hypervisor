@@ -7,7 +7,7 @@
 CLI_NAME="Cloud Hypervisor"
 
 CTR_IMAGE_TAG="cloudhypervisor/dev"
-CTR_IMAGE_VERSION="v3"
+CTR_IMAGE_VERSION="v4"
 CTR_IMAGE="${CTR_IMAGE_TAG}:${CTR_IMAGE_VERSION}"
 
 DOCKER_RUNTIME="docker"
@@ -320,7 +320,7 @@ cmd_tests() {
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_integration_tests.sh "$@" || fix_dir_perms $? || exit $?
+	       ./scripts/run_integration_tests_$(uname -m).sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     fix_dir_perms $?
