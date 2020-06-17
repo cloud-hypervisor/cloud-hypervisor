@@ -1322,6 +1322,20 @@ impl Pausable for CpuManager {
             state.signal_thread();
         }
 
+        #[cfg(target_arch = "x86_64")]
+        for vcpu in self.vcpus.iter() {
+            vcpu.lock()
+                .unwrap()
+                .fd
+                .notify_guest_clock_paused()
+                .map_err(|e| {
+                    MigratableError::Pause(anyhow!(
+                        "Could not notify guest it has been paused {:?}",
+                        e
+                    ))
+                })?;
+        }
+
         Ok(())
     }
 
