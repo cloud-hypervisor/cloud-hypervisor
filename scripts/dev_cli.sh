@@ -210,7 +210,7 @@ cmd_build() {
 
     # A workaround on Arm64 to avoid build errors in kvm-bindings
     if [ $(uname -m) = "aarch64" ]; then
-        sed -i 's/"with-serde",\ //g' "$CLH_ROOT_DIR"/vmm/Cargo.toml
+        sed -i 's/"with-serde",\ //g' "$CLH_ROOT_DIR"/hypervisor/Cargo.toml
     fi
 
     $DOCKER_RUNTIME run \
