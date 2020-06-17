@@ -2615,6 +2615,7 @@ impl DeviceManager {
             msix_num,
             iommu_mapping_cb,
             interrupt_manager,
+            pci_device_bdf,
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 

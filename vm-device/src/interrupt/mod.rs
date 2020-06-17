@@ -83,6 +83,8 @@ pub struct MsiIrqSourceConfig {
     pub low_addr: u32,
     /// Data to write to delivery message signaled interrupt.
     pub data: u32,
+    /// Unique ID of the device to delivery message signaled interrupt.
+    pub devid: u32,
 }
 
 /// Configuration data for an interrupt source.

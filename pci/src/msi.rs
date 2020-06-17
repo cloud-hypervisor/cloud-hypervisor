@@ -201,6 +201,7 @@ impl MsiConfig {
                     high_addr: self.cap.msg_addr_hi,
                     low_addr: self.cap.msg_addr_lo,
                     data: self.cap.msg_data as u32,
+                    devid: 0,
                 };
 
                 if let Err(e) = self

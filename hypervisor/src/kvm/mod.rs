@@ -47,7 +47,7 @@ pub mod aarch64;
 pub use kvm_bindings;
 pub use kvm_bindings::{
     kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing, kvm_irq_routing_entry,
-    kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI, KVM_MEM_READONLY,
+    kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
 };
 pub use kvm_ioctls;
 pub use kvm_ioctls::{Cap, Kvm};

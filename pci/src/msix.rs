@@ -72,6 +72,7 @@ struct MsixConfigState {
 pub struct MsixConfig {
     pub table_entries: Vec<MsixTableEntry>,
     pub pba_entries: Vec<u64>,
+    pub devid: u32,
     interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
     masked: bool,
     enabled: bool,
@@ -81,6 +82,7 @@ impl MsixConfig {
     pub fn new(
         msix_vectors: u16,
         interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+        devid: u32,
     ) -> Self {
         assert!(msix_vectors <= MAX_MSIX_VECTORS_PER_DEVICE);
 
@@ -93,6 +95,7 @@ impl MsixConfig {
         MsixConfig {
             table_entries,
             pba_entries,
+            devid,
             interrupt_source_group,
             masked: false,
             enabled: false,
@@ -124,6 +127,7 @@ impl MsixConfig {
                     high_addr: table_entry.msg_addr_hi,
                     low_addr: table_entry.msg_addr_lo,
                     data: table_entry.msg_data,
+                    devid: self.devid,
                 };
 
                 self.interrupt_source_group
@@ -162,6 +166,7 @@ impl MsixConfig {
                         high_addr: table_entry.msg_addr_hi,
                         low_addr: table_entry.msg_addr_lo,
                         data: table_entry.msg_data,
+                        devid: self.devid,
                     };
 
                     if let Err(e) = self
@@ -306,6 +311,7 @@ impl MsixConfig {
                 high_addr: table_entry.msg_addr_hi,
                 low_addr: table_entry.msg_addr_lo,
                 data: table_entry.msg_data,
+                devid: self.devid,
             };
 
             if let Err(e) = self.interrupt_source_group.update(
