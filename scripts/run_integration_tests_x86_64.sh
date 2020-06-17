@@ -8,7 +8,7 @@ export BUILD_TARGET=${BUILD_TARGET-x86_64-unknown-linux-gnu}
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
 
-cp scripts/sha1sums $WORKLOADS_DIR
+cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
 
 FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
 FW="$WORKLOADS_DIR/hypervisor-fw"
@@ -80,7 +80,7 @@ if [ ! -f "$ALPINE_INITRAMFS_IMAGE" ]; then
 fi
 
 pushd $WORKLOADS_DIR
-sha1sum sha1sums --check
+sha1sum sha1sums-x86_64 --check
 if [ $? -ne 0 ]; then
     echo "sha1sum validation of images failed, remove invalid images to fix the issue."
     exit 1
@@ -98,7 +98,7 @@ if [ ! -f "$VMLINUX_IMAGE" ] || [ ! -f "$VMLINUX_PVH_IMAGE" ]; then
     SRCDIR=$PWD
     pushd $WORKLOADS_DIR
     time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu-virtio-mem-5.6-rc4" $LINUX_CUSTOM_DIR
-    cp $SRCDIR/resources/linux-config $LINUX_CUSTOM_DIR/.config
+    cp $SRCDIR/resources/linux-config-x86_64 $LINUX_CUSTOM_DIR/.config
     popd
 fi
 
