@@ -4629,6 +4629,9 @@ mod tests {
             // Wait for the VM to be restored
             thread::sleep(std::time::Duration::new(10, 0));
 
+            // Resume the VM
+            aver!(tb, remote_command(&api_socket, "resume", None));
+
             // Perform same checks to validate VM has been properly restored
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
             aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_968_000);
