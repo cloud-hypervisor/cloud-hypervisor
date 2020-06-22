@@ -11,7 +11,9 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::{CpuTopology, CpusConfig};
+#[cfg(target_arch = "x86_64")]
+use crate::config::CpuTopology;
+use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
