@@ -16,6 +16,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread;
 use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::{
     ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError,
@@ -277,6 +278,14 @@ impl NetCtrlEpollHandler {
         .unwrap();
 
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); CTRL_EVENT_COUNT];
+
+        // Before jumping into the epoll loop, check if the device is expected
+        // to be in a paused state. This is helpful for the restore code path
+        // as the device thread should not start processing anything before the
+        // device has been resumed.
+        while paused.load(Ordering::SeqCst) {
+            thread::park();
+        }
 
         'epoll: loop {
             let num_events = match epoll::wait(epoll_file.as_raw_fd(), -1, &mut events[..]) {
