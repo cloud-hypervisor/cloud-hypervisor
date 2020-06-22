@@ -790,28 +790,6 @@ impl CpuManager {
                     vcpu_thread_barrier.wait();
 
                     loop {
-                        // vcpu.run() returns false on a KVM_EXIT_SHUTDOWN (triple-fault) so trigger a reset
-                        match vcpu.lock().unwrap().run() {
-                            Err(e) => {
-                                error!("VCPU generated error: {:?}", e);
-                                break;
-                            }
-                            Ok(true) => {}
-                            Ok(false) => {
-                                vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                                reset_evt.write(1).unwrap();
-                                break;
-                            }
-                        }
-
-                        // We've been told to terminate
-                        if vcpu_kill_signalled.load(Ordering::SeqCst)
-                            || vcpu_kill.load(Ordering::SeqCst)
-                        {
-                            vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                            break;
-                        }
-
                         // If we are being told to pause, we park the thread
                         // until the pause boolean is toggled.
                         // The resume operation is responsible for toggling
@@ -825,6 +803,28 @@ impl CpuManager {
                                 thread::park();
                             }
                             vcpu_run_interrupted.store(false, Ordering::SeqCst);
+                        }
+
+                        // We've been told to terminate
+                        if vcpu_kill_signalled.load(Ordering::SeqCst)
+                            || vcpu_kill.load(Ordering::SeqCst)
+                        {
+                            vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                            break;
+                        }
+
+                        // vcpu.run() returns false on a KVM_EXIT_SHUTDOWN (triple-fault) so trigger a reset
+                        match vcpu.lock().unwrap().run() {
+                            Err(e) => {
+                                error!("VCPU generated error: {:?}", e);
+                                break;
+                            }
+                            Ok(true) => {}
+                            Ok(false) => {
+                                vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                                reset_evt.write(1).unwrap();
+                                break;
+                            }
                         }
 
                         // We've been told to terminate
@@ -1331,6 +1331,9 @@ impl Snapshottable for CpuManager {
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
         let vcpu_thread_barrier = Arc::new(Barrier::new((snapshot.snapshots.len() + 1) as usize));
+
+        // Restore the vCPUs in "paused" state.
+        self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
 
         for (cpu_id, snapshot) in snapshot.snapshots.iter() {
             debug!("Restoring VCPU {}", cpu_id);
