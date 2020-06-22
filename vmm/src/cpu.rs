@@ -586,6 +586,7 @@ impl VcpuState {
 }
 
 impl CpuManager {
+    #[allow(unused_variables)]
     pub fn new(
         config: &CpusConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,

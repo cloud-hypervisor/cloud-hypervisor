@@ -13,7 +13,6 @@ use kvm_bindings::{
     KVM_REG_ARM64_SYSREG_OP1_SHIFT, KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_ARM64_SYSREG_OP2_SHIFT,
     KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
 };
-use kvm_ioctls::VcpuFd;
 use std::sync::Arc;
 use std::{mem, result};
 use vm_memory::GuestMemoryMmap;
