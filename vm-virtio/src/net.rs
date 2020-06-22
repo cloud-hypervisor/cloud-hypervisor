@@ -323,6 +323,14 @@ impl NetEpollHandler {
 
         let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); NET_EVENTS_COUNT];
 
+        // Before jumping into the epoll loop, check if the device is expected
+        // to be in a paused state. This is helpful for the restore code path
+        // as the device thread should not start processing anything before the
+        // device has been resumed.
+        while paused.load(Ordering::SeqCst) {
+            thread::park();
+        }
+
         'epoll: loop {
             let num_events = match epoll::wait(epoll_file.as_raw_fd(), -1, &mut events[..]) {
                 Ok(res) => res,
