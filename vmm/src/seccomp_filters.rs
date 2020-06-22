@@ -261,6 +261,7 @@ pub fn vmm_thread_filter() -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_rt_sigreturn),
             allow_syscall(libc::SYS_sched_getaffinity),
             allow_syscall(libc::SYS_sendmsg),
+            allow_syscall(libc::SYS_sendto),
             allow_syscall(libc::SYS_set_robust_list),
             allow_syscall(libc::SYS_set_tid_address),
             allow_syscall(libc::SYS_sigaltstack),
