@@ -214,10 +214,10 @@ impl VmState {
     fn valid_transition(self, new_state: VmState) -> Result<()> {
         match self {
             VmState::Created => match new_state {
-                VmState::Created | VmState::Shutdown | VmState::Paused => {
+                VmState::Created | VmState::Shutdown => {
                     Err(Error::InvalidStateTransition(self, new_state))
                 }
-                VmState::Running => Ok(()),
+                VmState::Running | VmState::Paused => Ok(()),
             },
 
             VmState::Running => match new_state {
@@ -1181,7 +1181,7 @@ impl Snapshottable for Vm {
         let current_state = self
             .get_state()
             .map_err(|e| MigratableError::Restore(anyhow!("Could not get VM state: {:#?}", e)))?;
-        let new_state = VmState::Running;
+        let new_state = VmState::Paused;
         current_state.valid_transition(new_state).map_err(|e| {
             MigratableError::Restore(anyhow!("Could not restore VM state: {:#?}", e))
         })?;
@@ -1336,7 +1336,7 @@ mod tests {
                 assert!(state.valid_transition(VmState::Created).is_err());
                 assert!(state.valid_transition(VmState::Running).is_ok());
                 assert!(state.valid_transition(VmState::Shutdown).is_err());
-                assert!(state.valid_transition(VmState::Paused).is_err());
+                assert!(state.valid_transition(VmState::Paused).is_ok());
             }
             VmState::Running => {
                 // Check the transitions from Running
