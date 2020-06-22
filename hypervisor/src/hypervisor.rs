@@ -10,7 +10,7 @@
 use crate::vm::Vm;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::CpuId;
-
+#[cfg(target_arch = "x86_64")]
 use kvm_ioctls::Cap;
 use std::sync::Arc;
 

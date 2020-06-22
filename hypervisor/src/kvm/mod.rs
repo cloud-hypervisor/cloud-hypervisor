@@ -11,6 +11,7 @@
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use std::result;
 use std::sync::Arc;
+#[cfg(target_arch = "x86_64")]
 use vm_memory::Address;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -617,6 +618,7 @@ impl cpu::Vcpu for KvmVcpu {
 
         Ok(())
     }
+    #[allow(unused_variables)]
     #[cfg(target_arch = "aarch64")]
     fn set_cpu_state(&self, state: &CpuState) -> cpu::Result<()> {
         Ok(())
