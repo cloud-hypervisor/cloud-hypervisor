@@ -41,7 +41,7 @@ vm-memory = { version = "0.2.1", features = ["backend-mmap", "backend-atomic"] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = ">=0.5.0", features = ["with-serde"] }
-signal-hook = "0.1.15"
+signal-hook = "0.1.16"
 tempfile = "3.1.0"
 
 [dependencies.linux-loader]
