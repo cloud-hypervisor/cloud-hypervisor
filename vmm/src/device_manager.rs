@@ -564,16 +564,25 @@ impl DeviceRelocation for AddressManager {
             if bar_addr == new_base {
                 for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm_fd.unregister_ioevent(event, &io_addr).unwrap();
-                    /*
-                    map_err(io::Error::from_raw_os_error(
-                        hypervisor::HypervisorVmError::UnregisterIoEvent,
-                    ))?; */
+                    self.vm_fd
+                        .unregister_ioevent(event, &io_addr)
+                        .map_err(|e| {
+                            io::Error::new(
+                                io::ErrorKind::Other,
+                                format!("failed to unregister ioevent: {:?}", e),
+                            )
+                        })?;
                 }
                 for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm_fd.register_ioevent(event, &io_addr, None).unwrap();
-                    //.map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
+                    self.vm_fd
+                        .register_ioevent(event, &io_addr, None)
+                        .map_err(|e| {
+                            io::Error::new(
+                                io::ErrorKind::Other,
+                                format!("failed to register ioevent: {:?}", e),
+                            )
+                        })?;
                 }
             } else {
                 let virtio_dev = virtio_pci_dev.virtio_device();
@@ -589,8 +598,12 @@ impl DeviceRelocation for AddressManager {
                             flags: 0,
                         };
 
-                        self.vm_fd.set_user_memory_region(mem_region).unwrap();
-                        //.map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
+                        self.vm_fd.set_user_memory_region(mem_region).map_err(|e| {
+                            io::Error::new(
+                                io::ErrorKind::Other,
+                                format!("failed to set user memory region: {:?}", e),
+                            )
+                        })?;
 
                         // Create new mapping by inserting new region to KVM.
                         mem_region.guest_phys_addr = new_base;
