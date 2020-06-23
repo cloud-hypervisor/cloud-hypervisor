@@ -30,7 +30,7 @@ use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 use vm_virtio::net_util::{open_tap, RxVirtio, TxVirtio};
-use vm_virtio::NetQueuePair;
+use vm_virtio::{NetCounters, NetQueuePair};
 use vmm::config::{OptionParser, OptionParserError};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -111,6 +111,7 @@ impl VhostUserNetThread {
                 tx: TxVirtio::new(),
                 rx_tap_listening: false,
                 epoll_fd: None,
+                counters: NetCounters::default(),
             },
         })
     }
