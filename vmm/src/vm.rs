@@ -31,7 +31,7 @@ use crate::config::{
 use crate::cpu;
 use crate::device_manager::{self, get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
-use crate::migration::{url_to_path, vm_config_from_snapshot, VM_SNAPSHOT_FILE};
+use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
 use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
 };
@@ -256,9 +256,14 @@ pub struct Vm {
     state: RwLock<VmState>,
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     memory_manager: Arc<Mutex<MemoryManager>>,
+    #[cfg(target_arch = "x86_64")]
+    vm_fd: Arc<dyn hypervisor::Vm>,
+    #[cfg(target_arch = "x86_64")]
+    saved_clock: Option<hypervisor::ClockData>,
 }
 
 impl Vm {
+    #[allow(clippy::too_many_arguments)]
     fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -267,6 +272,7 @@ impl Vm {
         reset_evt: EventFd,
         vmm_path: PathBuf,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
+        _saved_clock: Option<hypervisor::ClockData>,
     ) -> Result<Self> {
         config
             .lock()
@@ -288,7 +294,7 @@ impl Vm {
             &config.lock().unwrap().cpus.clone(),
             &device_manager,
             memory_manager.lock().unwrap().guest_memory(),
-            fd,
+            fd.clone(),
             reset_evt,
             hypervisor,
         )
@@ -318,6 +324,10 @@ impl Vm {
             state: RwLock::new(VmState::Created),
             cpu_manager,
             memory_manager,
+            #[cfg(target_arch = "x86_64")]
+            vm_fd: fd,
+            #[cfg(target_arch = "x86_64")]
+            saved_clock: _saved_clock,
         })
     }
 
@@ -349,6 +359,7 @@ impl Vm {
             reset_evt,
             vmm_path,
             hypervisor,
+            None,
         )?;
 
         // The device manager must create the devices from here as it is part
@@ -376,7 +387,8 @@ impl Vm {
         let fd = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
         fd.enable_split_irq().unwrap();
-        let config = vm_config_from_snapshot(snapshot).map_err(Error::Restore)?;
+        let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
+        let config = vm_snapshot.config.clone();
 
         let memory_manager = if let Some(memory_manager_snapshot) =
             snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
@@ -403,6 +415,10 @@ impl Vm {
             reset_evt,
             vmm_path,
             hypervisor,
+            #[cfg(target_arch = "x86_64")]
+            vm_snapshot.clock,
+            #[cfg(target_arch = "aarch64")]
+            None,
         )
     }
 
@@ -1112,6 +1128,16 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {:?}", e)))?;
 
+        #[cfg(target_arch = "x86_64")]
+        {
+            let mut clock = self
+                .vm_fd
+                .get_clock()
+                .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {}", e)))?;
+            // Reset clock flags.
+            clock.flags = 0;
+            self.saved_clock = Some(clock);
+        }
         self.cpu_manager.lock().unwrap().pause()?;
         self.device_manager.lock().unwrap().pause()?;
 
@@ -1129,10 +1155,18 @@ impl Pausable for Vm {
 
         state
             .valid_transition(new_state)
-            .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {:?}", e)))?;
+            .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {:?}", e)))?;
 
         self.device_manager.lock().unwrap().resume()?;
         self.cpu_manager.lock().unwrap().resume()?;
+        #[cfg(target_arch = "x86_64")]
+        {
+            if let Some(clock) = &self.saved_clock {
+                self.vm_fd.set_clock(clock).map_err(|e| {
+                    MigratableError::Resume(anyhow!("Could not set VM clock: {}", e))
+                })?;
+            }
+        }
 
         // And we're back to the Running state.
         *state = new_state;
@@ -1144,6 +1178,8 @@ impl Pausable for Vm {
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
     pub config: Arc<Mutex<VmConfig>>,
+    #[cfg(target_arch = "x86_64")]
+    pub clock: Option<hypervisor::ClockData>,
 }
 
 pub const VM_SNAPSHOT_ID: &str = "vm";
@@ -1163,6 +1199,8 @@ impl Snapshottable for Vm {
         let mut vm_snapshot = Snapshot::new(VM_SNAPSHOT_ID);
         let vm_snapshot_data = serde_json::to_vec(&VmSnapshot {
             config: self.get_config(),
+            #[cfg(target_arch = "x86_64")]
+            clock: self.saved_clock,
         })
         .map_err(|e| MigratableError::Snapshot(e.into()))?;
 

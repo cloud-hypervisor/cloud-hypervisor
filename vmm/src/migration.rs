@@ -2,13 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::config::VmConfig;
 use crate::vm::{VmSnapshot, VM_SNAPSHOT_ID};
 use anyhow::anyhow;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use url::Url;
 use vm_migration::{MigratableError, Snapshot};
 
@@ -63,19 +61,14 @@ pub fn recv_vm_snapshot(source_url: &str) -> std::result::Result<Snapshot, Migra
     }
 }
 
-pub fn vm_config_from_snapshot(
-    snapshot: &Snapshot,
-) -> std::result::Result<Arc<Mutex<VmConfig>>, MigratableError> {
+pub fn get_vm_snapshot(snapshot: &Snapshot) -> std::result::Result<VmSnapshot, MigratableError> {
     if let Some(vm_section) = snapshot
         .snapshot_data
         .get(&format!("{}-section", VM_SNAPSHOT_ID))
     {
-        let vm_snapshot: VmSnapshot =
-            serde_json::from_slice(&vm_section.snapshot).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not deserialize VM snapshot {}", e))
-            })?;
-
-        return Ok(vm_snapshot.config);
+        return serde_json::from_slice(&vm_section.snapshot).map_err(|e| {
+            MigratableError::Restore(anyhow!("Could not deserialize VM snapshot {}", e))
+        });
     }
 
     Err(MigratableError::Restore(anyhow!(
