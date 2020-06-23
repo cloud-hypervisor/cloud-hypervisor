@@ -525,6 +525,16 @@ impl cpu::Vcpu for KvmVcpu {
             .get_vcpu_events()
             .map_err(|e| cpu::HypervisorCpuError::GetVcpuEvents(e.into()))
     }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Let the guest know that it has been paused, which prevents from
+    /// potential soft lockups when being resumed.
+    ///
+    fn notify_guest_clock_paused(&self) -> cpu::Result<()> {
+        self.fd
+            .kvmclock_ctrl()
+            .map_err(|e| cpu::HypervisorCpuError::NotifyGuestClockPaused(e.into()))
+    }
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
     fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
         self.fd
