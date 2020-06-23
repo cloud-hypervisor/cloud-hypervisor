@@ -750,6 +750,7 @@ impl CpuManager {
         Ok(vcpu_clone)
     }
 
+    /// Only create new vCPUs if there aren't any inactive ones to reuse
     fn create_vcpus(&mut self, desired_vcpus: u8, entry_point: Option<EntryPoint>) -> Result<()> {
         info!(
             "Request to create new vCPUs: desired = {}, max = {}, allocated = {}, present = {}",
@@ -763,7 +764,8 @@ impl CpuManager {
             return Err(Error::DesiredVCPUCountExceedsMax);
         }
 
-        for cpu_id in self.present_vcpus()..desired_vcpus {
+        // Only create vCPUs in excess of all the allocated vCPUs.
+        for cpu_id in self.vcpus.len() as u8..desired_vcpus {
             let vcpu = self.create_vcpu(cpu_id, entry_point, None)?;
             self.vcpus.push(vcpu);
         }
@@ -859,6 +861,7 @@ impl CpuManager {
         Ok(())
     }
 
+    /// Start up as many vCPUs threads as needed to reach `desired_vcpus`
     fn activate_vcpus(&mut self, desired_vcpus: u8, inserting: bool) -> Result<()> {
         if desired_vcpus > self.config.max_vcpus {
             return Err(Error::DesiredVCPUCountExceedsMax);
@@ -875,6 +878,7 @@ impl CpuManager {
             self.present_vcpus()
         );
 
+        // This reuses any inactive vCPUs as well as any that were newly created
         for cpu_id in self.present_vcpus()..desired_vcpus {
             let vcpu = Arc::clone(&self.vcpus[cpu_id as usize]);
             self.start_vcpu(vcpu, vcpu_thread_barrier.clone(), inserting)?;

@@ -3775,6 +3775,19 @@ mod tests {
                 u32::from(desired_vcpus)
             );
 
+            // Resize the VM back up to 4
+            let desired_vcpus = 4;
+            resize_command(&api_socket, Some(desired_vcpus), None);
+
+            guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu2/online")?;
+            guest.ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu3/online")?;
+            thread::sleep(std::time::Duration::new(10, 0));
+            aver_eq!(
+                tb,
+                guest.get_cpu_count().unwrap_or_default(),
+                u32::from(desired_vcpus)
+            );
+
             let _ = child.kill();
             let _ = child.wait();
             Ok(())
