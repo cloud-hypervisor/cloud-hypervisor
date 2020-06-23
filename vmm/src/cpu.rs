@@ -900,6 +900,10 @@ impl CpuManager {
         state.signal_thread();
         state.join_thread()?;
         state.handle = None;
+
+        // Once the thread has exited, clear the "kill" so that it can reused
+        state.kill.store(false, Ordering::SeqCst);
+
         Ok(())
     }
 
