@@ -692,6 +692,8 @@ impl CpuManager {
         entry_point: Option<EntryPoint>,
         snapshot: Option<Snapshot>,
     ) -> Result<Arc<Mutex<Vcpu>>> {
+        info!("Creating vCPU: cpu_id = {}", cpu_id);
+
         let interrupt_controller = if let Some(interrupt_controller) = &self.interrupt_controller {
             Some(interrupt_controller.clone())
         } else {
@@ -749,6 +751,14 @@ impl CpuManager {
     }
 
     fn create_vcpus(&mut self, desired_vcpus: u8, entry_point: Option<EntryPoint>) -> Result<()> {
+        info!(
+            "Request to create new vCPUs: desired = {}, max = {}, allocated = {}, present = {}",
+            desired_vcpus,
+            self.config.max_vcpus,
+            self.vcpus.len(),
+            self.present_vcpus()
+        );
+
         if desired_vcpus > self.config.max_vcpus {
             return Err(Error::DesiredVCPUCountExceedsMax);
         }
@@ -776,6 +786,8 @@ impl CpuManager {
         let vcpu_run_interrupted = self.vcpu_states[usize::from(cpu_id)]
             .vcpu_run_interrupted
             .clone();
+
+        info!("Starting vCPU: cpu_id = {}", cpu_id);
 
         let handle = Some(
             thread::Builder::new()
@@ -856,6 +868,13 @@ impl CpuManager {
             (desired_vcpus - self.present_vcpus() + 1) as usize,
         ));
 
+        info!(
+            "Starting vCPUs: desired = {}, allocated = {}, present = {}",
+            desired_vcpus,
+            self.vcpus.len(),
+            self.present_vcpus()
+        );
+
         for cpu_id in self.present_vcpus()..desired_vcpus {
             let vcpu = Arc::clone(&self.vcpus[cpu_id as usize]);
             self.start_vcpu(vcpu, vcpu_thread_barrier.clone(), inserting)?;
@@ -875,6 +894,7 @@ impl CpuManager {
     }
 
     fn remove_vcpu(&mut self, cpu_id: u8) -> Result<()> {
+        info!("Removing vCPU: cpu_id = {}", cpu_id);
         let mut state = &mut self.vcpu_states[usize::from(cpu_id)];
         state.kill.store(true, Ordering::SeqCst);
         state.signal_thread();
