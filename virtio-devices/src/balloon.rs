@@ -410,10 +410,11 @@ pub struct Balloon {
 
 impl Balloon {
     // Create a new virtio-balloon.
-    pub fn new(id: String) -> io::Result<Self> {
+    pub fn new(id: String, size: u64) -> io::Result<Self> {
         let avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
-        let config = VirtioBalloonConfig::default();
+        let mut config = VirtioBalloonConfig::default();
+        config.num_pages = (size >> PAGE_SHIFT) as u32;
 
         Ok(Balloon {
             id,

@@ -738,7 +738,10 @@ impl Vm {
         }
 
         if let Some(desired_ram_w_balloon) = desired_ram_w_balloon {
-            self.memory_manager
+            // update the configuration value for the balloon size to ensure
+            // a reboot would use the right value.
+            self.config.lock().unwrap().memory.balloon_size = self
+                .memory_manager
                 .lock()
                 .unwrap()
                 .balloon_resize(desired_ram_w_balloon)
