@@ -24,9 +24,10 @@ use std::fs::File;
 use std::io::Read;
 use std::io::{self, Write};
 use std::net::Ipv4Addr;
+use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::result;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::vec::Vec;
@@ -54,6 +55,7 @@ pub struct NetQueuePair {
     pub tx: TxVirtio,
     pub epoll_fd: Option<RawFd>,
     pub rx_tap_listening: bool,
+    pub counters: NetCounters,
 }
 
 impl NetQueuePair {
@@ -112,6 +114,19 @@ impl NetQueuePair {
                 }
             }
         }
+
+        // Consume the counters from the Rx/Tx queues and accumulate into
+        // the counters for the device as whole. This consumption is needed
+        // to handle MQ.
+        self.counters
+            .rx_bytes
+            .fetch_add(self.rx.counter_bytes.0, Ordering::AcqRel);
+        self.counters
+            .rx_frames
+            .fetch_add(self.rx.counter_frames.0, Ordering::AcqRel);
+        self.rx.counter_bytes = Wrapping(0);
+        self.rx.counter_frames = Wrapping(0);
+
         if self.rx.deferred_irqs {
             self.rx.deferred_irqs = false;
             let mem = self
@@ -166,6 +181,16 @@ impl NetQueuePair {
             .ok_or(DeviceError::NoMemoryConfigured)
             .map(|m| m.memory())?;
         self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
+
+        self.counters
+            .tx_bytes
+            .fetch_add(self.tx.counter_bytes.0, Ordering::AcqRel);
+        self.counters
+            .tx_frames
+            .fetch_add(self.tx.counter_frames.0, Ordering::AcqRel);
+        self.tx.counter_bytes = Wrapping(0);
+        self.tx.counter_frames = Wrapping(0);
+
         Ok(queue.needs_notification(&mem, queue.next_used))
     }
 
@@ -390,6 +415,14 @@ impl NetEpollHandler {
     }
 }
 
+#[derive(Default, Clone)]
+pub struct NetCounters {
+    tx_bytes: Arc<AtomicU64>,
+    tx_frames: Arc<AtomicU64>,
+    rx_bytes: Arc<AtomicU64>,
+    rx_frames: Arc<AtomicU64>,
+}
+
 pub struct Net {
     id: String,
     kill_evt: Option<EventFd>,
@@ -404,6 +437,7 @@ pub struct Net {
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
     paused: Arc<AtomicBool>,
     queue_size: Vec<u16>,
+    counters: NetCounters,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -461,6 +495,7 @@ impl Net {
             ctrl_queue_epoll_thread: None,
             paused: Arc::new(AtomicBool::new(false)),
             queue_size: vec![queue_size; queue_num],
+            counters: NetCounters::default(),
         })
     }
 
@@ -661,6 +696,7 @@ impl VirtioDevice for Net {
                         tx,
                         epoll_fd: None,
                         rx_tap_listening,
+                        counters: self.counters.clone(),
                     },
                     interrupt_cb: interrupt_cb.clone(),
                     kill_evt: kill_evt.try_clone().unwrap(),

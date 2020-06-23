@@ -12,6 +12,7 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::mem;
 use std::net::Ipv4Addr;
+use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -340,6 +341,8 @@ impl NetCtrlEpollHandler {
 pub struct TxVirtio {
     pub iovec: Vec<(GuestAddress, usize)>,
     pub frame_buf: [u8; MAX_BUFFER_SIZE],
+    pub counter_bytes: Wrapping<u64>,
+    pub counter_frames: Wrapping<u64>,
 }
 
 impl Default for TxVirtio {
@@ -353,6 +356,8 @@ impl TxVirtio {
         TxVirtio {
             iovec: Vec::new(),
             frame_buf: [0u8; MAX_BUFFER_SIZE],
+            counter_bytes: Wrapping(0),
+            counter_frames: Wrapping(0),
         }
     }
 
@@ -400,6 +405,10 @@ impl TxVirtio {
                     println!("net: tx: error failed to write to tap: {}", e);
                 }
             };
+
+            self.counter_bytes += Wrapping((read_count - vnet_hdr_len()) as u64);
+            self.counter_frames += Wrapping(1);
+
             queue.add_used(&mem, head_index, 0);
             queue.update_avail_event(&mem);
         }
@@ -412,6 +421,8 @@ pub struct RxVirtio {
     pub deferred_irqs: bool,
     pub bytes_read: usize,
     pub frame_buf: [u8; MAX_BUFFER_SIZE],
+    pub counter_bytes: Wrapping<u64>,
+    pub counter_frames: Wrapping<u64>,
 }
 
 impl Default for RxVirtio {
@@ -427,6 +438,8 @@ impl RxVirtio {
             deferred_irqs: false,
             bytes_read: 0,
             frame_buf: [0u8; MAX_BUFFER_SIZE],
+            counter_bytes: Wrapping(0),
+            counter_frames: Wrapping(0),
         }
     }
 
@@ -471,6 +484,9 @@ impl RxVirtio {
                 }
             }
         }
+
+        self.counter_bytes += Wrapping((write_count - vnet_hdr_len()) as u64);
+        self.counter_frames += Wrapping(1);
 
         queue.add_used(&mem, head_index, write_count as u32);
         queue.update_avail_event(&mem);
