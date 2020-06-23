@@ -108,19 +108,19 @@ pub struct KvmRoutingEntry {
     masked: bool,
 }
 
-pub struct MsiInterruptGroup {
+pub struct KvmMsiInterruptGroup {
     vm_fd: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
 }
 
-impl MsiInterruptGroup {
+impl KvmMsiInterruptGroup {
     fn new(
         vm_fd: Arc<dyn hypervisor::Vm>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
         irq_routes: HashMap<InterruptIndex, InterruptRoute>,
     ) -> Self {
-        MsiInterruptGroup {
+        KvmMsiInterruptGroup {
             vm_fd,
             gsi_msi_routes,
             irq_routes,
@@ -179,7 +179,7 @@ impl MsiInterruptGroup {
     }
 }
 
-impl InterruptSourceGroup for MsiInterruptGroup {
+impl InterruptSourceGroup for KvmMsiInterruptGroup {
     fn enable(&self) -> Result<()> {
         for (_, route) in self.irq_routes.iter() {
             route.enable(&self.vm_fd)?;
@@ -372,7 +372,7 @@ impl InterruptManager for KvmMsiInterruptManager {
             irq_routes.insert(i, InterruptRoute::new(&mut allocator)?);
         }
 
-        Ok(Arc::new(Box::new(MsiInterruptGroup::new(
+        Ok(Arc::new(Box::new(KvmMsiInterruptGroup::new(
             self.vm_fd.clone(),
             self.gsi_msi_routes.clone(),
             irq_routes,
