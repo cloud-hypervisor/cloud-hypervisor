@@ -44,13 +44,13 @@ fn vec_with_size_in_bytes<T: Default>(size_in_bytes: usize) -> Vec<T> {
 // for `Foo`, a `Vec<Foo>` is created. Only the first element of `Vec<Foo>` would actually be used
 // as a `Foo`. The remaining memory in the `Vec<Foo>` is for `entries`, which must be contiguous
 // with `Foo`. This function is used to make the `Vec<Foo>` with enough space for `count` entries.
-pub fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
+fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
     let element_space = count * size_of::<F>();
     let vec_size_bytes = size_of::<T>() + element_space;
     vec_with_size_in_bytes(vec_size_bytes)
 }
 
-pub struct InterruptRoute {
+struct InterruptRoute {
     pub gsi: u32,
     pub irq_fd: EventFd,
     registered: AtomicBool,
@@ -108,7 +108,7 @@ pub struct KvmRoutingEntry {
     masked: bool,
 }
 
-pub struct KvmMsiInterruptGroup {
+struct KvmMsiInterruptGroup {
     vm_fd: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
