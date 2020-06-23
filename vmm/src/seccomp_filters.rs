@@ -59,6 +59,7 @@ const KVM_SET_CPUID2: u64 = 0x4008_ae90;
 const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
 const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
 const KVM_IRQFD: u64 = 0x4020_ae76;
+const KVM_SET_CLOCK: u64 = 0x4030_ae7b;
 const KVM_CREATE_PIT2: u64 = 0x4040_ae77;
 const KVM_IOEVENTFD: u64 = 0x4040_ae79;
 const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
@@ -69,6 +70,7 @@ const KVM_SET_FPU: u64 = 0x41a0_ae8d;
 const KVM_SET_LAPIC: u64 = 0x4400_ae8f;
 const KVM_SET_XSAVE: u64 = 0x5000_aea5;
 const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
+const KVM_GET_CLOCK: u64 = 0x8030_ae7c;
 const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
 const KVM_GET_REGS: u64 = 0x8090_ae81;
 const KVM_GET_SREGS: u64 = 0x8138_ae83;
@@ -123,6 +125,7 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_VM)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_ENABLE_CAP)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_API_VERSION,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_CLOCK,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_FPU)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_LAPIC)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MP_STATE)?],
@@ -137,6 +140,7 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IOEVENTFD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IRQFD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_RUN)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_CLOCK)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_CPUID2)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_DEVICE_ATTR,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_FPU)?],
