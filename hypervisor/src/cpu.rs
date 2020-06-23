@@ -139,6 +139,11 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to init vcpu: {0}")]
     GetOneReg(#[source] anyhow::Error),
+    ///
+    /// Getting guest clock paused error
+    ///
+    #[error("Failed to notify guest its clock was paused: {0}")]
+    NotifyGuestClockPaused(#[source] anyhow::Error),
 }
 
 ///
@@ -248,6 +253,12 @@ pub trait Vcpu: Send + Sync {
     /// states of the vcpu.
     ///
     fn get_vcpu_events(&self) -> Result<VcpuEvents>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Let the guest know that it has been paused, which prevents from
+    /// potential soft lockups when being resumed.
+    ///
+    fn notify_guest_clock_paused(&self) -> Result<()>;
     ///
     /// Sets the type of CPU to be exposed to the guest and optional features.
     ///
