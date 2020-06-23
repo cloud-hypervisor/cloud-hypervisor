@@ -340,6 +340,8 @@ pub struct MemoryConfig {
     pub hugepages: bool,
     #[serde(default)]
     pub balloon: bool,
+    #[serde(default)]
+    pub balloon_size: u64,
 }
 
 impl MemoryConfig {
@@ -400,6 +402,7 @@ impl MemoryConfig {
             shared,
             hugepages,
             balloon,
+            balloon_size: 0,
         })
     }
 }
@@ -415,6 +418,7 @@ impl Default for MemoryConfig {
             shared: false,
             hugepages: false,
             balloon: false,
+            balloon_size: 0,
         }
     }
 }
@@ -1873,6 +1877,7 @@ mod tests {
                 shared: false,
                 hugepages: false,
                 balloon: false,
+                balloon_size: 0,
             },
             kernel: Some(KernelConfig {
                 path: PathBuf::from("/path/to/kernel"),

@@ -799,13 +799,12 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn balloon_resize(&mut self, expected_ram: u64) -> Result<(), Error> {
+    pub fn balloon_resize(&mut self, expected_ram: u64) -> Result<u64, Error> {
+        let mut balloon_size = 0;
         if let Some(balloon) = &self.balloon {
-            let balloon_size = if expected_ram < self.current_ram {
-                self.current_ram - expected_ram
-            } else {
-                0
-            };
+            if expected_ram < self.current_ram {
+                balloon_size = self.current_ram - expected_ram;
+            }
             balloon
                 .lock()
                 .unwrap()
@@ -813,7 +812,7 @@ impl MemoryManager {
                 .map_err(Error::VirtioBalloonResizeFail)?;
         }
 
-        Ok(())
+        Ok(balloon_size)
     }
 
     /// In case this function resulted in adding a new memory region to the

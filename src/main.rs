@@ -503,6 +503,7 @@ mod unit_tests {
                     shared: false,
                     hugepages: false,
                     balloon: false,
+                    balloon_size: 0,
                 },
                 kernel: Some(KernelConfig {
                     path: PathBuf::from("/path/to/kernel"),
