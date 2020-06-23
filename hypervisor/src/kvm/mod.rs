@@ -57,8 +57,8 @@ pub use kvm_ioctls::{Cap, Kvm};
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_create_device as CreateDevice, kvm_bindings::kvm_irq_routing as IrqRouting,
-    kvm_bindings::kvm_mp_state as MpState,
+    kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
+    kvm_bindings::kvm_irq_routing as IrqRouting, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_userspace_memory_region as MemoryRegion,
     kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
     kvm_ioctls::VcpuExit,
@@ -210,6 +210,20 @@ impl vm::Vm for KvmVm {
             .enable_cap(&cap)
             .map_err(|e| vm::HypervisorVmError::EnableSplitIrq(e.into()))?;
         Ok(())
+    }
+    /// Retrieve guest clock.
+    #[cfg(target_arch = "x86_64")]
+    fn get_clock(&self) -> vm::Result<ClockData> {
+        self.fd
+            .get_clock()
+            .map_err(|e| vm::HypervisorVmError::GetClock(e.into()))
+    }
+    /// Set guest clock.
+    #[cfg(target_arch = "x86_64")]
+    fn set_clock(&self, data: &ClockData) -> vm::Result<()> {
+        self.fd
+            .set_clock(data)
+            .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))
     }
 }
 /// Wrapper over KVM system ioctls.

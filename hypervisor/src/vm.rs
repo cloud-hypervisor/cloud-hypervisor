@@ -11,6 +11,8 @@
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::VcpuInit;
 use crate::cpu::Vcpu;
+#[cfg(target_arch = "x86_64")]
+use crate::ClockData;
 use crate::{CreateDevice, DeviceFd, IoEventAddress, IrqRouting, MemoryRegion};
 use std::sync::Arc;
 use thiserror::Error;
@@ -97,6 +99,16 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to enable split Irq: {0}")]
     EnableSplitIrq(#[source] anyhow::Error),
+    ///
+    /// Get clock error
+    ///
+    #[error("Failed to get clock: {0}")]
+    GetClock(#[source] anyhow::Error),
+    ///
+    /// Set clock error
+    ///
+    #[error("Failed to set clock: {0}")]
+    SetClock(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -141,4 +153,10 @@ pub trait Vm: Send + Sync {
     /// Enable split Irq capability
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> Result<()>;
+    /// Retrieve guest clock.
+    #[cfg(target_arch = "x86_64")]
+    fn get_clock(&self) -> Result<ClockData>;
+    /// Set guest clock.
+    #[cfg(target_arch = "x86_64")]
+    fn set_clock(&self, data: &ClockData) -> Result<()>;
 }
