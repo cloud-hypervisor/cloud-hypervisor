@@ -4684,4 +4684,85 @@ mod tests {
             Ok(())
         });
     }
+
+    #[derive(PartialEq, PartialOrd)]
+    struct Counters {
+        rx_bytes: u64,
+        rx_frames: u64,
+        tx_bytes: u64,
+        tx_frames: u64,
+        read_bytes: u64,
+        write_bytes: u64,
+        read_ops: u64,
+        write_ops: u64,
+    }
+
+    fn get_counters(api_socket: &str) -> Counters {
+        // Get counters
+        let (cmd_success, cmd_output) = remote_command_w_output(&api_socket, "counters", None);
+        assert!(cmd_success);
+
+        let counters: HashMap<&str, HashMap<&str, u64>> =
+            serde_json::from_slice(&cmd_output).unwrap_or_default();
+
+        let rx_bytes = *counters.get("_net2").unwrap().get("rx_bytes").unwrap();
+        let rx_frames = *counters.get("_net2").unwrap().get("rx_frames").unwrap();
+        let tx_bytes = *counters.get("_net2").unwrap().get("tx_bytes").unwrap();
+        let tx_frames = *counters.get("_net2").unwrap().get("tx_frames").unwrap();
+
+        let read_bytes = *counters.get("_disk0").unwrap().get("read_bytes").unwrap();
+        let write_bytes = *counters.get("_disk0").unwrap().get("write_bytes").unwrap();
+        let read_ops = *counters.get("_disk0").unwrap().get("read_ops").unwrap();
+        let write_ops = *counters.get("_disk0").unwrap().get("write_ops").unwrap();
+
+        Counters {
+            rx_bytes,
+            rx_frames,
+            tx_bytes,
+            tx_frames,
+            read_bytes,
+            read_ops,
+            write_bytes,
+            write_ops,
+        }
+    }
+
+    #[cfg_attr(not(feature = "mmio"), test)]
+    fn test_counters() {
+        test_block!(tb, "", {
+            let mut clear = ClearDiskConfig::new();
+            let guest = Guest::new(&mut clear);
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .default_disks()
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--api-socket", &api_socket])
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            let orig_counters = get_counters(&api_socket);
+
+            aver!(
+                tb,
+                guest
+                    .ssh_command("dd if=/dev/zero of=test count=8 bs=1M")
+                    .is_ok()
+            );
+
+            let new_counters = get_counters(&api_socket);
+
+            // Check that all the counters have increased
+            aver!(tb, new_counters > orig_counters);
+
+            let _ = child.kill();
+            let _ = child.wait();
+            Ok(())
+        });
+    }
 }
