@@ -51,6 +51,7 @@ fn vuf_filter(action: SeccompAction) -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_exit_group),
             allow_syscall(libc::SYS_fallocate),
             allow_syscall(libc::SYS_fchdir),
+            allow_syscall(libc::SYS_fchmod),
             allow_syscall(libc::SYS_fchmodat),
             allow_syscall(libc::SYS_fchownat),
             allow_syscall(libc::SYS_fcntl),
