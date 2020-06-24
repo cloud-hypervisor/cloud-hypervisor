@@ -1446,7 +1446,7 @@ pub fn test_vm() {
     let vm_fd = hv.create_vm().expect("new VM fd creation failed");
 
     mem.with_regions(|index, region| {
-        let mem_region = hypervisor::kvm_userspace_memory_region {
+        let mem_region = hypervisor::MemoryRegion {
             slot: index as u32,
             guest_phys_addr: region.start_addr().raw_value(),
             memory_size: region.len() as u64,

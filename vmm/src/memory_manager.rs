@@ -13,8 +13,6 @@ use arch::{get_host_cpu_phys_bits, layout, RegionType};
 use devices::ioapic;
 use devices::BusDevice;
 
-use hypervisor::kvm::{kvm_userspace_memory_region, KVM_MEM_READONLY};
-
 use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
@@ -678,12 +676,16 @@ impl MemoryManager {
         readonly: bool,
     ) -> Result<u32, Error> {
         let slot = self.allocate_kvm_memory_slot();
-        let mem_region = kvm_userspace_memory_region {
+        let mem_region = hypervisor::MemoryRegion {
             slot,
             guest_phys_addr,
             memory_size,
             userspace_addr,
-            flags: if readonly { KVM_MEM_READONLY } else { 0 },
+            flags: if readonly {
+                hypervisor::kvm::KVM_MEM_READONLY
+            } else {
+                0
+            },
         };
 
         self.fd
@@ -731,7 +733,7 @@ impl MemoryManager {
         mergeable: bool,
         slot: u32,
     ) -> Result<(), Error> {
-        let mem_region = kvm_userspace_memory_region {
+        let mem_region = hypervisor::MemoryRegion {
             slot,
             guest_phys_addr,
             memory_size: 0,
