@@ -124,28 +124,40 @@ pub trait EndpointHandler: Sync + Send {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
     ) -> Response {
-        match req.method() {
-            Method::Put => match self.put_handler(api_notifier, api_sender, &req.body) {
-                Ok(response_body) => {
-                    if let Some(body) = response_body {
-                        let mut response = Response::new(Version::Http11, StatusCode::OK);
-                        response.set_body(body);
-                        response
-                    } else {
-                        Response::new(Version::Http11, StatusCode::NoContent)
-                    }
+        let res = match req.method() {
+            Method::Put => self.put_handler(api_notifier, api_sender, &req.body),
+            Method::Get => self.get_handler(api_notifier, api_sender, &req.body),
+            _ => return Response::new(Version::Http11, StatusCode::BadRequest),
+        };
+
+        match res {
+            Ok(response_body) => {
+                if let Some(body) = response_body {
+                    let mut response = Response::new(Version::Http11, StatusCode::OK);
+                    response.set_body(body);
+                    response
+                } else {
+                    Response::new(Version::Http11, StatusCode::NoContent)
                 }
-                Err(e @ HttpError::BadRequest) => error_response(e, StatusCode::BadRequest),
-                Err(e @ HttpError::SerdeJsonDeserialize(_)) => {
-                    error_response(e, StatusCode::BadRequest)
-                }
-                Err(e) => error_response(e, StatusCode::InternalServerError),
-            },
-            _ => Response::new(Version::Http11, StatusCode::BadRequest),
+            }
+            Err(e @ HttpError::BadRequest) => error_response(e, StatusCode::BadRequest),
+            Err(e @ HttpError::SerdeJsonDeserialize(_)) => {
+                error_response(e, StatusCode::BadRequest)
+            }
+            Err(e) => error_response(e, StatusCode::InternalServerError),
         }
     }
 
     fn put_handler(
+        &self,
+        _api_notifier: EventFd,
+        _api_sender: Sender<ApiRequest>,
+        _body: &Option<Body>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        Err(HttpError::BadRequest)
+    }
+
+    fn get_handler(
         &self,
         _api_notifier: EventFd,
         _api_sender: Sender<ApiRequest>,
