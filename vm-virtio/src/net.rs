@@ -20,6 +20,7 @@ use libc::EAGAIN;
 use libc::EFD_NONBLOCK;
 use net_util::{MacAddr, Tap};
 use std::cmp;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::io::{self, Write};
@@ -738,6 +739,29 @@ impl VirtioDevice for Net {
             self.interrupt_cb.take().unwrap(),
             self.queue_evts.take().unwrap(),
         ))
+    }
+
+    fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
+        let mut counters = HashMap::new();
+
+        counters.insert(
+            "rx_bytes",
+            Wrapping(self.counters.rx_bytes.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "rx_frames",
+            Wrapping(self.counters.rx_frames.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "tx_bytes",
+            Wrapping(self.counters.tx_bytes.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "tx_frames",
+            Wrapping(self.counters.tx_frames.load(Ordering::Acquire)),
+        );
+
+        Some(counters)
     }
 }
 
