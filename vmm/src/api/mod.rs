@@ -214,6 +214,9 @@ pub enum ApiRequest {
     /// Resume a VM.
     VmResume(Sender<ApiResponse>),
 
+    /// Get counters for a VM.
+    VmCounters(Sender<ApiResponse>),
+
     /// Shut the previously booted virtual machine down.
     /// If the VM was not previously booted or created, the VMM API server
     /// will send a VmShutdown error back.
@@ -300,6 +303,9 @@ pub enum VmAction {
     /// Resume a VM
     Resume,
 
+    /// Return VM counters
+    Counters,
+
     /// Add VFIO device
     AddDevice(Arc<DeviceConfig>),
 
@@ -346,6 +352,7 @@ fn vm_action(
         Reboot => ApiRequest::VmReboot(response_sender),
         Pause => ApiRequest::VmPause(response_sender),
         Resume => ApiRequest::VmResume(response_sender),
+        Counters => ApiRequest::VmCounters(response_sender),
         AddDevice(v) => ApiRequest::VmAddDevice(v, response_sender),
         AddDisk(v) => ApiRequest::VmAddDisk(v, response_sender),
         AddFs(v) => ApiRequest::VmAddFs(v, response_sender),
@@ -393,6 +400,10 @@ pub fn vm_pause(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<O
 
 pub fn vm_resume(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Resume)
+}
+
+pub fn vm_counters(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
+    vm_action(api_evt, api_sender, VmAction::Counters)
 }
 
 pub fn vm_snapshot(

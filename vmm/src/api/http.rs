@@ -94,6 +94,9 @@ pub enum HttpError {
 
     /// Could not add a vsock device to a VM
     VmAddVsock(ApiError),
+
+    /// Could not get counters from VM
+    VmCounters(ApiError),
 }
 
 impl From<serde_json::Error> for HttpError {
@@ -193,6 +196,7 @@ lazy_static! {
         r.routes.insert(endpoint!("/vm.add-pmem"), Box::new(VmActionHandler::new(VmAction::AddPmem(Arc::default()))));
         r.routes.insert(endpoint!("/vm.add-vsock"), Box::new(VmActionHandler::new(VmAction::AddVsock(Arc::default()))));
         r.routes.insert(endpoint!("/vm.boot"), Box::new(VmActionHandler::new(VmAction::Boot)));
+        r.routes.insert(endpoint!("/vm.counters"), Box::new(VmActionHandler::new(VmAction::Counters)));
         r.routes.insert(endpoint!("/vm.create"), Box::new(VmCreate {}));
         r.routes.insert(endpoint!("/vm.delete"), Box::new(VmActionHandler::new(VmAction::Delete)));
         r.routes.insert(endpoint!("/vm.info"), Box::new(VmInfo {}));
