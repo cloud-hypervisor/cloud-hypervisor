@@ -10,7 +10,7 @@ extern crate vmm_sys_util;
 extern crate clap;
 
 use clap::{App, Arg, ArgGroup, ArgMatches};
-use hypervisor::kvm::KvmHyperVisor as Hypervisor;
+use hypervisor::kvm::KvmHypervisor as Hypervisor;
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use seccomp::SeccompLevel;

@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn test_setup_fpu() {
-        let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
         let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0).unwrap();
@@ -391,7 +391,7 @@ mod tests {
         use hypervisor::arch::x86::msr_index;
         use hypervisor::x86_64::{MsrEntries, MsrEntry};
 
-        let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
         let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0).unwrap();
@@ -418,7 +418,7 @@ mod tests {
 
     #[test]
     fn test_setup_regs() {
-        let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
         let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0).unwrap();
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_setup_sregs() {
-        let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
         let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0).unwrap();

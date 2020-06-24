@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_setlint() {
-        let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
         let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
         let vm = hv.create_vm().expect("new VM fd creation failed");
         assert!(hv.check_capability(hypervisor::kvm::Cap::Irqchip));

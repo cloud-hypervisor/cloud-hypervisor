@@ -73,7 +73,7 @@ pub struct KvmVm {
 /// Example:
 /// #[cfg(feature = "kvm")]
 /// extern crate hypervisor
-/// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+/// let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
 /// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 /// vm.set/get().unwrap()
@@ -227,7 +227,7 @@ impl vm::Vm for KvmVm {
     }
 }
 /// Wrapper over KVM system ioctls.
-pub struct KvmHyperVisor {
+pub struct KvmHypervisor {
     kvm: Kvm,
 }
 /// Enum for KVM related error
@@ -236,28 +236,28 @@ pub enum KvmError {
     CapabilityMissing(Cap),
 }
 pub type KvmResult<T> = result::Result<T, KvmError>;
-impl KvmHyperVisor {
+impl KvmHypervisor {
     /// Create a hypervisor based on Kvm
-    pub fn new() -> hypervisor::Result<KvmHyperVisor> {
+    pub fn new() -> hypervisor::Result<KvmHypervisor> {
         let kvm_obj = Kvm::new().map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
-        Ok(KvmHyperVisor { kvm: kvm_obj })
+        Ok(KvmHypervisor { kvm: kvm_obj })
     }
 }
 /// Implementation of Hypervisor trait for KVM
 /// Example:
 /// #[cfg(feature = "kvm")]
 /// extern crate hypervisor
-/// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+/// let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
 /// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 ///
-impl hypervisor::Hypervisor for KvmHyperVisor {
+impl hypervisor::Hypervisor for KvmHypervisor {
     /// Create a KVM vm object and return the object as Vm trait object
     /// Example
     /// # extern crate hypervisor;
-    /// # use hypervisor::KvmHyperVisor;
+    /// # use hypervisor::KvmHypervisor;
     /// use hypervisor::KvmVm;
-    /// let hypervisor = KvmHyperVisor::new().unwrap();
+    /// let hypervisor = KvmHypervisor::new().unwrap();
     /// let vm = hypervisor.create_vm().unwrap()
     ///
     fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
@@ -341,7 +341,7 @@ pub struct KvmVcpu {
 /// Example:
 /// #[cfg(feature = "kvm")]
 /// extern crate hypervisor
-/// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+/// let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
 /// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 /// let vcpu = vm.create_vcpu(0).unwrap();
@@ -567,9 +567,9 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// ```rust
     /// # extern crate hypervisor;
-    /// # use hypervisor::KvmHyperVisor;
+    /// # use hypervisor::KvmHypervisor;
     /// # use std::sync::Arc;
-    /// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+    /// let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
     /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
     /// let vm = hv.create_vm().expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
@@ -613,9 +613,9 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// ```rust
     /// # extern crate hypervisor;
-    /// # use hypervisor::KvmHyperVisor;
+    /// # use hypervisor::KvmHypervisor;
     /// # use std::sync::Arc;
-    /// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+    /// let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
     /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
     /// let vm = hv.create_vm().expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
