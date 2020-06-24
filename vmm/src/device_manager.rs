@@ -3134,6 +3134,19 @@ impl DeviceManager {
         let (device, iommu_attached, id) = self.make_virtio_vsock_device(vsock_cfg)?;
         self.hotplug_virtio_pci_device(device, iommu_attached, id)
     }
+
+    pub fn counters(&self) -> HashMap<String, HashMap<&'static str, Wrapping<u64>>> {
+        let mut counters = HashMap::new();
+
+        for (virtio_device, _, id) in &self.virtio_devices {
+            let virtio_device = virtio_device.lock().unwrap();
+            if let Some(device_counters) = virtio_device.counters() {
+                counters.insert(id.clone(), device_counters.clone());
+            }
+        }
+
+        counters
+    }
 }
 
 #[cfg(feature = "acpi")]
