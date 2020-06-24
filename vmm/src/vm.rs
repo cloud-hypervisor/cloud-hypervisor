@@ -994,7 +994,7 @@ impl Vm {
     }
 
     pub fn counters(&self) -> Result<HashMap<String, HashMap<&'static str, Wrapping<u64>>>> {
-        Ok(HashMap::new())
+        Ok(self.device_manager.lock().unwrap().counters())
     }
 
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>, on_tty: bool) {
