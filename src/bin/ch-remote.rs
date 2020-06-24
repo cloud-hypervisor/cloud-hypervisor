@@ -337,6 +337,7 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
 
     match matches.subcommand_name() {
         Some("info") => simple_api_command(&mut socket, "GET", "info", None),
+        Some("counters") => simple_api_command(&mut socket, "GET", "counters", None),
         Some("resize") => resize_api_command(
             &mut socket,
             matches
@@ -498,6 +499,7 @@ fn main() {
                 .arg(Arg::with_name("id").index(1).help("<device_id>")),
         )
         .subcommand(SubCommand::with_name("info").about("Info on the VM"))
+        .subcommand(SubCommand::with_name("counters").about("Counters from the VM"))
         .subcommand(SubCommand::with_name("pause").about("Pause the VM"))
         .subcommand(SubCommand::with_name("reboot").about("Reboot the VM"))
         .subcommand(
