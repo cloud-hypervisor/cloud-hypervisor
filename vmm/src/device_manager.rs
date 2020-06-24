@@ -590,7 +590,7 @@ impl DeviceRelocation for AddressManager {
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     if shm_regions.addr.raw_value() == old_base {
                         // Remove old region from KVM by passing a size of 0.
-                        let mut mem_region = hypervisor::kvm::kvm_userspace_memory_region {
+                        let mut mem_region = hypervisor::MemoryRegion {
                             slot: shm_regions.mem_slot,
                             guest_phys_addr: old_base,
                             memory_size: 0,
