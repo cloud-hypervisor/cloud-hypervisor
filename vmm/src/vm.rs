@@ -1459,7 +1459,6 @@ pub fn test_vm() {
             flags: 0,
         };
 
-        // Safe because the guest regions are guaranteed not to overlap.
         vm_fd.set_user_memory_region(mem_region)
     })
     .expect("Cannot configure guest memory");
