@@ -7,6 +7,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use crate::{ActivateResult, Error, Queue};
+use std::collections::HashMap;
+use std::num::Wrapping;
 use std::sync::Arc;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
@@ -133,6 +135,11 @@ pub trait VirtioDevice: Send {
     /// Returns the list of userspace mappings associated with this device.
     fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
         Vec::new()
+    }
+
+    /// Return the counters that this device exposes
+    fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
+        None
     }
 }
 
