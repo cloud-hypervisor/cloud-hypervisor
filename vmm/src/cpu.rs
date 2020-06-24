@@ -745,9 +745,10 @@ impl CpuManager {
                 .expect("Failed to configure vCPU");
         }
 
-        let vcpu_clone = Arc::clone(&vcpu);
+        // Adding vCPU to the CpuManager's vCPU list.
+        self.vcpus.push(Arc::clone(&vcpu));
 
-        Ok(vcpu_clone)
+        Ok(vcpu)
     }
 
     /// Only create new vCPUs if there aren't any inactive ones to reuse
@@ -766,8 +767,7 @@ impl CpuManager {
 
         // Only create vCPUs in excess of all the allocated vCPUs.
         for cpu_id in self.vcpus.len() as u8..desired_vcpus {
-            let vcpu = self.create_vcpu(cpu_id, entry_point, None)?;
-            self.vcpus.push(vcpu);
+            self.create_vcpu(cpu_id, entry_point, None)?;
         }
 
         Ok(())
