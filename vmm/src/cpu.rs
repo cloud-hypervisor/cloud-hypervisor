@@ -398,7 +398,15 @@ impl Vcpu {
 }
 
 const VCPU_SNAPSHOT_ID: &str = "vcpu";
-impl Pausable for Vcpu {}
+impl Pausable for Vcpu {
+    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+        Ok(())
+    }
+
+    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        Ok(())
+    }
+}
 impl Snapshottable for Vcpu {
     fn id(&self) -> String {
         VCPU_SNAPSHOT_ID.to_string()
@@ -1322,24 +1330,23 @@ impl Pausable for CpuManager {
             state.signal_thread();
         }
 
-        #[cfg(target_arch = "x86_64")]
         for vcpu in self.vcpus.iter() {
-            vcpu.lock()
-                .unwrap()
-                .fd
-                .notify_guest_clock_paused()
-                .map_err(|e| {
-                    MigratableError::Pause(anyhow!(
-                        "Could not notify guest it has been paused {:?}",
-                        e
-                    ))
-                })?;
+            let mut vcpu = vcpu.lock().unwrap();
+            vcpu.pause()?;
+            #[cfg(target_arch = "x86_64")]
+            vcpu.fd.notify_guest_clock_paused().map_err(|e| {
+                MigratableError::Pause(anyhow!("Could not notify guest it has been paused {:?}", e))
+            })?;
         }
 
         Ok(())
     }
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        for vcpu in self.vcpus.iter() {
+            vcpu.lock().unwrap().resume()?;
+        }
+
         // Toggle the vCPUs pause boolean
         self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
 
