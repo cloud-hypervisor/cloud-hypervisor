@@ -29,7 +29,7 @@ use devices::{interrupt_controller::InterruptController, BusDevice};
 use hypervisor::kvm::kvm_bindings::KVM_SYSTEM_EVENT_SHUTDOWN;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuId;
-use hypervisor::VcpuExit;
+use hypervisor::{CpuState, VcpuExit};
 
 use libc::{c_void, siginfo_t};
 
@@ -243,6 +243,7 @@ pub struct Vcpu {
     vm_ts: std::time::Instant,
     #[cfg(target_arch = "aarch64")]
     mpidr: u64,
+    saved_state: Option<CpuState>,
 }
 
 impl Vcpu {
@@ -272,6 +273,7 @@ impl Vcpu {
             vm_ts: creation_ts,
             #[cfg(target_arch = "aarch64")]
             mpidr: 0,
+            saved_state: None,
         })))
     }
 
@@ -400,10 +402,21 @@ impl Vcpu {
 const VCPU_SNAPSHOT_ID: &str = "vcpu";
 impl Pausable for Vcpu {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+        self.saved_state =
+            Some(self.fd.cpu_state().map_err(|e| {
+                MigratableError::Pause(anyhow!("Could not get vCPU state {:?}", e))
+            })?);
+
         Ok(())
     }
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        if let Some(vcpu_state) = &self.saved_state {
+            self.fd.set_cpu_state(vcpu_state).map_err(|e| {
+                MigratableError::Pause(anyhow!("Could not set the vCPU state {:?}", e))
+            })?;
+        }
+
         Ok(())
     }
 }
@@ -413,10 +426,8 @@ impl Snapshottable for Vcpu {
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot = serde_json::to_vec(&self.fd.cpu_state().map_err(|e| {
-            MigratableError::Snapshot(anyhow!("Could not get vCPU KVM state {:?}", e))
-        })?)
-        .map_err(|e| MigratableError::Snapshot(e.into()))?;
+        let snapshot = serde_json::to_vec(&self.saved_state)
+            .map_err(|e| MigratableError::Snapshot(e.into()))?;
 
         let mut vcpu_snapshot = Snapshot::new(&format!("{}", self.id));
         vcpu_snapshot.add_data_section(SnapshotDataSection {
@@ -442,9 +453,7 @@ impl Snapshottable for Vcpu {
                 }
             };
 
-            self.fd.set_cpu_state(&vcpu_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not set the vCPU KVM state {:?}", e))
-            })?;
+            self.saved_state = Some(vcpu_state);
 
             Ok(())
         } else {
