@@ -170,6 +170,7 @@ impl vm::Vm for KvmVm {
     /// Creates/modifies a guest physical memory slot.
     ///
     fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {
+        // Safe because guest regions are guaranteed not to overlap.
         unsafe {
             self.fd
                 .set_user_memory_region(user_memory_region)
