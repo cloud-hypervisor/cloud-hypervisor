@@ -528,6 +528,16 @@ impl cpu::Vcpu for KvmVcpu {
     }
     #[cfg(target_arch = "x86_64")]
     ///
+    /// Sets pending exceptions, interrupts, and NMIs as well as related states
+    /// of the vcpu.
+    ///
+    fn set_vcpu_events(&self, events: &VcpuEvents) -> cpu::Result<()> {
+        self.fd
+            .set_vcpu_events(events)
+            .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
     /// Let the guest know that it has been paused, which prevents from
     /// potential soft lockups when being resumed.
     ///
@@ -561,8 +571,29 @@ impl cpu::Vcpu for KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::GetOneReg(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
+    ///
     /// Get the current CPU state
     ///
+    /// Ordering requirements:
+    ///
+    /// KVM_GET_MP_STATE calls kvm_apic_accept_events(), which might modify
+    /// vCPU/LAPIC state. As such, it must be done before most everything
+    /// else, otherwise we cannot restore everything and expect it to work.
+    ///
+    /// KVM_GET_VCPU_EVENTS/KVM_SET_VCPU_EVENTS is unsafe if other vCPUs are
+    /// still running.
+    ///
+    /// KVM_GET_LAPIC may change state of LAPIC before returning it.
+    ///
+    /// GET_VCPU_EVENTS should probably be last to save. The code looks as
+    /// it might as well be affected by internal state modifications of the
+    /// GET ioctls.
+    ///
+    /// SREGS saves/restores a pending interrupt, similar to what
+    /// VCPU_EVENTS also does.
+    ///
+    /// GET_MSRS requires a pre-populated data structure to do something
+    /// meaningful. For SET_MSRS it will then contain good data.
     ///
     /// # Example
     ///
@@ -576,19 +607,18 @@ impl cpu::Vcpu for KvmVcpu {
     /// vm.enable_split_irq().unwrap();
     /// let vcpu = vm.create_vcpu(0).unwrap();
     /// let state = vcpu.cpu_state().unwrap();
-    ///
+    /// ```
     fn cpu_state(&self) -> cpu::Result<CpuState> {
-        let mut msrs = boot_msr_entries();
-        self.get_msrs(&mut msrs)?;
-
-        let vcpu_events = self.get_vcpu_events()?;
+        let mp_state = self.get_mp_state()?;
         let regs = self.get_regs()?;
         let sregs = self.get_sregs()?;
-        let lapic_state = self.get_lapic()?;
-        let fpu = self.get_fpu()?;
         let xsave = self.get_xsave()?;
         let xcrs = self.get_xcrs()?;
-        let mp_state = self.get_mp_state()?;
+        let lapic_state = self.get_lapic()?;
+        let fpu = self.get_fpu()?;
+        let mut msrs = boot_msr_entries();
+        self.get_msrs(&mut msrs)?;
+        let vcpu_events = self.get_vcpu_events()?;
 
         Ok(CpuState {
             msrs,
@@ -607,7 +637,29 @@ impl cpu::Vcpu for KvmVcpu {
         unimplemented!();
     }
     #[cfg(target_arch = "x86_64")]
+    ///
     /// Restore the previously saved CPU state
+    ///
+    /// Ordering requirements:
+    ///
+    /// KVM_GET_VCPU_EVENTS/KVM_SET_VCPU_EVENTS is unsafe if other vCPUs are
+    /// still running.
+    ///
+    /// Some SET ioctls (like set_mp_state) depend on kvm_vcpu_is_bsp(), so
+    /// if we ever change the BSP, we have to do that before restoring anything.
+    /// The same seems to be true for CPUID stuff.
+    ///
+    /// SREGS saves/restores a pending interrupt, similar to what
+    /// VCPU_EVENTS also does.
+    ///
+    /// SET_REGS clears pending exceptions unconditionally, thus, it must be
+    /// done before SET_VCPU_EVENTS, which restores it.
+    ///
+    /// SET_LAPIC must come after SET_SREGS, because the latter restores
+    /// the apic base msr.
+    ///
+    /// SET_LAPIC must come before SET_MSRS, because the TSC deadline MSR
+    /// only restores successfully, when the LAPIC is correctly configured.
     ///
     /// Arguments: CpuState
     /// # Example
@@ -623,23 +675,17 @@ impl cpu::Vcpu for KvmVcpu {
     /// let vcpu = vm.create_vcpu(0).unwrap();
     /// let state = vcpu.cpu_state().unwrap();
     /// vcpu.set_cpu_state(&state).unwrap();
-    ///
+    /// ```
     fn set_cpu_state(&self, state: &CpuState) -> cpu::Result<()> {
-        self.set_regs(&state.regs)?;
-
-        self.set_fpu(&state.fpu)?;
-
-        self.set_xsave(&state.xsave)?;
-
-        self.set_sregs(&state.sregs)?;
-
-        self.set_xcrs(&state.xcrs)?;
-
-        self.set_msrs(&state.msrs)?;
-
-        self.set_lapic(&state.lapic_state)?;
-
         self.set_mp_state(state.mp_state)?;
+        self.set_regs(&state.regs)?;
+        self.set_sregs(&state.sregs)?;
+        self.set_xsave(&state.xsave)?;
+        self.set_xcrs(&state.xcrs)?;
+        self.set_lapic(&state.lapic_state)?;
+        self.set_fpu(&state.fpu)?;
+        self.set_msrs(&state.msrs)?;
+        self.set_vcpu_events(&state.vcpu_events)?;
 
         Ok(())
     }

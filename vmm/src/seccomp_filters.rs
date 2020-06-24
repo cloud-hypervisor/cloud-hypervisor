@@ -63,6 +63,7 @@ const KVM_IRQFD: u64 = 0x4020_ae76;
 const KVM_SET_CLOCK: u64 = 0x4030_ae7b;
 const KVM_CREATE_PIT2: u64 = 0x4040_ae77;
 const KVM_IOEVENTFD: u64 = 0x4040_ae79;
+const KVM_SET_VCPU_EVENTS: u64 = 0x4040_aea0;
 const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
 const KVM_SET_REGS: u64 = 0x4090_ae82;
 const KVM_SET_SREGS: u64 = 0x4138_ae84;
@@ -154,6 +155,7 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_SREGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_TSS_ADDR,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_USER_MEMORY_REGION,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_VCPU_EVENTS,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_XSAVE,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_XCRS,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCGIFFLAGS)?],
