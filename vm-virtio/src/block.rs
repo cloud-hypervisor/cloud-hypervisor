@@ -19,16 +19,18 @@ use libc::{c_void, EFD_NONBLOCK};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cmp;
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::num::Wrapping;
 use std::ops::DerefMut;
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::slice;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use virtio_bindings::bindings::virtio_blk::*;
@@ -599,6 +601,14 @@ impl Request {
     }
 }
 
+#[derive(Default, Clone)]
+pub struct BlockCounters {
+    read_bytes: Arc<AtomicU64>,
+    read_ops: Arc<AtomicU64>,
+    write_bytes: Arc<AtomicU64>,
+    write_ops: Arc<AtomicU64>,
+}
+
 struct BlockEpollHandler<T: DiskFile> {
     queue: Queue,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -610,6 +620,7 @@ struct BlockEpollHandler<T: DiskFile> {
     pause_evt: EventFd,
     event_idx: bool,
     writeback: Arc<AtomicBool>,
+    counters: BlockCounters,
 }
 
 impl<T: DiskFile> BlockEpollHandler<T> {
@@ -619,6 +630,11 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         let mut used_desc_heads = Vec::new();
         let mut used_count = 0;
         let mem = self.mem.memory();
+        let mut read_bytes = Wrapping(0);
+        let mut write_bytes = Wrapping(0);
+        let mut read_ops = Wrapping(0);
+        let mut write_ops = Wrapping(0);
+
         for avail_desc in queue.iter(&mem) {
             let len;
             match Request::parse(&avail_desc, &mem) {
@@ -635,6 +651,17 @@ impl<T: DiskFile> BlockEpollHandler<T> {
                     ) {
                         Ok(l) => {
                             len = l;
+                            match request.request_type {
+                                RequestType::In => {
+                                    read_bytes += Wrapping(request.data_len as u64);
+                                    read_ops += Wrapping(1);
+                                }
+                                RequestType::Out => {
+                                    write_bytes += Wrapping(request.data_len as u64);
+                                    write_ops += Wrapping(1);
+                                }
+                                _ => {}
+                            };
                             VIRTIO_BLK_S_OK
                         }
                         Err(e) => {
@@ -659,6 +686,21 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         for &(desc_index, len) in used_desc_heads.iter() {
             queue.add_used(&mem, desc_index, len);
         }
+
+        self.counters
+            .write_bytes
+            .fetch_add(write_bytes.0, Ordering::AcqRel);
+        self.counters
+            .write_ops
+            .fetch_add(write_ops.0, Ordering::AcqRel);
+
+        self.counters
+            .read_bytes
+            .fetch_add(read_bytes.0, Ordering::AcqRel);
+        self.counters
+            .read_ops
+            .fetch_add(read_ops.0, Ordering::AcqRel);
+
         used_count > 0
     }
 
@@ -942,6 +984,7 @@ pub struct Block<T: DiskFile> {
     paused: Arc<AtomicBool>,
     queue_size: Vec<u16>,
     writeback: Arc<AtomicBool>,
+    counters: BlockCounters,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1016,6 +1059,7 @@ impl<T: DiskFile> Block<T> {
             paused: Arc::new(AtomicBool::new(false)),
             queue_size: vec![queue_size; num_queues],
             writeback: Arc::new(AtomicBool::new(true)),
+            counters: BlockCounters::default(),
         })
     }
 
@@ -1197,6 +1241,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                 pause_evt: pause_evt.try_clone().unwrap(),
                 event_idx,
                 writeback: self.writeback.clone(),
+                counters: self.counters.clone(),
             };
 
             handler.queue.set_event_idx(event_idx);
@@ -1238,6 +1283,29 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
             self.interrupt_cb.take().unwrap(),
             self.queue_evts.take().unwrap(),
         ))
+    }
+
+    fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
+        let mut counters = HashMap::new();
+
+        counters.insert(
+            "read_bytes",
+            Wrapping(self.counters.read_bytes.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "write_bytes",
+            Wrapping(self.counters.write_bytes.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "read_ops",
+            Wrapping(self.counters.read_ops.load(Ordering::Acquire)),
+        );
+        counters.insert(
+            "write_ops",
+            Wrapping(self.counters.write_ops.load(Ordering::Acquire)),
+        );
+
+        Some(counters)
     }
 }
 
