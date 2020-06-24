@@ -944,8 +944,13 @@ impl CpuManager {
         // Tell the vCPUs to stop themselves next time they go through the loop
         self.vcpus_kill_signalled.store(true, Ordering::SeqCst);
 
-        // Clear pause state and unpark the vCPU threads if they are parked.
-        self.resume().map_err(Error::ResumeOnShutdown)?;
+        // Toggle the vCPUs pause boolean
+        self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
+
+        // Unpark all the VCPU threads.
+        for state in self.vcpu_states.iter() {
+            state.unpark_thread();
+        }
 
         // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
         // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
