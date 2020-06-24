@@ -587,6 +587,18 @@ impl Vmm {
         }
     }
 
+    fn vm_counters(&mut self) -> result::Result<Vec<u8>, VmError> {
+        if let Some(ref mut vm) = self.vm {
+            let info = vm.counters().map_err(|e| {
+                error!("Error when getting counters from the VM: {:?}", e);
+                e
+            })?;
+            serde_json::to_vec(&info).map_err(VmError::SerializeJson)
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -805,6 +817,14 @@ impl Vmm {
                                         .vm_add_vsock(add_vsock_data.as_ref().clone())
                                         .map_err(ApiError::VmAddVsock)
                                         .map(ApiResponsePayload::VmAction);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmCounters(sender) => {
+                                    let response = self
+                                        .vm_counters()
+                                        .map_err(ApiError::VmInfo)
+                                        .map(ApiResponsePayload::VmAction);
+
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                             }

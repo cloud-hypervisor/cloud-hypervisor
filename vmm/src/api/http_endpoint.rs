@@ -6,8 +6,9 @@
 use crate::api::http::{error_response, EndpointHandler, HttpError};
 use crate::api::{
     vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_add_vsock, vm_boot,
-    vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_remove_device, vm_resize, vm_restore,
-    vm_resume, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown, ApiRequest, VmAction, VmConfig,
+    vm_counters, vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_remove_device, vm_resize,
+    vm_restore, vm_resume, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown, ApiRequest, VmAction,
+    VmConfig,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use std::sync::mpsc::Sender;
@@ -157,6 +158,19 @@ impl EndpointHandler for VmActionHandler {
                 Resume => vm_resume(api_notifier, api_sender).map_err(HttpError::VmResume),
                 _ => Err(HttpError::BadRequest),
             }
+        }
+    }
+
+    fn get_handler(
+        &self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        _body: &Option<Body>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        use VmAction::*;
+        match self.action {
+            Counters => vm_counters(api_notifier, api_sender).map_err(HttpError::VmCounters),
+            _ => Err(HttpError::BadRequest),
         }
     }
 }

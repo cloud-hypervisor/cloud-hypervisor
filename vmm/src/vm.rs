@@ -44,8 +44,8 @@ use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
 use linux_loader::loader::KernelLoader;
-
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
+use std::collections::HashMap;
 #[cfg(target_arch = "x86_64")]
 use std::convert::TryInto;
 use std::ffi::CString;
@@ -53,6 +53,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 #[cfg(target_arch = "x86_64")]
 use std::io::{Seek, SeekFrom};
+use std::num::Wrapping;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
@@ -990,6 +991,10 @@ impl Vm {
             .map_err(Error::DeviceManager)?;
 
         Ok(pci_device_info)
+    }
+
+    pub fn counters(&self) -> Result<HashMap<String, HashMap<&'static str, Wrapping<u64>>>> {
+        Ok(HashMap::new())
     }
 
     fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>, on_tty: bool) {
