@@ -52,6 +52,7 @@ const KVM_CREATE_VCPU: u64 = 0xae41;
 const KVM_SET_TSS_ADDR: u64 = 0xae47;
 const KVM_CREATE_IRQCHIP: u64 = 0xae60;
 const KVM_RUN: u64 = 0xae80;
+const KVM_KVMCLOCK_CTRL: u64 = 0xaead;
 const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
 const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
 const KVM_SET_MSRS: u64 = 0x4008_ae89;
@@ -139,6 +140,7 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_XCRS,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IOEVENTFD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IRQFD)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_KVMCLOCK_CTRL)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_RUN)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_CLOCK)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_CPUID2)?],
