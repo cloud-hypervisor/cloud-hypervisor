@@ -292,9 +292,9 @@ dependencies = [
 
 [[package]]
 name = "epoll"
-version = "4.3.0"
+version = "4.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2fc767043bbb7fc449269e62596be65441c28fda97b4c1feaca517bf30bd915"
+checksum = "20df693c700404f7e19d4d6fae6b15215d2913c27955d2b9d6f2c0f537511cd0"
 dependencies = [
  "bitflags 1.2.1",
  "libc",
