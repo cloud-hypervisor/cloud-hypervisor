@@ -570,7 +570,7 @@ dependencies = [
 [[package]]
 name = "linux-loader"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/linux-loader#2a62f21b441716332df048762c3b15700f72563f"
+source = "git+https://github.com/rust-vmm/linux-loader#ec930d700f43458f191ee50404810a155accb0ec"
 dependencies = [
  "vm-memory",
 ]
