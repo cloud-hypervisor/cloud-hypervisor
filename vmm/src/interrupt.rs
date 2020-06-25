@@ -310,7 +310,7 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
     }
 }
 
-pub struct KvmLegacyUserspaceInterruptManager {
+pub struct LegacyUserspaceInterruptManager {
     ioapic: Arc<Mutex<dyn InterruptController>>,
 }
 
@@ -320,9 +320,9 @@ pub struct KvmMsiInterruptManager {
     gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
 }
 
-impl KvmLegacyUserspaceInterruptManager {
+impl LegacyUserspaceInterruptManager {
     pub fn new(ioapic: Arc<Mutex<dyn InterruptController>>) -> Self {
-        KvmLegacyUserspaceInterruptManager { ioapic }
+        LegacyUserspaceInterruptManager { ioapic }
     }
 }
 
@@ -342,7 +342,7 @@ impl KvmMsiInterruptManager {
     }
 }
 
-impl InterruptManager for KvmLegacyUserspaceInterruptManager {
+impl InterruptManager for LegacyUserspaceInterruptManager {
     type GroupConfig = LegacyIrqGroupConfig;
 
     fn create_group(
