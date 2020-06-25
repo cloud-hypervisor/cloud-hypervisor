@@ -163,8 +163,6 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
                         break 'poll;
                     }
                     x if pause_evt_index == x => {
-                        // Drain pause event
-                        let _ = self.vu_epoll_cfg.pause_evt.read();
                         debug!("PAUSE_EVENT received, pausing vhost-user epoll loop");
                         // We loop here to handle spurious park() returns.
                         // Until we have not resumed, the paused boolean will
@@ -172,6 +170,11 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
                         while paused.load(Ordering::SeqCst) {
                             thread::park();
                         }
+
+                        // Drain pause event after the device has been resumed.
+                        // This ensures the pause event has been seen by each
+                        // and every thread related to this virtio device.
+                        let _ = self.vu_epoll_cfg.pause_evt.read();
                     }
                     x if (slave_evt_index.is_some() && slave_evt_index.unwrap() == x) => {
                         if let Some(slave_req_handler) =

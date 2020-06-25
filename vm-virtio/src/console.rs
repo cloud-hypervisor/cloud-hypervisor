@@ -313,8 +313,6 @@ impl ConsoleEpollHandler {
                         break 'epoll;
                     }
                     PAUSE_EVENT => {
-                        // Drain pause event
-                        let _ = self.pause_evt.read();
                         debug!("PAUSE_EVENT received, pausing virtio-console epoll loop");
                         // We loop here to handle spurious park() returns.
                         // Until we have not resumed, the paused boolean will
@@ -322,6 +320,11 @@ impl ConsoleEpollHandler {
                         while paused.load(Ordering::SeqCst) {
                             thread::park();
                         }
+
+                        // Drain pause event after the device has been resumed.
+                        // This ensures the pause event has been seen by each
+                        // and every thread related to this virtio device.
+                        let _ = self.pause_evt.read();
                     }
                     _ => {
                         error!("Unknown event for virtio-console");
