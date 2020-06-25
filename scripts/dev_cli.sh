@@ -167,6 +167,9 @@ cmd_help() {
     echo "    clean [<cargo args>]]"
     echo "        Remove the Cloud Hypervisor artifacts."
     echo ""
+    echo "    shell"
+    echo "        Run the development container into an interactive, privileged BASH shell."
+    echo ""
     echo "    help"
     echo "        Display this help message."
     echo ""
@@ -349,6 +352,29 @@ cmd_build-container() {
 	   -f $BUILD_DIR/Dockerfile \
 	   --build-arg TARGETARCH="$(uname -m)" \
 	   $BUILD_DIR
+}
+
+cmd_shell() {
+    say_warn "Starting a privileged shell prompt as root ..."
+    say_warn "WARNING: Your $CLH_ROOT_DIR folder will be bind-mounted in the container under $CTR_CLH_ROOT_DIR"
+    $DOCKER_RUNTIME run \
+	   -ti \
+	   --workdir "$CTR_CLH_ROOT_DIR" \
+	   --rm \
+	   --privileged \
+	   --security-opt seccomp=unconfined \
+	   --ipc=host \
+	   --net=host \
+	   --tmpfs /tmp:exec \
+	   --volume /dev:/dev \
+	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	   --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+	   --env USER="root" \
+	   --env CH_LIBC="${libc}" \
+	   --entrypoint bash \
+	   "$CTR_IMAGE"
+
+    fix_dir_perms $?
 }
 
 # Parse main command line args.
