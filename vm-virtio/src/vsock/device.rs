@@ -365,8 +365,6 @@ where
                 return Ok(true);
             }
             PAUSE_EVENT => {
-                // Drain pause event
-                let _ = self.pause_evt.read();
                 debug!("PAUSE_EVENT received, pausing virtio-vsock epoll loop");
                 // We loop here to handle spurious park() returns.
                 // Until we have not resumed, the paused boolean will
@@ -374,6 +372,11 @@ where
                 while paused.load(Ordering::SeqCst) {
                     thread::park();
                 }
+
+                // Drain pause event after the device has been resumed.
+                // This ensures the pause event has been seen by each
+                // and every thread related to this virtio device.
+                let _ = self.pause_evt.read();
             }
             other => {
                 error!("Unknown event for virtio-vsock");
