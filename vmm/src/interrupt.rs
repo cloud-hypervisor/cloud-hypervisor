@@ -103,7 +103,7 @@ impl InterruptRoute {
     }
 }
 
-pub struct KvmRoutingEntry {
+struct KvmRoutingEntry {
     kvm_route: kvm_irq_routing_entry,
     masked: bool,
 }
@@ -327,11 +327,13 @@ impl KvmLegacyUserspaceInterruptManager {
 }
 
 impl KvmMsiInterruptManager {
-    pub fn new(
-        allocator: Arc<Mutex<SystemAllocator>>,
-        vm_fd: Arc<dyn hypervisor::Vm>,
-        gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
-    ) -> Self {
+    pub fn new(allocator: Arc<Mutex<SystemAllocator>>, vm_fd: Arc<dyn hypervisor::Vm>) -> Self {
+        // Create a shared list of GSI that can be shared through all PCI
+        // devices. This way, we can maintain the full list of used GSI,
+        // preventing one device from overriding interrupts setting from
+        // another one.
+        let gsi_msi_routes = Arc::new(Mutex::new(HashMap::new()));
+
         KvmMsiInterruptManager {
             allocator,
             vm_fd,

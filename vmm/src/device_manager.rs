@@ -14,9 +14,7 @@ use crate::config::ConsoleOutputMode;
 use crate::config::DeviceConfig;
 use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig, VsockConfig};
 use crate::device_tree::{DeviceNode, DeviceTree};
-use crate::interrupt::{
-    KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager, KvmRoutingEntry,
-};
+use crate::interrupt::{KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 #[cfg(feature = "pci_support")]
 use crate::PciDeviceInfo;
@@ -785,13 +783,6 @@ impl DeviceManager {
             device_tree: Arc::clone(&device_tree),
         });
 
-        // Create a shared list of GSI that can be shared through all PCI
-        // devices. This way, we can maintain the full list of used GSI,
-        // preventing one device from overriding interrupts setting from
-        // another one.
-        let kvm_gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-
         // First we create the MSI interrupt manager, the legacy one is created
         // later, after the IOAPIC device creation.
         // The reason we create the MSI one first is because the IOAPIC needs it,
@@ -802,7 +793,6 @@ impl DeviceManager {
             Arc::new(KvmMsiInterruptManager::new(
                 Arc::clone(&address_manager.allocator),
                 vm_fd,
-                Arc::clone(&kvm_gsi_msi_routes),
             ));
 
         let device_manager = DeviceManager {
