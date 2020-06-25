@@ -14,7 +14,7 @@ use crate::config::ConsoleOutputMode;
 use crate::config::DeviceConfig;
 use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig, VsockConfig};
 use crate::device_tree::{DeviceNode, DeviceTree};
-use crate::interrupt::{KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager};
+use crate::interrupt::{KvmMsiInterruptManager, LegacyUserspaceInterruptManager};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 #[cfg(feature = "pci_support")]
 use crate::PciDeviceInfo;
@@ -865,7 +865,7 @@ impl DeviceManager {
         // formed IOAPIC device.
         let legacy_interrupt_manager: Arc<
             dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
-        > = Arc::new(KvmLegacyUserspaceInterruptManager::new(Arc::clone(
+        > = Arc::new(LegacyUserspaceInterruptManager::new(Arc::clone(
             &interrupt_controller,
         )));
 
