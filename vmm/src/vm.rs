@@ -1162,7 +1162,6 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {:?}", e)))?;
 
-        self.device_manager.lock().unwrap().resume()?;
         self.cpu_manager.lock().unwrap().resume()?;
         #[cfg(target_arch = "x86_64")]
         {
@@ -1172,6 +1171,7 @@ impl Pausable for Vm {
                 })?;
             }
         }
+        self.device_manager.lock().unwrap().resume()?;
 
         // And we're back to the Running state.
         *state = new_state;
