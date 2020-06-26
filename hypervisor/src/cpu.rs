@@ -1,12 +1,12 @@
 // Copyright © 2019 Intel Corporation
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 // Copyright © 2020, Microsoft  Corporation
 //
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
-// SPDX-License-Identifier: Apache-2.0 OR MIT
+//
 
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::VcpuInit;
