@@ -4,7 +4,6 @@
 //
 
 use devices::interrupt_controller::InterruptController;
-use hypervisor::kvm::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
 
 use std::collections::HashMap;
 use std::io;
@@ -108,8 +107,6 @@ pub struct RoutingEntry<E> {
     masked: bool,
 }
 
-type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
-
 pub struct MsiInterruptGroup<E> {
     vm_fd: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
@@ -124,34 +121,6 @@ pub trait RoutingEntryExt {
     fn make_entry(gsi: u32, config: &InterruptSourceConfig) -> Result<Box<Self>>;
 }
 
-impl RoutingEntryExt for KvmRoutingEntry {
-    fn make_entry(gsi: u32, config: &InterruptSourceConfig) -> Result<Box<Self>> {
-        if let InterruptSourceConfig::MsiIrq(cfg) = &config {
-            let mut kvm_route = kvm_irq_routing_entry {
-                gsi,
-                type_: KVM_IRQ_ROUTING_MSI,
-                ..Default::default()
-            };
-
-            kvm_route.u.msi.address_lo = cfg.low_addr;
-            kvm_route.u.msi.address_hi = cfg.high_addr;
-            kvm_route.u.msi.data = cfg.data;
-
-            let kvm_entry = KvmRoutingEntry {
-                route: kvm_route,
-                masked: false,
-            };
-
-            return Ok(Box::new(kvm_entry));
-        }
-
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            "Interrupt config type not supported",
-        ))
-    }
-}
-
 impl<E> MsiInterruptGroup<E> {
     fn new(
         vm_fd: Arc<dyn hypervisor::Vm>,
@@ -163,40 +132,6 @@ impl<E> MsiInterruptGroup<E> {
             gsi_msi_routes,
             irq_routes,
         }
-    }
-}
-
-type KvmMsiInterruptGroup = MsiInterruptGroup<kvm_irq_routing_entry>;
-
-impl MsiInterruptGroupOps for KvmMsiInterruptGroup {
-    fn set_gsi_routes(&self) -> Result<()> {
-        let gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
-        let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
-        for (_, entry) in gsi_msi_routes.iter() {
-            if entry.masked {
-                continue;
-            }
-
-            entry_vec.push(entry.route);
-        }
-
-        let mut irq_routing =
-            vec_with_array_field::<kvm_irq_routing, kvm_irq_routing_entry>(entry_vec.len());
-        irq_routing[0].nr = entry_vec.len() as u32;
-        irq_routing[0].flags = 0;
-
-        unsafe {
-            let entries: &mut [kvm_irq_routing_entry] =
-                irq_routing[0].entries.as_mut_slice(entry_vec.len());
-            entries.copy_from_slice(&entry_vec);
-        }
-
-        self.vm_fd.set_gsi_routing(&irq_routing[0]).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed setting GSI routing: {}", e),
-            )
-        })
     }
 }
 
@@ -345,8 +280,6 @@ pub struct MsiInterruptManager<E> {
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
 }
 
-pub type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
-
 impl LegacyUserspaceInterruptManager {
     pub fn new(ioapic: Arc<Mutex<dyn InterruptController>>) -> Self {
         LegacyUserspaceInterruptManager { ioapic }
@@ -415,5 +348,74 @@ where
 
     fn destroy_group(&self, _group: Arc<Box<dyn InterruptSourceGroup>>) -> Result<()> {
         Ok(())
+    }
+}
+
+pub mod kvm {
+    use super::*;
+    use hypervisor::kvm::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
+
+    type KvmMsiInterruptGroup = MsiInterruptGroup<kvm_irq_routing_entry>;
+    type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
+    pub type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
+
+    impl RoutingEntryExt for KvmRoutingEntry {
+        fn make_entry(gsi: u32, config: &InterruptSourceConfig) -> Result<Box<Self>> {
+            if let InterruptSourceConfig::MsiIrq(cfg) = &config {
+                let mut kvm_route = kvm_irq_routing_entry {
+                    gsi,
+                    type_: KVM_IRQ_ROUTING_MSI,
+                    ..Default::default()
+                };
+
+                kvm_route.u.msi.address_lo = cfg.low_addr;
+                kvm_route.u.msi.address_hi = cfg.high_addr;
+                kvm_route.u.msi.data = cfg.data;
+
+                let kvm_entry = KvmRoutingEntry {
+                    route: kvm_route,
+                    masked: false,
+                };
+
+                return Ok(Box::new(kvm_entry));
+            }
+
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Interrupt config type not supported",
+            ))
+        }
+    }
+
+    impl MsiInterruptGroupOps for KvmMsiInterruptGroup {
+        fn set_gsi_routes(&self) -> Result<()> {
+            let gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
+            let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
+            for (_, entry) in gsi_msi_routes.iter() {
+                if entry.masked {
+                    continue;
+                }
+
+                entry_vec.push(entry.route);
+            }
+
+            let mut irq_routing =
+                vec_with_array_field::<kvm_irq_routing, kvm_irq_routing_entry>(entry_vec.len());
+            irq_routing[0].nr = entry_vec.len() as u32;
+            irq_routing[0].flags = 0;
+
+            unsafe {
+                let entries: &mut [kvm_irq_routing_entry] =
+                    irq_routing[0].entries.as_mut_slice(entry_vec.len());
+                entries.copy_from_slice(&entry_vec);
+            }
+
+            self.vm_fd.set_gsi_routing(&irq_routing[0]).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed setting GSI routing: {}", e),
+                )
+            })
+        }
     }
 }
