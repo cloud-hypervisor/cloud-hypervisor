@@ -133,7 +133,7 @@ impl<E> MsiInterruptGroup<E> {
 type KvmMsiInterruptGroup = MsiInterruptGroup<kvm_irq_routing_entry>;
 
 impl KvmMsiInterruptGroup {
-    fn set_kvm_gsi_routes(&self) -> Result<()> {
+    fn set_gsi_routes(&self) -> Result<()> {
         let gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
         let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
         for (_, entry) in gsi_msi_routes.iter() {
@@ -229,7 +229,7 @@ impl InterruptSourceGroup for KvmMsiInterruptGroup {
                 ));
             }
 
-            return self.set_kvm_gsi_routes();
+            return self.set_gsi_routes();
         }
 
         Err(io::Error::new(
@@ -249,9 +249,9 @@ impl InterruptSourceGroup for KvmMsiInterruptGroup {
                     format!("mask: No existing route for interrupt index {}", index),
                 ));
             }
-            // Drop the guard because set_kvm_gsi_routes will try to take the lock again.
+            // Drop the guard because set_gsi_routes will try to take the lock again.
             drop(gsi_msi_routes);
-            self.set_kvm_gsi_routes()?;
+            self.set_gsi_routes()?;
             return route.disable(&self.vm_fd);
         }
 
@@ -272,9 +272,9 @@ impl InterruptSourceGroup for KvmMsiInterruptGroup {
                     format!("mask: No existing route for interrupt index {}", index),
                 ));
             }
-            // Drop the guard because set_kvm_gsi_routes will try to take the lock again.
+            // Drop the guard because set_gsi_routes will try to take the lock again.
             drop(gsi_msi_routes);
-            self.set_kvm_gsi_routes()?;
+            self.set_gsi_routes()?;
             return route.enable(&self.vm_fd);
         }
 
