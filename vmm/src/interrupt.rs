@@ -320,11 +320,13 @@ pub struct LegacyUserspaceInterruptManager {
     ioapic: Arc<Mutex<dyn InterruptController>>,
 }
 
-pub struct KvmMsiInterruptManager {
+pub struct MsiInterruptManager<E> {
     allocator: Arc<Mutex<SystemAllocator>>,
     vm_fd: Arc<dyn hypervisor::Vm>,
-    gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
+    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
 }
+
+pub type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
 
 impl LegacyUserspaceInterruptManager {
     pub fn new(ioapic: Arc<Mutex<dyn InterruptController>>) -> Self {
@@ -332,7 +334,7 @@ impl LegacyUserspaceInterruptManager {
     }
 }
 
-impl KvmMsiInterruptManager {
+impl<E> MsiInterruptManager<E> {
     pub fn new(allocator: Arc<Mutex<SystemAllocator>>, vm_fd: Arc<dyn hypervisor::Vm>) -> Self {
         // Create a shared list of GSI that can be shared through all PCI
         // devices. This way, we can maintain the full list of used GSI,
@@ -340,7 +342,7 @@ impl KvmMsiInterruptManager {
         // another one.
         let gsi_msi_routes = Arc::new(Mutex::new(HashMap::new()));
 
-        KvmMsiInterruptManager {
+        MsiInterruptManager {
             allocator,
             vm_fd,
             gsi_msi_routes,
