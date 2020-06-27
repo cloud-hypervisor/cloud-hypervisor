@@ -162,27 +162,6 @@ impl KvmMsiInterruptGroup {
             )
         })
     }
-
-    fn mask_kvm_entry(&self, index: InterruptIndex, mask: bool) -> Result<()> {
-        if let Some(route) = self.irq_routes.get(&index) {
-            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
-            if let Some(kvm_entry) = gsi_msi_routes.get_mut(&route.gsi) {
-                kvm_entry.masked = mask;
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("mask: No existing route for interrupt index {}", index),
-                ));
-            }
-        } else {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("mask: Invalid interrupt index {}", index),
-            ));
-        }
-
-        self.set_kvm_gsi_routes()
-    }
 }
 
 impl InterruptSourceGroup for KvmMsiInterruptGroup {
@@ -260,9 +239,19 @@ impl InterruptSourceGroup for KvmMsiInterruptGroup {
     }
 
     fn mask(&self, index: InterruptIndex) -> Result<()> {
-        self.mask_kvm_entry(index, true)?;
-
         if let Some(route) = self.irq_routes.get(&index) {
+            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
+            if let Some(entry) = gsi_msi_routes.get_mut(&route.gsi) {
+                entry.masked = true;
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("mask: No existing route for interrupt index {}", index),
+                ));
+            }
+            // Drop the guard because set_kvm_gsi_routes will try to take the lock again.
+            drop(gsi_msi_routes);
+            self.set_kvm_gsi_routes()?;
             return route.disable(&self.vm_fd);
         }
 
@@ -273,9 +262,19 @@ impl InterruptSourceGroup for KvmMsiInterruptGroup {
     }
 
     fn unmask(&self, index: InterruptIndex) -> Result<()> {
-        self.mask_kvm_entry(index, false)?;
-
         if let Some(route) = self.irq_routes.get(&index) {
+            let mut gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
+            if let Some(entry) = gsi_msi_routes.get_mut(&route.gsi) {
+                entry.masked = false;
+            } else {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("mask: No existing route for interrupt index {}", index),
+                ));
+            }
+            // Drop the guard because set_kvm_gsi_routes will try to take the lock again.
+            drop(gsi_msi_routes);
+            self.set_kvm_gsi_routes()?;
             return route.enable(&self.vm_fd);
         }
 
