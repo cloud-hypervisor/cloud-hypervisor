@@ -116,6 +116,10 @@ struct MsiInterruptGroup<E> {
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
 }
 
+trait MsiInterruptGroupOps {
+    fn set_gsi_routes(&self) -> Result<()>;
+}
+
 trait RoutingEntryExt {
     fn make_entry(gsi: u32, config: &InterruptSourceConfig) -> Result<Box<Self>>;
 }
@@ -164,7 +168,7 @@ impl<E> MsiInterruptGroup<E> {
 
 type KvmMsiInterruptGroup = MsiInterruptGroup<kvm_irq_routing_entry>;
 
-impl KvmMsiInterruptGroup {
+impl MsiInterruptGroupOps for KvmMsiInterruptGroup {
     fn set_gsi_routes(&self) -> Result<()> {
         let gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
         let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
