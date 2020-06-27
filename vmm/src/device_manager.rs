@@ -14,7 +14,7 @@ use crate::config::ConsoleOutputMode;
 use crate::config::DeviceConfig;
 use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig, VsockConfig};
 use crate::device_tree::{DeviceNode, DeviceTree};
-use crate::interrupt::{KvmMsiInterruptManager, LegacyUserspaceInterruptManager};
+use crate::interrupt::{kvm::KvmMsiInterruptManager, LegacyUserspaceInterruptManager};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 #[cfg(feature = "pci_support")]
 use crate::PciDeviceInfo;
