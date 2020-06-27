@@ -103,30 +103,36 @@ impl InterruptRoute {
     }
 }
 
-struct KvmRoutingEntry {
-    kvm_route: kvm_irq_routing_entry,
+struct RoutingEntry<E> {
+    route: E,
     masked: bool,
 }
 
-struct KvmMsiInterruptGroup {
+type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
+
+struct MsiInterruptGroup<E> {
     vm_fd: Arc<dyn hypervisor::Vm>,
-    gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
+    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
 }
 
-impl KvmMsiInterruptGroup {
+impl<E> MsiInterruptGroup<E> {
     fn new(
         vm_fd: Arc<dyn hypervisor::Vm>,
-        gsi_msi_routes: Arc<Mutex<HashMap<u32, KvmRoutingEntry>>>,
+        gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
         irq_routes: HashMap<InterruptIndex, InterruptRoute>,
     ) -> Self {
-        KvmMsiInterruptGroup {
+        MsiInterruptGroup {
             vm_fd,
             gsi_msi_routes,
             irq_routes,
         }
     }
+}
 
+type KvmMsiInterruptGroup = MsiInterruptGroup<kvm_irq_routing_entry>;
+
+impl KvmMsiInterruptGroup {
     fn set_kvm_gsi_routes(&self) -> Result<()> {
         let gsi_msi_routes = self.gsi_msi_routes.lock().unwrap();
         let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
@@ -135,7 +141,7 @@ impl KvmMsiInterruptGroup {
                 continue;
             }
 
-            entry_vec.push(entry.kvm_route);
+            entry_vec.push(entry.route);
         }
 
         let mut irq_routing =
@@ -229,7 +235,7 @@ impl InterruptSourceGroup for KvmMsiInterruptGroup {
                 kvm_route.u.msi.data = cfg.data;
 
                 let kvm_entry = KvmRoutingEntry {
-                    kvm_route,
+                    route: kvm_route,
                     masked: false,
                 };
 
