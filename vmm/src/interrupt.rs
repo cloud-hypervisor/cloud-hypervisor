@@ -116,6 +116,38 @@ struct MsiInterruptGroup<E> {
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
 }
 
+trait RoutingEntryExt {
+    fn make_entry(gsi: u32, config: &InterruptSourceConfig) -> Result<Box<Self>>;
+}
+
+impl RoutingEntryExt for KvmRoutingEntry {
+    fn make_entry(gsi: u32, config: &InterruptSourceConfig) -> Result<Box<Self>> {
+        if let InterruptSourceConfig::MsiIrq(cfg) = &config {
+            let mut kvm_route = kvm_irq_routing_entry {
+                gsi,
+                type_: KVM_IRQ_ROUTING_MSI,
+                ..Default::default()
+            };
+
+            kvm_route.u.msi.address_lo = cfg.low_addr;
+            kvm_route.u.msi.address_hi = cfg.high_addr;
+            kvm_route.u.msi.data = cfg.data;
+
+            let kvm_entry = KvmRoutingEntry {
+                route: kvm_route,
+                masked: false,
+            };
+
+            return Ok(Box::new(kvm_entry));
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "Interrupt config type not supported",
+        ))
+    }
+}
+
 impl<E> MsiInterruptGroup<E> {
     fn new(
         vm_fd: Arc<dyn hypervisor::Vm>,
@@ -202,32 +234,11 @@ impl InterruptSourceGroup for KvmMsiInterruptGroup {
 
     fn update(&self, index: InterruptIndex, config: InterruptSourceConfig) -> Result<()> {
         if let Some(route) = self.irq_routes.get(&index) {
-            if let InterruptSourceConfig::MsiIrq(cfg) = &config {
-                let mut kvm_route = kvm_irq_routing_entry {
-                    gsi: route.gsi,
-                    type_: KVM_IRQ_ROUTING_MSI,
-                    ..Default::default()
-                };
-
-                kvm_route.u.msi.address_lo = cfg.low_addr;
-                kvm_route.u.msi.address_hi = cfg.high_addr;
-                kvm_route.u.msi.data = cfg.data;
-
-                let kvm_entry = KvmRoutingEntry {
-                    route: kvm_route,
-                    masked: false,
-                };
-
-                self.gsi_msi_routes
-                    .lock()
-                    .unwrap()
-                    .insert(route.gsi, kvm_entry);
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Interrupt config type not supported",
-                ));
-            }
+            let entry = KvmRoutingEntry::make_entry(route.gsi, &config)?;
+            self.gsi_msi_routes
+                .lock()
+                .unwrap()
+                .insert(route.gsi, *entry);
 
             return self.set_gsi_routes();
         }
