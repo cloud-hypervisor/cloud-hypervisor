@@ -200,7 +200,12 @@ impl MsiInterruptGroupOps for KvmMsiInterruptGroup {
     }
 }
 
-impl InterruptSourceGroup for KvmMsiInterruptGroup {
+impl<E> InterruptSourceGroup for MsiInterruptGroup<E>
+where
+    E: Send + Sync,
+    RoutingEntry<E>: RoutingEntryExt,
+    MsiInterruptGroup<E>: MsiInterruptGroupOps,
+{
     fn enable(&self) -> Result<()> {
         for (_, route) in self.irq_routes.iter() {
             route.enable(&self.vm_fd)?;
@@ -238,7 +243,7 @@ impl InterruptSourceGroup for KvmMsiInterruptGroup {
 
     fn update(&self, index: InterruptIndex, config: InterruptSourceConfig) -> Result<()> {
         if let Some(route) = self.irq_routes.get(&index) {
-            let entry = KvmRoutingEntry::make_entry(route.gsi, &config)?;
+            let entry = RoutingEntry::<_>::make_entry(route.gsi, &config)?;
             self.gsi_msi_routes
                 .lock()
                 .unwrap()
