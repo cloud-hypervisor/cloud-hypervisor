@@ -103,24 +103,24 @@ impl InterruptRoute {
     }
 }
 
-struct RoutingEntry<E> {
+pub struct RoutingEntry<E> {
     route: E,
     masked: bool,
 }
 
 type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
 
-struct MsiInterruptGroup<E> {
+pub struct MsiInterruptGroup<E> {
     vm_fd: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
 }
 
-trait MsiInterruptGroupOps {
+pub trait MsiInterruptGroupOps {
     fn set_gsi_routes(&self) -> Result<()>;
 }
 
-trait RoutingEntryExt {
+pub trait RoutingEntryExt {
     fn make_entry(gsi: u32, config: &InterruptSourceConfig) -> Result<Box<Self>>;
 }
 
@@ -387,7 +387,12 @@ impl InterruptManager for LegacyUserspaceInterruptManager {
     }
 }
 
-impl InterruptManager for KvmMsiInterruptManager {
+impl<E> InterruptManager for MsiInterruptManager<E>
+where
+    E: Send + Sync + 'static,
+    RoutingEntry<E>: RoutingEntryExt,
+    MsiInterruptGroup<E>: MsiInterruptGroupOps,
+{
     type GroupConfig = MsiIrqGroupConfig;
 
     fn create_group(
@@ -401,7 +406,7 @@ impl InterruptManager for KvmMsiInterruptManager {
             irq_routes.insert(i, InterruptRoute::new(&mut allocator)?);
         }
 
-        Ok(Arc::new(Box::new(KvmMsiInterruptGroup::new(
+        Ok(Arc::new(Box::new(MsiInterruptGroup::new(
             self.vm_fd.clone(),
             self.gsi_msi_routes.clone(),
             irq_routes,
