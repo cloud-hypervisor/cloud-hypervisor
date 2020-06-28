@@ -17,9 +17,6 @@ use serde_derive::{Deserialize, Serialize};
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
-///
-/// Export generically-named wrappers of kvm-bindings for Unix-based platforms
-///
 pub use {
     kvm_bindings::kvm_dtable as DescriptorTable, kvm_bindings::kvm_fpu as FpuState,
     kvm_bindings::kvm_lapic_state as LapicState, kvm_bindings::kvm_mp_state as MpState,
