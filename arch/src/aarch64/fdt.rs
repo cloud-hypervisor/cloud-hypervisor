@@ -531,7 +531,7 @@ mod tests {
     use super::*;
     use crate::aarch64::gic::create_gic;
     use crate::aarch64::layout;
-    use kvm_ioctls::Kvm;
+    use std::sync::Arc;
 
     const LEN: u64 = 4096;
 
@@ -585,8 +585,10 @@ mod tests {
         .iter()
         .cloned()
         .collect();
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+
+        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
+        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let vm = hv.create_vm().unwrap();
         let gic = create_gic(&vm, 1).unwrap();
         assert!(create_fdt(
             &mem,

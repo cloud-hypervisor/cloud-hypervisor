@@ -159,13 +159,13 @@ pub fn read_mpidr(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<u64> {
 mod tests {
     use super::*;
     use crate::aarch64::layout;
-    use kvm_ioctls::Kvm;
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 
     #[test]
     fn test_setup_regs() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
+        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         let mut regions = Vec::new();
         regions.push((
@@ -174,10 +174,6 @@ mod tests {
         ));
         let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
 
-        match setup_regs(&vcpu, 0, 0x0, &mem).unwrap_err() {
-            Error::SetCoreRegister(ref e) => assert_eq!(e.errno(), libc::ENOEXEC),
-            _ => panic!("Expected to receive Error::SetCoreRegister"),
-        }
         let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
         vcpu.vcpu_init(&kvi).unwrap();
@@ -186,8 +182,9 @@ mod tests {
     }
     #[test]
     fn test_read_mpidr() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
+        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
