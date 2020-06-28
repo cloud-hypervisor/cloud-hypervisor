@@ -146,14 +146,14 @@ pub fn create_gic(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<d
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
-    use kvm_ioctls::Kvm;
 
     #[test]
     fn test_create_gic() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
+        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let vm = hv.create_vm().unwrap();
+
         assert!(create_gic(&vm, 1).is_ok());
     }
 }
