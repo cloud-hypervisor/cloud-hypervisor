@@ -164,6 +164,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<()> {
     let physptr = GuestAddress(SMBIOS_START)
         .checked_add(mem::size_of::<Smbios30Entrypoint>() as u64)
         .ok_or(Error::NotEnoughMemory)?;
+    eprintln!("{:x}", physptr.0);
     let mut curptr = physptr;
     let mut handle = 0;
 
@@ -194,6 +195,16 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<()> {
         curptr = write_and_incr(mem, smbios_sysinfo, curptr)?;
         curptr = write_string(mem, "Cloud Hypervisor", curptr)?;
         curptr = write_string(mem, "cloud-hypervisor", curptr)?;
+        curptr = write_and_incr(mem, 0 as u8, curptr)?;
+    }
+
+    {
+        handle += 1;
+        let mut smbios_sysinfo = SmbiosSysInfo::default();
+        smbios_sysinfo.typ = 127;
+        smbios_sysinfo.length = mem::size_of::<SmbiosSysInfo>() as u8;
+        smbios_sysinfo.handle = handle;
+        curptr = write_and_incr(mem, smbios_sysinfo, curptr)?;
         curptr = write_and_incr(mem, 0 as u8, curptr)?;
     }
 
