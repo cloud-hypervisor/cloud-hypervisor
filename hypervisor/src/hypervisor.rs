@@ -9,7 +9,7 @@
 //
 use crate::vm::Vm;
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::CpuId;
+use crate::x86_64::{CpuId, MsrList};
 #[cfg(target_arch = "x86_64")]
 use kvm_ioctls::Cap;
 use std::sync::Arc;
@@ -55,6 +55,11 @@ pub enum HypervisorError {
     ///
     #[error("Failed to get number of max vcpus: {0}")]
     GetCpuId(#[source] anyhow::Error),
+    ///
+    /// Failed to retrieve list of MSRs.
+    ///
+    #[error("Failed to get the list of supported MSRs: {0}")]
+    GetMsrList(#[source] anyhow::Error),
 }
 
 ///
@@ -103,4 +108,9 @@ pub trait Hypervisor: Send + Sync {
     /// Check particular extensions if any
     ///
     fn check_required_extensions(&self) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Retrieve the list of MSRs supported by the hypervisor.
+    ///
+    fn get_msr_list(&self) -> Result<MsrList>;
 }
