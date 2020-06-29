@@ -70,6 +70,8 @@ pub const EBDA_START: GuestAddress = GuestAddress(0xa0000);
 // ACPI RSDP table
 pub const RSDP_POINTER: GuestAddress = EBDA_START;
 
+pub const SMBIOS_START: u64 = 0xf0000; // First possible location per the spec.
+
 // == End of "EBDA" range ==
 
 // ** High RAM (start: 1MiB, length: 3071MiB) **
