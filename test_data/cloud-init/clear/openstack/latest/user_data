@@ -77,4 +77,4 @@ write_files:
         # 1G ram requires 512 pages
         echo 512 | sudo tee /proc/sys/vm/nr_hugepages
         sudo chmod a+rwX /dev/hugepages
-        /mnt/cloud-hypervisor --kernel /mnt/vmlinux --cmdline "console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c VFIOTAG" --disk path=/mnt/clear-31311-cloudguest.img path=/mnt/cloudinit.img --cpus boot=1 --memory size=512M,hotplug_size=1G,file=/dev/hugepages --device path=/sys/bus/pci/devices/0000:00:05.0/ path=/sys/bus/pci/devices/0000:00:06.0/ --api-socket /tmp/ch_api.sock
+        /mnt/cloud-hypervisor --kernel /mnt/vmlinux --cmdline "console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=PARTUUID=1485769e-8c72-4a3a-a5f5-2bf2bc822816 VFIOTAG" --disk path=/mnt/clear-31311-cloudguest.img path=/mnt/cloudinit.img --cpus boot=1 --memory size=512M,hotplug_size=1G,file=/dev/hugepages --device path=/sys/bus/pci/devices/0000:00:05.0/ path=/sys/bus/pci/devices/0000:00:06.0/ --api-socket /tmp/ch_api.sock

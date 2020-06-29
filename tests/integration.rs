@@ -99,11 +99,11 @@ mod tests {
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64-raw.img";
     const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-raw.img";
 
-    const CLEAR_KERNEL_CMDLINE: &str = "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c \
+    const CLEAR_KERNEL_CMDLINE: &str = "root=PARTUUID=1485769e-8c72-4a3a-a5f5-2bf2bc822816 \
                      console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
                      init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
-                     no_timer_check noreplace-smp cryptomgr.notests \
-                     rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw";
+                     no_timer_check noreplace-smp cryptomgr.notests page_alloc.shuffle=1 \
+                     rootfstype=ext4,btrfs,xfs rw";
 
     impl UbuntuDiskConfig {
         fn new(image_name: String) -> Self {
@@ -215,10 +215,10 @@ mod tests {
             workload_path.push("workloads");
 
             let mut osdisk_base_path = workload_path.clone();
-            osdisk_base_path.push("clear-31311-cloudguest.img");
+            osdisk_base_path.push("clear-32480-cloudguest.img");
 
             let mut osdisk_raw_base_path = workload_path;
-            osdisk_raw_base_path.push("clear-31311-cloudguest-raw.img");
+            osdisk_raw_base_path.push("clear-32480-cloudguest-raw.img");
 
             let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
             let osdisk_raw_path =
@@ -2851,7 +2851,7 @@ mod tests {
                 .args(&[
                     "--cmdline",
                     format!(
-                        "{} vfio_iommu_type1.allow_unsafe_interrupts",
+                        "{} kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts",
                         CLEAR_KERNEL_CMDLINE
                     )
                     .as_str(),
@@ -3900,9 +3900,12 @@ mod tests {
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=2,max=4"])
-                .args(&["--memory", "size=512M,hotplug_method=virtio-mem,hotplug_size=8192M"])
+                .args(&[
+                    "--memory",
+                    "size=512M,hotplug_method=virtio-mem,hotplug_size=8192M",
+                ])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
                 .default_disks()
                 .default_net()
                 .args(&["--api-socket", &api_socket])
