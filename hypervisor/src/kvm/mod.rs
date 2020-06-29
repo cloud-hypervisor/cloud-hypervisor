@@ -36,7 +36,7 @@ pub use x86_64::{
 };
 
 #[cfg(target_arch = "x86_64")]
-use kvm_bindings::{kvm_enable_cap, KVM_CAP_SPLIT_IRQCHIP};
+use kvm_bindings::{kvm_enable_cap, MsrList, KVM_CAP_SPLIT_IRQCHIP};
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
@@ -332,6 +332,15 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         self.kvm
             .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
             .map_err(|e| hypervisor::HypervisorError::GetCpuId(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Retrieve the list of MSRs supported by KVM.
+    ///
+    fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
+        self.kvm
+            .get_msr_index_list()
+            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
     }
 }
 /// Vcpu struct for KVM

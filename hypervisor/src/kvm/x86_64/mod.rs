@@ -24,7 +24,7 @@ pub use {
     kvm_bindings::kvm_segment as SegmentRegister, kvm_bindings::kvm_sregs as SpecialRegisters,
     kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave as Xsave,
-    kvm_bindings::CpuId, kvm_bindings::Msrs as MsrEntries,
+    kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
 };
 
 pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
