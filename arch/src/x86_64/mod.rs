@@ -25,6 +25,7 @@ use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryMmap, GuestMemoryRegion, GuestUsize,
 };
+mod smbios;
 
 #[derive(Debug, Copy, Clone)]
 pub enum BootProtocol {
@@ -114,6 +115,9 @@ pub enum Error {
 
     /// Cannot set the local interruption due to bad configuration.
     LocalIntConfiguration(anyhow::Error),
+
+    /// Error setting up SMBIOS table
+    SmbiosSetup(smbios::Error),
 }
 
 impl From<Error> for super::Error {
@@ -296,6 +300,8 @@ pub fn configure_system(
     rsdp_addr: Option<GuestAddress>,
     boot_prot: BootProtocol,
 ) -> super::Result<()> {
+    smbios::setup_smbios(guest_mem).map_err(Error::SmbiosSetup)?;
+
     // Note that this puts the mptable at the last 1k of Linux's 640k base RAM
     #[cfg(not(feature = "acpi"))]
     mptable::setup_mptable(guest_mem, _num_cpus).map_err(Error::MpTableSetup)?;
