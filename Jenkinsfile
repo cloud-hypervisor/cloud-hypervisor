@@ -88,6 +88,11 @@ pipeline{
 								sh "scripts/dev_cli.sh tests --unit"
 							}
 						}
+						stage ('Run integration tests') {
+							steps {
+								sh "scripts/dev_cli.sh tests --integration"
+							}
+						}
 					}
 				}
 				stage ('Worker build (musl)') {
