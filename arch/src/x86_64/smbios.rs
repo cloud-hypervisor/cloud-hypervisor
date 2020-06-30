@@ -165,7 +165,6 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<()> {
     let physptr = GuestAddress(SMBIOS_START)
         .checked_add(mem::size_of::<Smbios30Entrypoint>() as u64)
         .ok_or(Error::NotEnoughMemory)?;
-    eprintln!("{:x}", physptr.0);
     let mut curptr = physptr;
     let mut handle = 0;
 
