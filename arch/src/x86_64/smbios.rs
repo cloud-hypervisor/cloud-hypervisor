@@ -53,6 +53,7 @@ pub type Result<T> = result::Result<T, Error>;
 const SM3_MAGIC_IDENT: &[u8; 5usize] = b"_SM3_";
 const BIOS_INFORMATION: u8 = 0;
 const SYSTEM_INFORMATION: u8 = 1;
+const END_OF_TABLE: u8 = 127;
 const PCI_SUPPORTED: u64 = 1 << 7;
 const IS_VIRTUAL_MACHINE: u8 = 1 << 4;
 
@@ -201,7 +202,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<()> {
     {
         handle += 1;
         let mut smbios_sysinfo = SmbiosSysInfo::default();
-        smbios_sysinfo.typ = 127;
+        smbios_sysinfo.typ = END_OF_TABLE;
         smbios_sysinfo.length = mem::size_of::<SmbiosSysInfo>() as u8;
         smbios_sysinfo.handle = handle;
         curptr = write_and_incr(mem, smbios_sysinfo, curptr)?;
