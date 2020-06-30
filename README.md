@@ -133,7 +133,7 @@ We need to get the latest `rust-hypervisor-firmware` release and also a working 
 $ pushd $CLOUDH
 $ wget https://download.clearlinux.org/releases/31890/clear/clear-31890-kvm.img.xz
 $ unxz clear-31890-kvm.img.xz
-$ wget https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.2.6/hypervisor-fw
+$ wget https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.2.8/hypervisor-fw
 $ popd
 ```
 
