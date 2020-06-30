@@ -80,6 +80,7 @@ const KVM_GET_XCRS: u64 = 0x8188_aea6;
 const KVM_GET_FPU: u64 = 0x81a0_ae8c;
 const KVM_GET_LAPIC: u64 = 0x8400_ae8e;
 const KVM_GET_XSAVE: u64 = 0x9000_aea4;
+const KVM_GET_MSR_INDEX_LIST: u64 = 0xc004_ae02;
 const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
 const KVM_GET_MSRS: u64 = 0xc008_ae88;
 const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
@@ -131,6 +132,7 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_FPU)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_LAPIC)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MP_STATE)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MSR_INDEX_LIST)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MSRS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_REGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_SREGS)?],
