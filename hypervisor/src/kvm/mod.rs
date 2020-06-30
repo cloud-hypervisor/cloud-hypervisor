@@ -26,8 +26,7 @@ pub mod x86_64;
 
 #[cfg(target_arch = "x86_64")]
 use x86_64::{
-    boot_msr_entries, check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters,
-    KVM_TSS_ADDRESS,
+    check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters, KVM_TSS_ADDRESS,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -67,6 +66,8 @@ pub use {
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
     fd: Arc<VmFd>,
+    #[cfg(target_arch = "x86_64")]
+    msrs: MsrEntries,
 }
 ///
 /// Implementation of Vm trait for KVM
@@ -120,7 +121,11 @@ impl vm::Vm for KvmVm {
             .fd
             .create_vcpu(id)
             .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
-        let vcpu = KvmVcpu { fd: vc };
+        let vcpu = KvmVcpu {
+            fd: vc,
+            #[cfg(target_arch = "x86_64")]
+            msrs: self.msrs.clone(),
+        };
         Ok(Arc::new(vcpu))
     }
     ///
@@ -262,11 +267,9 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     /// let vm = hypervisor.create_vm().unwrap()
     ///
     fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
-        let kvm = Kvm::new().map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
-
         let fd: VmFd;
         loop {
-            match kvm.create_vm() {
+            match self.kvm.create_vm() {
                 Ok(res) => fd = res,
                 Err(e) => {
                     if e.errno() == libc::EINTR {
@@ -281,9 +284,27 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             }
             break;
         }
+
         let vm_fd = Arc::new(fd);
-        let kvm_fd = KvmVm { fd: vm_fd };
-        Ok(Arc::new(kvm_fd))
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let msr_list = self.get_msr_list()?;
+            let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
+            let mut msrs = MsrEntries::new(num_msrs);
+            let indices = msr_list.as_slice();
+            let msr_entries = msrs.as_mut_slice();
+            for (pos, index) in indices.iter().enumerate() {
+                msr_entries[pos].index = *index;
+            }
+
+            Ok(Arc::new(KvmVm { fd: vm_fd, msrs }))
+        }
+
+        #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+        {
+            Ok(Arc::new(KvmVm { fd: vm_fd }))
+        }
     }
 
     fn check_required_extensions(&self) -> hypervisor::Result<()> {
@@ -346,6 +367,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 /// Vcpu struct for KVM
 pub struct KvmVcpu {
     fd: VcpuFd,
+    #[cfg(target_arch = "x86_64")]
+    msrs: MsrEntries,
 }
 /// Implementation of Vcpu trait for KVM
 /// Example:
@@ -625,7 +648,7 @@ impl cpu::Vcpu for KvmVcpu {
         let xcrs = self.get_xcrs()?;
         let lapic_state = self.get_lapic()?;
         let fpu = self.get_fpu()?;
-        let mut msrs = boot_msr_entries();
+        let mut msrs = self.msrs.clone();
         self.get_msrs(&mut msrs)?;
         let vcpu_events = self.get_vcpu_events()?;
 
