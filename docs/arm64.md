@@ -19,13 +19,23 @@ sudo apt-get install libfdt-dev
 Before building, a hack trick need to be performed to get rid of some build error in vmm component. See [this](https://github.com/cloud-hypervisor/kvm-bindings/pull/1) for more info about this temporary workaround.
 
 ```bash
-sed -i 's/"with-serde",\ //g' vmm/Cargo.toml
+sed -i 's/"with-serde",\ //g' hypervisor/Cargo.toml
 ```
 
-The support of AArch64 is in very early stage, only Virtio devices with MMIO tranport is available.
+For Virtio devices, you can choose MMIO or PCI as transport option.
+
+### MMIO
 
 ```bash
 cargo build --no-default-features --features "mmio"
+```
+
+### PCI
+
+Using PCI devices requires GICv3-ITS for MSI messaging. GICv3-ITS is very common in modern servers, but your machine happen to be old ones with GICv2(M) (like Raspberry Pi 4) or GICv3 without ITS, MMIO can still work.
+
+```bash
+cargo build --no-default-features --features "pci"
 ```
 
 ## Image
@@ -47,7 +57,7 @@ To build the development container:
 ./scripts/dev_cli.sh build-container
 ```
 
-To build Cloud-hypervisor in the container:
+To build Cloud-hypervisor in the container: (The default option for Virtio transport is MMIO.)
 
 ```bash
 ./scripts/dev_cli.sh build
@@ -58,7 +68,7 @@ To build Cloud-hypervisor in the container:
 Assuming you have built Cloud-hypervisor with the development container, a VM can be started with command:
 
 ```bash
-sudo target/debug/cloud-hypervisor --kernel kernel.bin --disk path=rootfs.ext4 --cmdline "keep_bootcon console=hvc0 reboot=k panic=1 pci=off root=/dev/vda rw" --cpus boot=4 --memory size=512M --serial file=serial.log --log-file log.log -vvv
+sudo build/cargo_target/aarch64-unknown-linux-gnu/debug/cloud-hypervisor --kernel kernel.bin --disk path=rootfs.ext4 --cmdline "keep_bootcon console=hvc0 reboot=k panic=1 pci=off root=/dev/vda rw" --cpus boot=4 --memory size=512M --serial file=serial.log --log-file log.log -vvv
 ```
 
-If the build was done out of the container, replace the binary path with `build/cargo_target/aarch64-unknown-linux-gnu/debug/cloud-hypervisor`.
+If the build was done out of the container, replace the binary path with `target/debug/cloud-hypervisor`.
