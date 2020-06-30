@@ -58,7 +58,7 @@ To build Cloud-hypervisor in the container:
 Assuming you have built Cloud-hypervisor with the development container, a VM can be started with command:
 
 ```bash
-sudo target/debug/cloud-hypervisor --kernel kernel.bin --disk path=rootfs.ext4 --cmdline "keep_bootcon console=hvc0 reboot=k panic=1 pci=off root=/dev/vda rw" --cpus boot=4 --memory size=512M --seccomp false --serial file=serial.log --log-file log.log -vvv
+sudo target/debug/cloud-hypervisor --kernel kernel.bin --disk path=rootfs.ext4 --cmdline "keep_bootcon console=hvc0 reboot=k panic=1 pci=off root=/dev/vda rw" --cpus boot=4 --memory size=512M --serial file=serial.log --log-file log.log -vvv
 ```
 
 If the build was done out of the container, replace the binary path with `build/cargo_target/aarch64-unknown-linux-gnu/debug/cloud-hypervisor`.

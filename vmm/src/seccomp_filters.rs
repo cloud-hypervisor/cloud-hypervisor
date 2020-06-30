@@ -44,6 +44,8 @@ const FIOCLEX: u64 = 0x5451;
 const FIONBIO: u64 = 0x5421;
 
 // See include/uapi/linux/kvm.h in the kernel code.
+const KVM_ARM_PREFERRED_TARGET: u64 = 0x8020_aeaf;
+const KVM_ARM_VCPU_INIT: u64 = 0x4020_aeae;
 const KVM_GET_API_VERSION: u64 = 0xae00;
 const KVM_CREATE_VM: u64 = 0xae01;
 const KVM_CHECK_EXTENSION: u64 = 0xae03;
@@ -58,6 +60,7 @@ const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
 const KVM_SET_MSRS: u64 = 0x4008_ae89;
 const KVM_SET_CPUID2: u64 = 0x4008_ae90;
 const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
+const KVM_SET_ONE_REG: u64 = 0x4010_aeac;
 const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
 const KVM_IRQFD: u64 = 0x4020_ae76;
 const KVM_SET_CLOCK: u64 = 0x4030_ae7b;
@@ -73,7 +76,9 @@ const KVM_SET_LAPIC: u64 = 0x4400_ae8f;
 const KVM_SET_XSAVE: u64 = 0x5000_aea5;
 const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
 const KVM_GET_CLOCK: u64 = 0x8030_ae7c;
+const KVM_GET_DEVICE_ATTR: u64 = 0x4018_aee2;
 const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
+const KVM_GET_ONE_REG: u64 = 0x4010_aeab;
 const KVM_GET_REGS: u64 = 0x8090_ae81;
 const KVM_GET_SREGS: u64 = 0x8138_ae83;
 const KVM_GET_XCRS: u64 = 0x8188_aea6;
@@ -120,6 +125,8 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
     Ok(or![
         and![Cond::new(1, ArgLen::DWORD, Eq, FIOCLEX)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_ARM_PREFERRED_TARGET,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_ARM_VCPU_INIT,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CHECK_EXTENSION,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_DEVICE,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_IRQCHIP,)?],
@@ -129,11 +136,13 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_ENABLE_CAP)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_API_VERSION,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_CLOCK,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_DEVICE_ATTR,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_FPU)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_LAPIC)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MP_STATE)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MSR_INDEX_LIST)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MSRS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_ONE_REG)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_REGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_SREGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_SUPPORTED_CPUID,)?],
@@ -153,6 +162,7 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_LAPIC)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_MP_STATE)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_MSRS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_ONE_REG)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_REGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_SREGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_TSS_ADDR,)?],
@@ -236,6 +246,10 @@ pub fn vmm_thread_filter() -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_fsync),
             #[cfg(target_arch = "x86_64")]
             allow_syscall(libc::SYS_ftruncate),
+            #[cfg(target_arch = "aarch64")]
+            // The definition of libc::SYS_ftruncate is missing on AArch64.
+            // Use a hard-code number instead.
+            allow_syscall(46),
             allow_syscall(libc::SYS_futex),
             allow_syscall(libc::SYS_getpid),
             allow_syscall(libc::SYS_getrandom),
