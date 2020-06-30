@@ -73,42 +73,23 @@ mod tests {
         fn disk(&self, disk_type: DiskType) -> Option<String>;
     }
 
-    #[derive(Clone)]
-    struct ClearDiskConfig {
-        osdisk_path: String,
-        osdisk_raw_path: String,
-        cloudinit_path: String,
-    }
-
-    impl ClearDiskConfig {
-        fn new() -> Self {
-            ClearDiskConfig {
-                osdisk_path: String::new(),
-                osdisk_raw_path: String::new(),
-                cloudinit_path: String::new(),
-            }
-        }
-    }
-
     struct UbuntuDiskConfig {
+        osdisk_path: String,
         osdisk_raw_path: String,
         cloudinit_path: String,
         image_name: String,
     }
 
-    const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64-raw.img";
-    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-raw.img";
+    const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64";
+    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom";
 
-    const CLEAR_KERNEL_CMDLINE: &str = "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c \
-                     console=tty0 console=ttyS0,115200n8 console=hvc0 quiet \
-                     init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable \
-                     no_timer_check noreplace-smp cryptomgr.notests \
-                     rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw";
+    const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=ttyS0 console=hvc0 quiet rw";
 
     impl UbuntuDiskConfig {
         fn new(image_name: String) -> Self {
             UbuntuDiskConfig {
                 image_name,
+                osdisk_path: String::new(),
                 osdisk_raw_path: String::new(),
                 cloudinit_path: String::new(),
             }
@@ -162,110 +143,6 @@ mod tests {
         )
     }
 
-    impl DiskConfig for ClearDiskConfig {
-        fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
-            let cloudinit_file_path =
-                String::from(tmp_dir.path().join("cloudinit").to_str().unwrap());
-
-            let cloud_init_directory = tmp_dir
-                .path()
-                .join("cloud-init")
-                .join("clear")
-                .join("openstack");
-
-            fs::create_dir_all(&cloud_init_directory.join("latest"))
-                .expect("Expect creating cloud-init directory to succeed");
-
-            let source_file_dir = std::env::current_dir()
-                .unwrap()
-                .join("test_data")
-                .join("cloud-init")
-                .join("clear")
-                .join("openstack")
-                .join("latest");
-
-            rate_limited_copy(
-                source_file_dir.join("meta_data.json"),
-                cloud_init_directory.join("latest").join("meta_data.json"),
-            )
-            .expect("Expect copying cloud-init meta_data.json to succeed");
-
-            let mut user_data_string = String::new();
-
-            fs::File::open(source_file_dir.join("user_data"))
-                .unwrap()
-                .read_to_string(&mut user_data_string)
-                .expect("Expected reading user_data file in to succeed");
-
-            user_data_string = user_data_string.replace("192.168.2.1", &network.host_ip);
-            user_data_string = user_data_string.replace("192.168.2.2", &network.guest_ip);
-            user_data_string = user_data_string.replace("192.168.2.3", &network.l2_guest_ip1);
-            user_data_string = user_data_string.replace("192.168.2.4", &network.l2_guest_ip2);
-            user_data_string = user_data_string.replace("192.168.2.5", &network.l2_guest_ip3);
-            user_data_string = user_data_string.replace("12:34:56:78:90:ab", &network.guest_mac);
-            user_data_string =
-                user_data_string.replace("de:ad:be:ef:12:34", &network.l2_guest_mac1);
-            user_data_string =
-                user_data_string.replace("de:ad:be:ef:34:56", &network.l2_guest_mac2);
-            user_data_string =
-                user_data_string.replace("de:ad:be:ef:56:78", &network.l2_guest_mac3);
-
-            fs::File::create(cloud_init_directory.join("latest").join("user_data"))
-                .unwrap()
-                .write_all(&user_data_string.as_bytes())
-                .expect("Expected writing out user_data to succeed");
-
-            std::process::Command::new("mkdosfs")
-                .args(&["-n", "config-2"])
-                .args(&["-C", cloudinit_file_path.as_str()])
-                .arg("8192")
-                .output()
-                .expect("Expect creating disk image to succeed");
-
-            std::process::Command::new("mcopy")
-                .arg("-o")
-                .args(&["-i", cloudinit_file_path.as_str()])
-                .args(&["-s", cloud_init_directory.to_str().unwrap(), "::"])
-                .output()
-                .expect("Expect copying files to disk image to succeed");
-
-            cloudinit_file_path
-        }
-
-        fn prepare_files(&mut self, tmp_dir: &TempDir, network: &GuestNetworkConfig) {
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut osdisk_base_path = workload_path.clone();
-            osdisk_base_path.push("clear-31311-cloudguest.img");
-
-            let mut osdisk_raw_base_path = workload_path;
-            osdisk_raw_base_path.push("clear-31311-cloudguest-raw.img");
-
-            let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
-            let osdisk_raw_path =
-                String::from(tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
-            let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
-
-            rate_limited_copy(osdisk_base_path, &osdisk_path)
-                .expect("copying of OS source disk image failed");
-            rate_limited_copy(osdisk_raw_base_path, &osdisk_raw_path)
-                .expect("copying of OS source disk raw image failed");
-
-            self.cloudinit_path = cloudinit_path;
-            self.osdisk_path = osdisk_path;
-            self.osdisk_raw_path = osdisk_raw_path;
-        }
-
-        fn disk(&self, disk_type: DiskType) -> Option<String> {
-            match disk_type {
-                DiskType::OperatingSystem => Some(self.osdisk_path.clone()),
-                DiskType::RawOperatingSystem => Some(self.osdisk_raw_path.clone()),
-                DiskType::CloudInit => Some(self.cloudinit_path.clone()),
-            }
-        }
-    }
-
     impl DiskConfig for UbuntuDiskConfig {
         fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
             let cloudinit_file_path =
@@ -297,7 +174,19 @@ mod tests {
             network_config_string = network_config_string.replace("192.168.2.1", &network.host_ip);
             network_config_string = network_config_string.replace("192.168.2.2", &network.guest_ip);
             network_config_string =
+                network_config_string.replace("192.168.2.3", &network.l2_guest_ip1);
+            network_config_string =
+                network_config_string.replace("192.168.2.4", &network.l2_guest_ip2);
+            network_config_string =
+                network_config_string.replace("192.168.2.5", &network.l2_guest_ip3);
+            network_config_string =
                 network_config_string.replace("12:34:56:78:90:ab", &network.guest_mac);
+            network_config_string =
+                network_config_string.replace("de:ad:be:ef:12:34", &network.l2_guest_mac1);
+            network_config_string =
+                network_config_string.replace("de:ad:be:ef:34:56", &network.l2_guest_mac2);
+            network_config_string =
+                network_config_string.replace("de:ad:be:ef:56:78", &network.l2_guest_mac3);
 
             fs::File::create(cloud_init_directory.join("network-config"))
                 .unwrap()
@@ -329,25 +218,34 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut osdisk_raw_base_path = workload_path;
-            osdisk_raw_base_path.push(&self.image_name);
+            let image_name = format!("{}.qcow2", self.image_name);
+            let raw_image_name = format!("{}.raw", self.image_name);
 
+            let mut osdisk_base_path = workload_path.clone();
+            osdisk_base_path.push(&image_name);
+
+            let mut osdisk_raw_base_path = workload_path;
+            osdisk_raw_base_path.push(&raw_image_name);
+
+            let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
             let osdisk_raw_path =
                 String::from(tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
             let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
 
+            rate_limited_copy(osdisk_base_path, &osdisk_path)
+                .expect("copying of OS source disk image failed");
             rate_limited_copy(osdisk_raw_base_path, &osdisk_raw_path)
                 .expect("copying of OS source disk raw image failed");
 
             self.cloudinit_path = cloudinit_path;
+            self.osdisk_path = osdisk_path;
             self.osdisk_raw_path = osdisk_raw_path;
         }
 
         fn disk(&self, disk_type: DiskType) -> Option<String> {
             match disk_type {
-                DiskType::OperatingSystem | DiskType::RawOperatingSystem => {
-                    Some(self.osdisk_raw_path.clone())
-                }
+                DiskType::OperatingSystem => Some(self.osdisk_path.clone()),
+                DiskType::RawOperatingSystem => Some(self.osdisk_raw_path.clone()),
                 DiskType::CloudInit => Some(self.cloudinit_path.clone()),
             }
         }
@@ -949,6 +847,25 @@ mod tests {
             ])
         }
 
+        fn default_raw_disks(&mut self) -> &mut Self {
+            self.args(&[
+                "--disk",
+                format!(
+                    "path={}",
+                    self.guest
+                        .disk_config
+                        .disk(DiskType::RawOperatingSystem)
+                        .unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    self.guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+            ])
+        }
+
         fn default_net(&mut self) -> &mut Self {
             self.args(&["--net", self.guest.default_net_string().as_str()])
         }
@@ -957,12 +874,10 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_simple_launch() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
             let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
 
             vec![
-                &mut clear as &mut dyn DiskConfig,
                 &mut bionic as &mut dyn DiskConfig,
                 &mut focal as &mut dyn DiskConfig,
             ]
@@ -974,7 +889,7 @@ mod tests {
                     .args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
-                    .default_disks()
+                    .default_raw_disks()
                     .default_net()
                     .args(&["--serial", "tty", "--console", "off"])
                     .spawn()
@@ -984,7 +899,7 @@ mod tests {
 
                 aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
                 aver_eq!(tb, guest.get_initial_apicid().unwrap_or(1), 0);
-                aver!(tb, guest.get_total_memory().unwrap_or_default() > 488_000);
+                aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
                 aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
                 aver_eq!(
                     tb,
@@ -1008,7 +923,7 @@ mod tests {
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
-                .default_disks()
+                .default_raw_disks()
                 .default_net()
                 .spawn()
                 .unwrap();
@@ -1048,8 +963,8 @@ mod tests {
 
     fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8) {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let total_vcpus = threads_per_core * cores_per_package * packages;
             let mut child = GuestCommand::new(&guest)
                 .args(&[
@@ -1115,8 +1030,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_large_vm() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=48"])
                 .args(&["--memory", "size=5120M"])
@@ -1139,8 +1054,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_huge_memory() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=128G"])
@@ -1166,8 +1081,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_pci_msi() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
@@ -1199,8 +1114,8 @@ mod tests {
     #[test]
     fn test_vmlinux_boot() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -1213,14 +1128,14 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .spawn()
                 .unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
 
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             #[cfg(not(feature = "mmio"))]
@@ -1244,8 +1159,8 @@ mod tests {
     #[test]
     fn test_pvh_boot() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -1258,14 +1173,14 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .spawn()
                 .unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
 
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             #[cfg(not(feature = "mmio"))]
@@ -1289,8 +1204,8 @@ mod tests {
     #[test]
     fn test_bzimage_boot() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -1303,14 +1218,14 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .spawn()
                 .unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
 
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             #[cfg(not(feature = "mmio"))]
@@ -1334,8 +1249,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_blk() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut blk_file_path = dirs::home_dir().unwrap();
             blk_file_path.push("workloads");
             blk_file_path.push("blk.img");
@@ -1421,8 +1336,8 @@ mod tests {
         generate_host_mac: bool,
     ) {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -1476,7 +1391,7 @@ mod tests {
                 .args(&["--cpus", format!("boot={}", num_queues / 2).as_str()])
                 .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .args(&["--net", net_params.as_str()])
                 .args(&["--api-socket", &api_socket])
@@ -1561,7 +1476,7 @@ mod tests {
                 // Here by simply checking the size (through ssh), we validate
                 // the connection is still working, which means vhost-user-net
                 // keeps working after the resize.
-                aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+                aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
             }
 
             let _ = cloud_child.kill();
@@ -1646,8 +1561,8 @@ mod tests {
         self_spawned: bool,
     ) {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -1687,7 +1602,7 @@ mod tests {
                 .args(&["--cpus", format!("boot={}", num_queues).as_str()])
                 .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .args(&[
                     "--disk",
                     format!(
@@ -1784,7 +1699,7 @@ mod tests {
 
                 thread::sleep(std::time::Duration::new(10, 0));
 
-                aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+                aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
 
                 // Check again the content of the block device after the resize
                 // has been performed.
@@ -1843,8 +1758,8 @@ mod tests {
         self_spawned: bool,
     ) {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -1889,7 +1804,7 @@ mod tests {
                 .args(&["--cpus", format!("boot={}", num_queues).as_str()])
                 .args(&["--memory", "size=512M,shared=on"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .args(&[
                     "--disk",
                     blk_boot_params.as_str(),
@@ -1911,7 +1826,7 @@ mod tests {
                 guest.get_cpu_count().unwrap_or_default(),
                 num_queues as u32
             );
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
 
             if self_spawned {
                 // The reboot is not supported with mmio, so no reason to test it.
@@ -1964,8 +1879,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_split_irqchip() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
@@ -2013,8 +1928,8 @@ mod tests {
         hotplug: bool,
     ) {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -2046,7 +1961,7 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .args(&["--api-socket", &api_socket]);
 
             let fs_params = format!(
@@ -2142,7 +2057,7 @@ mod tests {
                 resize_command(&api_socket, None, Some(desired_ram));
 
                 thread::sleep(std::time::Duration::new(10, 0));
-                aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+                aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
 
                 // After the resize, check again that file1 exists and its
                 // content is "foo".
@@ -2299,11 +2214,14 @@ mod tests {
 
     fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
+
+            let mut kernel_path = workload_path;
+            kernel_path.push("bzImage");
 
             let mut pmem_temp_file = NamedTempFile::new().unwrap();
             pmem_temp_file.as_file_mut().set_len(128 << 20).unwrap();
@@ -2316,7 +2234,8 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", &guest.fw_path])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
                 .args(&[
@@ -2394,8 +2313,8 @@ mod tests {
     #[test]
     fn test_boot_from_virtio_pmem() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -2434,7 +2353,12 @@ mod tests {
                     )
                     .as_str(),
                 ])
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&[
+                    "--cmdline",
+                    DIRECT_KERNEL_BOOT_CMDLINE
+                        .replace("vda1", "pmem0p1")
+                        .as_str(),
+                ])
                 .spawn()
                 .unwrap();
 
@@ -2442,7 +2366,7 @@ mod tests {
 
             // Simple checks to validate the VM booted properly
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
 
             let _ = child.kill();
             let _ = child.wait();
@@ -2454,8 +2378,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_multiple_network_interfaces() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
@@ -2500,8 +2424,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_unprivileged_net() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
 
             let host_ip = &guest.network.host_ip;
 
@@ -2555,8 +2479,8 @@ mod tests {
 
     fn test_serial_off() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -2571,8 +2495,8 @@ mod tests {
                 .default_net()
                 .args(&[
                     "--cmdline",
-                    CLEAR_KERNEL_CMDLINE
-                        .replace("console=ttyS0,115200n8 ", "")
+                    DIRECT_KERNEL_BOOT_CMDLINE
+                        .replace("console=ttyS0 ", "")
                         .as_str(),
                 ])
                 .args(&["--serial", "off"])
@@ -2602,8 +2526,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_serial_null() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
@@ -2647,12 +2571,19 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_serial_tty() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+            let mut kernel_path = workload_path;
+            kernel_path.push("vmlinux");
+
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
                 .args(&["--serial", "tty"])
@@ -2692,8 +2623,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_serial_file() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
 
             let serial_path = guest.tmp_dir.path().join("/tmp/serial-output");
             let mut child = GuestCommand::new(&guest)
@@ -2743,8 +2674,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_console() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
@@ -2787,8 +2718,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_console_file() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
 
             let console_path = guest.tmp_dir.path().join("/tmp/console-output");
             let mut child = GuestCommand::new(&guest)
@@ -2834,8 +2765,8 @@ mod tests {
     // it is being added to the L2 VM through hotplugging mechanism.
     fn test_vfio() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new_from_ip_range(&mut clear, "172.17", 0);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new_from_ip_range(&mut focal, "172.17", 0);
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -2873,8 +2804,8 @@ mod tests {
                 .args(&[
                     "--cmdline",
                     format!(
-                        "{} vfio_iommu_type1.allow_unsafe_interrupts",
-                        CLEAR_KERNEL_CMDLINE
+                        "{} kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts",
+                        DIRECT_KERNEL_BOOT_CMDLINE
                     )
                     .as_str(),
                 ])
@@ -3029,7 +2960,7 @@ mod tests {
             // verify that VFIO devices are functional with memory hotplug.
             aver!(
                 tb,
-                guest.get_total_memory_l2().unwrap_or_default() > 491_000
+                guest.get_total_memory_l2().unwrap_or_default() > 480_000
             );
             guest.ssh_command_l2_1(
                 "sudo bash -c 'echo online > /sys/devices/system/memory/auto_online_blocks'",
@@ -3041,7 +2972,7 @@ mod tests {
             )?;
             aver!(
                 tb,
-                guest.get_total_memory_l2().unwrap_or_default() > 982_000
+                guest.get_total_memory_l2().unwrap_or_default() > 960_000
             );
 
             let _ = child.kill();
@@ -3056,8 +2987,8 @@ mod tests {
     #[cfg_attr(feature = "mmio", test)]
     fn test_vmlinux_boot_noacpi() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -3072,7 +3003,7 @@ mod tests {
                 .default_net()
                 .args(&[
                     "--cmdline",
-                    format!("{} acpi=off", CLEAR_KERNEL_CMDLINE).as_str(),
+                    format!("{} acpi=off", DIRECT_KERNEL_BOOT_CMDLINE).as_str(),
                 ])
                 .spawn()
                 .unwrap();
@@ -3080,7 +3011,7 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 496_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             let _ = child.kill();
@@ -3096,12 +3027,10 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_reboot() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
             let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
 
             vec![
-                &mut clear as &mut dyn DiskConfig,
                 &mut bionic as &mut dyn DiskConfig,
                 &mut focal as &mut dyn DiskConfig,
             ]
@@ -3113,7 +3042,7 @@ mod tests {
                     .args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
-                    .default_disks()
+                    .default_raw_disks()
                     .default_net()
                     .args(&["--serial", "tty", "--console", "off"])
                     .spawn()
@@ -3160,8 +3089,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_bzimage_reboot() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -3174,7 +3103,7 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .spawn()
                 .unwrap();
 
@@ -3226,10 +3155,13 @@ mod tests {
 
     fn _test_virtio_vsock(hotplug: bool) {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
+            let mut kernel_path = workload_path;
+            kernel_path.push("vmlinux");
 
             let socket = temp_vsock_path(&guest.tmp_dir);
             let api_socket = temp_api_path(&guest.tmp_dir);
@@ -3238,7 +3170,8 @@ mod tests {
             cmd.args(&["--api-socket", &api_socket]);
             cmd.args(&["--cpus", "boot=1"]);
             cmd.args(&["--memory", "size=512M"]);
-            cmd.args(&["--kernel", guest.fw_path.as_str()]);
+            cmd.args(&["--kernel", kernel_path.to_str().unwrap()]);
+            cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
             cmd.default_disks();
             cmd.default_net();
 
@@ -3314,8 +3247,8 @@ mod tests {
     // From the API: Create a VM, boot it and check that it looks as expected.
     fn test_api_create_boot() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -3351,7 +3284,7 @@ mod tests {
                 guest.get_cpu_count().unwrap_or_default() as u8,
                 cpu_count
             );
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             let _ = child.kill();
@@ -3368,8 +3301,8 @@ mod tests {
     // Finally we resume the VM and check that it's available.
     fn test_api_pause_resume() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -3405,7 +3338,7 @@ mod tests {
                 guest.get_cpu_count().unwrap_or_default() as u8,
                 cpu_count
             );
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
             aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
 
             // We now pause the VM
@@ -3459,8 +3392,8 @@ mod tests {
     // send all commands through SSH.
     fn test_virtio_iommu() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -3485,7 +3418,7 @@ mod tests {
                     .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string_w_iommu().as_str()])
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .spawn()
                 .unwrap();
 
@@ -3549,8 +3482,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_pci_bar_reprogramming() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
@@ -3652,10 +3585,10 @@ mod tests {
                 "mergeable=off"
             };
 
-            let mut clear1 = ClearDiskConfig::new();
-            let mut clear2 = ClearDiskConfig::new();
+            let mut focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
 
-            let guest1 = Guest::new(&mut clear1 as &mut dyn DiskConfig);
+            let guest1 = Guest::new(&mut focal1 as &mut dyn DiskConfig);
 
             let mut child1 = GuestCommand::new(&guest1)
                 .args(&["--cpus", "boot=1"])
@@ -3674,7 +3607,7 @@ mod tests {
             // Get initial PSS
             let old_pss = get_pss(child1.id());
 
-            let guest2 = Guest::new(&mut clear2 as &mut dyn DiskConfig);
+            let guest2 = Guest::new(&mut focal2 as &mut dyn DiskConfig);
 
             let mut child2 = GuestCommand::new(&guest2)
                 .args(&["--cpus", "boot=1"])
@@ -3697,6 +3630,8 @@ mod tests {
             // Convert PSS from u32 into float.
             let old_pss = old_pss as f32;
             let new_pss = new_pss as f32;
+
+            println!("old PSS {}, new PSS {}", old_pss, new_pss);
 
             if mergeable {
                 aver!(tb, new_pss < (old_pss * 0.95));
@@ -3725,8 +3660,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_cpu_hotplug() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -3737,7 +3672,7 @@ mod tests {
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
                 .args(&["--api-socket", &api_socket])
@@ -3819,8 +3754,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_memory_hotplug() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -3831,7 +3766,7 @@ mod tests {
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M,hotplug_size=8192M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
                 .args(&["--api-socket", &api_socket])
@@ -3840,7 +3775,7 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
 
             guest
                 .ssh_command("echo online | sudo tee /sys/devices/system/memory/auto_online_blocks")
@@ -3851,7 +3786,7 @@ mod tests {
             resize_command(&api_socket, None, Some(desired_ram));
 
             thread::sleep(std::time::Duration::new(10, 0));
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
 
             let reboot_count = guest
                 .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
@@ -3872,7 +3807,7 @@ mod tests {
                 .unwrap_or_default();
             aver_eq!(tb, reboot_count, 1);
 
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
 
             guest
                 .ssh_command("echo online | sudo tee /sys/devices/system/memory/auto_online_blocks")
@@ -3883,7 +3818,7 @@ mod tests {
             resize_command(&api_socket, None, Some(desired_ram));
 
             thread::sleep(std::time::Duration::new(10, 0));
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 1_964_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 1_920_000);
 
             // Remove RAM to the VM (only applies after reboot)
             let desired_ram = 1024 << 20;
@@ -3900,8 +3835,8 @@ mod tests {
                 .unwrap_or_default();
             aver_eq!(tb, reboot_count, 2);
 
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() < 1_964_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() < 1_920_000);
 
             let _ = child.kill();
             let _ = child.wait();
@@ -3912,8 +3847,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_virtio_mem() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -3922,9 +3857,12 @@ mod tests {
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=2,max=4"])
-                .args(&["--memory", "size=512M,hotplug_method=virtio-mem,hotplug_size=8192M"])
+                .args(&[
+                    "--memory",
+                    "size=512M,hotplug_method=virtio-mem,hotplug_size=8192M",
+                ])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", "root=PARTUUID=6fb4d1a8-6c8c-4dd7-9f7c-1fe0b9f2574c console=tty0 console=ttyS0,115200n8 console=hvc0 quiet init=/usr/lib/systemd/systemd-bootchart initcall_debug tsc=reliable no_timer_check noreplace-smp cryptomgr.notests rootfstype=ext4,btrfs,xfs kvm-intel.nested=1 rw"])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
                 .args(&["--api-socket", &api_socket])
@@ -3933,7 +3871,7 @@ mod tests {
 
             thread::sleep(std::time::Duration::new(20, 0));
 
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
 
             guest
                 .ssh_command("echo online | sudo tee /sys/devices/system/memory/auto_online_blocks")
@@ -3944,22 +3882,22 @@ mod tests {
             resize_command(&api_socket, None, Some(desired_ram));
 
             thread::sleep(std::time::Duration::new(10, 0));
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
 
             // Add RAM to the VM
             let desired_ram = 2048 << 20;
             resize_command(&api_socket, None, Some(desired_ram));
 
             thread::sleep(std::time::Duration::new(10, 0));
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 1_964_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 1_920_000);
 
             // Remove RAM to the VM
             let desired_ram = 1024 << 20;
             resize_command(&api_socket, None, Some(desired_ram));
 
             thread::sleep(std::time::Duration::new(10, 0));
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() < 1_964_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() < 1_920_000);
 
             let _ = child.kill();
             let _ = child.wait();
@@ -3971,8 +3909,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_resize() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -3983,7 +3921,7 @@ mod tests {
                 .args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M,hotplug_size=8192M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
                 .args(&["--api-socket", &api_socket])
@@ -3993,7 +3931,7 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 2);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 491_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
 
             guest
                 .ssh_command("echo online | sudo tee /sys/devices/system/memory/auto_online_blocks")
@@ -4013,7 +3951,7 @@ mod tests {
                 u32::from(desired_vcpus)
             );
 
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 982_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
 
             let _ = child.kill();
             let _ = child.wait();
@@ -4080,8 +4018,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_memory_overhead() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -4098,7 +4036,7 @@ mod tests {
                 ])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .spawn()
                 .unwrap();
 
@@ -4120,8 +4058,13 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_disk_hotplug() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+            let mut kernel_path = workload_path;
+            kernel_path.push("vmlinux");
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -4129,7 +4072,8 @@ mod tests {
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
                 .spawn()
@@ -4250,8 +4194,13 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_pmem_hotplug() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+            let mut kernel_path = workload_path;
+            kernel_path.push("vmlinux");
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -4259,7 +4208,8 @@ mod tests {
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
                 .spawn()
@@ -4382,8 +4332,13 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_net_hotplug() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+            let mut kernel_path = workload_path;
+            kernel_path.push("vmlinux");
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -4392,7 +4347,8 @@ mod tests {
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .spawn()
                 .unwrap();
@@ -4457,8 +4413,8 @@ mod tests {
     #[test]
     fn test_initramfs() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -4506,8 +4462,8 @@ mod tests {
     #[test]
     fn test_snapshot_restore() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -4552,7 +4508,7 @@ mod tests {
                 ])
                 .args(&["--net", net_params.as_str()])
                 .args(&["--vsock", format!("cid=3,socket={}", socket).as_str()])
-                .args(&["--cmdline", CLEAR_KERNEL_CMDLINE])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -4562,7 +4518,7 @@ mod tests {
             // Check the number of vCPUs
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 4);
             // Check the guest RAM
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_968_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_840_000);
             // Check block devices are readable
             aver!(
                 tb,
@@ -4669,7 +4625,7 @@ mod tests {
 
             // Perform same checks to validate VM has been properly restored
             aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 4);
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_968_000);
+            aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_840_000);
             aver!(
                 tb,
                 guest
@@ -4752,8 +4708,8 @@ mod tests {
     #[cfg_attr(not(feature = "mmio"), test)]
     fn test_counters() {
         test_block!(tb, "", {
-            let mut clear = ClearDiskConfig::new();
-            let guest = Guest::new(&mut clear);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
 
             let mut child = GuestCommand::new(&guest)

@@ -18,24 +18,7 @@ if [ ! -f "$FW" ]; then
     popd
 fi
 
-CLEAR_OS_IMAGE_NAME="clear-31311-cloudguest.img"
-CLEAR_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$CLEAR_OS_IMAGE_NAME"
-CLEAR_OS_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_IMAGE_NAME"
-if [ ! -f "$CLEAR_OS_IMAGE" ]; then
-    pushd $WORKLOADS_DIR
-    time wget --quiet $CLEAR_OS_IMAGE_URL || exit 1
-    popd
-fi
-
-CLEAR_OS_RAW_IMAGE_NAME="clear-31311-cloudguest-raw.img"
-CLEAR_OS_RAW_IMAGE="$WORKLOADS_DIR/$CLEAR_OS_RAW_IMAGE_NAME"
-if [ ! -f "$CLEAR_OS_RAW_IMAGE" ]; then
-    pushd $WORKLOADS_DIR
-    time qemu-img convert -p -f qcow2 -O raw $CLEAR_OS_IMAGE_NAME $CLEAR_OS_RAW_IMAGE_NAME || exit 1
-    popd
-fi
-
-BIONIC_OS_IMAGE_NAME="bionic-server-cloudimg-amd64.img"
+BIONIC_OS_IMAGE_NAME="bionic-server-cloudimg-amd64.qcow2"
 BIONIC_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$BIONIC_OS_IMAGE_NAME"
 BIONIC_OS_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_IMAGE_NAME"
 if [ ! -f "$BIONIC_OS_IMAGE" ]; then
@@ -44,7 +27,7 @@ if [ ! -f "$BIONIC_OS_IMAGE" ]; then
     popd
 fi
 
-BIONIC_OS_RAW_IMAGE_NAME="bionic-server-cloudimg-amd64-raw.img"
+BIONIC_OS_RAW_IMAGE_NAME="bionic-server-cloudimg-amd64.raw"
 BIONIC_OS_RAW_IMAGE="$WORKLOADS_DIR/$BIONIC_OS_RAW_IMAGE_NAME"
 if [ ! -f "$BIONIC_OS_RAW_IMAGE" ]; then
     pushd $WORKLOADS_DIR
@@ -53,7 +36,7 @@ if [ ! -f "$BIONIC_OS_RAW_IMAGE" ]; then
 fi
 
 
-FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64.img"
+FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom.qcow2"
 FOCAL_OS_IMAGE_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$FOCAL_OS_IMAGE_NAME"
 FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
 if [ ! -f "$FOCAL_OS_IMAGE" ]; then
@@ -62,7 +45,7 @@ if [ ! -f "$FOCAL_OS_IMAGE" ]; then
     popd
 fi
 
-FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-amd64-raw.img"
+FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-amd64-custom.raw"
 FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
 if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
     pushd $WORKLOADS_DIR
@@ -179,7 +162,7 @@ fi
 VFIO_DIR="$WORKLOADS_DIR/vfio"
 rm -rf $VFIO_DIR
 mkdir -p $VFIO_DIR
-cp $CLEAR_OS_IMAGE $VFIO_DIR
+cp $FOCAL_OS_IMAGE $VFIO_DIR
 cp $FW $VFIO_DIR
 cp $VMLINUX_IMAGE $VFIO_DIR || exit 1
 
