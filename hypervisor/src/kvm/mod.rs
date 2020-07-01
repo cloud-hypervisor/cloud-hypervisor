@@ -159,7 +159,7 @@ impl vm::Vm for KvmVm {
     ///
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> vm::Result<()> {
         self.fd
-            .unregister_ioevent(fd, addr)
+            .unregister_ioevent(fd, addr, NoDatamatch)
             .map_err(|e| vm::HypervisorVmError::UnregisterIoEvent(e.into()))
     }
     ///
