@@ -49,6 +49,22 @@ RUN if [ "$TARGETARCH" = "x86_64" ]; then \
 	&& apt-get clean \
     && rm -rf /var/lib/apt/lists/*;	fi
 
+RUN if [ "$TARGETARCH" = "aarch64" ]; then \
+        # On AArch64, `setcap` binary should be installed via `libcap2-bin`.
+        # The `setcap` binary is used in integration tests.
+        apt-get update \
+        && apt-get -yq upgrade \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -yq libcap2-bin \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/* \
+        # Build and install the musl-gcc version of libfdt. This is to ensure
+        # the cloud-hypervisor binary can be built and linked using musl toolchain.
+        && git clone https://github.com/dgibson/dtc.git && cd dtc \
+        && sed -i 's/$(LIBFDT_archive) $(LIBFDT_lib)/$(LIBFDT_archive)/g' Makefile \
+        && export CC=musl-gcc && make libfdt \
+        && cp libfdt/libfdt.a /usr/lib/aarch64-linux-musl \
+        && rm -rf /dtc;	fi
+
 # Fix the libssl-dev install
 RUN cp /usr/include/"$TARGETARCH"-linux-gnu/openssl/opensslconf.h /usr/include/openssl/
 ENV OPENSSL_DIR=/usr/lib/"$TARGETARCH"-linux-gnu/
