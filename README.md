@@ -127,12 +127,12 @@ Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware) project 
 an ELF
 formatted KVM firmware for `cloud-hypervisor` to directly boot into.
 
-We need to get the latest `rust-hypervisor-firmware` release and also a working cloud image. Here we will use a Clear Linux image:
+We need to get the latest `rust-hypervisor-firmware` release and also a working cloud image. Here we will use a Ubuntu image:
 
 ```shell
 $ pushd $CLOUDH
-$ wget https://download.clearlinux.org/releases/31890/clear/clear-31890-kvm.img.xz
-$ unxz clear-31890-kvm.img.xz
+$ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
+$ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-amd64.img focal-server-cloudimg-amd64.raw
 $ wget https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/0.2.8/hypervisor-fw
 $ popd
 ```
@@ -142,7 +142,7 @@ $ pushd $CLOUDH
 $ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hypervisor
 $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel ./hypervisor-fw \
-	--disk path=clear-31890-kvm.img \
+	--disk path=focal-server-cloudimg-amd64.raw \
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
@@ -178,18 +178,18 @@ The `vmlinux` kernel image will then be located at `linux-cloud-hypervisor/arch/
 
 #### Disk image
 
-For the disk image, we will use a Clear Linux cloud image that contains a root partition:
+For the disk image, we will use a Ubuntu cloud image that contains a root partition:
 
 ```shell
 $ pushd $CLOUDH
-$ wget https://download.clearlinux.org/releases/31890/clear/clear-31890-kvm.img.xz
-$ unxz clear-31890-kvm.img.xz
+$ wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
+$ qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-amd64.img focal-server-cloudimg-amd64.raw
 $ popd
 ```
 
 #### Booting the guest VM
 
-Now we can directly boot into our custom kernel and make it use the Clear Linux root partition.
+Now we can directly boot into our custom kernel and make it use the Ubuntu root partition.
 If we want to have 4 vCPUs and 512 MBytes of memory:
 
 ```shell
@@ -197,8 +197,8 @@ $ pushd $CLOUDH
 $ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hypervisor
 $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
-	--disk path=clear-31890-kvm.img \
-	--cmdline "console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
+	--disk path=focal-server-cloudimg-amd64.raw \
+	--cmdline "console=hvc0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
@@ -217,8 +217,8 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--kernel ./linux-cloud-hypervisor/arch/x86/boot/compressed/vmlinux.bin \
 	--console off \
 	--serial tty \
-	--disk path=clear-31890-kvm.img \
-	--cmdline "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
+	--disk path=focal-server-cloudimg-amd64.raw \
+	--cmdline "console=ttyS0 root=/dev/vda1 rw" \
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
@@ -229,8 +229,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 
 `cloud-hypervisor` is in a very early, pre-alpha stage. Use at your own risk!
 
-As of 2020-04-23, the following cloud images are supported:
-* [Clear Linux](https://download.clearlinux.org/current/) (cloudguest and kvm)
+As of 2020-07-02, the following cloud images are supported:
 * [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (cloudimg)
 * [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (cloudimg)
 

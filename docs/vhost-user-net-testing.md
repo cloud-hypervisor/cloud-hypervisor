@@ -76,19 +76,19 @@ VMs run in client mode. They connect to the socket created by the `dpdkvhostuser
 # From one terminal. We need to give the cloud-hypervisor binary the NET_ADMIN capabilities for it to set TAP interfaces up on the host.
 ./cloud-hypervisor \
         --cpus boot=2 \
-        --memory size=512M,file=/dev/hugepages   \
+        --memory size=512M,hugepages=on   \
         --kernel vmlinux \
-        --cmdline "reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
-        --disk path=clear-kvm.img   \
-        --net "mac=52:54:00:02:d9:01,vhost_user=true,socket=/var/run/openvswitch/vhost-user1,num_queues=4"
+        --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
+        --disk path=focal-server-cloudimg-amd64.raw   \
+        --net mac=52:54:00:02:d9:01,vhost_user=true,socket=/var/run/openvswitch/vhost-user1,num_queues=4
 
 # From another terminal. We need to give the cloud-hypervisor binary the NET_ADMIN capabilities for it to set TAP interfaces up on the host.
 ./cloud-hypervisor \
         --cpus boot=2 \
-        --memory size=512M,file=/dev/hugepages   \
+        --memory size=512M,hugepages=on   \
         --kernel vmlinux \
-        --cmdline "reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
-        --disk path=clear-kvm.img   \
+        --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
+        --disk path=focal-server-cloudimg-amd64.raw   \
         --net "mac=52:54:20:11:C5:02,vhost_user=true,socket=/var/run/openvswitch/vhost-user2,num_queues=4"
 ```
 

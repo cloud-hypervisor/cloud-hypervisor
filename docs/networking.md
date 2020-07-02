@@ -25,9 +25,9 @@ Use one `--net` command-line argument from cloud-hypervisor to specify the emula
 ./cloud-hypervisor \
     --cpus 4 \
     --memory "size=512M" \
-    --disk path=my-root-disk.img \
+    --disk path=focal-server-cloudimg-amd64.raw \
     --kernel my-vmlinux.bin \
-    --cmdline "console=ttyS0 reboot=k panic=1 nomodules root=/dev/vda3" \
+    --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
     --net tap=ich0,mac=a4:a1:c2:00:00:01,ip=192.168.4.2,mask=255.255.255.0,num_queues=2,queue_size=256 \
           tap=ich1,mac=a4:a1:c2:00:00:02,ip=10.0.1.2,mask=255.255.255.0,num_queues=2,queue_size=256
 ```

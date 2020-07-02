@@ -5,9 +5,7 @@ Currently Cloud Hypervisor only support hot plugging of CPU devices.
 ## Kernel support
 
 For hotplug on Cloud Hypervisor ACPI GED support is needed. This can either be achieved by turning on `CONFIG_ACPI_REDUCED_HARDWARE_ONLY` 
-or by using this kernel patch (available in 5.5rc1 and later): https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/patch/drivers/acpi/Makefile?id=ac36d37e943635fc072e9d4f47e40a48fbcdb3f0
-
-This patch is integrated into the Clear Linux KVM and cloudguest images.
+or by using this kernel patch (available in 5.5-rc1 and later): https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/patch/drivers/acpi/Makefile?id=ac36d37e943635fc072e9d4f47e40a48fbcdb3f0
 
 ## CPU Hot Plug
 
@@ -22,8 +20,9 @@ To use CPU hotplug start the VM with the number of max vCPUs greater than the nu
 $ pushd $CLOUDH
 $ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hypervisor
 $ ./cloud-hypervisor/target/release/cloud-hypervisor \
-	--kernel ./hypervisor-fw \
-	--disk path=clear-31890-kvm.img \
+	--kernel custom-vmlinux.bin \
+	--cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
+	--disk path=focal-server-cloudimg-amd64.raw \
 	--cpus boot=4,max=8 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
@@ -75,8 +74,9 @@ To use memory hotplug start the VM specifying some size RAM in the "hotplug_size
 $ pushd $CLOUDH
 $ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hypervisor
 $ ./cloud-hypervisor/target/release/cloud-hypervisor \
-	--kernel ./hypervisor-fw \
-	--disk path=clear-31890-kvm.img \
+	--kernel custom-vmlinux.bin \
+	--cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
+	--disk path=focal-server-cloudimg-amd64.raw \
 	--cpus boot=4,max=8 \
 	--memory size=1024M,hotplug_size=8192M \
 	--net "tap=,mac=,ip=,mask=" \

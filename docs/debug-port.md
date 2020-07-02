@@ -43,7 +43,7 @@ to easily grep for the tracing logs (e.g.
 ```
 ./target/debug/cloud-hypervisor \
     --kernel ~/rust-hypervisor-firmware/target/target/release/hypervisor-fw \
-    --disk path=~/hypervisor/images/clear-30080-kvm.img \
+    --disk path=~/hypervisor/images/focal-server-cloudimg-amd64.raw \
     --cpus 4 \
     --memory size=1024M \
     --rng \
