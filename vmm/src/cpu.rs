@@ -25,11 +25,9 @@ use arch::EntryPoint;
 #[cfg(target_arch = "x86_64")]
 use arch::{CpuidPatch, CpuidReg};
 use devices::{interrupt_controller::InterruptController, BusDevice};
-#[cfg(target_arch = "aarch64")]
-use hypervisor::kvm::kvm_bindings::KVM_SYSTEM_EVENT_SHUTDOWN;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuId;
-use hypervisor::{CpuState, VcpuExit};
+use hypervisor::CpuState;
 
 use libc::{c_void, siginfo_t};
 
@@ -246,6 +244,64 @@ pub struct Vcpu {
     saved_state: Option<CpuState>,
 }
 
+impl hypervisor::cpu::VcpuRun for Vcpu {
+    fn id(&self) -> u8 {
+        self.id
+    }
+
+    fn mmio_read(
+        &self,
+        addr: u64,
+        data: &mut [u8],
+    ) -> std::result::Result<bool, hypervisor::cpu::HypervisorCpuError> {
+        self.mmio_bus.read(addr, data);
+        Ok(true)
+    }
+
+    fn mmio_write(
+        &self,
+        addr: u64,
+        data: &[u8],
+    ) -> std::result::Result<bool, hypervisor::cpu::HypervisorCpuError> {
+        self.mmio_bus.write(addr, data);
+        Ok(true)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn pio_in(
+        &self,
+        addr: u64,
+        data: &mut [u8],
+    ) -> std::result::Result<bool, hypervisor::cpu::HypervisorCpuError> {
+        self.io_bus.read(u64::from(addr), data);
+        Ok(true)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn pio_out(
+        &self,
+        addr: u64,
+        data: &[u8],
+    ) -> std::result::Result<bool, hypervisor::cpu::HypervisorCpuError> {
+        if addr as u16 == DEBUG_IOPORT && data.len() == 1 {
+            self.log_debug_ioport(data[0]);
+        }
+        self.io_bus.write(u64::from(addr), data);
+        Ok(true)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn eoi(&self, vector: u8) -> std::result::Result<bool, hypervisor::cpu::HypervisorCpuError> {
+        if let Some(interrupt_controller) = &self.interrupt_controller {
+            interrupt_controller
+                .lock()
+                .unwrap()
+                .end_of_interrupt(vector);
+        }
+        Ok(true)
+    }
+}
+
 impl Vcpu {
     /// Constructs a new VCPU for `vm`.
     ///
@@ -317,71 +373,7 @@ impl Vcpu {
     /// Note that the state of the VCPU and associated VM must be setup first for this to do
     /// anything useful.
     pub fn run(&self) -> Result<bool> {
-        match self.fd.run() {
-            Ok(run) => match run {
-                #[cfg(target_arch = "x86_64")]
-                VcpuExit::IoIn(addr, data) => {
-                    self.io_bus.read(u64::from(addr), data);
-                    Ok(true)
-                }
-                #[cfg(target_arch = "x86_64")]
-                VcpuExit::IoOut(addr, data) => {
-                    if addr == DEBUG_IOPORT && data.len() == 1 {
-                        self.log_debug_ioport(data[0]);
-                    }
-                    self.io_bus.write(u64::from(addr), data);
-                    Ok(true)
-                }
-                VcpuExit::MmioRead(addr, data) => {
-                    self.mmio_bus.read(addr as u64, data);
-                    Ok(true)
-                }
-                VcpuExit::MmioWrite(addr, data) => {
-                    self.mmio_bus.write(addr as u64, data);
-                    Ok(true)
-                }
-                #[cfg(target_arch = "x86_64")]
-                VcpuExit::IoapicEoi(vector) => {
-                    if let Some(interrupt_controller) = &self.interrupt_controller {
-                        interrupt_controller
-                            .lock()
-                            .unwrap()
-                            .end_of_interrupt(vector);
-                    }
-                    Ok(true)
-                }
-                VcpuExit::Shutdown => {
-                    // Triple fault to trigger a reboot
-                    Ok(false)
-                }
-                #[cfg(target_arch = "aarch64")]
-                VcpuExit::SystemEvent(event_type, flags) => {
-                    // On Aarch64, when the VM is shutdown, run() returns
-                    // VcpuExit::SystemEvent with reason KVM_SYSTEM_EVENT_SHUTDOWN
-                    if event_type == KVM_SYSTEM_EVENT_SHUTDOWN {
-                        Ok(false)
-                    } else {
-                        error!(
-                            "Unexpected system event with type 0x{:x}, flags 0x{:x}",
-                            event_type, flags
-                        );
-                        Err(Error::VcpuUnhandledKvmExit)
-                    }
-                }
-                r => {
-                    error!("Unexpected exit reason on vcpu run: {:?}", r);
-                    Err(Error::VcpuUnhandledKvmExit)
-                }
-            },
-
-            Err(ref e) => match e.errno() {
-                libc::EAGAIN | libc::EINTR => Ok(true),
-                _ => {
-                    error!("VCPU {:?} error {:?}", self.id, e);
-                    Err(Error::VcpuUnhandledKvmExit)
-                }
-            },
-        }
+        self.fd.run(self).map_err(|e| Error::VcpuRun(e.into()))
     }
 
     #[cfg(target_arch = "x86_64")]

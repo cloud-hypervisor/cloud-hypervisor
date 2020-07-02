@@ -10,7 +10,7 @@
 
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::VcpuInit;
-use crate::{CpuState, MpState, VcpuExit};
+use crate::{CpuState, MpState};
 
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{
@@ -18,7 +18,6 @@ use crate::x86_64::{
     StandardRegisters, VcpuEvents, Xsave,
 };
 use thiserror::Error;
-use vmm_sys_util::errno::Error as RunError;
 
 #[derive(Error, Debug)]
 ///
@@ -251,7 +250,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///
-    fn run(&self) -> std::result::Result<VcpuExit, RunError>;
+    fn run(&self, vr: &dyn VcpuRun) -> std::result::Result<bool, HypervisorCpuError>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns currently pending exceptions, interrupts, and NMIs as well as related
@@ -294,4 +293,16 @@ pub trait Vcpu: Send + Sync {
     /// This function is required when restoring the VM
     ///
     fn set_cpu_state(&self, state: &CpuState) -> Result<()>;
+}
+
+pub trait VcpuRun {
+    fn id(&self) -> u8;
+    fn mmio_read(&self, addr: u64, data: &mut [u8]) -> Result<bool>;
+    fn mmio_write(&self, addr: u64, data: &[u8]) -> Result<bool>;
+    #[cfg(target_arch = "x86_64")]
+    fn pio_in(&self, addr: u64, data: &mut [u8]) -> Result<bool>;
+    #[cfg(target_arch = "x86_64")]
+    fn pio_out(&self, addr: u64, data: &[u8]) -> Result<bool>;
+    #[cfg(target_arch = "x86_64")]
+    fn eoi(&self, vector: u8) -> Result<bool>;
 }

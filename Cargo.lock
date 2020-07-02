@@ -465,6 +465,7 @@ dependencies = [
  "kvm-ioctls",
  "libc",
  "linux-loader",
+ "log 0.4.8",
  "serde",
  "serde_derive",
  "serde_json",

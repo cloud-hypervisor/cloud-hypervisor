@@ -18,10 +18,14 @@
 //! - arm64
 //!
 
+#[macro_use]
+extern crate log;
 extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 extern crate thiserror;
+#[macro_use]
+extern crate anyhow;
 
 /// KVM implementation module
 pub mod kvm;
@@ -36,7 +40,7 @@ pub mod vm;
 pub mod arch;
 
 /// CPU related module
-mod cpu;
+pub mod cpu;
 
 pub use crate::hypervisor::{Hypervisor, HypervisorError};
 pub use cpu::{HypervisorCpuError, Vcpu};
