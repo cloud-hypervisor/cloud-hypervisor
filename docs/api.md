@@ -122,10 +122,10 @@ We want to create a virtual machine with the following characteristics:
 * 4 vCPUs
 * 1 GB of RAM
 * 1 virtio based networking interface
-* Direct kernel boot from a custom 5.5.0 Linux kernel located at
+* Direct kernel boot from a custom 5.6.0-rc4 Linux kernel located at
   `/opt/clh/kernel/vmlinux-virtio-fs-virtio-iommu`
-* Using a Clear Linux image as its root filesystem, located at
-  `/opt/clh/images/clear-30080-kvm.img`
+* Using a Ubuntu image as its root filesystem, located at
+  `/opt/clh/images/focal-server-cloudimg-amd64.raw`
 
 ```shell
 #!/bin/bash
@@ -137,8 +137,8 @@ curl --unix-socket /tmp/cloud-hypervisor.sock -i \
      -d '{
          "cpus":{"boot_vcpus": 4, "max_vcpus": 4},
          "kernel":{"path":"/opt/clh/kernel/vmlinux-virtio-fs-virtio-iommu"},
-         "cmdline":{"args":"console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3"},
-         "disks":[{"path":"/opt/clh/images/clear-30080-kvm.img"}],
+         "cmdline":{"args":"console=ttyS0 console=hvc0 root=/dev/vda1 rw"},
+         "disks":[{"path":"/opt/clh/images/focal-server-cloudimg-amd64.raw"}],
          "rng":{"src":"/dev/urandom"},
          "net":[{"ip":"192.168.10.10", "mask":"255.255.255.0", "mac":"12:34:56:78:90:01"}]
          }'
@@ -305,8 +305,8 @@ APIs work together, let's look at a complete VM creation flow, from the
 		-d '{
 			"cpus":{"boot_vcpus": 4, "max_vcpus": 4},
 			"kernel":{"path":"/opt/clh/kernel/vmlinux-virtio-fs-virtio-iommu"},
-			"cmdline":{"args":"console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3"},
-			"disks":[{"path":"/opt/clh/images/clear-30080-kvm.img"}],
+			"cmdline":{"args":"console=ttyS0 console=hvc0 root=/dev/vda1 rw"},
+			"disks":[{"path":"/opt/clh/images/focal-server-cloudimg-amd64.raw"}],
 			"rng":{"src":"/dev/urandom"},
 			"net":[{"ip":"192.168.10.10", "mask":"255.255.255.0", "mac":"12:34:56:78:90:01"}]
 			}'

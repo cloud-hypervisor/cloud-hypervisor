@@ -52,14 +52,14 @@ Direct kernel boot option is preferred since we need to provide the custom kerne
 
 Because _vhost-user_ expects a dedicated process (__virtiofsd__ in this case) to be able to access the guest RAM to communicate through the _virtqueues_ with the driver running in the guest, `--memory` option needs to be slightly modified. It needs to specify a backing file for the memory so that an external process can access it.
 
-Assuming you have `clear-kvm.img` and `custom-vmlinux.bin` on your system, here is the __cloud-hypervisor__ command you need to run:
+Assuming you have `focal-server-cloudimg-amd64.raw` and `custom-vmlinux.bin` on your system, here is the __cloud-hypervisor__ command you need to run:
 ```bash
 ./cloud-hypervisor \
     --cpus 4 \
     --memory "size=512,file=/dev/shm" \
-    --disk path=clear-kvm.img \
+    --disk path=focal-server-cloudimg-amd64.raw \
     --kernel custom-vmlinux.bin \
-    --cmdline "console=ttyS0 reboot=k panic=1 nomodules root=/dev/vda3" \
+    --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
     --fs tag=myfs,socket=/tmp/virtiofs,num_queues=1,queue_size=512
 ```
 

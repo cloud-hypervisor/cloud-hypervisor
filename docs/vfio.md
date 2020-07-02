@@ -66,10 +66,10 @@ takes the device's sysfs path as an argument. In our example it is
 ```
 ./target/debug/cloud-hypervisor \
     --kernel ~/vmlinux \
-    --disk path=~/clear-29160-kvm.img \
+    --disk path=~/focal-server-cloudimg-amd64.raw \
     --console off \
     --serial tty \
-    --cmdline "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3" \
+    --cmdline "console=ttyS0 root=/dev/vda1 rw" \
     --cpus 4 \
     --memory size=512M \
     --device path=/sys/bus/pci/devices/0000:01:00.0/

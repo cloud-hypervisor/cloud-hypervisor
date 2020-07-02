@@ -73,10 +73,10 @@ VMs run in client mode. They connect to the socket created by the `dpdkvhostuser
 # From the test terminal. We need to create one vhost-user-blk device for the --disk.
 ./cloud-hypervisor \
         --cpus boot=4 \
-        --memory size=1024M,file=/dev/hugepages \
+        --memory size=1024M,hugepages=on \
         --kernel linux/arch/x86/boot/compressed/vmlinux.bin \
-        --cmdline "console=ttyS0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda3 iommu=off" \
-        --disk "path=images/clear-kvm.img" "num_queues=4,queue_size=128,vhost_user=true,socket=/var/tmp/vhost.1" \
+        --cmdline "console=ttyS0 root=/dev/vda1 rw iommu=off" \
+        --disk path=images/focal-server-cloudimg-amd64.raw vhost_user=true,socket=/var/tmp/vhost.1,num_queues=4,queue_size=128 \
         --console off \
         --serial tty \
         --rng
@@ -88,11 +88,11 @@ login in guest
 
 # Use lsblk command to find out vhost-user-blk device
 lsblk
-NAME   MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
-vda    253:0    0  8.5G  0 disk
-├─vda1 253:1    0  511M  0 part
-├─vda2 253:2    0   32M  0 part [SWAP]
-└─vda3 253:3    0    8G  0 part /
+NAME    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
+vda     252:0    0  2.2G  0 disk 
+├─vda1  252:1    0  2.1G  0 part /
+├─vda14 252:14   0    4M  0 part 
+└─vda15 252:15   0  106M  0 part /boot/efi
 vdb    253:16   0  512M  0 disk
 
 The vhost-user-blk device is /dev/vdb
