@@ -116,11 +116,33 @@ mod tests {
     }
 
     fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<u64> {
-        for _ in 0..10 {
+        for i in 0..10 {
+            let free_bytes = unsafe {
+                let mut stats = std::mem::MaybeUninit::zeroed();
+                let fs_name = std::ffi::CString::new("/tmp").unwrap();
+                libc::statvfs(fs_name.as_ptr(), stats.as_mut_ptr());
+
+                let free_blocks = stats.assume_init().f_bfree;
+                let block_size = stats.assume_init().f_bsize;
+
+                free_blocks * block_size
+            };
+
+            // Make sure there is at least 6 GiB of space
+            if free_bytes < 6 << 30 {
+                eprintln!(
+                    "Not enough space on disk ({}). Attempt {} of 10. Sleeping.",
+                    free_bytes, i
+                );
+                thread::sleep(std::time::Duration::new(60, 0));
+                continue;
+            }
+
             match fs::copy(&from, &to) {
                 Err(e) => {
                     if let Some(errno) = e.raw_os_error() {
                         if errno == libc::ENOSPC {
+                            eprintln!("Copy returned ENOSPC. Attempt {} of 10. Sleeping.", i);
                             thread::sleep(std::time::Duration::new(60, 0));
                             continue;
                         }
