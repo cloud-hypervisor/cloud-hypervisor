@@ -22,7 +22,6 @@ extern crate signal_hook;
 #[cfg(feature = "pci_support")]
 extern crate vm_allocator;
 extern crate vm_memory;
-extern crate vm_virtio;
 
 use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig, ValidationError,

@@ -8,22 +8,21 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use crate::VirtioIommuRemapping;
 use std::cmp::min;
 use std::convert::TryInto;
 use std::fmt::{self, Display};
 use std::num::Wrapping;
 use std::sync::atomic::{fence, Ordering};
 use std::sync::Arc;
-
-use crate::device::VirtioIommuRemapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap,
     GuestUsize,
 };
 
-pub(super) const VIRTQ_DESC_F_NEXT: u16 = 0x1;
-pub(super) const VIRTQ_DESC_F_WRITE: u16 = 0x2;
-pub(super) const VIRTQ_DESC_F_INDIRECT: u16 = 0x4;
+pub const VIRTQ_DESC_F_NEXT: u16 = 0x1;
+pub const VIRTQ_DESC_F_WRITE: u16 = 0x2;
+pub const VIRTQ_DESC_F_INDIRECT: u16 = 0x4;
 
 #[derive(Debug)]
 pub enum Error {
@@ -718,15 +717,12 @@ impl Queue {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
-    extern crate vm_memory;
-
+pub mod testing {
+    use super::*;
     use std::marker::PhantomData;
     use std::mem;
-
-    pub use super::*;
-    use vm_memory::{GuestAddress, GuestMemoryMmap, GuestUsize};
+    use vm_memory::Bytes;
+    use vm_memory::{Address, GuestAddress, GuestMemoryMmap, GuestUsize};
 
     // Represents a location in GuestMemoryMmap which holds a given type.
     pub struct SomeplaceInMemory<'a, T> {
@@ -790,7 +786,7 @@ pub(crate) mod tests {
     }
 
     impl<'a> VirtqDesc<'a> {
-        fn new(start: GuestAddress, mem: &'a GuestMemoryMmap) -> Self {
+        pub fn new(start: GuestAddress, mem: &'a GuestMemoryMmap) -> Self {
             assert_eq!(start.0 & 0xf, 0);
 
             let addr = SomeplaceInMemory::new(start, mem);
@@ -930,15 +926,15 @@ pub(crate) mod tests {
             self.dtable.len() as u16
         }
 
-        fn dtable_start(&self) -> GuestAddress {
+        pub fn dtable_start(&self) -> GuestAddress {
             self.dtable.first().unwrap().start()
         }
 
-        fn avail_start(&self) -> GuestAddress {
+        pub fn avail_start(&self) -> GuestAddress {
             self.avail.flags.location
         }
 
-        fn used_start(&self) -> GuestAddress {
+        pub fn used_start(&self) -> GuestAddress {
             self.used.flags.location
         }
 
@@ -963,6 +959,15 @@ pub(crate) mod tests {
             self.used.end()
         }
     }
+}
+
+#[cfg(test)]
+pub mod tests {
+    extern crate vm_memory;
+
+    use super::testing::*;
+    pub use super::*;
+    use vm_memory::{GuestAddress, GuestMemoryMmap};
 
     #[test]
     fn test_checked_new_descriptor_chain() {

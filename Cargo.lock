@@ -205,6 +205,7 @@ dependencies = [
  "vhost_user_fs",
  "vhost_user_net",
  "virtio-bindings",
+ "virtio-devices",
  "vm-device",
  "vm-memory",
  "vm-virtio",
@@ -896,7 +897,7 @@ dependencies = [
  "log 0.4.8",
  "remain",
  "tempfile",
- "vm-virtio",
+ "virtio-devices",
  "vmm-sys-util",
 ]
 
@@ -1448,8 +1449,8 @@ dependencies = [
  "vhost",
  "vhost_user_backend",
  "virtio-bindings",
+ "virtio-devices",
  "vm-memory",
- "vm-virtio",
  "vmm",
  "vmm-sys-util",
 ]
@@ -1464,6 +1465,7 @@ dependencies = [
  "seccomp",
  "tempdir",
  "vhost",
+ "virtio-devices",
  "vm-memory",
  "vm-virtio",
 ]
@@ -1480,8 +1482,8 @@ dependencies = [
  "vhost",
  "vhost_user_backend",
  "virtio-bindings",
+ "virtio-devices",
  "vm-memory",
- "vm-virtio",
  "vmm",
  "vmm-sys-util",
 ]
@@ -1491,6 +1493,35 @@ name = "virtio-bindings"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
+
+[[package]]
+name = "virtio-devices"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "byteorder",
+ "devices",
+ "epoll",
+ "libc",
+ "log 0.4.8",
+ "net_gen",
+ "net_util",
+ "pci",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "tempfile",
+ "vfio-ioctls",
+ "vhost",
+ "virtio-bindings",
+ "vm-allocator",
+ "vm-device",
+ "vm-memory",
+ "vm-migration",
+ "vm-virtio",
+ "vmm-sys-util",
+]
 
 [[package]]
 name = "vm-allocator"
@@ -1539,28 +1570,12 @@ dependencies = [
 name = "vm-virtio"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "arc-swap",
- "byteorder",
- "devices",
- "epoll",
- "libc",
  "log 0.4.8",
- "net_gen",
- "net_util",
- "pci",
  "serde",
  "serde_derive",
  "serde_json",
- "tempfile",
- "vfio-ioctls",
- "vhost",
  "virtio-bindings",
- "vm-allocator",
- "vm-device",
  "vm-memory",
- "vm-migration",
- "vmm-sys-util",
 ]
 
 [[package]]
@@ -1592,6 +1607,7 @@ dependencies = [
  "tempfile",
  "url",
  "vfio-ioctls",
+ "virtio-devices",
  "vm-allocator",
  "vm-device",
  "vm-memory",

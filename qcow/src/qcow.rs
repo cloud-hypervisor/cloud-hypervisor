@@ -12,7 +12,7 @@ mod vec_cache;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use libc::{EINVAL, ENOSPC, ENOTSUP};
 use remain::sorted;
-use vm_virtio::RawFile;
+use virtio_devices::RawFile;
 use vmm_sys_util::{
     file_traits::FileSetLen, file_traits::FileSync, seek_hole::SeekHole, write_zeroes::PunchHole,
     write_zeroes::WriteZeroes,
@@ -367,7 +367,7 @@ fn max_refcount_clusters(refcount_order: u32, cluster_size: u32, num_clusters: u
 ///
 /// ```
 /// # use std::io::{Read, Seek, SeekFrom};
-/// # use vm_virtio::RawFile;
+/// # use virtio_devices::RawFile;
 /// # use qcow::{self, QcowFile};
 /// # fn test(file: std::fs::File) -> std::io::Result<()> {
 ///     let mut raw_img = RawFile::new(file, false);
@@ -1703,7 +1703,7 @@ mod tests {
     use super::*;
     use std::io::{Read, Seek, SeekFrom, Write};
     use tempfile::tempfile;
-    use vm_virtio::RawFile;
+    use virtio_devices::RawFile;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![

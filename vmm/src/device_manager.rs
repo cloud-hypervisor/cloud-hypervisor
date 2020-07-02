@@ -63,6 +63,13 @@ use std::sync::{Arc, Mutex};
 use tempfile::NamedTempFile;
 #[cfg(feature = "pci_support")]
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDmaMapping};
+#[cfg(feature = "pci_support")]
+use virtio_devices::transport::VirtioPciDevice;
+use virtio_devices::transport::VirtioTransport;
+use virtio_devices::vhost_user::VhostUserConfig;
+#[cfg(feature = "pci_support")]
+use virtio_devices::{DmaRemapping, IommuMapping};
+use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
@@ -77,12 +84,7 @@ use vm_migration::{
     Transportable,
 };
 #[cfg(feature = "pci_support")]
-use vm_virtio::transport::VirtioPciDevice;
-use vm_virtio::transport::VirtioTransport;
-use vm_virtio::vhost_user::VhostUserConfig;
-#[cfg(feature = "pci_support")]
-use vm_virtio::{DmaRemapping, IommuMapping, VirtioDeviceType, VirtioIommuRemapping};
-use vm_virtio::{VirtioSharedMemory, VirtioSharedMemoryList};
+use vm_virtio::{VirtioDeviceType, VirtioIommuRemapping};
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(feature = "mmio_support")]
@@ -125,13 +127,13 @@ pub enum DeviceManagerError {
     Disk(io::Error),
 
     /// Cannot create vhost-user-net device
-    CreateVhostUserNet(vm_virtio::vhost_user::Error),
+    CreateVhostUserNet(virtio_devices::vhost_user::Error),
 
     /// Cannot create virtio-blk device
     CreateVirtioBlock(io::Error),
 
     /// Cannot create virtio-net device
-    CreateVirtioNet(vm_virtio::net::Error),
+    CreateVirtioNet(virtio_devices::net::Error),
 
     /// Cannot create virtio-console device
     CreateVirtioConsole(io::Error),
@@ -140,13 +142,13 @@ pub enum DeviceManagerError {
     CreateVirtioRng(io::Error),
 
     /// Cannot create virtio-fs device
-    CreateVirtioFs(vm_virtio::vhost_user::Error),
+    CreateVirtioFs(virtio_devices::vhost_user::Error),
 
     /// Virtio-fs device was created without a socket.
     NoVirtioFsSock,
 
     /// Cannot create vhost-user-blk device
-    CreateVhostUserBlk(vm_virtio::vhost_user::Error),
+    CreateVhostUserBlk(virtio_devices::vhost_user::Error),
 
     /// Cannot create virtio-pmem device
     CreateVirtioPmem(io::Error),
@@ -158,7 +160,7 @@ pub enum DeviceManagerError {
     CreateVsockConvertPath,
 
     /// Cannot create virtio-vsock backend
-    CreateVsockBackend(vm_virtio::vsock::VsockUnixError),
+    CreateVsockBackend(virtio_devices::vsock::VsockUnixError),
 
     /// Cannot create virtio-iommu device
     CreateVirtioIommu(io::Error),
@@ -321,13 +323,13 @@ pub enum DeviceManagerError {
     NoDiskPath,
 
     /// Failed updating guest memory for virtio device.
-    UpdateMemoryForVirtioDevice(vm_virtio::Error),
+    UpdateMemoryForVirtioDevice(virtio_devices::Error),
 
     /// Cannot create virtio-mem device
     CreateVirtioMem(io::Error),
 
     /// Cannot try Clone virtio-mem resize
-    TryCloneVirtioMemResize(vm_virtio::mem::Error),
+    TryCloneVirtioMemResize(virtio_devices::mem::Error),
 
     /// Cannot find a memory range for virtio-mem memory
     VirtioMemRangeAllocation,
@@ -366,7 +368,7 @@ pub enum DeviceManagerError {
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
-type VirtioDeviceArc = Arc<Mutex<dyn vm_virtio::VirtioDevice>>;
+type VirtioDeviceArc = Arc<Mutex<dyn virtio_devices::VirtioDevice>>;
 
 pub fn get_win_size() -> (u16, u16) {
     #[repr(C)]
@@ -390,7 +392,7 @@ pub fn get_win_size() -> (u16, u16) {
 pub struct Console {
     // Serial port on 0x3f8
     serial: Option<Arc<Mutex<Serial>>>,
-    console_input: Option<Arc<vm_virtio::ConsoleInput>>,
+    console_input: Option<Arc<virtio_devices::ConsoleInput>>,
     input_enabled: bool,
 }
 
@@ -728,7 +730,7 @@ pub struct DeviceManager {
 
     // Paravirtualized IOMMU
     #[cfg(feature = "pci_support")]
-    iommu_device: Option<Arc<Mutex<vm_virtio::Iommu>>>,
+    iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
 
     // Bitmap of PCI devices to hotplug.
     #[cfg(feature = "pci_support")]
@@ -962,7 +964,7 @@ impl DeviceManager {
             let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
             let (iommu_device, iommu_mapping) = if self.config.lock().unwrap().iommu {
-                let (device, mapping) = vm_virtio::Iommu::new(iommu_id.clone())
+                let (device, mapping) = virtio_devices::Iommu::new(iommu_id.clone())
                     .map_err(DeviceManagerError::CreateVirtioIommu)?;
                 let device = Arc::new(Mutex::new(device));
                 self.iommu_device = Some(Arc::clone(&device));
@@ -1451,7 +1453,7 @@ impl DeviceManager {
             let id = String::from(CONSOLE_DEVICE_NAME);
 
             let (virtio_console_device, console_input) =
-                vm_virtio::Console::new(id.clone(), writer, col, row, console_config.iommu)
+                virtio_devices::Console::new(id.clone(), writer, col, row, console_config.iommu)
                     .map_err(DeviceManagerError::CreateVirtioConsole)?;
             let virtio_console_device = Arc::new(Mutex::new(virtio_console_device));
             virtio_devices.push((
@@ -1560,7 +1562,7 @@ impl DeviceManager {
                 queue_size: disk_cfg.queue_size,
             };
             let vhost_user_block_device = Arc::new(Mutex::new(
-                vm_virtio::vhost_user::Blk::new(id.clone(), vu_cfg)
+                virtio_devices::vhost_user::Blk::new(id.clone(), vu_cfg)
                     .map_err(DeviceManagerError::CreateVhostUserBlk)?,
             ));
 
@@ -1595,13 +1597,13 @@ impl DeviceManager {
                 )
                 .map_err(DeviceManagerError::Disk)?;
 
-            let mut raw_img = vm_virtio::RawFile::new(image, disk_cfg.direct);
+            let mut raw_img = virtio_devices::RawFile::new(image, disk_cfg.direct);
 
             let image_type = qcow::detect_image_type(&mut raw_img)
                 .map_err(DeviceManagerError::DetectImageType)?;
             match image_type {
                 ImageType::Raw => {
-                    let dev = vm_virtio::Block::new(
+                    let dev = virtio_devices::Block::new(
                         id.clone(),
                         raw_img,
                         disk_cfg
@@ -1631,7 +1633,7 @@ impl DeviceManager {
                 ImageType::Qcow2 => {
                     let qcow_img =
                         QcowFile::from(raw_img).map_err(DeviceManagerError::QcowDeviceCreate)?;
-                    let dev = vm_virtio::Block::new(
+                    let dev = virtio_devices::Block::new(
                         id.clone(),
                         qcow_img,
                         disk_cfg
@@ -1736,7 +1738,7 @@ impl DeviceManager {
                 queue_size: net_cfg.queue_size,
             };
             let vhost_user_net_device = Arc::new(Mutex::new(
-                vm_virtio::vhost_user::Net::new(id.clone(), net_cfg.mac, vu_cfg)
+                virtio_devices::vhost_user::Net::new(id.clone(), net_cfg.mac, vu_cfg)
                     .map_err(DeviceManagerError::CreateVhostUserNet)?,
             ));
 
@@ -1756,7 +1758,7 @@ impl DeviceManager {
         } else {
             let virtio_net_device = if let Some(ref tap_if_name) = net_cfg.tap {
                 Arc::new(Mutex::new(
-                    vm_virtio::Net::new(
+                    virtio_devices::Net::new(
                         id.clone(),
                         Some(tap_if_name),
                         None,
@@ -1771,7 +1773,7 @@ impl DeviceManager {
                 ))
             } else {
                 Arc::new(Mutex::new(
-                    vm_virtio::Net::new(
+                    virtio_devices::Net::new(
                         id.clone(),
                         None,
                         Some(net_cfg.ip),
@@ -1829,7 +1831,7 @@ impl DeviceManager {
             let id = String::from(RNG_DEVICE_NAME);
 
             let virtio_rng_device = Arc::new(Mutex::new(
-                vm_virtio::Rng::new(id.clone(), rng_path, rng_config.iommu)
+                virtio_devices::Rng::new(id.clone(), rng_path, rng_config.iommu)
                     .map_err(DeviceManagerError::CreateVirtioRng)?,
             ));
             devices.push((
@@ -1969,7 +1971,7 @@ impl DeviceManager {
             };
 
             let virtio_fs_device = Arc::new(Mutex::new(
-                vm_virtio::vhost_user::Fs::new(
+                virtio_devices::vhost_user::Fs::new(
                     id.clone(),
                     fs_socket,
                     &fs_cfg.tag,
@@ -2142,7 +2144,7 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::MemoryManager)?;
 
-        let mapping = vm_virtio::UserspaceMapping {
+        let mapping = virtio_devices::UserspaceMapping {
             host_addr,
             mem_slot,
             addr: GuestAddress(region_base),
@@ -2151,7 +2153,7 @@ impl DeviceManager {
         };
 
         let virtio_pmem_device = Arc::new(Mutex::new(
-            vm_virtio::Pmem::new(
+            virtio_devices::Pmem::new(
                 id.clone(),
                 file,
                 GuestAddress(region_base),
@@ -2211,11 +2213,11 @@ impl DeviceManager {
             .to_str()
             .ok_or(DeviceManagerError::CreateVsockConvertPath)?;
         let backend =
-            vm_virtio::vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
+            virtio_devices::vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
                 .map_err(DeviceManagerError::CreateVsockBackend)?;
 
         let vsock_device = Arc::new(Mutex::new(
-            vm_virtio::Vsock::new(
+            virtio_devices::Vsock::new(
                 id.clone(),
                 vsock_cfg.cid,
                 vsock_cfg.socket.clone(),
@@ -2265,7 +2267,7 @@ impl DeviceManager {
             let id = String::from(MEM_DEVICE_NAME);
 
             let virtio_mem_device = Arc::new(Mutex::new(
-                vm_virtio::Mem::new(
+                virtio_devices::Mem::new(
                     id.clone(),
                     &region,
                     resize
@@ -2735,7 +2737,7 @@ impl DeviceManager {
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let mut mmio_device =
-            vm_virtio::transport::MmioDevice::new(id.clone(), memory, virtio_device)
+            virtio_devices::transport::MmioDevice::new(id.clone(), memory, virtio_device)
                 .map_err(DeviceManagerError::VirtioDevice)?;
 
         for (i, (event, addr)) in mmio_device.ioeventfds(mmio_base).iter().enumerate() {
