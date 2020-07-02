@@ -1,96 +1,136 @@
-# How to create a custom Clear Linux image
+# How to create a custom Ubuntu image
 
-In the context of adding more utility to the cloudguest image being used
-for integration testing, this is a quick guide on how to achieve the creation
-of your own Clear Linux image using the official Clear Linux tooling.
-
-## Prepare the environment
-
-From the host, the goal is run a Clear Linux VM that will allow us to build
-the custom image we want.
-
-```bash
-# Get latest CL version:
-IMG_VERSION=$(curl https://download.clearlinux.org/latest)
-# Get latest clear-kvm image:
-wget -P $HOME/workloads/ https://download.clearlinux.org/current/clear-${IMG_VERSION}-kvm.img.xz
-# Extract the image
-unxz $HOME/workloads/clear-${IMG_VERSION}-kvm.img.xz
-# Make sure cloud-hypervisor binary has CAP_NET_ADMIN capability set
-sudo setcap cap_net_admin+ep cloud-hypervisor
-# Boot cloud-hypervisor VM with the downloaded image
-./cloud-hypervisor -v --kernel $HOME/workloads/vmlinux --disk path=clear-${IMG_VERSION}-kvm.img --cmdline "console=ttyS0 console=hvc0 reboot=k panic=1 nomodules root=/dev/vda3 rw" --cpus 1 --memory size=4G --net tap=,mac=
-# Setup connectivity
-# First make sure to enable IP forwarding (disabled on Linux by default)
-sudo bash -c "echo 1 > /proc/sys/net/ipv4/ip_forward"
-# Retrieve the interface name and the gateway IP
-IFACE=$(ip route | grep default | awk -F 'dev' '{print $2}' | awk -F ' ' '{print $1}')
-GW=$(ip route | grep vmtap0 | awk -F ' ' '{print $1}')
-# Create a new masquerade rule to tag the packets going out
-sudo iptables -t nat -A POSTROUTING -s ${GW} -o ${IFACE} -j MASQUERADE
-```
+In the context of adding more utilities to the Ubuntu cloud image being used
+for integration testing, this quick guide details how to achieve the proper
+modification of an official Ubuntu cloud image.
 
 ## Create the image
 
-From the guest, we can now create the image.
+Let's go through the steps on how to extend an official Ubuntu image. These
+steps can be applied to other distributions (with a few changes regarding
+package management).
+
+### Get latest Ubuntu cloud image
 
 ```bash
-# Setup connectivity
-sudo ip addr add 192.168.249.2/24 dev enp0s3
-sudo ip route add default via 192.168.249.1
-# Install necessary bundles
-sudo swupd bundle-add clr-installer
-sudo swupd bundle-add os-installer
-# Download and update cloudguest image configuration
-wget https://download.clearlinux.org/current/config/image/cloudguest.yaml
-sed -i '/size: \"864M\"/d' cloudguest.yaml
-sed -i 's/\"800M\"/\"2G\"/g' cloudguest.yaml
-sed -i 's/bootloader,/bootloader,\n    curl,\n    iperf,/g' cloudguest.yaml
-sed -i 's/systemd-networkd-autostart/sysadmin-basic,\n    systemd-networkd-autostart/g' cloudguest.yaml
-# Create the custom cloudguest image
-clr-installer -c cloudguest.yaml
-# Make the guest accessible through ssh
-sudo mkdir -p /etc/ssh
-sudo bash -c "echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config"
+wget https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img
 ```
 
-### Retrieve the image
-
-Once the new image has been created and the guest is accessible through
-`ssh`, it is time to retrieve the image from the host.
+### Check the file format is QCOW2
 
 ```bash
-# Retrieve new image (this is a raw image)
-scp root@192.168.249.2:cloudguest.img .
-mv cloudguest.img clear-cloudguest-raw.img
-# Create the QCOW image from the RAW image
-qemu-img convert -p -f raw -O qcow2 clear-cloudguest-raw.img clear-cloudguest.img
-# Compress the QCOW image
-xz -k -T $(nproc) clear-cloudguest.img
+file focal-server-cloudimg-amd64.img
+focal-server-cloudimg-amd64.img: QEMU QCOW2 Image (v2), 2361393152 bytes
+```
+
+### Convert QCOW2 into RAW
+
+```bash
+qemu-img convert -p -f qcow2 -O raw focal-server-cloudimg-amd64.img focal-server-cloudimg-amd64.raw
+```
+
+### Identify the Linux partition
+
+The goal is to mount the image rootfs so that it can be modified as needed.
+That's why we need to identify where the Linux filesystem partition is located
+in the image.
+
+```bash
+sudo fdisk -l focal-server-cloudimg-amd64.raw
+Disk focal-server-cloudimg-amd64.raw: 2.2 GiB, 2361393152 bytes, 4612096 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disklabel type: gpt
+Disk identifier: A1171ABA-2BEA-4218-A467-1B2B607E5953
+
+Device                             Start     End Sectors  Size Type
+focal-server-cloudimg-amd64.raw1  227328 4612062 4384735  2.1G Linux filesystem
+focal-server-cloudimg-amd64.raw14   2048   10239    8192    4M BIOS boot
+focal-server-cloudimg-amd64.raw15  10240  227327  217088  106M EFI System
+
+Partition table entries are not in disk order.
+```
+
+### Mount the Linux partition
+
+```bash
+mkdir -p /mnt
+sudo mount -o loop,offset=$((227328 * 512)) focal-server-cloudimg-amd64.raw /mnt
+```
+
+### Change root directory
+
+Changing the root directory will allow us to install new packages to the rootfs
+contained by the cloud image.
+
+```bash
+sudo chroot /mnt
+mount -t proc proc /proc
+mount -t devpts devpts /dev/pts
+```
+
+### Install needed packages
+
+In the context Cloud-Hypervisor's integration tests, we need several utilities.
+Here is the way to install them for a Ubuntu image. This step is specific to
+Ubuntu distributions.
+
+```bash
+apt update
+apt install fio iperf iperf3 socat
+```
+
+### Remove snapd
+
+This prevents snapd from trying to mount squashfs filesystem when the kernel
+might not support it. This might be the case when the image is used with direct
+kernel boot. This step is specific to Ubuntu distributions.
+
+```bash
+apt remove --purge snapd
+```
+
+### Cleanup the image
+
+Leave no trace in the image before unmounting its content.
+
+```bash
+umount /dev/pts
+umount /proc
+history -c
+exit
+umount /mnt
+```
+
+### Rename the image
+
+Renaming is important to identify this is a modified image.
+
+```bash
+mv focal-server-cloudimg-amd64.raw focal-server-cloudimg-amd64-custom.raw
+```
+
+### Create QCOW2 from RAW
+
+Last step is to create the QCOW2 image back from the modified image.
+
+```bash
+qemu-img convert -p -f raw -O qcow2 focal-server-cloudimg-amd64-custom.raw focal-server-cloudimg-amd64-custom.qcow2
 ```
 
 ## Switch CI to use the new image
 
 ### Upload to Azure storage
 
-The next step is to update the image stored as part of the Azure storage
-account, replacing it with the newly created image. This will make this
-new image available from the integration tests.
-This is usually achieved through the web interface.
+The next step is to update both images (QCOW2 and RAW) stored as part of the
+Azure storage account, replacing them with the newly created ones. This will
+make these new images available from the integration tests. This is usually
+achieved through the web interface.
 
 ### Update integration tests
 
 Last step is about updating the integration tests to work with this new image.
-The key point is to identify the UUID of this new image so that it can be used
-directly from the tests.
-
-Proceed as follow to determine this UUID:
-
-```bash
-# Mount the image
-sudo mount -o loop,offset=$((2048 * 512)) clear-cloudguest-raw.img /mnt/
-# Identify UUID
-sudo cat /mnt/loader/entries/Clear-linux-kvm-*.conf | grep "root=PARTUUID="
-# Unmount the image
-sudo umount /mnt
-```
+The key point is to identify where the Linux filesystem partition is located,
+as we might need to update the direct kernel boot command line, replacing
+`/dev/vda1` with the appropriate partition number.
