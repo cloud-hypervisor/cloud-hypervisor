@@ -1,9 +1,8 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::Queue;
+use super::super::{Descriptor, Queue};
 use super::{Error, Result};
-use crate::queue::Descriptor;
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use libc::EFD_NONBLOCK;
 use std::convert::TryInto;

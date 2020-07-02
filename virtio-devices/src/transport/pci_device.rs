@@ -17,8 +17,8 @@ use super::VirtioPciCommonConfig;
 use crate::transport::VirtioTransport;
 use crate::{
     Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
-    VirtioIommuRemapping, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
-    DEVICE_FEATURES_OK, DEVICE_INIT, VIRTIO_MSI_NO_VECTOR,
+    DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
+    DEVICE_INIT, VIRTIO_MSI_NO_VECTOR,
 };
 use anyhow::anyhow;
 use devices::BusDevice;
@@ -47,12 +47,13 @@ use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
 };
+use vm_virtio::{queue, VirtioIommuRemapping};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 #[derive(Debug)]
 enum Error {
     /// Failed to retrieve queue ring's index.
-    QueueRingIndex(crate::queue::Error),
+    QueueRingIndex(queue::Error),
 }
 
 #[allow(clippy::enum_variant_names)]

@@ -11,7 +11,7 @@
 extern crate log;
 extern crate vhost_rs;
 extern crate vhost_user_backend;
-extern crate vm_virtio;
+extern crate virtio_devices;
 
 use libc::EFD_NONBLOCK;
 use log::*;
@@ -36,10 +36,10 @@ use vhost_rs::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
+use virtio_devices::block::{build_disk_image_id, Request};
+use virtio_devices::VirtioBlockConfig;
 use vm_memory::ByteValued;
 use vm_memory::{Bytes, GuestMemoryMmap};
-use vm_virtio::block::{build_disk_image_id, Request};
-use vm_virtio::VirtioBlockConfig;
 use vmm::config::{OptionParser, OptionParserError, Toggle};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -207,7 +207,7 @@ impl VhostUserBlkBackend {
             options.custom_flags(libc::O_DIRECT);
         }
         let image: File = options.open(&image_path).unwrap();
-        let mut raw_img: vm_virtio::RawFile = vm_virtio::RawFile::new(image, direct);
+        let mut raw_img: virtio_devices::RawFile = virtio_devices::RawFile::new(image, direct);
 
         let image_id = build_disk_image_id(&PathBuf::from(&image_path));
         let image_type = qcow::detect_image_type(&mut raw_img).unwrap();

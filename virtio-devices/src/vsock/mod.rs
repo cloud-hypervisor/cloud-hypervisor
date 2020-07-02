@@ -161,15 +161,15 @@ mod tests {
     use super::packet::VSOCK_PKT_HDR_SIZE;
     use super::*;
     use crate::device::{VirtioInterrupt, VirtioInterruptType};
-    use crate::queue::tests::VirtQueue as GuestQ;
-    use crate::queue::Queue;
-    use crate::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
     use libc::EFD_NONBLOCK;
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, RwLock};
     use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+    use vm_virtio::queue::testing::VirtQueue as GuestQ;
+    use vm_virtio::queue::Queue;
+    use vm_virtio::queue::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
     use vmm_sys_util::eventfd::EventFd;
 
     pub struct NoopVirtioInterrupt {}

@@ -3,8 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-extern crate vm_virtio;
-
 use clap::ArgMatches;
 use net_util::MacAddr;
 use std::collections::HashMap;

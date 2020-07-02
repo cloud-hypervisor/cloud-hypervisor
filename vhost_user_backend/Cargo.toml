@@ -6,8 +6,6 @@ edition = "2018"
 
 [features]
 default = []
-pci_support = ["vm-virtio/pci_support"]
-mmio_support = ["vm-virtio/mmio_support"]
 
 [dependencies]
 epoll = ">=4.0.1"

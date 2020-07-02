@@ -340,14 +340,12 @@ impl VsockPacket {
 
 #[cfg(test)]
 mod tests {
-
-    use vm_memory::{GuestAddress, GuestMemoryMmap};
-
     use super::super::tests::TestContext;
     use super::*;
-    use crate::queue::tests::VirtqDesc as GuestQDesc;
     use crate::vsock::defs::MAX_PKT_BUF_SIZE;
-    use crate::VIRTQ_DESC_F_WRITE;
+    use vm_memory::{GuestAddress, GuestMemoryMmap};
+    use vm_virtio::queue::testing::VirtqDesc as GuestQDesc;
+    use vm_virtio::queue::VIRTQ_DESC_F_WRITE;
 
     macro_rules! create_context {
         ($test_ctx:ident, $handler_ctx:ident) => {

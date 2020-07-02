@@ -7,7 +7,7 @@ extern crate clap;
 extern crate log;
 extern crate vhost_rs;
 extern crate vhost_user_backend;
-extern crate vm_virtio;
+extern crate virtio_devices;
 
 use clap::{App, Arg};
 use futures::executor::{ThreadPool, ThreadPoolBuilder};

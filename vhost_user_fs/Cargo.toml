@@ -11,6 +11,7 @@ log = "0.4.8"
 # Match the version in vmm
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.21.1" }
 tempdir= "0.3.7"
+virtio-devices = { path = "../virtio-devices" }
 vm-memory = "0.2.1"
 vm-virtio = { path = "../vm-virtio" }
 vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-slave"] }

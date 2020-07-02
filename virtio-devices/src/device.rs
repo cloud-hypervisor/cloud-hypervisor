@@ -33,9 +33,6 @@ pub trait VirtioInterrupt: Send + Sync {
     }
 }
 
-pub type VirtioIommuRemapping =
-    Box<dyn Fn(u64) -> std::result::Result<u64, std::io::Error> + Send + Sync>;
-
 #[derive(Clone)]
 pub struct UserspaceMapping {
     pub host_addr: u64,

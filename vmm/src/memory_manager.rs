@@ -66,7 +66,7 @@ pub struct MemoryManager {
     current_ram: u64,
     next_hotplug_slot: usize,
     pub virtiomem_region: Option<Arc<GuestRegionMmap>>,
-    pub virtiomem_resize: Option<vm_virtio::Resize>,
+    pub virtiomem_resize: Option<virtio_devices::Resize>,
     snapshot: Mutex<Option<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
     shared: bool,
     hugepages: bool,
@@ -111,7 +111,7 @@ pub enum Error {
     EventfdError(io::Error),
 
     /// Failed to virtio-mem resize
-    VirtioMemResizeFail(vm_virtio::mem::Error),
+    VirtioMemResizeFail(virtio_devices::mem::Error),
 
     /// Cannot restore VM
     Restore(MigratableError),
@@ -271,9 +271,9 @@ impl MemoryManager {
             if config.hotplug_method == HotplugMethod::VirtioMem {
                 // Alignment must be "natural" i.e. same as size of block
                 let start_addr = GuestAddress(
-                    (start_of_device_area.0 + vm_virtio::VIRTIO_MEM_DEFAULT_BLOCK_SIZE - 1)
-                        / vm_virtio::VIRTIO_MEM_DEFAULT_BLOCK_SIZE
-                        * vm_virtio::VIRTIO_MEM_DEFAULT_BLOCK_SIZE,
+                    (start_of_device_area.0 + virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE - 1)
+                        / virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE
+                        * virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE,
                 );
                 virtiomem_region = Some(MemoryManager::create_ram_region(
                     &config.file,
@@ -285,7 +285,7 @@ impl MemoryManager {
                     config.hugepages,
                 )?);
 
-                virtiomem_resize = Some(vm_virtio::Resize::new().map_err(Error::EventFdFail)?);
+                virtiomem_resize = Some(virtio_devices::Resize::new().map_err(Error::EventFdFail)?);
 
                 start_of_device_area = start_addr.unchecked_add(size);
             } else {

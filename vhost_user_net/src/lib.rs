@@ -10,7 +10,7 @@ extern crate log;
 extern crate net_util;
 extern crate vhost_rs;
 extern crate vhost_user_backend;
-extern crate vm_virtio;
+extern crate virtio_devices;
 extern crate vmm;
 
 use libc::{self, EFD_NONBLOCK};
@@ -28,9 +28,9 @@ use vhost_rs::vhost_user::{Error as VhostUserError, Listener};
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
+use virtio_devices::net_util::{open_tap, RxVirtio, TxVirtio};
+use virtio_devices::{NetCounters, NetQueuePair};
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
-use vm_virtio::net_util::{open_tap, RxVirtio, TxVirtio};
-use vm_virtio::{NetCounters, NetQueuePair};
 use vmm::config::{OptionParser, OptionParserError};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -67,11 +67,11 @@ pub enum Error {
     /// No memory configured.
     NoMemoryConfigured,
     /// Open tap device failed.
-    OpenTap(vm_virtio::net_util::Error),
+    OpenTap(virtio_devices::net_util::Error),
     /// No socket provided
     SocketParameterMissing,
     /// Underlying QueuePair error
-    NetQueuePair(vm_virtio::Error),
+    NetQueuePair(virtio_devices::Error),
 }
 
 pub const SYNTAX: &str = "vhost-user-net backend parameters \

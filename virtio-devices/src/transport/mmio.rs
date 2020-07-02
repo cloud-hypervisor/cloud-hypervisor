@@ -22,6 +22,7 @@ use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
 };
+use vm_virtio::queue;
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 const VENDOR_ID: u32 = 0;
@@ -32,7 +33,7 @@ const MMIO_VERSION: u32 = 2;
 #[derive(Debug)]
 enum Error {
     /// Failed to retrieve queue ring's index.
-    QueueRingIndex(crate::queue::Error),
+    QueueRingIndex(queue::Error),
 }
 
 pub struct VirtioInterruptIntx {
