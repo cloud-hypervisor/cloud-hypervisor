@@ -403,7 +403,7 @@ const VCPU_SNAPSHOT_ID: &str = "vcpu";
 impl Pausable for Vcpu {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         self.saved_state =
-            Some(self.fd.cpu_state().map_err(|e| {
+            Some(self.fd.state().map_err(|e| {
                 MigratableError::Pause(anyhow!("Could not get vCPU state {:?}", e))
             })?);
 
@@ -412,7 +412,7 @@ impl Pausable for Vcpu {
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vcpu_state) = &self.saved_state {
-            self.fd.set_cpu_state(vcpu_state).map_err(|e| {
+            self.fd.set_state(vcpu_state).map_err(|e| {
                 MigratableError::Pause(anyhow!("Could not set the vCPU state {:?}", e))
             })?;
         }

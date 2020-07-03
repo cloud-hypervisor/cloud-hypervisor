@@ -638,9 +638,9 @@ impl cpu::Vcpu for KvmVcpu {
     /// let vm = hv.create_vm().expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
     /// let vcpu = vm.create_vcpu(0).unwrap();
-    /// let state = vcpu.cpu_state().unwrap();
+    /// let state = vcpu.state().unwrap();
     /// ```
-    fn cpu_state(&self) -> cpu::Result<CpuState> {
+    fn state(&self) -> cpu::Result<CpuState> {
         let mp_state = self.get_mp_state()?;
         let regs = self.get_regs()?;
         let sregs = self.get_sregs()?;
@@ -665,7 +665,7 @@ impl cpu::Vcpu for KvmVcpu {
         })
     }
     #[cfg(target_arch = "aarch64")]
-    fn cpu_state(&self) -> cpu::Result<CpuState> {
+    fn state(&self) -> cpu::Result<CpuState> {
         unimplemented!();
     }
     #[cfg(target_arch = "x86_64")]
@@ -705,10 +705,10 @@ impl cpu::Vcpu for KvmVcpu {
     /// let vm = hv.create_vm().expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
     /// let vcpu = vm.create_vcpu(0).unwrap();
-    /// let state = vcpu.cpu_state().unwrap();
-    /// vcpu.set_cpu_state(&state).unwrap();
+    /// let state = vcpu.state().unwrap();
+    /// vcpu.set_state(&state).unwrap();
     /// ```
-    fn set_cpu_state(&self, state: &CpuState) -> cpu::Result<()> {
+    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         self.set_mp_state(state.mp_state)?;
         self.set_regs(&state.regs)?;
         self.set_sregs(&state.sregs)?;
@@ -723,7 +723,7 @@ impl cpu::Vcpu for KvmVcpu {
     }
     #[allow(unused_variables)]
     #[cfg(target_arch = "aarch64")]
-    fn set_cpu_state(&self, state: &CpuState) -> cpu::Result<()> {
+    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         Ok(())
     }
 }
