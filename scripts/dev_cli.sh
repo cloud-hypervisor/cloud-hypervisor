@@ -224,7 +224,7 @@ cmd_build() {
 	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	   --env RUSTFLAGS="$rustflags" \
 	   "$CTR_IMAGE" \
-	   cargo build \
+	   cargo build --all \
 	         --target-dir "$CTR_CLH_CARGO_TARGET" \
 	         "${cargo_args[@]}" && say "Binaries placed under $CLH_CARGO_TARGET/$target/$build"
 }
