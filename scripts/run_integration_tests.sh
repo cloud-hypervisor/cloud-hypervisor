@@ -222,20 +222,30 @@ sudo bash -c "echo 1000000 > /sys/kernel/mm/ksm/pages_to_scan"
 sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
-# Ensure test binary has the same caps as the cloud-hypervisor one
-time cargo test --no-run --features "integration_tests" -- --nocapture || exit 1
-ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
-
 # test_vfio relies on hugepages
 echo 4096 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
+# Ensure test binary has the same caps as the cloud-hypervisor one
+time cargo test --no-run --features "integration_tests" -- --nocapture || exit 1
+ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
+
 sudo adduser $USER kvm
 newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --features "integration_tests" "$@" -- --nocapture
+time cargo test --features "integration_tests" "tests::parallel::$@" -- --nocapture
 EOF
 RES=$?
+
+# Run some tests in sequence since the result could be affected by other tests
+# running in parallel.
+if [ $RES -eq 0 ]; then
+    newgrp kvm << EOF
+export RUST_BACKTRACE=1
+time cargo test --features "integration_tests" "tests::sequential::$@" -- --nocapture --test-threads=1
+EOF
+    RES=$?
+fi
 
 if [ $RES -eq 0 ]; then
     # virtio-mmio based testing
@@ -252,10 +262,20 @@ if [ $RES -eq 0 ]; then
 
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --features "integration_tests,mmio" "$@" -- --nocapture
+time cargo test --features "integration_tests,mmio" "tests::parallel::$@" -- --nocapture
 EOF
 
     RES=$?
+
+    # Run some tests in sequence since the result could be affected by other tests
+    # running in parallel.
+    if [ $RES -eq 0 ]; then
+        newgrp kvm << EOF
+export RUST_BACKTRACE=1
+time cargo test --features "integration_tests,mmio" "tests::sequential::$@" -- --nocapture --test-threads=1
+EOF
+        RES=$?
+    fi
 fi
 
 # Tear VFIO test network down
