@@ -10,7 +10,7 @@
 
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::VcpuInit;
-use crate::{CpuState, MpState, VcpuExit};
+use crate::{CpuState, MpState};
 
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{
@@ -18,7 +18,6 @@ use crate::x86_64::{
     StandardRegisters, VcpuEvents, Xsave,
 };
 use thiserror::Error;
-use vmm_sys_util::errno::Error as RunError;
 
 #[derive(Error, Debug)]
 ///
@@ -151,6 +150,20 @@ pub enum HypervisorCpuError {
     NotifyGuestClockPaused(#[source] anyhow::Error),
 }
 
+#[derive(Debug)]
+pub enum VmExit<'a> {
+    #[cfg(target_arch = "x86_64")]
+    IoOut(u16 /* port */, &'a [u8] /* data */),
+    #[cfg(target_arch = "x86_64")]
+    IoIn(u16 /* port */, &'a mut [u8] /* data */),
+    #[cfg(target_arch = "x86_64")]
+    IoapicEoi(u8 /* vector */),
+    MmioRead(u64 /* address */, &'a mut [u8]),
+    MmioWrite(u64 /* address */, &'a [u8]),
+    Ignore,
+    Reset,
+}
+
 ///
 /// Result type for returning from a function
 ///
@@ -248,10 +261,6 @@ pub trait Vcpu: Send + Sync {
     /// X86 specific call that sets the vcpu's current "xcrs".
     ///
     fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> Result<()>;
-    ///
-    /// Triggers the running of the current virtual CPU returning an exit reason.
-    ///
-    fn run(&self) -> std::result::Result<VcpuExit, RunError>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns currently pending exceptions, interrupts, and NMIs as well as related
@@ -295,4 +304,9 @@ pub trait Vcpu: Send + Sync {
     /// This function is required when restoring the VM
     ///
     fn set_state(&self, state: &CpuState) -> Result<()>;
+
+    ///
+    /// Triggers the running of the current virtual CPU returning an exit reason.
+    ///
+    fn run(&self) -> std::result::Result<VmExit, HypervisorCpuError>;
 }

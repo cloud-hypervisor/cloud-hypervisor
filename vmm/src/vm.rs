@@ -1429,7 +1429,7 @@ mod tests {
 #[cfg(target_arch = "x86_64")]
 #[test]
 pub fn test_vm() {
-    use hypervisor::VcpuExit;
+    use hypervisor::VmExit;
     use vm_memory::{GuestMemory, GuestMemoryRegion};
     // This example based on https://lwn.net/Articles/658511/
     let code = [
@@ -1481,52 +1481,18 @@ pub fn test_vm() {
 
     loop {
         match vcpu.run().expect("run failed") {
-            VcpuExit::IoIn(addr, data) => {
-                println!(
-                    "IO in -- addr: {:#x} data [{:?}]",
-                    addr,
-                    str::from_utf8(&data).unwrap()
-                );
-            }
-            VcpuExit::IoOut(addr, data) => {
+            VmExit::IoOut(addr, data) => {
                 println!(
                     "IO out -- addr: {:#x} data [{:?}]",
                     addr,
                     str::from_utf8(&data).unwrap()
                 );
             }
-            VcpuExit::MmioRead(_addr, _data) => {}
-            VcpuExit::MmioWrite(_addr, _data) => {}
-            VcpuExit::Unknown => {}
-            VcpuExit::Exception => {}
-            VcpuExit::Hypercall => {}
-            VcpuExit::Debug => {}
-            VcpuExit::Hlt => {
+            VmExit::Reset => {
                 println!("HLT");
                 break;
             }
-            VcpuExit::IrqWindowOpen => {}
-            VcpuExit::Shutdown => {}
-            VcpuExit::FailEntry => {}
-            VcpuExit::Intr => {}
-            VcpuExit::SetTpr => {}
-            VcpuExit::TprAccess => {}
-            VcpuExit::S390Sieic => {}
-            VcpuExit::S390Reset => {}
-            VcpuExit::Dcr => {}
-            VcpuExit::Nmi => {}
-            VcpuExit::InternalError => {}
-            VcpuExit::Osi => {}
-            VcpuExit::PaprHcall => {}
-            VcpuExit::S390Ucontrol => {}
-            VcpuExit::Watchdog => {}
-            VcpuExit::S390Tsch => {}
-            VcpuExit::Epr => {}
-            VcpuExit::SystemEvent(_, _) => {}
-            VcpuExit::S390Stsi => {}
-            VcpuExit::IoapicEoi(_vector) => {}
-            VcpuExit::Hyperv => {}
+            r => panic!("unexpected exit reason: {:?}", r),
         }
-        //        r => panic!("unexpected exit reason: {:?}", r),
     }
 }
