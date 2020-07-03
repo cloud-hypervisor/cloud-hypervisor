@@ -22,6 +22,8 @@ extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 extern crate thiserror;
+#[macro_use]
+extern crate anyhow;
 
 /// KVM implementation module
 pub mod kvm;
@@ -39,6 +41,6 @@ pub mod arch;
 mod cpu;
 
 pub use crate::hypervisor::{Hypervisor, HypervisorError};
-pub use cpu::{HypervisorCpuError, Vcpu};
+pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
 pub use kvm::*;
 pub use vm::{DataMatch, HypervisorVmError, Vm};

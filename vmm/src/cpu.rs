@@ -25,11 +25,9 @@ use arch::EntryPoint;
 #[cfg(target_arch = "x86_64")]
 use arch::{CpuidPatch, CpuidReg};
 use devices::{interrupt_controller::InterruptController, BusDevice};
-#[cfg(target_arch = "aarch64")]
-use hypervisor::kvm::kvm_bindings::KVM_SYSTEM_EVENT_SHUTDOWN;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuId;
-use hypervisor::{CpuState, VcpuExit};
+use hypervisor::{CpuState, VmExit};
 
 use libc::{c_void, siginfo_t};
 
@@ -123,9 +121,6 @@ pub enum Error {
 
     /// Error configuring VCPU
     VcpuConfiguration(arch::Error),
-
-    /// Unexpected KVM_RUN exit reason
-    VcpuUnhandledKvmExit,
 
     /// Failed to join on vCPU threads
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
@@ -322,28 +317,28 @@ impl Vcpu {
         match self.vcpu.run() {
             Ok(run) => match run {
                 #[cfg(target_arch = "x86_64")]
-                VcpuExit::IoIn(addr, data) => {
+                VmExit::IoIn(addr, data) => {
                     self.io_bus.read(u64::from(addr), data);
                     Ok(true)
                 }
                 #[cfg(target_arch = "x86_64")]
-                VcpuExit::IoOut(addr, data) => {
+                VmExit::IoOut(addr, data) => {
                     if addr == DEBUG_IOPORT && data.len() == 1 {
                         self.log_debug_ioport(data[0]);
                     }
                     self.io_bus.write(u64::from(addr), data);
                     Ok(true)
                 }
-                VcpuExit::MmioRead(addr, data) => {
+                VmExit::MmioRead(addr, data) => {
                     self.mmio_bus.read(addr as u64, data);
                     Ok(true)
                 }
-                VcpuExit::MmioWrite(addr, data) => {
+                VmExit::MmioWrite(addr, data) => {
                     self.mmio_bus.write(addr as u64, data);
                     Ok(true)
                 }
                 #[cfg(target_arch = "x86_64")]
-                VcpuExit::IoapicEoi(vector) => {
+                VmExit::IoapicEoi(vector) => {
                     if let Some(interrupt_controller) = &self.interrupt_controller {
                         interrupt_controller
                             .lock()
@@ -352,37 +347,12 @@ impl Vcpu {
                     }
                     Ok(true)
                 }
-                VcpuExit::Shutdown => {
-                    // Triple fault to trigger a reboot
-                    Ok(false)
-                }
-                #[cfg(target_arch = "aarch64")]
-                VcpuExit::SystemEvent(event_type, flags) => {
-                    // On Aarch64, when the VM is shutdown, run() returns
-                    // VcpuExit::SystemEvent with reason KVM_SYSTEM_EVENT_SHUTDOWN
-                    if event_type == KVM_SYSTEM_EVENT_SHUTDOWN {
-                        Ok(false)
-                    } else {
-                        error!(
-                            "Unexpected system event with type 0x{:x}, flags 0x{:x}",
-                            event_type, flags
-                        );
-                        Err(Error::VcpuUnhandledKvmExit)
-                    }
-                }
-                r => {
-                    error!("Unexpected exit reason on vcpu run: {:?}", r);
-                    Err(Error::VcpuUnhandledKvmExit)
-                }
+
+                VmExit::Ignore => Ok(true),
+                VmExit::Reset => Ok(false),
             },
 
-            Err(ref e) => match e.errno() {
-                libc::EAGAIN | libc::EINTR => Ok(true),
-                _ => {
-                    error!("VCPU {:?} error {:?}", self.id, e);
-                    Err(Error::VcpuUnhandledKvmExit)
-                }
-            },
+            Err(e) => Err(Error::VcpuRun(e.into())),
         }
     }
 
@@ -846,7 +816,7 @@ impl CpuManager {
                             break;
                         }
 
-                        // vcpu.run() returns false on a KVM_EXIT_SHUTDOWN (triple-fault) so trigger a reset
+                        // vcpu.run() returns false on a triple-fault so trigger a reset
                         match vcpu.lock().unwrap().run() {
                             Err(e) => {
                                 error!("VCPU generated error: {:?}", e);

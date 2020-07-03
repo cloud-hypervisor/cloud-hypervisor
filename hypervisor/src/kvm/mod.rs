@@ -564,8 +564,51 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///
-    fn run(&self) -> std::result::Result<VcpuExit, vmm_sys_util::errno::Error> {
-        self.fd.run()
+    fn run(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+        match self.fd.run() {
+            Ok(run) => match run {
+                #[cfg(target_arch = "x86_64")]
+                VcpuExit::IoIn(addr, data) => Ok(cpu::VmExit::IoIn(addr, data)),
+                #[cfg(target_arch = "x86_64")]
+                VcpuExit::IoOut(addr, data) => Ok(cpu::VmExit::IoOut(addr, data)),
+                #[cfg(target_arch = "x86_64")]
+                VcpuExit::IoapicEoi(vector) => Ok(cpu::VmExit::IoapicEoi(vector)),
+                #[cfg(target_arch = "x86_64")]
+                VcpuExit::Shutdown | VcpuExit::Hlt => Ok(cpu::VmExit::Reset),
+
+                #[cfg(target_arch = "aarch64")]
+                VcpuExit::SystemEvent(event_type, flags) => {
+                    use kvm_bindings::KVM_SYSTEM_EVENT_SHUTDOWN;
+                    // On Aarch64, when the VM is shutdown, run() returns
+                    // VcpuExit::SystemEvent with reason KVM_SYSTEM_EVENT_SHUTDOWN
+                    if event_type == KVM_SYSTEM_EVENT_SHUTDOWN {
+                        Ok(cpu::VmExit::Reset)
+                    } else {
+                        Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                            "Unexpected system event with type 0x{:x}, flags 0x{:x}",
+                            event_type,
+                            flags
+                        )))
+                    }
+                }
+
+                VcpuExit::MmioRead(addr, data) => Ok(cpu::VmExit::MmioRead(addr, data)),
+                VcpuExit::MmioWrite(addr, data) => Ok(cpu::VmExit::MmioWrite(addr, data)),
+
+                r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                    "Unexpected exit reason on vcpu run: {:?}",
+                    r
+                ))),
+            },
+
+            Err(ref e) => match e.errno() {
+                libc::EAGAIN | libc::EINTR => Ok(cpu::VmExit::Ignore),
+                _ => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                    "VCPU error {:?}",
+                    e
+                ))),
+            },
+        }
     }
     #[cfg(target_arch = "x86_64")]
     ///
