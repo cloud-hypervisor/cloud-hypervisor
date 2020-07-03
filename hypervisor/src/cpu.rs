@@ -286,12 +286,13 @@ pub trait Vcpu: Send + Sync {
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
     fn get_one_reg(&self, reg_id: u64) -> Result<u64>;
     ///
-    /// Retrieve the current cpu states. This function is necessary to snapshot the VM
+    /// Retrieve the vCPU state.
+    /// This function is necessary to snapshot the VM
     ///
-    fn cpu_state(&self) -> Result<CpuState>;
+    fn state(&self) -> Result<CpuState>;
     ///
-    /// Setting the FPU state this.
+    /// Set the vCPU state.
     /// This function is required when restoring the VM
     ///
-    fn set_cpu_state(&self, state: &CpuState) -> Result<()>;
+    fn set_state(&self, state: &CpuState) -> Result<()>;
 }
