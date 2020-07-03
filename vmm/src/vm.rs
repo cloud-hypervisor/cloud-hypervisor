@@ -77,9 +77,6 @@ const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
 /// Errors associated with VM management
 #[derive(Debug)]
 pub enum Error {
-    /// Cannot open the VM file descriptor.
-    VmFd(io::Error),
-
     /// Cannot open the kernel image
     KernelFile(io::Error),
 
@@ -259,7 +256,8 @@ pub struct Vm {
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     memory_manager: Arc<Mutex<MemoryManager>>,
     #[cfg(target_arch = "x86_64")]
-    vm_fd: Arc<dyn hypervisor::Vm>,
+    // The hypervisor abstracted virtual machine.
+    vm: Arc<dyn hypervisor::Vm>,
     #[cfg(target_arch = "x86_64")]
     saved_clock: Option<hypervisor::ClockData>,
 }
@@ -269,7 +267,7 @@ impl Vm {
     fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        fd: Arc<dyn hypervisor::Vm>,
+        vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
@@ -283,7 +281,7 @@ impl Vm {
             .map_err(Error::ConfigValidation)?;
 
         let device_manager = DeviceManager::new(
-            fd.clone(),
+            vm.clone(),
             config.clone(),
             memory_manager.clone(),
             &exit_evt,
@@ -296,7 +294,7 @@ impl Vm {
             &config.lock().unwrap().cpus.clone(),
             &device_manager,
             memory_manager.lock().unwrap().guest_memory(),
-            fd.clone(),
+            vm.clone(),
             reset_evt,
             hypervisor,
         )
@@ -327,7 +325,7 @@ impl Vm {
             cpu_manager,
             memory_manager,
             #[cfg(target_arch = "x86_64")]
-            vm_fd: fd,
+            vm,
             #[cfg(target_arch = "x86_64")]
             saved_clock: _saved_clock,
         })
@@ -342,21 +340,21 @@ impl Vm {
     ) -> Result<Self> {
         #[cfg(target_arch = "x86_64")]
         hypervisor.check_required_extensions().unwrap();
-        let fd = hypervisor.create_vm().unwrap();
+        let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
-        fd.enable_split_irq().unwrap();
+        vm.enable_split_irq().unwrap();
         let memory_manager = MemoryManager::new(
-            fd.clone(),
+            vm.clone(),
             &config.lock().unwrap().memory.clone(),
             None,
             false,
         )
         .map_err(Error::MemoryManager)?;
 
-        let vm = Vm::new_from_memory_manager(
+        let new_vm = Vm::new_from_memory_manager(
             config,
             memory_manager,
-            fd,
+            vm,
             exit_evt,
             reset_evt,
             vmm_path,
@@ -366,13 +364,14 @@ impl Vm {
 
         // The device manager must create the devices from here as it is part
         // of the regular code path creating everything from scratch.
-        vm.device_manager
+        new_vm
+            .device_manager
             .lock()
             .unwrap()
             .create_devices()
             .map_err(Error::DeviceManager)?;
 
-        Ok(vm)
+        Ok(new_vm)
     }
 
     pub fn new_from_snapshot(
@@ -386,9 +385,9 @@ impl Vm {
     ) -> Result<Self> {
         #[cfg(target_arch = "x86_64")]
         hypervisor.check_required_extensions().unwrap();
-        let fd = hypervisor.create_vm().unwrap();
+        let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
-        fd.enable_split_irq().unwrap();
+        vm.enable_split_irq().unwrap();
         let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
         let config = vm_snapshot.config.clone();
 
@@ -397,7 +396,7 @@ impl Vm {
         {
             MemoryManager::new_from_snapshot(
                 memory_manager_snapshot,
-                fd.clone(),
+                vm.clone(),
                 &config.lock().unwrap().memory.clone(),
                 source_url,
                 prefault,
@@ -412,7 +411,7 @@ impl Vm {
         Vm::new_from_memory_manager(
             config,
             memory_manager,
-            fd,
+            vm,
             exit_evt,
             reset_evt,
             vmm_path,
@@ -620,7 +619,7 @@ impl Vm {
             .clone();
 
         arch::configure_system(
-            &self.memory_manager.lock().as_ref().unwrap().fd,
+            &self.memory_manager.lock().as_ref().unwrap().vm,
             &mem,
             &cmdline_cstring,
             self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
@@ -1137,7 +1136,7 @@ impl Pausable for Vm {
         #[cfg(target_arch = "x86_64")]
         {
             let mut clock = self
-                .vm_fd
+                .vm
                 .get_clock()
                 .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {}", e)))?;
             // Reset clock flags.
@@ -1167,7 +1166,7 @@ impl Pausable for Vm {
         #[cfg(target_arch = "x86_64")]
         {
             if let Some(clock) = &self.saved_clock {
-                self.vm_fd.set_clock(clock).map_err(|e| {
+                self.vm.set_clock(clock).map_err(|e| {
                     MigratableError::Resume(anyhow!("Could not set VM clock: {}", e))
                 })?;
             }
@@ -1449,7 +1448,7 @@ pub fn test_vm() {
 
     let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
     let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
-    let vm_fd = hv.create_vm().expect("new VM fd creation failed");
+    let vm = hv.create_vm().expect("new VM creation failed");
 
     mem.with_regions(|index, region| {
         let mem_region = hypervisor::MemoryRegion {
@@ -1460,28 +1459,28 @@ pub fn test_vm() {
             flags: 0,
         };
 
-        vm_fd.set_user_memory_region(mem_region)
+        vm.set_user_memory_region(mem_region)
     })
     .expect("Cannot configure guest memory");
     mem.write_slice(&code, load_addr)
         .expect("Writing code to memory failed");
 
-    let vcpu_fd = vm_fd.create_vcpu(0).expect("new VcpuFd failed");
+    let vcpu = vm.create_vcpu(0).expect("new Vcpu failed");
 
-    let mut vcpu_sregs = vcpu_fd.get_sregs().expect("get sregs failed");
+    let mut vcpu_sregs = vcpu.get_sregs().expect("get sregs failed");
     vcpu_sregs.cs.base = 0;
     vcpu_sregs.cs.selector = 0;
-    vcpu_fd.set_sregs(&vcpu_sregs).expect("set sregs failed");
+    vcpu.set_sregs(&vcpu_sregs).expect("set sregs failed");
 
-    let mut vcpu_regs = vcpu_fd.get_regs().expect("get regs failed");
+    let mut vcpu_regs = vcpu.get_regs().expect("get regs failed");
     vcpu_regs.rip = 0x1000;
     vcpu_regs.rax = 2;
     vcpu_regs.rbx = 3;
     vcpu_regs.rflags = 2;
-    vcpu_fd.set_regs(&vcpu_regs).expect("set regs failed");
+    vcpu.set_regs(&vcpu_regs).expect("set regs failed");
 
     loop {
-        match vcpu_fd.run().expect("run failed") {
+        match vcpu.run().expect("run failed") {
             VcpuExit::IoIn(addr, data) => {
                 println!(
                     "IO in -- addr: {:#x} data [{:?}]",
