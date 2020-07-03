@@ -1460,14 +1460,20 @@ name = "vhost_user_fs"
 version = "0.1.0"
 dependencies = [
  "bitflags 1.2.1",
+ "clap",
+ "epoll",
+ "futures",
  "libc",
  "log 0.4.8",
  "seccomp",
  "tempdir",
  "vhost",
+ "vhost_user_backend",
+ "virtio-bindings",
  "virtio-devices",
  "vm-memory",
  "vm-virtio",
+ "vmm-sys-util",
 ]
 
 [[package]]
