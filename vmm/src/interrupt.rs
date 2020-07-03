@@ -108,7 +108,7 @@ pub struct RoutingEntry<E> {
 }
 
 pub struct MsiInterruptGroup<E> {
-    vm_fd: Arc<dyn hypervisor::Vm>,
+    vm: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
 }
@@ -123,12 +123,12 @@ pub trait RoutingEntryExt {
 
 impl<E> MsiInterruptGroup<E> {
     fn new(
-        vm_fd: Arc<dyn hypervisor::Vm>,
+        vm: Arc<dyn hypervisor::Vm>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
         irq_routes: HashMap<InterruptIndex, InterruptRoute>,
     ) -> Self {
         MsiInterruptGroup {
-            vm_fd,
+            vm,
             gsi_msi_routes,
             irq_routes,
         }
@@ -143,7 +143,7 @@ where
 {
     fn enable(&self) -> Result<()> {
         for (_, route) in self.irq_routes.iter() {
-            route.enable(&self.vm_fd)?;
+            route.enable(&self.vm)?;
         }
 
         Ok(())
@@ -151,7 +151,7 @@ where
 
     fn disable(&self) -> Result<()> {
         for (_, route) in self.irq_routes.iter() {
-            route.disable(&self.vm_fd)?;
+            route.disable(&self.vm)?;
         }
 
         Ok(())
@@ -207,7 +207,7 @@ where
             // Drop the guard because set_gsi_routes will try to take the lock again.
             drop(gsi_msi_routes);
             self.set_gsi_routes()?;
-            return route.disable(&self.vm_fd);
+            return route.disable(&self.vm);
         }
 
         Err(io::Error::new(
@@ -230,7 +230,7 @@ where
             // Drop the guard because set_gsi_routes will try to take the lock again.
             drop(gsi_msi_routes);
             self.set_gsi_routes()?;
-            return route.enable(&self.vm_fd);
+            return route.enable(&self.vm);
         }
 
         Err(io::Error::new(
@@ -276,7 +276,7 @@ pub struct LegacyUserspaceInterruptManager {
 
 pub struct MsiInterruptManager<E> {
     allocator: Arc<Mutex<SystemAllocator>>,
-    vm_fd: Arc<dyn hypervisor::Vm>,
+    vm: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
 }
 
@@ -287,7 +287,7 @@ impl LegacyUserspaceInterruptManager {
 }
 
 impl<E> MsiInterruptManager<E> {
-    pub fn new(allocator: Arc<Mutex<SystemAllocator>>, vm_fd: Arc<dyn hypervisor::Vm>) -> Self {
+    pub fn new(allocator: Arc<Mutex<SystemAllocator>>, vm: Arc<dyn hypervisor::Vm>) -> Self {
         // Create a shared list of GSI that can be shared through all PCI
         // devices. This way, we can maintain the full list of used GSI,
         // preventing one device from overriding interrupts setting from
@@ -296,7 +296,7 @@ impl<E> MsiInterruptManager<E> {
 
         MsiInterruptManager {
             allocator,
-            vm_fd,
+            vm,
             gsi_msi_routes,
         }
     }
@@ -340,7 +340,7 @@ where
         }
 
         Ok(Arc::new(Box::new(MsiInterruptGroup::new(
-            self.vm_fd.clone(),
+            self.vm.clone(),
             self.gsi_msi_routes.clone(),
             irq_routes,
         ))))
@@ -410,7 +410,7 @@ pub mod kvm {
                 entries.copy_from_slice(&entry_vec);
             }
 
-            self.vm_fd.set_gsi_routing(&irq_routing[0]).map_err(|e| {
+            self.vm.set_gsi_routing(&irq_routing[0]).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::Other,
                     format!("Failed setting GSI routing: {}", e),
