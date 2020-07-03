@@ -201,7 +201,7 @@ TARGET_CC="musl-gcc"
 CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --release --target $BUILD_TARGET
+cargo build --all --release --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
 strip target/$BUILD_TARGET/release/ch-remote
@@ -249,7 +249,7 @@ fi
 
 if [ $RES -eq 0 ]; then
     # virtio-mmio based testing
-    cargo build --release --target $BUILD_TARGET --no-default-features --features "mmio"
+    cargo build --all --release --target $BUILD_TARGET --no-default-features --features "mmio"
     strip target/$BUILD_TARGET/release/cloud-hypervisor
     strip target/$BUILD_TARGET/release/vhost_user_net
     strip target/$BUILD_TARGET/release/ch-remote
