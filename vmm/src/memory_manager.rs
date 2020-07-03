@@ -55,7 +55,7 @@ pub struct MemoryManager {
     next_kvm_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
-    pub fd: Arc<dyn hypervisor::Vm>,
+    pub vm: Arc<dyn hypervisor::Vm>,
     hotplug_slots: Vec<HotPlugState>,
     selected_slot: usize,
     backing_file: Option<PathBuf>,
@@ -213,7 +213,7 @@ impl BusDevice for MemoryManager {
 
 impl MemoryManager {
     pub fn new(
-        fd: Arc<dyn hypervisor::Vm>,
+        vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
         ext_regions: Option<Vec<MemoryRegion>>,
         prefault: bool,
@@ -323,7 +323,7 @@ impl MemoryManager {
             next_kvm_memory_slot: 0,
             start_of_device_area,
             end_of_device_area,
-            fd,
+            vm,
             hotplug_slots,
             selected_slot: 0,
             backing_file: config.file.clone(),
@@ -380,7 +380,7 @@ impl MemoryManager {
 
     pub fn new_from_snapshot(
         snapshot: &Snapshot,
-        fd: Arc<dyn hypervisor::Vm>,
+        vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
         source_url: &str,
         prefault: bool,
@@ -416,10 +416,10 @@ impl MemoryManager {
             // allows for a faster VM restoration and does not require us to
             // fill the memory content, hence we can return right away.
             if config.file.is_none() {
-                return MemoryManager::new(fd, config, Some(ext_regions), prefault);
+                return MemoryManager::new(vm, config, Some(ext_regions), prefault);
             };
 
-            let memory_manager = MemoryManager::new(fd, config, None, false)?;
+            let memory_manager = MemoryManager::new(vm, config, None, false)?;
             let guest_memory = memory_manager.lock().unwrap().guest_memory();
 
             // In case the previous config was using a backing file, this means
@@ -688,7 +688,7 @@ impl MemoryManager {
             },
         };
 
-        self.fd
+        self.vm
             .set_user_memory_region(mem_region)
             .map_err(Error::SetUserMemoryRegion)?;
 
@@ -741,7 +741,7 @@ impl MemoryManager {
             flags: 0,
         };
 
-        self.fd
+        self.vm
             .set_user_memory_region(mem_region)
             .map_err(Error::SetUserMemoryRegion)?;
 
