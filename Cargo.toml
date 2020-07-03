@@ -10,28 +10,16 @@ build = "build.rs"
 lto = true
 
 [dependencies]
-arc-swap = ">=0.4.4"
 clap = { version = "2.33.1", features=["wrap_help"] }
-epoll = ">=4.0.1"
-futures = { version = "0.3.5", features = ["thread-pool"] }
 hypervisor = { path = "hypervisor" }
-lazy_static = "1.4.0"
 libc = "0.2.71"
 log = { version = "0.4.8", features = ["std"] }
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.21.1" }
 serde_json = ">=1.0.9"
-vhost_user_backend = { path = "vhost_user_backend"}
 vhost_user_block = { path = "vhost_user_block"}
-vhost_user_fs = { path = "vhost_user_fs"}
 vhost_user_net = { path = "vhost_user_net"}
-virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
-virtio-devices = { path = "virtio-devices" }
-vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-slave"] }
 vmm = { path = "vmm" }
 vmm-sys-util = "0.6.1"
-vm-device = { path = "vm-device" }
-vm-memory = "0.2.1"
-vm-virtio = { path = "vm-virtio" }
 
 [patch.crates-io]
 vm-memory = { git = "https://github.com/cloud-hypervisor/vm-memory", branch = "ch" }
@@ -40,7 +28,7 @@ vm-memory = { git = "https://github.com/cloud-hypervisor/vm-memory", branch = "c
 ssh2 = "0.8.2"
 dirs = "2.0.2"
 credibility = "0.1.3"
-tempdir= "0.3.7"
+tempdir = "0.3.7"
 lazy_static= "1.4.0"
 tempfile = "3.1.0"
 serde_json = ">=1.0.9"

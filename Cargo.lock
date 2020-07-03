@@ -183,12 +183,9 @@ dependencies = [
 name = "cloud-hypervisor"
 version = "0.8.0"
 dependencies = [
- "arc-swap",
  "clap",
  "credibility",
  "dirs",
- "epoll",
- "futures",
  "hypervisor",
  "lazy_static",
  "libc",
@@ -199,16 +196,8 @@ dependencies = [
  "ssh2",
  "tempdir",
  "tempfile",
- "vhost",
- "vhost_user_backend",
  "vhost_user_block",
- "vhost_user_fs",
  "vhost_user_net",
- "virtio-bindings",
- "virtio-devices",
- "vm-device",
- "vm-memory",
- "vm-virtio",
  "vmm",
  "vmm-sys-util",
 ]
