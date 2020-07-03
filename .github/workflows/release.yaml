@@ -20,9 +20,9 @@ jobs:
             toolchain: stable
             target: x86_64-unknown-linux-musl
       - name: Build
-        run: cargo build --release --target=x86_64-unknown-linux-gnu
+        run: cargo build --all --release --target=x86_64-unknown-linux-gnu
       - name: Static Build
-        run: cargo build --release --target=x86_64-unknown-linux-musl
+        run: cargo build --all --release --target=x86_64-unknown-linux-musl
       - name: Strip cloud-hypervisor binaries
         run: strip target/*/release/cloud-hypervisor
       - name: Create Release

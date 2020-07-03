@@ -26,4 +26,4 @@ jobs:
             override: true
 
       - name: Build
-        run: cargo build --release --target=${{ matrix.target }}
+        run: cargo build --all --release --target=${{ matrix.target }}
