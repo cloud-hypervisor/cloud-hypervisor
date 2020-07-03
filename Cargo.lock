@@ -1469,7 +1469,7 @@ dependencies = [
 name = "vhost_user_net"
 version = "0.1.0"
 dependencies = [
- "bitflags 1.2.1",
+ "clap",
  "epoll",
  "libc",
  "log 0.4.8",
