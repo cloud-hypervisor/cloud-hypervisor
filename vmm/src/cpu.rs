@@ -102,8 +102,8 @@ impl fmt::Display for DebugIoPortRange {
 
 #[derive(Debug)]
 pub enum Error {
-    /// Cannot open the VCPU file descriptor.
-    VcpuFd(anyhow::Error),
+    /// Cannot create the vCPU.
+    VcpuCreate(anyhow::Error),
 
     /// Cannot run the VCPUs.
     VcpuRun(anyhow::Error),
@@ -232,7 +232,8 @@ struct InterruptSourceOverride {
 
 /// A wrapper around creating and using a kvm-based VCPU.
 pub struct Vcpu {
-    fd: Arc<dyn hypervisor::Vcpu>,
+    // The hypervisor abstracted CPU.
+    vcpu: Arc<dyn hypervisor::Vcpu>,
     id: u8,
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<devices::Bus>,
@@ -255,16 +256,18 @@ impl Vcpu {
     /// * `vm` - The virtual machine this vcpu will get attached to.
     pub fn new(
         id: u8,
-        fd: &Arc<dyn hypervisor::Vm>,
+        vm: &Arc<dyn hypervisor::Vm>,
         #[cfg(target_arch = "x86_64")] io_bus: Arc<devices::Bus>,
         mmio_bus: Arc<devices::Bus>,
         interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
         creation_ts: std::time::Instant,
     ) -> Result<Arc<Mutex<Self>>> {
-        let kvm_vcpu = fd.create_vcpu(id).map_err(|e| Error::VcpuFd(e.into()))?;
+        let vcpu = vm
+            .create_vcpu(id)
+            .map_err(|e| Error::VcpuCreate(e.into()))?;
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Arc::new(Mutex::new(Vcpu {
-            fd: kvm_vcpu,
+            vcpu,
             id,
             #[cfg(target_arch = "x86_64")]
             io_bus,
@@ -281,13 +284,12 @@ impl Vcpu {
     ///
     /// # Arguments
     ///
-    /// * `fd` - VcpuFd.
     /// * `kernel_entry_point` - Kernel entry point address in guest memory and boot protocol used.
     /// * `vm_memory` - Guest memory.
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
     pub fn configure(
         &mut self,
-        #[cfg(target_arch = "aarch64")] vm_fd: &Arc<dyn hypervisor::Vm>,
+        #[cfg(target_arch = "aarch64")] vm: &Arc<dyn hypervisor::Vm>,
         kernel_entry_point: Option<EntryPoint>,
         vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         #[cfg(target_arch = "x86_64")] cpuid: CpuId,
@@ -295,12 +297,12 @@ impl Vcpu {
         #[cfg(target_arch = "aarch64")]
         {
             self.mpidr =
-                arch::configure_vcpu(&self.fd, self.id, vm_fd, kernel_entry_point, vm_memory)
+                arch::configure_vcpu(&self.vcpu, self.id, vm, kernel_entry_point, vm_memory)
                     .map_err(Error::VcpuConfiguration)?;
         }
 
         #[cfg(target_arch = "x86_64")]
-        arch::configure_vcpu(&self.fd, self.id, kernel_entry_point, vm_memory, cpuid)
+        arch::configure_vcpu(&self.vcpu, self.id, kernel_entry_point, vm_memory, cpuid)
             .map_err(Error::VcpuConfiguration)?;
 
         Ok(())
@@ -317,7 +319,7 @@ impl Vcpu {
     /// Note that the state of the VCPU and associated VM must be setup first for this to do
     /// anything useful.
     pub fn run(&self) -> Result<bool> {
-        match self.fd.run() {
+        match self.vcpu.run() {
             Ok(run) => match run {
                 #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoIn(addr, data) => {
@@ -403,7 +405,7 @@ const VCPU_SNAPSHOT_ID: &str = "vcpu";
 impl Pausable for Vcpu {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         self.saved_state =
-            Some(self.fd.state().map_err(|e| {
+            Some(self.vcpu.state().map_err(|e| {
                 MigratableError::Pause(anyhow!("Could not get vCPU state {:?}", e))
             })?);
 
@@ -412,7 +414,7 @@ impl Pausable for Vcpu {
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vcpu_state) = &self.saved_state {
-            self.fd.set_state(vcpu_state).map_err(|e| {
+            self.vcpu.set_state(vcpu_state).map_err(|e| {
                 MigratableError::Pause(anyhow!("Could not set the vCPU state {:?}", e))
             })?;
         }
@@ -477,7 +479,7 @@ pub struct CpuManager {
     #[cfg(target_arch = "x86_64")]
     cpuid: CpuId,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    fd: Arc<dyn hypervisor::Vm>,
+    vm: Arc<dyn hypervisor::Vm>,
     vcpus_kill_signalled: Arc<AtomicBool>,
     vcpus_pause_signalled: Arc<AtomicBool>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -608,7 +610,7 @@ impl CpuManager {
         config: &CpusConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-        fd: Arc<dyn hypervisor::Vm>,
+        vm: Arc<dyn hypervisor::Vm>,
         reset_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Arc<Mutex<CpuManager>>> {
@@ -627,7 +629,7 @@ impl CpuManager {
             vm_memory: guest_memory,
             #[cfg(target_arch = "x86_64")]
             cpuid,
-            fd,
+            vm,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
             vcpu_states,
@@ -721,7 +723,7 @@ impl CpuManager {
 
         let vcpu = Vcpu::new(
             cpu_id,
-            &self.fd,
+            &self.vm,
             #[cfg(target_arch = "x86_64")]
             self.io_bus.clone(),
             self.mmio_bus.clone(),
@@ -738,7 +740,7 @@ impl CpuManager {
 
                 vcpu.lock()
                     .unwrap()
-                    .fd
+                    .vcpu
                     .set_cpuid2(&cpuid)
                     .map_err(|e| Error::SetSupportedCpusFailed(e.into()))?;
             }
@@ -758,7 +760,7 @@ impl CpuManager {
             #[cfg(target_arch = "aarch64")]
             vcpu.lock()
                 .unwrap()
-                .configure(&self.fd, entry_point, &vm_memory)
+                .configure(&self.vm, entry_point, &vm_memory)
                 .expect("Failed to configure vCPU");
         }
 
@@ -1348,7 +1350,7 @@ impl Pausable for CpuManager {
             let mut vcpu = vcpu.lock().unwrap();
             vcpu.pause()?;
             #[cfg(target_arch = "x86_64")]
-            vcpu.fd.notify_guest_clock_paused().map_err(|e| {
+            vcpu.vcpu.notify_guest_clock_paused().map_err(|e| {
                 MigratableError::Pause(anyhow!("Could not notify guest it has been paused {:?}", e))
             })?;
         }
