@@ -172,6 +172,25 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
     }
     ///
+    /// Creates a memory region structure that can be used with set_user_memory_region
+    ///
+    fn make_user_memory_region(
+        &self,
+        slot: u32,
+        guest_phys_addr: u64,
+        memory_size: u64,
+        userspace_addr: u64,
+        readonly: bool,
+    ) -> MemoryRegion {
+        MemoryRegion {
+            slot,
+            guest_phys_addr,
+            memory_size,
+            userspace_addr,
+            flags: if readonly { KVM_MEM_READONLY } else { 0 },
+        }
+    }
+    ///
     /// Creates/modifies a guest physical memory slot.
     ///
     fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> vm::Result<()> {

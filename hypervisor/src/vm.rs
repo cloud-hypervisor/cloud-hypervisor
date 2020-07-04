@@ -143,6 +143,15 @@ pub trait Vm: Send + Sync {
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> Result<()>;
     /// Sets the GSI routing table entries, overwriting any previously set
     fn set_gsi_routing(&self, irq_routing: &IrqRouting) -> Result<()>;
+    /// Creates a memory region structure that can be used with set_user_memory_region
+    fn make_user_memory_region(
+        &self,
+        slot: u32,
+        guest_phys_addr: u64,
+        memory_size: u64,
+        userspace_addr: u64,
+        readonly: bool,
+    ) -> MemoryRegion;
     /// Creates/modifies a guest physical memory slot.
     fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> Result<()>;
     /// Creates an emulated device in the kernel.
