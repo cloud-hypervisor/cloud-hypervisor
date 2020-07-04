@@ -676,17 +676,13 @@ impl MemoryManager {
         readonly: bool,
     ) -> Result<u32, Error> {
         let slot = self.allocate_memory_slot();
-        let mem_region = hypervisor::MemoryRegion {
+        let mem_region = self.vm.make_user_memory_region(
             slot,
             guest_phys_addr,
             memory_size,
             userspace_addr,
-            flags: if readonly {
-                hypervisor::kvm::KVM_MEM_READONLY
-            } else {
-                0
-            },
-        };
+            readonly,
+        );
 
         self.vm
             .set_user_memory_region(mem_region)
@@ -733,13 +729,13 @@ impl MemoryManager {
         mergeable: bool,
         slot: u32,
     ) -> Result<(), Error> {
-        let mem_region = hypervisor::MemoryRegion {
+        let mem_region = self.vm.make_user_memory_region(
             slot,
             guest_phys_addr,
-            memory_size: 0,
+            0, /* memory_size -- using 0 removes this slot */
             userspace_addr,
-            flags: 0,
-        };
+            false, /* readonly -- don't care */
+        );
 
         self.vm
             .set_user_memory_region(mem_region)

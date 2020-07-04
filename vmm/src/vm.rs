@@ -1451,13 +1451,13 @@ pub fn test_vm() {
     let vm = hv.create_vm().expect("new VM creation failed");
 
     mem.with_regions(|index, region| {
-        let mem_region = hypervisor::MemoryRegion {
-            slot: index as u32,
-            guest_phys_addr: region.start_addr().raw_value(),
-            memory_size: region.len() as u64,
-            userspace_addr: region.as_ptr() as u64,
-            flags: 0,
-        };
+        let mem_region = vm.make_user_memory_region(
+            index as u32,
+            region.start_addr().raw_value(),
+            region.len() as u64,
+            region.as_ptr() as u64,
+            false,
+        );
 
         vm.set_user_memory_region(mem_region)
     })
