@@ -52,7 +52,7 @@ struct HotPlugState {
 
 pub struct MemoryManager {
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-    next_kvm_memory_slot: u32,
+    next_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
     pub vm: Arc<dyn hypervisor::Vm>,
@@ -320,7 +320,7 @@ impl MemoryManager {
 
         let memory_manager = Arc::new(Mutex::new(MemoryManager {
             guest_memory: guest_memory.clone(),
-            next_kvm_memory_slot: 0,
+            next_memory_slot: 0,
             start_of_device_area,
             end_of_device_area,
             vm,
@@ -661,9 +661,9 @@ impl MemoryManager {
         self.end_of_device_area
     }
 
-    pub fn allocate_kvm_memory_slot(&mut self) -> u32 {
-        let slot_id = self.next_kvm_memory_slot;
-        self.next_kvm_memory_slot += 1;
+    pub fn allocate_memory_slot(&mut self) -> u32 {
+        let slot_id = self.next_memory_slot;
+        self.next_memory_slot += 1;
         slot_id
     }
 
@@ -675,7 +675,7 @@ impl MemoryManager {
         mergeable: bool,
         readonly: bool,
     ) -> Result<u32, Error> {
-        let slot = self.allocate_kvm_memory_slot();
+        let slot = self.allocate_memory_slot();
         let mem_region = hypervisor::MemoryRegion {
             slot,
             guest_phys_addr,

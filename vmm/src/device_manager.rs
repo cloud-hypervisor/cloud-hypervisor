@@ -2396,10 +2396,7 @@ impl DeviceManager {
 
         vfio_pci_device
             .map_mmio_regions(&self.address_manager.vm, || {
-                self.memory_manager
-                    .lock()
-                    .unwrap()
-                    .allocate_kvm_memory_slot()
+                self.memory_manager.lock().unwrap().allocate_memory_slot()
             })
             .map_err(DeviceManagerError::VfioMapRegion)?;
 
