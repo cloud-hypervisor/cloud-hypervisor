@@ -6,6 +6,7 @@
 extern crate anyhow;
 extern crate arc_swap;
 extern crate hypervisor;
+extern crate option_parser;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]

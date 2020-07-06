@@ -9,11 +9,11 @@ clap = { version = "2.33.1", features=["wrap_help"] }
 epoll = ">=4.0.1"
 libc = "0.2.71"
 log = "0.4.8"
+option_parser = { path = "../option_parser" }
 qcow = { path = "../qcow" }
 vhost_user_backend = { path = "../vhost_user_backend" }
 vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-slave"] }
 virtio-bindings = "0.1.0"
 virtio-devices = { path = "../virtio-devices" }
 vm-memory = "0.2.1"
-vmm = { path = "../vmm" }
 vmm-sys-util = ">=0.3.1"

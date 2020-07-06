@@ -15,6 +15,7 @@ extern crate virtio_devices;
 
 use libc::EFD_NONBLOCK;
 use log::*;
+use option_parser::{OptionParser, OptionParserError, Toggle};
 use qcow::{self, ImageType, QcowFile};
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -40,7 +41,6 @@ use virtio_devices::block::{build_disk_image_id, Request};
 use virtio_devices::VirtioBlockConfig;
 use vm_memory::ByteValued;
 use vm_memory::{Bytes, GuestMemoryMmap};
-use vmm::config::{OptionParser, OptionParserError, Toggle};
 use vmm_sys_util::eventfd::EventFd;
 
 const SECTOR_SHIFT: u8 = 9;
