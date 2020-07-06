@@ -43,53 +43,6 @@ const TIOCGWINSZ: u64 = 0x5413;
 const FIOCLEX: u64 = 0x5451;
 const FIONBIO: u64 = 0x5421;
 
-// See include/uapi/linux/kvm.h in the kernel code.
-const KVM_ARM_PREFERRED_TARGET: u64 = 0x8020_aeaf;
-const KVM_ARM_VCPU_INIT: u64 = 0x4020_aeae;
-const KVM_GET_API_VERSION: u64 = 0xae00;
-const KVM_CREATE_VM: u64 = 0xae01;
-const KVM_CHECK_EXTENSION: u64 = 0xae03;
-const KVM_GET_VCPU_MMAP_SIZE: u64 = 0xae04;
-const KVM_CREATE_VCPU: u64 = 0xae41;
-const KVM_SET_TSS_ADDR: u64 = 0xae47;
-const KVM_CREATE_IRQCHIP: u64 = 0xae60;
-const KVM_RUN: u64 = 0xae80;
-const KVM_KVMCLOCK_CTRL: u64 = 0xaead;
-const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
-const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
-const KVM_SET_MSRS: u64 = 0x4008_ae89;
-const KVM_SET_CPUID2: u64 = 0x4008_ae90;
-const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
-const KVM_SET_ONE_REG: u64 = 0x4010_aeac;
-const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
-const KVM_IRQFD: u64 = 0x4020_ae76;
-const KVM_SET_CLOCK: u64 = 0x4030_ae7b;
-const KVM_CREATE_PIT2: u64 = 0x4040_ae77;
-const KVM_IOEVENTFD: u64 = 0x4040_ae79;
-const KVM_SET_VCPU_EVENTS: u64 = 0x4040_aea0;
-const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
-const KVM_SET_REGS: u64 = 0x4090_ae82;
-const KVM_SET_SREGS: u64 = 0x4138_ae84;
-const KVM_SET_XCRS: u64 = 0x4188_aea7;
-const KVM_SET_FPU: u64 = 0x41a0_ae8d;
-const KVM_SET_LAPIC: u64 = 0x4400_ae8f;
-const KVM_SET_XSAVE: u64 = 0x5000_aea5;
-const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
-const KVM_GET_CLOCK: u64 = 0x8030_ae7c;
-const KVM_GET_DEVICE_ATTR: u64 = 0x4018_aee2;
-const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
-const KVM_GET_ONE_REG: u64 = 0x4010_aeab;
-const KVM_GET_REGS: u64 = 0x8090_ae81;
-const KVM_GET_SREGS: u64 = 0x8138_ae83;
-const KVM_GET_XCRS: u64 = 0x8188_aea6;
-const KVM_GET_FPU: u64 = 0x81a0_ae8c;
-const KVM_GET_LAPIC: u64 = 0x8400_ae8e;
-const KVM_GET_XSAVE: u64 = 0x9000_aea4;
-const KVM_GET_MSR_INDEX_LIST: u64 = 0xc004_ae02;
-const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
-const KVM_GET_MSRS: u64 = 0xc008_ae88;
-const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
-
 // See include/uapi/linux/if_tun.h in the kernel code.
 const TUNSETIFF: u64 = 0x4004_54ca;
 const TUNSETOFFLOAD: u64 = 0x4004_54d0;
@@ -121,55 +74,60 @@ const VFIO_IOMMU_MAP_DMA: u64 = 0x3b71;
 const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 const VFIO_DEVICE_IOEVENTFD: u64 = 0x3b74;
 
-fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
+    // See include/uapi/linux/kvm.h in the kernel code.
+    const KVM_GET_API_VERSION: u64 = 0xae00;
+    const KVM_CREATE_VM: u64 = 0xae01;
+    const KVM_CHECK_EXTENSION: u64 = 0xae03;
+    const KVM_GET_VCPU_MMAP_SIZE: u64 = 0xae04;
+    const KVM_CREATE_VCPU: u64 = 0xae41;
+    const KVM_CREATE_IRQCHIP: u64 = 0xae60;
+    const KVM_RUN: u64 = 0xae80;
+    const KVM_SET_MP_STATE: u64 = 0x4004_ae99;
+    const KVM_SET_GSI_ROUTING: u64 = 0x4008_ae6a;
+    const KVM_SET_DEVICE_ATTR: u64 = 0x4018_aee1;
+    const KVM_SET_ONE_REG: u64 = 0x4010_aeac;
+    const KVM_SET_USER_MEMORY_REGION: u64 = 0x4020_ae46;
+    const KVM_IRQFD: u64 = 0x4020_ae76;
+    const KVM_IOEVENTFD: u64 = 0x4040_ae79;
+    const KVM_SET_VCPU_EVENTS: u64 = 0x4040_aea0;
+    const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
+    const KVM_SET_REGS: u64 = 0x4090_ae82;
+    const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
+    const KVM_GET_DEVICE_ATTR: u64 = 0x4018_aee2;
+    const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
+    const KVM_GET_ONE_REG: u64 = 0x4010_aeab;
+    const KVM_GET_REGS: u64 = 0x8090_ae81;
+    const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
+    const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
+
     Ok(or![
         and![Cond::new(1, ArgLen::DWORD, Eq, FIOCLEX)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_ARM_PREFERRED_TARGET,)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_ARM_VCPU_INIT,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CHECK_EXTENSION,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_DEVICE,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_IRQCHIP,)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_PIT2)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_VCPU)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_VM)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_ENABLE_CAP)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_API_VERSION,)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_CLOCK,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_DEVICE_ATTR,)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_FPU)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_LAPIC)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MP_STATE)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MSR_INDEX_LIST)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MSRS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_ONE_REG)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_REGS)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_SREGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_SUPPORTED_CPUID,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_VCPU_EVENTS,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_VCPU_MMAP_SIZE,)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_XSAVE,)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_XCRS,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IOEVENTFD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IRQFD)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_KVMCLOCK_CTRL)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_RUN)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_CLOCK)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_CPUID2)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_DEVICE_ATTR,)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_FPU)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_GSI_ROUTING)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_LAPIC)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_MP_STATE)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_MSRS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_ONE_REG)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_REGS)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_SREGS)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_TSS_ADDR,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_USER_MEMORY_REGION,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_VCPU_EVENTS,)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_XSAVE,)?],
-        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_XCRS,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCGIFFLAGS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCGIFHWADDR)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, SIOCSIFADDR)?],
@@ -204,6 +162,70 @@ fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_IOMMU_UNMAP_DMA)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, VFIO_DEVICE_IOEVENTFD)?],
     ])
+}
+
+#[cfg(target_arch = "x86_64")]
+fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+    const KVM_CREATE_PIT2: u64 = 0x4040_ae77;
+    const KVM_GET_CLOCK: u64 = 0x8030_ae7c;
+    const KVM_GET_FPU: u64 = 0x81a0_ae8c;
+    const KVM_GET_LAPIC: u64 = 0x8400_ae8e;
+    const KVM_GET_MSR_INDEX_LIST: u64 = 0xc004_ae02;
+    const KVM_GET_MSRS: u64 = 0xc008_ae88;
+    const KVM_GET_SREGS: u64 = 0x8138_ae83;
+    const KVM_GET_XCRS: u64 = 0x8188_aea6;
+    const KVM_GET_XSAVE: u64 = 0x9000_aea4;
+    const KVM_KVMCLOCK_CTRL: u64 = 0xaead;
+    const KVM_SET_CLOCK: u64 = 0x4030_ae7b;
+    const KVM_SET_CPUID2: u64 = 0x4008_ae90;
+    const KVM_SET_FPU: u64 = 0x41a0_ae8d;
+    const KVM_SET_LAPIC: u64 = 0x4400_ae8f;
+    const KVM_SET_MSRS: u64 = 0x4008_ae89;
+    const KVM_SET_SREGS: u64 = 0x4138_ae84;
+    const KVM_SET_TSS_ADDR: u64 = 0xae47;
+    const KVM_SET_XCRS: u64 = 0x4188_aea7;
+    const KVM_SET_XSAVE: u64 = 0x5000_aea5;
+
+    let common_rules = create_vmm_ioctl_seccomp_rule_common()?;
+    let mut arch_rules = or![
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CREATE_PIT2)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_CLOCK,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_FPU)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_LAPIC)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MSR_INDEX_LIST)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MSRS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_SREGS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_XCRS,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_XSAVE,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_KVMCLOCK_CTRL)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_CLOCK)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_CPUID2)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_FPU)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_LAPIC)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_SREGS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_TSS_ADDR,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_MSRS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_XCRS,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_XSAVE,)?],
+    ];
+    arch_rules.extend(common_rules);
+
+    Ok(arch_rules)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn create_vmm_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+    const KVM_ARM_PREFERRED_TARGET: u64 = 0x8020_aeaf;
+    const KVM_ARM_VCPU_INIT: u64 = 0x4020_aeae;
+
+    let common_rules = create_vmm_ioctl_seccomp_rule_common()?;
+    let mut arch_rules = or![
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_ARM_PREFERRED_TARGET,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_ARM_VCPU_INIT,)?],
+    ];
+    arch_rules.extend(common_rules);
+
+    Ok(arch_rules)
 }
 
 fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
