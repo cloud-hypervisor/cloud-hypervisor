@@ -677,6 +677,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "option_parser"
+version = "0.1.0"
+
+[[package]]
 name = "parking_lot"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1433,13 +1437,13 @@ dependencies = [
  "epoll",
  "libc",
  "log 0.4.8",
+ "option_parser",
  "qcow",
  "vhost",
  "vhost_user_backend",
  "virtio-bindings",
  "virtio-devices",
  "vm-memory",
- "vmm",
  "vmm-sys-util",
 ]
 
@@ -1473,12 +1477,12 @@ dependencies = [
  "libc",
  "log 0.4.8",
  "net_util",
+ "option_parser",
  "vhost",
  "vhost_user_backend",
  "virtio-bindings",
  "virtio-devices",
  "vm-memory",
- "vmm",
  "vmm-sys-util",
 ]
 
@@ -1591,6 +1595,7 @@ dependencies = [
  "log 0.4.8",
  "micro_http",
  "net_util",
+ "option_parser",
  "pci",
  "qcow",
  "seccomp",

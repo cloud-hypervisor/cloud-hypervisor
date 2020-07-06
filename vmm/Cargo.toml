@@ -26,6 +26,7 @@ libc = "0.2.71"
 log = "0.4.8"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "master" }
 net_util = { path = "../net_util" }
+option_parser = { path = "../option_parser" }
 pci = {path = "../pci", optional = true}
 qcow = { path = "../qcow" }
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.21.1" }

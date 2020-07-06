@@ -11,11 +11,11 @@ extern crate net_util;
 extern crate vhost_rs;
 extern crate vhost_user_backend;
 extern crate virtio_devices;
-extern crate vmm;
 
 use libc::{self, EFD_NONBLOCK};
 use log::*;
 use net_util::{MacAddr, Tap};
+use option_parser::{OptionParser, OptionParserError};
 use std::fmt;
 use std::io::{self};
 use std::net::Ipv4Addr;
@@ -31,7 +31,6 @@ use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_devices::net_util::{open_tap, RxVirtio, TxVirtio};
 use virtio_devices::{NetCounters, NetQueuePair};
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
-use vmm::config::{OptionParser, OptionParserError};
 use vmm_sys_util::eventfd::EventFd;
 
 pub type VhostUserResult<T> = std::result::Result<T, VhostUserError>;
