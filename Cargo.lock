@@ -1402,7 +1402,7 @@ checksum = "4a21f546f2bda37f5a8cfb138c87f95b8e34d2d78d6a7a92ba3785f4e08604a7"
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/cloud-hypervisor/vfio-ioctls?branch=ch#f6f81ee865cb60a24ad5d4ba8200940ed1d5d1f4"
+source = "git+https://github.com/cloud-hypervisor/vfio-ioctls?branch=ch#4c568127fe371c0a04711b36b2a8bacd04416912"
 dependencies = [
  "byteorder",
  "kvm-bindings",
