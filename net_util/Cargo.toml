@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["The Chromium OS Authors"]
 
 [dependencies]
+epoll = ">=4.0.1"
 libc = "0.2.72"
 log = "0.4.8"
 net_gen = { path = "../net_gen" }

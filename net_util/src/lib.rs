@@ -27,9 +27,8 @@ mod queue_pair;
 mod tap;
 
 use std::io::Error as IoError;
-use std::mem;
-use std::net;
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{FromRawFd, RawFd};
+use std::{io, mem, net};
 
 pub use mac::{MacAddr, MAC_ADDR_LEN};
 pub use open_tap::{open_tap, Error as OpenTapError};
@@ -73,6 +72,34 @@ fn create_socket() -> Result<net::UdpSocket> {
 fn vnet_hdr_len() -> usize {
     use virtio_bindings::bindings::virtio_net::virtio_net_hdr_v1;
     std::mem::size_of::<virtio_net_hdr_v1>()
+}
+
+pub fn register_listener(
+    epoll_fd: RawFd,
+    fd: RawFd,
+    ev_type: epoll::Events,
+    data: u64,
+) -> std::result::Result<(), io::Error> {
+    epoll::ctl(
+        epoll_fd,
+        epoll::ControlOptions::EPOLL_CTL_ADD,
+        fd,
+        epoll::Event::new(ev_type, data),
+    )
+}
+
+pub fn unregister_listener(
+    epoll_fd: RawFd,
+    fd: RawFd,
+    ev_type: epoll::Events,
+    data: u64,
+) -> std::result::Result<(), io::Error> {
+    epoll::ctl(
+        epoll_fd,
+        epoll::ControlOptions::EPOLL_CTL_DEL,
+        fd,
+        epoll::Event::new(ev_type, data),
+    )
 }
 
 #[cfg(test)]
