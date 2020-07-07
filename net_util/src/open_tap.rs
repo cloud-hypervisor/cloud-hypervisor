@@ -2,12 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::TapError;
-use super::{MacAddr, Tap};
+use super::{vnet_hdr_len, MacAddr, Tap, TapError};
 use std::net::Ipv4Addr;
 use std::path::Path;
 use std::{fs, io};
-use virtio_bindings::bindings::virtio_net::virtio_net_hdr_v1;
 
 #[derive(Debug)]
 pub enum Error {
@@ -38,10 +36,6 @@ pub enum Error {
 }
 
 type Result<T> = std::result::Result<T, Error>;
-
-fn vnet_hdr_len() -> usize {
-    std::mem::size_of::<virtio_net_hdr_v1>()
-}
 
 fn check_mq_support(if_name: &Option<&str>, queue_pairs: usize) -> Result<()> {
     if let Some(tap_name) = if_name {
