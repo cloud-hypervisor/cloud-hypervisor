@@ -70,6 +70,11 @@ fn create_socket() -> Result<net::UdpSocket> {
     Ok(unsafe { net::UdpSocket::from_raw_fd(sock) })
 }
 
+fn vnet_hdr_len() -> usize {
+    use virtio_bindings::bindings::virtio_net::virtio_net_hdr_v1;
+    std::mem::size_of::<virtio_net_hdr_v1>()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

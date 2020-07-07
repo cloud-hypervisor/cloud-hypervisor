@@ -2,13 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::Tap;
+use super::{vnet_hdr_len, Tap};
 use std::cmp;
 use std::io::Write;
 use std::num::Wrapping;
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 use vm_virtio::{DescriptorChain, Queue};
-use virtio_bindings::bindings::virtio_net::virtio_net_hdr_v1
 
 /// The maximum buffer size when segmentation offload is enabled. This
 /// includes the 12-byte virtio net header.
@@ -182,8 +181,4 @@ impl RxVirtio {
             true
         }
     }
-}
-
-fn vnet_hdr_len() -> usize {
-    std::mem::size_of::<virtio_net_hdr_v1>()
 }
