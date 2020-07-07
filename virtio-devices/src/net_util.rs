@@ -21,12 +21,6 @@ type Result<T> = std::result::Result<T, Error>;
 
 const QUEUE_SIZE: usize = 256;
 
-// The guest has made a buffer available to receive a frame into.
-pub const RX_QUEUE_EVENT: DeviceEventT = 0;
-// The transmit queue has a frame that is ready to send from the guest.
-pub const TX_QUEUE_EVENT: DeviceEventT = 1;
-// A frame is available for reading from the tap device to receive in the guest.
-pub const RX_TAP_EVENT: DeviceEventT = 2;
 // The device has been dropped.
 pub const KILL_EVENT: DeviceEventT = 3;
 // The device should be paused.

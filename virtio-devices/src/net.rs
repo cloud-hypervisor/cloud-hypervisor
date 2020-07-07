@@ -7,8 +7,7 @@
 
 use super::net_util::{
     build_net_config_space, build_net_config_space_with_mq, CtrlVirtio, NetCtrlEpollHandler,
-    VirtioNetConfig, KILL_EVENT, NET_EVENTS_COUNT, PAUSE_EVENT, RX_QUEUE_EVENT, RX_TAP_EVENT,
-    TX_QUEUE_EVENT,
+    VirtioNetConfig, KILL_EVENT, NET_EVENTS_COUNT, PAUSE_EVENT,
 };
 use super::Error as DeviceError;
 use super::{
@@ -16,22 +15,20 @@ use super::{
 };
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
-use libc::EAGAIN;
 use libc::EFD_NONBLOCK;
 use net_util::{
-    open_tap, register_listener, unregister_listener, MacAddr, OpenTapError, RxVirtio, Tap,
-    TxVirtio,
+    open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
+    RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
 };
 use std::cmp;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Read;
 use std::io::{self, Write};
 use std::net::Ipv4Addr;
 use std::num::Wrapping;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::result;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::vec::Vec;
@@ -51,176 +48,6 @@ pub enum Error {
 }
 
 pub type Result<T> = result::Result<T, Error>;
-
-pub struct NetQueuePair {
-    pub mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    pub tap: Tap,
-    pub rx: RxVirtio,
-    pub tx: TxVirtio,
-    pub epoll_fd: Option<RawFd>,
-    pub rx_tap_listening: bool,
-    pub counters: NetCounters,
-}
-
-impl NetQueuePair {
-    // Copies a single frame from `self.rx.frame_buf` into the guest. Returns true
-    // if a buffer was used, and false if the frame must be deferred until a buffer
-    // is made available by the driver.
-    fn rx_single_frame(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
-        let mem = self
-            .mem
-            .as_ref()
-            .ok_or(DeviceError::NoMemoryConfigured)
-            .map(|m| m.memory())?;
-        let next_desc = queue.iter(&mem).next();
-
-        if next_desc.is_none() {
-            // Queue has no available descriptors
-            if self.rx_tap_listening {
-                unregister_listener(
-                    self.epoll_fd.unwrap(),
-                    self.tap.as_raw_fd(),
-                    epoll::Events::EPOLLIN,
-                    u64::from(RX_TAP_EVENT),
-                )
-                .map_err(DeviceError::UnregisterListener)?;
-                self.rx_tap_listening = false;
-                info!("Listener unregistered");
-            }
-            return Ok(false);
-        }
-
-        Ok(self.rx.process_desc_chain(&mem, next_desc, &mut queue))
-    }
-
-    fn process_rx(&mut self, queue: &mut Queue) -> result::Result<bool, DeviceError> {
-        // Read as many frames as possible.
-        loop {
-            match self.read_tap() {
-                Ok(count) => {
-                    self.rx.bytes_read = count;
-                    if !self.rx_single_frame(queue)? {
-                        self.rx.deferred_frame = true;
-                        break;
-                    }
-                }
-                Err(e) => {
-                    // The tap device is non-blocking, so any error aside from EAGAIN is
-                    // unexpected.
-                    match e.raw_os_error() {
-                        Some(err) if err == EAGAIN => (),
-                        _ => {
-                            error!("Failed to read tap: {:?}", e);
-                            return Err(DeviceError::FailedReadTap);
-                        }
-                    };
-                    break;
-                }
-            }
-        }
-
-        // Consume the counters from the Rx/Tx queues and accumulate into
-        // the counters for the device as whole. This consumption is needed
-        // to handle MQ.
-        self.counters
-            .rx_bytes
-            .fetch_add(self.rx.counter_bytes.0, Ordering::AcqRel);
-        self.counters
-            .rx_frames
-            .fetch_add(self.rx.counter_frames.0, Ordering::AcqRel);
-        self.rx.counter_bytes = Wrapping(0);
-        self.rx.counter_frames = Wrapping(0);
-
-        if self.rx.deferred_irqs {
-            self.rx.deferred_irqs = false;
-            let mem = self
-                .mem
-                .as_ref()
-                .ok_or(DeviceError::NoMemoryConfigured)
-                .map(|m| m.memory())?;
-            Ok(queue.needs_notification(&mem, queue.next_used))
-        } else {
-            Ok(false)
-        }
-    }
-
-    pub fn resume_rx(&mut self, queue: &mut Queue) -> result::Result<bool, DeviceError> {
-        if !self.rx_tap_listening {
-            register_listener(
-                self.epoll_fd.unwrap(),
-                self.tap.as_raw_fd(),
-                epoll::Events::EPOLLIN,
-                u64::from(RX_TAP_EVENT),
-            )
-            .map_err(DeviceError::RegisterListener)?;
-            self.rx_tap_listening = true;
-            info!("Listener registered");
-        }
-        if self.rx.deferred_frame {
-            if self.rx_single_frame(queue)? {
-                self.rx.deferred_frame = false;
-                // process_rx() was interrupted possibly before consuming all
-                // packets in the tap; try continuing now.
-                self.process_rx(queue)
-            } else if self.rx.deferred_irqs {
-                self.rx.deferred_irqs = false;
-                let mem = self
-                    .mem
-                    .as_ref()
-                    .ok_or(DeviceError::NoMemoryConfigured)
-                    .map(|m| m.memory())?;
-                Ok(queue.needs_notification(&mem, queue.next_used))
-            } else {
-                Ok(false)
-            }
-        } else {
-            Ok(false)
-        }
-    }
-
-    pub fn process_tx(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
-        let mem = self
-            .mem
-            .as_ref()
-            .ok_or(DeviceError::NoMemoryConfigured)
-            .map(|m| m.memory())?;
-        self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
-
-        self.counters
-            .tx_bytes
-            .fetch_add(self.tx.counter_bytes.0, Ordering::AcqRel);
-        self.counters
-            .tx_frames
-            .fetch_add(self.tx.counter_frames.0, Ordering::AcqRel);
-        self.tx.counter_bytes = Wrapping(0);
-        self.tx.counter_frames = Wrapping(0);
-
-        Ok(queue.needs_notification(&mem, queue.next_used))
-    }
-
-    pub fn process_rx_tap(&mut self, mut queue: &mut Queue) -> result::Result<bool, DeviceError> {
-        if self.rx.deferred_frame
-        // Process a deferred frame first if available. Don't read from tap again
-        // until we manage to receive this deferred frame.
-        {
-            if self.rx_single_frame(&mut queue)? {
-                self.rx.deferred_frame = false;
-                self.process_rx(&mut queue)
-            } else if self.rx.deferred_irqs {
-                self.rx.deferred_irqs = false;
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        } else {
-            self.process_rx(&mut queue)
-        }
-    }
-
-    fn read_tap(&mut self) -> io::Result<usize> {
-        self.tap.read(&mut self.rx.frame_buf)
-    }
-}
 
 struct NetEpollHandler {
     net: NetQueuePair,
@@ -254,7 +81,12 @@ impl NetEpollHandler {
             error!("Failed to get rx queue event: {:?}", e);
         }
 
-        if self.net.resume_rx(&mut queue)? || !self.driver_awake {
+        if self
+            .net
+            .resume_rx(&mut queue)
+            .map_err(DeviceError::NetQueuePair)?
+            || !self.driver_awake
+        {
             self.signal_used_queue(queue)?;
             info!("Signalling RX queue");
         } else {
@@ -272,7 +104,12 @@ impl NetEpollHandler {
         if let Err(e) = queue_evt.read() {
             error!("Failed to get tx queue event: {:?}", e);
         }
-        if self.net.process_tx(&mut queue)? || !self.driver_awake {
+        if self
+            .net
+            .process_tx(&mut queue)
+            .map_err(DeviceError::NetQueuePair)?
+            || !self.driver_awake
+        {
             self.signal_used_queue(queue)?;
             info!("Signalling TX queue");
         } else {
@@ -282,7 +119,12 @@ impl NetEpollHandler {
     }
 
     fn handle_rx_tap_event(&mut self, queue: &mut Queue) -> result::Result<(), DeviceError> {
-        if self.net.process_rx_tap(queue)? || !self.driver_awake {
+        if self
+            .net
+            .process_rx_tap(queue)
+            .map_err(DeviceError::NetQueuePair)?
+            || !self.driver_awake
+        {
             self.signal_used_queue(queue)?;
             info!("Signalling RX queue");
         } else {
@@ -420,14 +262,6 @@ impl NetEpollHandler {
         }
         Ok(())
     }
-}
-
-#[derive(Default, Clone)]
-pub struct NetCounters {
-    tx_bytes: Arc<AtomicU64>,
-    tx_frames: Arc<AtomicU64>,
-    rx_bytes: Arc<AtomicU64>,
-    rx_frames: Arc<AtomicU64>,
 }
 
 pub struct Net {

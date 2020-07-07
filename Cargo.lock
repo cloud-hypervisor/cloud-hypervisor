@@ -1486,7 +1486,6 @@ dependencies = [
  "vhost",
  "vhost_user_backend",
  "virtio-bindings",
- "virtio-devices",
  "vm-memory",
  "vmm-sys-util",
 ]

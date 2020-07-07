@@ -103,7 +103,6 @@ pub enum Error {
         event_type: &'static str,
         underlying: io::Error,
     },
-    FailedReadTap,
     FailedSignalingUsedQueue(io::Error),
     PayloadExpected,
     UnknownEvent {
@@ -111,8 +110,6 @@ pub enum Error {
         event: DeviceEventT,
     },
     IoError(io::Error),
-    RegisterListener(io::Error),
-    UnregisterListener(io::Error),
     EpollCreateFd(io::Error),
     EpollCtl(io::Error),
     EpollWait(io::Error),
@@ -122,4 +119,5 @@ pub enum Error {
     SetShmRegionsNotSupported,
     EpollHander(String),
     NoMemoryConfigured,
+    NetQueuePair(::net_util::NetQueuePairError),
 }

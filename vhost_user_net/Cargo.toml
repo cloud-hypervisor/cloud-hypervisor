@@ -14,6 +14,5 @@ option_parser = { path = "../option_parser" }
 vhost_user_backend = { path = "../vhost_user_backend" }
 vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-slave"] }
 virtio-bindings = "0.1.0"
-virtio-devices = { path = "../virtio-devices" }
 vm-memory = "0.2.1"
 vmm-sys-util = ">=0.3.1"

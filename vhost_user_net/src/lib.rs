@@ -10,11 +10,12 @@ extern crate log;
 extern crate net_util;
 extern crate vhost_rs;
 extern crate vhost_user_backend;
-extern crate virtio_devices;
 
 use libc::{self, EFD_NONBLOCK};
 use log::*;
-use net_util::{open_tap, MacAddr, OpenTapError, RxVirtio, Tap, TxVirtio};
+use net_util::{
+    open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
+};
 use option_parser::{OptionParser, OptionParserError};
 use std::fmt;
 use std::io::{self};
@@ -28,7 +29,6 @@ use vhost_rs::vhost_user::{Error as VhostUserError, Listener};
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use virtio_devices::{NetCounters, NetQueuePair};
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -69,7 +69,7 @@ pub enum Error {
     /// No socket provided
     SocketParameterMissing,
     /// Underlying QueuePair error
-    NetQueuePair(virtio_devices::Error),
+    NetQueuePair(net_util::NetQueuePairError),
 }
 
 pub const SYNTAX: &str = "vhost-user-net backend parameters \
