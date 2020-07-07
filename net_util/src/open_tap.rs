@@ -13,8 +13,10 @@ use virtio_bindings::bindings::virtio_net::virtio_net_hdr_v1;
 pub enum Error {
     /// Failed to convert an hexadecimal string into an integer.
     ConvertHexStringToInt(std::num::ParseIntError),
-    /// Error related to the multiqueue support.
-    MultiQueueSupport(String),
+    /// Error related to the multiqueue support (no support TAP side).
+    MultiQueueNoTapSupport,
+    /// Error related to the multiqueue support (no support device side).
+    MultiQueueNoDeviceSupport,
     /// Failed to read the TAP flags from sysfs.
     ReadSysfsTunFlags(io::Error),
     /// Open tap device failed.
@@ -53,13 +55,9 @@ fn check_mq_support(if_name: &Option<&str>, queue_pairs: usize) -> Result<()> {
         let tun_flags = u32::from_str_radix(tun_flags_str.trim().trim_start_matches("0x"), 16)
             .map_err(Error::ConvertHexStringToInt)?;
         if (tun_flags & net_gen::IFF_MULTI_QUEUE != 0) && !mq {
-            return Err(Error::MultiQueueSupport(String::from(
-                "TAP interface supports MQ while device does not",
-            )));
+            return Err(Error::MultiQueueNoDeviceSupport);
         } else if (tun_flags & net_gen::IFF_MULTI_QUEUE == 0) && mq {
-            return Err(Error::MultiQueueSupport(String::from(
-                "Device supports MQ while TAP interface does not",
-            )));
+            return Err(Error::MultiQueueNoTapSupport);
         }
     }
     Ok(())
