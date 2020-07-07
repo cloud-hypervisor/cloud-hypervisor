@@ -178,7 +178,7 @@ sed -i 's/"with-serde",\ //g' hypervisor/Cargo.toml
 
 cargo_args=("$@")
 cargo_args+=("--no-default-features")
-cargo_args+=("--features mmio")
+cargo_args+=("--features mmio,kvm")
 cargo build --release --target $BUILD_TARGET ${cargo_args[@]}
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
@@ -204,7 +204,7 @@ RES=$?
 
 if [ $RES -eq 0 ]; then
     # virtio-mmio based testing
-    cargo build --release --target $BUILD_TARGET --no-default-features --features "mmio"
+    cargo build --release --target $BUILD_TARGET --no-default-features --features "mmio,kvm"
     strip target/$BUILD_TARGET/release/cloud-hypervisor
     strip target/$BUILD_TARGET/release/vhost_user_net
     strip target/$BUILD_TARGET/release/ch-remote
@@ -212,12 +212,12 @@ if [ $RES -eq 0 ]; then
     sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/cloud-hypervisor
 
     # Ensure test binary has the same caps as the cloud-hypervisor one
-    time cargo test --no-run --no-default-features --features "integration_tests,mmio" -- --nocapture || exit 1
+    time cargo test --no-run --no-default-features --features "integration_tests,mmio,kvm" -- --nocapture || exit 1
     ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
 
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --no-default-features --features "integration_tests,mmio" "tests::parallel::test_aarch64_pe_boot" -- --nocapture
+time cargo test --no-default-features --features "integration_tests,mmio,kvm" "tests::parallel::test_aarch64_pe_boot" -- --nocapture
 EOF
 
     RES=$?

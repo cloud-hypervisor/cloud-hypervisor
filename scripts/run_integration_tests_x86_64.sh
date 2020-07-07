@@ -249,7 +249,7 @@ fi
 
 if [ $RES -eq 0 ]; then
     # virtio-mmio based testing
-    cargo build --all --release --target $BUILD_TARGET --no-default-features --features "mmio"
+    cargo build --all --release --target $BUILD_TARGET --no-default-features --features "mmio,kvm"
     strip target/$BUILD_TARGET/release/cloud-hypervisor
     strip target/$BUILD_TARGET/release/vhost_user_net
     strip target/$BUILD_TARGET/release/ch-remote

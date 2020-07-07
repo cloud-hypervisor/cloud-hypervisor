@@ -11,6 +11,7 @@ pci_support = ["pci", "vfio-ioctls", "virtio-devices/pci_support"]
 mmio_support = ["virtio-devices/mmio_support"]
 cmos = ["devices/cmos"]
 fwdebug = ["devices/fwdebug"]
+kvm = ["hypervisor/kvm"]
 
 [dependencies]
 arc-swap = ">=0.4.4"

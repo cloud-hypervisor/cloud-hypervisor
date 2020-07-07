@@ -4,6 +4,8 @@ version = "0.1.0"
 authors = ["Muminul Islam <muislam@microsoft.com>"]
 edition = "2018"
 
+[features]
+kvm = []
 
 [dependencies]
 anyhow = "1.0"
