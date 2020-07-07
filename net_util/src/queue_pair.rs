@@ -2,11 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::{vnet_hdr_len, Tap};
+use super::{register_listener, unregister_listener, vnet_hdr_len, Tap};
+use libc::EAGAIN;
 use std::cmp;
-use std::io::Write;
+use std::io;
+use std::io::{Read, Write};
 use std::num::Wrapping;
-use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_virtio::{DescriptorChain, Queue};
 
 /// The maximum buffer size when segmentation offload is enabled. This
@@ -180,5 +185,203 @@ impl RxVirtio {
             self.bytes_read = 0;
             true
         }
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct NetCounters {
+    pub tx_bytes: Arc<AtomicU64>,
+    pub tx_frames: Arc<AtomicU64>,
+    pub rx_bytes: Arc<AtomicU64>,
+    pub rx_frames: Arc<AtomicU64>,
+}
+
+#[derive(Debug)]
+pub enum NetQueuePairError {
+    /// No memory configured
+    NoMemoryConfigured,
+    /// Error registering listener
+    RegisterListener(io::Error),
+    /// Error unregistering listener
+    UnregisterListener(io::Error),
+    /// Error reading from the TAP device
+    FailedReadTap,
+}
+
+pub struct NetQueuePair {
+    pub mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    pub tap: Tap,
+    pub rx: RxVirtio,
+    pub tx: TxVirtio,
+    pub epoll_fd: Option<RawFd>,
+    pub rx_tap_listening: bool,
+    pub counters: NetCounters,
+}
+
+pub type DeviceEventT = u16;
+// The guest has made a buffer available to receive a frame into.
+pub const RX_QUEUE_EVENT: DeviceEventT = 0;
+// The transmit queue has a frame that is ready to send from the guest.
+pub const TX_QUEUE_EVENT: DeviceEventT = 1;
+// A frame is available for reading from the tap device to receive in the guest.
+pub const RX_TAP_EVENT: DeviceEventT = 2;
+
+impl NetQueuePair {
+    // Copies a single frame from `self.rx.frame_buf` into the guest. Returns true
+    // if a buffer was used, and false if the frame must be deferred until a buffer
+    // is made available by the driver.
+    fn rx_single_frame(&mut self, mut queue: &mut Queue) -> Result<bool, NetQueuePairError> {
+        let mem = self
+            .mem
+            .as_ref()
+            .ok_or(NetQueuePairError::NoMemoryConfigured)
+            .map(|m| m.memory())?;
+        let next_desc = queue.iter(&mem).next();
+
+        if next_desc.is_none() {
+            // Queue has no available descriptors
+            if self.rx_tap_listening {
+                unregister_listener(
+                    self.epoll_fd.unwrap(),
+                    self.tap.as_raw_fd(),
+                    epoll::Events::EPOLLIN,
+                    u64::from(RX_TAP_EVENT),
+                )
+                .map_err(NetQueuePairError::UnregisterListener)?;
+                self.rx_tap_listening = false;
+                info!("Listener unregistered");
+            }
+            return Ok(false);
+        }
+
+        Ok(self.rx.process_desc_chain(&mem, next_desc, &mut queue))
+    }
+
+    fn process_rx(&mut self, queue: &mut Queue) -> Result<bool, NetQueuePairError> {
+        // Read as many frames as possible.
+        loop {
+            match self.read_tap() {
+                Ok(count) => {
+                    self.rx.bytes_read = count;
+                    if !self.rx_single_frame(queue)? {
+                        self.rx.deferred_frame = true;
+                        break;
+                    }
+                }
+                Err(e) => {
+                    // The tap device is non-blocking, so any error aside from EAGAIN is
+                    // unexpected.
+                    match e.raw_os_error() {
+                        Some(err) if err == EAGAIN => (),
+                        _ => {
+                            error!("Failed to read tap: {:?}", e);
+                            return Err(NetQueuePairError::FailedReadTap);
+                        }
+                    };
+                    break;
+                }
+            }
+        }
+
+        // Consume the counters from the Rx/Tx queues and accumulate into
+        // the counters for the device as whole. This consumption is needed
+        // to handle MQ.
+        self.counters
+            .rx_bytes
+            .fetch_add(self.rx.counter_bytes.0, Ordering::AcqRel);
+        self.counters
+            .rx_frames
+            .fetch_add(self.rx.counter_frames.0, Ordering::AcqRel);
+        self.rx.counter_bytes = Wrapping(0);
+        self.rx.counter_frames = Wrapping(0);
+
+        if self.rx.deferred_irqs {
+            self.rx.deferred_irqs = false;
+            let mem = self
+                .mem
+                .as_ref()
+                .ok_or(NetQueuePairError::NoMemoryConfigured)
+                .map(|m| m.memory())?;
+            Ok(queue.needs_notification(&mem, queue.next_used))
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn resume_rx(&mut self, queue: &mut Queue) -> Result<bool, NetQueuePairError> {
+        if !self.rx_tap_listening {
+            register_listener(
+                self.epoll_fd.unwrap(),
+                self.tap.as_raw_fd(),
+                epoll::Events::EPOLLIN,
+                u64::from(RX_TAP_EVENT),
+            )
+            .map_err(NetQueuePairError::RegisterListener)?;
+            self.rx_tap_listening = true;
+            info!("Listener registered");
+        }
+        if self.rx.deferred_frame {
+            if self.rx_single_frame(queue)? {
+                self.rx.deferred_frame = false;
+                // process_rx() was interrupted possibly before consuming all
+                // packets in the tap; try continuing now.
+                self.process_rx(queue)
+            } else if self.rx.deferred_irqs {
+                self.rx.deferred_irqs = false;
+                let mem = self
+                    .mem
+                    .as_ref()
+                    .ok_or(NetQueuePairError::NoMemoryConfigured)
+                    .map(|m| m.memory())?;
+                Ok(queue.needs_notification(&mem, queue.next_used))
+            } else {
+                Ok(false)
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn process_tx(&mut self, mut queue: &mut Queue) -> Result<bool, NetQueuePairError> {
+        let mem = self
+            .mem
+            .as_ref()
+            .ok_or(NetQueuePairError::NoMemoryConfigured)
+            .map(|m| m.memory())?;
+        self.tx.process_desc_chain(&mem, &mut self.tap, &mut queue);
+
+        self.counters
+            .tx_bytes
+            .fetch_add(self.tx.counter_bytes.0, Ordering::AcqRel);
+        self.counters
+            .tx_frames
+            .fetch_add(self.tx.counter_frames.0, Ordering::AcqRel);
+        self.tx.counter_bytes = Wrapping(0);
+        self.tx.counter_frames = Wrapping(0);
+
+        Ok(queue.needs_notification(&mem, queue.next_used))
+    }
+
+    pub fn process_rx_tap(&mut self, mut queue: &mut Queue) -> Result<bool, NetQueuePairError> {
+        if self.rx.deferred_frame
+        // Process a deferred frame first if available. Don't read from tap again
+        // until we manage to receive this deferred frame.
+        {
+            if self.rx_single_frame(&mut queue)? {
+                self.rx.deferred_frame = false;
+                self.process_rx(&mut queue)
+            } else if self.rx.deferred_irqs {
+                self.rx.deferred_irqs = false;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        } else {
+            self.process_rx(&mut queue)
+        }
+    }
+
+    fn read_tap(&mut self) -> io::Result<usize> {
+        self.tap.read(&mut self.rx.frame_buf)
     }
 }
