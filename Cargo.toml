@@ -35,12 +35,13 @@ serde_json = "1.0.56"
 net_util = { path = "net_util" }
 
 [features]
-default = ["acpi", "pci", "cmos"]
+default = ["acpi", "pci", "cmos", "kvm"]
 acpi = ["vmm/acpi"]
 pci = ["vmm/pci_support"]
 mmio = ["vmm/mmio_support"]
 cmos = ["vmm/cmos"]
 fwdebug = ["vmm/fwdebug"]
+kvm = ["vmm/kvm"]
 
 # Integration tests require a special environment to run in
 integration_tests = []

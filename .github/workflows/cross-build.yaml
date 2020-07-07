@@ -31,4 +31,4 @@ jobs:
         with:
           use-cross: true
           command: build
-          args: --target=${{ matrix.target }} --no-default-features --features "mmio"
+          args: --target=${{ matrix.target }} --no-default-features --features "mmio,kvm"
