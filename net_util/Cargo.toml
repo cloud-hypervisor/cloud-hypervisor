@@ -5,10 +5,13 @@ authors = ["The Chromium OS Authors"]
 
 [dependencies]
 libc = "0.2.72"
+log = "0.4.8"
 net_gen = { path = "../net_gen" }
 rand = "0.7.3"
 serde = "1.0.114"
 virtio-bindings = "0.1.0"
+vm-memory = { version = "0.2.1", features = ["backend-mmap", "backend-atomic"] }
+vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
 
 [dev-dependencies]
