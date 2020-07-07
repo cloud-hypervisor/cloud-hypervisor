@@ -6,9 +6,9 @@
 // found in the THIRD-PARTY file.
 
 use super::net_util::{
-    build_net_config_space, build_net_config_space_with_mq, open_tap, register_listener,
-    unregister_listener, CtrlVirtio, NetCtrlEpollHandler, RxVirtio, TxVirtio, VirtioNetConfig,
-    KILL_EVENT, NET_EVENTS_COUNT, PAUSE_EVENT, RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
+    build_net_config_space, build_net_config_space_with_mq, register_listener, unregister_listener,
+    CtrlVirtio, NetCtrlEpollHandler, RxVirtio, TxVirtio, VirtioNetConfig, KILL_EVENT,
+    NET_EVENTS_COUNT, PAUSE_EVENT, RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
 };
 use super::Error as DeviceError;
 use super::{
@@ -18,6 +18,7 @@ use crate::VirtioInterrupt;
 use anyhow::anyhow;
 use libc::EAGAIN;
 use libc::EFD_NONBLOCK;
+use net_util::{open_tap, OpenTapError};
 use net_util::{MacAddr, Tap};
 use std::cmp;
 use std::collections::HashMap;
@@ -44,7 +45,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[derive(Debug)]
 pub enum Error {
     /// Failed to open taps.
-    OpenTap(super::net_util::Error),
+    OpenTap(OpenTapError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
