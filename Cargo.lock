@@ -633,12 +633,15 @@ version = "0.1.0"
 dependencies = [
  "lazy_static",
  "libc",
+ "log 0.4.8",
  "net_gen",
  "pnet",
  "rand 0.7.3",
  "serde",
  "serde_json",
  "virtio-bindings",
+ "vm-memory",
+ "vm-virtio",
  "vmm-sys-util",
 ]
 

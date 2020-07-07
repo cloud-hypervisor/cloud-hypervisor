@@ -11,14 +11,19 @@
 #[macro_use]
 extern crate lazy_static;
 extern crate libc;
+#[macro_use]
+extern crate log;
 extern crate net_gen;
 extern crate rand;
 extern crate serde;
 extern crate virtio_bindings;
+extern crate vm_memory;
+extern crate vm_virtio;
 extern crate vmm_sys_util;
 
 mod mac;
 mod open_tap;
+mod queue_pair;
 mod tap;
 
 use std::io::Error as IoError;
@@ -28,6 +33,7 @@ use std::os::unix::io::FromRawFd;
 
 pub use mac::{MacAddr, MAC_ADDR_LEN};
 pub use open_tap::{open_tap, Error as OpenTapError};
+pub use queue_pair::{RxVirtio, TxVirtio};
 pub use tap::{Error as TapError, Tap};
 
 #[derive(Debug)]
