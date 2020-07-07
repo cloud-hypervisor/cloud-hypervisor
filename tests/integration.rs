@@ -1869,7 +1869,7 @@ mod tests {
 
             // Let enough time for the first VM to be spawned, and to make
             // sure the PSS measurement is accurate.
-            thread::sleep(std::time::Duration::new(60, 0));
+            thread::sleep(std::time::Duration::new(120, 0));
 
             // Get initial PSS
             let old_pss = get_pss(child1.id());
