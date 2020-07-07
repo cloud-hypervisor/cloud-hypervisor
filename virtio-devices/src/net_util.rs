@@ -4,10 +4,9 @@
 
 use super::Error as DeviceError;
 use super::{DescriptorChain, DeviceEventT, Queue};
-use net_util::MacAddr;
+use net_util::{register_listener, MacAddr};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::fs::File;
-use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -178,34 +177,6 @@ impl CtrlVirtio {
 
         Ok(())
     }
-}
-
-pub fn register_listener(
-    epoll_fd: RawFd,
-    fd: RawFd,
-    ev_type: epoll::Events,
-    data: u64,
-) -> std::result::Result<(), io::Error> {
-    epoll::ctl(
-        epoll_fd,
-        epoll::ControlOptions::EPOLL_CTL_ADD,
-        fd,
-        epoll::Event::new(ev_type, data),
-    )
-}
-
-pub fn unregister_listener(
-    epoll_fd: RawFd,
-    fd: RawFd,
-    ev_type: epoll::Events,
-    data: u64,
-) -> std::result::Result<(), io::Error> {
-    epoll::ctl(
-        epoll_fd,
-        epoll::ControlOptions::EPOLL_CTL_DEL,
-        fd,
-        epoll::Event::new(ev_type, data),
-    )
 }
 
 pub struct NetCtrlEpollHandler {

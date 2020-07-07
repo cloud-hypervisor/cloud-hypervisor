@@ -631,6 +631,7 @@ dependencies = [
 name = "net_util"
 version = "0.1.0"
 dependencies = [
+ "epoll",
  "lazy_static",
  "libc",
  "log 0.4.8",
