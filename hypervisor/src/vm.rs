@@ -14,6 +14,7 @@ use crate::cpu::Vcpu;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::{CreateDevice, DeviceFd, IoEventAddress, IrqRouting, MemoryRegion};
+use kvm_ioctls::Cap;
 use std::sync::Arc;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
@@ -168,4 +169,6 @@ pub trait Vm: Send + Sync {
     /// Set guest clock.
     #[cfg(target_arch = "x86_64")]
     fn set_clock(&self, data: &ClockData) -> Result<()>;
+    /// Checks if a particular `Cap` is available.
+    fn check_extension(&self, c: Cap) -> bool;
 }

@@ -250,6 +250,10 @@ impl vm::Vm for KvmVm {
             .set_clock(data)
             .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))
     }
+    /// Checks if a particular `Cap` is available.
+    fn check_extension(&self, c: Cap) -> bool {
+        self.fd.check_extension(c)
+    }
 }
 /// Wrapper over KVM system ioctls.
 pub struct KvmHypervisor {
