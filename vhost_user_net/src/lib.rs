@@ -14,7 +14,7 @@ extern crate virtio_devices;
 
 use libc::{self, EFD_NONBLOCK};
 use log::*;
-use net_util::{MacAddr, Tap};
+use net_util::{open_tap, MacAddr, OpenTapError, Tap};
 use option_parser::{OptionParser, OptionParserError};
 use std::fmt;
 use std::io::{self};
@@ -28,7 +28,7 @@ use vhost_rs::vhost_user::{Error as VhostUserError, Listener};
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use virtio_devices::net_util::{open_tap, RxVirtio, TxVirtio};
+use virtio_devices::net_util::{RxVirtio, TxVirtio};
 use virtio_devices::{NetCounters, NetQueuePair};
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
@@ -66,7 +66,7 @@ pub enum Error {
     /// No memory configured.
     NoMemoryConfigured,
     /// Open tap device failed.
-    OpenTap(virtio_devices::net_util::Error),
+    OpenTap(OpenTapError),
     /// No socket provided
     SocketParameterMissing,
     /// Underlying QueuePair error

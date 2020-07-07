@@ -11,13 +11,14 @@
 #[macro_use]
 extern crate lazy_static;
 extern crate libc;
+extern crate net_gen;
 extern crate rand;
 extern crate serde;
-
-extern crate net_gen;
+extern crate virtio_bindings;
 extern crate vmm_sys_util;
 
 mod mac;
+mod open_tap;
 mod tap;
 
 use std::io::Error as IoError;
@@ -26,6 +27,7 @@ use std::net;
 use std::os::unix::io::FromRawFd;
 
 pub use mac::{MacAddr, MAC_ADDR_LEN};
+pub use open_tap::{open_tap, Error as OpenTapError};
 pub use tap::{Error as TapError, Tap};
 
 #[derive(Debug)]
