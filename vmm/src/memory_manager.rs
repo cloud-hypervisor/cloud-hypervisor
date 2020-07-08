@@ -1289,6 +1289,40 @@ impl Aml for MemoryManager {
             .to_aml_bytes(),
         );
 
+        #[cfg(target_arch = "x86_64")]
+        {
+            if let Some(sgx_epc_region) = &self.sgx_epc_region {
+                let min = sgx_epc_region.start().raw_value() as u64;
+                let max = min + sgx_epc_region.size() as u64 - 1;
+                // SGX EPC region
+                bytes.extend_from_slice(
+                    &aml::Device::new(
+                        "_SB_.EPC_".into(),
+                        vec![
+                            &aml::Name::new("_HID".into(), &aml::EISAName::new("INT0E0C")),
+                            // QWORD describing the EPC region start and size
+                            &aml::Name::new(
+                                "_CRS".into(),
+                                &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
+                                    aml::AddressSpaceCachable::NotCacheable,
+                                    true,
+                                    min,
+                                    max,
+                                )]),
+                            ),
+                            &aml::Method::new(
+                                "_STA".into(),
+                                0,
+                                false,
+                                vec![&aml::Return::new(&0xfu8)],
+                            ),
+                        ],
+                    )
+                    .to_aml_bytes(),
+                );
+            }
+        }
+
         bytes
     }
 }
