@@ -732,7 +732,6 @@ pub mod testing {
     // Represents a virtio descriptor in guest memory.
     pub struct VirtqDesc<'a> {
         desc: VolatileSlice<'a>,
-        start: GuestAddress,
     }
 
     #[macro_export]
@@ -745,18 +744,11 @@ pub mod testing {
     #[allow(clippy::len_without_is_empty)]
     #[allow(clippy::zero_ptr)]
     impl<'a> VirtqDesc<'a> {
-        pub fn new(start: GuestAddress, mem: &'a GuestMemoryMmap) -> Self {
-            let (region, addr) = mem.to_region_addr(start).unwrap();
-            let desc = region.get_slice(addr, 16).unwrap();
-            VirtqDesc { desc, start }
-        }
-
-        pub fn start(&self) -> GuestAddress {
-            self.start
-        }
-
-        pub fn end(&self) -> GuestAddress {
-            self.start.unchecked_add(self.desc.len() as u64)
+        fn new(dtable: &'a VolatileSlice<'a>, i: u16) -> Self {
+            let desc = dtable
+                .get_slice((i as usize) * Self::dtable_len(1), Self::dtable_len(1))
+                .unwrap();
+            VirtqDesc { desc }
         }
 
         pub fn addr(&self) -> VolatileRef<u64> {
@@ -780,6 +772,10 @@ pub mod testing {
             self.len().store(len);
             self.flags().store(flags);
             self.next().store(next);
+        }
+
+        fn dtable_len(nelem: u16) -> usize {
+            16 * nelem as usize
         }
     }
 
@@ -867,10 +863,20 @@ pub mod testing {
     pub type VirtqAvail<'a> = VirtqRing<'a, u16>;
     pub type VirtqUsed<'a> = VirtqRing<'a, VirtqUsedElem>;
 
+    trait GuestAddressExt {
+        fn align_up(&self, x: GuestUsize) -> GuestAddress;
+    }
+    impl GuestAddressExt for GuestAddress {
+        fn align_up(&self, x: GuestUsize) -> GuestAddress {
+            Self((self.0 + (x - 1)) & !(x - 1))
+        }
+    }
+
     pub struct VirtQueue<'a> {
-        pub dtable: Vec<VirtqDesc<'a>>,
-        pub avail: VirtqAvail<'a>,
-        pub used: VirtqUsed<'a>,
+        start: GuestAddress,
+        dtable: VolatileSlice<'a>,
+        avail: VirtqAvail<'a>,
+        used: VirtqUsed<'a>,
     }
 
     impl<'a> VirtQueue<'a> {
@@ -879,28 +885,25 @@ pub mod testing {
             // power of 2?
             assert!(qsize > 0 && qsize & (qsize - 1) == 0);
 
-            let mut dtable = Vec::with_capacity(qsize as usize);
-
-            let mut end = start;
-
-            for _ in 0..qsize {
-                let d = VirtqDesc::new(end, mem);
-                end = d.end();
-                dtable.push(d);
-            }
+            let (region, addr) = mem.to_region_addr(start).unwrap();
+            let dtable = region
+                .get_slice(addr, VirtqDesc::dtable_len(qsize))
+                .unwrap();
 
             const AVAIL_ALIGN: u64 = 2;
 
-            let avail = VirtqAvail::new(end, mem, qsize, AVAIL_ALIGN);
+            let avail_addr = start
+                .unchecked_add(VirtqDesc::dtable_len(qsize) as GuestUsize)
+                .align_up(AVAIL_ALIGN);
+            let avail = VirtqAvail::new(avail_addr, mem, qsize, AVAIL_ALIGN);
 
             const USED_ALIGN: u64 = 4;
 
-            let mut x = avail.end().0;
-            x = (x + USED_ALIGN - 1) & !(USED_ALIGN - 1);
-
-            let used = VirtqUsed::new(GuestAddress(x), mem, qsize, USED_ALIGN);
+            let used_addr = avail.end().align_up(USED_ALIGN);
+            let used = VirtqUsed::new(used_addr, mem, qsize, USED_ALIGN);
 
             VirtQueue {
+                start,
                 dtable,
                 avail,
                 used,
@@ -908,11 +911,23 @@ pub mod testing {
         }
 
         fn size(&self) -> u16 {
-            self.dtable.len() as u16
+            (self.dtable.len() / VirtqDesc::dtable_len(1)) as u16
+        }
+
+        pub fn dtable(&self, i: u16) -> VirtqDesc {
+            VirtqDesc::new(&self.dtable, i)
+        }
+
+        pub fn avail(&self) -> &VirtqAvail {
+            &self.avail
+        }
+
+        pub fn used(&self) -> &VirtqUsed {
+            &self.used
         }
 
         pub fn dtable_start(&self) -> GuestAddress {
-            self.dtable.first().unwrap().start()
+            self.start
         }
 
         pub fn avail_start(&self) -> GuestAddress {
@@ -970,25 +985,25 @@ pub mod tests {
         );
 
         // the addr field of the descriptor is way off
-        vq.dtable[0].addr().store(0x0fff_ffff_ffff);
+        vq.dtable(0).addr().store(0x0fff_ffff_ffff);
         assert!(DescriptorChain::checked_new(m, vq.start(), 16, 0, None).is_none());
 
         // let's create some invalid chains
 
         {
             // the addr field of the desc is ok now
-            vq.dtable[0].addr().store(0x1000);
+            vq.dtable(0).addr().store(0x1000);
             // ...but the length is too large
-            vq.dtable[0].len().store(0xffff_ffff);
+            vq.dtable(0).len().store(0xffff_ffff);
             assert!(DescriptorChain::checked_new(m, vq.start(), 16, 0, None).is_none());
         }
 
         {
             // the first desc has a normal len now, and the next_descriptor flag is set
-            vq.dtable[0].len().store(0x1000);
-            vq.dtable[0].flags().store(VIRTQ_DESC_F_NEXT);
+            vq.dtable(0).len().store(0x1000);
+            vq.dtable(0).flags().store(VIRTQ_DESC_F_NEXT);
             //..but the the index of the next descriptor is too large
-            vq.dtable[0].next().store(16);
+            vq.dtable(0).next().store(16);
 
             assert!(DescriptorChain::checked_new(m, vq.start(), 16, 0, None).is_none());
         }
@@ -996,8 +1011,8 @@ pub mod tests {
         // finally, let's test an ok chain
 
         {
-            vq.dtable[0].next().store(1);
-            vq.dtable[1].set(0x2000, 0x1000, 0, 0);
+            vq.dtable(0).next().store(1);
+            vq.dtable(1).set(0x2000, 0x1000, 0, 0);
 
             let c = DescriptorChain::checked_new(m, vq.start(), 16, 0, None).unwrap();
 
@@ -1021,28 +1036,28 @@ pub mod tests {
         let vq = VirtQueue::new(GuestAddress(0), m, 16);
 
         // create a chain with a descriptor pointing to an indirect table
-        vq.dtable[0].addr().store(0x1000);
-        vq.dtable[0].len().store(0x1000);
-        vq.dtable[0].next().store(0);
-        vq.dtable[0].flags().store(VIRTQ_DESC_F_INDIRECT);
+        vq.dtable(0).addr().store(0x1000);
+        vq.dtable(0).len().store(0x1000);
+        vq.dtable(0).next().store(0);
+        vq.dtable(0).flags().store(VIRTQ_DESC_F_INDIRECT);
 
-        let c = DescriptorChain::checked_new(m, vq.start(), 16, 0, None).unwrap();
-        assert!(c.is_indirect());
+        let desc_chain = DescriptorChain::checked_new(m, vq.start(), 16, 0, None).unwrap();
+        assert!(desc_chain.is_indirect());
 
-        // create an indirect table with 4 chained descriptors
-        let mut indirect_table = Vec::with_capacity(4 as usize);
+        // Create the indirect chain, at 0x1000.
+        let vq_indirect = VirtQueue::new(GuestAddress(0x1000), m, 16);
         for j in 0..4 {
-            let desc = VirtqDesc::new(GuestAddress(0x1000 + (j * 16)), m);
-            desc.set(0x1000, 0x1000, VIRTQ_DESC_F_NEXT, (j + 1) as u16);
-            indirect_table.push(desc);
+            vq_indirect
+                .dtable(j)
+                .set(0x1000, 0x1000, VIRTQ_DESC_F_NEXT, (j + 1) as u16);
         }
 
         // try to iterate through the indirect table descriptors
-        let mut i = c.new_from_indirect().unwrap();
+        let mut indirect_desc_chain = desc_chain.new_from_indirect().unwrap();
         for j in 0..4 {
-            assert_eq!(i.flags, VIRTQ_DESC_F_NEXT);
-            assert_eq!(i.next, j + 1);
-            i = i.next_descriptor().unwrap();
+            assert_eq!(indirect_desc_chain.flags, VIRTQ_DESC_F_NEXT);
+            assert_eq!(indirect_desc_chain.next, j + 1);
+            indirect_desc_chain = indirect_desc_chain.next_descriptor().unwrap();
         }
     }
 
@@ -1109,7 +1124,7 @@ pub mod tests {
 
         {
             for j in 0..5 {
-                vq.dtable[j].set(
+                vq.dtable(j).set(
                     0x1000 * (j + 1) as u64,
                     0x1000,
                     VIRTQ_DESC_F_NEXT,
@@ -1118,11 +1133,11 @@ pub mod tests {
             }
 
             // the chains are (0, 1) and (2, 3, 4)
-            vq.dtable[1].flags().store(0);
-            vq.dtable[4].flags().store(0);
-            vq.avail.ring(0).store(0);
-            vq.avail.ring(1).store(2);
-            vq.avail.idx().store(2);
+            vq.dtable(1).flags().store(0);
+            vq.dtable(4).flags().store(0);
+            vq.avail().ring(0).store(0);
+            vq.avail().ring(1).store(2);
+            vq.avail().idx().store(2);
 
             let mut i = q.iter(m);
 
@@ -1166,16 +1181,16 @@ pub mod tests {
         let vq = VirtQueue::new(GuestAddress(0), m, 16);
 
         let mut q = vq.create_queue();
-        assert_eq!(vq.used.idx().load(), 0);
+        assert_eq!(vq.used().idx().load(), 0);
 
         //index too large
         q.add_used(m, 16, 0x1000);
-        assert_eq!(vq.used.idx().load(), 0);
+        assert_eq!(vq.used().idx().load(), 0);
 
         //should be ok
         q.add_used(m, 1, 0x1000);
-        assert_eq!(vq.used.idx().load(), 1);
-        let x = vq.used.ring(0).load();
+        assert_eq!(vq.used().idx().load(), 1);
+        let x = vq.used().ring(0).load();
         assert_eq!(x.id, 1);
         assert_eq!(x.len, 0x1000);
     }

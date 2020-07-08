@@ -787,9 +787,9 @@ mod tests {
             ctx.signal_txq_event();
 
             // The available TX descriptor should have been used.
-            assert_eq!(ctx.guest_txvq.used.idx().load(), 1);
+            assert_eq!(ctx.guest_txvq.used().idx().load(), 1);
             // The available RX descriptor should be untouched.
-            assert_eq!(ctx.guest_rxvq.used.idx().load(), 0);
+            assert_eq!(ctx.guest_rxvq.used().idx().load(), 0);
         }
 
         // Test case:
@@ -803,8 +803,8 @@ mod tests {
             ctx.signal_txq_event();
 
             // Both available RX and TX descriptors should have been used.
-            assert_eq!(ctx.guest_txvq.used.idx().load(), 1);
-            assert_eq!(ctx.guest_rxvq.used.idx().load(), 1);
+            assert_eq!(ctx.guest_txvq.used().idx().load(), 1);
+            assert_eq!(ctx.guest_rxvq.used().idx().load(), 1);
         }
 
         // Test case:
@@ -823,8 +823,8 @@ mod tests {
             ctx.signal_txq_event();
 
             // Both RX and TX queues should be untouched.
-            assert_eq!(ctx.guest_txvq.used.idx().load(), 0);
-            assert_eq!(ctx.guest_rxvq.used.idx().load(), 0);
+            assert_eq!(ctx.guest_txvq.used().idx().load(), 0);
+            assert_eq!(ctx.guest_rxvq.used().idx().load(), 0);
         }
 
         // Test case:
@@ -834,12 +834,12 @@ mod tests {
             let mut ctx = test_ctx.create_epoll_handler_context();
 
             // Invalidate the packet header descriptor, by setting its length to 0.
-            ctx.guest_txvq.dtable[0].len().store(0);
+            ctx.guest_txvq.dtable(0).len().store(0);
             ctx.signal_txq_event();
 
             // The available descriptor should have been consumed, but no packet should have
             // reached the backend.
-            assert_eq!(ctx.guest_txvq.used.idx().load(), 1);
+            assert_eq!(ctx.guest_txvq.used().idx().load(), 1);
             assert_eq!(ctx.handler.backend.read().unwrap().tx_ok_cnt, 0);
         }
 
@@ -878,7 +878,7 @@ mod tests {
             ctx.signal_rxq_event();
 
             // The available RX buffer should've been left untouched.
-            assert_eq!(ctx.guest_rxvq.used.idx().load(), 0);
+            assert_eq!(ctx.guest_rxvq.used().idx().load(), 0);
         }
 
         // Test case:
@@ -893,7 +893,7 @@ mod tests {
             ctx.signal_rxq_event();
 
             // The available RX buffer should have been used.
-            assert_eq!(ctx.guest_rxvq.used.idx().load(), 1);
+            assert_eq!(ctx.guest_rxvq.used().idx().load(), 1);
         }
 
         // Test case: the driver provided a malformed RX descriptor chain.
@@ -902,11 +902,11 @@ mod tests {
             let mut ctx = test_ctx.create_epoll_handler_context();
 
             // Invalidate the packet header descriptor, by setting its length to 0.
-            ctx.guest_rxvq.dtable[0].len().store(0);
+            ctx.guest_rxvq.dtable(0).len().store(0);
 
             // The chain should've been processed, without employing the backend.
             assert!(ctx.handler.process_rx().is_ok());
-            assert_eq!(ctx.guest_rxvq.used.idx().load(), 1);
+            assert_eq!(ctx.guest_rxvq.used().idx().load(), 1);
             assert_eq!(ctx.handler.backend.read().unwrap().rx_ok_cnt, 0);
         }
 
@@ -968,9 +968,9 @@ mod tests {
                 Some(epoll::Events::EPOLLIN)
             );
             // TX queue processing should've been triggered.
-            assert_eq!(ctx.guest_txvq.used.idx().load(), 1);
+            assert_eq!(ctx.guest_txvq.used().idx().load(), 1);
             // RX queue processing should've been triggered.
-            assert_eq!(ctx.guest_rxvq.used.idx().load(), 1);
+            assert_eq!(ctx.guest_rxvq.used().idx().load(), 1);
         }
 
         // Test case:
@@ -995,9 +995,9 @@ mod tests {
                 Some(epoll::Events::EPOLLIN)
             );
             // TX queue processing should've been triggered.
-            assert_eq!(ctx.guest_txvq.used.idx().load(), 1);
+            assert_eq!(ctx.guest_txvq.used().idx().load(), 1);
             // The RX queue should've been left untouched.
-            assert_eq!(ctx.guest_rxvq.used.idx().load(), 0);
+            assert_eq!(ctx.guest_rxvq.used().idx().load(), 0);
         }
     }
 

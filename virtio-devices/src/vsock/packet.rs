@@ -352,7 +352,7 @@ mod tests {
             let $test_ctx = TestContext::new();
             let mut $handler_ctx = $test_ctx.create_epoll_handler_context();
             // For TX packets, hdr.len should be set to a valid value.
-            set_pkt_len(1024, &$handler_ctx.guest_txvq.dtable[0], &$test_ctx.mem);
+            set_pkt_len(1024, &$handler_ctx.guest_txvq.dtable(0), &$test_ctx.mem);
         };
     }
 
@@ -403,14 +403,16 @@ mod tests {
             assert_eq!(pkt.hdr().len(), VSOCK_PKT_HDR_SIZE);
             assert_eq!(
                 pkt.buf().unwrap().len(),
-                handler_ctx.guest_txvq.dtable[1].len().load() as usize
+                handler_ctx.guest_txvq.dtable(1).len().load() as usize
             );
         }
 
         // Test case: error on write-only hdr descriptor.
         {
             create_context!(test_ctx, handler_ctx);
-            handler_ctx.guest_txvq.dtable[0]
+            handler_ctx
+                .guest_txvq
+                .dtable(0)
                 .flags()
                 .store(VIRTQ_DESC_F_WRITE);
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::UnreadableDescriptor);
@@ -419,7 +421,9 @@ mod tests {
         // Test case: header descriptor has insufficient space to hold the packet header.
         {
             create_context!(test_ctx, handler_ctx);
-            handler_ctx.guest_txvq.dtable[0]
+            handler_ctx
+                .guest_txvq
+                .dtable(0)
                 .len()
                 .store(VSOCK_PKT_HDR_SIZE as u32 - 1);
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::HdrDescTooSmall(_));
@@ -428,7 +432,7 @@ mod tests {
         // Test case: zero-length TX packet.
         {
             create_context!(test_ctx, handler_ctx);
-            set_pkt_len(0, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
+            set_pkt_len(0, &handler_ctx.guest_txvq.dtable(0), &test_ctx.mem);
             let mut pkt = VsockPacket::from_tx_virtq_head(
                 &handler_ctx.handler.queues[1]
                     .iter(&test_ctx.mem)
@@ -445,7 +449,7 @@ mod tests {
             create_context!(test_ctx, handler_ctx);
             set_pkt_len(
                 MAX_PKT_BUF_SIZE as u32 + 1,
-                &handler_ctx.guest_txvq.dtable[0],
+                &handler_ctx.guest_txvq.dtable(0),
                 &test_ctx.mem,
             );
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::InvalidPktLen(_));
@@ -456,15 +460,17 @@ mod tests {
         // - the data descriptor is missing.
         {
             create_context!(test_ctx, handler_ctx);
-            set_pkt_len(1024, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
-            handler_ctx.guest_txvq.dtable[0].flags().store(0);
+            set_pkt_len(1024, &handler_ctx.guest_txvq.dtable(0), &test_ctx.mem);
+            handler_ctx.guest_txvq.dtable(0).flags().store(0);
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::BufDescMissing);
         }
 
         // Test case: error on write-only buf descriptor.
         {
             create_context!(test_ctx, handler_ctx);
-            handler_ctx.guest_txvq.dtable[1]
+            handler_ctx
+                .guest_txvq
+                .dtable(1)
                 .flags()
                 .store(VIRTQ_DESC_F_WRITE);
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::UnreadableDescriptor);
@@ -474,8 +480,8 @@ mod tests {
         // packet header `len` field.
         {
             create_context!(test_ctx, handler_ctx);
-            set_pkt_len(8 * 1024, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
-            handler_ctx.guest_txvq.dtable[1].len().store(4 * 1024);
+            set_pkt_len(8 * 1024, &handler_ctx.guest_txvq.dtable(0), &test_ctx.mem);
+            handler_ctx.guest_txvq.dtable(1).len().store(4 * 1024);
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::BufDescTooSmall);
         }
     }
@@ -495,21 +501,23 @@ mod tests {
             assert_eq!(pkt.hdr().len(), VSOCK_PKT_HDR_SIZE);
             assert_eq!(
                 pkt.buf().unwrap().len(),
-                handler_ctx.guest_rxvq.dtable[1].len().load() as usize
+                handler_ctx.guest_rxvq.dtable(1).len().load() as usize
             );
         }
 
         // Test case: read-only RX packet header.
         {
             create_context!(test_ctx, handler_ctx);
-            handler_ctx.guest_rxvq.dtable[0].flags().store(0);
+            handler_ctx.guest_rxvq.dtable(0).flags().store(0);
             expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::UnwritableDescriptor);
         }
 
         // Test case: RX descriptor head cannot fit the entire packet header.
         {
             create_context!(test_ctx, handler_ctx);
-            handler_ctx.guest_rxvq.dtable[0]
+            handler_ctx
+                .guest_rxvq
+                .dtable(0)
                 .len()
                 .store(VSOCK_PKT_HDR_SIZE as u32 - 1);
             expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::HdrDescTooSmall(_));
@@ -518,7 +526,9 @@ mod tests {
         // Test case: RX descriptor chain is missing the packet buffer descriptor.
         {
             create_context!(test_ctx, handler_ctx);
-            handler_ctx.guest_rxvq.dtable[0]
+            handler_ctx
+                .guest_rxvq
+                .dtable(0)
                 .flags()
                 .store(VIRTQ_DESC_F_WRITE);
             expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::BufDescMissing);
@@ -639,11 +649,11 @@ mod tests {
 
         assert_eq!(
             pkt.buf().unwrap().len(),
-            handler_ctx.guest_rxvq.dtable[1].len().load() as usize
+            handler_ctx.guest_rxvq.dtable(1).len().load() as usize
         );
         assert_eq!(
             pkt.buf_mut().unwrap().len(),
-            handler_ctx.guest_rxvq.dtable[1].len().load() as usize
+            handler_ctx.guest_rxvq.dtable(1).len().load() as usize
         );
 
         for i in 0..pkt.buf().unwrap().len() {
