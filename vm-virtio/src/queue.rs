@@ -724,64 +724,10 @@ pub mod testing {
     pub use super::*;
     use std::marker::PhantomData;
     use std::mem;
-    use vm_memory::Bytes;
     use vm_memory::{
         GuestAddress, GuestMemoryMmap, GuestMemoryRegion, VolatileMemory, VolatileRef,
         VolatileSlice,
     };
-
-    // Represents a location in GuestMemoryMmap which holds a given type.
-    pub struct SomeplaceInMemory<'a, T> {
-        pub location: GuestAddress,
-        mem: &'a GuestMemoryMmap,
-        phantom: PhantomData<*const T>,
-    }
-
-    // The ByteValued trait is required to use mem.read_obj and write_obj.
-    impl<'a, T> SomeplaceInMemory<'a, T>
-    where
-        T: vm_memory::ByteValued,
-    {
-        fn new(location: GuestAddress, mem: &'a GuestMemoryMmap) -> Self {
-            SomeplaceInMemory {
-                location,
-                mem,
-                phantom: PhantomData,
-            }
-        }
-
-        // Reads from the actual memory location.
-        pub fn get(&self) -> T {
-            self.mem.read_obj(self.location).unwrap()
-        }
-
-        // Writes to the actual memory location.
-        pub fn set(&self, val: T) {
-            self.mem.write_obj(val, self.location).unwrap()
-        }
-
-        // This function returns a place in memory which holds a value of type U, and starts
-        // offset bytes after the current location.
-        fn map_offset<U>(&self, offset: GuestUsize) -> SomeplaceInMemory<'a, U> {
-            SomeplaceInMemory {
-                location: self.location.checked_add(offset).unwrap(),
-                mem: self.mem,
-                phantom: PhantomData,
-            }
-        }
-
-        // This function returns a place in memory which holds a value of type U, and starts
-        // immediately after the end of self (which is location + sizeof(T)).
-        fn next_place<U>(&self) -> SomeplaceInMemory<'a, U> {
-            self.map_offset::<U>(mem::size_of::<T>() as u64)
-        }
-
-        fn end(&self) -> GuestAddress {
-            self.location
-                .checked_add(mem::size_of::<T>() as u64)
-                .unwrap()
-        }
-    }
 
     // Represents a virtio descriptor in guest memory.
     pub struct VirtqDesc<'a> {
@@ -840,10 +786,10 @@ pub mod testing {
     // Represents a virtio queue ring. The only difference between the used and available rings,
     // is the ring element type.
     pub struct VirtqRing<'a, T> {
-        pub flags: SomeplaceInMemory<'a, u16>,
-        pub idx: SomeplaceInMemory<'a, u16>,
-        pub ring: Vec<SomeplaceInMemory<'a, T>>,
-        pub event: SomeplaceInMemory<'a, u16>,
+        ring: VolatileSlice<'a>,
+        start: GuestAddress,
+        qsize: u16,
+        _marker: PhantomData<*const T>,
     }
 
     impl<'a, T> VirtqRing<'a, T>
@@ -858,34 +804,54 @@ pub mod testing {
         ) -> Self {
             assert_eq!(start.0 & (alignment - 1), 0);
 
-            let flags = SomeplaceInMemory::new(start, mem);
-            let idx = flags.next_place();
+            let (region, addr) = mem.to_region_addr(start).unwrap();
+            let size = Self::ring_len(qsize);
+            let ring = region.get_slice(addr, size).unwrap();
 
-            let mut ring = Vec::with_capacity(qsize as usize);
-
-            ring.push(idx.next_place());
-
-            for _ in 1..qsize as usize {
-                let x = ring.last().unwrap().next_place();
-                ring.push(x)
-            }
-
-            let event = ring.last().unwrap().next_place();
-
-            flags.set(0);
-            idx.set(0);
-            event.set(0);
-
-            VirtqRing {
-                flags,
-                idx,
+            let result = VirtqRing {
                 ring,
-                event,
-            }
+                start,
+                qsize,
+                _marker: PhantomData,
+            };
+
+            result.flags().store(0);
+            result.idx().store(0);
+            result.event().store(0);
+            result
+        }
+
+        pub fn start(&self) -> GuestAddress {
+            self.start
         }
 
         pub fn end(&self) -> GuestAddress {
-            self.event.end()
+            self.start.unchecked_add(self.ring.len() as GuestUsize)
+        }
+
+        pub fn flags(&self) -> VolatileRef<u16> {
+            self.ring.get_ref(0).unwrap()
+        }
+
+        pub fn idx(&self) -> VolatileRef<u16> {
+            self.ring.get_ref(2).unwrap()
+        }
+
+        fn ring_offset(i: u16) -> usize {
+            4 + mem::size_of::<T>() * (i as usize)
+        }
+
+        pub fn ring(&self, i: u16) -> VolatileRef<T> {
+            assert!(i < self.qsize);
+            self.ring.get_ref(Self::ring_offset(i)).unwrap()
+        }
+
+        pub fn event(&self) -> VolatileRef<u16> {
+            self.ring.get_ref(Self::ring_offset(self.qsize)).unwrap()
+        }
+
+        fn ring_len(qsize: u16) -> usize {
+            Self::ring_offset(qsize) + 2
         }
     }
 
@@ -950,11 +916,11 @@ pub mod testing {
         }
 
         pub fn avail_start(&self) -> GuestAddress {
-            self.avail.flags.location
+            self.avail.start()
         }
 
         pub fn used_start(&self) -> GuestAddress {
-            self.used.flags.location
+            self.used.start()
         }
 
         // Creates a new Queue, using the underlying memory regions represented by the VirtQueue.
@@ -1154,9 +1120,9 @@ pub mod tests {
             // the chains are (0, 1) and (2, 3, 4)
             vq.dtable[1].flags().store(0);
             vq.dtable[4].flags().store(0);
-            vq.avail.ring[0].set(0);
-            vq.avail.ring[1].set(2);
-            vq.avail.idx.set(2);
+            vq.avail.ring(0).store(0);
+            vq.avail.ring(1).store(2);
+            vq.avail.idx().store(2);
 
             let mut i = q.iter(m);
 
@@ -1200,16 +1166,16 @@ pub mod tests {
         let vq = VirtQueue::new(GuestAddress(0), m, 16);
 
         let mut q = vq.create_queue();
-        assert_eq!(vq.used.idx.get(), 0);
+        assert_eq!(vq.used.idx().load(), 0);
 
         //index too large
         q.add_used(m, 16, 0x1000);
-        assert_eq!(vq.used.idx.get(), 0);
+        assert_eq!(vq.used.idx().load(), 0);
 
         //should be ok
         q.add_used(m, 1, 0x1000);
-        assert_eq!(vq.used.idx.get(), 1);
-        let x = vq.used.ring[0].get();
+        assert_eq!(vq.used.idx().load(), 1);
+        let x = vq.used.ring(0).load();
         assert_eq!(x.id, 1);
         assert_eq!(x.len, 0x1000);
     }
