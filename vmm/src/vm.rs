@@ -351,6 +351,17 @@ impl Vm {
         )
         .map_err(Error::MemoryManager)?;
 
+        #[cfg(target_arch = "x86_64")]
+        {
+            if let Some(sgx_epc_config) = config.lock().unwrap().sgx_epc.clone() {
+                memory_manager
+                    .lock()
+                    .unwrap()
+                    .setup_sgx(sgx_epc_config)
+                    .map_err(Error::MemoryManager)?;
+            }
+        }
+
         let new_vm = Vm::new_from_memory_manager(
             config,
             memory_manager,

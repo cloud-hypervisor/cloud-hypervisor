@@ -3,20 +3,28 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 extern crate hypervisor;
+#[cfg(target_arch = "x86_64")]
+use crate::config::SgxEpcConfig;
 use crate::config::{HotplugMethod, MemoryConfig};
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
+#[cfg(target_arch = "x86_64")]
+use arch::x86_64::{SgxEpcRegion, SgxEpcSection};
 use arch::{get_host_cpu_phys_bits, layout, RegionType};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 use devices::BusDevice;
 
+#[cfg(target_arch = "x86_64")]
+use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
 use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
 use std::io;
+#[cfg(target_arch = "x86_64")]
+use std::os::unix::io::AsRawFd;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
@@ -71,6 +79,8 @@ pub struct MemoryManager {
     shared: bool,
     hugepages: bool,
     balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
+    #[cfg(target_arch = "x86_64")]
+    sgx_epc_region: Option<SgxEpcRegion>,
 }
 
 #[derive(Debug)]
@@ -126,6 +136,26 @@ pub enum Error {
 
     /// Failed to virtio-balloon resize
     VirtioBalloonResizeFail(virtio_devices::balloon::Error),
+
+    /// Invalid SGX EPC section size
+    #[cfg(target_arch = "x86_64")]
+    EpcSectionSizeInvalid,
+
+    /// Failed allocating SGX EPC region
+    #[cfg(target_arch = "x86_64")]
+    SgxEpcRangeAllocation,
+
+    /// Failed opening SGX virtual EPC device
+    #[cfg(target_arch = "x86_64")]
+    SgxVirtEpcOpen(io::Error),
+
+    /// Failed setting the SGX virtual EPC section size
+    #[cfg(target_arch = "x86_64")]
+    SgxVirtEpcFileSetLen(io::Error),
+
+    /// Failed creating a new MmapRegion instance.
+    #[cfg(target_arch = "x86_64")]
+    NewMmapRegion(vm_memory::mmap::MmapRegionError),
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -343,6 +373,8 @@ impl MemoryManager {
             shared: config.shared,
             hugepages: config.hugepages,
             balloon: None,
+            #[cfg(target_arch = "x86_64")]
+            sgx_epc_region: None,
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -837,6 +869,93 @@ impl MemoryManager {
             }
         }
         Ok(region)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn setup_sgx(&mut self, sgx_epc_config: Vec<SgxEpcConfig>) -> Result<(), Error> {
+        // Go over each EPC section and verify its size is a 4k multiple. At
+        // the same time, calculate the total size needed for the contiguous
+        // EPC region.
+        let mut epc_region_size = 0;
+        for epc_section in sgx_epc_config.iter() {
+            if epc_section.size == 0 {
+                return Err(Error::EpcSectionSizeInvalid);
+            }
+            if epc_section.size & 0x0fff != 0 {
+                return Err(Error::EpcSectionSizeInvalid);
+            }
+
+            epc_region_size += epc_section.size;
+        }
+
+        // Now that we know about the total size for the EPC region, we can
+        // proceed with the allocation of the entire range. The EPC region
+        // must be 4kiB aligned.
+        let epc_region_start = self
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_mmio_addresses(None, epc_region_size as GuestUsize, Some(0x1000))
+            .ok_or(Error::SgxEpcRangeAllocation)?;
+
+        let mut sgx_epc_region = SgxEpcRegion::new(epc_region_start, epc_region_size as GuestUsize);
+
+        // Each section can be memory mapped into the allocated region.
+        let mut epc_section_start = epc_region_start.raw_value();
+        for epc_section in sgx_epc_config.iter() {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/sgx/virt_epc")
+                .map_err(Error::SgxVirtEpcOpen)?;
+
+            let prot = PROT_READ | PROT_WRITE;
+            let mut flags = MAP_NORESERVE | MAP_SHARED;
+            if epc_section.prefault {
+                flags |= MAP_POPULATE;
+            }
+
+            // We can't use the vm-memory crate to perform the memory mapping
+            // here as it would try to ensure the size of the backing file is
+            // matching the size of the expected mapping. The /dev/sgx/virt_epc
+            // device does not work that way, it provides a file descriptor
+            // which is not matching the mapping size, as it's a just a way to
+            // let KVM know that an EPC section is being created for the guest.
+            let host_addr = unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    epc_section.size as usize,
+                    prot,
+                    flags,
+                    file.as_raw_fd(),
+                    0 as libc::off_t,
+                )
+            } as u64;
+
+            let _mem_slot = self.create_userspace_mapping(
+                epc_section_start,
+                epc_section.size,
+                host_addr,
+                false,
+                false,
+            )?;
+
+            sgx_epc_region.push(SgxEpcSection::new(
+                GuestAddress(epc_section_start),
+                epc_section.size as GuestUsize,
+            ));
+
+            epc_section_start += epc_section.size;
+        }
+
+        self.sgx_epc_region = Some(sgx_epc_region);
+
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn sgx_epc_region(&self) -> &Option<SgxEpcRegion> {
+        &self.sgx_epc_region
     }
 }
 
