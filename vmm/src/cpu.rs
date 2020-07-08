@@ -22,6 +22,8 @@ use acpi_tables::{aml, aml::Aml, sdt::SDT};
 use anyhow::anyhow;
 #[cfg(feature = "acpi")]
 use arch::layout;
+#[cfg(target_arch = "x86_64")]
+use arch::x86_64::SgxEpcSection;
 use arch::EntryPoint;
 #[cfg(target_arch = "x86_64")]
 use arch::{CpuidPatch, CpuidReg};
@@ -589,9 +591,17 @@ impl CpuManager {
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
         vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
 
-        let device_manager = device_manager.lock().unwrap();
         #[cfg(target_arch = "x86_64")]
-        let cpuid = CpuManager::patch_cpuid(hypervisor, &config.topology)?;
+        let sgx_epc_sections =
+            if let Some(sgx_epc_region) = memory_manager.lock().unwrap().sgx_epc_region() {
+                Some(sgx_epc_region.epc_sections().clone())
+            } else {
+                None
+            };
+        #[cfg(target_arch = "x86_64")]
+        let cpuid = CpuManager::patch_cpuid(hypervisor, &config.topology, sgx_epc_sections)?;
+
+        let device_manager = device_manager.lock().unwrap();
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             #[cfg(target_arch = "x86_64")]
@@ -633,6 +643,7 @@ impl CpuManager {
     fn patch_cpuid(
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         topology: &Option<CpuTopology>,
+        sgx_epc_sections: Option<Vec<SgxEpcSection>>,
     ) -> Result<CpuId> {
         let mut cpuid_patches = Vec::new();
 
@@ -672,6 +683,10 @@ impl CpuManager {
                 t.cores_per_die,
                 t.dies_per_package,
             );
+        }
+
+        if let Some(sgx_epc_sections) = sgx_epc_sections {
+            arch::x86_64::update_cpuid_sgx(&mut cpuid, sgx_epc_sections).unwrap();
         }
 
         Ok(cpuid)

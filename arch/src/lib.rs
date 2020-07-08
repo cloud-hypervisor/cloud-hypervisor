@@ -19,13 +19,13 @@ extern crate hypervisor;
 extern crate kvm_bindings;
 extern crate kvm_ioctls;
 extern crate libc;
-
-extern crate vm_memory;
-
+#[macro_use]
+extern crate log;
 #[cfg(feature = "acpi")]
 extern crate acpi_tables;
 extern crate arch_gen;
 extern crate linux_loader;
+extern crate vm_memory;
 
 use std::fmt;
 use std::result;
