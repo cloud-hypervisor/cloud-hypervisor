@@ -378,7 +378,7 @@ mod tests {
     }
 
     fn set_pkt_len(len: u32, guest_desc: &GuestQDesc, mem: &GuestMemoryMmap) {
-        let hdr_gpa = guest_desc.addr.get();
+        let hdr_gpa = guest_desc.addr().load();
         let hdr_ptr = get_host_address_range(mem, GuestAddress(hdr_gpa), VSOCK_PKT_HDR_SIZE)
             .unwrap() as *mut u8;
         let len_ptr = unsafe { hdr_ptr.add(HDROFF_LEN) };
@@ -403,7 +403,7 @@ mod tests {
             assert_eq!(pkt.hdr().len(), VSOCK_PKT_HDR_SIZE);
             assert_eq!(
                 pkt.buf().unwrap().len(),
-                handler_ctx.guest_txvq.dtable[1].len.get() as usize
+                handler_ctx.guest_txvq.dtable[1].len().load() as usize
             );
         }
 
@@ -411,8 +411,8 @@ mod tests {
         {
             create_context!(test_ctx, handler_ctx);
             handler_ctx.guest_txvq.dtable[0]
-                .flags
-                .set(VIRTQ_DESC_F_WRITE);
+                .flags()
+                .store(VIRTQ_DESC_F_WRITE);
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::UnreadableDescriptor);
         }
 
@@ -420,8 +420,8 @@ mod tests {
         {
             create_context!(test_ctx, handler_ctx);
             handler_ctx.guest_txvq.dtable[0]
-                .len
-                .set(VSOCK_PKT_HDR_SIZE as u32 - 1);
+                .len()
+                .store(VSOCK_PKT_HDR_SIZE as u32 - 1);
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::HdrDescTooSmall(_));
         }
 
@@ -457,7 +457,7 @@ mod tests {
         {
             create_context!(test_ctx, handler_ctx);
             set_pkt_len(1024, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
-            handler_ctx.guest_txvq.dtable[0].flags.set(0);
+            handler_ctx.guest_txvq.dtable[0].flags().store(0);
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::BufDescMissing);
         }
 
@@ -465,8 +465,8 @@ mod tests {
         {
             create_context!(test_ctx, handler_ctx);
             handler_ctx.guest_txvq.dtable[1]
-                .flags
-                .set(VIRTQ_DESC_F_WRITE);
+                .flags()
+                .store(VIRTQ_DESC_F_WRITE);
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::UnreadableDescriptor);
         }
 
@@ -475,7 +475,7 @@ mod tests {
         {
             create_context!(test_ctx, handler_ctx);
             set_pkt_len(8 * 1024, &handler_ctx.guest_txvq.dtable[0], &test_ctx.mem);
-            handler_ctx.guest_txvq.dtable[1].len.set(4 * 1024);
+            handler_ctx.guest_txvq.dtable[1].len().store(4 * 1024);
             expect_asm_error!(tx, test_ctx, handler_ctx, VsockError::BufDescTooSmall);
         }
     }
@@ -495,14 +495,14 @@ mod tests {
             assert_eq!(pkt.hdr().len(), VSOCK_PKT_HDR_SIZE);
             assert_eq!(
                 pkt.buf().unwrap().len(),
-                handler_ctx.guest_rxvq.dtable[1].len.get() as usize
+                handler_ctx.guest_rxvq.dtable[1].len().load() as usize
             );
         }
 
         // Test case: read-only RX packet header.
         {
             create_context!(test_ctx, handler_ctx);
-            handler_ctx.guest_rxvq.dtable[0].flags.set(0);
+            handler_ctx.guest_rxvq.dtable[0].flags().store(0);
             expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::UnwritableDescriptor);
         }
 
@@ -510,8 +510,8 @@ mod tests {
         {
             create_context!(test_ctx, handler_ctx);
             handler_ctx.guest_rxvq.dtable[0]
-                .len
-                .set(VSOCK_PKT_HDR_SIZE as u32 - 1);
+                .len()
+                .store(VSOCK_PKT_HDR_SIZE as u32 - 1);
             expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::HdrDescTooSmall(_));
         }
 
@@ -519,8 +519,8 @@ mod tests {
         {
             create_context!(test_ctx, handler_ctx);
             handler_ctx.guest_rxvq.dtable[0]
-                .flags
-                .set(VIRTQ_DESC_F_WRITE);
+                .flags()
+                .store(VIRTQ_DESC_F_WRITE);
             expect_asm_error!(rx, test_ctx, handler_ctx, VsockError::BufDescMissing);
         }
     }
@@ -639,11 +639,11 @@ mod tests {
 
         assert_eq!(
             pkt.buf().unwrap().len(),
-            handler_ctx.guest_rxvq.dtable[1].len.get() as usize
+            handler_ctx.guest_rxvq.dtable[1].len().load() as usize
         );
         assert_eq!(
             pkt.buf_mut().unwrap().len(),
-            handler_ctx.guest_rxvq.dtable[1].len.get() as usize
+            handler_ctx.guest_rxvq.dtable[1].len().load() as usize
         );
 
         for i in 0..pkt.buf().unwrap().len() {

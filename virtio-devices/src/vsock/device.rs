@@ -834,7 +834,7 @@ mod tests {
             let mut ctx = test_ctx.create_epoll_handler_context();
 
             // Invalidate the packet header descriptor, by setting its length to 0.
-            ctx.guest_txvq.dtable[0].len.set(0);
+            ctx.guest_txvq.dtable[0].len().store(0);
             ctx.signal_txq_event();
 
             // The available descriptor should have been consumed, but no packet should have
@@ -902,7 +902,7 @@ mod tests {
             let mut ctx = test_ctx.create_epoll_handler_context();
 
             // Invalidate the packet header descriptor, by setting its length to 0.
-            ctx.guest_rxvq.dtable[0].len.set(0);
+            ctx.guest_rxvq.dtable[0].len().store(0);
 
             // The chain should've been processed, without employing the backend.
             assert!(ctx.handler.process_rx().is_ok());
