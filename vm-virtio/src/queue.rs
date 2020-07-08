@@ -136,10 +136,11 @@ pub struct DescriptorChain<'a> {
 }
 
 impl<'a> DescriptorChain<'a> {
-    pub fn checked_new(
+    pub fn read_new(
         mem: &'a GuestMemoryMmap,
         desc_table: GuestAddress,
         table_size: u16,
+        ttl: u16,
         index: u16,
         iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
     ) -> Option<Self> {
@@ -165,7 +166,7 @@ impl<'a> DescriptorChain<'a> {
             mem,
             desc_table,
             table_size,
-            ttl: table_size,
+            ttl,
             index,
             addr: GuestAddress(desc_addr),
             len: desc.len,
@@ -179,6 +180,23 @@ impl<'a> DescriptorChain<'a> {
         } else {
             None
         }
+    }
+
+    pub fn checked_new(
+        mem: &'a GuestMemoryMmap,
+        dtable_addr: GuestAddress,
+        table_size: u16,
+        index: u16,
+        iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
+    ) -> Option<Self> {
+        Self::read_new(
+            mem,
+            dtable_addr,
+            table_size,
+            table_size,
+            index,
+            iommu_mapping_cb,
+        )
     }
 
     pub fn new_from_indirect(&self) -> Result<DescriptorChain, Error> {
@@ -287,17 +305,14 @@ impl<'a> DescriptorChain<'a> {
     /// the head of the next _available_ descriptor chain.
     pub fn next_descriptor(&self) -> Option<DescriptorChain<'a>> {
         if self.has_next() {
-            DescriptorChain::checked_new(
+            Self::read_new(
                 self.mem,
                 self.desc_table,
                 self.table_size,
+                self.ttl - 1,
                 self.next,
                 self.iommu_mapping_cb.clone(),
             )
-            .map(|mut c| {
-                c.ttl = self.ttl - 1;
-                c
-            })
         } else {
             None
         }
