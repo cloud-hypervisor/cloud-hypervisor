@@ -170,16 +170,3 @@ pub fn create_gic(
             .or_else(|_| GICv3::new(vm, vcpu_count).or_else(|_| GICv2::new(vm, vcpu_count)))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_create_gic() {
-        let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().unwrap();
-
-        assert!(create_gic(&vm, 1, false).is_ok());
-    }
-}

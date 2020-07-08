@@ -432,3 +432,17 @@ pub mod kvm {
         }
     }
 }
+
+#[cfg(target_arch = "aarch64")]
+#[cfg(test)]
+mod tests {
+    use arch::aarch64::gic::create_gic;
+
+    #[test]
+    fn test_create_gic() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+
+        assert!(create_gic(&vm, 1, false).is_ok());
+    }
+}

@@ -1469,6 +1469,85 @@ mod tests {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arch::aarch64::fdt::create_fdt;
+    use arch::aarch64::gic::create_gic;
+    use arch::aarch64::{layout, DeviceInfoForFDT};
+    use arch::DeviceType;
+    use vm_memory::{GuestAddress, GuestMemoryMmap};
+
+    const LEN: u64 = 4096;
+
+    #[derive(Clone, Debug)]
+    pub struct MMIODeviceInfo {
+        addr: u64,
+        irq: u32,
+    }
+
+    impl DeviceInfoForFDT for MMIODeviceInfo {
+        fn addr(&self) -> u64 {
+            self.addr
+        }
+        fn irq(&self) -> u32 {
+            self.irq
+        }
+        fn length(&self) -> u64 {
+            LEN
+        }
+    }
+
+    #[test]
+    fn test_create_fdt_with_devices() {
+        let mut regions = Vec::new();
+        regions.push((
+            GuestAddress(layout::RAM_64BIT_START),
+            (layout::FDT_MAX_SIZE + 0x1000) as usize,
+        ));
+        let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
+
+        let dev_info: HashMap<(DeviceType, std::string::String), MMIODeviceInfo> = [
+            (
+                (DeviceType::Serial, DeviceType::Serial.to_string()),
+                MMIODeviceInfo { addr: 0x00, irq: 1 },
+            ),
+            (
+                (DeviceType::Virtio(1), "virtio".to_string()),
+                MMIODeviceInfo {
+                    addr: 0x00 + LEN,
+                    irq: 2,
+                },
+            ),
+            (
+                (DeviceType::RTC, "rtc".to_string()),
+                MMIODeviceInfo {
+                    addr: 0x00 + 2 * LEN,
+                    irq: 3,
+                },
+            ),
+        ]
+        .iter()
+        .cloned()
+        .collect();
+
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let gic = create_gic(&vm, 1, false).unwrap();
+        assert!(create_fdt(
+            &mem,
+            &CString::new("console=tty0").unwrap(),
+            vec![0],
+            &dev_info,
+            &gic,
+            &None,
+            &None,
+        )
+        .is_ok())
+    }
+}
+
 #[cfg(target_arch = "x86_64")]
 #[test]
 pub fn test_vm() {
