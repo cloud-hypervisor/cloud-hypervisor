@@ -15,7 +15,7 @@ mod mptable;
 pub mod regs;
 use crate::InitramfsConfig;
 use crate::RegionType;
-use hypervisor::CpuId;
+use hypervisor::{CpuId, CpuIdEntry, CPUID_FLAG_VALID_INDEX};
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
@@ -156,7 +156,7 @@ pub enum Error {
     /// Error configuring the MSR registers
     MSRSConfiguration(regs::Error),
 
-    /// The call to KVM_SET_CPUID2 failed.
+    /// Failed to set supported CPUs.
     SetSupportedCpusFailed(anyhow::Error),
 
     /// Cannot set the local interruption due to bad configuration.
@@ -164,6 +164,15 @@ pub enum Error {
 
     /// Error setting up SMBIOS table
     SmbiosSetup(smbios::Error),
+
+    /// Could not find any SGX EPC section
+    NoSgxEpcSection,
+
+    /// Missing SGX CPU feature
+    MissingSgxFeature,
+
+    /// Missing SGX_LC CPU feature
+    MissingSgxLaunchControlFeature,
 }
 
 impl From<Error> for super::Error {
@@ -201,8 +210,10 @@ impl CpuidPatch {
     ) {
         let entries = cpuid.as_mut_slice();
 
+        let mut entry_found = false;
         for entry in entries.iter_mut() {
             if entry.function == function && (index == None || index.unwrap() == entry.index) {
+                entry_found = true;
                 match reg {
                     CpuidReg::EAX => {
                         entry.eax = value;
@@ -217,6 +228,38 @@ impl CpuidPatch {
                         entry.edx = value;
                     }
                 }
+            }
+        }
+
+        if entry_found {
+            return;
+        }
+
+        // Entry not found, so let's add it.
+        if let Some(index) = index {
+            let mut entry = CpuIdEntry {
+                function,
+                index,
+                flags: CPUID_FLAG_VALID_INDEX,
+                ..Default::default()
+            };
+            match reg {
+                CpuidReg::EAX => {
+                    entry.eax = value;
+                }
+                CpuidReg::EBX => {
+                    entry.ebx = value;
+                }
+                CpuidReg::ECX => {
+                    entry.ecx = value;
+                }
+                CpuidReg::EDX => {
+                    entry.edx = value;
+                }
+            }
+
+            if let Err(e) = cpuid.push(entry) {
+                error!("Failed adding new CPUID entry: {:?}", e);
             }
         }
     }
@@ -245,6 +288,41 @@ impl CpuidPatch {
                 }
             }
         }
+    }
+
+    pub fn is_feature_enabled(
+        cpuid: &CpuId,
+        function: u32,
+        index: u32,
+        reg: CpuidReg,
+        feature_bit: usize,
+    ) -> bool {
+        let entries = cpuid.as_slice();
+        let mask = 1 << feature_bit;
+
+        for entry in entries.iter() {
+            if entry.function == function && entry.index == index {
+                let reg_val: u32;
+                match reg {
+                    CpuidReg::EAX => {
+                        reg_val = entry.eax;
+                    }
+                    CpuidReg::EBX => {
+                        reg_val = entry.ebx;
+                    }
+                    CpuidReg::ECX => {
+                        reg_val = entry.ecx;
+                    }
+                    CpuidReg::EDX => {
+                        reg_val = entry.edx;
+                    }
+                }
+
+                return (reg_val & mask) == mask;
+            }
+        }
+
+        false
     }
 }
 
@@ -728,6 +806,52 @@ pub fn update_cpuid_topology(
         u32::from(dies_per_package * cores_per_die * threads_per_core),
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::ECX, 5 << 8);
+}
+
+// The goal is to update the CPUID sub-leaves to reflect the number of EPC
+// sections exposed to the guest.
+pub fn update_cpuid_sgx(cpuid: &mut CpuId, epc_sections: Vec<SgxEpcSection>) -> Result<(), Error> {
+    // Something's wrong if there's no EPC section.
+    if epc_sections.is_empty() {
+        return Err(Error::NoSgxEpcSection);
+    }
+    // We can't go further if the hypervisor does not support SGX feature.
+    if !CpuidPatch::is_feature_enabled(cpuid, 0x7, 0, CpuidReg::EBX, 2) {
+        return Err(Error::MissingSgxFeature);
+    }
+    // We can't go further if the hypervisor does not support SGX_LC feature.
+    if !CpuidPatch::is_feature_enabled(cpuid, 0x7, 0, CpuidReg::ECX, 30) {
+        return Err(Error::MissingSgxLaunchControlFeature);
+    }
+
+    // Get host CPUID for leaf 0x12, subleaf 0x2. This is to retrieve EPC
+    // properties such as confidentiality and integrity.
+    let leaf = unsafe { std::arch::x86_64::__cpuid_count(0x12, 0x2) };
+
+    for (i, epc_section) in epc_sections.iter().enumerate() {
+        let subleaf_idx = i + 2;
+        let start = epc_section.start().raw_value();
+        let size = epc_section.size() as u64;
+        let eax = (start & 0xffff_f000) as u32 | 0x1;
+        let ebx = (start >> 32) as u32;
+        let ecx = (size & 0xffff_f000) as u32 | (leaf.ecx & 0xf);
+        let edx = (size >> 32) as u32;
+        // CPU Topology leaf 0x12
+        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EAX, eax);
+        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EBX, ebx);
+        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::ECX, ecx);
+        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EDX, edx);
+    }
+
+    // Add one NULL entry to terminate the dynamic list
+    let subleaf_idx = epc_sections.len() + 2;
+    // CPU Topology leaf 0x12
+    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EAX, 0);
+    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EBX, 0);
+    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::ECX, 0);
+    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EDX, 0);
+
+    Ok(())
 }
 
 #[cfg(test)]

@@ -31,7 +31,8 @@ use x86_64::{
 
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    CpuId, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState, Xsave,
+    CpuId, CpuIdEntry, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState,
+    Xsave, CPUID_FLAG_VALID_INDEX,
 };
 
 #[cfg(target_arch = "x86_64")]

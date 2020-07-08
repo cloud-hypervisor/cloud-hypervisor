@@ -18,13 +18,14 @@ use serde_derive::{Deserialize, Serialize};
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_dtable as DescriptorTable, kvm_bindings::kvm_fpu as FpuState,
-    kvm_bindings::kvm_lapic_state as LapicState, kvm_bindings::kvm_mp_state as MpState,
-    kvm_bindings::kvm_msr_entry as MsrEntry, kvm_bindings::kvm_regs as StandardRegisters,
-    kvm_bindings::kvm_segment as SegmentRegister, kvm_bindings::kvm_sregs as SpecialRegisters,
-    kvm_bindings::kvm_vcpu_events as VcpuEvents,
+    kvm_bindings::kvm_cpuid_entry2 as CpuIdEntry, kvm_bindings::kvm_dtable as DescriptorTable,
+    kvm_bindings::kvm_fpu as FpuState, kvm_bindings::kvm_lapic_state as LapicState,
+    kvm_bindings::kvm_mp_state as MpState, kvm_bindings::kvm_msr_entry as MsrEntry,
+    kvm_bindings::kvm_regs as StandardRegisters, kvm_bindings::kvm_segment as SegmentRegister,
+    kvm_bindings::kvm_sregs as SpecialRegisters, kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave as Xsave,
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
+    kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX as CPUID_FLAG_VALID_INDEX,
 };
 
 pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
