@@ -58,6 +58,52 @@ pub struct EntryPoint {
 const E820_RAM: u32 = 1;
 const E820_RESERVED: u32 = 2;
 
+#[derive(Clone)]
+pub struct SgxEpcSection {
+    start: GuestAddress,
+    size: GuestUsize,
+}
+
+impl SgxEpcSection {
+    pub fn new(start: GuestAddress, size: GuestUsize) -> Self {
+        SgxEpcSection { start, size }
+    }
+    pub fn start(&self) -> GuestAddress {
+        self.start
+    }
+    pub fn size(&self) -> GuestUsize {
+        self.size
+    }
+}
+
+pub struct SgxEpcRegion {
+    start: GuestAddress,
+    size: GuestUsize,
+    epc_sections: Vec<SgxEpcSection>,
+}
+
+impl SgxEpcRegion {
+    pub fn new(start: GuestAddress, size: GuestUsize) -> Self {
+        SgxEpcRegion {
+            start,
+            size,
+            epc_sections: Vec::new(),
+        }
+    }
+    pub fn start(&self) -> GuestAddress {
+        self.start
+    }
+    pub fn size(&self) -> GuestUsize {
+        self.size
+    }
+    pub fn epc_sections(&self) -> &Vec<SgxEpcSection> {
+        &self.epc_sections
+    }
+    pub fn push(&mut self, epc_section: SgxEpcSection) {
+        self.epc_sections.push(epc_section);
+    }
+}
+
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `DataInit`) where:
 // *    the type that is implementing the trait is foreign or
