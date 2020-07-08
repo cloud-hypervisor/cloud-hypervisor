@@ -511,7 +511,7 @@ dependencies = [
 [[package]]
 name = "kvm-ioctls"
 version = "0.5.0"
-source = "git+https://github.com/cloud-hypervisor/kvm-ioctls?branch=ch#d094064fefd83dd60c6e427e8665c263a1cc2265"
+source = "git+https://github.com/cloud-hypervisor/kvm-ioctls?branch=ch#37953e968b9064f42d6b71b7afc13872ac4171ce"
 dependencies = [
  "kvm-bindings",
  "libc",
