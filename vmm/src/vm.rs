@@ -293,7 +293,7 @@ impl Vm {
         let cpu_manager = cpu::CpuManager::new(
             &config.lock().unwrap().cpus.clone(),
             &device_manager,
-            memory_manager.lock().unwrap().guest_memory(),
+            &memory_manager,
             vm.clone(),
             reset_evt,
             hypervisor,
