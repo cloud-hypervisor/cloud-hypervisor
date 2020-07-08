@@ -15,6 +15,7 @@
 use crate::config::CpuTopology;
 use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
+use crate::memory_manager::MemoryManager;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
@@ -579,11 +580,12 @@ impl CpuManager {
     pub fn new(
         config: &CpusConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
-        guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+        memory_manager: &Arc<Mutex<MemoryManager>>,
         vm: Arc<dyn hypervisor::Vm>,
         reset_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Arc<Mutex<CpuManager>>> {
+        let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
         vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
 
