@@ -2374,19 +2374,26 @@ mod tests {
             });
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_virtio_blk() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
                 let guest = Guest::new(&mut focal);
-                let mut blk_file_path = dirs::home_dir().unwrap();
-                blk_file_path.push("workloads");
+
+                let mut workload_path = dirs::home_dir().unwrap();
+                workload_path.push("workloads");
+
+                let mut blk_file_path = workload_path.clone();
                 blk_file_path.push("blk.img");
+
+                let mut kernel_path = workload_path;
+                kernel_path.push("vmlinux");
 
                 let mut cloud_child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=4"])
                     .args(&["--memory", "size=512M,shared=on"])
-                    .args(&["--kernel", guest.fw_path.as_str()])
+                    .args(&["--kernel", kernel_path.to_str().unwrap()])
+                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .args(&[
                         "--disk",
                         format!(
