@@ -64,6 +64,9 @@ pub enum Error {
     ParseVsock(OptionParserError),
     /// Failed to parse restore parameters
     ParseRestore(OptionParserError),
+    /// Failed to parse SGX EPC parameters
+    #[cfg(target_arch = "x86_64")]
+    ParseSgxEpc(OptionParserError),
     /// Failed to validate configuration
     Validation(ValidationError),
 }
@@ -145,6 +148,8 @@ impl fmt::Display for Error {
             ParseDisk(o) => write!(f, "Error parsing --disk: {}", o),
             ParseRNG(o) => write!(f, "Error parsing --rng: {}", o),
             ParseRestore(o) => write!(f, "Error parsing --restore: {}", o),
+            #[cfg(target_arch = "x86_64")]
+            ParseSgxEpc(o) => write!(f, "Error parsing --sgx-epc: {}", o),
             ParseRestoreSourceUrlMissing => {
                 write!(f, "Error parsing --restore: source_url missing")
             }
@@ -170,6 +175,8 @@ pub struct VmParams<'a> {
     pub console: &'a str,
     pub devices: Option<Vec<&'a str>>,
     pub vsock: Option<&'a str>,
+    #[cfg(target_arch = "x86_64")]
+    pub sgx_epc: Option<Vec<&'a str>>,
 }
 
 impl<'a> VmParams<'a> {
@@ -191,6 +198,8 @@ impl<'a> VmParams<'a> {
         let pmem: Option<Vec<&str>> = args.values_of("pmem").map(|x| x.collect());
         let devices: Option<Vec<&str>> = args.values_of("device").map(|x| x.collect());
         let vsock: Option<&str> = args.value_of("vsock");
+        #[cfg(target_arch = "x86_64")]
+        let sgx_epc: Option<Vec<&str>> = args.values_of("sgx-epc").map(|x| x.collect());
 
         VmParams {
             cpus,
@@ -207,6 +216,8 @@ impl<'a> VmParams<'a> {
             console,
             devices,
             vsock,
+            #[cfg(target_arch = "x86_64")]
+            sgx_epc,
         }
     }
 }
@@ -1080,6 +1091,39 @@ impl VsockConfig {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+pub struct SgxEpcConfig {
+    #[serde(default)]
+    pub size: u64,
+    #[serde(default)]
+    pub prefault: bool,
+}
+
+#[cfg(target_arch = "x86_64")]
+impl SgxEpcConfig {
+    pub const SYNTAX: &'static str = "SGX EPC parameters \
+        \"size=<epc_section_size>,prefault=on|off\"";
+    pub fn parse(sgx_epc: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("size").add("prefault");
+        parser.parse(sgx_epc).map_err(Error::ParseSgxEpc)?;
+
+        let size = parser
+            .convert::<ByteSized>("size")
+            .map_err(Error::ParseSgxEpc)?
+            .unwrap_or(ByteSized(0))
+            .0;
+        let prefault = parser
+            .convert::<Toggle>("prefault")
+            .map_err(Error::ParseSgxEpc)?
+            .unwrap_or(Toggle(false))
+            .0;
+
+        Ok(SgxEpcConfig { size, prefault })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct RestoreConfig {
     pub source_url: PathBuf,
@@ -1139,6 +1183,8 @@ pub struct VmConfig {
     pub vsock: Option<VsockConfig>,
     #[serde(default)]
     pub iommu: bool,
+    #[cfg(target_arch = "x86_64")]
+    pub sgx_epc: Option<Vec<SgxEpcConfig>>,
 }
 
 impl VmConfig {
@@ -1301,6 +1347,21 @@ impl VmConfig {
             }
             vsock = Some(vsock_config);
         }
+
+        #[cfg(target_arch = "x86_64")]
+        let mut sgx_epc: Option<Vec<SgxEpcConfig>> = None;
+        #[cfg(target_arch = "x86_64")]
+        {
+            if let Some(sgx_epc_list) = &vm_params.sgx_epc {
+                let mut sgx_epc_config_list = Vec::new();
+                for item in sgx_epc_list.iter() {
+                    let sgx_epc_config = SgxEpcConfig::parse(item)?;
+                    sgx_epc_config_list.push(sgx_epc_config);
+                }
+                sgx_epc = Some(sgx_epc_config_list);
+            }
+        }
+
         let mut kernel: Option<KernelConfig> = None;
         if let Some(k) = vm_params.kernel {
             kernel = Some(KernelConfig {
@@ -1331,6 +1392,8 @@ impl VmConfig {
             devices,
             vsock,
             iommu,
+            #[cfg(target_arch = "x86_64")]
+            sgx_epc,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -1907,6 +1970,8 @@ mod tests {
             devices: None,
             vsock: None,
             iommu: false,
+            #[cfg(target_arch = "x86_64")]
+            sgx_epc: None,
         };
 
         assert!(valid_config.validate().is_ok());

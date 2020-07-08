@@ -79,7 +79,12 @@ fn create_app<'a, 'b>(
     default_rng: &'a str,
     api_server_path: &'a str,
 ) -> App<'a, 'b> {
-    App::new("cloud-hypervisor")
+    #[cfg(target_arch = "x86_64")]
+    let mut app: App;
+    #[cfg(target_arch = "aarch64")]
+    let app: App;
+
+    app = App::new("cloud-hypervisor")
         // 'BUILT_VERSION' is set by the build script 'build.rs' at
         // compile time
         .version(env!("BUILT_VERSION"))
@@ -258,7 +263,21 @@ fn create_app<'a, 'b>(
                 .takes_value(true)
                 .possible_values(&["true", "false"])
                 .default_value("true"),
-        )
+        );
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        app = app.arg(
+            Arg::with_name("sgx-epc")
+                .long("sgx-epc")
+                .help(config::SgxEpcConfig::SYNTAX)
+                .takes_value(true)
+                .min_values(1)
+                .group("vm-config"),
+        );
+    }
+
+    app
 }
 
 fn start_vmm(cmd_arguments: ArgMatches) {
@@ -533,6 +552,8 @@ mod unit_tests {
                 devices: None,
                 vsock: None,
                 iommu: false,
+                #[cfg(target_arch = "x86_64")]
+                sgx_epc: None,
             };
 
             aver_eq!(tb, expected_vm_config, result_vm_config);
