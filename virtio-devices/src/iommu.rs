@@ -397,15 +397,16 @@ impl Request {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
 
-        if (avail_desc.len as usize) < size_of::<VirtioIommuReqHead>() {
+        if (avail_desc.len() as usize) < size_of::<VirtioIommuReqHead>() {
             return Err(Error::InvalidRequest);
         }
 
-        let req_head: VirtioIommuReqHead =
-            mem.read_obj(avail_desc.addr).map_err(Error::GuestMemory)?;
+        let req_head: VirtioIommuReqHead = mem
+            .read_obj(avail_desc.addr())
+            .map_err(Error::GuestMemory)?;
         let req_offset = size_of::<VirtioIommuReqHead>();
-        let desc_size_left = (avail_desc.len as usize) - req_offset;
-        let req_addr = if let Some(addr) = avail_desc.addr.checked_add(req_offset as u64) {
+        let desc_size_left = (avail_desc.len() as usize) - req_offset;
+        let req_addr = if let Some(addr) = avail_desc.addr().checked_add(req_offset as u64) {
             addr
         } else {
             return Err(Error::InvalidRequest);
@@ -576,7 +577,7 @@ impl Request {
             return Err(Error::UnexpectedReadOnlyDescriptor);
         }
 
-        if status_desc.len < hdr_len + size_of::<VirtioIommuReqTail>() as u32 {
+        if status_desc.len() < hdr_len + size_of::<VirtioIommuReqTail>() as u32 {
             return Err(Error::BufferLengthTooSmall);
         }
 
@@ -586,7 +587,7 @@ impl Request {
         };
         reply.extend_from_slice(tail.as_slice());
 
-        mem.write_slice(reply.as_slice(), status_desc.addr)
+        mem.write_slice(reply.as_slice(), status_desc.addr())
             .map_err(Error::GuestMemory)?;
 
         Ok((hdr_len as usize) + size_of::<VirtioIommuReqTail>())
@@ -625,7 +626,7 @@ impl IommuEpollHandler {
                 }
             };
 
-            used_desc_heads[used_count] = (avail_desc.index, len);
+            used_desc_heads[used_count] = (avail_desc.index(), len);
             used_count += 1;
         }
 

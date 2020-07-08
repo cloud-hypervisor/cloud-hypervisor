@@ -195,10 +195,12 @@ impl Request {
         if avail_desc.is_write_only() {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
-        if avail_desc.len as usize != size_of::<VirtioMemReq>() {
+        if avail_desc.len() as usize != size_of::<VirtioMemReq>() {
             return Err(Error::InvalidRequest);
         }
-        let req: VirtioMemReq = mem.read_obj(avail_desc.addr).map_err(Error::GuestMemory)?;
+        let req: VirtioMemReq = mem
+            .read_obj(avail_desc.addr())
+            .map_err(Error::GuestMemory)?;
 
         let status_desc = avail_desc
             .next_descriptor()
@@ -209,13 +211,13 @@ impl Request {
             return Err(Error::UnexpectedReadOnlyDescriptor);
         }
 
-        if (status_desc.len as usize) < size_of::<VirtioMemResp>() {
+        if (status_desc.len() as usize) < size_of::<VirtioMemResp>() {
             return Err(Error::BufferLengthTooSmall);
         }
 
         Ok(Request {
             req,
-            status_addr: status_desc.addr,
+            status_addr: status_desc.addr(),
         })
     }
 }
@@ -582,7 +584,7 @@ impl MemEpollHandler {
                     }
                 }
             };
-            used_desc_heads[used_count] = (avail_desc.index, len);
+            used_desc_heads[used_count] = (avail_desc.index(), len);
             used_count += 1;
         }
 

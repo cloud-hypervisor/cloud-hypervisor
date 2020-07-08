@@ -159,7 +159,7 @@ impl VhostUserBlkThread {
 
             if self.event_idx {
                 let queue = vring.mut_queue();
-                if let Some(used_idx) = queue.add_used(mem, head.index, len) {
+                if let Some(used_idx) = queue.add_used(mem, head.index(), len) {
                     if queue.needs_notification(&mem, Wrapping(used_idx)) {
                         debug!("signalling queue");
                         vring.signal_used_queue().unwrap();
@@ -170,7 +170,7 @@ impl VhostUserBlkThread {
                 }
             } else {
                 debug!("signalling queue");
-                vring.mut_queue().add_used(mem, head.index, len);
+                vring.mut_queue().add_used(mem, head.index(), len);
                 vring.signal_used_queue().unwrap();
                 used_any = true;
             }

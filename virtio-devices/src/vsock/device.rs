@@ -143,7 +143,7 @@ where
                 }
             };
 
-            used_desc_heads[used_count] = (avail_desc.index, used_len);
+            used_desc_heads[used_count] = (avail_desc.index(), used_len);
             used_count += 1;
         }
 
@@ -172,7 +172,7 @@ where
                 Ok(pkt) => pkt,
                 Err(e) => {
                     error!("vsock: error reading TX packet: {:?}", e);
-                    used_desc_heads[used_count] = (avail_desc.index, 0);
+                    used_desc_heads[used_count] = (avail_desc.index(), 0);
                     used_count += 1;
                     continue;
                 }
@@ -183,7 +183,7 @@ where
                 break;
             }
 
-            used_desc_heads[used_count] = (avail_desc.index, 0);
+            used_desc_heads[used_count] = (avail_desc.index(), 0);
             used_count += 1;
         }
 

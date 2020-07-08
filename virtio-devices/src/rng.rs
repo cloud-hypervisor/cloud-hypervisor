@@ -60,17 +60,17 @@ impl RngEpollHandler {
                 // Fill the read with data from the random device on the host.
                 if mem
                     .read_from(
-                        avail_desc.addr,
+                        avail_desc.addr(),
                         &mut self.random_file,
-                        avail_desc.len as usize,
+                        avail_desc.len() as usize,
                     )
                     .is_ok()
                 {
-                    len = avail_desc.len;
+                    len = avail_desc.len();
                 }
             }
 
-            used_desc_heads[used_count] = (avail_desc.index, len);
+            used_desc_heads[used_count] = (avail_desc.index(), len);
             used_count += 1;
         }
 

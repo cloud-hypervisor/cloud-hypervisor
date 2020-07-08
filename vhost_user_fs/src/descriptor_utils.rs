@@ -209,17 +209,19 @@ impl<'a> Reader<'a> {
                 // This can happen if a driver tricks a device into reading more data than
                 // fits in a `usize`.
                 total_len = total_len
-                    .checked_add(desc.len as usize)
+                    .checked_add(desc.len() as usize)
                     .ok_or(Error::DescriptorChainOverflow)?;
 
-                let region = mem.find_region(desc.addr).ok_or(Error::FindMemoryRegion)?;
+                let region = mem
+                    .find_region(desc.addr())
+                    .ok_or(Error::FindMemoryRegion)?;
                 let offset = desc
-                    .addr
+                    .addr()
                     .checked_sub(region.start_addr().raw_value())
                     .unwrap();
                 region
                     .deref()
-                    .get_slice(offset.raw_value() as usize, desc.len as usize)
+                    .get_slice(offset.raw_value() as usize, desc.len() as usize)
                     .map_err(Error::VolatileMemoryError)
             })
             .collect::<Result<VecDeque<VolatileSlice<'a>>>>()?;
@@ -368,17 +370,19 @@ impl<'a> Writer<'a> {
                 // This can happen if a driver tricks a device into writing more data than
                 // fits in a `usize`.
                 total_len = total_len
-                    .checked_add(desc.len as usize)
+                    .checked_add(desc.len() as usize)
                     .ok_or(Error::DescriptorChainOverflow)?;
 
-                let region = mem.find_region(desc.addr).ok_or(Error::FindMemoryRegion)?;
+                let region = mem
+                    .find_region(desc.addr())
+                    .ok_or(Error::FindMemoryRegion)?;
                 let offset = desc
-                    .addr
+                    .addr()
                     .checked_sub(region.start_addr().raw_value())
                     .unwrap();
                 region
                     .deref()
-                    .get_slice(offset.raw_value() as usize, desc.len as usize)
+                    .get_slice(offset.raw_value() as usize, desc.len() as usize)
                     .map_err(Error::VolatileMemoryError)
             })
             .collect::<Result<VecDeque<VolatileSlice<'a>>>>()?;

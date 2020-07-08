@@ -116,15 +116,15 @@ impl ConsoleEpollHandler {
 
         let mem = self.mem.memory();
         for avail_desc in recv_queue.iter(&mem) {
-            let len = cmp::min(avail_desc.len as u32, in_buffer.len() as u32);
+            let len = cmp::min(avail_desc.len() as u32, in_buffer.len() as u32);
             let source_slice = in_buffer.drain(..len as usize).collect::<Vec<u8>>();
-            if let Err(e) = mem.write_slice(&source_slice[..], avail_desc.addr) {
+            if let Err(e) = mem.write_slice(&source_slice[..], avail_desc.addr()) {
                 error!("Failed to write slice: {:?}", e);
                 recv_queue.go_to_previous_position();
                 break;
             }
 
-            used_desc_heads[used_count] = (avail_desc.index, len);
+            used_desc_heads[used_count] = (avail_desc.index(), len);
             used_count += 1;
 
             if in_buffer.is_empty() {
@@ -156,14 +156,14 @@ impl ConsoleEpollHandler {
             let len;
             let mut out = self.out.lock().unwrap();
             let _ = mem.write_to(
-                avail_desc.addr,
+                avail_desc.addr(),
                 &mut out.deref_mut(),
-                avail_desc.len as usize,
+                avail_desc.len() as usize,
             );
             let _ = out.flush();
 
-            len = avail_desc.len;
-            used_desc_heads[used_count] = (avail_desc.index, len);
+            len = avail_desc.len();
+            used_desc_heads[used_count] = (avail_desc.index(), len);
             used_count += 1;
         }
 

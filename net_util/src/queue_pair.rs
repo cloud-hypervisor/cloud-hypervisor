@@ -45,7 +45,7 @@ impl TxVirtio {
 
     pub fn process_desc_chain(&mut self, mem: &GuestMemoryMmap, tap: &mut Tap, queue: &mut Queue) {
         while let Some(avail_desc) = queue.iter(&mem).next() {
-            let head_index = avail_desc.index;
+            let head_index = avail_desc.index();
             let mut read_count = 0;
             let mut next_desc = Some(avail_desc);
 
@@ -54,8 +54,8 @@ impl TxVirtio {
                 if desc.is_write_only() {
                     break;
                 }
-                self.iovec.push((desc.addr, desc.len as usize));
-                read_count += desc.len as usize;
+                self.iovec.push((desc.addr(), desc.len() as usize));
+                read_count += desc.len() as usize;
                 next_desc = desc.next_descriptor();
             }
 
@@ -131,7 +131,7 @@ impl RxVirtio {
         mut next_desc: Option<DescriptorChain>,
         queue: &mut Queue,
     ) -> bool {
-        let head_index = next_desc.as_ref().unwrap().index;
+        let head_index = next_desc.as_ref().unwrap().index();
         let mut write_count = 0;
 
         // Copy from frame into buffer, which may span multiple descriptors.
@@ -141,9 +141,9 @@ impl RxVirtio {
                     if !desc.is_write_only() {
                         break;
                     }
-                    let limit = cmp::min(write_count + desc.len as usize, self.bytes_read);
+                    let limit = cmp::min(write_count + desc.len() as usize, self.bytes_read);
                     let source_slice = &self.frame_buf[write_count..limit];
-                    let write_result = mem.write_slice(source_slice, desc.addr);
+                    let write_result = mem.write_slice(source_slice, desc.addr());
 
                     match write_result {
                         Ok(_) => {

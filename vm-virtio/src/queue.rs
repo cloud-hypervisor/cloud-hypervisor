@@ -48,6 +48,24 @@ impl Display for Error {
     }
 }
 
+/// A virtio descriptor constraints with C representation
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct Descriptor {
+    /// Guest physical address of device specific data
+    addr: u64,
+
+    /// Length of device specific data
+    len: u32,
+
+    /// Includes next, write, and indirect bits
+    flags: u16,
+
+    /// Index into the descriptor table of the next descriptor if flags has
+    /// the next bit set
+    next: u16,
+}
+
 // GuestMemoryMmap::read_obj() will be used to fetch the descriptor,
 // which has an explicit constraint that the entire descriptor doesn't
 // cross the page boundary. Otherwise the descriptor may be splitted into
@@ -55,6 +73,38 @@ impl Display for Error {
 //
 // The Virtio Spec 1.0 defines the alignment of VirtIO descriptor is 16 bytes,
 // which fulfills the explicit constraint of GuestMemoryMmap::read_obj().
+impl Descriptor {
+    /// Return the guest physical address of descriptor buffer
+    pub fn addr(&self) -> GuestAddress {
+        GuestAddress(self.addr)
+    }
+
+    /// Return the length of descriptor buffer
+    pub fn len(&self) -> u32 {
+        self.len
+    }
+
+    /// Check if this is an empty descriptor.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Return the flags for this descriptor, including next, write and indirect
+    /// bits
+    pub fn flags(&self) -> u16 {
+        self.flags
+    }
+
+    /// Checks if the driver designated this as a write only descriptor.
+    ///
+    /// If this is false, this descriptor is read only.
+    /// Write only means the the emulated device can write and the driver can read.
+    pub fn is_write_only(&self) -> bool {
+        self.flags & VIRTQ_DESC_F_WRITE != 0
+    }
+}
+
+unsafe impl ByteValued for Descriptor {}
 
 /// An iterator over a single descriptor chain.  Not to be confused with AvailIter,
 /// which iterates over the descriptor chain heads in a queue.
@@ -87,18 +137,6 @@ impl<'a> Iterator for DescIter<'a> {
     }
 }
 
-/// A virtio descriptor constraints with C representive.
-#[repr(C)]
-#[derive(Default, Clone, Copy)]
-pub struct Descriptor {
-    addr: u64,
-    len: u32,
-    flags: u16,
-    next: u16,
-}
-
-unsafe impl ByteValued for Descriptor {}
-
 /// A virtio descriptor head, not tied to a GuestMemoryMmap.
 pub struct DescriptorHead {
     desc_table: GuestAddress,
@@ -112,27 +150,15 @@ pub struct DescriptorHead {
 pub struct DescriptorChain<'a> {
     desc_table: GuestAddress,
     table_size: u16,
-    ttl: u16, // used to prevent infinite chain cycles
+    ttl: u16,   // used to prevent infinite chain cycles
+    index: u16, // Index into the descriptor table
     iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
 
     /// Reference to guest memory
     pub mem: &'a GuestMemoryMmap,
 
-    /// Index into the descriptor table
-    pub index: u16,
-
-    /// Guest physical address of device specific data
-    pub addr: GuestAddress,
-
-    /// Length of device specific data
-    pub len: u32,
-
-    /// Includes next, write, and indirect bits
-    pub flags: u16,
-
-    /// Index into the descriptor table of the next descriptor if flags has
-    /// the next bit set
-    pub next: u16,
+    /// This particular descriptor
+    pub desc: Descriptor,
 }
 
 impl<'a> DescriptorChain<'a> {
@@ -150,17 +176,15 @@ impl<'a> DescriptorChain<'a> {
 
         let desc_table_size = size_of::<Descriptor>() * table_size as usize;
         let slice = mem.get_slice(desc_table, desc_table_size).ok()?;
-        let desc = slice
+        let mut desc = slice
             .get_array_ref::<Descriptor>(0, table_size as usize)
             .ok()?
             .load(index as usize);
 
         // Translate address if necessary
-        let desc_addr = if let Some(iommu_mapping_cb) = &iommu_mapping_cb {
-            (iommu_mapping_cb)(desc.addr).unwrap()
-        } else {
-            desc.addr
-        };
+        if let Some(iommu_mapping_cb) = &iommu_mapping_cb {
+            desc.addr = (iommu_mapping_cb)(desc.addr).unwrap()
+        }
 
         let chain = DescriptorChain {
             mem,
@@ -168,10 +192,7 @@ impl<'a> DescriptorChain<'a> {
             table_size,
             ttl,
             index,
-            addr: GuestAddress(desc_addr),
-            len: desc.len,
-            flags: desc.flags,
-            next: desc.next,
+            desc,
             iommu_mapping_cb,
         };
 
@@ -204,38 +225,32 @@ impl<'a> DescriptorChain<'a> {
             return Err(Error::InvalidIndirectDescriptor);
         }
 
-        let desc_head = self.addr;
+        let desc_head = self.desc.addr();
         self.mem
             .checked_offset(desc_head, 16)
             .ok_or(Error::GuestMemoryError)?;
 
         // These reads can't fail unless Guest memory is hopelessly broken.
-        let desc = match self.mem.read_obj::<Descriptor>(desc_head) {
+        let mut desc = match self.mem.read_obj::<Descriptor>(desc_head) {
             Ok(ret) => ret,
             Err(_) => return Err(Error::GuestMemoryError),
         };
 
         // Translate address if necessary
-        let (desc_addr, iommu_mapping_cb) =
-            if let Some(iommu_mapping_cb) = self.iommu_mapping_cb.clone() {
-                (
-                    (iommu_mapping_cb)(desc.addr).unwrap(),
-                    Some(iommu_mapping_cb),
-                )
-            } else {
-                (desc.addr, None)
-            };
+        let iommu_mapping_cb = if let Some(iommu_mapping_cb) = self.iommu_mapping_cb.clone() {
+            desc.addr = (iommu_mapping_cb)(desc.addr).unwrap();
+            Some(iommu_mapping_cb)
+        } else {
+            None
+        };
 
         let chain = DescriptorChain {
             mem: self.mem,
-            desc_table: self.addr,
-            table_size: (self.len / 16).try_into().unwrap(),
-            ttl: (self.len / 16).try_into().unwrap(),
+            desc_table: self.desc.addr(),
+            table_size: (self.desc.len() / 16).try_into().unwrap(),
+            ttl: (self.desc.len() / 16).try_into().unwrap(),
             index: 0,
-            addr: GuestAddress(desc_addr),
-            len: desc.len,
-            flags: desc.flags,
-            next: desc.next,
+            desc,
             iommu_mapping_cb,
         };
 
@@ -277,14 +292,14 @@ impl<'a> DescriptorChain<'a> {
     fn is_valid(&self) -> bool {
         !(self
             .mem
-            .checked_offset(self.addr, self.len as usize)
+            .checked_offset(self.desc.addr(), self.desc.len as usize)
             .is_none()
-            || (self.has_next() && self.next >= self.table_size))
+            || (self.has_next() && self.desc.next >= self.table_size))
     }
 
     /// Gets if this descriptor chain has another descriptor chain linked after it.
     pub fn has_next(&self) -> bool {
-        self.flags & VIRTQ_DESC_F_NEXT != 0 && self.ttl > 1
+        self.desc.flags & VIRTQ_DESC_F_NEXT != 0 && self.ttl > 1
     }
 
     /// If the driver designated this as a write only descriptor.
@@ -292,11 +307,37 @@ impl<'a> DescriptorChain<'a> {
     /// If this is false, this descriptor is read only.
     /// Write only means the the emulated device can write and the driver can read.
     pub fn is_write_only(&self) -> bool {
-        self.flags & VIRTQ_DESC_F_WRITE != 0
+        self.desc.flags & VIRTQ_DESC_F_WRITE != 0
     }
 
     pub fn is_indirect(&self) -> bool {
-        self.flags & VIRTQ_DESC_F_INDIRECT != 0
+        self.desc.flags & VIRTQ_DESC_F_INDIRECT != 0
+    }
+
+    /// Get the descriptor index of the chain header
+    pub fn index(&self) -> u16 {
+        self.index
+    }
+
+    /// Return the guest physical address of descriptor buffer
+    pub fn addr(&self) -> GuestAddress {
+        GuestAddress(self.desc.addr)
+    }
+
+    /// Return the length of descriptor buffer
+    pub fn len(&self) -> u32 {
+        self.desc.len
+    }
+
+    /// Return the flags for this descriptor, including next, write and indirect
+    /// bits
+    pub fn flags(&self) -> u16 {
+        self.desc.flags
+    }
+
+    /// Check if this is an empty descriptor.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Gets the next descriptor in this descriptor chain, if there is one.
@@ -310,7 +351,7 @@ impl<'a> DescriptorChain<'a> {
                 self.desc_table,
                 self.table_size,
                 self.ttl - 1,
-                self.next,
+                self.desc.next,
                 self.iommu_mapping_cb.clone(),
             )
         } else {
@@ -1027,11 +1068,12 @@ pub mod tests {
             assert_eq!(c.desc_table, vq.start());
             assert_eq!(c.table_size, 16);
             assert_eq!(c.ttl, c.table_size);
-            assert_eq!(c.index, 0);
-            assert_eq!(c.addr, GuestAddress(0x1000));
-            assert_eq!(c.len, 0x1000);
-            assert_eq!(c.flags, VIRTQ_DESC_F_NEXT);
-            assert_eq!(c.next, 1);
+            assert_eq!(c.index(), 0);
+            let desc = c.desc;
+            assert_eq!(desc.addr(), GuestAddress(0x1000));
+            assert_eq!(desc.len(), 0x1000);
+            assert_eq!(desc.flags(), VIRTQ_DESC_F_NEXT);
+            assert_eq!(desc.next, 1);
 
             assert!(c.next_descriptor().unwrap().next_descriptor().is_none());
         }
@@ -1062,8 +1104,8 @@ pub mod tests {
         // try to iterate through the indirect table descriptors
         let mut indirect_desc_chain = desc_chain.new_from_indirect().unwrap();
         for j in 0..4 {
-            assert_eq!(indirect_desc_chain.flags, VIRTQ_DESC_F_NEXT);
-            assert_eq!(indirect_desc_chain.next, j + 1);
+            assert_eq!(indirect_desc_chain.desc.flags, VIRTQ_DESC_F_NEXT);
+            assert_eq!(indirect_desc_chain.desc.next, j + 1);
             indirect_desc_chain = indirect_desc_chain.next_descriptor().unwrap();
         }
     }

@@ -120,7 +120,7 @@ impl CtrlVirtio {
             return Err(Error::NoQueuePairsNum);
         };
         let queue_pairs = mem
-            .read_obj::<u16>(mq_desc.addr)
+            .read_obj::<u16>(mq_desc.addr())
             .map_err(Error::GuestMemory)?;
         if (queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
             || (queue_pairs > VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
@@ -132,7 +132,7 @@ impl CtrlVirtio {
         } else {
             return Err(Error::NoQueuePairsNum);
         };
-        mem.write_obj::<u8>(0, status_desc.addr)
+        mem.write_obj::<u8>(0, status_desc.addr())
             .map_err(Error::GuestMemory)?;
 
         Ok(())
@@ -142,10 +142,10 @@ impl CtrlVirtio {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE];
         let mut used_count = 0;
         if let Some(avail_desc) = self.queue.iter(&mem).next() {
-            used_desc_heads[used_count] = (avail_desc.index, avail_desc.len);
+            used_desc_heads[used_count] = (avail_desc.index(), avail_desc.len());
             used_count += 1;
             let ctrl_hdr = mem
-                .read_obj::<u16>(avail_desc.addr)
+                .read_obj::<u16>(avail_desc.addr())
                 .map_err(Error::GuestMemory)?;
             let ctrl_hdr_v = ctrl_hdr.as_slice();
             let class = ctrl_hdr_v[0];

@@ -145,7 +145,7 @@ impl<F: FileSystem + Send + Sync + 'static> VhostUserFsThread<F> {
             self.pool.spawn_ok(async move {
                 let mem = atomic_mem.memory();
                 let desc = DescriptorChain::new_from_head(&mem, desc_head).unwrap();
-                let head_index = desc.index;
+                let head_index = desc.index();
 
                 let reader = Reader::new(&mem, desc.clone())
                     .map_err(Error::QueueReader)

@@ -112,12 +112,12 @@ impl VsockPacket {
         }
 
         // The packet header should fit inside the head descriptor.
-        if head.len < VSOCK_PKT_HDR_SIZE as u32 {
-            return Err(VsockError::HdrDescTooSmall(head.len));
+        if head.len() < VSOCK_PKT_HDR_SIZE as u32 {
+            return Err(VsockError::HdrDescTooSmall(head.len()));
         }
 
         let mut pkt = Self {
-            hdr: get_host_address_range(head.mem, head.addr, VSOCK_PKT_HDR_SIZE)
+            hdr: get_host_address_range(head.mem, head.addr(), VSOCK_PKT_HDR_SIZE)
                 .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
             buf: None,
             buf_size: 0,
@@ -144,13 +144,13 @@ impl VsockPacket {
 
         // The data buffer should be large enough to fit the size of the data, as described by
         // the header descriptor.
-        if buf_desc.len < pkt.len() {
+        if buf_desc.len() < pkt.len() {
             return Err(VsockError::BufDescTooSmall);
         }
 
-        pkt.buf_size = buf_desc.len as usize;
+        pkt.buf_size = buf_desc.len() as usize;
         pkt.buf = Some(
-            get_host_address_range(buf_desc.mem, buf_desc.addr, pkt.buf_size)
+            get_host_address_range(buf_desc.mem, buf_desc.addr(), pkt.buf_size)
                 .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
         );
 
@@ -170,8 +170,8 @@ impl VsockPacket {
         }
 
         // The packet header should fit inside the head descriptor.
-        if head.len < VSOCK_PKT_HDR_SIZE as u32 {
-            return Err(VsockError::HdrDescTooSmall(head.len));
+        if head.len() < VSOCK_PKT_HDR_SIZE as u32 {
+            return Err(VsockError::HdrDescTooSmall(head.len()));
         }
 
         // All RX descriptor chains should have a header and a data descriptor.
@@ -179,13 +179,13 @@ impl VsockPacket {
             return Err(VsockError::BufDescMissing);
         }
         let buf_desc = head.next_descriptor().ok_or(VsockError::BufDescMissing)?;
-        let buf_size = buf_desc.len as usize;
+        let buf_size = buf_desc.len() as usize;
 
         Ok(Self {
-            hdr: get_host_address_range(head.mem, head.addr, VSOCK_PKT_HDR_SIZE)
+            hdr: get_host_address_range(head.mem, head.addr(), VSOCK_PKT_HDR_SIZE)
                 .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
             buf: Some(
-                get_host_address_range(buf_desc.mem, buf_desc.addr, buf_size)
+                get_host_address_range(buf_desc.mem, buf_desc.addr(), buf_size)
                     .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
             ),
             buf_size,

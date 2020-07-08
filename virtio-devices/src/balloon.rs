@@ -180,7 +180,7 @@ impl BalloonEpollHandler {
         let mut used_count = 0;
         let mem = self.mem.memory();
         for avail_desc in self.queues[queue_index].iter(&mem) {
-            used_desc_heads[used_count] = avail_desc.index;
+            used_desc_heads[used_count] = avail_desc.index();
             used_count += 1;
 
             let data_chunk_size = size_of::<u32>();
@@ -190,14 +190,14 @@ impl BalloonEpollHandler {
                 error!("The head contains the request type is not right");
                 return Err(Error::UnexpectedWriteOnlyDescriptor);
             }
-            if avail_desc.len as usize % data_chunk_size != 0 {
-                error!("the request size {} is not right", avail_desc.len);
+            if avail_desc.len() as usize % data_chunk_size != 0 {
+                error!("the request size {} is not right", avail_desc.len());
                 return Err(Error::InvalidRequest);
             }
 
             let mut offset = 0u64;
-            while offset < avail_desc.len as u64 {
-                let addr = avail_desc.addr.checked_add(offset).unwrap();
+            while offset < avail_desc.len() as u64 {
+                let addr = avail_desc.addr().checked_add(offset).unwrap();
                 let pfn: u32 = mem.read_obj(addr).map_err(Error::GuestMemory)?;
                 offset += data_chunk_size as u64;
 

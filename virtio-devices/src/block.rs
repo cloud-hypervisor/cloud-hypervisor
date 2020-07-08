@@ -494,8 +494,8 @@ impl Request {
         }
 
         let mut req = Request {
-            request_type: request_type(&mem, avail_desc.addr)?,
-            sector: sector(&mem, avail_desc.addr)?,
+            request_type: request_type(&mem, avail_desc.addr())?,
+            sector: sector(&mem, avail_desc.addr())?,
             data_addr: GuestAddress(0),
             data_len: 0,
             status_addr: GuestAddress(0),
@@ -530,8 +530,8 @@ impl Request {
                 return Err(Error::UnexpectedReadOnlyDescriptor);
             }
 
-            req.data_addr = data_desc.addr;
-            req.data_len = data_desc.len;
+            req.data_addr = data_desc.desc.addr();
+            req.data_len = data_desc.len();
         }
 
         // The status MUST always be writable.
@@ -539,11 +539,11 @@ impl Request {
             return Err(Error::UnexpectedReadOnlyDescriptor);
         }
 
-        if status_desc.len < 1 {
+        if status_desc.is_empty() {
             return Err(Error::DescriptorLengthTooSmall);
         }
 
-        req.status_addr = status_desc.addr;
+        req.status_addr = status_desc.addr();
 
         Ok(req)
     }
@@ -679,7 +679,7 @@ impl<T: DiskFile> BlockEpollHandler<T> {
                     len = 0;
                 }
             }
-            used_desc_heads.push((avail_desc.index, len));
+            used_desc_heads.push((avail_desc.index(), len));
             used_count += 1;
         }
 
