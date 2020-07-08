@@ -4027,7 +4027,7 @@ mod tests {
             });
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_virtio_mem() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
