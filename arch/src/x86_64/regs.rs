@@ -160,7 +160,7 @@ fn write_idt_value(val: u64, guest_mem: &GuestMemoryMmap) -> Result<()> {
         .map_err(Error::WriteIDT)
 }
 
-fn configure_segments_and_sregs(
+pub fn configure_segments_and_sregs(
     mem: &GuestMemoryMmap,
     sregs: &mut SpecialRegisters,
     boot_prot: BootProtocol,
@@ -222,7 +222,7 @@ fn configure_segments_and_sregs(
     Ok(())
 }
 
-fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut SpecialRegisters) -> Result<()> {
+pub fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut SpecialRegisters) -> Result<()> {
     // Puts PML5 or PML4 right after zero page but aligned to 4k.
     if unsafe { std::arch::x86_64::__cpuid(7).ecx } & (1 << 16) != 0 {
         // Entry covering VA [0..256TB)
@@ -361,100 +361,5 @@ mod tests {
         }
         assert_eq!(X86_CR4_PAE, sregs.cr4);
         assert_eq!(X86_CR0_PG, sregs.cr0);
-    }
-
-    #[test]
-    fn test_setup_fpu() {
-        let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
-        setup_fpu(&vcpu).unwrap();
-
-        let expected_fpu: FpuState = FpuState {
-            fcw: 0x37f,
-            mxcsr: 0x1f80,
-            ..Default::default()
-        };
-        let actual_fpu: FpuState = vcpu.get_fpu().unwrap();
-        // TODO: auto-generate kvm related structures with PartialEq on.
-        assert_eq!(expected_fpu.fcw, actual_fpu.fcw);
-        // Setting the mxcsr register from FpuState inside setup_fpu does not influence anything.
-        // See 'kvm_arch_vcpu_ioctl_set_fpu' from arch/x86/kvm/x86.c.
-        // The mxcsr will stay 0 and the assert below fails. Decide whether or not we should
-        // remove it at all.
-        // assert!(expected_fpu.mxcsr == actual_fpu.mxcsr);
-    }
-
-    #[test]
-    fn test_setup_msrs() {
-        use hypervisor::arch::x86::msr_index;
-        use hypervisor::x86_64::{MsrEntries, MsrEntry};
-
-        let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
-        setup_msrs(&vcpu).unwrap();
-
-        // This test will check against the last MSR entry configured (the tenth one).
-        // See create_msr_entries for details.
-        let mut msrs = MsrEntries::from_entries(&[MsrEntry {
-            index: msr_index::MSR_IA32_MISC_ENABLE,
-            ..Default::default()
-        }]);
-
-        // get_msrs returns the number of msrs that it succeed in reading. We only want to read 1
-        // in this test case scenario.
-        let read_msrs = vcpu.get_msrs(&mut msrs).unwrap();
-        assert_eq!(read_msrs, 1);
-
-        // Official entries that were setup when we did setup_msrs. We need to assert that the
-        // tenth one (i.e the one with index msr_index::MSR_IA32_MISC_ENABLE has the data we
-        // expect.
-        let entry_vec = hypervisor::x86_64::boot_msr_entries();
-        assert_eq!(entry_vec.as_slice()[9], msrs.as_slice()[0]);
-    }
-
-    #[test]
-    fn test_setup_regs() {
-        let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
-
-        let expected_regs: StandardRegisters = StandardRegisters {
-            rflags: 0x0000000000000002u64,
-            rip: 1,
-            rsp: 2,
-            rbp: 2,
-            rsi: 3,
-            ..Default::default()
-        };
-
-        setup_regs(
-            &vcpu,
-            expected_regs.rip,
-            expected_regs.rsp,
-            expected_regs.rsi,
-            BootProtocol::LinuxBoot,
-        )
-        .unwrap();
-
-        let actual_regs: StandardRegisters = vcpu.get_regs().unwrap();
-        assert_eq!(actual_regs, expected_regs);
-    }
-
-    #[test]
-    fn test_setup_sregs() {
-        let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
-
-        let mut expected_sregs: SpecialRegisters = vcpu.get_sregs().unwrap();
-        let gm = create_guest_mem();
-        configure_segments_and_sregs(&gm, &mut expected_sregs, BootProtocol::LinuxBoot).unwrap();
-        setup_page_tables(&gm, &mut expected_sregs).unwrap();
-
-        setup_sregs(&gm, &vcpu, BootProtocol::LinuxBoot).unwrap();
-        let actual_sregs: SpecialRegisters = vcpu.get_sregs().unwrap();
-        assert_eq!(expected_sregs, actual_sregs);
     }
 }

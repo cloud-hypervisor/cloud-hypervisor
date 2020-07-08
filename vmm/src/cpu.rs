@@ -1404,3 +1404,178 @@ impl Snapshottable for CpuManager {
 
 impl Transportable for CpuManager {}
 impl Migratable for CpuManager {}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use arch::x86_64::interrupts::*;
+    use arch::x86_64::regs::*;
+    use arch::x86_64::BootProtocol;
+    use hypervisor::x86_64::{FpuState, LapicState, SpecialRegisters, StandardRegisters};
+
+    #[test]
+    fn test_setlint() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().expect("new VM fd creation failed");
+        assert!(hv.check_capability(hypervisor::kvm::Cap::Irqchip));
+        // Calling get_lapic will fail if there is no irqchip before hand.
+        assert!(vm.create_irq_chip().is_ok());
+        let vcpu = vm.create_vcpu(0).unwrap();
+        let klapic_before: LapicState = vcpu.get_lapic().unwrap();
+
+        // Compute the value that is expected to represent LVT0 and LVT1.
+        let lint0 = get_klapic_reg(&klapic_before, APIC_LVT0);
+        let lint1 = get_klapic_reg(&klapic_before, APIC_LVT1);
+        let lint0_mode_expected = set_apic_delivery_mode(lint0, APIC_MODE_EXTINT);
+        let lint1_mode_expected = set_apic_delivery_mode(lint1, APIC_MODE_NMI);
+
+        set_lint(&vcpu).unwrap();
+
+        // Compute the value that represents LVT0 and LVT1 after set_lint.
+        let klapic_actual: LapicState = vcpu.get_lapic().unwrap();
+        let lint0_mode_actual = get_klapic_reg(&klapic_actual, APIC_LVT0);
+        let lint1_mode_actual = get_klapic_reg(&klapic_actual, APIC_LVT1);
+        assert_eq!(lint0_mode_expected, lint0_mode_actual);
+        assert_eq!(lint1_mode_expected, lint1_mode_actual);
+    }
+
+    #[test]
+    fn test_setup_fpu() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().expect("new VM fd creation failed");
+        let vcpu = vm.create_vcpu(0).unwrap();
+        setup_fpu(&vcpu).unwrap();
+
+        let expected_fpu: FpuState = FpuState {
+            fcw: 0x37f,
+            mxcsr: 0x1f80,
+            ..Default::default()
+        };
+        let actual_fpu: FpuState = vcpu.get_fpu().unwrap();
+        // TODO: auto-generate kvm related structures with PartialEq on.
+        assert_eq!(expected_fpu.fcw, actual_fpu.fcw);
+        // Setting the mxcsr register from FpuState inside setup_fpu does not influence anything.
+        // See 'kvm_arch_vcpu_ioctl_set_fpu' from arch/x86/kvm/x86.c.
+        // The mxcsr will stay 0 and the assert below fails. Decide whether or not we should
+        // remove it at all.
+        // assert!(expected_fpu.mxcsr == actual_fpu.mxcsr);
+    }
+
+    #[test]
+    fn test_setup_msrs() {
+        use hypervisor::arch::x86::msr_index;
+        use hypervisor::x86_64::{MsrEntries, MsrEntry};
+
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().expect("new VM fd creation failed");
+        let vcpu = vm.create_vcpu(0).unwrap();
+        setup_msrs(&vcpu).unwrap();
+
+        // This test will check against the last MSR entry configured (the tenth one).
+        // See create_msr_entries for details.
+        let mut msrs = MsrEntries::from_entries(&[MsrEntry {
+            index: msr_index::MSR_IA32_MISC_ENABLE,
+            ..Default::default()
+        }]);
+
+        // get_msrs returns the number of msrs that it succeed in reading. We only want to read 1
+        // in this test case scenario.
+        let read_msrs = vcpu.get_msrs(&mut msrs).unwrap();
+        assert_eq!(read_msrs, 1);
+
+        // Official entries that were setup when we did setup_msrs. We need to assert that the
+        // tenth one (i.e the one with index msr_index::MSR_IA32_MISC_ENABLE has the data we
+        // expect.
+        let entry_vec = hypervisor::x86_64::boot_msr_entries();
+        assert_eq!(entry_vec.as_slice()[9], msrs.as_slice()[0]);
+    }
+
+    #[test]
+    fn test_setup_regs() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().expect("new VM fd creation failed");
+        let vcpu = vm.create_vcpu(0).unwrap();
+
+        let expected_regs: StandardRegisters = StandardRegisters {
+            rflags: 0x0000000000000002u64,
+            rip: 1,
+            rsp: 2,
+            rbp: 2,
+            rsi: 3,
+            ..Default::default()
+        };
+
+        setup_regs(
+            &vcpu,
+            expected_regs.rip,
+            expected_regs.rsp,
+            expected_regs.rsi,
+            BootProtocol::LinuxBoot,
+        )
+        .unwrap();
+
+        let actual_regs: StandardRegisters = vcpu.get_regs().unwrap();
+        assert_eq!(actual_regs, expected_regs);
+    }
+
+    #[test]
+    fn test_setup_sregs() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().expect("new VM fd creation failed");
+        let vcpu = vm.create_vcpu(0).unwrap();
+
+        let mut expected_sregs: SpecialRegisters = vcpu.get_sregs().unwrap();
+        let gm = GuestMemoryMmap::from_ranges(&vec![(GuestAddress(0), 0x10000)]).unwrap();
+        configure_segments_and_sregs(&gm, &mut expected_sregs, BootProtocol::LinuxBoot).unwrap();
+        setup_page_tables(&gm, &mut expected_sregs).unwrap();
+
+        setup_sregs(&gm, &vcpu, BootProtocol::LinuxBoot).unwrap();
+        let actual_sregs: SpecialRegisters = vcpu.get_sregs().unwrap();
+        assert_eq!(expected_sregs, actual_sregs);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[cfg(test)]
+mod tests {
+    use arch::aarch64::layout;
+    use arch::aarch64::regs::*;
+    use hypervisor::kvm::kvm_bindings;
+    use vm_memory::{GuestAddress, GuestMemoryMmap};
+
+    #[test]
+    fn test_setup_regs() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let vcpu = vm.create_vcpu(0).unwrap();
+        let mut regions = Vec::new();
+        regions.push((
+            GuestAddress(layout::RAM_64BIT_START),
+            (layout::FDT_MAX_SIZE + 0x1000) as usize,
+        ));
+        let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
+
+        let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
+        vm.get_preferred_target(&mut kvi).unwrap();
+        vcpu.vcpu_init(&kvi).unwrap();
+
+        assert!(setup_regs(&vcpu, 0, 0x0, &mem).is_ok());
+    }
+
+    #[test]
+    fn test_read_mpidr() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let vcpu = vm.create_vcpu(0).unwrap();
+        let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
+        vm.get_preferred_target(&mut kvi).unwrap();
+
+        // Must fail when vcpu is not initialized yet.
+        assert!(read_mpidr(&vcpu).is_err());
+
+        vcpu.vcpu_init(&kvi).unwrap();
+        assert_eq!(read_mpidr(&vcpu).unwrap(), 0x80000000);
+    }
+}
