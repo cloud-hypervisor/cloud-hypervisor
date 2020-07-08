@@ -12,12 +12,13 @@ use crate::VirtioIommuRemapping;
 use std::cmp::min;
 use std::convert::TryInto;
 use std::fmt::{self, Display};
+use std::mem::size_of;
 use std::num::Wrapping;
 use std::sync::atomic::{fence, Ordering};
 use std::sync::Arc;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap,
-    GuestUsize,
+    GuestUsize, VolatileMemory,
 };
 
 pub const VIRTQ_DESC_F_NEXT: u16 = 0x1;
@@ -136,31 +137,22 @@ pub struct DescriptorChain<'a> {
 
 impl<'a> DescriptorChain<'a> {
     pub fn checked_new(
-        mem: &GuestMemoryMmap,
+        mem: &'a GuestMemoryMmap,
         desc_table: GuestAddress,
         table_size: u16,
         index: u16,
         iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
-    ) -> Option<DescriptorChain> {
+    ) -> Option<Self> {
         if index >= table_size {
             return None;
         }
 
-        let desc_head = match mem.checked_offset(desc_table, (index as usize) * 16) {
-            Some(a) => a,
-            None => return None,
-        };
-        mem.checked_offset(desc_head, 16)?;
-
-        // These reads can't fail unless Guest memory is hopelessly broken.
-        let desc = match mem.read_obj::<Descriptor>(desc_head) {
-            Ok(ret) => ret,
-            Err(_) => {
-                // TODO log address
-                error!("Failed to read from memory");
-                return None;
-            }
-        };
+        let desc_table_size = size_of::<Descriptor>() * table_size as usize;
+        let slice = mem.get_slice(desc_table, desc_table_size).ok()?;
+        let desc = slice
+            .get_array_ref::<Descriptor>(0, table_size as usize)
+            .ok()?
+            .load(index as usize);
 
         // Translate address if necessary
         let desc_addr = if let Some(iommu_mapping_cb) = &iommu_mapping_cb {
