@@ -584,6 +584,14 @@ impl Vm {
             ));
         }
 
+        let sgx_epc_region = self
+            .memory_manager
+            .lock()
+            .unwrap()
+            .sgx_epc_region()
+            .as_ref()
+            .cloned();
+
         match entry_addr.setup_header {
             Some(hdr) => {
                 arch::configure_system(
@@ -595,6 +603,7 @@ impl Vm {
                     Some(hdr),
                     rsdp_addr,
                     BootProtocol::LinuxBoot,
+                    sgx_epc_region,
                 )
                 .map_err(Error::ConfigureSystem)?;
             }
@@ -608,6 +617,7 @@ impl Vm {
                     None,
                     rsdp_addr,
                     entry_addr.protocol,
+                    sgx_epc_region,
                 )
                 .map_err(Error::ConfigureSystem)?;
             }
