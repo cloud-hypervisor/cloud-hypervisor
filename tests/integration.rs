@@ -3032,19 +3032,26 @@ mod tests {
             });
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_virtio_console() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
                 let guest = Guest::new(&mut focal);
 
+                let mut workload_path = dirs::home_dir().unwrap();
+                workload_path.push("workloads");
+                let mut kernel_path = workload_path;
+                kernel_path.push("vmlinux");
+
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", guest.fw_path.as_str()])
+                    .args(&["--kernel", kernel_path.to_str().unwrap()])
+                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .default_disks()
                     .default_net()
                     .args(&["--console", "tty"])
+                    .args(&["--serial", "null"])
                     .capture_output()
                     .spawn()
                     .unwrap();
