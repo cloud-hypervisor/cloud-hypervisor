@@ -104,20 +104,21 @@ impl VsockPacket {
     /// descriptor can optionally end the chain. Bounds and pointer checks are performed when
     /// creating the wrapper.
     ///
-    pub fn from_tx_virtq_head(head: &DescriptorChain) -> Result<Self> {
+    pub fn from_tx_virtq_head(head: &mut DescriptorChain) -> Result<Self> {
+        let head_desc = head.next().ok_or(VsockError::BufDescMissing)?;
         // All buffers in the TX queue must be readable.
         //
-        if head.is_write_only() {
+        if head_desc.is_write_only() {
             return Err(VsockError::UnreadableDescriptor);
         }
 
         // The packet header should fit inside the head descriptor.
-        if head.len() < VSOCK_PKT_HDR_SIZE as u32 {
-            return Err(VsockError::HdrDescTooSmall(head.len()));
+        if head_desc.len() < VSOCK_PKT_HDR_SIZE as u32 {
+            return Err(VsockError::HdrDescTooSmall(head_desc.len()));
         }
 
         let mut pkt = Self {
-            hdr: get_host_address_range(head.mem, head.addr(), VSOCK_PKT_HDR_SIZE)
+            hdr: get_host_address_range(head.mem, head_desc.addr(), VSOCK_PKT_HDR_SIZE)
                 .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
             buf: None,
             buf_size: 0,
@@ -135,7 +136,7 @@ impl VsockPacket {
         }
 
         // If the packet header showed a non-zero length, there should be a data descriptor here.
-        let buf_desc = head.next_descriptor().ok_or(VsockError::BufDescMissing)?;
+        let buf_desc = head.next().ok_or(VsockError::BufDescMissing)?;
 
         // TX data should be read-only.
         if buf_desc.is_write_only() {
@@ -150,7 +151,7 @@ impl VsockPacket {
 
         pkt.buf_size = buf_desc.len() as usize;
         pkt.buf = Some(
-            get_host_address_range(buf_desc.mem, buf_desc.addr(), pkt.buf_size)
+            get_host_address_range(head.mem, buf_desc.addr(), pkt.buf_size)
                 .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
         );
 
@@ -162,30 +163,31 @@ impl VsockPacket {
     /// There must be two descriptors in the chain, both writable: a header descriptor and a data
     /// descriptor. Bounds and pointer checks are performed when creating the wrapper.
     ///
-    pub fn from_rx_virtq_head(head: &DescriptorChain) -> Result<Self> {
+    pub fn from_rx_virtq_head(head: &mut DescriptorChain) -> Result<Self> {
+        let head_desc = head.next().ok_or(VsockError::BufDescMissing)?;
         // All RX buffers must be writable.
         //
-        if !head.is_write_only() {
+        if !head_desc.is_write_only() {
             return Err(VsockError::UnwritableDescriptor);
         }
 
         // The packet header should fit inside the head descriptor.
-        if head.len() < VSOCK_PKT_HDR_SIZE as u32 {
-            return Err(VsockError::HdrDescTooSmall(head.len()));
+        if head_desc.len() < VSOCK_PKT_HDR_SIZE as u32 {
+            return Err(VsockError::HdrDescTooSmall(head_desc.len()));
         }
 
         // All RX descriptor chains should have a header and a data descriptor.
-        if !head.has_next() {
+        if !head_desc.has_next() {
             return Err(VsockError::BufDescMissing);
         }
-        let buf_desc = head.next_descriptor().ok_or(VsockError::BufDescMissing)?;
+        let buf_desc = head.next().ok_or(VsockError::BufDescMissing)?;
         let buf_size = buf_desc.len() as usize;
 
         Ok(Self {
-            hdr: get_host_address_range(head.mem, head.addr(), VSOCK_PKT_HDR_SIZE)
+            hdr: get_host_address_range(head.mem, head_desc.addr(), VSOCK_PKT_HDR_SIZE)
                 .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
             buf: Some(
-                get_host_address_range(buf_desc.mem, buf_desc.addr(), buf_size)
+                get_host_address_range(head.mem, buf_desc.addr(), buf_size)
                     .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
             ),
             buf_size,
@@ -365,7 +367,7 @@ mod tests {
         };
         ($test_ctx:expr, $handler_ctx:expr, $err:pat, $ctor:ident, $vq:expr) => {
             match VsockPacket::$ctor(
-                &$handler_ctx.handler.queues[$vq]
+                &mut $handler_ctx.handler.queues[$vq]
                     .iter(&$test_ctx.mem)
                     .next()
                     .unwrap(),
@@ -394,7 +396,7 @@ mod tests {
             create_context!(test_ctx, handler_ctx);
 
             let pkt = VsockPacket::from_tx_virtq_head(
-                &handler_ctx.handler.queues[1]
+                &mut handler_ctx.handler.queues[1]
                     .iter(&test_ctx.mem)
                     .next()
                     .unwrap(),
@@ -434,7 +436,7 @@ mod tests {
             create_context!(test_ctx, handler_ctx);
             set_pkt_len(0, &handler_ctx.guest_txvq.dtable(0), &test_ctx.mem);
             let mut pkt = VsockPacket::from_tx_virtq_head(
-                &handler_ctx.handler.queues[1]
+                &mut handler_ctx.handler.queues[1]
                     .iter(&test_ctx.mem)
                     .next()
                     .unwrap(),
@@ -492,7 +494,7 @@ mod tests {
         {
             create_context!(test_ctx, handler_ctx);
             let pkt = VsockPacket::from_rx_virtq_head(
-                &handler_ctx.handler.queues[0]
+                &mut handler_ctx.handler.queues[0]
                     .iter(&test_ctx.mem)
                     .next()
                     .unwrap(),
@@ -551,7 +553,7 @@ mod tests {
 
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
-            &handler_ctx.handler.queues[0]
+            &mut handler_ctx.handler.queues[0]
                 .iter(&test_ctx.mem)
                 .next()
                 .unwrap(),
@@ -640,7 +642,7 @@ mod tests {
     fn test_packet_buf() {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
-            &handler_ctx.handler.queues[0]
+            &mut handler_ctx.handler.queues[0]
                 .iter(&test_ctx.mem)
                 .next()
                 .unwrap(),

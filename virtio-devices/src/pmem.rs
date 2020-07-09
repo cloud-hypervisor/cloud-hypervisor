@@ -141,30 +141,28 @@ struct Request {
 
 impl Request {
     fn parse(
-        avail_desc: &DescriptorChain,
+        avail_desc: &mut DescriptorChain,
         mem: &GuestMemoryMmap,
     ) -> result::Result<Request, Error> {
+        let req_desc = avail_desc.next().ok_or(Error::DescriptorChainTooShort)?;
+
         // The head contains the request type which MUST be readable.
-        if avail_desc.is_write_only() {
+        if req_desc.is_write_only() {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
 
-        if avail_desc.len() as usize != size_of::<VirtioPmemReq>() {
+        if req_desc.len() as usize != size_of::<VirtioPmemReq>() {
             return Err(Error::InvalidRequest);
         }
 
-        let request: VirtioPmemReq = mem
-            .read_obj(avail_desc.addr())
-            .map_err(Error::GuestMemory)?;
+        let request: VirtioPmemReq = mem.read_obj(req_desc.addr()).map_err(Error::GuestMemory)?;
 
         let request_type = match request.type_ {
             VIRTIO_PMEM_REQ_TYPE_FLUSH => RequestType::Flush,
             _ => return Err(Error::InvalidRequest),
         };
 
-        let status_desc = avail_desc
-            .next_descriptor()
-            .ok_or(Error::DescriptorChainTooShort)?;
+        let status_desc = avail_desc.next().ok_or(Error::DescriptorChainTooShort)?;
 
         // The status MUST always be writable
         if !status_desc.is_write_only() {
@@ -197,8 +195,8 @@ impl PmemEpollHandler {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
         let mem = self.mem.memory();
-        for avail_desc in self.queue.iter(&mem) {
-            let len = match Request::parse(&avail_desc, &mem) {
+        for mut avail_desc in self.queue.iter(&mem) {
+            let len = match Request::parse(&mut avail_desc, &mem) {
                 Ok(ref req) if (req.type_ == RequestType::Flush) => {
                     let status_code = match self.disk.sync_all() {
                         Ok(()) => VIRTIO_PMEM_RESP_TYPE_OK,

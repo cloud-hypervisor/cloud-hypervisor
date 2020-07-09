@@ -47,16 +47,14 @@ impl TxVirtio {
         while let Some(avail_desc) = queue.iter(&mem).next() {
             let head_index = avail_desc.index();
             let mut read_count = 0;
-            let mut next_desc = Some(avail_desc);
 
             self.iovec.clear();
-            while let Some(desc) = next_desc {
+            for desc in avail_desc {
                 if desc.is_write_only() {
                     break;
                 }
                 self.iovec.push((desc.addr(), desc.len() as usize));
                 read_count += desc.len() as usize;
-                next_desc = desc.next_descriptor();
             }
 
             read_count = 0;
@@ -128,42 +126,33 @@ impl RxVirtio {
     pub fn process_desc_chain(
         &mut self,
         mem: &GuestMemoryMmap,
-        mut next_desc: Option<DescriptorChain>,
+        next_desc: DescriptorChain,
         queue: &mut Queue,
     ) -> bool {
-        let head_index = next_desc.as_ref().unwrap().index();
+        let head_index = next_desc.index();
         let mut write_count = 0;
 
         // Copy from frame into buffer, which may span multiple descriptors.
-        loop {
-            match next_desc {
-                Some(desc) => {
-                    if !desc.is_write_only() {
-                        break;
-                    }
-                    let limit = cmp::min(write_count + desc.len() as usize, self.bytes_read);
-                    let source_slice = &self.frame_buf[write_count..limit];
-                    let write_result = mem.write_slice(source_slice, desc.addr());
+        for desc in next_desc {
+            if !desc.is_write_only() {
+                break;
+            }
+            let limit = cmp::min(write_count + desc.len() as usize, self.bytes_read);
+            let source_slice = &self.frame_buf[write_count..limit];
+            let write_result = mem.write_slice(source_slice, desc.addr());
 
-                    match write_result {
-                        Ok(_) => {
-                            write_count = limit;
-                        }
-                        Err(e) => {
-                            error!("Failed to write slice: {:?}", e);
-                            break;
-                        }
-                    };
-
-                    if write_count >= self.bytes_read {
-                        break;
-                    }
-                    next_desc = desc.next_descriptor();
+            match write_result {
+                Ok(_) => {
+                    write_count = limit;
                 }
-                None => {
-                    warn!("Receiving buffer is too small to hold frame of current size");
+                Err(e) => {
+                    error!("Failed to write slice: {:?}", e);
                     break;
                 }
+            };
+
+            if write_count >= self.bytes_read {
+                break;
             }
         }
 
@@ -254,7 +243,9 @@ impl NetQueuePair {
             return Ok(false);
         }
 
-        Ok(self.rx.process_desc_chain(&mem, next_desc, &mut queue))
+        Ok(self
+            .rx
+            .process_desc_chain(&mem, next_desc.unwrap(), &mut queue))
     }
 
     fn process_rx(&mut self, queue: &mut Queue) -> Result<bool, NetQueuePairError> {

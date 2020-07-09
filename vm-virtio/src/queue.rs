@@ -102,40 +102,14 @@ impl Descriptor {
     pub fn is_write_only(&self) -> bool {
         self.flags & VIRTQ_DESC_F_WRITE != 0
     }
+
+    /// Checks if this descriptor has another descriptor linked after it.
+    pub fn has_next(&self) -> bool {
+        self.flags & VIRTQ_DESC_F_NEXT != 0
+    }
 }
 
 unsafe impl ByteValued for Descriptor {}
-
-/// An iterator over a single descriptor chain.  Not to be confused with AvailIter,
-/// which iterates over the descriptor chain heads in a queue.
-pub struct DescIter<'a> {
-    next: Option<DescriptorChain<'a>>,
-}
-
-impl<'a> DescIter<'a> {
-    /// Returns an iterator that only yields the readable descriptors in the chain.
-    pub fn readable(self) -> impl Iterator<Item = DescriptorChain<'a>> {
-        self.filter(|d| !d.is_write_only())
-    }
-
-    /// Returns an iterator that only yields the writable descriptors in the chain.
-    pub fn writable(self) -> impl Iterator<Item = DescriptorChain<'a>> {
-        self.filter(DescriptorChain::is_write_only)
-    }
-}
-
-impl<'a> Iterator for DescIter<'a> {
-    type Item = DescriptorChain<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(current) = self.next.take() {
-            self.next = current.next_descriptor();
-            Some(current)
-        } else {
-            None
-        }
-    }
-}
 
 /// A virtio descriptor head, not tied to a GuestMemoryMmap.
 pub struct DescriptorHead {
@@ -340,32 +314,78 @@ impl<'a> DescriptorChain<'a> {
         self.len() == 0
     }
 
-    /// Gets the next descriptor in this descriptor chain, if there is one.
-    ///
-    /// Note that this is distinct from the next descriptor chain returned by `AvailIter`, which is
-    /// the head of the next _available_ descriptor chain.
-    pub fn next_descriptor(&self) -> Option<DescriptorChain<'a>> {
-        if self.has_next() {
-            Self::read_new(
-                self.mem,
-                self.desc_table,
-                self.table_size,
-                self.ttl - 1,
-                self.desc.next,
-                self.iommu_mapping_cb.clone(),
-            )
-        } else {
-            None
+    /// Returns an iterator that only yields the readable descriptors in the chain.
+    pub fn readable(self) -> DescriptorChainRwIter<'a> {
+        DescriptorChainRwIter {
+            chain: self,
+            writable: false,
+        }
+    }
+
+    /// Returns an iterator that only yields the writable descriptors in the chain.
+    pub fn writable(self) -> DescriptorChainRwIter<'a> {
+        DescriptorChainRwIter {
+            chain: self,
+            writable: true,
         }
     }
 }
 
-impl<'a> IntoIterator for DescriptorChain<'a> {
-    type Item = DescriptorChain<'a>;
-    type IntoIter = DescIter<'a>;
+impl<'a> Iterator for DescriptorChain<'a> {
+    type Item = Descriptor;
 
-    fn into_iter(self) -> Self::IntoIter {
-        DescIter { next: Some(self) }
+    /// Returns the next descriptor in this descriptor chain, if there is one.
+    ///
+    /// Note that this is distinct from the next descriptor chain returned by
+    /// [`AvailIter`](struct.AvailIter.html), which is the head of the next
+    /// _available_ descriptor chain.
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ttl == 0 {
+            return None;
+        }
+
+        let curr = self.desc;
+        if !self.has_next() {
+            self.ttl = 0
+        } else {
+            let index = self.desc.next;
+            let desc_table_size = size_of::<Descriptor>() * self.table_size as usize;
+            let slice = self.mem.get_slice(self.desc_table, desc_table_size).ok()?;
+            self.desc = slice
+                .get_array_ref(0, self.table_size as usize)
+                .ok()?
+                .load(index as usize);
+            self.ttl -= 1;
+        }
+        Some(curr)
+    }
+}
+
+/// An iterator for readable or writable descriptors.
+pub struct DescriptorChainRwIter<'a> {
+    chain: DescriptorChain<'a>,
+    writable: bool,
+}
+
+impl<'a> Iterator for DescriptorChainRwIter<'a> {
+    type Item = Descriptor;
+
+    /// Returns the next descriptor in this descriptor chain, if there is one.
+    ///
+    /// Note that this is distinct from the next descriptor chain returned by
+    /// [`AvailIter`](struct.AvailIter.html), which is the head of the next
+    /// _available_ descriptor chain.
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.chain.next() {
+                Some(v) => {
+                    if v.is_write_only() == self.writable {
+                        return Some(v);
+                    }
+                }
+                None => return None,
+            }
+        }
     }
 }
 
@@ -1062,20 +1082,21 @@ pub mod tests {
             vq.dtable(0).next().store(1);
             vq.dtable(1).set(0x2000, 0x1000, 0, 0);
 
-            let c = DescriptorChain::checked_new(m, vq.start(), 16, 0, None).unwrap();
+            let mut c = DescriptorChain::checked_new(m, vq.start(), 16, 0, None).unwrap();
 
             assert_eq!(c.mem as *const GuestMemoryMmap, m as *const GuestMemoryMmap);
             assert_eq!(c.desc_table, vq.start());
             assert_eq!(c.table_size, 16);
             assert_eq!(c.ttl, c.table_size);
             assert_eq!(c.index(), 0);
-            let desc = c.desc;
+            let desc = c.next().unwrap();
             assert_eq!(desc.addr(), GuestAddress(0x1000));
             assert_eq!(desc.len(), 0x1000);
             assert_eq!(desc.flags(), VIRTQ_DESC_F_NEXT);
             assert_eq!(desc.next, 1);
 
-            assert!(c.next_descriptor().unwrap().next_descriptor().is_none());
+            assert!(c.next().is_some());
+            assert!(c.next().is_none());
         }
     }
 
@@ -1103,10 +1124,11 @@ pub mod tests {
 
         // try to iterate through the indirect table descriptors
         let mut indirect_desc_chain = desc_chain.new_from_indirect().unwrap();
+        let mut indirect_desc = indirect_desc_chain.next().unwrap();
         for j in 0..4 {
-            assert_eq!(indirect_desc_chain.desc.flags, VIRTQ_DESC_F_NEXT);
-            assert_eq!(indirect_desc_chain.desc.next, j + 1);
-            indirect_desc_chain = indirect_desc_chain.next_descriptor().unwrap();
+            assert_eq!(indirect_desc.flags, VIRTQ_DESC_F_NEXT);
+            assert_eq!(indirect_desc.next, j + 1);
+            indirect_desc = indirect_desc_chain.next().unwrap();
         }
     }
 
@@ -1192,15 +1214,19 @@ pub mod tests {
 
             {
                 let mut c = i.next().unwrap();
-                c = c.next_descriptor().unwrap();
+                c.next().unwrap();
                 assert!(!c.has_next());
+                assert!(c.next().is_some());
+                assert!(c.next().is_none());
             }
 
             {
                 let mut c = i.next().unwrap();
-                c = c.next_descriptor().unwrap();
-                c = c.next_descriptor().unwrap();
+                c.next().unwrap();
+                c.next().unwrap();
+                c.next().unwrap();
                 assert!(!c.has_next());
+                assert!(c.next().is_none());
             }
         }
 
@@ -1209,9 +1235,11 @@ pub mod tests {
             assert!(q.iter(m).next().is_none());
             q.go_to_previous_position();
             let mut c = q.iter(m).next().unwrap();
-            c = c.next_descriptor().unwrap();
-            c = c.next_descriptor().unwrap();
+            c.next().unwrap();
+            c.next().unwrap();
+            c.next().unwrap();
             assert!(!c.has_next());
+            assert!(c.next().is_none());
         }
     }
 

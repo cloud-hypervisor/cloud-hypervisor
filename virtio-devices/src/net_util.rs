@@ -113,12 +113,8 @@ impl CtrlVirtio {
         CtrlVirtio { queue_evt, queue }
     }
 
-    fn process_mq(&self, mem: &GuestMemoryMmap, avail_desc: DescriptorChain) -> Result<()> {
-        let mq_desc = if avail_desc.has_next() {
-            avail_desc.next_descriptor().unwrap()
-        } else {
-            return Err(Error::NoQueuePairsNum);
-        };
+    fn process_mq(&self, mem: &GuestMemoryMmap, mut avail_desc: DescriptorChain) -> Result<()> {
+        let mq_desc = avail_desc.next().ok_or(Error::NoQueuePairsNum)?;
         let queue_pairs = mem
             .read_obj::<u16>(mq_desc.addr())
             .map_err(Error::GuestMemory)?;
@@ -127,11 +123,8 @@ impl CtrlVirtio {
         {
             return Err(Error::InvalidQueuePairsNum);
         }
-        let status_desc = if mq_desc.has_next() {
-            mq_desc.next_descriptor().unwrap()
-        } else {
-            return Err(Error::NoQueuePairsNum);
-        };
+
+        let status_desc = avail_desc.next().ok_or(Error::NoQueuePairsNum)?;
         mem.write_obj::<u8>(0, status_desc.addr())
             .map_err(Error::GuestMemory)?;
 

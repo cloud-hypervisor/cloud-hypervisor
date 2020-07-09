@@ -386,27 +386,28 @@ impl Request {
     // is created based on the information provided from the guest driver for
     // virtio-iommu (giving the link device_id <=> domain).
     fn parse(
-        avail_desc: &DescriptorChain,
+        avail_desc: &mut DescriptorChain,
         mem: &GuestMemoryMmap,
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         ext_domain_mapping: &mut BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     ) -> result::Result<usize, Error> {
+        let head_desc = avail_desc.next().ok_or(Error::DescriptorChainTooShort)?;
+
         // The head contains the request type which MUST be readable.
-        if avail_desc.is_write_only() {
+        if head_desc.is_write_only() {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
 
-        if (avail_desc.len() as usize) < size_of::<VirtioIommuReqHead>() {
+        if (head_desc.len() as usize) < size_of::<VirtioIommuReqHead>() {
             return Err(Error::InvalidRequest);
         }
 
-        let req_head: VirtioIommuReqHead = mem
-            .read_obj(avail_desc.addr())
-            .map_err(Error::GuestMemory)?;
+        let req_head: VirtioIommuReqHead =
+            mem.read_obj(head_desc.addr()).map_err(Error::GuestMemory)?;
         let req_offset = size_of::<VirtioIommuReqHead>();
-        let desc_size_left = (avail_desc.len() as usize) - req_offset;
-        let req_addr = if let Some(addr) = avail_desc.addr().checked_add(req_offset as u64) {
+        let desc_size_left = (head_desc.len() as usize) - req_offset;
+        let req_addr = if let Some(addr) = head_desc.addr().checked_add(req_offset as u64) {
             addr
         } else {
             return Err(Error::InvalidRequest);
@@ -568,9 +569,7 @@ impl Request {
             _ => return Err(Error::InvalidRequest),
         };
 
-        let status_desc = avail_desc
-            .next_descriptor()
-            .ok_or(Error::DescriptorChainTooShort)?;
+        let status_desc = avail_desc.next().ok_or(Error::DescriptorChainTooShort)?;
 
         // The status MUST always be writable
         if !status_desc.is_write_only() {
@@ -611,9 +610,9 @@ impl IommuEpollHandler {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
         let mem = self.mem.memory();
-        for avail_desc in self.queues[0].iter(&mem) {
+        for mut avail_desc in self.queues[0].iter(&mem) {
             let len = match Request::parse(
-                &avail_desc,
+                &mut avail_desc,
                 &mem,
                 &self.mapping,
                 &self.ext_mapping,

@@ -485,17 +485,19 @@ pub struct Request {
 
 impl Request {
     pub fn parse(
-        avail_desc: &DescriptorChain,
+        avail_desc: &mut DescriptorChain,
         mem: &GuestMemoryMmap,
     ) -> result::Result<Request, Error> {
+        let head_desc = avail_desc.next().ok_or(Error::DescriptorLengthTooSmall)?;
+
         // The head contains the request type which MUST be readable.
-        if avail_desc.is_write_only() {
+        if head_desc.is_write_only() {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
 
         let mut req = Request {
-            request_type: request_type(&mem, avail_desc.addr())?,
-            sector: sector(&mem, avail_desc.addr())?,
+            request_type: request_type(&mem, head_desc.addr())?,
+            sector: sector(&mem, head_desc.addr())?,
             data_addr: GuestAddress(0),
             data_len: 0,
             status_addr: GuestAddress(0),
@@ -504,9 +506,7 @@ impl Request {
 
         let data_desc;
         let status_desc;
-        let desc = avail_desc
-            .next_descriptor()
-            .ok_or(Error::DescriptorChainTooShort)?;
+        let desc = avail_desc.next().ok_or(Error::DescriptorChainTooShort)?;
 
         if !desc.has_next() {
             status_desc = desc;
@@ -516,9 +516,7 @@ impl Request {
             }
         } else {
             data_desc = desc;
-            status_desc = data_desc
-                .next_descriptor()
-                .ok_or(Error::DescriptorChainTooShort)?;
+            status_desc = avail_desc.next().ok_or(Error::DescriptorChainTooShort)?;
 
             if data_desc.is_write_only() && req.request_type == RequestType::Out {
                 return Err(Error::UnexpectedWriteOnlyDescriptor);
@@ -530,7 +528,7 @@ impl Request {
                 return Err(Error::UnexpectedReadOnlyDescriptor);
             }
 
-            req.data_addr = data_desc.desc.addr();
+            req.data_addr = data_desc.addr();
             req.data_len = data_desc.len();
         }
 
@@ -635,9 +633,9 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         let mut read_ops = Wrapping(0);
         let mut write_ops = Wrapping(0);
 
-        for avail_desc in queue.iter(&mem) {
+        for mut avail_desc in queue.iter(&mem) {
             let len;
-            match Request::parse(&avail_desc, &mem) {
+            match Request::parse(&mut avail_desc, &mem) {
                 Ok(mut request) => {
                     request.set_writeback(self.writeback.load(Ordering::SeqCst));
 

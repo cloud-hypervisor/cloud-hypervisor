@@ -127,10 +127,10 @@ impl VhostUserBlkThread {
             None => return false,
         };
 
-        while let Some(head) = vring.mut_queue().iter(mem).next() {
+        while let Some(mut head) = vring.mut_queue().iter(mem).next() {
             debug!("got an element in the queue");
             let len;
-            match Request::parse(&head, mem) {
+            match Request::parse(&mut head, mem) {
                 Ok(mut request) => {
                     debug!("element is a valid request");
                     request.set_writeback(self.writeback.load(Ordering::SeqCst));

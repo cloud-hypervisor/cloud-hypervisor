@@ -125,8 +125,8 @@ where
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
         let mem = self.mem.memory();
-        for avail_desc in self.queues[0].iter(&mem) {
-            let used_len = match VsockPacket::from_rx_virtq_head(&avail_desc) {
+        for mut avail_desc in self.queues[0].iter(&mem) {
+            let used_len = match VsockPacket::from_rx_virtq_head(&mut avail_desc) {
                 Ok(mut pkt) => {
                     if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
                         pkt.hdr().len() as u32 + pkt.len()
@@ -167,8 +167,8 @@ where
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE as usize];
         let mut used_count = 0;
         let mem = self.mem.memory();
-        for avail_desc in self.queues[1].iter(&mem) {
-            let pkt = match VsockPacket::from_tx_virtq_head(&avail_desc) {
+        for mut avail_desc in self.queues[1].iter(&mem) {
+            let pkt = match VsockPacket::from_tx_virtq_head(&mut avail_desc) {
                 Ok(pkt) => pkt,
                 Err(e) => {
                     error!("vsock: error reading TX packet: {:?}", e);
