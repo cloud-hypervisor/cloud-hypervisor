@@ -76,6 +76,7 @@ impl SgxEpcSection {
     }
 }
 
+#[derive(Clone)]
 pub struct SgxEpcRegion {
     start: GuestAddress,
     size: GuestUsize,
@@ -423,6 +424,7 @@ pub fn configure_system(
     setup_hdr: Option<setup_header>,
     rsdp_addr: Option<GuestAddress>,
     boot_prot: BootProtocol,
+    sgx_epc_region: Option<SgxEpcRegion>,
 ) -> super::Result<()> {
     smbios::setup_smbios(guest_mem).map_err(Error::SmbiosSetup)?;
 
@@ -439,7 +441,13 @@ pub fn configure_system(
 
     match boot_prot {
         BootProtocol::PvhBoot => {
-            configure_pvh(guest_mem, cmdline_addr, initramfs, rsdp_addr)?;
+            configure_pvh(
+                guest_mem,
+                cmdline_addr,
+                initramfs,
+                rsdp_addr,
+                sgx_epc_region,
+            )?;
         }
         BootProtocol::LinuxBoot => {
             configure_64bit_boot(
@@ -449,6 +457,7 @@ pub fn configure_system(
                 initramfs,
                 setup_hdr,
                 rsdp_addr,
+                sgx_epc_region,
             )?;
         }
     }
@@ -461,6 +470,7 @@ fn configure_pvh(
     cmdline_addr: GuestAddress,
     initramfs: &Option<InitramfsConfig>,
     rsdp_addr: Option<GuestAddress>,
+    sgx_epc_region: Option<SgxEpcRegion>,
 ) -> super::Result<()> {
     const XEN_HVM_START_MAGIC_VALUE: u32 = 0x336ec578;
 
@@ -534,6 +544,15 @@ fn configure_pvh(
         E820_RESERVED,
     )?;
 
+    if let Some(sgx_epc_region) = sgx_epc_region {
+        add_memmap_entry(
+            &mut memmap,
+            sgx_epc_region.start().raw_value(),
+            sgx_epc_region.size() as u64,
+            E820_RESERVED,
+        )?;
+    }
+
     start_info.0.memmap_entries = memmap.len() as u32;
 
     // Copy the vector with the memmap table to the MEMMAP_START address
@@ -600,6 +619,7 @@ fn configure_64bit_boot(
     initramfs: &Option<InitramfsConfig>,
     setup_hdr: Option<setup_header>,
     rsdp_addr: Option<GuestAddress>,
+    sgx_epc_region: Option<SgxEpcRegion>,
 ) -> super::Result<()> {
     const KERNEL_BOOT_FLAG_MAGIC: u16 = 0xaa55;
     const KERNEL_HDR_MAGIC: u32 = 0x53726448;
@@ -662,6 +682,15 @@ fn configure_64bit_boot(
         layout::PCI_MMCONFIG_SIZE,
         E820_RESERVED,
     )?;
+
+    if let Some(sgx_epc_region) = sgx_epc_region {
+        add_e820_entry(
+            &mut params.0,
+            sgx_epc_region.start().raw_value(),
+            sgx_epc_region.size() as u64,
+            E820_RESERVED,
+        )?;
+    }
 
     if let Some(rsdp_addr) = rsdp_addr {
         params.0.acpi_rsdp_addr = rsdp_addr.0;
@@ -888,6 +917,7 @@ mod tests {
             None,
             Some(layout::RSDP_POINTER),
             BootProtocol::LinuxBoot,
+            None,
         );
         assert!(config_err.is_err());
 
@@ -909,6 +939,7 @@ mod tests {
             None,
             None,
             BootProtocol::LinuxBoot,
+            None,
         )
         .unwrap();
 
@@ -921,6 +952,7 @@ mod tests {
             None,
             None,
             BootProtocol::PvhBoot,
+            None,
         )
         .unwrap();
 
@@ -942,6 +974,7 @@ mod tests {
             None,
             None,
             BootProtocol::LinuxBoot,
+            None,
         )
         .unwrap();
 
@@ -954,6 +987,7 @@ mod tests {
             None,
             None,
             BootProtocol::PvhBoot,
+            None,
         )
         .unwrap();
 
@@ -975,6 +1009,7 @@ mod tests {
             None,
             None,
             BootProtocol::LinuxBoot,
+            None,
         )
         .unwrap();
 
@@ -987,6 +1022,7 @@ mod tests {
             None,
             None,
             BootProtocol::PvhBoot,
+            None,
         )
         .unwrap();
     }
