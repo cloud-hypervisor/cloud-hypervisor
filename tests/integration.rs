@@ -1791,28 +1791,30 @@ mod tests {
             // Validate vsock works as expected.
             guest.check_vsock(socket.as_str());
 
-            let reboot_count = guest
-                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                .unwrap_or_default()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or(1);
+            #[cfg(not(feature = "mmio"))]
+            {
+                let reboot_count = guest
+                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1);
 
-            aver_eq!(tb, reboot_count, 0);
-            guest.ssh_command("sudo reboot").unwrap_or_default();
+                aver_eq!(tb, reboot_count, 0);
+                guest.ssh_command("sudo reboot").unwrap_or_default();
 
-            thread::sleep(std::time::Duration::new(30, 0));
-            let reboot_count = guest
-                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                .unwrap_or_default()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default();
-            aver_eq!(tb, reboot_count, 1);
+                thread::sleep(std::time::Duration::new(30, 0));
+                let reboot_count = guest
+                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default();
+                aver_eq!(tb, reboot_count, 1);
 
-            // Validate vsock still works after a reboot.
-            guest.check_vsock(socket.as_str());
-
+                // Validate vsock still works after a reboot.
+                guest.check_vsock(socket.as_str());
+            }
             if hotplug {
                 aver!(
                     tb,
@@ -3501,7 +3503,7 @@ mod tests {
             });
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_virtio_vsock() {
             _test_virtio_vsock(false)
         }
