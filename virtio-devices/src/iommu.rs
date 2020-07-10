@@ -101,9 +101,8 @@ unsafe impl ByteValued for VirtioIommuRange64 {}
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuTopoConfig {
-    offset: u32,
-    num_items: u32,
-    item_length: u32,
+    num_items: u16,
+    offset: u16,
 }
 
 unsafe impl ByteValued for VirtioIommuTopoConfig {}
@@ -121,32 +120,36 @@ struct VirtioIommuConfig {
 unsafe impl ByteValued for VirtioIommuConfig {}
 
 #[allow(unused)]
-const VIRTIO_IOMMU_TOPO_PCI_RANGE: u16 = 1;
+const VIRTIO_IOMMU_TOPO_PCI_RANGE: u8 = 1;
 #[allow(unused)]
-const VIRTIO_IOMMU_TOPO_ENDPOINT: u16 = 2;
+const VIRTIO_IOMMU_TOPO_MMIO: u8 = 2;
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
 struct VirtioIommuTopoPciRange {
-    type_: u16,
-    hierarchy: u16,
-    requester_start: u16,
-    requester_end: u16,
+    type_: u8,
+    reserved: u8,
+    length: u16,
     endpoint_start: u32,
+    segment: u16,
+    bdf_start: u16,
+    bdf_end: u16,
+    padding: u16,
 }
 
 unsafe impl ByteValued for VirtioIommuTopoPciRange {}
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(packed)]
-struct VirtioIommuTopoEndpoint {
-    type_: u16,
-    reserved: u16,
+struct VirtioIommuTopoMmio {
+    type_: u8,
+    reserved: u8,
+    length: u16,
     endpoint: u32,
     address: u64,
 }
 
-unsafe impl ByteValued for VirtioIommuTopoEndpoint {}
+unsafe impl ByteValued for VirtioIommuTopoMmio {}
 
 /// Virtio IOMMU request type
 const VIRTIO_IOMMU_T_ATTACH: u8 = 1;
@@ -894,7 +897,7 @@ impl Iommu {
     //
     // This function is dedicated to PCI, which means it will exclusively
     // create VIRTIO_IOMMU_TOPO_PCI_RANGE entries.
-    pub fn attach_pci_devices(&mut self, domain: u16, device_ids: Vec<u32>) {
+    pub fn attach_pci_devices(&mut self, segment: u16, device_ids: Vec<u32>) {
         if device_ids.is_empty() {
             warn!("No device to attach to virtual IOMMU");
             return;
@@ -910,18 +913,19 @@ impl Iommu {
             let dev_id = *device_id;
             topo_pci_ranges.push(VirtioIommuTopoPciRange {
                 type_: VIRTIO_IOMMU_TOPO_PCI_RANGE,
-                hierarchy: domain,
-                requester_start: dev_id as u16,
-                requester_end: dev_id as u16,
+                length: size_of::<VirtioIommuTopoPciRange>() as u16,
                 endpoint_start: dev_id,
+                segment,
+                bdf_start: dev_id as u16,
+                bdf_end: dev_id as u16,
+                ..Default::default()
             });
         }
         self.config_topo_pci_ranges = topo_pci_ranges;
 
         // Update the configuration to include the topology.
-        self.config.topo_config.offset = size_of::<VirtioIommuConfig>() as u32;
-        self.config.topo_config.num_items = self.config_topo_pci_ranges.len() as u32;
-        self.config.topo_config.item_length = size_of::<VirtioIommuTopoPciRange>() as u32;
+        self.config.topo_config.num_items = self.config_topo_pci_ranges.len() as u16;
+        self.config.topo_config.offset = size_of::<VirtioIommuConfig>() as u16;
     }
 
     pub fn add_external_mapping(&mut self, device_id: u32, mapping: Arc<dyn ExternalDmaMapping>) {
