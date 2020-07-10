@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+use super::RawFile;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, BufWriter, Seek, SeekFrom};
 use std::mem::size_of;
-use virtio_devices::RawFile;
 use vmm_sys_util::write_zeroes::WriteZeroes;
 
 /// A qcow file. Allows reading/writing clusters and appending clusters.

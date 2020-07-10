@@ -1602,7 +1602,7 @@ impl DeviceManager {
                 )
                 .map_err(DeviceManagerError::Disk)?;
 
-            let mut raw_img = virtio_devices::RawFile::new(image, disk_cfg.direct);
+            let mut raw_img = qcow::RawFile::new(image, disk_cfg.direct);
 
             let image_type = qcow::detect_image_type(&mut raw_img)
                 .map_err(DeviceManagerError::DetectImageType)?;

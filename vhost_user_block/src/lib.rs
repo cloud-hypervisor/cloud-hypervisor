@@ -207,7 +207,7 @@ impl VhostUserBlkBackend {
             options.custom_flags(libc::O_DIRECT);
         }
         let image: File = options.open(&image_path).unwrap();
-        let mut raw_img: virtio_devices::RawFile = virtio_devices::RawFile::new(image, direct);
+        let mut raw_img: qcow::RawFile = qcow::RawFile::new(image, direct);
 
         let image_id = build_disk_image_id(&PathBuf::from(&image_path));
         let image_type = qcow::detect_image_type(&mut raw_img).unwrap();
