@@ -14,7 +14,6 @@ libc = "0.2.72"
 log = "0.4.8"
 remain = "0.2.2"
 vmm-sys-util = ">=0.3.1"
-virtio-devices = { path = "../virtio-devices" }
 
 [dev-dependencies]
 tempfile = "3.1.0"

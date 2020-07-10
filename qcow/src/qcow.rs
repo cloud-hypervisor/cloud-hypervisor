@@ -6,26 +6,26 @@
 extern crate log;
 
 mod qcow_raw_file;
+mod raw_file;
 mod refcount;
 mod vec_cache;
 
+use crate::qcow_raw_file::QcowRawFile;
+use crate::refcount::RefCount;
+use crate::vec_cache::{CacheMap, Cacheable, VecCache};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use libc::{EINVAL, ENOSPC, ENOTSUP};
 use remain::sorted;
-use virtio_devices::RawFile;
+use std::cmp::{max, min};
+use std::fmt::{self, Display};
+use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::mem::size_of;
 use vmm_sys_util::{
     file_traits::FileSetLen, file_traits::FileSync, seek_hole::SeekHole, write_zeroes::PunchHole,
     write_zeroes::WriteZeroes,
 };
 
-use std::cmp::{max, min};
-use std::fmt::{self, Display};
-use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::mem::size_of;
-
-use crate::qcow_raw_file::QcowRawFile;
-use crate::refcount::RefCount;
-use crate::vec_cache::{CacheMap, Cacheable, VecCache};
+pub use crate::raw_file::RawFile;
 
 #[sorted]
 #[derive(Debug)]
@@ -367,8 +367,7 @@ fn max_refcount_clusters(refcount_order: u32, cluster_size: u32, num_clusters: u
 ///
 /// ```
 /// # use std::io::{Read, Seek, SeekFrom};
-/// # use virtio_devices::RawFile;
-/// # use qcow::{self, QcowFile};
+/// # use qcow::{self, QcowFile, RawFile};
 /// # fn test(file: std::fs::File) -> std::io::Result<()> {
 ///     let mut raw_img = RawFile::new(file, false);
 ///     let mut q = QcowFile::from(raw_img).expect("Can't open qcow file");
@@ -1703,7 +1702,6 @@ mod tests {
     use super::*;
     use std::io::{Read, Seek, SeekFrom, Write};
     use tempfile::tempfile;
-    use virtio_devices::RawFile;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![
