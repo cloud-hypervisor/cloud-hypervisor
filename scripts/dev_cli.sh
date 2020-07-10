@@ -208,7 +208,7 @@ cmd_build() {
 
     rustflags=""
     if [ $(uname -m) = "aarch64" ] && [ $libc = "musl" ] ; then
-        rustflags="-C link-arg=-lgcc"
+        rustflags="-C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
     fi
 
     # A workaround on Arm64 to avoid build errors in kvm-bindings
