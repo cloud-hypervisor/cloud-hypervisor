@@ -4262,6 +4262,8 @@ mod tests {
                         .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
                 );
 
+                thread::sleep(std::time::Duration::new(10, 0));
+
                 // Check that if /dev/vdc exists and the block size is 16M.
                 aver_eq!(
                     tb,
