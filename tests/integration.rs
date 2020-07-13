@@ -3212,7 +3212,7 @@ mod tests {
                 thread::sleep(std::time::Duration::new(30, 0));
 
                 guest.ssh_command_l1("sudo systemctl start vfio")?;
-                thread::sleep(std::time::Duration::new(60, 0));
+                thread::sleep(std::time::Duration::new(120, 0));
 
                 // We booted our cloud hypervisor L2 guest with a "VFIOTAG" tag
                 // added to its kernel command line.
