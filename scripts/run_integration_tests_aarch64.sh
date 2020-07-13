@@ -104,30 +104,27 @@ PE_IMAGE="$WORKLOADS_DIR/Image"
 LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
 
 build_custom_linux_kernel() {
-    SRCDIR=$PWD
-    pushd $WORKLOADS_DIR
-    time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu-virtio-mem-5.6-rc4" $LINUX_CUSTOM_DIR
-    cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
-    popd
-
     pushd $LINUX_CUSTOM_DIR
     time make -j `nproc`
     cp arch/arm64/boot/Image $WORKLOADS_DIR/Image || exit 1
     popd
 }
 
-if [ ! -f "$PE_IMAGE" ]; then
-    build_custom_linux_kernel
+if [ ! -d "$LINUX_CUSTOM_DIR" ]; then
+    pushd $WORKLOADS_DIR
+    time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu-virtio-mem-5.6-rc4" $LINUX_CUSTOM_DIR
+    popd
+
 else
-    SRCDIR=$PWD
-    if [ "$PE_IMAGE" -ot "$SRCDIR/resources/linux-config-aarch64" ]; then
-        build_custom_linux_kernel
-    fi
+    pushd $LINUX_CUSTOM_DIR
+    git fetch
+    git checkout -f
+    popd
 fi
 
-if [ -d "$LINUX_CUSTOM_DIR" ]; then
-    rm -rf $LINUX_CUSTOM_DIR
-fi
+SRCDIR=$PWD
+cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
+build_custom_linux_kernel
 
 VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
 QEMU_DIR="qemu_build"
