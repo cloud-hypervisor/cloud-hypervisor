@@ -27,7 +27,7 @@ mod tests {
     use std::io::BufRead;
     use std::io::{Read, Write};
     use std::net::TcpStream;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Stdio};
     use std::string::String;
     use std::sync::Mutex;
@@ -88,10 +88,6 @@ mod tests {
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64";
     #[cfg(target_arch = "aarch64")]
     const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64";
-
-    #[cfg(target_arch = "aarch64")]
-    const ARM64_KERNEL_CMDLINE: &str =
-        "keep_bootcon console=hvc0 reboot=k panic=1 pci=off root=/dev/vdb1 rw";
 
     const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=ttyS0 console=hvc0 quiet rw";
 
@@ -362,6 +358,22 @@ mod tests {
         let snapshot_dir = String::from(tmp_dir.path().join("snapshot").to_str().unwrap());
         std::fs::create_dir(&snapshot_dir).unwrap();
         snapshot_dir
+    }
+
+    // Creates the path for direct kernel boot and return the path.
+    // For x86_64, this function returns the vmlinux kernel path.
+    // For AArch64, this function returns the PE kernel path.
+    fn direct_kernel_boot_path() -> Option<PathBuf> {
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
+
+        let mut kernel_path = workload_path;
+        #[cfg(target_arch = "x86_64")]
+        kernel_path.push("vmlinux");
+        #[cfg(target_arch = "aarch64")]
+        kernel_path.push("Image");
+
+        Some(kernel_path)
     }
 
     fn prepare_vhost_user_net_daemon(
@@ -970,8 +982,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path;
-            kernel_path.push("vmlinux");
+            let kernel_path = direct_kernel_boot_path().unwrap();
 
             let host_mac = if generate_host_mac {
                 Some(MacAddr::local_random())
@@ -1137,8 +1148,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path.clone();
-            kernel_path.push("vmlinux");
+            let kernel_path = direct_kernel_boot_path().unwrap();
 
             let (blk_params, daemon_child) = if self_spawned {
                 let mut blk_file_path = workload_path;
@@ -1191,7 +1201,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
+            thread::sleep(std::time::Duration::new(120, 0));
 
             // Check both if /dev/vdc exists and if the block size is 16M.
             aver_eq!(
@@ -1313,8 +1323,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path;
-            kernel_path.push("vmlinux");
+            let kernel_path = direct_kernel_boot_path().unwrap();
 
             let disk_path = guest
                 .disk_config
@@ -1367,7 +1376,7 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
+            thread::sleep(std::time::Duration::new(40, 0));
 
             // Just check the VM booted correctly.
             aver_eq!(
@@ -1430,11 +1439,10 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut shared_dir = workload_path.clone();
+            let mut shared_dir = workload_path;
             shared_dir.push("shared_dir");
 
-            let mut kernel_path = workload_path;
-            kernel_path.push("vmlinux");
+            let kernel_path = direct_kernel_boot_path().unwrap();
 
             let (dax_vmm_param, dax_mount_param) = if dax { ("on", "-o dax") } else { ("off", "") };
             let cache_size_vmm_param = if let Some(cache) = cache_size {
@@ -1644,8 +1652,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path;
-            kernel_path.push("bzImage");
+            let kernel_path = direct_kernel_boot_path().unwrap();
 
             let mut pmem_temp_file = NamedTempFile::new().unwrap();
             pmem_temp_file.as_file_mut().set_len(128 << 20).unwrap();
@@ -1745,8 +1752,8 @@ mod tests {
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
-            let mut kernel_path = workload_path;
-            kernel_path.push("vmlinux");
+
+            let kernel_path = direct_kernel_boot_path().unwrap();
 
             let socket = temp_vsock_path(&guest.tmp_dir);
             let api_socket = temp_api_path(&guest.tmp_dir);
@@ -2202,8 +2209,7 @@ mod tests {
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
 
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=1"])
@@ -2257,8 +2263,7 @@ mod tests {
                     let mut workload_path = dirs::home_dir().unwrap();
                     workload_path.push("workloads");
 
-                    let mut kernel_path = workload_path;
-                    kernel_path.push("Image");
+                    let kernel_path = direct_kernel_boot_path().unwrap();
 
                     let mut child = GuestCommand::new(&guest)
                         .args(&["--cpus", "boot=1"])
@@ -2266,7 +2271,7 @@ mod tests {
                         .args(&["--kernel", kernel_path.to_str().unwrap()])
                         .default_disks()
                         .default_net()
-                        .args(&["--cmdline", ARM64_KERNEL_CMDLINE])
+                        .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                         .args(&["--seccomp", "false"])
                         .spawn()
                         .unwrap();
@@ -2385,11 +2390,10 @@ mod tests {
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
 
-                let mut blk_file_path = workload_path.clone();
+                let mut blk_file_path = workload_path;
                 blk_file_path.push("blk.img");
 
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut cloud_child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=4"])
@@ -2506,36 +2510,43 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_net_self_spawning() {
             test_vhost_user_net(None, 4, None, true, false)
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_net_self_spawning_host_mac() {
             test_vhost_user_net(None, 2, None, true, true)
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_net_host_mac() {
             test_vhost_user_net(None, 2, None, true, true)
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_blk_default() {
             test_vhost_user_blk(2, false, false, Some(&prepare_vubd), false)
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_blk_self_spawning() {
             test_vhost_user_blk(1, false, false, None, true)
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_blk_readonly() {
             test_vhost_user_blk(1, true, false, Some(&prepare_vubd), false)
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_blk_direct() {
             test_vhost_user_blk(1, false, true, Some(&prepare_vubd), false)
         }
@@ -2546,6 +2557,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_boot_from_vhost_user_blk_self_spawning() {
             test_boot_from_vhost_user_blk(1, false, false, None, true)
         }
@@ -2595,26 +2607,31 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_on_default_cache_size() {
             test_virtio_fs(true, None, "none", &prepare_virtiofsd, false)
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_on_cache_size_1_gib() {
             test_virtio_fs(true, Some(0x4000_0000), "none", &prepare_virtiofsd, false)
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_off() {
             test_virtio_fs(false, None, "none", &prepare_virtiofsd, false)
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_on_default_cache_size_w_vhost_user_fs_daemon() {
             test_virtio_fs(true, None, "none", &prepare_vhost_user_fs_daemon, false)
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_on_cache_size_1_gib_w_vhost_user_fs_daemon() {
             test_virtio_fs(
                 true,
@@ -2626,6 +2643,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_off_w_vhost_user_fs_daemon() {
             test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon, false)
         }
@@ -2673,8 +2691,7 @@ mod tests {
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
 
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=1"])
@@ -2738,8 +2755,8 @@ mod tests {
 
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=1"])
@@ -2939,8 +2956,8 @@ mod tests {
 
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=1"])
@@ -3042,8 +3059,8 @@ mod tests {
 
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=1"])
@@ -3356,6 +3373,7 @@ mod tests {
         }
 
         #[cfg_attr(feature = "mmio", test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_vmlinux_boot_noacpi() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3363,8 +3381,7 @@ mod tests {
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
 
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=1"])
@@ -3511,6 +3528,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_vsock() {
             _test_virtio_vsock(false)
         }
@@ -3851,8 +3869,8 @@ mod tests {
                 let api_socket = temp_api_path(&guest.tmp_dir);
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=2,max=4"])
@@ -3945,8 +3963,8 @@ mod tests {
                 let api_socket = temp_api_path(&guest.tmp_dir);
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=2,max=4"])
@@ -4051,6 +4069,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_mem() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4058,8 +4077,8 @@ mod tests {
                 let api_socket = temp_api_path(&guest.tmp_dir);
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=2,max=4"])
@@ -4122,8 +4141,8 @@ mod tests {
                 let api_socket = temp_api_path(&guest.tmp_dir);
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=2,max=4"])
@@ -4177,8 +4196,7 @@ mod tests {
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
 
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let guest_memory_size_kb = 512 * 1024;
 
@@ -4217,8 +4235,8 @@ mod tests {
 
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -4355,8 +4373,8 @@ mod tests {
 
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -4493,8 +4511,8 @@ mod tests {
 
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
-                let mut kernel_path = workload_path;
-                kernel_path.push("vmlinux");
+
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -4567,6 +4585,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_initramfs() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4574,8 +4593,7 @@ mod tests {
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
 
-                let mut kernel_path = workload_path.clone();
-                kernel_path.push("vmlinux");
+                let kernel_path = direct_kernel_boot_path().unwrap();
 
                 let mut pvh_kernel_path = workload_path.clone();
                 pvh_kernel_path.push("vmlinux.pvh");
@@ -4616,6 +4634,7 @@ mod tests {
         // through each ssh command. There's no need to perform a dedicated test to
         // verify the migration went well for virtio-net.
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_snapshot_restore() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
