@@ -65,15 +65,14 @@ pub struct EntryPoint {
 pub fn configure_vcpu(
     fd: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
-    vm_fd: &Arc<dyn hypervisor::Vm>,
+    vm: &Arc<dyn hypervisor::Vm>,
     kernel_entry_point: Option<EntryPoint>,
     vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
 ) -> super::Result<u64> {
     let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
 
     // This reads back the kernel's preferred target type.
-    vm_fd
-        .get_preferred_target(&mut kvi)
+    vm.get_preferred_target(&mut kvi)
         .map_err(Error::VcpuArmPreferredTarget)?;
     // We already checked that the capability is supported.
     kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
@@ -138,7 +137,7 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)]
 pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
-    vm_fd: &Arc<dyn hypervisor::Vm>,
+    vm: &Arc<dyn hypervisor::Vm>,
     guest_mem: &GuestMemoryMmap,
     cmdline_cstring: &CStr,
     vcpu_count: u64,
@@ -146,7 +145,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
     device_info: &HashMap<(DeviceType, String), T>,
     initrd: &Option<super::InitramfsConfig>,
 ) -> super::Result<()> {
-    let gic_device = gic::create_gic(vm_fd, vcpu_count).map_err(Error::SetupGIC)?;
+    let gic_device = gic::create_gic(vm, vcpu_count).map_err(Error::SetupGIC)?;
 
     let dtb = fdt::create_fdt(
         guest_mem,

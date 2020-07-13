@@ -280,7 +280,7 @@ impl VfioPciConfig {
 /// The VMM creates a VfioDevice, then assigns it to a VfioPciDevice,
 /// which then gets added to the PCI bus.
 pub struct VfioPciDevice {
-    vm_fd: Arc<dyn hypervisor::Vm>,
+    vm: Arc<dyn hypervisor::Vm>,
     device: Arc<VfioDevice>,
     vfio_pci_configuration: VfioPciConfig,
     configuration: PciConfiguration,
@@ -292,7 +292,7 @@ pub struct VfioPciDevice {
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
     pub fn new(
-        vm_fd: &Arc<dyn hypervisor::Vm>,
+        vm: &Arc<dyn hypervisor::Vm>,
         device: VfioDevice,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -316,7 +316,7 @@ impl VfioPciDevice {
         let vfio_pci_configuration = VfioPciConfig::new(Arc::clone(&device));
 
         let mut vfio_pci_device = VfioPciDevice {
-            vm_fd: vm_fd.clone(),
+            vm: vm.clone(),
             device,
             configuration,
             vfio_pci_configuration,
@@ -597,7 +597,7 @@ impl VfioPciDevice {
                     flags: 0,
                 };
 
-                if let Err(e) = self.vm_fd.set_user_memory_region(kvm_region) {
+                if let Err(e) = self.vm.set_user_memory_region(kvm_region) {
                     error!(
                         "Could not remove the userspace memory region from KVM: {}",
                         e
@@ -1025,7 +1025,7 @@ impl PciDevice for VfioPciDevice {
                             flags: 0,
                         };
 
-                        self.vm_fd
+                        self.vm
                             .set_user_memory_region(old_mem_region)
                             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
@@ -1038,7 +1038,7 @@ impl PciDevice for VfioPciDevice {
                             flags: 0,
                         };
 
-                        self.vm_fd
+                        self.vm
                             .set_user_memory_region(new_mem_region)
                             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
                     }
