@@ -540,6 +540,10 @@ fn create_devices_node<T: DeviceInfoForFDT + Clone + Debug>(
 
     // Sort out virtio devices by address from low to high and insert them into fdt table.
     ordered_virtio_device.sort_by(|a, b| a.addr().cmp(&b.addr()));
+    // Current address allocation strategy in cloud-hypervisor is: the first created device
+    // will be allocated to higher address. Here we reverse the vector to make sure that
+    // the older created device will appear in front of the newer created device in FDT.
+    ordered_virtio_device.reverse();
     for ordered_device_info in ordered_virtio_device.drain(..) {
         create_virtio_node(fdt, ordered_device_info)?;
     }

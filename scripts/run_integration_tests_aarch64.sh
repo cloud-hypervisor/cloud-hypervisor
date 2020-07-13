@@ -207,6 +207,7 @@ if [ $RES -eq 0 ]; then
     strip target/$BUILD_TARGET/release/ch-remote
 
     sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/cloud-hypervisor
+    sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/vhost_user_net
 
     # Ensure test binary has the same caps as the cloud-hypervisor one
     time cargo test --no-run --no-default-features --features "integration_tests,mmio,kvm" -- --nocapture || exit 1
@@ -214,7 +215,7 @@ if [ $RES -eq 0 ]; then
 
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --no-default-features --features "integration_tests,mmio,kvm" "tests::parallel::test_aarch64_pe_boot" -- --nocapture
+time cargo test --no-default-features --features "integration_tests,mmio,kvm" "tests::parallel::$@" -- --nocapture
 EOF
 
     RES=$?
