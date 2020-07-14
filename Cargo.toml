@@ -66,5 +66,6 @@ members = [
     "arch_gen",
     "net_gen",
     "vm-allocator",
-    "option_parser"
+    "option_parser",
+    "block_util"
 ]
