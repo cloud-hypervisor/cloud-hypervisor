@@ -650,8 +650,7 @@ mod tests {
         .cloned()
         .collect();
 
-        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
-        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let gic = create_gic(&vm, 1, false).unwrap();
         assert!(create_fdt(

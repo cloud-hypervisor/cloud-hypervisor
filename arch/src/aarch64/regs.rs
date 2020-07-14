@@ -163,8 +163,7 @@ mod tests {
 
     #[test]
     fn test_setup_regs() {
-        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
-        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         let mut regions = Vec::new();
@@ -182,8 +181,7 @@ mod tests {
     }
     #[test]
     fn test_read_mpidr() {
-        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
-        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();

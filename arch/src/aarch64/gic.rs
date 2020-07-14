@@ -177,8 +177,7 @@ mod tests {
 
     #[test]
     fn test_create_gic() {
-        let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
-        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
 
         assert!(create_gic(&vm, 1, false).is_ok());
