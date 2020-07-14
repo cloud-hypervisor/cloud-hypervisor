@@ -35,8 +35,8 @@ pub enum Error {
     /// Failed to create a GIC.
     SetupGIC(gic::Error),
 
-    /// Failed to compute the initrd address.
-    InitrdAddress,
+    /// Failed to compute the initramfs address.
+    InitramfsAddress,
 
     /// Error configuring the general purpose registers
     REGSConfiguration(regs::Error),
@@ -163,6 +163,26 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
     .map_err(Error::SetupFDT)?;
 
     Ok(())
+}
+
+/// Returns the memory address where the initramfs could be loaded.
+pub fn initramfs_load_addr(
+    guest_mem: &GuestMemoryMmap,
+    initramfs_size: usize,
+) -> super::Result<u64> {
+    let round_to_pagesize = |size| (size + (super::PAGE_SIZE - 1)) & !(super::PAGE_SIZE - 1);
+    match GuestAddress(get_fdt_addr(&guest_mem))
+        .checked_sub(round_to_pagesize(initramfs_size) as u64)
+    {
+        Some(offset) => {
+            if guest_mem.address_in_range(offset) {
+                Ok(offset.raw_value())
+            } else {
+                Err(super::Error::AArch64Setup(Error::InitramfsAddress))
+            }
+        }
+        None => Err(super::Error::AArch64Setup(Error::InitramfsAddress)),
+    }
 }
 
 /// Returns the memory address where the kernel could be loaded.
