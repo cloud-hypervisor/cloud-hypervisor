@@ -4585,7 +4585,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_initramfs() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4593,10 +4592,15 @@ mod tests {
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
 
-                let kernel_path = direct_kernel_boot_path().unwrap();
+                let mut kernels = vec![];
+                kernels.push(direct_kernel_boot_path().unwrap());
 
-                let mut pvh_kernel_path = workload_path.clone();
-                pvh_kernel_path.push("vmlinux.pvh");
+                #[cfg(target_arch = "x86_64")]
+                {
+                    let mut pvh_kernel_path = workload_path.clone();
+                    pvh_kernel_path.push("vmlinux.pvh");
+                    kernels.push(pvh_kernel_path);
+                }
 
                 let mut initramfs_path = workload_path;
                 initramfs_path.push("alpine_initramfs.img");
@@ -4604,28 +4608,26 @@ mod tests {
                 let test_string = String::from("axz34i9rylotd8n50wbv6kcj7f2qushme1pg");
                 let cmdline = format!("console=hvc0 quiet TEST_STRING={}", test_string);
 
-                vec![kernel_path, pvh_kernel_path]
-                    .iter()
-                    .for_each(|k_path| {
-                        let mut child = GuestCommand::new(&guest)
-                            .args(&["--kernel", k_path.to_str().unwrap()])
-                            .args(&["--initramfs", initramfs_path.to_str().unwrap()])
-                            .args(&["--cmdline", &cmdline])
-                            .capture_output()
-                            .spawn()
-                            .unwrap();
+                kernels.iter().for_each(|k_path| {
+                    let mut child = GuestCommand::new(&guest)
+                        .args(&["--kernel", k_path.to_str().unwrap()])
+                        .args(&["--initramfs", initramfs_path.to_str().unwrap()])
+                        .args(&["--cmdline", &cmdline])
+                        .capture_output()
+                        .spawn()
+                        .unwrap();
 
-                        thread::sleep(std::time::Duration::new(20, 0));
+                    thread::sleep(std::time::Duration::new(20, 0));
 
-                        let _ = child.kill();
-                        match child.wait_with_output() {
-                            Ok(out) => {
-                                let s = String::from_utf8_lossy(&out.stdout);
-                                aver_ne!(tb, s.lines().position(|line| line == test_string), None);
-                            }
-                            Err(_) => aver!(tb, false),
+                    let _ = child.kill();
+                    match child.wait_with_output() {
+                        Ok(out) => {
+                            let s = String::from_utf8_lossy(&out.stdout);
+                            aver_ne!(tb, s.lines().position(|line| line == test_string), None);
                         }
-                    });
+                        Err(_) => aver!(tb, false),
+                    }
+                });
                 Ok(())
             });
         }
