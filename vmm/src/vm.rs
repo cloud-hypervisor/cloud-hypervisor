@@ -47,12 +47,10 @@ use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 use linux_loader::loader::KernelLoader;
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 use std::collections::HashMap;
-#[cfg(target_arch = "x86_64")]
 use std::convert::TryInto;
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
-#[cfg(target_arch = "x86_64")]
 use std::io::{Seek, SeekFrom};
 use std::num::Wrapping;
 use std::ops::Deref;
@@ -60,9 +58,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use url::Url;
-use vm_memory::{Address, GuestAddress, GuestAddressSpace};
-#[cfg(target_arch = "x86_64")]
-use vm_memory::{Bytes, GuestMemoryMmap};
+use vm_memory::{Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryMmap};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
@@ -245,7 +241,6 @@ impl VmState {
 
 pub struct Vm {
     kernel: File,
-    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     initramfs: Option<File>,
     threads: Vec<thread::JoinHandle<()>>,
     device_manager: Arc<Mutex<DeviceManager>>,
@@ -434,7 +429,6 @@ impl Vm {
         )
     }
 
-    #[cfg(target_arch = "x86_64")]
     fn load_initramfs(&mut self, guest_mem: &GuestMemoryMmap) -> Result<arch::InitramfsConfig> {
         let mut initramfs = self.initramfs.as_ref().unwrap();
         let size: usize = initramfs
@@ -631,6 +625,10 @@ impl Vm {
         let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
+        let initramfs_config = match self.initramfs {
+            Some(_) => Some(self.load_initramfs(mem.deref())?),
+            None => None,
+        };
 
         let device_info = &self
             .device_manager
@@ -671,7 +669,7 @@ impl Vm {
             self.cpu_manager.lock().unwrap().boot_vcpus() as u64,
             vcpu_mpidrs,
             device_info,
-            &None,
+            &initramfs_config,
             &pci_space,
         )
         .map_err(Error::ConfigureSystem)?;
