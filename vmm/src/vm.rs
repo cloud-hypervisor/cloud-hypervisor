@@ -1489,8 +1489,7 @@ pub fn test_vm() {
     let load_addr = GuestAddress(0x1000);
     let mem = GuestMemoryMmap::from_ranges(&[(load_addr, mem_size)]).unwrap();
 
-    let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
-    let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+    let hv = hypervisor::new().unwrap();
     let vm = hv.create_vm().expect("new VM creation failed");
 
     mem.with_regions(|index, region| {
