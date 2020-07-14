@@ -1,0 +1,14 @@
+[package]
+name = "block_util"
+version = "0.1.0"
+authors = ["The Cloud Hypervisor Authors"]
+edition = "2018"
+
+[dependencies]
+log = "0.4.8"
+serde = ">=1.0.27"
+serde_derive = ">=1.0.27"
+serde_json = ">=1.0.9"
+virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
+vm-memory = { version = "0.2.1", features = ["backend-mmap", "backend-atomic"] }
+vm-virtio = { path = "../vm-virtio" }

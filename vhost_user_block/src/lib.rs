@@ -8,11 +8,12 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
+extern crate block_util;
 extern crate log;
 extern crate vhost_rs;
 extern crate vhost_user_backend;
-extern crate virtio_devices;
 
+use block_util::{build_disk_image_id, Request, VirtioBlockConfig};
 use libc::EFD_NONBLOCK;
 use log::*;
 use option_parser::{OptionParser, OptionParserError, Toggle};
@@ -37,8 +38,6 @@ use vhost_rs::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
-use virtio_devices::block::{build_disk_image_id, Request};
-use virtio_devices::VirtioBlockConfig;
 use vm_memory::ByteValued;
 use vm_memory::{Bytes, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
