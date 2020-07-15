@@ -48,24 +48,25 @@ integration_tests = []
 
 [workspace]
 members = [
+    "acpi_tables",
     "arch",
+    "arch_gen",
+    "block_util",
     "devices",
-    "qcow",
+    "hypervisor",
+    "net_gen",
+    "net_util",
+    "option_parser",
     "pci",
-    "virtio-devices",
-    "vmm",
-    "vm-virtio",
-    "vm-device",
-    "vm-migration",
-    "vhost_user_block",
+    "qcow",
     "vhost_user_backend",
+    "vhost_user_block",
     "vhost_user_fs",
     "vhost_user_net",
-    "net_util",
-    "acpi_tables",
-    "arch_gen",
-    "net_gen",
+    "virtio-devices",
+    "vmm",
     "vm-allocator",
-    "option_parser",
-    "block_util"
+    "vm-device",
+    "vm-migration",
+    "vm-virtio"
 ]
