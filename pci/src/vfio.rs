@@ -13,7 +13,6 @@ use crate::{
 };
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
-use hypervisor::kvm::kvm_userspace_memory_region;
 use std::any::Any;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
@@ -560,13 +559,13 @@ impl VfioPciDevice {
                 }
 
                 let slot = mem_slot();
-                let mem_region = kvm_userspace_memory_region {
+                let mem_region = vm.make_user_memory_region(
                     slot,
-                    guest_phys_addr: region.start.raw_value() + mmap_offset,
-                    memory_size: mmap_size as u64,
-                    userspace_addr: host_addr as u64,
-                    flags: 0,
-                };
+                    region.start.raw_value() + mmap_offset,
+                    mmap_size as u64,
+                    host_addr as u64,
+                    false,
+                );
 
                 vm.set_user_memory_region(mem_region)
                     .map_err(|e| VfioPciError::MapRegionGuest(e.into()))?;
@@ -589,13 +588,13 @@ impl VfioPciDevice {
                 let (mmap_offset, _) = self.device.get_region_mmap(region.index);
 
                 // Remove region from KVM
-                let kvm_region = kvm_userspace_memory_region {
-                    slot: mem_slot,
-                    guest_phys_addr: region.start.raw_value() + mmap_offset,
-                    memory_size: 0,
-                    userspace_addr: host_addr,
-                    flags: 0,
-                };
+                let kvm_region = self.vm.make_user_memory_region(
+                    mem_slot,
+                    region.start.raw_value() + mmap_offset,
+                    0,
+                    host_addr as u64,
+                    false,
+                );
 
                 if let Err(e) = self.vm.set_user_memory_region(kvm_region) {
                     error!(
@@ -1017,26 +1016,26 @@ impl PciDevice for VfioPciDevice {
                         let (mmap_offset, mmap_size) = self.device.get_region_mmap(region.index);
 
                         // Remove old region from KVM
-                        let old_mem_region = kvm_userspace_memory_region {
-                            slot: mem_slot,
-                            guest_phys_addr: old_base + mmap_offset,
-                            memory_size: 0,
-                            userspace_addr: host_addr,
-                            flags: 0,
-                        };
+                        let old_mem_region = self.vm.make_user_memory_region(
+                            mem_slot,
+                            old_base + mmap_offset,
+                            0,
+                            host_addr as u64,
+                            false,
+                        );
 
                         self.vm
                             .set_user_memory_region(old_mem_region)
                             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
                         // Insert new region to KVM
-                        let new_mem_region = kvm_userspace_memory_region {
-                            slot: mem_slot,
-                            guest_phys_addr: new_base + mmap_offset,
-                            memory_size: mmap_size as u64,
-                            userspace_addr: host_addr,
-                            flags: 0,
-                        };
+                        let new_mem_region = self.vm.make_user_memory_region(
+                            mem_slot,
+                            new_base + mmap_offset,
+                            mmap_size as u64,
+                            host_addr as u64,
+                            false,
+                        );
 
                         self.vm
                             .set_user_memory_region(new_mem_region)
