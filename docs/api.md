@@ -91,12 +91,12 @@ Add/remove CPUs to/from the VM     | `/vm.resize`        | `/schemas/VmResize`  
 Remove memory from the VM          | `/vm.resize`        | `/schemas/VmResize`       | N/A                      | The VM is booted
 Dump the VM information            | `/vm.info`          | N/A                       | `/schemas/VmInfo`        | The VM is created
 Add VFIO PCI device to the VM      | `/vm.add-device`    | `/schemas/VmAddDevice`    | `/schemas/PciDeviceInfo` | The VM is booted
-Remove VFIO PCI device from the VM | `/vm.remove-device` | `/schemas/VmRemoveDevice` | N/A                      | The VM is booted
 Add disk device to the VM          | `/vm.add-disk`      | `/schemas/DiskConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
 Add fs device to the VM            | `/vm.add-fs`        | `/schemas/FsConfig`       | `/schemas/PciDeviceInfo` | The VM is booted
 Add pmem device to the VM          | `/vm.add-pmem`      | `/schemas/PmemConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
 Add network device to the VM       | `/vm.add-net`       | `/schemas/NetConfig`      | `/schemas/PciDeviceInfo` | The VM is booted
 Add vsock device to the VM         | `/vm.add-vsock`     | `/schemas/VsockConfig`    | `/schemas/PciDeviceInfo` | The VM is booted
+Remove device from the VM          | `/vm.remove-device` | `/schemas/VmRemoveDevice` | N/A                      | The VM is booted
 Dump the VM counters               | `/vm.counters`      | N/A                       | `/schemas/VmCounters`    | The VM is booted
 
 ### REST API Examples
