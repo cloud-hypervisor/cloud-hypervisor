@@ -508,15 +508,20 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
-        let config_slice = self.config.as_mut_slice();
-        let data_len = data.len() as u64;
-        let config_len = config_slice.len() as u64;
-        if offset + data_len > config_len {
-            error!("Failed to write config space");
+        // The "writeback" field is the only mutable field
+        let writeback_offset =
+            (&self.config.writeback as *const _ as u64) - (&self.config as *const _ as u64);
+        if offset != writeback_offset || data.len() != std::mem::size_of_val(&self.config.writeback)
+        {
+            error!(
+                "Attempt to write to read-only field: offset {:x} length {}",
+                offset,
+                data.len()
+            );
             return;
         }
-        let (_, right) = config_slice.split_at_mut(offset as usize);
-        right.copy_from_slice(&data[..]);
+
+        self.config.writeback = data[0];
         self.update_writeback();
     }
 
