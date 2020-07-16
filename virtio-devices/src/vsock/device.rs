@@ -519,14 +519,6 @@ where
         }
     }
 
-    fn write_config(&mut self, offset: u64, data: &[u8]) {
-        warn!(
-            "vsock: guest driver attempted to write device config (offset={:x}, len={:x})",
-            offset,
-            data.len()
-        );
-    }
-
     fn activate(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
