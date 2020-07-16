@@ -10,11 +10,10 @@ use super::{
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
-use std::cmp;
 use std::collections::BTreeMap;
 use std::fmt::{self, Display};
 use std::fs::File;
-use std::io::{self, Write};
+use std::io;
 use std::mem::size_of;
 use std::ops::Bound::Included;
 use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -968,26 +967,16 @@ impl VirtioDevice for Iommu {
         self.acked_features |= v;
     }
 
-    fn read_config(&self, offset: u64, mut data: &mut [u8]) {
+    fn read_config(&self, offset: u64, data: &mut [u8]) {
         let mut config: Vec<u8> = Vec::new();
         config.extend_from_slice(self.config.as_slice());
         for config_topo_pci_range in self.config_topo_pci_ranges.iter() {
             config.extend_from_slice(config_topo_pci_range.as_slice());
         }
 
-        let config_slice = config.as_slice();
-        let config_len = config_slice.len() as u64;
-        if offset >= config_len {
-            error!("Failed to read config space");
-            return;
-        }
-
-        if let Some(end) = offset.checked_add(data.len() as u64) {
-            // This write can't fail, offset and end are checked against config_len.
-            data.write_all(&config_slice[offset as usize..cmp::min(end, config_len) as usize])
-                .unwrap();
-        }
+        self.read_config_from_slice(config.as_slice(), offset, data);
     }
+
     fn activate(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,

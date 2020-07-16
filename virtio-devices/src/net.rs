@@ -20,10 +20,9 @@ use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
     RX_QUEUE_EVENT, RX_TAP_EVENT, TX_QUEUE_EVENT,
 };
-use std::cmp;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Write};
+use std::io;
 use std::net::Ipv4Addr;
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -413,18 +412,8 @@ impl VirtioDevice for Net {
         self.acked_features |= v;
     }
 
-    fn read_config(&self, offset: u64, mut data: &mut [u8]) {
-        let config_slice = self.config.as_slice();
-        let config_len = config_slice.len() as u64;
-        if offset >= config_len {
-            error!("Failed to read config space");
-            return;
-        }
-        if let Some(end) = offset.checked_add(data.len() as u64) {
-            // This write can't fail, offset and end are checked against config_len.
-            data.write_all(&config_slice[offset as usize..cmp::min(end, config_len) as usize])
-                .unwrap();
-        }
+    fn read_config(&self, offset: u64, data: &mut [u8]) {
+        self.read_config_from_slice(self.config.as_slice(), offset, data);
     }
 
     fn activate(
