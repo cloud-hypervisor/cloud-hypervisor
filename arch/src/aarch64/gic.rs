@@ -166,7 +166,12 @@ pub fn create_gic(
     if its_required {
         GICv3ITS::new(vm, vcpu_count)
     } else {
-        GICv3ITS::new(vm, vcpu_count)
-            .or_else(|_| GICv3::new(vm, vcpu_count).or_else(|_| GICv2::new(vm, vcpu_count)))
+        GICv3ITS::new(vm, vcpu_count).or_else(|_| {
+            debug!("Failed to create GICv3-ITS, will try GICv3 instead.");
+            GICv3::new(vm, vcpu_count).or_else(|_| {
+                debug!("Failed to create GICv3, will try GICv2 instead.");
+                GICv2::new(vm, vcpu_count)
+            })
+        })
     }
 }
