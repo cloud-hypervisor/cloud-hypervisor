@@ -601,7 +601,7 @@ impl DeviceRelocation for AddressManager {
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     if shm_regions.addr.raw_value() == old_base {
                         // Remove old region from KVM by passing a size of 0.
-                        let mut mem_region = self.vm.make_user_memory_region(
+                        let mem_region = self.vm.make_user_memory_region(
                             shm_regions.mem_slot,
                             old_base,
                             0,
@@ -617,8 +617,13 @@ impl DeviceRelocation for AddressManager {
                         })?;
 
                         // Create new mapping by inserting new region to KVM.
-                        mem_region.guest_phys_addr = new_base;
-                        mem_region.memory_size = shm_regions.len;
+                        let mem_region = self.vm.make_user_memory_region(
+                            shm_regions.mem_slot,
+                            new_base,
+                            shm_regions.len,
+                            shm_regions.host_addr,
+                            false,
+                        );
 
                         self.vm.set_user_memory_region(mem_region).map_err(|e| {
                             io::Error::new(
