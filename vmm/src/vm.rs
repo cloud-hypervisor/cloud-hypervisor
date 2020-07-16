@@ -1493,7 +1493,7 @@ mod tests {
 mod tests {
     use super::*;
     use arch::aarch64::fdt::create_fdt;
-    use arch::aarch64::gic::create_gic;
+    use arch::aarch64::gic::kvm::create_gic;
     use arch::aarch64::{layout, DeviceInfoForFDT};
     use arch::DeviceType;
     use vm_memory::{GuestAddress, GuestMemoryMmap};
