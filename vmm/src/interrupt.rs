@@ -395,7 +395,7 @@ pub mod kvm {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
-    use arch::aarch64::gic::create_gic;
+    use arch::aarch64::gic::kvm::create_gic;
 
     #[test]
     fn test_create_gic() {
