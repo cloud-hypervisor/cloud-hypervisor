@@ -208,18 +208,6 @@ impl VirtioDevice for Net {
         }
     }
 
-    fn write_config(&mut self, offset: u64, data: &[u8]) {
-        let config_slice = self.config.as_mut_slice();
-        let data_len = data.len() as u64;
-        let config_len = config_slice.len() as u64;
-        if offset + data_len > config_len {
-            error!("Failed to write config space");
-            return;
-        }
-        let (_, right) = config_slice.split_at_mut(offset as usize);
-        right.copy_from_slice(&data[..]);
-    }
-
     fn activate(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
