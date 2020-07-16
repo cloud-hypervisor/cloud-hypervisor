@@ -14,7 +14,7 @@ hypervisor = { path = "../hypervisor" }
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch" }
 kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
 libc = "0.2.72"
-log = "0.4.8"
+log = "0.4.11"
 vm-memory = { version = "0.2.1", features = ["backend-mmap"] }
 acpi_tables = { path = "../acpi_tables", optional = true }
 arch_gen = { path = "../arch_gen" }
