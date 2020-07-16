@@ -11,21 +11,7 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
-#[allow(non_upper_case_globals)]
-#[allow(non_camel_case_types)]
-#[allow(non_snake_case)]
-#[allow(non_upper_case_globals)]
-#[allow(unused)]
-#[allow(
-    clippy::unreadable_literal,
-    clippy::redundant_static_lifetimes,
-    clippy::trivially_copy_pass_by_ref,
-    clippy::useless_transmute,
-    clippy::should_implement_trait,
-    clippy::transmute_ptr_to_ptr,
-    clippy::unreadable_literal,
-    clippy::redundant_static_lifetimes
-)]
+use crate::x86_64::{MsrEntries, MsrEntry};
 pub mod msr_index;
 
 // MTRR constants
@@ -34,3 +20,44 @@ pub const MTRR_MEM_TYPE_WB: u64 = 0x6;
 
 // IOAPIC pins
 pub const NUM_IOAPIC_PINS: usize = 24;
+
+macro_rules! msr {
+    ($msr:expr) => {
+        MsrEntry {
+            index: $msr,
+            data: 0x0,
+            ..Default::default()
+        }
+    };
+}
+#[cfg(feature = "kvm")]
+macro_rules! msr_data {
+    ($msr:expr, $data:expr) => {
+        MsrEntry {
+            index: $msr,
+            data: $data,
+            ..Default::default()
+        }
+    };
+}
+
+pub fn boot_msr_entries() -> MsrEntries {
+    MsrEntries::from_entries(&[
+        msr!(msr_index::MSR_IA32_SYSENTER_CS),
+        msr!(msr_index::MSR_IA32_SYSENTER_ESP),
+        msr!(msr_index::MSR_IA32_SYSENTER_EIP),
+        msr!(msr_index::MSR_STAR),
+        msr!(msr_index::MSR_CSTAR),
+        msr!(msr_index::MSR_LSTAR),
+        msr!(msr_index::MSR_KERNEL_GS_BASE),
+        msr!(msr_index::MSR_SYSCALL_MASK),
+        msr!(msr_index::MSR_IA32_TSC),
+        #[cfg(feature = "kvm")]
+        msr_data!(
+            msr_index::MSR_IA32_MISC_ENABLE,
+            msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64
+        ),
+        #[cfg(feature = "kvm")]
+        msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
+    ])
+}
