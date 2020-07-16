@@ -8,6 +8,7 @@
 
 use crate::{ActivateResult, Error, Queue};
 use std::collections::HashMap;
+use std::io::Write;
 use std::num::Wrapping;
 use std::sync::Arc;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize};
@@ -148,6 +149,26 @@ pub trait VirtioDevice: Send {
     /// Return the counters that this device exposes
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
         None
+    }
+
+    /// Helper to allow common implementation of read_config
+    fn read_config_from_slice(&self, config: &[u8], offset: u64, mut data: &mut [u8]) {
+        let config_len = config.len() as u64;
+        let data_len = data.len() as u64;
+        if offset + data_len > config_len {
+            error!(
+                "Out-of-bound access to configuration: config_len = {} offset = {:x} length = {} for {}",
+                config_len,
+                offset,
+                data_len,
+                self.device_type()
+            );
+            return;
+        }
+        if let Some(end) = offset.checked_add(data.len() as u64) {
+            data.write_all(&config[offset as usize..std::cmp::min(end, config_len) as usize])
+                .unwrap();
+        }
     }
 }
 
