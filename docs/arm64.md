@@ -27,7 +27,7 @@ For Virtio devices, you can choose MMIO or PCI as transport option.
 ### MMIO
 
 ```bash
-cargo build --no-default-features --features "mmio"
+cargo build --no-default-features --features mmio,kvm
 ```
 
 ### PCI
@@ -35,7 +35,7 @@ cargo build --no-default-features --features "mmio"
 Using PCI devices requires GICv3-ITS for MSI messaging. GICv3-ITS is very common in modern servers, but your machine happen to be old ones with GICv2(M) (like Raspberry Pi 4) or GICv3 without ITS, MMIO can still work.
 
 ```bash
-cargo build --no-default-features --features "pci"
+cargo build --no-default-features --features pci,kvm
 ```
 
 ## Image
