@@ -486,10 +486,6 @@ impl VirtioDevice for Balloon {
         }
     }
 
-    fn write_config(&mut self, _offset: u64, _data: &[u8]) {
-        warn!("virtio-balloon device configuration is read-only");
-    }
-
     fn activate(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
