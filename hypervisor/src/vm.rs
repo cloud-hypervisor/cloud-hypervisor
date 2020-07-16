@@ -11,6 +11,7 @@
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::VcpuInit;
 use crate::cpu::Vcpu;
+use crate::device::Device;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::{CreateDevice, DeviceFd, IoEventAddress, IrqRoutingEntry, MemoryRegion};
@@ -161,7 +162,7 @@ pub trait Vm: Send + Sync {
     /// Creates/modifies a guest physical memory slot.
     fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> Result<()>;
     /// Creates an emulated device in the kernel.
-    fn create_device(&self, device: &mut CreateDevice) -> Result<DeviceFd>;
+    fn create_device(&self, device: &mut CreateDevice) -> Result<Arc<dyn Device>>;
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
     fn get_preferred_target(&self, kvi: &mut VcpuInit) -> Result<()>;

@@ -18,6 +18,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "aarch64")]
 pub use crate::aarch64::{check_required_kvm_extensions, VcpuInit, VcpuKvmState as CpuState};
 use crate::cpu;
+use crate::device;
 use crate::hypervisor;
 use crate::vm;
 // x86_64 dependencies
@@ -58,6 +59,7 @@ pub use kvm_ioctls::{Cap, Kvm};
 ///
 pub use {
     kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
+    kvm_bindings::kvm_device_attr as DeviceAttr,
     kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_userspace_memory_region as MemoryRegion,
     kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
@@ -248,10 +250,13 @@ impl vm::Vm for KvmVm {
     /// Creates an emulated device in the kernel.
     ///
     /// See the documentation for `KVM_CREATE_DEVICE`.
-    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<DeviceFd> {
-        self.fd
+    fn create_device(&self, device: &mut CreateDevice) -> vm::Result<Arc<dyn device::Device>> {
+        let fd = self
+            .fd
             .create_device(device)
-            .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))
+            .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
+        let device = KvmDevice { fd };
+        Ok(Arc::new(device))
     }
     ///
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
@@ -305,7 +310,8 @@ impl vm::Vm for KvmVm {
             flags: 0,
         };
 
-        self.create_device(&mut vfio_dev)
+        self.fd
+            .create_device(&mut vfio_dev)
             .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
     }
 }
@@ -845,5 +851,21 @@ impl cpu::Vcpu for KvmVcpu {
     #[cfg(target_arch = "aarch64")]
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         Ok(())
+    }
+}
+
+/// Device struct for KVM
+pub struct KvmDevice {
+    fd: DeviceFd,
+}
+
+impl device::Device for KvmDevice {
+    ///
+    /// Set device attribute
+    ///
+    fn set_device_attr(&self, attr: &DeviceAttr) -> device::Result<()> {
+        self.fd
+            .set_device_attr(attr)
+            .map_err(|e| device::HypervisorDeviceError::SetDeviceAttribute(e.into()))
     }
 }
