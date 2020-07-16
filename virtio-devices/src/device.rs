@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::num::Wrapping;
 use std::sync::Arc;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize};
+use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
 
 pub enum VirtioInterruptType {
@@ -82,10 +83,20 @@ pub trait VirtioDevice: Send {
     }
 
     /// Reads this device configuration space at `offset`.
-    fn read_config(&self, offset: u64, data: &mut [u8]);
+    fn read_config(&self, _offset: u64, _data: &mut [u8]) {
+        warn!(
+            "No readable configuration fields for {}",
+            VirtioDeviceType::from(self.device_type())
+        );
+    }
 
     /// Writes to this device configuration space at `offset`.
-    fn write_config(&mut self, offset: u64, data: &[u8]);
+    fn write_config(&mut self, _offset: u64, _data: &[u8]) {
+        warn!(
+            "No writable configuration fields for {}",
+            VirtioDeviceType::from(self.device_type())
+        );
+    }
 
     /// Activates this device for real usage.
     fn activate(
