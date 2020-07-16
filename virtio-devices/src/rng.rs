@@ -288,10 +288,6 @@ impl VirtioDevice for Rng {
         self.acked_features |= v;
     }
 
-    fn read_config(&self, _offset: u64, _data: &mut [u8]) {
-        warn!("No currently device specific configration defined");
-    }
-
     fn activate(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
