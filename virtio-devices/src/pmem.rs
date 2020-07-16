@@ -478,10 +478,6 @@ impl VirtioDevice for Pmem {
         }
     }
 
-    fn write_config(&mut self, _offset: u64, _data: &[u8]) {
-        warn!("virtio-pmem device configuration is read-only");
-    }
-
     fn activate(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,

@@ -521,10 +521,6 @@ impl VirtioDevice for Console {
         }
     }
 
-    fn write_config(&mut self, _offset: u64, _data: &[u8]) {
-        warn!("No device specific configration requires write");
-    }
-
     fn activate(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
