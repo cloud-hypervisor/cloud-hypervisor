@@ -40,8 +40,12 @@ pub mod arch;
 /// CPU related module
 mod cpu;
 
+/// Device related module
+mod device;
+
 pub use crate::hypervisor::{Hypervisor, HypervisorError};
 pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
+pub use device::{Device, HypervisorDeviceError};
 pub use kvm::*;
 pub use vm::{DataMatch, HypervisorVmError, Vm};
 
