@@ -369,6 +369,9 @@ pub enum DeviceManagerError {
     /// Missing PCI b/d/f from the DeviceNode.
     #[cfg(feature = "pci_support")]
     MissingDeviceNodePciBdf,
+
+    /// No support for device passthrough
+    NoDevicePassthroughSupport,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -2383,6 +2386,21 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
+    fn add_passthrough_device(
+        &mut self,
+        pci: &mut PciBus,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        device_fd: &Arc<DeviceFd>,
+        device_cfg: &mut DeviceConfig,
+    ) -> DeviceManagerResult<(u32, String)> {
+        #[cfg(feature = "kvm")]
+        return self.add_vfio_device(pci, interrupt_manager, device_fd, device_cfg);
+
+        #[cfg(not(feature = "kvm"))]
+        Err(DeviceManagerError::NoDevicePassthroughSupport)
+    }
+
+    #[cfg(all(feature = "pci_support", feature = "kvm"))]
     fn add_vfio_device(
         &mut self,
         pci: &mut PciBus,
@@ -2503,7 +2521,7 @@ impl DeviceManager {
 
             for device_cfg in device_list_cfg.iter_mut() {
                 let (device_id, _) =
-                    self.add_vfio_device(pci, interrupt_manager, &device_fd, device_cfg)?;
+                    self.add_passthrough_device(pci, interrupt_manager, &device_fd, device_cfg)?;
                 if device_cfg.iommu && self.iommu_device.is_some() {
                     iommu_attached_device_ids.push(device_id);
                 }
@@ -2934,7 +2952,7 @@ impl DeviceManager {
             device_fd
         };
 
-        let (device_id, device_name) = self.add_vfio_device(
+        let (device_id, device_name) = self.add_passthrough_device(
             &mut pci.lock().unwrap(),
             &interrupt_manager,
             &device_fd,
