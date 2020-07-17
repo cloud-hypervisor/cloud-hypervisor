@@ -255,6 +255,17 @@ impl vm::Vm for KvmVm {
     fn check_extension(&self, c: Cap) -> bool {
         self.fd.check_extension(c)
     }
+    /// Create a device that is used for passthrough
+    fn create_passthrough_device(&self) -> vm::Result<DeviceFd> {
+        let mut vfio_dev = kvm_create_device {
+            type_: kvm_device_type_KVM_DEV_TYPE_VFIO,
+            fd: 0,
+            flags: 0,
+        };
+
+        self.create_device(&mut vfio_dev)
+            .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
+    }
 }
 /// Wrapper over KVM system ioctls.
 pub struct KvmHypervisor {

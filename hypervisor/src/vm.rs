@@ -110,6 +110,11 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to set clock: {0}")]
     SetClock(#[source] anyhow::Error),
+    ///
+    /// Create passthrough device
+    ///
+    #[error("Failed to create passthrough device: {0}")]
+    CreatePassthroughDevice(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -171,4 +176,6 @@ pub trait Vm: Send + Sync {
     fn set_clock(&self, data: &ClockData) -> Result<()>;
     /// Checks if a particular `Cap` is available.
     fn check_extension(&self, c: Cap) -> bool;
+    /// Create a device that is used for passthrough
+    fn create_passthrough_device(&self) -> Result<DeviceFd>;
 }
