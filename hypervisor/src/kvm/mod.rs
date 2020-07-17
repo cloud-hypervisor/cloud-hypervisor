@@ -58,7 +58,7 @@ pub use kvm_ioctls::{Cap, Kvm};
 ///
 pub use {
     kvm_bindings::kvm_clock_data as ClockData, kvm_bindings::kvm_create_device as CreateDevice,
-    kvm_bindings::kvm_irq_routing as IrqRouting, kvm_bindings::kvm_mp_state as MpState,
+    kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_userspace_memory_region as MemoryRegion,
     kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
     kvm_ioctls::VcpuExit,
@@ -70,6 +70,37 @@ pub struct KvmVm {
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
 }
+
+// Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
+fn vec_with_size_in_bytes<T: Default>(size_in_bytes: usize) -> Vec<T> {
+    let rounded_size = (size_in_bytes + size_of::<T>() - 1) / size_of::<T>();
+    let mut v = Vec::with_capacity(rounded_size);
+    v.resize_with(rounded_size, T::default);
+    v
+}
+
+// The kvm API has many structs that resemble the following `Foo` structure:
+//
+// ```
+// #[repr(C)]
+// struct Foo {
+//    some_data: u32
+//    entries: __IncompleteArrayField<__u32>,
+// }
+// ```
+//
+// In order to allocate such a structure, `size_of::<Foo>()` would be too small because it would not
+// include any space for `entries`. To make the allocation large enough while still being aligned
+// for `Foo`, a `Vec<Foo>` is created. Only the first element of `Vec<Foo>` would actually be used
+// as a `Foo`. The remaining memory in the `Vec<Foo>` is for `entries`, which must be contiguous
+// with `Foo`. This function is used to make the `Vec<Foo>` with enough space for `count` entries.
+use std::mem::size_of;
+fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
+    let element_space = count * size_of::<F>();
+    let vec_size_bytes = size_of::<T>() + element_space;
+    vec_with_size_in_bytes(vec_size_bytes)
+}
+
 ///
 /// Implementation of Vm trait for KVM
 /// Example:
@@ -167,9 +198,20 @@ impl vm::Vm for KvmVm {
     /// Sets the GSI routing table entries, overwriting any previously set
     /// entries, as per the `KVM_SET_GSI_ROUTING` ioctl.
     ///
-    fn set_gsi_routing(&self, irq_routing: &IrqRouting) -> vm::Result<()> {
+    fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> vm::Result<()> {
+        let mut irq_routing =
+            vec_with_array_field::<kvm_irq_routing, kvm_irq_routing_entry>(entries.len());
+        irq_routing[0].nr = entries.len() as u32;
+        irq_routing[0].flags = 0;
+
+        unsafe {
+            let entries_slice: &mut [kvm_irq_routing_entry] =
+                irq_routing[0].entries.as_mut_slice(entries.len());
+            entries_slice.copy_from_slice(&entries);
+        }
+
         self.fd
-            .set_gsi_routing(irq_routing)
+            .set_gsi_routing(&irq_routing[0])
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
     }
     ///
