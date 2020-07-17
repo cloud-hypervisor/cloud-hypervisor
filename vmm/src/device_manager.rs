@@ -235,8 +235,8 @@ pub enum DeviceManagerError {
     #[cfg(feature = "pci_support")]
     VfioMapRegion(pci::VfioPciError),
 
-    /// Failed to create the KVM device.
-    CreateKvmDevice(anyhow::Error),
+    /// Failed to create the passthrough device.
+    CreatePassthroughDevice(anyhow::Error),
 
     /// Failed to memory map.
     Mmap(io::Error),
@@ -740,9 +740,9 @@ pub struct DeviceManager {
     // MSI Interrupt Manager
     msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
 
-    // VFIO KVM device
+    // Passthrough device handle
     #[cfg(feature = "pci_support")]
-    kvm_device_fd: Option<Arc<DeviceFd>>,
+    passthrough_device: Option<Arc<DeviceFd>>,
 
     // Paravirtualized IOMMU
     #[cfg(feature = "pci_support")]
@@ -831,7 +831,7 @@ impl DeviceManager {
             pci_bus: None,
             msi_interrupt_manager,
             #[cfg(feature = "pci_support")]
-            kvm_device_fd: None,
+            passthrough_device: None,
             #[cfg(feature = "pci_support")]
             iommu_device: None,
             #[cfg(feature = "pci_support")]
@@ -2492,14 +2492,14 @@ impl DeviceManager {
         let mut devices = self.config.lock().unwrap().devices.clone();
 
         if let Some(device_list_cfg) = &mut devices {
-            // Create the KVM VFIO device
+            // Create the passthrough device handle
             let device_fd = self
                 .address_manager
                 .vm
                 .create_passthrough_device()
-                .map_err(|e| DeviceManagerError::CreateKvmDevice(e.into()))?;
+                .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?;
             let device_fd = Arc::new(device_fd);
-            self.kvm_device_fd = Some(Arc::clone(&device_fd));
+            self.passthrough_device = Some(Arc::clone(&device_fd));
 
             for device_cfg in device_list_cfg.iter_mut() {
                 let (device_id, _) =
@@ -2918,19 +2918,19 @@ impl DeviceManager {
 
         let interrupt_manager = Arc::clone(&self.msi_interrupt_manager);
 
-        let device_fd = if let Some(device_fd) = &self.kvm_device_fd {
+        let device_fd = if let Some(device_fd) = &self.passthrough_device {
             Arc::clone(&device_fd)
         } else {
-            // If the VFIO KVM device file descriptor has not been created yet,
+            // If the passthrough device file descriptor has not been created yet,
             // it is created here and stored in the DeviceManager structure for
             // future needs.
             let device_fd = self
                 .address_manager
                 .vm
                 .create_passthrough_device()
-                .map_err(|e| DeviceManagerError::CreateKvmDevice(e.into()))?;
+                .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?;
             let device_fd = Arc::new(device_fd);
-            self.kvm_device_fd = Some(Arc::clone(&device_fd));
+            self.passthrough_device = Some(Arc::clone(&device_fd));
             device_fd
         };
 
