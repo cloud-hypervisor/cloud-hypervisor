@@ -258,7 +258,6 @@ pub fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut SpecialRegisters) ->
 
 #[cfg(test)]
 mod tests {
-    extern crate kvm_ioctls;
     extern crate vm_memory;
 
     use super::*;

@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod kvm {
+    use super::super::gic::kvm::KvmGICDevice;
     use super::super::gic::{Error, GICDevice};
     use std::{boxed::Box, result};
     type Result<T> = result::Result<T, Error>;
-    use super::super::gic::kvm::KvmGICDevice;
-    use super::super::layout;
-    use kvm_ioctls::DeviceFd;
+    use crate::layout;
+    use hypervisor::kvm::kvm_bindings;
     use std::sync::Arc;
 
     /// Represent a GIC v2 device
     pub struct KvmGICv2 {
         /// The file descriptor for the KVM device
-        fd: DeviceFd,
+        device: Arc<dyn hypervisor::Device>,
 
         /// GIC device properties, to be used for setting up the fdt entry
         properties: [u64; 4],
@@ -53,8 +53,8 @@ pub mod kvm {
     }
 
     impl GICDevice for KvmGICv2 {
-        fn device_fd(&self) -> &DeviceFd {
-            &self.fd
+        fn device(&self) -> &Arc<dyn hypervisor::Device> {
+            &self.device
         }
 
         fn device_properties(&self) -> &[u64] {
@@ -79,9 +79,12 @@ pub mod kvm {
             kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V2
         }
 
-        fn create_device(fd: DeviceFd, vcpu_count: u64) -> Box<dyn GICDevice> {
+        fn create_device(
+            device: Arc<dyn hypervisor::Device>,
+            vcpu_count: u64,
+        ) -> Box<dyn GICDevice> {
             Box::new(KvmGICv2 {
-                fd: fd,
+                device: device,
                 properties: [
                     KvmGICv2::get_dist_addr(),
                     KvmGICv2::get_dist_size(),
@@ -99,7 +102,7 @@ pub mod kvm {
             /* Setting up the distributor attribute.
             We are placing the GIC below 1GB so we need to substract the size of the distributor. */
             Self::set_device_attribute(
-                &gic_device.device_fd(),
+                gic_device.device(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_V2_ADDR_TYPE_DIST),
                 &KvmGICv2::get_dist_addr() as *const u64 as u64,
@@ -108,7 +111,7 @@ pub mod kvm {
 
             /* Setting up the CPU attribute. */
             Self::set_device_attribute(
-                &gic_device.device_fd(),
+                gic_device.device(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_V2_ADDR_TYPE_CPU),
                 &KvmGICv2::get_cpu_addr() as *const u64 as u64,

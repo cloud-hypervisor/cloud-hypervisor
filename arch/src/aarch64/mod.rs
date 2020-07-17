@@ -17,6 +17,7 @@ pub mod regs;
 pub use self::fdt::DeviceInfoForFDT;
 use crate::DeviceType;
 use crate::RegionType;
+use hypervisor::kvm::kvm_bindings;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;

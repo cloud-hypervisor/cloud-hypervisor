@@ -8,11 +8,11 @@ pub mod kvm {
     use super::super::gic::kvm::KvmGICDevice;
     use super::super::gic::{Error, GICDevice};
     use super::super::gicv3::kvm::KvmGICv3;
-    use kvm_ioctls::DeviceFd;
+    use hypervisor::kvm::kvm_bindings;
 
     pub struct KvmGICv3ITS {
         /// The file descriptor for the KVM device
-        fd: DeviceFd,
+        device: Arc<dyn hypervisor::Device>,
 
         /// GIC device properties, to be used for setting up the fdt entry
         gic_properties: [u64; 4],
@@ -37,8 +37,8 @@ pub mod kvm {
     }
 
     impl GICDevice for KvmGICv3ITS {
-        fn device_fd(&self) -> &DeviceFd {
-            &self.fd
+        fn device(&self) -> &Arc<dyn hypervisor::Device> {
+            &self.device
         }
 
         fn fdt_compatibility(&self) -> &str {
@@ -75,9 +75,12 @@ pub mod kvm {
             KvmGICv3::version()
         }
 
-        fn create_device(fd: DeviceFd, vcpu_count: u64) -> Box<dyn GICDevice> {
+        fn create_device(
+            device: Arc<dyn hypervisor::Device>,
+            vcpu_count: u64,
+        ) -> Box<dyn GICDevice> {
             Box::new(KvmGICv3ITS {
-                fd: fd,
+                device: device,
                 gic_properties: [
                     KvmGICv3::get_dist_addr(),
                     KvmGICv3::get_dist_size(),
