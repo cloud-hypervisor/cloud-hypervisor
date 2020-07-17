@@ -6,7 +6,6 @@
 use devices::interrupt_controller::InterruptController;
 use std::collections::HashMap;
 use std::io;
-use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use vm_allocator::SystemAllocator;
@@ -18,35 +17,6 @@ use vmm_sys_util::eventfd::EventFd;
 
 /// Reuse std::io::Result to simplify interoperability among crates.
 pub type Result<T> = std::io::Result<T>;
-
-// Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
-fn vec_with_size_in_bytes<T: Default>(size_in_bytes: usize) -> Vec<T> {
-    let rounded_size = (size_in_bytes + size_of::<T>() - 1) / size_of::<T>();
-    let mut v = Vec::with_capacity(rounded_size);
-    v.resize_with(rounded_size, T::default);
-    v
-}
-
-// The kvm API has many structs that resemble the following `Foo` structure:
-//
-// ```
-// #[repr(C)]
-// struct Foo {
-//    some_data: u32
-//    entries: __IncompleteArrayField<__u32>,
-// }
-// ```
-//
-// In order to allocate such a structure, `size_of::<Foo>()` would be too small because it would not
-// include any space for `entries`. To make the allocation large enough while still being aligned
-// for `Foo`, a `Vec<Foo>` is created. Only the first element of `Vec<Foo>` would actually be used
-// as a `Foo`. The remaining memory in the `Vec<Foo>` is for `entries`, which must be contiguous
-// with `Foo`. This function is used to make the `Vec<Foo>` with enough space for `count` entries.
-fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
-    let element_space = count * size_of::<F>();
-    let vec_size_bytes = size_of::<T>() + element_space;
-    vec_with_size_in_bytes(vec_size_bytes)
-}
 
 struct InterruptRoute {
     pub gsi: u32,
@@ -357,7 +327,7 @@ where
 pub mod kvm {
     use super::*;
     use hypervisor::kvm::KVM_MSI_VALID_DEVID;
-    use hypervisor::kvm::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
+    use hypervisor::kvm::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
 
     type KvmMsiInterruptGroup = MsiInterruptGroup<kvm_irq_routing_entry>;
     type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
@@ -412,18 +382,7 @@ pub mod kvm {
                 entry_vec.push(entry.route);
             }
 
-            let mut irq_routing =
-                vec_with_array_field::<kvm_irq_routing, kvm_irq_routing_entry>(entry_vec.len());
-            irq_routing[0].nr = entry_vec.len() as u32;
-            irq_routing[0].flags = 0;
-
-            unsafe {
-                let entries: &mut [kvm_irq_routing_entry] =
-                    irq_routing[0].entries.as_mut_slice(entry_vec.len());
-                entries.copy_from_slice(&entry_vec);
-            }
-
-            self.vm.set_gsi_routing(&irq_routing[0]).map_err(|e| {
+            self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::Other,
                     format!("Failed setting GSI routing: {}", e),
