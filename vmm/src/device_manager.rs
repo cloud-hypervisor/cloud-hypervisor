@@ -2350,18 +2350,6 @@ impl DeviceManager {
         Ok(devices)
     }
 
-    #[cfg(feature = "pci_support")]
-    fn create_kvm_device(vm: &Arc<dyn hypervisor::Vm>) -> DeviceManagerResult<DeviceFd> {
-        let mut vfio_dev = hypervisor::kvm::kvm_create_device {
-            type_: hypervisor::kvm::kvm_device_type_KVM_DEV_TYPE_VFIO,
-            fd: 0,
-            flags: 0,
-        };
-
-        vm.create_device(&mut vfio_dev)
-            .map_err(|e| DeviceManagerError::CreateKvmDevice(e.into()))
-    }
-
     #[cfg(not(feature = "pci_support"))]
     fn next_device_name(&mut self, prefix: &str) -> DeviceManagerResult<String> {
         // Generate the temporary name.
@@ -2505,7 +2493,11 @@ impl DeviceManager {
 
         if let Some(device_list_cfg) = &mut devices {
             // Create the KVM VFIO device
-            let device_fd = DeviceManager::create_kvm_device(&self.address_manager.vm)?;
+            let device_fd = self
+                .address_manager
+                .vm
+                .create_passthrough_device()
+                .map_err(|e| DeviceManagerError::CreateKvmDevice(e.into()))?;
             let device_fd = Arc::new(device_fd);
             self.kvm_device_fd = Some(Arc::clone(&device_fd));
 
@@ -2932,7 +2924,11 @@ impl DeviceManager {
             // If the VFIO KVM device file descriptor has not been created yet,
             // it is created here and stored in the DeviceManager structure for
             // future needs.
-            let device_fd = DeviceManager::create_kvm_device(&self.address_manager.vm)?;
+            let device_fd = self
+                .address_manager
+                .vm
+                .create_passthrough_device()
+                .map_err(|e| DeviceManagerError::CreateKvmDevice(e.into()))?;
             let device_fd = Arc::new(device_fd);
             self.kvm_device_fd = Some(Arc::clone(&device_fd));
             device_fd
