@@ -4,15 +4,15 @@
 pub mod kvm {
     use super::super::gic::kvm::KvmGICDevice;
     use super::super::gic::{Error, GICDevice};
-    use super::super::layout;
-    use kvm_ioctls::DeviceFd;
+    use crate::layout;
+    use hypervisor::kvm::kvm_bindings;
     use std::sync::Arc;
     use std::{boxed::Box, result};
     type Result<T> = result::Result<T, Error>;
 
     pub struct KvmGICv3 {
         /// The file descriptor for the KVM device
-        fd: DeviceFd,
+        device: Arc<dyn hypervisor::Device>,
 
         /// GIC device properties, to be used for setting up the fdt entry
         properties: [u64; 4],
@@ -53,8 +53,8 @@ pub mod kvm {
     }
 
     impl GICDevice for KvmGICv3 {
-        fn device_fd(&self) -> &DeviceFd {
-            &self.fd
+        fn device(&self) -> &Arc<dyn hypervisor::Device> {
+            &self.device
         }
 
         fn fdt_compatibility(&self) -> &str {
@@ -79,9 +79,12 @@ pub mod kvm {
             kvm_bindings::kvm_device_type_KVM_DEV_TYPE_ARM_VGIC_V3
         }
 
-        fn create_device(fd: DeviceFd, vcpu_count: u64) -> Box<dyn GICDevice> {
+        fn create_device(
+            device: Arc<dyn hypervisor::Device>,
+            vcpu_count: u64,
+        ) -> Box<dyn GICDevice> {
             Box::new(KvmGICv3 {
-                fd: fd,
+                device: device,
                 properties: [
                     KvmGICv3::get_dist_addr(),
                     KvmGICv3::get_dist_size(),
@@ -100,7 +103,7 @@ pub mod kvm {
              We are placing the GIC below 1GB so we need to substract the size of the distributor.
             */
             Self::set_device_attribute(
-                &gic_device.device_fd(),
+                gic_device.device(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_DIST),
                 &KvmGICv3::get_dist_addr() as *const u64 as u64,
@@ -111,7 +114,7 @@ pub mod kvm {
             We are calculating here the start of the redistributors address. We have one per CPU.
             */
             Self::set_device_attribute(
-                &gic_device.device_fd(),
+                gic_device.device(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_REDIST),
                 &KvmGICv3::get_redists_addr(u64::from(gic_device.vcpu_count())) as *const u64

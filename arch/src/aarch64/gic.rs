@@ -1,8 +1,8 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use kvm_ioctls::DeviceFd;
 use std::result;
+use std::sync::Arc;
 
 /// Errors thrown while setting up the GIC.
 #[derive(Debug)]
@@ -10,13 +10,13 @@ pub enum Error {
     /// Error while calling KVM ioctl for setting up the global interrupt controller.
     CreateGIC(hypervisor::HypervisorVmError),
     /// Error while setting device attributes for the GIC.
-    SetDeviceAttribute(hypervisor::kvm_ioctls::Error),
+    SetDeviceAttribute(hypervisor::HypervisorDeviceError),
 }
 type Result<T> = result::Result<T, Error>;
 
 pub trait GICDevice {
-    /// Returns the file descriptor of the GIC device
-    fn device_fd(&self) -> &DeviceFd;
+    /// Returns the hypervisor agnostic Device of the GIC device
+    fn device(&self) -> &Arc<dyn hypervisor::Device>;
 
     /// Returns the fdt compatibility property of the device
     fn fdt_compatibility(&self) -> &str;
@@ -50,10 +50,10 @@ pub mod kvm {
     use super::super::gicv2::kvm::KvmGICv2;
     use super::super::gicv3::kvm::KvmGICv3;
     use super::super::gicv3_its::kvm::KvmGICv3ITS;
-    use super::super::layout;
     use super::GICDevice;
     use super::Result;
-    use kvm_ioctls::DeviceFd;
+    use crate::layout;
+    use hypervisor::kvm::kvm_bindings;
     use std::boxed::Box;
     use std::sync::Arc;
 
@@ -65,7 +65,10 @@ pub mod kvm {
             Self: Sized;
 
         /// Create the GIC device object
-        fn create_device(fd: DeviceFd, vcpu_count: u64) -> Box<dyn GICDevice>
+        fn create_device(
+            device: Arc<dyn hypervisor::Device>,
+            vcpu_count: u64,
+        ) -> Box<dyn GICDevice>
         where
             Self: Sized;
 
@@ -78,7 +81,7 @@ pub mod kvm {
             Self: Sized;
 
         /// Initialize a GIC device
-        fn init_device(vm: &Arc<dyn hypervisor::Vm>) -> Result<DeviceFd>
+        fn init_device(vm: &Arc<dyn hypervisor::Vm>) -> Result<Arc<dyn hypervisor::Device>>
         where
             Self: Sized,
         {
@@ -94,7 +97,7 @@ pub mod kvm {
 
         /// Set a GIC device attribute
         fn set_device_attribute(
-            fd: &DeviceFd,
+            device: &Arc<dyn hypervisor::Device>,
             group: u32,
             attr: u64,
             addr: u64,
@@ -109,7 +112,8 @@ pub mod kvm {
                 addr: addr,
                 flags: flags,
             };
-            fd.set_device_attr(&attr)
+            device
+                .set_device_attr(&attr)
                 .map_err(super::Error::SetDeviceAttribute)?;
 
             Ok(())
@@ -126,7 +130,7 @@ pub mod kvm {
             let nr_irqs: u32 = layout::IRQ_MAX - layout::IRQ_BASE + 1;
             let nr_irqs_ptr = &nr_irqs as *const u32;
             Self::set_device_attribute(
-                gic_device.device_fd(),
+                gic_device.device(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_NR_IRQS,
                 0,
                 nr_irqs_ptr as u64,
@@ -137,7 +141,7 @@ pub mod kvm {
              * See https://code.woboq.org/linux/linux/virt/kvm/arm/vgic/vgic-kvm-device.c.html#211.
              */
             Self::set_device_attribute(
-                gic_device.device_fd(),
+                gic_device.device(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_CTRL,
                 u64::from(kvm_bindings::KVM_DEV_ARM_VGIC_CTRL_INIT),
                 0,

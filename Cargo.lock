@@ -61,8 +61,6 @@ dependencies = [
  "arch_gen",
  "byteorder",
  "hypervisor",
- "kvm-bindings",
- "kvm-ioctls",
  "libc",
  "linux-loader",
  "log 0.4.11",

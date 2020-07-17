@@ -16,8 +16,6 @@
 
 extern crate byteorder;
 extern crate hypervisor;
-extern crate kvm_bindings;
-extern crate kvm_ioctls;
 extern crate libc;
 #[macro_use]
 extern crate log;
