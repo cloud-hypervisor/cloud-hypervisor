@@ -19,6 +19,7 @@
 4. [rust-vmm dependency](#4-rust-vmm-dependency)
 	* [Firecracker and crosvm](#firecracker-and-crosvm)
 5. [Community](#5-community)
+	* [Contribute](#contribute)
 	* [Join us](#join-us)
 6. [Security](#6-security)
 
@@ -285,6 +286,11 @@ will increase while at the same time sharing as much of the fundamental virtuali
 crates as possible.
 
 # 5. Community
+
+The Cloud Hypervisor project follows the governance, and community guidelines described in
+the [Community](https://github.com/cloud-hypervisor/community) repository.
+
+## Contribute
 
 We are working on building a global, diverse and collaborative community around the Cloud Hypervisor project.
 Anyone who is interested in [contributing](CONTRIBUTING.md) to the project is welcome to participate.
