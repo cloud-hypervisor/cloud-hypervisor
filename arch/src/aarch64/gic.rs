@@ -47,11 +47,11 @@ pub trait GICDevice {
 }
 
 pub mod kvm {
-    use super::super::gicv2::kvm::KvmGICv2;
-    use super::super::gicv3::kvm::KvmGICv3;
-    use super::super::gicv3_its::kvm::KvmGICv3ITS;
     use super::GICDevice;
     use super::Result;
+    use crate::aarch64::gicv2::kvm::KvmGICv2;
+    use crate::aarch64::gicv3::kvm::KvmGICv3;
+    use crate::aarch64::gicv3_its::kvm::KvmGICv3ITS;
     use crate::layout;
     use hypervisor::kvm::kvm_bindings;
     use std::boxed::Box;
@@ -60,31 +60,22 @@ pub mod kvm {
     /// Trait for GIC devices.
     pub trait KvmGICDevice: Send + Sync + GICDevice {
         /// Returns the GIC version of the device
-        fn version() -> u32
-        where
-            Self: Sized;
+        fn version() -> u32;
 
         /// Create the GIC device object
         fn create_device(
             device: Arc<dyn hypervisor::Device>,
             vcpu_count: u64,
-        ) -> Box<dyn GICDevice>
-        where
-            Self: Sized;
+        ) -> Box<dyn GICDevice>;
 
         /// Setup the device-specific attributes
         fn init_device_attributes(
             vm: &Arc<dyn hypervisor::Vm>,
             gic_device: &Box<dyn GICDevice>,
-        ) -> Result<()>
-        where
-            Self: Sized;
+        ) -> Result<()>;
 
         /// Initialize a GIC device
-        fn init_device(vm: &Arc<dyn hypervisor::Vm>) -> Result<Arc<dyn hypervisor::Device>>
-        where
-            Self: Sized,
-        {
+        fn init_device(vm: &Arc<dyn hypervisor::Vm>) -> Result<Arc<dyn hypervisor::Device>> {
             let mut gic_device = kvm_bindings::kvm_create_device {
                 type_: Self::version(),
                 fd: 0,
@@ -102,10 +93,7 @@ pub mod kvm {
             attr: u64,
             addr: u64,
             flags: u32,
-        ) -> Result<()>
-        where
-            Self: Sized,
-        {
+        ) -> Result<()> {
             let attr = kvm_bindings::kvm_device_attr {
                 group: group,
                 attr: attr,
@@ -120,10 +108,7 @@ pub mod kvm {
         }
 
         /// Finalize the setup of a GIC device
-        fn finalize_device(gic_device: &Box<dyn GICDevice>) -> Result<()>
-        where
-            Self: Sized,
-        {
+        fn finalize_device(gic_device: &Box<dyn GICDevice>) -> Result<()> {
             /* We need to tell the kernel how many irqs to support with this vgic.
              * See the `layout` module for details.
              */
@@ -152,10 +137,7 @@ pub mod kvm {
         }
 
         /// Method to initialize the GIC device
-        fn new(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GICDevice>>
-        where
-            Self: Sized,
-        {
+        fn new(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GICDevice>> {
             let vgic_fd = Self::init_device(vm)?;
 
             let device = Self::create_device(vgic_fd, vcpu_count);

@@ -5,13 +5,13 @@ pub mod kvm {
     use std::sync::Arc;
     use std::{boxed::Box, result};
     type Result<T> = result::Result<T, Error>;
-    use super::super::gic::kvm::KvmGICDevice;
-    use super::super::gic::{Error, GICDevice};
-    use super::super::gicv3::kvm::KvmGICv3;
+    use crate::aarch64::gic::kvm::KvmGICDevice;
+    use crate::aarch64::gic::{Error, GICDevice};
+    use crate::aarch64::gicv3::kvm::KvmGICv3;
     use hypervisor::kvm::kvm_bindings;
 
     pub struct KvmGICv3ITS {
-        /// The file descriptor for the KVM device
+        /// The hypervisor agnostic device
         device: Arc<dyn hypervisor::Device>,
 
         /// GIC device properties, to be used for setting up the fdt entry

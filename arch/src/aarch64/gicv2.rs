@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod kvm {
-    use super::super::gic::kvm::KvmGICDevice;
-    use super::super::gic::{Error, GICDevice};
+    use crate::aarch64::gic::kvm::KvmGICDevice;
+    use crate::aarch64::gic::{Error, GICDevice};
     use std::{boxed::Box, result};
     type Result<T> = result::Result<T, Error>;
     use crate::layout;
@@ -12,7 +12,7 @@ pub mod kvm {
 
     /// Represent a GIC v2 device
     pub struct KvmGICv2 {
-        /// The file descriptor for the KVM device
+        /// The hypervisor agnostic device
         device: Arc<dyn hypervisor::Device>,
 
         /// GIC device properties, to be used for setting up the fdt entry
