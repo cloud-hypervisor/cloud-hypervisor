@@ -163,6 +163,11 @@ if [ ! -d "$SHARED_DIR" ]; then
     echo "bar" > "$SHARED_DIR/file3" || exit 1
 fi
 
+# Create tap interface without multipe queues support for vhost_user_net test.
+sudo ip tuntap add name vunet-tap0 mode tap
+# Create tap interface with multipe queues support for vhost_user_net test.
+sudo ip tuntap add name vunet-tap1 mode tap multi_queue
+
 BUILD_TARGET="aarch64-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
@@ -220,5 +225,9 @@ EOF
 
     RES=$?
 fi
+
+# Tear vhost_user_net test network down
+sudo ip link del vunet-tap0
+sudo ip link del vunet-tap1
 
 exit $RES
