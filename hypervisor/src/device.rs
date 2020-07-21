@@ -10,6 +10,7 @@
 //
 
 use crate::DeviceAttr;
+use std::os::unix::io::AsRawFd;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -33,7 +34,7 @@ pub type Result<T> = std::result::Result<T, HypervisorDeviceError>;
 ///
 /// This crate provides a hypervisor-agnostic interfaces for device
 ///
-pub trait Device: Send + Sync {
+pub trait Device: Send + Sync + AsRawFd {
     /// Set device attribute.
     fn set_device_attr(&self, attr: &DeviceAttr) -> Result<()>;
 }
