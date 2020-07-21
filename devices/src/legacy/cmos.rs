@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use libc::{gmtime_r, time, time_t, tm};
+use libc::{clock_gettime, gmtime_r, time_t, timespec, tm, CLOCK_REALTIME};
 use std::cmp::min;
 use std::mem;
 
@@ -77,14 +77,17 @@ impl BusDevice for Cmos {
                 let day;
                 let month;
                 let year;
-                // The time and gmtime_r calls are safe as long as the structs they are given are
-                // large enough, and neither of them fail. It is safe to zero initialize the tm
-                // struct because it contains only plain data.
-                unsafe {
+                // The clock_gettime and gmtime_r calls are safe as long as the structs they are
+                // given are large enough, and neither of them fail. It is safe to zero initialize
+                // the tm and timespec struct because it contains only plain data.
+                let update_in_progress = unsafe {
+                    let mut timespec: timespec = mem::zeroed();
+                    clock_gettime(CLOCK_REALTIME, &mut timespec as *mut _);
+
+                    let now: time_t = timespec.tv_sec;
                     let mut tm: tm = mem::zeroed();
-                    let mut now: time_t = 0;
-                    time(&mut now as *mut _);
                     gmtime_r(&now, &mut tm as *mut _);
+
                     // The following lines of code are safe but depend on tm being in scope.
                     seconds = tm.tm_sec;
                     minutes = tm.tm_min;
@@ -93,6 +96,11 @@ impl BusDevice for Cmos {
                     day = tm.tm_mday;
                     month = tm.tm_mon + 1;
                     year = tm.tm_year;
+
+                    // Update in Progress bit held for last 224us of each second
+                    const NANOSECONDS_PER_SECOND: i64 = 1_000_000_000;
+                    const UIP_HOLD_LENGTH: i64 = 8 * NANOSECONDS_PER_SECOND / 32768;
+                    timespec.tv_nsec >= (NANOSECONDS_PER_SECOND - UIP_HOLD_LENGTH)
                 };
                 match self.index {
                     0x00 => to_bcd(seconds as u8),
@@ -102,6 +110,8 @@ impl BusDevice for Cmos {
                     0x07 => to_bcd(day as u8),
                     0x08 => to_bcd(month as u8),
                     0x09 => to_bcd((year % 100) as u8),
+                    // Bit 5 for 32kHz clock. Bit 7 for Update in Progress
+                    0x0a => 1 << 5 | (update_in_progress as u8) << 7,
                     0x32 => to_bcd(((year + 1900) / 100) as u8),
                     _ => {
                         // self.index is always guaranteed to be in range via INDEX_MASK.
