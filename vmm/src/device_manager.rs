@@ -2392,11 +2392,10 @@ impl DeviceManager {
         &mut self,
         pci: &mut PciBus,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-        device: &Arc<dyn hypervisor::Device>,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(u32, String)> {
         #[cfg(feature = "kvm")]
-        return self.add_vfio_device(pci, interrupt_manager, device, device_cfg);
+        return self.add_vfio_device(pci, interrupt_manager, device_cfg);
 
         #[cfg(not(feature = "kvm"))]
         Err(DeviceManagerError::NoDevicePassthroughSupport)
@@ -2407,9 +2406,13 @@ impl DeviceManager {
         &mut self,
         pci: &mut PciBus,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-        device: &Arc<dyn hypervisor::Device>,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(u32, String)> {
+        let passthrough_device = self
+            .passthrough_device
+            .as_ref()
+            .ok_or(DeviceManagerError::NoDevicePassthroughSupport)?;
+
         // We need to shift the device id since the 3 first bits
         // are dedicated to the PCI function, and we know we don't
         // do multifunction. Also, because we only support one PCI
@@ -2423,7 +2426,7 @@ impl DeviceManager {
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let vfio_container = Arc::new(
             VfioContainer::new(Arc::new(unsafe {
-                DeviceFd::from_raw_fd(device.as_raw_fd())
+                DeviceFd::from_raw_fd(passthrough_device.as_raw_fd())
             }))
             .map_err(DeviceManagerError::VfioCreate)?,
         );
@@ -2515,17 +2518,19 @@ impl DeviceManager {
         let mut devices = self.config.lock().unwrap().devices.clone();
 
         if let Some(device_list_cfg) = &mut devices {
-            // Create the passthrough device handle
-            let device = self
-                .address_manager
-                .vm
-                .create_passthrough_device()
-                .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?;
-            self.passthrough_device = Some(Arc::clone(&device));
+            if self.passthrough_device.is_none() {
+                // Create the passthrough device.
+                self.passthrough_device = Some(
+                    self.address_manager
+                        .vm
+                        .create_passthrough_device()
+                        .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?,
+                );
+            }
 
             for device_cfg in device_list_cfg.iter_mut() {
                 let (device_id, _) =
-                    self.add_passthrough_device(pci, interrupt_manager, &device, device_cfg)?;
+                    self.add_passthrough_device(pci, interrupt_manager, device_cfg)?;
                 if device_cfg.iommu && self.iommu_device.is_some() {
                     iommu_attached_device_ids.push(device_id);
                 }
@@ -2940,27 +2945,19 @@ impl DeviceManager {
 
         let interrupt_manager = Arc::clone(&self.msi_interrupt_manager);
 
-        let device = if let Some(device) = &self.passthrough_device {
-            Arc::clone(&device)
-        } else {
-            // If the passthrough device file descriptor has not been created yet,
-            // it is created here and stored in the DeviceManager structure for
-            // future needs.
-            let device = self
-                .address_manager
-                .vm
-                .create_passthrough_device()
-                .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?;
-            self.passthrough_device = Some(Arc::clone(&device));
-            device
-        };
+        if self.passthrough_device.is_none() {
+            // If the passthrough device has not been created yet, it is created
+            // here and stored in the DeviceManager structure for future needs.
+            self.passthrough_device = Some(
+                self.address_manager
+                    .vm
+                    .create_passthrough_device()
+                    .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?,
+            );
+        }
 
-        let (device_id, device_name) = self.add_passthrough_device(
-            &mut pci.lock().unwrap(),
-            &interrupt_manager,
-            &device,
-            device_cfg,
-        )?;
+        let (device_id, device_name) =
+            self.add_passthrough_device(&mut pci.lock().unwrap(), &interrupt_manager, device_cfg)?;
 
         // Update the PCIU bitmap
         self.pci_devices_up |= 1 << (device_id >> 3);
