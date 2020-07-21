@@ -19,106 +19,123 @@ pipeline{
 						cancelPreviousBuilds()
 					}
 				}
-			}
-		}
-		stage ('Build') {
-			failFast true
-            parallel {
-				stage ('Master build') {
-					agent { node { label 'master' } }
-					stages {
-						stage ('Checkout') {
-							steps {
-								checkout scm
-							}
-						}
-						stage ('Run Cargo tests') {
-							steps {
-								sh "scripts/dev_cli.sh tests --cargo"
-							}
-						}
-						stage ('Run OpenAPI tests') {
-							steps {
-								sh "scripts/run_openapi_tests.sh"
-							}
-						}
-					}
-				}	
-				stage ('Worker build') {
-					agent { node { label 'bionic' } }
-					options {
-						timeout(time: 1, unit: 'HOURS')
-					}
-					stages {
-						stage ('Checkout') {
-							steps {
-								checkout scm
-							}
-						}
-						stage ('Run unit tests') {
-							steps {
-								sh "scripts/dev_cli.sh tests --unit"
-							}
-						}
-						stage ('Run integration tests') {
-							steps {
-								sh "scripts/dev_cli.sh tests --integration"
-							}
-						}
+				stage ('Checkout') {
+					steps {
+						checkout scm
 					}
 				}
-				stage ('AArch64 worker build') {
-					agent { node { label 'bionic-arm64' } }
-					options {
-						timeout(time: 1, unit: 'HOURS')
-					}
-					stages {
-						stage ('Checkout') {
-							steps {
-								checkout scm
-							}
-						}
-						stage ('Build') {
-							steps {
-								sh "scripts/dev_cli.sh build --release"
-							}
-						}
-						stage ('Build for musl') {
-							steps {
-								sh "scripts/dev_cli.sh build --release --libc musl"
-							}
-						}
-						stage ('Run unit tests') {
-							steps {
-								sh "scripts/dev_cli.sh tests --unit"
-							}
-						}
-						stage ('Run integration tests') {
-							steps {
-								sh "scripts/dev_cli.sh tests --integration"
-							}
+				stage ('Build') {
+					when {
+						anyOf { 
+							branch 'master';
+							changeset "Jenkinsfile"; 
+							changeset "**/*.rs";
+							changeset "**/Cargo.*";
+							changeset "scripts/*";
+							changeset "resources/linux-config-*";
+							changeset "test_data/*";
+							changeset "**/cloud-hypervisor.yaml"
 						}
 					}
-				}
-				stage ('Worker build (musl)') {
-					agent { node { label 'bionic' } }
-					options {
-						timeout(time: 1, unit: 'HOURS')
-					}
-					stages {
-						stage ('Checkout') {
-							steps {
-								checkout scm
+					failFast true
+					parallel {
+						stage ('Master build') {
+							agent { node { label 'master' } }
+							stages {
+								stage ('Checkout') {
+									steps {
+										checkout scm
+									}
+								}
+								stage ('Run Cargo tests') {
+									steps {
+										sh "scripts/dev_cli.sh tests --cargo"
+									}
+								}
+								stage ('Run OpenAPI tests') {
+									steps {
+										sh "scripts/run_openapi_tests.sh"
+									}
+								}
+							}
+						}	
+						stage ('Worker build') {
+							agent { node { label 'bionic' } }
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							stages {
+								stage ('Checkout') {
+									steps {
+										checkout scm
+									}
+								}
+								stage ('Run unit tests') {
+									steps {
+										sh "scripts/dev_cli.sh tests --unit"
+									}
+								}
+								stage ('Run integration tests') {
+									steps {
+										sh "scripts/dev_cli.sh tests --integration"
+									}
+								}
 							}
 						}
-						stage ('Run unit tests for musl') {
-							steps {
-								sh "scripts/dev_cli.sh tests --unit --libc musl"
+						stage ('AArch64 worker build') {
+							agent { node { label 'bionic-arm64' } }
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							stages {
+								stage ('Checkout') {
+									steps {
+										checkout scm
+									}
+								}
+								stage ('Build') {
+									steps {
+										sh "scripts/dev_cli.sh build --release"
+									}
+								}
+								stage ('Build for musl') {
+									steps {
+										sh "scripts/dev_cli.sh build --release --libc musl"
+									}
+								}
+								stage ('Run unit tests') {
+									steps {
+										sh "scripts/dev_cli.sh tests --unit"
+									}
+								}
+								stage ('Run integration tests') {
+									steps {
+										sh "scripts/dev_cli.sh tests --integration"
+									}
+								}
 							}
 						}
-						stage ('Run integration tests for musl') {
-							steps {
-								sh "scripts/dev_cli.sh tests --integration --libc musl"
+						stage ('Worker build (musl)') {
+							agent { node { label 'bionic' } }
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
+							stages {
+								stage ('Checkout') {
+									steps {
+										checkout scm
+									}
+								}
+								stage ('Run unit tests for musl') {
+									steps {
+										sh "scripts/dev_cli.sh tests --unit --libc musl"
+									}
+								}
+								stage ('Run integration tests for musl') {
+									steps {
+										sh "scripts/dev_cli.sh tests --integration --libc musl"
+									}
+								}
 							}
 						}
 					}
