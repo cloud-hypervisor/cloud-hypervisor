@@ -9,6 +9,7 @@
 //
 
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::Arc;
 #[cfg(target_arch = "x86_64")]
@@ -303,15 +304,14 @@ impl vm::Vm for KvmVm {
         self.fd.check_extension(c)
     }
     /// Create a device that is used for passthrough
-    fn create_passthrough_device(&self) -> vm::Result<DeviceFd> {
+    fn create_passthrough_device(&self) -> vm::Result<Arc<dyn device::Device>> {
         let mut vfio_dev = kvm_create_device {
             type_: kvm_device_type_KVM_DEV_TYPE_VFIO,
             fd: 0,
             flags: 0,
         };
 
-        self.fd
-            .create_device(&mut vfio_dev)
+        self.create_device(&mut vfio_dev)
             .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
     }
 }
@@ -867,5 +867,11 @@ impl device::Device for KvmDevice {
         self.fd
             .set_device_attr(attr)
             .map_err(|e| device::HypervisorDeviceError::SetDeviceAttribute(e.into()))
+    }
+}
+
+impl AsRawFd for KvmDevice {
+    fn as_raw_fd(&self) -> RawFd {
+        self.fd.as_raw_fd()
     }
 }

@@ -14,7 +14,7 @@ use crate::cpu::Vcpu;
 use crate::device::Device;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
-use crate::{CreateDevice, DeviceFd, IoEventAddress, IrqRoutingEntry, MemoryRegion};
+use crate::{CreateDevice, IoEventAddress, IrqRoutingEntry, MemoryRegion};
 use kvm_ioctls::Cap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -178,5 +178,5 @@ pub trait Vm: Send + Sync {
     /// Checks if a particular `Cap` is available.
     fn check_extension(&self, c: Cap) -> bool;
     /// Create a device that is used for passthrough
-    fn create_passthrough_device(&self) -> Result<DeviceFd>;
+    fn create_passthrough_device(&self) -> Result<Arc<dyn Device>>;
 }
