@@ -2424,6 +2424,11 @@ impl DeviceManager {
             << 3;
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
+        // SAFETY the raw fd conversion here is safe because:
+        //   1. This function is only called on KVM, see the feature guard above.
+        //   2. When running on KVM, passthrough_device wraps around DeviceFd.
+        //   3. The conversion here extracts the raw fd and then turns the raw fd into a DeviceFd
+        //      of the same (correct) type.
         let vfio_container = Arc::new(
             VfioContainer::new(Arc::new(unsafe {
                 DeviceFd::from_raw_fd(passthrough_device.as_raw_fd())
