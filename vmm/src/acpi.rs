@@ -64,8 +64,11 @@ pub fn create_acpi_tables(
     // Revision 6 of the ACPI FADT table is 276 bytes long
     let mut facp = SDT::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
 
-    // HW_REDUCED_ACPI and RESET_REG_SUP
-    let fadt_flags: u32 = 1 << 20 | 1 << 10;
+    // PM_TMR_BLK I/O port
+    facp.write(76, 0xb008);
+
+    // HW_REDUCED_ACPI, RESET_REG_SUP, TMR_VAL_EXT
+    let fadt_flags: u32 = 1 << 20 | 1 << 10 | 1 << 8;
     facp.write(112, fadt_flags);
 
     // RESET_REG
@@ -75,6 +78,9 @@ pub fn create_acpi_tables(
 
     facp.write(131, 3u8); // FADT minor version
     facp.write(140, dsdt_offset.0); // X_DSDT
+
+    // X_PM_TMR_BLK
+    facp.write(208, GenericAddress::io_port_address(0xb008));
 
     // SLEEP_CONTROL_REG
     facp.write(244, GenericAddress::io_port_address(0x3c0));

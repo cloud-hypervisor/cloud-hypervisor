@@ -39,7 +39,7 @@ pub mod ioapic;
 pub mod legacy;
 
 #[cfg(feature = "acpi")]
-pub use self::acpi::{AcpiGEDDevice, AcpiShutdownDevice};
+pub use self::acpi::{AcpiGEDDevice, AcpiPMTimerDevice, AcpiShutdownDevice};
 pub use self::bus::{Bus, BusDevice, Error as BusError};
 
 pub type DeviceEventT = u16;

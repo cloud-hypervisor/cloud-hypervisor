@@ -1224,6 +1224,24 @@ impl DeviceManager {
             .io_bus
             .insert(ged_device.clone(), 0xb000, 0x1)
             .map_err(DeviceManagerError::BusError)?;
+
+        let pm_timer_device = Arc::new(Mutex::new(devices::AcpiPMTimerDevice::new()));
+
+        self.bus_devices
+            .push(Arc::clone(&pm_timer_device) as Arc<Mutex<dyn BusDevice>>);
+
+        self.address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_io_addresses(Some(GuestAddress(0xb008)), 0x4, None)
+            .ok_or(DeviceManagerError::AllocateIOPort)?;
+
+        self.address_manager
+            .io_bus
+            .insert(pm_timer_device, 0xb008, 0x4)
+            .map_err(DeviceManagerError::BusError)?;
+
         Ok(Some(ged_device))
     }
 
