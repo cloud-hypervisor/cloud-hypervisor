@@ -65,14 +65,14 @@ pub fn create_acpi_tables(
     let mut facp = SDT::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
 
     // PM_TMR_BLK I/O port
-    facp.write(76, 0xb008);
+    facp.write(76, 0xb008u32);
 
     // HW_REDUCED_ACPI, RESET_REG_SUP, TMR_VAL_EXT
     let fadt_flags: u32 = 1 << 20 | 1 << 10 | 1 << 8;
     facp.write(112, fadt_flags);
 
     // RESET_REG
-    facp.write(116, GenericAddress::io_port_address(0x3c0));
+    facp.write(116, GenericAddress::io_port_address::<u8>(0x3c0));
     // RESET_VALUE
     facp.write(128, 1u8);
 
@@ -80,12 +80,12 @@ pub fn create_acpi_tables(
     facp.write(140, dsdt_offset.0); // X_DSDT
 
     // X_PM_TMR_BLK
-    facp.write(208, GenericAddress::io_port_address(0xb008));
+    facp.write(208, GenericAddress::io_port_address::<u32>(0xb008));
 
     // SLEEP_CONTROL_REG
-    facp.write(244, GenericAddress::io_port_address(0x3c0));
+    facp.write(244, GenericAddress::io_port_address::<u8>(0x3c0));
     // SLEEP_STATUS_REG
-    facp.write(256, GenericAddress::io_port_address(0x3c0));
+    facp.write(256, GenericAddress::io_port_address::<u8>(0x3c0));
 
     facp.write(268, b"CLOUDHYP"); // Hypervisor Vendor Identity
 
