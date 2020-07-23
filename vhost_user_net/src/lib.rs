@@ -110,6 +110,7 @@ impl VhostUserNetThread {
                 rx_tap_listening: false,
                 epoll_fd: None,
                 counters: NetCounters::default(),
+                tap_event_id: 2,
             },
         })
     }

@@ -32,10 +32,7 @@ use std::{io, mem, net};
 
 pub use mac::{MacAddr, MAC_ADDR_LEN};
 pub use open_tap::{open_tap, Error as OpenTapError};
-pub use queue_pair::{
-    NetCounters, NetQueuePair, NetQueuePairError, RxVirtio, TxVirtio, RX_QUEUE_EVENT, RX_TAP_EVENT,
-    TX_QUEUE_EVENT,
-};
+pub use queue_pair::{NetCounters, NetQueuePair, NetQueuePairError, RxVirtio, TxVirtio};
 pub use tap::{Error as TapError, Tap};
 
 #[derive(Debug)]
