@@ -216,15 +216,8 @@ pub struct NetQueuePair {
     pub epoll_fd: Option<RawFd>,
     pub rx_tap_listening: bool,
     pub counters: NetCounters,
+    pub tap_event_id: u16,
 }
-
-pub type DeviceEventT = u16;
-// The guest has made a buffer available to receive a frame into.
-pub const RX_QUEUE_EVENT: DeviceEventT = 0;
-// The transmit queue has a frame that is ready to send from the guest.
-pub const TX_QUEUE_EVENT: DeviceEventT = 1;
-// A frame is available for reading from the tap device to receive in the guest.
-pub const RX_TAP_EVENT: DeviceEventT = 2;
 
 impl NetQueuePair {
     // Copies a single frame from `self.rx.frame_buf` into the guest. Returns true
@@ -245,7 +238,7 @@ impl NetQueuePair {
                     self.epoll_fd.unwrap(),
                     self.tap.as_raw_fd(),
                     epoll::Events::EPOLLIN,
-                    u64::from(RX_TAP_EVENT),
+                    u64::from(self.tap_event_id),
                 )
                 .map_err(NetQueuePairError::UnregisterListener)?;
                 self.rx_tap_listening = false;
@@ -314,7 +307,7 @@ impl NetQueuePair {
                 self.epoll_fd.unwrap(),
                 self.tap.as_raw_fd(),
                 epoll::Events::EPOLLIN,
-                u64::from(RX_TAP_EVENT),
+                u64::from(self.tap_event_id),
             )
             .map_err(NetQueuePairError::RegisterListener)?;
             self.rx_tap_listening = true;
