@@ -546,6 +546,9 @@ mod tests {
             workload_path.push("workloads");
 
             let mut fw_path = workload_path;
+            #[cfg(target_arch = "aarch64")]
+            fw_path.push("Image");
+            #[cfg(target_arch = "x86_64")]
             fw_path.push("hypervisor-fw");
             let fw_path = String::from(fw_path.to_str().unwrap());
             let network = GuestNetworkConfig {
@@ -1083,7 +1086,7 @@ mod tests {
             // 1 virtio-net     with 5 vectors: config, Rx (2), Tx (2)
             // Based on the above, the total vectors should 14.
             // This is a PCI only feature.
-            #[cfg(not(feature = "mmio"))]
+            #[cfg(all(not(feature = "mmio"), feature = "acpi"))]
             aver_eq!(
                 tb,
                 guest
@@ -1097,7 +1100,7 @@ mod tests {
 
             // ACPI is not built with mmio, hence we can't test the resize
             // feature for mmio.
-            #[cfg(not(feature = "mmio"))]
+            #[cfg(all(not(feature = "mmio"), feature = "acpi"))]
             {
                 guest
                     .ssh_command(
@@ -1264,7 +1267,7 @@ mod tests {
 
             // ACPI is not built with mmio, hence we can't test the resize
             // feature for mmio.
-            #[cfg(not(feature = "mmio"))]
+            #[cfg(all(not(feature = "mmio"), feature = "acpi"))]
             {
                 guest
                     .ssh_command(
@@ -2025,6 +2028,7 @@ mod tests {
         use crate::tests::*;
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_simple_launch() {
             test_block!(tb, "", {
                 let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
@@ -2068,6 +2072,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_multi_cpu() {
             test_block!(tb, "", {
                 let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
@@ -2102,21 +2107,25 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_cpu_topology_421() {
             test_cpu_topology(4, 2, 1);
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_cpu_topology_142() {
             test_cpu_topology(1, 4, 2);
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_cpu_topology_262() {
             test_cpu_topology(2, 6, 2);
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_large_vm() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -2141,6 +2150,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_huge_memory() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -2168,6 +2178,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_pci_msi() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -2552,6 +2563,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_boot_from_vhost_user_blk_default() {
             test_boot_from_vhost_user_blk(1, false, false, Some(&prepare_vubd), false)
         }
@@ -2563,6 +2575,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_split_irqchip() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -2649,36 +2662,43 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_on() {
             test_virtio_fs(true, None, "none", &prepare_virtiofsd, true)
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_off() {
             test_virtio_fs(false, None, "none", &prepare_virtiofsd, true)
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_on_w_vhost_user_fs_daemon() {
             test_virtio_fs(true, None, "none", &prepare_vhost_user_fs_daemon, true)
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_off_w_vhost_user_fs_daemon() {
             test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon, true)
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_pmem_persist_writes() {
             test_virtio_pmem(false, false)
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_pmem_discard_writes() {
             test_virtio_pmem(true, false)
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_pmem_with_size() {
             test_virtio_pmem(true, true)
         }
@@ -2801,6 +2821,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_unprivileged_net() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -2857,6 +2878,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_serial_off() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -2904,6 +2926,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_serial_null() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -2949,6 +2972,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_serial_tty() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3001,6 +3025,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_serial_file() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3077,7 +3102,7 @@ mod tests {
 
                 thread::sleep(std::time::Duration::new(20, 0));
 
-                #[cfg(not(feature = "mmio"))]
+                #[cfg(all(not(feature = "mmio"), feature = "acpi"))]
                 aver!(
                     tb,
                     guest
@@ -3103,6 +3128,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_console_file() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3142,6 +3168,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         // The VFIO integration test starts cloud-hypervisor guest with 3 TAP
         // backed networking interfaces, bound through a simple bridge on the host.
         // So if the nested cloud-hypervisor succeeds in getting a directly
@@ -3409,6 +3436,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_reboot() {
             test_block!(tb, "", {
                 let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
@@ -3471,6 +3499,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_bzimage_reboot() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3534,11 +3563,13 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_virtio_vsock_hotplug() {
             _test_virtio_vsock(true);
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         // Start cloud-hypervisor with no VM parameters, only the API server running.
         // From the API: Create a VM, boot it and check that it looks as expected.
         fn test_api_create_boot() {
@@ -3591,6 +3622,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         // Start cloud-hypervisor with no VM parameters, only the API server running.
         // From the API: Create a VM, boot it and check that it looks as expected.
         // Then we pause the VM, check that it's no longer available.
@@ -3680,6 +3712,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         // This test validates that it can find the virtio-iommu device at first.
         // It also verifies that both disks and the network card are attached to
         // the virtual IOMMU by looking at /sys/kernel/iommu_groups directory.
@@ -3776,6 +3809,7 @@ mod tests {
         // properly probed first, then removing it, and adding it again by doing a
         // rescan.
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_pci_bar_reprogramming() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3862,6 +3896,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_cpu_hotplug() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3956,6 +3991,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_memory_hotplug() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4134,6 +4170,7 @@ mod tests {
 
         // Test both vCPU and memory resizing together
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_resize() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4228,6 +4265,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_disk_hotplug() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4366,6 +4404,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_pmem_hotplug() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4504,6 +4543,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_net_hotplug() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4842,6 +4882,7 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
         fn test_counters() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
