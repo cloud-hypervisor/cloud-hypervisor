@@ -132,3 +132,9 @@ impl EpollHelper {
         }
     }
 }
+
+impl AsRawFd for EpollHelper {
+    fn as_raw_fd(&self) -> RawFd {
+        self.epoll_file.as_raw_fd()
+    }
+}
