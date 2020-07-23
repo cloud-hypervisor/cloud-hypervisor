@@ -5,6 +5,7 @@
 
 use acpi_tables::{aml, aml::Aml};
 use std::sync::Arc;
+use std::time::Instant;
 use vm_device::interrupt::InterruptSourceGroup;
 use vmm_sys_util::eventfd::EventFd;
 use BusDevice;
@@ -148,4 +149,40 @@ impl Aml for AcpiGEDDevice {
         )
         .to_aml_bytes()
     }
+}
+
+pub struct AcpiPMTimerDevice {
+    start: Instant,
+}
+
+impl AcpiPMTimerDevice {
+    pub fn new() -> Self {
+        Self {
+            start: Instant::now(),
+        }
+    }
+}
+
+impl Default for AcpiPMTimerDevice {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BusDevice for AcpiPMTimerDevice {
+    fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
+        let now = Instant::now();
+        let since = now.duration_since(self.start);
+        let nanos = since.as_nanos();
+
+        const PM_TIMER_FREQUENCY_HZ: u128 = 3_579_545;
+        const NANOS_PER_SECOND: u128 = 1_000_000_000;
+
+        let counter = (nanos * PM_TIMER_FREQUENCY_HZ) / NANOS_PER_SECOND;
+        let counter: u32 = (counter & 0xffff_ffff) as u32;
+
+        data.copy_from_slice(&counter.to_le_bytes());
+    }
+
+    fn write(&mut self, _base: u64, _offset: u64, _data: &[u8]) {}
 }
