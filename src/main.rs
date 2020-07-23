@@ -332,7 +332,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
 
         println!(
             "Cloud Hypervisor Guest\n\tAPI server: {}\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: \
-             {:?}\n\tInitramfs: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
+             {:?}\n\tInitramfs: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}\n\tNet: {:?}",
             api_socket_path,
             vm_config.cpus.boot_vcpus,
             vm_config.memory.size >> 20,
@@ -340,6 +340,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
             vm_config.initramfs,
             vm_config.cmdline.args.as_str(),
             vm_config.disks,
+            vm_config.net,
         );
 
         // Create and boot the VM based off the VM config we just built.
