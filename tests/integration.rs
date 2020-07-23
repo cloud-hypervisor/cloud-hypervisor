@@ -480,7 +480,7 @@ mod tests {
         cmd.status().expect("Failed to launch ch-remote").success()
     }
 
-    const DEFAULT_SSH_RETRIES: u8 = 6;
+    const DEFAULT_SSH_RETRIES: u8 = 10;
     const DEFAULT_SSH_TIMEOUT: u8 = 10;
     fn ssh_command_ip(command: &str, ip: &str, retries: u8, timeout: u8) -> Result<String, Error> {
         let mut s = String::new();
