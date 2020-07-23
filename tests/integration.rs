@@ -507,10 +507,22 @@ mod tests {
                 let _ = channel.wait_close();
                 Ok(())
             })() {
-                Ok(_) => break,
+                Ok(_) => {
+                    println!(
+                        "++++++++++++ retries: {}, ip: {}, command: {}, output: {}",
+                        counter, ip, command, s
+                    );
+                    break;
+                }
                 Err(e) => {
                     counter += 1;
                     if counter >= retries {
+                        if retries > 0 {
+                            println!(
+                                "++++++++++++ ERROR: ip: {}, command: {}, error: {}",
+                                ip, command, e
+                            );
+                        }
                         return Err(e);
                     }
                 }
@@ -590,6 +602,33 @@ mod tests {
                 "tap=,mac={},ip={},mask=255.255.255.0,iommu=on",
                 self.network.guest_mac, self.network.host_ip
             )
+        }
+
+        fn probe(&self, timeout: u8, tag: &str) -> Result<(), Error> {
+            // Try to issue a command every 4 seconds and check the result
+            let mut n = 0;
+            loop {
+                match ssh_command_ip("pwd", &self.network.guest_ip, 0, 0) {
+                    Ok(s) => {
+                        println!(
+                            "---------- {}: guest reached after {} seconds: {}",
+                            tag, n, s
+                        );
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        if n >= timeout {
+                            println!(
+                                "---------- {}: guest not reached in {} seconds: {}",
+                                tag, timeout, e
+                            );
+                            return Err(e);
+                        }
+                        n += 4;
+                        thread::sleep(std::time::Duration::new(4, 0));
+                    }
+                }
+            }
         }
 
         fn ssh_command(&self, command: &str) -> Result<String, Error> {
@@ -2276,7 +2315,8 @@ mod tests {
                         .spawn()
                         .unwrap();
 
-                    thread::sleep(std::time::Duration::new(20, 0));
+                    aver!(tb, guest.probe(60, "test_aarch64_pe_boot").is_ok());
+                    // thread::sleep(std::time::Duration::new(20, 0));
 
                     aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
                     aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
