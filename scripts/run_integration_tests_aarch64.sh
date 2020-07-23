@@ -186,10 +186,7 @@ fi
 
 sed -i 's/"with-serde",\ //g' hypervisor/Cargo.toml
 
-cargo_args=("$@")
-cargo_args+=("--no-default-features")
-cargo_args+=("--features mmio,kvm")
-cargo build --all --release --target $BUILD_TARGET ${cargo_args[@]}
+cargo build --all --release --no-default-features --features pci,kvm --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
 strip target/$BUILD_TARGET/release/ch-remote
@@ -209,6 +206,7 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 sudo adduser $USER kvm
 newgrp kvm << EOF
 export RUST_BACKTRACE=1
+time cargo test --no-default-features --features "integration_tests,pci,kvm" "tests::parallel::$@" -- --nocapture
 EOF
 RES=$?
 
