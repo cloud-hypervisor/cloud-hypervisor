@@ -13,12 +13,12 @@ pub struct GenericAddress {
 }
 
 impl GenericAddress {
-    pub fn io_port_address(address: u16) -> Self {
+    pub fn io_port_address<T>(address: u16) -> Self {
         GenericAddress {
             address_space_id: 1,
-            register_bit_width: 8,
+            register_bit_width: 8 * std::mem::size_of::<T>() as u8,
             register_bit_offset: 0,
-            access_size: 1,
+            access_size: std::mem::size_of::<T>() as u8,
             address: u64::from(address),
         }
     }
