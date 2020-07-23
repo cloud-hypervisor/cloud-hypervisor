@@ -29,7 +29,7 @@ pub enum EpollHelperError {
 
 pub const EPOLL_HELPER_EVENT_PAUSE: u16 = 0;
 pub const EPOLL_HELPER_EVENT_KILL: u16 = 1;
-pub const EPOLL_HELPER_EVENT_LAST: u16 = EPOLL_HELPER_EVENT_KILL;
+pub const EPOLL_HELPER_EVENT_LAST: u16 = 15;
 
 pub trait EpollHelperHandler {
     // Return true if execution of the loop should be stopped
