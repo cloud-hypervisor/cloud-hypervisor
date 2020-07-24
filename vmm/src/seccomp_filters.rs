@@ -330,6 +330,8 @@ pub fn vmm_thread_filter() -> Result<SeccompFilter, Error> {
             ),
             #[cfg(target_arch = "x86_64")]
             allow_syscall(libc::SYS_unlink),
+            #[cfg(target_arch = "aarch64")]
+            allow_syscall(libc::SYS_unlinkat),
             allow_syscall(libc::SYS_wait4),
             allow_syscall(libc::SYS_write),
         ]
