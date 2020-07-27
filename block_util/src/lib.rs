@@ -13,15 +13,18 @@ extern crate log;
 #[macro_use]
 extern crate serde_derive;
 
+use io_uring::{opcode, IoUring, Probe};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::DescriptorChain;
+use vmm_sys_util::eventfd::EventFd;
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = (0x01 as u64) << SECTOR_SHIFT;
@@ -86,6 +89,8 @@ pub enum ExecuteError {
     Seek(io::Error),
     Write(GuestMemoryError),
     Unsupported(u32),
+    SubmitIoUring(io::Error),
+    GetHostAddress(GuestMemoryError),
 }
 
 impl ExecuteError {
@@ -97,6 +102,8 @@ impl ExecuteError {
             ExecuteError::Seek(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Write(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Unsupported(_) => VIRTIO_BLK_S_UNSUPP,
+            ExecuteError::SubmitIoUring(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::GetHostAddress(_) => VIRTIO_BLK_S_IOERR,
         }
     }
 }
@@ -136,11 +143,11 @@ fn sector(mem: &GuestMemoryMmap, desc_addr: GuestAddress) -> result::Result<u64,
 
 pub struct Request {
     pub request_type: RequestType,
-    sector: u64,
-    data_addr: GuestAddress,
+    pub sector: u64,
+    pub data_addr: GuestAddress,
     pub data_len: u32,
     pub status_addr: GuestAddress,
-    writeback: bool,
+    pub writeback: bool,
 }
 
 impl Request {
@@ -254,6 +261,95 @@ impl Request {
             RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
         };
         Ok(0)
+    }
+
+    pub fn execute_io_uring(
+        &self,
+        mem: &GuestMemoryMmap,
+        io_uring: &mut IoUring,
+        disk_nsectors: u64,
+        disk_image_fd: RawFd,
+        disk_id: &[u8],
+        user_data: u64,
+    ) -> result::Result<bool, ExecuteError> {
+        let data_len = self.data_len;
+        let sector = self.sector;
+        let data_addr = self.data_addr;
+        let request_type = self.request_type;
+
+        let mut top: u64 = u64::from(data_len) / SECTOR_SIZE;
+        if u64::from(data_len) % SECTOR_SIZE != 0 {
+            top += 1;
+        }
+        top = top
+            .checked_add(sector)
+            .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
+        if top > disk_nsectors {
+            return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+        }
+
+        let buf = mem
+            .get_slice(data_addr, data_len as usize)
+            .map_err(ExecuteError::GetHostAddress)?
+            .as_ptr();
+        let offset = (sector as i64) << SECTOR_SHIFT;
+
+        let (submitter, sq, _) = io_uring.split();
+        let mut avail_sq = sq.available();
+
+        // Queue operations expected to be submitted.
+        match request_type {
+            RequestType::In => {
+                // Safe because we know the file descriptor is valid and we
+                // relied on vm-memory to provide the buffer address.
+                let _ = unsafe {
+                    avail_sq.push(
+                        opcode::Read::new(opcode::types::Fd(disk_image_fd), buf, data_len)
+                            .offset(offset)
+                            .build()
+                            .user_data(user_data),
+                    )
+                };
+            }
+            RequestType::Out => {
+                // Safe because we know the file descriptor is valid and we
+                // relied on vm-memory to provide the buffer address.
+                let _ = unsafe {
+                    avail_sq.push(
+                        opcode::Write::new(opcode::types::Fd(disk_image_fd), buf, data_len)
+                            .offset(offset)
+                            .build()
+                            .user_data(user_data),
+                    )
+                };
+            }
+            RequestType::Flush => {
+                // Safe because we know the file descriptor is valid.
+                let _ = unsafe {
+                    avail_sq.push(
+                        opcode::Fsync::new(opcode::types::Fd(disk_image_fd))
+                            .build()
+                            .user_data(user_data),
+                    )
+                };
+            }
+            RequestType::GetDeviceID => {
+                if (data_len as usize) < disk_id.len() {
+                    return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                }
+                mem.write_slice(disk_id, data_addr)
+                    .map_err(ExecuteError::Write)?;
+                return Ok(false);
+            }
+            RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
+        }
+
+        // Update the submission queue and submit new operations to the
+        // io_uring instance.
+        avail_sq.sync();
+        submitter.submit().map_err(ExecuteError::SubmitIoUring)?;
+
+        Ok(true)
     }
 
     pub fn set_writeback(&mut self, writeback: bool) {
@@ -374,3 +470,71 @@ impl Serialize for VirtioBlockGeometry {
 }
 
 unsafe impl ByteValued for VirtioBlockGeometry {}
+
+/// Check if io_uring for block device can be used on the current system, as
+/// it correctly supports the expected io_uring features.
+pub fn block_io_uring_is_supported() -> bool {
+    let error_msg = "io_uring not supported:";
+
+    // Check we can create an io_uring instance, which effectively verifies
+    // that io_uring_setup() syscall is supported.
+    let io_uring = match IoUring::new(1) {
+        Ok(io_uring) => io_uring,
+        Err(e) => {
+            info!("{} failed to create io_uring instance: {}", error_msg, e);
+            return false;
+        }
+    };
+
+    let submitter = io_uring.submitter();
+
+    let event_fd = match EventFd::new(libc::EFD_NONBLOCK) {
+        Ok(fd) => fd,
+        Err(e) => {
+            info!("{} failed to create eventfd: {}", error_msg, e);
+            return false;
+        }
+    };
+
+    // Check we can register an eventfd as this is going to be needed while
+    // using io_uring with the virtio block device. This also validates that
+    // io_uring_register() syscall is supported.
+    match submitter.register_eventfd(event_fd.as_raw_fd()) {
+        Ok(_) => {}
+        Err(e) => {
+            info!("{} failed to register eventfd: {}", error_msg, e);
+            return false;
+        }
+    }
+
+    let mut probe = Probe::new();
+
+    // Check we can register a probe to validate supported operations.
+    match submitter.register_probe(&mut probe) {
+        Ok(_) => {}
+        Err(e) => {
+            info!("{} failed to register a probe: {}", error_msg, e);
+            return false;
+        }
+    }
+
+    // Check IORING_OP_FSYNC is supported
+    if !probe.is_supported(opcode::Fsync::CODE) {
+        info!("{} IORING_OP_FSYNC operation not supported", error_msg);
+        return false;
+    }
+
+    // Check IORING_OP_READ is supported
+    if !probe.is_supported(opcode::Read::CODE) {
+        info!("{} IORING_OP_READ operation not supported", error_msg);
+        return false;
+    }
+
+    // Check IORING_OP_WRITE is supported
+    if !probe.is_supported(opcode::Write::CODE) {
+        info!("{} IORING_OP_WRITE operation not supported", error_msg);
+        return false;
+    }
+
+    true
+}
