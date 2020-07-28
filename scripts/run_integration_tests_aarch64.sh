@@ -6,6 +6,18 @@ source $HOME/.cargo/env
 export BUILD_TARGET=${BUILD_TARGET-aarch64-unknown-linux-gnu}
 
 WORKLOADS_DIR="$HOME/workloads"
+
+WORKLOADS_LOCK="$WORKLOADS_DIR/integration_test.lock"
+
+while [ -f "$WORKLOADS_LOCK" ]
+do
+    echo "another job is syncing $WORKLOADS_DIR folder, wait 10 seconds"
+    sleep 10
+done
+
+touch $WORKLOADS_LOCK
+echo "locked $WORKLOADS_DIR folder"
+
 mkdir -p "$WORKLOADS_DIR"
 
 cp scripts/sha1sums-aarch64 $WORKLOADS_DIR
@@ -163,6 +175,14 @@ if [ ! -d "$SHARED_DIR" ]; then
     echo "bar" > "$SHARED_DIR/file3" || exit 1
 fi
 
+rm -f $WORKLOADS_LOCK
+echo "unlocked $WORKLOADS_DIR folder"
+
+# Create tap interface without multipe queues support for vhost_user_net test.
+sudo ip tuntap add name vunet-tap0 mode tap
+# Create tap interface with multipe queues support for vhost_user_net test.
+sudo ip tuntap add name vunet-tap1 mode tap multi_queue
+
 BUILD_TARGET="aarch64-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
@@ -176,7 +196,7 @@ sed -i 's/"with-serde",\ //g' hypervisor/Cargo.toml
 cargo_args=("$@")
 cargo_args+=("--no-default-features")
 cargo_args+=("--features mmio,kvm")
-cargo build --release --target $BUILD_TARGET ${cargo_args[@]}
+cargo build --all --release --target $BUILD_TARGET ${cargo_args[@]}
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
 strip target/$BUILD_TARGET/release/ch-remote
@@ -220,5 +240,9 @@ EOF
 
     RES=$?
 fi
+
+# Tear vhost_user_net test network down
+sudo ip link del vunet-tap0
+sudo ip link del vunet-tap1
 
 exit $RES
