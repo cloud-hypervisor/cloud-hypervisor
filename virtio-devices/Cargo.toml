@@ -16,7 +16,7 @@ block_util = { path = "../block_util" }
 byteorder = "1.3.4"
 devices = { path = "../devices" }
 epoll = ">=4.0.1"
-libc = "0.2.73"
+libc = "0.2.74"
 log = "0.4.11"
 net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
