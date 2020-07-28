@@ -9,7 +9,7 @@ bitflags = "1.1.0"
 clap = { version = "2.33.1", features=["wrap_help"] }
 epoll = ">=4.0.1"
 futures = { version = "0.3.5", features = ["thread-pool"] }
-libc = "0.2.73"
+libc = "0.2.74"
 log = "0.4.11"
 # Match the version in vmm
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.21.1" }
