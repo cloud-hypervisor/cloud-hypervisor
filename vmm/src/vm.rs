@@ -251,6 +251,7 @@ pub struct Vm {
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     memory_manager: Arc<Mutex<MemoryManager>>,
     #[cfg(target_arch = "x86_64")]
+    #[cfg_attr(not(feature = "kvm"), allow(dead_code))]
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
     #[cfg(target_arch = "x86_64")]

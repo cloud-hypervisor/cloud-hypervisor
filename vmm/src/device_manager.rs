@@ -57,13 +57,13 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, sink, stdout, Seek, SeekFrom};
 use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
-#[cfg(feature = "pci_support")]
+#[cfg(all(feature = "pci_support", feature = "kvm"))]
 use std::os::unix::io::FromRawFd;
 use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Mutex};
 use tempfile::NamedTempFile;
-#[cfg(feature = "pci_support")]
+#[cfg(all(feature = "pci_support", feature = "kvm"))]
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDmaMapping};
 #[cfg(feature = "pci_support")]
 use virtio_devices::transport::VirtioPciDevice;
@@ -92,7 +92,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(any(feature = "mmio_support", target_arch = "aarch64"))]
 const MMIO_LEN: u64 = 0x1000;
 
-#[cfg(feature = "pci_support")]
+#[cfg(all(feature = "pci_support", feature = "kvm"))]
 const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
 
 #[cfg(target_arch = "x86_64")]
@@ -2406,6 +2406,7 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
+    #[cfg_attr(not(feature = "kvm"), allow(unused_variables))]
     fn add_passthrough_device(
         &mut self,
         pci: &mut PciBus,
