@@ -93,6 +93,8 @@ pub enum ValidationError {
     CpuTopologyCount,
     /// One part of the CPU topology was zero
     CpuTopologyZeroPart,
+    /// Virtio needs a min of 2 queues
+    VnetQueueLowerThan2,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -116,6 +118,7 @@ impl fmt::Display for ValidationError {
                 f,
                 "Product of CPU topology parts does not match maximum vCPUs"
             ),
+            VnetQueueLowerThan2 => write!(f, "Number of queues to virtio_net less than 2"),
         }
     }
 }
@@ -711,8 +714,7 @@ impl NetConfig {
             .0;
         let vhost_socket = parser.get("socket");
         let id = parser.get("id");
-
-        Ok(NetConfig {
+        let config = NetConfig {
             tap,
             ip,
             mask,
@@ -724,7 +726,15 @@ impl NetConfig {
             vhost_user,
             vhost_socket,
             id,
-        })
+        };
+        config.validate().map_err(Error::Validation)?;
+        Ok(config)
+    }
+    pub fn validate(&self) -> ValidationResult<()> {
+        if self.num_queues < 2 {
+            return Err(ValidationError::VnetQueueLowerThan2);
+        }
+        Ok(())
     }
 }
 
