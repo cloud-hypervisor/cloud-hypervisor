@@ -27,6 +27,10 @@ CTR_CLH_CARGO_BUILT_DIR="${CTR_CLH_ROOT_DIR}/build"
 CTR_CLH_CARGO_TARGET="${CTR_CLH_CARGO_BUILT_DIR}/cargo_target"
 CTR_CLH_INTEGRATION_WORKLOADS="/root/workloads"
 
+# Container networking option
+CTR_CLH_NET="host"
+[ $(uname -m) = "aarch64" ] && CTR_CLH_NET="bridge"
+
 # Cargo paths
 # Full path to the cargo registry dir on the host. This appears on the host
 # because we want to persist the cargo registry across container invocations.
@@ -312,7 +316,7 @@ cmd_tests() {
 	       --privileged \
 	       --security-opt seccomp=unconfined \
 	       --ipc=host \
-	       --net=host \
+	       --net="$CTR_CLH_NET" \
 	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
@@ -364,7 +368,7 @@ cmd_shell() {
 	   --privileged \
 	   --security-opt seccomp=unconfined \
 	   --ipc=host \
-	   --net=host \
+	   --net="$CTR_CLH_NET" \
 	   --tmpfs /tmp:exec \
 	   --volume /dev:/dev \
 	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
