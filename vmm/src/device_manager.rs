@@ -14,7 +14,9 @@ use crate::config::ConsoleOutputMode;
 use crate::config::DeviceConfig;
 use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig, VsockConfig};
 use crate::device_tree::{DeviceNode, DeviceTree};
-use crate::interrupt::{kvm::KvmMsiInterruptManager, LegacyUserspaceInterruptManager};
+#[cfg(feature = "kvm")]
+use crate::interrupt::kvm::KvmMsiInterruptManager as MsiInterruptManager;
+use crate::interrupt::LegacyUserspaceInterruptManager;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 #[cfg(feature = "pci_support")]
 use crate::PciDeviceInfo;
@@ -813,7 +815,7 @@ impl DeviceManager {
         // handling a linear dependency chain:
         // msi_interrupt_manager <- IOAPIC <- legacy_interrupt_manager.
         let msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>> =
-            Arc::new(KvmMsiInterruptManager::new(
+            Arc::new(MsiInterruptManager::new(
                 Arc::clone(&address_manager.allocator),
                 vm,
             ));
