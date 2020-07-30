@@ -8,7 +8,7 @@ use crate::api::{ApiError, ApiRequest, VmAction};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error, Result};
 use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusCode, Version};
-use seccomp::{SeccompFilter, SeccompLevel};
+use seccomp::{SeccompAction, SeccompFilter};
 use serde_json::Error as SerdeError;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -241,14 +241,14 @@ pub fn start_http_thread(
     path: &str,
     api_notifier: EventFd,
     api_sender: Sender<ApiRequest>,
-    seccomp_level: &SeccompLevel,
+    seccomp_action: &SeccompAction,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     std::fs::remove_file(path).unwrap_or_default();
     let socket_path = PathBuf::from(path);
 
     // Retrieve seccomp filter for API thread
     let api_seccomp_filter =
-        get_seccomp_filter(seccomp_level, Thread::Api).map_err(Error::CreateSeccompFilter)?;
+        get_seccomp_filter(seccomp_action, Thread::Api).map_err(Error::CreateSeccompFilter)?;
 
     thread::Builder::new()
         .name("http-server".to_string())

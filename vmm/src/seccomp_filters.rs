@@ -6,8 +6,7 @@
 
 use seccomp::{
     allow_syscall, allow_syscall_if, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen,
-    SeccompCmpOp::Eq, SeccompCondition as Cond, SeccompError, SeccompFilter, SeccompLevel,
-    SeccompRule,
+    SeccompCmpOp::Eq, SeccompCondition as Cond, SeccompError, SeccompFilter, SeccompRule,
 };
 use std::convert::TryInto;
 
@@ -381,17 +380,17 @@ pub fn api_thread_filter() -> Result<SeccompFilter, Error> {
     )?)
 }
 
-/// Generate a BPF program based on a seccomp level value.
+/// Generate a BPF program based on the seccomp_action value
 pub fn get_seccomp_filter(
-    seccomp_level: &SeccompLevel,
+    seccomp_action: &SeccompAction,
     thread_type: Thread,
 ) -> Result<BpfProgram, SeccompError> {
     let filter = match thread_type {
         Thread::Vmm => vmm_thread_filter(),
         Thread::Api => api_thread_filter(),
     };
-    match *seccomp_level {
-        SeccompLevel::None => Ok(vec![]),
+    match seccomp_action {
+        SeccompAction::Allow => Ok(vec![]),
         _ => filter
             .and_then(|filter| filter.try_into())
             .map_err(SeccompError::SeccompFilter),

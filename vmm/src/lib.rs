@@ -30,7 +30,7 @@ use crate::migration::{get_vm_snapshot, recv_vm_snapshot};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
 use libc::EFD_NONBLOCK;
-use seccomp::{SeccompFilter, SeccompLevel};
+use seccomp::{SeccompAction, SeccompFilter};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::fs::File;
 use std::io;
@@ -214,14 +214,14 @@ pub fn start_vmm_thread(
     api_event: EventFd,
     api_sender: Sender<ApiRequest>,
     api_receiver: Receiver<ApiRequest>,
-    seccomp_level: &SeccompLevel,
+    seccomp_action: &SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     let http_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
 
     // Retrieve seccomp filter
     let vmm_seccomp_filter =
-        get_seccomp_filter(seccomp_level, Thread::Vmm).map_err(Error::CreateSeccompFilter)?;
+        get_seccomp_filter(seccomp_action, Thread::Vmm).map_err(Error::CreateSeccompFilter)?;
 
     // Find the path that the "/proc/<pid>/exe" symlink points to. Must be done before spawning
     // a thread as Rust does not put the child threads in the same thread group which prevents the
@@ -242,7 +242,7 @@ pub fn start_vmm_thread(
         .map_err(Error::VmmThreadSpawn)?;
 
     // The VMM thread is started, we can start serving HTTP requests
-    api::start_http_thread(http_path, http_api_event, api_sender, seccomp_level)?;
+    api::start_http_thread(http_path, http_api_event, api_sender, seccomp_action)?;
 
     Ok(thread)
 }
