@@ -399,30 +399,41 @@ pub fn get_win_size() -> (u16, u16) {
     (ws.cols, ws.rows)
 }
 
+enum ConsoleInput {
+    Serial,
+    VirtioConsole,
+}
 #[derive(Default)]
 pub struct Console {
     // Serial port on 0x3f8
     serial: Option<Arc<Mutex<Serial>>>,
     virtio_console_input: Option<Arc<virtio_devices::ConsoleInput>>,
-    input_enabled: bool,
+    input: Option<ConsoleInput>,
 }
 
 impl Console {
     pub fn queue_input_bytes(&self, out: &[u8]) -> vmm_sys_util::errno::Result<()> {
-        if self.serial.is_some() {
-            self.serial
-                .as_ref()
-                .unwrap()
-                .lock()
-                .expect("Failed to process stdin event due to poisoned lock")
-                .queue_input_bytes(out)?;
-        }
+        match self.input {
+            Some(ConsoleInput::Serial) => {
+                if self.serial.is_some() {
+                    self.serial
+                        .as_ref()
+                        .unwrap()
+                        .lock()
+                        .expect("Failed to process stdin event due to poisoned lock")
+                        .queue_input_bytes(out)?;
+                }
+            }
 
-        if self.virtio_console_input.is_some() {
-            self.virtio_console_input
-                .as_ref()
-                .unwrap()
-                .queue_input_bytes(out);
+            Some(ConsoleInput::VirtioConsole) => {
+                if self.virtio_console_input.is_some() {
+                    self.virtio_console_input
+                        .as_ref()
+                        .unwrap()
+                        .queue_input_bytes(out);
+                }
+            }
+            None => {}
         }
 
         Ok(())
@@ -438,7 +449,7 @@ impl Console {
     }
 
     pub fn input_enabled(&self) -> bool {
-        self.input_enabled
+        self.input.is_some()
     }
 }
 
@@ -1519,11 +1530,18 @@ impl DeviceManager {
             None
         };
 
+        let input = if serial_config.mode.input_enabled() {
+            Some(ConsoleInput::Serial)
+        } else if console_config.mode.input_enabled() {
+            Some(ConsoleInput::VirtioConsole)
+        } else {
+            None
+        };
+
         Ok(Arc::new(Console {
             serial,
             virtio_console_input,
-            input_enabled: serial_config.mode.input_enabled()
-                || console_config.mode.input_enabled(),
+            input,
         }))
     }
 
