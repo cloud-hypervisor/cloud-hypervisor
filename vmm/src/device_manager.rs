@@ -403,7 +403,7 @@ pub fn get_win_size() -> (u16, u16) {
 pub struct Console {
     // Serial port on 0x3f8
     serial: Option<Arc<Mutex<Serial>>>,
-    console_input: Option<Arc<virtio_devices::ConsoleInput>>,
+    virtio_console_input: Option<Arc<virtio_devices::ConsoleInput>>,
     input_enabled: bool,
 }
 
@@ -418,16 +418,19 @@ impl Console {
                 .queue_input_bytes(out)?;
         }
 
-        if self.console_input.is_some() {
-            self.console_input.as_ref().unwrap().queue_input_bytes(out);
+        if self.virtio_console_input.is_some() {
+            self.virtio_console_input
+                .as_ref()
+                .unwrap()
+                .queue_input_bytes(out);
         }
 
         Ok(())
     }
 
     pub fn update_console_size(&self, cols: u16, rows: u16) {
-        if self.console_input.is_some() {
-            self.console_input
+        if self.virtio_console_input.is_some() {
+            self.virtio_console_input
                 .as_ref()
                 .unwrap()
                 .update_console_size(cols, rows)
@@ -1490,10 +1493,10 @@ impl DeviceManager {
             ConsoleOutputMode::Off => None,
         };
         let (col, row) = get_win_size();
-        let console_input = if let Some(writer) = console_writer {
+        let virtio_console_input = if let Some(writer) = console_writer {
             let id = String::from(CONSOLE_DEVICE_NAME);
 
-            let (virtio_console_device, console_input) =
+            let (virtio_console_device, virtio_console_input) =
                 virtio_devices::Console::new(id.clone(), writer, col, row, console_config.iommu)
                     .map_err(DeviceManagerError::CreateVirtioConsole)?;
             let virtio_console_device = Arc::new(Mutex::new(virtio_console_device));
@@ -1511,14 +1514,14 @@ impl DeviceManager {
                 .unwrap()
                 .insert(id.clone(), device_node!(id, virtio_console_device));
 
-            Some(console_input)
+            Some(virtio_console_input)
         } else {
             None
         };
 
         Ok(Arc::new(Console {
             serial,
-            console_input,
+            virtio_console_input,
             input_enabled: serial_config.mode.input_enabled()
                 || console_config.mode.input_enabled(),
         }))
