@@ -36,6 +36,11 @@ macro_rules! or {
     ($($x:expr),*) => (vec![$($x),*])
 }
 
+// Define io_uring syscalls as they are not yet part of libc.
+const SYS_IO_URING_SETUP: i64 = 425;
+const SYS_IO_URING_ENTER: i64 = 426;
+const SYS_IO_URING_REGISTER: i64 = 427;
+
 // See include/uapi/asm-generic/ioctls.h in the kernel code.
 const TCGETS: u64 = 0x5401;
 const TCSETS: u64 = 0x5402;
@@ -279,6 +284,9 @@ pub fn vmm_thread_filter() -> Result<SeccompFilter, Error> {
             allow_syscall(libc::SYS_gettimeofday),
             allow_syscall(libc::SYS_getuid),
             allow_syscall_if(libc::SYS_ioctl, create_vmm_ioctl_seccomp_rule()?),
+            allow_syscall(SYS_IO_URING_ENTER),
+            allow_syscall(SYS_IO_URING_SETUP),
+            allow_syscall(SYS_IO_URING_REGISTER),
             allow_syscall(libc::SYS_listen),
             allow_syscall(libc::SYS_lseek),
             allow_syscall(libc::SYS_madvise),

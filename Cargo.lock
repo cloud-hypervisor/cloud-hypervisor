@@ -1613,6 +1613,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "arch",
+ "block_util",
  "clap",
  "credibility",
  "devices",

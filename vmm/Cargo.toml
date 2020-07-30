@@ -19,6 +19,7 @@ clap = "2.33.1"
 acpi_tables = { path = "../acpi_tables", optional = true }
 anyhow = "1.0"
 arch = { path = "../arch" }
+block_util = { path = "../block_util" }
 devices = { path = "../devices" }
 epoll = ">=4.0.1"
 hypervisor = { path = "../hypervisor" }
