@@ -1529,6 +1529,7 @@ dependencies = [
  "byteorder",
  "devices",
  "epoll",
+ "io-uring",
  "libc",
  "log 0.4.11",
  "net_gen",
