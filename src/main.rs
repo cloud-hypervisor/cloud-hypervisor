@@ -12,7 +12,7 @@ extern crate clap;
 use clap::{App, Arg, ArgGroup, ArgMatches};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
-use seccomp::SeccompLevel;
+use seccomp::SeccompAction;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::{env, process};
@@ -288,18 +288,17 @@ fn start_vmm(cmd_arguments: ArgMatches) {
     let api_evt = EventFd::new(EFD_NONBLOCK).expect("Cannot create API EventFd");
 
     let http_sender = api_request_sender.clone();
-
-    let seccomp_level = if let Some(seccomp_value) = cmd_arguments.value_of("seccomp") {
+    let seccomp_action = if let Some(seccomp_value) = cmd_arguments.value_of("seccomp") {
         match seccomp_value {
-            "true" => SeccompLevel::Advanced,
-            "false" => SeccompLevel::None,
+            "true" => SeccompAction::Trap,
+            "false" => SeccompAction::Allow,
             _ => {
                 eprintln!("Invalid parameter {} for \"--seccomp\" flag", seccomp_value);
                 process::exit(1);
             }
         }
     } else {
-        SeccompLevel::Advanced
+        SeccompAction::Trap
     };
     let hypervisor = hypervisor::new().unwrap();
     let vmm_thread = match vmm::start_vmm_thread(
@@ -308,7 +307,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         api_evt.try_clone().unwrap(),
         http_sender,
         api_request_receiver,
-        &seccomp_level,
+        &seccomp_action,
         hypervisor,
     ) {
         Ok(t) => t,
