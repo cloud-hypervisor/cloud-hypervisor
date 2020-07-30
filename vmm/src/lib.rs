@@ -229,13 +229,20 @@ pub fn start_vmm_thread(
     // alternative is to run always with CAP_SYS_PTRACE but that is not a good idea.
     let self_path = format!("/proc/{}/exe", std::process::id());
     let vmm_path = std::fs::read_link(PathBuf::from(self_path)).map_err(Error::ExePathReadLink)?;
+    let vmm_seccomp_action = seccomp_action.clone();
     let thread = thread::Builder::new()
         .name("vmm".to_string())
         .spawn(move || {
             // Apply seccomp filter for VMM thread.
             SeccompFilter::apply(vmm_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
 
-            let mut vmm = Vmm::new(vmm_version.to_string(), api_event, vmm_path, hypervisor)?;
+            let mut vmm = Vmm::new(
+                vmm_version.to_string(),
+                api_event,
+                vmm_path,
+                vmm_seccomp_action,
+                hypervisor,
+            )?;
 
             vmm.control_loop(Arc::new(api_receiver))
         })
@@ -256,6 +263,7 @@ pub struct Vmm {
     vm: Option<Vm>,
     vm_config: Option<Arc<Mutex<VmConfig>>>,
     vmm_path: PathBuf,
+    seccomp_action: SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
 }
 
@@ -264,6 +272,7 @@ impl Vmm {
         vmm_version: String,
         api_evt: EventFd,
         vmm_path: PathBuf,
+        seccomp_action: SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
@@ -295,6 +304,7 @@ impl Vmm {
             vm: None,
             vm_config: None,
             vmm_path,
+            seccomp_action,
             hypervisor,
         })
     }
@@ -311,6 +321,7 @@ impl Vmm {
                     exit_evt,
                     reset_evt,
                     self.vmm_path.clone(),
+                    &self.seccomp_action,
                     self.hypervisor.clone(),
                 )?;
                 self.vm = Some(vm);
@@ -381,6 +392,7 @@ impl Vmm {
             self.vmm_path.clone(),
             source_url,
             restore_cfg.prefault,
+            &self.seccomp_action,
             self.hypervisor.clone(),
         )?;
         self.vm = Some(vm);
@@ -430,6 +442,7 @@ impl Vmm {
                 exit_evt,
                 reset_evt,
                 self.vmm_path.clone(),
+                &self.seccomp_action,
                 self.hypervisor.clone(),
             )?);
         }
