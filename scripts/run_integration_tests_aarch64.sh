@@ -112,19 +112,20 @@ update_workloads() {
         popd
     }
 
+    SRCDIR=$PWD
     if [ ! -d "$LINUX_CUSTOM_DIR" ]; then
         pushd $WORKLOADS_DIR
-        time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu-virtio-mem-5.6-rc4" $LINUX_CUSTOM_DIR
+        time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu-5.8-rc4" $LINUX_CUSTOM_DIR
+        cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
         popd
     else
         pushd $LINUX_CUSTOM_DIR
         git fetch
-        git checkout -f
+        git checkout -f "virtio-fs-virtio-iommu-5.8-rc4"
+        cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
         popd
     fi
 
-    SRCDIR=$PWD
-    cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
     build_custom_linux_kernel
 
     VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
