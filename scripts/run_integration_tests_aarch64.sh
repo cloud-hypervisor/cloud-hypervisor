@@ -172,6 +172,14 @@ update_workloads() {
     flock -x 12 && update_workloads
 ) 12>$WORKLOADS_LOCK
 
+# Check if there is any error in the execution of `update_workloads`.
+# If there is any error, then kill the shell. Otherwise the script will continue
+# running even if the `update_workloads` function was failed.
+RES=$?
+if [ $RES -ne 0 ]; then
+    exit 1
+fi
+
 # Create tap interface without multipe queues support for vhost_user_net test.
 sudo ip tuntap add name vunet-tap0 mode tap
 # Create tap interface with multipe queues support for vhost_user_net test.
