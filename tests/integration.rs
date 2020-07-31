@@ -1550,7 +1550,9 @@ mod tests {
 
             // ACPI is not built with mmio, hence we can't test the resize
             // feature for mmio.
+            // ACPI is currently x86_64 only, we skip this for AArch64.
             #[cfg(not(feature = "mmio"))]
+            #[cfg(target_arch = "x86_64")]
             {
                 guest
                     .ssh_command(
@@ -2620,31 +2622,26 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_on_default_cache_size() {
             test_virtio_fs(true, None, "none", &prepare_virtiofsd, false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_on_cache_size_1_gib() {
             test_virtio_fs(true, Some(0x4000_0000), "none", &prepare_virtiofsd, false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_off() {
             test_virtio_fs(false, None, "none", &prepare_virtiofsd, false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_on_default_cache_size_w_vhost_user_fs_daemon() {
             test_virtio_fs(true, None, "none", &prepare_vhost_user_fs_daemon, false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_on_cache_size_1_gib_w_vhost_user_fs_daemon() {
             test_virtio_fs(
                 true,
@@ -2656,7 +2653,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_dax_off_w_vhost_user_fs_daemon() {
             test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon, false)
         }
