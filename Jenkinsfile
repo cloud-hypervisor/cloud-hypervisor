@@ -45,7 +45,7 @@ pipeline{
 					}
 				}	
 				stage ('Worker build') {
-					agent { node { label 'bionic' } }
+					agent { node { label 'groovy' } }
 					options {
 						timeout(time: 1, unit: 'HOURS')
 					}
@@ -109,7 +109,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build (musl)') {
-					agent { node { label 'bionic' } }
+					agent { node { label 'groovy' } }
 					options {
 						timeout(time: 1, unit: 'HOURS')
 					}
