@@ -184,8 +184,6 @@ TARGET_CC="musl-gcc"
 CFLAGS="-I /usr/include/aarch64-linux-musl/ -idirafter /usr/include/"
 fi
 
-sed -i 's/"with-serde",\ //g' hypervisor/Cargo.toml
-
 cargo build --all --release --no-default-features --features pci,kvm --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net

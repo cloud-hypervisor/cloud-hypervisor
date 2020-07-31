@@ -215,11 +215,6 @@ cmd_build() {
         rustflags="-C link-arg=-lgcc -C link_arg=-specs -C link_arg=/usr/lib/aarch64-linux-musl/musl-gcc.specs"
     fi
 
-    # A workaround on Arm64 to avoid build errors in kvm-bindings
-    if [ $(uname -m) = "aarch64" ]; then
-        sed -i 's/"with-serde",\ //g' "$CLH_ROOT_DIR"/hypervisor/Cargo.toml
-    fi
-
     $DOCKER_RUNTIME run \
 	   --user "$(id -u):$(id -g)" \
 	   --workdir "$CTR_CLH_ROOT_DIR" \

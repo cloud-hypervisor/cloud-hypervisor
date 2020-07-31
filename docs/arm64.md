@@ -16,12 +16,6 @@ sudo apt-get install libfdt-dev
 
 ## Build
 
-Before building, a hack trick need to be performed to get rid of some build error in vmm component. See [this](https://github.com/cloud-hypervisor/kvm-bindings/pull/1) for more info about this temporary workaround.
-
-```bash
-sed -i 's/"with-serde",\ //g' hypervisor/Cargo.toml
-```
-
 For Virtio devices, you can choose MMIO or PCI as transport option.
 
 ### MMIO
