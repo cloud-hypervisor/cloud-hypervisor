@@ -641,10 +641,22 @@ mod tests {
         }
 
         fn api_create_body(&self, cpu_count: u8) -> String {
+            #[cfg(target_arch = "x86_64")]
             format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                      cpu_count,
                      cpu_count,
                      self.fw_path.as_str(),
+                     self.network.host_ip,
+                     self.network.guest_mac,
+                     self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
+                     self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
+            }
+            #[cfg(target_arch = "aarch64")]
+            format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
+                     cpu_count,
+                     cpu_count,
+                     direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                     DIRECT_KERNEL_BOOT_CMDLINE,
                      self.network.host_ip,
                      self.network.guest_mac,
                      self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
@@ -3565,7 +3577,6 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
-        #[cfg(target_arch = "x86_64")]
         // Start cloud-hypervisor with no VM parameters, only the API server running.
         // From the API: Create a VM, boot it and check that it looks as expected.
         fn test_api_create_boot() {
