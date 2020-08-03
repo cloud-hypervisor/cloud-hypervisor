@@ -12,6 +12,7 @@ mmio_support = ["virtio-devices/mmio_support"]
 cmos = ["devices/cmos"]
 fwdebug = ["devices/fwdebug"]
 kvm = ["hypervisor/kvm"]
+io_uring = ["virtio-devices/io_uring"]
 
 [dependencies]
 arc-swap = ">=0.4.4"

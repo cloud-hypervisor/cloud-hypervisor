@@ -4,6 +4,10 @@ version = "0.1.0"
 authors = ["The Cloud Hypervisor Authors"]
 edition = "2018"
 
+[features]
+default = []
+io_uring = []
+
 [dependencies]
 io-uring = { git = "https://github.com/tokio-rs/io-uring.git", branch = "0.4" }
 libc = "0.2.74"
