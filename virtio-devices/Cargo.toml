@@ -8,6 +8,7 @@ edition = "2018"
 default = []
 pci_support = ["pci"]
 mmio_support = []
+io_uring = ["block_util/io_uring"]
 
 [dependencies]
 anyhow = "1.0"

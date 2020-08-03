@@ -42,6 +42,7 @@ mmio = ["vmm/mmio_support"]
 cmos = ["vmm/cmos"]
 fwdebug = ["vmm/fwdebug"]
 kvm = ["vmm/kvm"]
+io_uring = ["vmm/io_uring"]
 
 # Integration tests require a special environment to run in
 integration_tests = []

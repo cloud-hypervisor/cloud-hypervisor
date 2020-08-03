@@ -13,17 +13,20 @@ extern crate log;
 #[macro_use]
 extern crate serde_derive;
 
+#[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
+#[cfg(feature = "io_uring")]
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::DescriptorChain;
+#[cfg(feature = "io_uring")]
 use vmm_sys_util::eventfd::EventFd;
 
 const SECTOR_SHIFT: u8 = 9;
@@ -263,6 +266,7 @@ impl Request {
         Ok(0)
     }
 
+    #[cfg(feature = "io_uring")]
     pub fn execute_io_uring(
         &self,
         mem: &GuestMemoryMmap,
@@ -473,6 +477,7 @@ unsafe impl ByteValued for VirtioBlockGeometry {}
 
 /// Check if io_uring for block device can be used on the current system, as
 /// it correctly supports the expected io_uring features.
+#[cfg(feature = "io_uring")]
 pub fn block_io_uring_is_supported() -> bool {
     let error_msg = "io_uring not supported:";
 
