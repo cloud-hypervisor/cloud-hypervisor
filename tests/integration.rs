@@ -87,7 +87,7 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64";
     #[cfg(target_arch = "aarch64")]
-    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64";
+    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom";
 
     const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=ttyS0 console=hvc0 quiet rw";
 
@@ -1804,6 +1804,9 @@ mod tests {
             guest.check_vsock(socket.as_str());
 
             #[cfg(not(feature = "mmio"))]
+            // AArch64 currently does not support reboot, and therefore we
+            // skip the reboot test here.
+            #[cfg(target_arch = "x86_64")]
             {
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
@@ -3553,7 +3556,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_virtio_vsock() {
             _test_virtio_vsock(false)
         }
