@@ -40,30 +40,23 @@ update_workloads() {
         popd
     fi
 
-    FOCAL_OS_IMAGE_DOWNLOAD_NAME="focal-server-cloudimg-arm64.img"
-    FOCAL_OS_IMAGE_DOWNLOAD_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$FOCAL_OS_IMAGE_DOWNLOAD_NAME"
-    FOCAL_OS_DOWNLOAD_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_DOWNLOAD_NAME"
-    if [ ! -f "$FOCAL_OS_DOWNLOAD_IMAGE" ]; then
-        pushd $WORKLOADS_DIR
-        time wget --quiet $FOCAL_OS_IMAGE_DOWNLOAD_URL || exit 1
-        popd
-    fi
-
-    FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-arm64.raw"
+    FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-arm64-custom.raw"
+    FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$FOCAL_OS_RAW_IMAGE_NAME"
     FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
     if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
         pushd $WORKLOADS_DIR
-        time qemu-img convert -p -f qcow2 -O raw $FOCAL_OS_IMAGE_DOWNLOAD_NAME $FOCAL_OS_RAW_IMAGE_NAME || exit 1
+        time wget --quiet $FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL || exit 1
         popd
     fi
 
     # Convert the raw image to qcow2 image to remove compressed blocks from the disk. Therefore letting the
     # qcow2 format image can be directly used in the integration test.
-    FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="focal-server-cloudimg-arm64.qcow2"
+    FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME="focal-server-cloudimg-arm64-custom.qcow2"
+    FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL="https://cloudhypervisorstorage.blob.core.windows.net/images/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_NAME"
     if [ ! -f "$FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
         pushd $WORKLOADS_DIR
-        time qemu-img convert -p -f raw -O qcow2 $FOCAL_OS_RAW_IMAGE_NAME $FOCAL_OS_QCOW2_UNCOMPRESSED_IMAGE || exit 1
+        time wget --quiet $FOCAL_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL || exit 1
         popd
     fi
 
