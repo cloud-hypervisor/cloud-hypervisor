@@ -1515,9 +1515,15 @@ impl DeviceManager {
         let virtio_console_input = if let Some(writer) = console_writer {
             let id = String::from(CONSOLE_DEVICE_NAME);
 
-            let (virtio_console_device, virtio_console_input) =
-                virtio_devices::Console::new(id.clone(), writer, col, row, console_config.iommu)
-                    .map_err(DeviceManagerError::CreateVirtioConsole)?;
+            let (virtio_console_device, virtio_console_input) = virtio_devices::Console::new(
+                id.clone(),
+                writer,
+                col,
+                row,
+                console_config.iommu,
+                self.seccomp_action.clone(),
+            )
+            .map_err(DeviceManagerError::CreateVirtioConsole)?;
             let virtio_console_device = Arc::new(Mutex::new(virtio_console_device));
             virtio_devices.push((
                 Arc::clone(&virtio_console_device) as VirtioDeviceArc,
