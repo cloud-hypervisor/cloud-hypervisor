@@ -525,7 +525,7 @@ dependencies = [
 [[package]]
 name = "kvm-bindings"
 version = "0.2.0"
-source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=ch#11af42da85f21ac13d7aaebf5765f3ede6252b25"
+source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=ch#6453253aff8b804796bce547c7a23e09464b7491"
 dependencies = [
  "serde",
  "serde_derive",
@@ -1535,6 +1535,7 @@ dependencies = [
  "net_gen",
  "net_util",
  "pci",
+ "seccomp",
  "serde",
  "serde_derive",
  "serde_json",
