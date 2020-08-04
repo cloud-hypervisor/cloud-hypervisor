@@ -11,9 +11,11 @@ use super::{
     ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, UserspaceMapping,
     VirtioDevice, VirtioDeviceType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
+use seccomp::{SeccompAction, SeccompFilter};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::fmt::{self, Display};
 use std::fs::File;
@@ -360,6 +362,7 @@ pub struct Pmem {
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     paused: Arc<AtomicBool>,
     mapping: UserspaceMapping,
+    seccomp_action: SeccompAction,
 
     // Hold ownership of the memory that is allocated for the device
     // which will be automatically dropped when the device is dropped
@@ -381,6 +384,7 @@ impl Pmem {
         mapping: UserspaceMapping,
         _region: MmapRegion,
         iommu: bool,
+        seccomp_action: SeccompAction,
     ) -> io::Result<Pmem> {
         let config = VirtioPmemConfig {
             start: addr.raw_value().to_le(),
@@ -406,6 +410,7 @@ impl Pmem {
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
             mapping,
+            seccomp_action,
             _region,
         })
     }
@@ -530,9 +535,18 @@ impl VirtioDevice for Pmem {
 
             let paused = self.paused.clone();
             let mut epoll_threads = Vec::new();
+            // Retrieve seccomp filter for virtio_pmem thread
+            let virtio_pmem_seccomp_filter =
+                get_seccomp_filter(&self.seccomp_action, Thread::VirtioPmem)
+                    .map_err(ActivateError::CreateSeccompFilter)?;
             thread::Builder::new()
                 .name("virtio_pmem".to_string())
-                .spawn(move || handler.run(paused))
+                .spawn(move || {
+                    SeccompFilter::apply(virtio_pmem_seccomp_filter)
+                        .map_err(DeviceError::ApplySeccompFilter)?;
+
+                    handler.run(paused)
+                })
                 .map(|thread| epoll_threads.push(thread))
                 .map_err(|e| {
                     error!("failed to clone virtio-pmem epoll thread: {}", e);
