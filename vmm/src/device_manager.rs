@@ -1960,8 +1960,13 @@ impl DeviceManager {
             let id = String::from(RNG_DEVICE_NAME);
 
             let virtio_rng_device = Arc::new(Mutex::new(
-                virtio_devices::Rng::new(id.clone(), rng_path, rng_config.iommu)
-                    .map_err(DeviceManagerError::CreateVirtioRng)?,
+                virtio_devices::Rng::new(
+                    id.clone(),
+                    rng_path,
+                    rng_config.iommu,
+                    self.seccomp_action.clone(),
+                )
+                .map_err(DeviceManagerError::CreateVirtioRng)?,
             ));
             devices.push((
                 Arc::clone(&virtio_rng_device) as VirtioDeviceArc,

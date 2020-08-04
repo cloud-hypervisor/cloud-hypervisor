@@ -7,9 +7,11 @@ use super::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
     VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
+use seccomp::{SeccompAction, SeccompFilter};
 use std::fs::File;
 use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -203,6 +205,7 @@ pub struct Rng {
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     paused: Arc<AtomicBool>,
+    seccomp_action: SeccompAction,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -214,7 +217,12 @@ pub struct RngState {
 
 impl Rng {
     /// Create a new virtio rng device that gets random data from /dev/urandom.
-    pub fn new(id: String, path: &str, iommu: bool) -> io::Result<Rng> {
+    pub fn new(
+        id: String,
+        path: &str,
+        iommu: bool,
+        seccomp_action: SeccompAction,
+    ) -> io::Result<Rng> {
         let random_file = File::open(path)?;
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
@@ -233,6 +241,7 @@ impl Rng {
             interrupt_cb: None,
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
+            seccomp_action,
         })
     }
 
@@ -352,9 +361,18 @@ impl VirtioDevice for Rng {
 
             let paused = self.paused.clone();
             let mut epoll_threads = Vec::new();
+            // Retrieve seccomp filter for virtio_rng thread
+            let virtio_rng_seccomp_filter =
+                get_seccomp_filter(&self.seccomp_action, Thread::VirtioRng)
+                    .map_err(ActivateError::CreateSeccompFilter)?;
             thread::Builder::new()
                 .name("virtio_rng".to_string())
-                .spawn(move || handler.run(paused))
+                .spawn(move || {
+                    SeccompFilter::apply(virtio_rng_seccomp_filter)
+                        .map_err(DeviceError::ApplySeccompFilter)?;
+
+                    handler.run(paused)
+                })
                 .map(|thread| epoll_threads.push(thread))
                 .map_err(|e| {
                     error!("failed to clone the virtio-rng epoll thread: {}", e);

@@ -129,4 +129,5 @@ pub enum Error {
     EpollHander(String),
     NoMemoryConfigured,
     NetQueuePair(::net_util::NetQueuePairError),
+    ApplySeccompFilter(seccomp::Error),
 }
