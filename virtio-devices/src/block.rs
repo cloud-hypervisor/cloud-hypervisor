@@ -13,10 +13,12 @@ use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
     VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
 use block_util::{build_disk_image_id, Request, RequestType, VirtioBlockConfig};
 use libc::EFD_NONBLOCK;
+use seccomp::{SeccompAction, SeccompFilter};
 use std::collections::HashMap;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::num::Wrapping;
@@ -268,6 +270,7 @@ pub struct Block<T: DiskFile> {
     queue_size: Vec<u16>,
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
+    seccomp_action: SeccompAction,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -283,6 +286,7 @@ impl<T: DiskFile> Block<T> {
     /// Create a new virtio block device that operates on the given file.
     ///
     /// The given file must be seekable and sizable.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         mut disk_image: T,
@@ -291,6 +295,7 @@ impl<T: DiskFile> Block<T> {
         iommu: bool,
         num_queues: usize,
         queue_size: u16,
+        seccomp_action: SeccompAction,
     ) -> io::Result<Block<T>> {
         let disk_size = disk_image.seek(SeekFrom::End(0))? as u64;
         if disk_size % SECTOR_SIZE != 0 {
@@ -343,6 +348,7 @@ impl<T: DiskFile> Block<T> {
             queue_size: vec![queue_size; num_queues],
             writeback: Arc::new(AtomicBool::new(true)),
             counters: BlockCounters::default(),
+            seccomp_action,
         })
     }
 
@@ -527,9 +533,19 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
             handler.queue.set_event_idx(event_idx);
 
             let paused = self.paused.clone();
+
+            // Retrieve seccomp filter for virtio_blk thread
+            let api_seccomp_filter = get_seccomp_filter(&self.seccomp_action, Thread::VirtioBlk)
+                .map_err(ActivateError::CreateSeccompFilter)?;
+
             thread::Builder::new()
                 .name("virtio_blk".to_string())
-                .spawn(move || handler.run(paused))
+                .spawn(move || {
+                    SeccompFilter::apply(api_seccomp_filter)
+                        .map_err(EpollHelperError::ApplySeccompFilter)?;
+
+                    handler.run(paused)
+                })
                 .map(|thread| epoll_threads.push(thread))
                 .map_err(|e| {
                     error!("failed to clone the virtio-blk epoll thread: {}", e);

@@ -268,7 +268,7 @@ impl Vm {
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
-        _seccomp_action: &SeccompAction,
+        seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         _saved_clock: Option<hypervisor::ClockData>,
     ) -> Result<Self> {
@@ -285,6 +285,7 @@ impl Vm {
             &exit_evt,
             &reset_evt,
             vmm_path,
+            seccomp_action.clone(),
         )
         .map_err(Error::DeviceManager)?;
 
