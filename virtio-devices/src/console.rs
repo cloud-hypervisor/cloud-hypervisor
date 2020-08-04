@@ -6,9 +6,11 @@ use super::{
     ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
     VirtioInterruptType, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
+use seccomp::{SeccompAction, SeccompFilter};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::collections::VecDeque;
@@ -396,6 +398,7 @@ pub struct Console {
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     paused: Arc<AtomicBool>,
+    seccomp_action: SeccompAction,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -414,6 +417,7 @@ impl Console {
         cols: u16,
         rows: u16,
         iommu: bool,
+        seccomp_action: SeccompAction,
     ) -> io::Result<(Console, Arc<ConsoleInput>)> {
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_CONSOLE_F_SIZE;
 
@@ -446,6 +450,7 @@ impl Console {
                 interrupt_cb: None,
                 epoll_threads: None,
                 paused: Arc::new(AtomicBool::new(false)),
+                seccomp_action,
             },
             console_input,
         ))
@@ -583,9 +588,18 @@ impl VirtioDevice for Console {
 
         let paused = self.paused.clone();
         let mut epoll_threads = Vec::new();
+        // Retrieve seccomp filter for virtio_console thread
+        let virtio_console_seccomp_filter =
+            get_seccomp_filter(&self.seccomp_action, Thread::VirtioConsole)
+                .map_err(ActivateError::CreateSeccompFilter)?;
         thread::Builder::new()
             .name("virtio_console".to_string())
-            .spawn(move || handler.run(paused))
+            .spawn(move || {
+                SeccompFilter::apply(virtio_console_seccomp_filter)
+                    .map_err(DeviceError::ApplySeccompFilter)?;
+
+                handler.run(paused)
+            })
             .map(|thread| epoll_threads.push(thread))
             .map_err(|e| {
                 error!("failed to clone the virtio-console epoll thread: {}", e);

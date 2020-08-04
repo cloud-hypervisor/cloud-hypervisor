@@ -11,6 +11,7 @@ use std::convert::TryInto;
 
 pub enum Thread {
     VirtioBlk,
+    VirtioConsole,
     VirtioRng,
 }
 
@@ -53,6 +54,30 @@ fn virtio_blk_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     ])
 }
 
+fn virtio_console_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+    Ok(vec![
+        allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_epoll_create1),
+        allow_syscall(libc::SYS_epoll_ctl),
+        allow_syscall(libc::SYS_epoll_pwait),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_epoll_wait),
+        allow_syscall(libc::SYS_exit),
+        allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_mmap),
+        allow_syscall(libc::SYS_mprotect),
+        allow_syscall(libc::SYS_munmap),
+        allow_syscall(libc::SYS_prctl),
+        allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_rt_sigprocmask),
+        allow_syscall(libc::SYS_sched_getaffinity),
+        allow_syscall(libc::SYS_set_robust_list),
+        allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_write),
+    ])
+}
+
 fn virtio_rng_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_close),
@@ -80,6 +105,7 @@ fn virtio_rng_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
         Thread::VirtioBlk => virtio_blk_thread_rules()?,
+        Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioRng => virtio_rng_thread_rules()?,
     };
 
@@ -92,6 +118,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
 fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
         Thread::VirtioBlk => virtio_blk_thread_rules()?,
+        Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioRng => virtio_rng_thread_rules()?,
     };
 
