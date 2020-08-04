@@ -50,7 +50,7 @@ pub enum Error {
     UmountTempDir(io::Error),
     /// Call to libc::unshare returned an error.
     Unshare(io::Error),
-    /// Failed to read procfs.
+    /// Failed to read from procfs.
     ReadProc(io::Error),
     /// Failed to parse `/proc/sys/fs/nr_open`.
     InvalidNrOpen(std::num::ParseIntError),
