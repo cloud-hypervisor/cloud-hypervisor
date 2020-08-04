@@ -535,13 +535,14 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
             let paused = self.paused.clone();
 
             // Retrieve seccomp filter for virtio_blk thread
-            let api_seccomp_filter = get_seccomp_filter(&self.seccomp_action, Thread::VirtioBlk)
-                .map_err(ActivateError::CreateSeccompFilter)?;
+            let virtio_blk_seccomp_filter =
+                get_seccomp_filter(&self.seccomp_action, Thread::VirtioBlk)
+                    .map_err(ActivateError::CreateSeccompFilter)?;
 
             thread::Builder::new()
                 .name("virtio_blk".to_string())
                 .spawn(move || {
-                    SeccompFilter::apply(api_seccomp_filter)
+                    SeccompFilter::apply(virtio_blk_seccomp_filter)
                         .map_err(EpollHelperError::ApplySeccompFilter)?;
 
                     handler.run(paused)
