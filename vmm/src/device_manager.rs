@@ -54,6 +54,7 @@ use pci::{
     VfioPciDevice,
 };
 use qcow::{self, ImageType, QcowFile};
+use seccomp::SeccompAction;
 #[cfg(feature = "pci_support")]
 use std::any::Any;
 use std::collections::HashMap;
@@ -801,6 +802,9 @@ pub struct DeviceManager {
 
     #[cfg(target_arch = "aarch64")]
     id_to_dev_info: HashMap<(DeviceType, String), MMIODeviceInfo>,
+
+    // seccomp action
+    seccomp_action: SeccompAction,
 }
 
 impl DeviceManager {
@@ -811,6 +815,7 @@ impl DeviceManager {
         _exit_evt: &EventFd,
         #[cfg_attr(target_arch = "aarch64", allow(unused_variables))] reset_evt: &EventFd,
         vmm_path: PathBuf,
+        seccomp_action: SeccompAction,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
 
@@ -872,6 +877,7 @@ impl DeviceManager {
             reset_evt: reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             #[cfg(target_arch = "aarch64")]
             id_to_dev_info: HashMap::new(),
+            seccomp_action,
         };
 
         #[cfg(feature = "acpi")]
@@ -1710,6 +1716,7 @@ impl DeviceManager {
                                     disk_cfg.iommu,
                                     disk_cfg.num_queues,
                                     disk_cfg.queue_size,
+                                    self.seccomp_action.clone(),
                                 )
                                 .map_err(DeviceManagerError::CreateVirtioBlock)?,
                             ));
@@ -1736,6 +1743,7 @@ impl DeviceManager {
                                 disk_cfg.iommu,
                                 disk_cfg.num_queues,
                                 disk_cfg.queue_size,
+                                self.seccomp_action.clone(),
                             )
                             .map_err(DeviceManagerError::CreateVirtioBlock)?,
                         ));
@@ -1762,6 +1770,7 @@ impl DeviceManager {
                             disk_cfg.iommu,
                             disk_cfg.num_queues,
                             disk_cfg.queue_size,
+                            self.seccomp_action.clone(),
                         )
                         .map_err(DeviceManagerError::CreateVirtioBlock)?,
                     ));

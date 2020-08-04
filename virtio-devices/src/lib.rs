@@ -41,6 +41,7 @@ pub mod net;
 pub mod net_util;
 mod pmem;
 mod rng;
+pub mod seccomp_filters;
 pub mod transport;
 pub mod vhost_user;
 pub mod vsock;
@@ -97,6 +98,8 @@ pub enum ActivateError {
     VhostUserBlkSetup(vhost_user::Error),
     /// Failed to reset vhost-user daemon.
     VhostUserReset(vhost_user::Error),
+    /// Cannot create seccomp filter
+    CreateSeccompFilter(seccomp::SeccompError),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;
