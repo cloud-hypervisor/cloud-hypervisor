@@ -2302,6 +2302,7 @@ impl DeviceManager {
                 mapping,
                 mmap_region,
                 pmem_cfg.iommu,
+                self.seccomp_action.clone(),
             )
             .map_err(DeviceManagerError::CreateVirtioPmem)?,
         ));
