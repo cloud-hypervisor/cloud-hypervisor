@@ -260,7 +260,7 @@ fn create_app<'a, 'b>(
             Arg::with_name("seccomp")
                 .long("seccomp")
                 .takes_value(true)
-                .possible_values(&["true", "false"])
+                .possible_values(&["true", "false", "log"])
                 .default_value("true"),
         );
 
@@ -292,6 +292,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         match seccomp_value {
             "true" => SeccompAction::Trap,
             "false" => SeccompAction::Allow,
+            "log" => SeccompAction::Log,
             _ => {
                 eprintln!("Invalid parameter {} for \"--seccomp\" flag", seccomp_value);
                 process::exit(1);

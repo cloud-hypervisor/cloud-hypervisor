@@ -7,6 +7,7 @@
 use seccomp::{
     allow_syscall, allow_syscall_if, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen,
     SeccompCmpOp::Eq, SeccompCondition as Cond, SeccompError, SeccompFilter, SeccompRule,
+    SyscallRuleSet,
 };
 use std::convert::TryInto;
 
@@ -236,147 +237,161 @@ fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
     Ok(or![and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO)?],])
 }
 
-/// The filter containing the white listed syscall rules required by the VMM to
-/// function.
-pub fn vmm_thread_filter() -> Result<SeccompFilter, Error> {
+// The filter containing the white listed syscall rules required by the VMM to
+// function.
+fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+    Ok(vec![
+        allow_syscall(libc::SYS_accept4),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_access),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_arch_prctl),
+        allow_syscall(libc::SYS_bind),
+        allow_syscall(libc::SYS_brk),
+        allow_syscall(libc::SYS_clock_gettime),
+        allow_syscall(libc::SYS_clock_nanosleep),
+        allow_syscall(libc::SYS_clone),
+        allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_connect),
+        allow_syscall(libc::SYS_dup),
+        allow_syscall(libc::SYS_epoll_create1),
+        allow_syscall(libc::SYS_epoll_ctl),
+        allow_syscall(libc::SYS_epoll_pwait),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_epoll_wait),
+        allow_syscall(libc::SYS_eventfd2),
+        allow_syscall(libc::SYS_execve),
+        allow_syscall(libc::SYS_exit),
+        allow_syscall(libc::SYS_exit_group),
+        allow_syscall(libc::SYS_fallocate),
+        allow_syscall(libc::SYS_fcntl),
+        allow_syscall(libc::SYS_fdatasync),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_fork),
+        allow_syscall(libc::SYS_fstat),
+        allow_syscall(libc::SYS_fsync),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_ftruncate),
+        #[cfg(target_arch = "aarch64")]
+        // The definition of libc::SYS_ftruncate is missing on AArch64.
+        // Use a hard-code number instead.
+        allow_syscall(46),
+        allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_getpid),
+        allow_syscall(libc::SYS_getrandom),
+        allow_syscall(libc::SYS_gettid),
+        allow_syscall(libc::SYS_gettimeofday),
+        allow_syscall(libc::SYS_getuid),
+        allow_syscall_if(libc::SYS_ioctl, create_vmm_ioctl_seccomp_rule()?),
+        allow_syscall(SYS_IO_URING_ENTER),
+        allow_syscall(SYS_IO_URING_SETUP),
+        allow_syscall(SYS_IO_URING_REGISTER),
+        allow_syscall(libc::SYS_listen),
+        allow_syscall(libc::SYS_lseek),
+        allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_memfd_create),
+        allow_syscall(libc::SYS_mmap),
+        allow_syscall(libc::SYS_mprotect),
+        allow_syscall(libc::SYS_mremap),
+        allow_syscall(libc::SYS_munmap),
+        allow_syscall(libc::SYS_nanosleep),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_open),
+        allow_syscall(libc::SYS_openat),
+        allow_syscall(libc::SYS_pipe2),
+        allow_syscall(libc::SYS_prctl),
+        allow_syscall(libc::SYS_pread64),
+        allow_syscall(libc::SYS_prlimit64),
+        allow_syscall(libc::SYS_pwrite64),
+        allow_syscall(libc::SYS_read),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_readlink),
+        allow_syscall(libc::SYS_recvfrom),
+        allow_syscall(libc::SYS_recvmsg),
+        allow_syscall(libc::SYS_restart_syscall),
+        allow_syscall(libc::SYS_rt_sigaction),
+        allow_syscall(libc::SYS_rt_sigprocmask),
+        allow_syscall(libc::SYS_rt_sigreturn),
+        allow_syscall(libc::SYS_sched_getaffinity),
+        allow_syscall(libc::SYS_sendmsg),
+        allow_syscall(libc::SYS_sendto),
+        allow_syscall(libc::SYS_set_robust_list),
+        allow_syscall(libc::SYS_set_tid_address),
+        allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall_if(
+            libc::SYS_socket,
+            or![
+                and![Cond::new(0, ArgLen::DWORD, Eq, libc::AF_UNIX as u64)?],
+                and![Cond::new(0, ArgLen::DWORD, Eq, libc::AF_INET as u64)?],
+            ],
+        ),
+        allow_syscall(libc::SYS_socketpair),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_stat),
+        allow_syscall(libc::SYS_statx),
+        allow_syscall(libc::SYS_tgkill),
+        allow_syscall(libc::SYS_tkill),
+        allow_syscall_if(
+            libc::SYS_umask,
+            or![and![Cond::new(0, ArgLen::DWORD, Eq, 0o077)?]],
+        ),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_unlink),
+        #[cfg(target_arch = "aarch64")]
+        allow_syscall(libc::SYS_unlinkat),
+        allow_syscall(libc::SYS_wait4),
+        allow_syscall(libc::SYS_write),
+    ])
+}
+
+// The filter containing the white listed syscall rules required by the API to
+// function.
+fn api_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+    Ok(vec![
+        allow_syscall(libc::SYS_accept4),
+        allow_syscall(libc::SYS_bind),
+        allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_dup),
+        allow_syscall(libc::SYS_epoll_create1),
+        allow_syscall(libc::SYS_epoll_ctl),
+        allow_syscall(libc::SYS_epoll_pwait),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_epoll_wait),
+        allow_syscall(libc::SYS_exit),
+        allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_getrandom),
+        allow_syscall_if(libc::SYS_ioctl, create_api_ioctl_seccomp_rule()?),
+        allow_syscall(libc::SYS_listen),
+        allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_munmap),
+        allow_syscall(libc::SYS_recvfrom),
+        allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_socket),
+        allow_syscall(libc::SYS_write),
+    ])
+}
+
+fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> {
+    let rules = match thread_type {
+        Thread::Vmm => vmm_thread_rules()?,
+        Thread::Api => api_thread_rules()?,
+    };
+
     Ok(SeccompFilter::new(
-        vec![
-            allow_syscall(libc::SYS_accept4),
-            #[cfg(target_arch = "x86_64")]
-            allow_syscall(libc::SYS_access),
-            #[cfg(target_arch = "x86_64")]
-            allow_syscall(libc::SYS_arch_prctl),
-            allow_syscall(libc::SYS_bind),
-            allow_syscall(libc::SYS_brk),
-            allow_syscall(libc::SYS_clock_gettime),
-            allow_syscall(libc::SYS_clock_nanosleep),
-            allow_syscall(libc::SYS_clone),
-            allow_syscall(libc::SYS_close),
-            allow_syscall(libc::SYS_connect),
-            allow_syscall(libc::SYS_dup),
-            allow_syscall(libc::SYS_epoll_create1),
-            allow_syscall(libc::SYS_epoll_ctl),
-            allow_syscall(libc::SYS_epoll_pwait),
-            #[cfg(target_arch = "x86_64")]
-            allow_syscall(libc::SYS_epoll_wait),
-            allow_syscall(libc::SYS_eventfd2),
-            allow_syscall(libc::SYS_execve),
-            allow_syscall(libc::SYS_exit),
-            allow_syscall(libc::SYS_exit_group),
-            allow_syscall(libc::SYS_fallocate),
-            allow_syscall(libc::SYS_fcntl),
-            allow_syscall(libc::SYS_fdatasync),
-            #[cfg(target_arch = "x86_64")]
-            allow_syscall(libc::SYS_fork),
-            allow_syscall(libc::SYS_fstat),
-            allow_syscall(libc::SYS_fsync),
-            #[cfg(target_arch = "x86_64")]
-            allow_syscall(libc::SYS_ftruncate),
-            #[cfg(target_arch = "aarch64")]
-            // The definition of libc::SYS_ftruncate is missing on AArch64.
-            // Use a hard-code number instead.
-            allow_syscall(46),
-            allow_syscall(libc::SYS_futex),
-            allow_syscall(libc::SYS_getpid),
-            allow_syscall(libc::SYS_getrandom),
-            allow_syscall(libc::SYS_gettid),
-            allow_syscall(libc::SYS_gettimeofday),
-            allow_syscall(libc::SYS_getuid),
-            allow_syscall_if(libc::SYS_ioctl, create_vmm_ioctl_seccomp_rule()?),
-            allow_syscall(SYS_IO_URING_ENTER),
-            allow_syscall(SYS_IO_URING_SETUP),
-            allow_syscall(SYS_IO_URING_REGISTER),
-            allow_syscall(libc::SYS_listen),
-            allow_syscall(libc::SYS_lseek),
-            allow_syscall(libc::SYS_madvise),
-            allow_syscall(libc::SYS_memfd_create),
-            allow_syscall(libc::SYS_mmap),
-            allow_syscall(libc::SYS_mprotect),
-            allow_syscall(libc::SYS_mremap),
-            allow_syscall(libc::SYS_munmap),
-            allow_syscall(libc::SYS_nanosleep),
-            #[cfg(target_arch = "x86_64")]
-            allow_syscall(libc::SYS_open),
-            allow_syscall(libc::SYS_openat),
-            allow_syscall(libc::SYS_pipe2),
-            allow_syscall(libc::SYS_prctl),
-            allow_syscall(libc::SYS_pread64),
-            allow_syscall(libc::SYS_prlimit64),
-            allow_syscall(libc::SYS_pwrite64),
-            allow_syscall(libc::SYS_read),
-            #[cfg(target_arch = "x86_64")]
-            allow_syscall(libc::SYS_readlink),
-            allow_syscall(libc::SYS_recvfrom),
-            allow_syscall(libc::SYS_recvmsg),
-            allow_syscall(libc::SYS_restart_syscall),
-            allow_syscall(libc::SYS_rt_sigaction),
-            allow_syscall(libc::SYS_rt_sigprocmask),
-            allow_syscall(libc::SYS_rt_sigreturn),
-            allow_syscall(libc::SYS_sched_getaffinity),
-            allow_syscall(libc::SYS_sendmsg),
-            allow_syscall(libc::SYS_sendto),
-            allow_syscall(libc::SYS_set_robust_list),
-            allow_syscall(libc::SYS_set_tid_address),
-            allow_syscall(libc::SYS_sigaltstack),
-            allow_syscall_if(
-                libc::SYS_socket,
-                or![
-                    and![Cond::new(0, ArgLen::DWORD, Eq, libc::AF_UNIX as u64)?],
-                    and![Cond::new(0, ArgLen::DWORD, Eq, libc::AF_INET as u64)?],
-                ],
-            ),
-            allow_syscall(libc::SYS_socketpair),
-            #[cfg(target_arch = "x86_64")]
-            allow_syscall(libc::SYS_stat),
-            allow_syscall(libc::SYS_statx),
-            allow_syscall(libc::SYS_tgkill),
-            allow_syscall(libc::SYS_tkill),
-            allow_syscall_if(
-                libc::SYS_umask,
-                or![and![Cond::new(0, ArgLen::DWORD, Eq, 0o077)?]],
-            ),
-            #[cfg(target_arch = "x86_64")]
-            allow_syscall(libc::SYS_unlink),
-            #[cfg(target_arch = "aarch64")]
-            allow_syscall(libc::SYS_unlinkat),
-            allow_syscall(libc::SYS_wait4),
-            allow_syscall(libc::SYS_write),
-        ]
-        .into_iter()
-        .collect(),
+        rules.into_iter().collect(),
         SeccompAction::Trap,
     )?)
 }
 
-/// The filter containing the white listed syscall rules required by the API to
-/// function.
-pub fn api_thread_filter() -> Result<SeccompFilter, Error> {
+fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
+    let rules = match thread_type {
+        Thread::Vmm => vmm_thread_rules()?,
+        Thread::Api => api_thread_rules()?,
+    };
+
     Ok(SeccompFilter::new(
-        vec![
-            allow_syscall(libc::SYS_accept4),
-            allow_syscall(libc::SYS_bind),
-            allow_syscall(libc::SYS_close),
-            allow_syscall(libc::SYS_dup),
-            allow_syscall(libc::SYS_epoll_create1),
-            allow_syscall(libc::SYS_epoll_ctl),
-            allow_syscall(libc::SYS_epoll_pwait),
-            #[cfg(target_arch = "x86_64")]
-            allow_syscall(libc::SYS_epoll_wait),
-            allow_syscall(libc::SYS_exit),
-            allow_syscall(libc::SYS_futex),
-            allow_syscall(libc::SYS_getrandom),
-            allow_syscall_if(libc::SYS_ioctl, create_api_ioctl_seccomp_rule()?),
-            allow_syscall(libc::SYS_listen),
-            allow_syscall(libc::SYS_madvise),
-            allow_syscall(libc::SYS_munmap),
-            allow_syscall(libc::SYS_recvfrom),
-            allow_syscall(libc::SYS_sigaltstack),
-            allow_syscall(libc::SYS_socket),
-            allow_syscall(libc::SYS_write),
-        ]
-        .into_iter()
-        .collect(),
-        SeccompAction::Trap,
+        rules.into_iter().collect(),
+        SeccompAction::Log,
     )?)
 }
 
@@ -385,13 +400,12 @@ pub fn get_seccomp_filter(
     seccomp_action: &SeccompAction,
     thread_type: Thread,
 ) -> Result<BpfProgram, SeccompError> {
-    let filter = match thread_type {
-        Thread::Vmm => vmm_thread_filter(),
-        Thread::Api => api_thread_filter(),
-    };
     match seccomp_action {
         SeccompAction::Allow => Ok(vec![]),
-        _ => filter
+        SeccompAction::Log => get_seccomp_filter_log(thread_type)
+            .and_then(|filter| filter.try_into())
+            .map_err(SeccompError::SeccompFilter),
+        _ => get_seccomp_filter_trap(thread_type)
             .and_then(|filter| filter.try_into())
             .map_err(SeccompError::SeccompFilter),
     }
