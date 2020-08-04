@@ -14,16 +14,17 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
-    VirtioDeviceType, VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, DescriptorChain, EpollHelper, EpollHelperError,
+    EpollHelperHandler, Queue, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
+    VIRTIO_F_VERSION_1,
 };
+
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use libc::EFD_NONBLOCK;
 use std::cmp;
-use std::fs::File;
 use std::io;
 use std::mem::size_of;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -84,13 +85,9 @@ const VIRTIO_MEM_REQ_UNPLUG_ALL: u16 = 2;
 const VIRTIO_MEM_REQ_STATE: u16 = 3;
 
 // Get resize event.
-const RESIZE_EVENT: DeviceEventT = 0;
+const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 // New descriptors are pending on the virtio queue.
-const QUEUE_AVAIL_EVENT: DeviceEventT = 1;
-// The device has been dropped.
-const KILL_EVENT: DeviceEventT = 2;
-// The device should be paused.
-const PAUSE_EVENT: DeviceEventT = 3;
+const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 
 #[derive(Debug)]
 pub enum Error {
@@ -592,177 +589,85 @@ impl MemEpollHandler {
         used_count > 0
     }
 
-    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
-        // Create the epoll file descriptor
-        let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
-        // Use 'File' to enforce closing on 'epoll_fd'
-        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
+    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), EpollHelperError> {
+        let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
+        helper.add_event(self.resize.evt.as_raw_fd(), RESIZE_EVENT)?;
+        helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
+        helper.run(paused, self)?;
 
-        // Add events
-        epoll::ctl(
-            epoll_file.as_raw_fd(),
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.resize.evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(RESIZE_EVENT)),
-        )
-        .map_err(DeviceError::EpollCtl)?;
+        Ok(())
+    }
+}
 
-        epoll::ctl(
-            epoll_file.as_raw_fd(),
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.queue_evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(QUEUE_AVAIL_EVENT)),
-        )
-        .map_err(DeviceError::EpollCtl)?;
-
-        epoll::ctl(
-            epoll_file.as_raw_fd(),
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.kill_evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
-        )
-        .map_err(DeviceError::EpollCtl)?;
-
-        epoll::ctl(
-            epoll_file.as_raw_fd(),
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.pause_evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
-        )
-        .map_err(DeviceError::EpollCtl)?;
-
-        const EPOLL_EVENTS_LEN: usize = 100;
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
-
-        // Before jumping into the epoll loop, check if the device is expected
-        // to be in a paused state. This is helpful for the restore code path
-        // as the device thread should not start processing anything before the
-        // device has been resumed.
-        while paused.load(Ordering::SeqCst) {
-            thread::park();
-        }
-
-        'epoll: loop {
-            let num_events = match epoll::wait(epoll_file.as_raw_fd(), -1, &mut events[..]) {
-                Ok(res) => res,
-                Err(e) => {
-                    if e.kind() == io::ErrorKind::Interrupted {
-                        // It's well defined from the epoll_wait() syscall
-                        // documentation that the epoll loop can be interrupted
-                        // before any of the requested events occurred or the
-                        // timeout expired. In both those cases, epoll_wait()
-                        // returns an error of type EINTR, but this should not
-                        // be considered as a regular error. Instead it is more
-                        // appropriate to retry, by calling into epoll_wait().
-                        continue;
-                    }
-                    return Err(DeviceError::EpollWait(e));
-                }
-            };
-
-            for event in events.iter().take(num_events) {
-                let ev_type = event.data as u16;
-
-                match ev_type {
-                    RESIZE_EVENT => {
-                        if let Err(e) = self.resize.evt.read() {
-                            return Err(DeviceError::EpollHander(format!(
-                                "Failed to get resize event: {:?}",
-                                e
-                            )));
+impl EpollHelperHandler for MemEpollHandler {
+    fn handle_event(&mut self, _helper: &mut EpollHelper, event: u16) -> bool {
+        match event {
+            RESIZE_EVENT => {
+                if let Err(e) = self.resize.evt.read() {
+                    error!("Failed to get resize event: {:?}", e);
+                    return true;
+                } else {
+                    let size = self.resize.get_size();
+                    let mut config = self.config.lock().unwrap();
+                    let mut signal_error = false;
+                    let r = if config.requested_size == size {
+                        Err(Error::ResizeInval(format!(
+                            "Virtio-mem resize {} is same with current config.requested_size",
+                            size
+                        )))
+                    } else if size > config.region_size {
+                        let region_size = config.region_size;
+                        Err(Error::ResizeInval(format!(
+                            "Virtio-mem resize {} is bigger than config.region_size {}",
+                            size, region_size
+                        )))
+                    } else if size % (config.block_size as u64) != 0 {
+                        let block_size = config.block_size;
+                        Err(Error::ResizeInval(format!(
+                            "Virtio-mem resize {} is not aligned with config.block_size {}",
+                            size, block_size
+                        )))
+                    } else {
+                        config.requested_size = size;
+                        let tmp_size = cmp::min(
+                            config.region_size,
+                            config.requested_size + VIRTIO_MEM_USABLE_EXTENT,
+                        );
+                        config.usable_region_size = cmp::max(config.usable_region_size, tmp_size);
+                        if let Err(e) = self.signal(&VirtioInterruptType::Config) {
+                            signal_error = true;
+                            error!("Error signalling config: {:?}", e);
+                            Err(Error::ResizeTriggerFail(e))
                         } else {
-                            let size = self.resize.get_size();
-                            let mut config = self.config.lock().unwrap();
-                            let mut signal_error = false;
-                            let r = if config.requested_size == size {
-                                Err(Error::ResizeInval(format!("Virtio-mem resize {} is same with current config.requested_size", size)))
-                            } else if size > config.region_size {
-                                let region_size = config.region_size;
-                                Err(Error::ResizeInval(format!(
-                                    "Virtio-mem resize {} is bigger than config.region_size {}",
-                                    size, region_size
-                                )))
-                            } else if size % (config.block_size as u64) != 0 {
-                                let block_size = config.block_size;
-                                Err(Error::ResizeInval(format!(
-                                    "Virtio-mem resize {} is not aligned with config.block_size {}",
-                                    size, block_size
-                                )))
-                            } else {
-                                config.requested_size = size;
-                                let tmp_size = cmp::min(
-                                    config.region_size,
-                                    config.requested_size + VIRTIO_MEM_USABLE_EXTENT,
-                                );
-                                config.usable_region_size =
-                                    cmp::max(config.usable_region_size, tmp_size);
-                                if let Err(e) = self.signal(&VirtioInterruptType::Config) {
-                                    signal_error = true;
-                                    Err(Error::ResizeTriggerFail(e))
-                                } else {
-                                    Ok(())
-                                }
-                            };
-                            if let Err(e) = &r {
-                                // This error will send back to resize caller.
-                                error!("Handle resize event get error: {:?}", e);
-                            }
-                            if let Err(e) = self.resize.send(r) {
-                                return Err(DeviceError::EpollHander(format!(
-                                    "Sending \"resize\" generated error: {:?}",
-                                    e
-                                )));
-                            }
-                            if signal_error {
-                                return Err(DeviceError::EpollHander(String::from(
-                                    "Signal get error",
-                                )));
-                            }
+                            Ok(())
                         }
+                    };
+                    if let Err(e) = self.resize.send(r) {
+                        error!("Sending \"resize\" reponse: {:?}", e);
+                        return true;
                     }
-                    QUEUE_AVAIL_EVENT => {
-                        if let Err(e) = self.queue_evt.read() {
-                            return Err(DeviceError::EpollHander(format!(
-                                "Failed to get queue event: {:?}",
-                                e
-                            )));
-                        } else if self.process_queue() {
-                            if let Err(e) = self.signal(&VirtioInterruptType::Queue) {
-                                return Err(DeviceError::EpollHander(format!(
-                                    "Failed to signal used queue: {:?}",
-                                    e
-                                )));
-                            }
-                        }
-                    }
-                    KILL_EVENT => {
-                        debug!("kill_evt received, stopping epoll loop");
-                        break 'epoll;
-                    }
-                    PAUSE_EVENT => {
-                        debug!("PAUSE_EVENT received, pausing virtio-pmem epoll loop");
-                        // We loop here to handle spurious park() returns.
-                        // Until we have not resumed, the paused boolean will
-                        // be true.
-                        while paused.load(Ordering::SeqCst) {
-                            thread::park();
-                        }
-
-                        // Drain pause event after the device has been resumed.
-                        // This ensures the pause event has been seen by each
-                        // and every thread related to this virtio device.
-                        let _ = self.pause_evt.read();
-                    }
-                    _ => {
-                        return Err(DeviceError::EpollHander(String::from(
-                            "Unknown event for virtio-mem",
-                        )));
+                    if signal_error {
+                        return true;
                     }
                 }
             }
+            QUEUE_AVAIL_EVENT => {
+                if let Err(e) = self.queue_evt.read() {
+                    error!("Failed to get queue event: {:?}", e);
+                    return true;
+                } else if self.process_queue() {
+                    if let Err(e) = self.signal(&VirtioInterruptType::Queue) {
+                        error!("Failed to signal used queue: {:?}", e);
+                        return true;
+                    }
+                }
+            }
+            _ => {
+                error!("Unexpected event: {}", event);
+                return true;
+            }
         }
-
-        Ok(())
+        false
     }
 }
 
@@ -779,7 +684,7 @@ pub struct Mem {
     config: Arc<Mutex<VirtioMemConfig>>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     paused: Arc<AtomicBool>,
 }
 
