@@ -14,12 +14,14 @@ use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
     VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
 };
+use seccomp::{SeccompAction, SeccompFilter};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::num::Wrapping;
@@ -204,6 +206,7 @@ pub struct Net {
     paused: Arc<AtomicBool>,
     queue_size: Vec<u16>,
     counters: NetCounters,
+    seccomp_action: SeccompAction,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -223,6 +226,7 @@ impl Net {
         iommu: bool,
         num_queues: usize,
         queue_size: u16,
+        seccomp_action: SeccompAction,
     ) -> Result<Self> {
         let mut avail_features = 1 << VIRTIO_NET_F_GUEST_CSUM
             | 1 << VIRTIO_NET_F_CSUM
@@ -262,6 +266,7 @@ impl Net {
             paused: Arc::new(AtomicBool::new(false)),
             queue_size: vec![queue_size; queue_num],
             counters: NetCounters::default(),
+            seccomp_action,
         })
     }
 
@@ -278,11 +283,20 @@ impl Net {
         iommu: bool,
         num_queues: usize,
         queue_size: u16,
+        seccomp_action: SeccompAction,
     ) -> Result<Self> {
         let taps = open_tap(if_name, ip_addr, netmask, host_mac, num_queues / 2)
             .map_err(Error::OpenTap)?;
 
-        Self::new_with_tap(id, taps, guest_mac, iommu, num_queues, queue_size)
+        Self::new_with_tap(
+            id,
+            taps,
+            guest_mac,
+            iommu,
+            num_queues,
+            queue_size,
+            seccomp_action,
+        )
     }
 
     fn state(&self) -> NetState {
@@ -404,9 +418,18 @@ impl VirtioDevice for Net {
                 };
 
                 let paused = self.paused.clone();
+                // Retrieve seccomp filter for virtio_net thread
+                let virtio_net_seccomp_filter =
+                    get_seccomp_filter(&self.seccomp_action, Thread::VirtioNet)
+                        .map_err(ActivateError::CreateSeccompFilter)?;
                 thread::Builder::new()
                     .name("virtio_net".to_string())
-                    .spawn(move || ctrl_handler.run_ctrl(paused))
+                    .spawn(move || {
+                        SeccompFilter::apply(virtio_net_seccomp_filter)
+                            .map_err(DeviceError::ApplySeccompFilter)?;
+
+                        ctrl_handler.run_ctrl(paused)
+                    })
                     .map(|thread| self.ctrl_queue_epoll_thread = Some(thread))
                     .map_err(|e| {
                         error!("failed to clone queue EventFd: {}", e);
