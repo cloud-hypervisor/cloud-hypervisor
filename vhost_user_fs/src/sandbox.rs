@@ -4,7 +4,7 @@
 
 use std::ffi::CString;
 use std::os::unix::io::RawFd;
-use std::{fmt, io};
+use std::{fmt, fs, io};
 
 use tempdir::TempDir;
 
@@ -50,6 +50,12 @@ pub enum Error {
     UmountTempDir(io::Error),
     /// Call to libc::unshare returned an error.
     Unshare(io::Error),
+    /// Failed to read procfs.
+    ReadProc(io::Error),
+    /// Failed to parse `/proc/sys/fs/nr_open`.
+    InvalidNrOpen(std::num::ParseIntError),
+    /// Failed to set rlimit.
+    SetRlimit(io::Error),
 }
 
 impl fmt::Display for Error {
@@ -249,6 +255,29 @@ impl Sandbox {
         Ok(())
     }
 
+    /// Sets the limit of open files to the max possible.
+    fn setup_nofile_rlimit(&self) -> Result<(), Error> {
+        // /proc/sys/fs/nr_open is a sysctl file that shows the maximum number
+        // of file-handles a process can allocate.
+        let path = "/proc/sys/fs/nr_open";
+        let max_str = fs::read_to_string(path).map_err(|e| Error::ReadProc(e))?;
+        let max = max_str
+            .trim()
+            .parse()
+            .map_err(|e| Error::InvalidNrOpen(e))?;
+
+        let limit = libc::rlimit {
+            rlim_cur: max,
+            rlim_max: max,
+        };
+        let ret = unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) };
+        if ret < 0 {
+            Err(Error::SetRlimit(std::io::Error::last_os_error()))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Set up sandbox, fork and jump into it.
     ///
     /// On success, the returned value will be the PID of the child for the parent and `None` for
@@ -275,6 +304,7 @@ impl Sandbox {
             0 => {
                 // This is the child. Request to receive SIGTERM on parent's death.
                 unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) };
+                self.setup_nofile_rlimit()?;
                 self.setup_mounts()?;
                 Ok(None)
             }
