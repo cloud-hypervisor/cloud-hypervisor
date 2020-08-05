@@ -369,7 +369,6 @@ cmd_shell() {
 	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
 	   --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	   --env USER="root" \
-	   --env CH_LIBC="${libc}" \
 	   --entrypoint bash \
 	   "$CTR_IMAGE"
 
