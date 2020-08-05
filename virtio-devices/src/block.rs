@@ -264,7 +264,7 @@ pub struct Block<T: DiskFile> {
     config: VirtioBlockConfig,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     pause_evt: Option<EventFd>,
     paused: Arc<AtomicBool>,
     queue_size: Vec<u16>,
@@ -542,10 +542,11 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
             thread::Builder::new()
                 .name("virtio_blk".to_string())
                 .spawn(move || {
-                    SeccompFilter::apply(virtio_blk_seccomp_filter)
-                        .map_err(EpollHelperError::ApplySeccompFilter)?;
-
-                    handler.run(paused)
+                    if let Err(e) = SeccompFilter::apply(virtio_blk_seccomp_filter) {
+                        error!("Error applying seccomp filter: {:?}", e);
+                    } else if let Err(e) = handler.run(paused) {
+                        error!("Error running worker: {:?}", e);
+                    }
                 })
                 .map(|thread| epoll_threads.push(thread))
                 .map_err(|e| {
