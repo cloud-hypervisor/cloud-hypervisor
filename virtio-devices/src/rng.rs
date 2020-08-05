@@ -130,7 +130,7 @@ pub struct Rng {
     acked_features: u64,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     paused: Arc<AtomicBool>,
     seccomp_action: SeccompAction,
 }
@@ -295,10 +295,11 @@ impl VirtioDevice for Rng {
             thread::Builder::new()
                 .name("virtio_rng".to_string())
                 .spawn(move || {
-                    SeccompFilter::apply(virtio_rng_seccomp_filter)
-                        .map_err(DeviceError::ApplySeccompFilter)?;
-
-                    handler.run(paused)
+                    if let Err(e) = SeccompFilter::apply(virtio_rng_seccomp_filter) {
+                        error!("Error applying seccomp filter: {:?}", e);
+                    } else if let Err(e) = handler.run(paused) {
+                        error!("Error running worker: {:?}", e);
+                    }
                 })
                 .map(|thread| epoll_threads.push(thread))
                 .map_err(|e| {
