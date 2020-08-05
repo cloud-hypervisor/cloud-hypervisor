@@ -10,7 +10,7 @@ build = "build.rs"
 lto = true
 
 [dependencies]
-clap = { version = "2.33.1", features = ["wrap_help"] }
+clap = { version = "2.33.2", features = ["wrap_help"] }
 hypervisor = { path = "hypervisor" }
 libc = "0.2.74"
 log = { version = "0.4.11", features = ["std"] }
