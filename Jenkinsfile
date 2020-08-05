@@ -126,6 +126,17 @@ pipeline{
 			}
 		}
 	}
+	post {
+		regression {
+			when { branch 'master' }
+			slackSend (color: '#ff0000', message: '"master" branch build is now failing')
+		}
+		fixed {
+			when { branch 'master' }
+			slackSend (color: '#00ff00', message: '"master" branch build is now fixed')
+		}
+	}
+	
 }
 
 def cancelPreviousBuilds() {
