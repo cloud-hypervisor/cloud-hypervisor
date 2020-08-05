@@ -67,39 +67,6 @@ pipeline{
 						}
 					}
 				}
-				stage ('AArch64 worker build') {
-					agent { node { label 'bionic-arm64' } }
-					options {
-						timeout(time: 1, unit: 'HOURS')
-					}
-					stages {
-						stage ('Checkout') {
-							steps {
-								checkout scm
-							}
-						}
-						stage ('Build') {
-							steps {
-								sh "scripts/dev_cli.sh build --release"
-							}
-						}
-						stage ('Build for musl') {
-							steps {
-								sh "scripts/dev_cli.sh build --release --libc musl"
-							}
-						}
-						stage ('Run unit tests') {
-							steps {
-								sh "scripts/dev_cli.sh tests --unit"
-							}
-						}
-						stage ('Run integration tests') {
-							steps {
-								sh "scripts/dev_cli.sh tests --integration"
-							}
-						}
-					}
-				}
 				stage ('Worker build (musl)') {
 					agent { node { label 'bionic' } }
 					options {
