@@ -4,19 +4,19 @@
 
 use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, DescriptorChain, EpollHelper, EpollHelperError,
-    EpollHelperHandler, Queue, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, DescriptorChain, DeviceEventT, Queue, VirtioDevice,
+    VirtioDeviceType, VIRTIO_F_VERSION_1,
 };
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use std::collections::BTreeMap;
 use std::fmt::{self, Display};
+use std::fs::File;
 use std::io;
 use std::mem::size_of;
 use std::ops::Bound::Included;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
@@ -40,11 +40,15 @@ const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
 /// New descriptors are pending on the request queue.
 /// "requestq" is meant to be used anytime an action is required to be
 /// performed on behalf of the guest driver.
-const REQUEST_Q_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
+const REQUEST_Q_EVENT: DeviceEventT = 0;
 /// New descriptors are pending on the event queue.
 /// "eventq" lets the device report any fault or other asynchronous event to
 /// the guest driver.
-const EVENT_Q_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
+const EVENT_Q_EVENT: DeviceEventT = 1;
+/// The device has been dropped.
+const KILL_EVENT: DeviceEventT = 2;
+/// The device should be paused.
+const PAUSE_EVENT: DeviceEventT = 3;
 
 /// PROBE properties size.
 /// This is the minimal size to provide at least one RESV_MEM property.
@@ -646,47 +650,126 @@ impl IommuEpollHandler {
             })
     }
 
-    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), EpollHelperError> {
-        let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
-        helper.add_event(self.queue_evts[0].as_raw_fd(), REQUEST_Q_EVENT)?;
-        helper.add_event(self.queue_evts[1].as_raw_fd(), EVENT_Q_EVENT)?;
-        helper.run(paused, self)?;
+    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
+        // Create the epoll file descriptor
+        let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
+        // Use 'File' to enforce closing on 'epoll_fd'
+        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
+
+        // Add events
+        epoll::ctl(
+            epoll_file.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.queue_evts[0].as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(REQUEST_Q_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+        epoll::ctl(
+            epoll_file.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.queue_evts[1].as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(EVENT_Q_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+        epoll::ctl(
+            epoll_file.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.kill_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+        epoll::ctl(
+            epoll_file.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            self.pause_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
+        )
+        .map_err(DeviceError::EpollCtl)?;
+
+        const EPOLL_EVENTS_LEN: usize = 100;
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
+
+        // Before jumping into the epoll loop, check if the device is expected
+        // to be in a paused state. This is helpful for the restore code path
+        // as the device thread should not start processing anything before the
+        // device has been resumed.
+        while paused.load(Ordering::SeqCst) {
+            thread::park();
+        }
+
+        'epoll: loop {
+            let num_events = match epoll::wait(epoll_file.as_raw_fd(), -1, &mut events[..]) {
+                Ok(res) => res,
+                Err(e) => {
+                    if e.kind() == io::ErrorKind::Interrupted {
+                        // It's well defined from the epoll_wait() syscall
+                        // documentation that the epoll loop can be interrupted
+                        // before any of the requested events occurred or the
+                        // timeout expired. In both those cases, epoll_wait()
+                        // returns an error of type EINTR, but this should not
+                        // be considered as a regular error. Instead it is more
+                        // appropriate to retry, by calling into epoll_wait().
+                        continue;
+                    }
+                    return Err(DeviceError::EpollWait(e));
+                }
+            };
+
+            for event in events.iter().take(num_events) {
+                let ev_type = event.data as u16;
+
+                match ev_type {
+                    REQUEST_Q_EVENT => {
+                        if let Err(e) = self.queue_evts[0].read() {
+                            error!("Failed to get queue event: {:?}", e);
+                            break 'epoll;
+                        } else if self.request_queue() {
+                            if let Err(e) = self.signal_used_queue(&self.queues[0]) {
+                                error!("Failed to signal used queue: {:?}", e);
+                                break 'epoll;
+                            }
+                        }
+                    }
+                    EVENT_Q_EVENT => {
+                        if let Err(e) = self.queue_evts[1].read() {
+                            error!("Failed to get queue event: {:?}", e);
+                            break 'epoll;
+                        } else if self.event_queue() {
+                            if let Err(e) = self.signal_used_queue(&self.queues[1]) {
+                                error!("Failed to signal used queue: {:?}", e);
+                                break 'epoll;
+                            }
+                        }
+                    }
+                    KILL_EVENT => {
+                        debug!("kill_evt received, stopping epoll loop");
+                        break 'epoll;
+                    }
+                    PAUSE_EVENT => {
+                        debug!("PAUSE_EVENT received, pausing virtio-iommu epoll loop");
+                        // We loop here to handle spurious park() returns.
+                        // Until we have not resumed, the paused boolean will
+                        // be true.
+                        while paused.load(Ordering::SeqCst) {
+                            thread::park();
+                        }
+
+                        // Drain pause event after the device has been resumed.
+                        // This ensures the pause event has been seen by each
+                        // and every thread related to this virtio device.
+                        let _ = self.pause_evt.read();
+                    }
+                    _ => {
+                        error!("Unknown event for virtio-iommu");
+                        break 'epoll;
+                    }
+                }
+            }
+
+            info!("Exit epoll loop");
+        }
 
         Ok(())
-    }
-}
-
-impl EpollHelperHandler for IommuEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: u16) -> bool {
-        match event {
-            REQUEST_Q_EVENT => {
-                if let Err(e) = self.queue_evts[0].read() {
-                    error!("Failed to get queue event: {:?}", e);
-                    return true;
-                } else if self.request_queue() {
-                    if let Err(e) = self.signal_used_queue(&self.queues[0]) {
-                        error!("Failed to signal used queue: {:?}", e);
-                        return true;
-                    }
-                }
-            }
-            EVENT_Q_EVENT => {
-                if let Err(e) = self.queue_evts[1].read() {
-                    error!("Failed to get queue event: {:?}", e);
-                    return true;
-                } else if self.event_queue() {
-                    if let Err(e) = self.signal_used_queue(&self.queues[1]) {
-                        error!("Failed to signal used queue: {:?}", e);
-                        return true;
-                    }
-                }
-            }
-            _ => {
-                error!("Unexpected event: {}", event);
-                return true;
-            }
-        }
-        false
     }
 }
 
@@ -740,7 +823,7 @@ pub struct Iommu {
     ext_mapping: BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
     paused: Arc<AtomicBool>,
 }
 
