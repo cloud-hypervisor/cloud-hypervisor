@@ -101,6 +101,7 @@ fn virtio_net_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 fn virtio_pmem_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
         allow_syscall(libc::SYS_epoll_ctl),
         allow_syscall(libc::SYS_epoll_pwait),
@@ -121,6 +122,7 @@ fn virtio_pmem_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 fn virtio_rng_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
         allow_syscall(libc::SYS_epoll_ctl),
         allow_syscall(libc::SYS_epoll_pwait),
