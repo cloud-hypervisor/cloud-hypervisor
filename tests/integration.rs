@@ -2142,19 +2142,22 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
-        #[cfg(target_arch = "x86_64")]
         fn test_large_vm() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
                 let guest = Guest::new(&mut focal);
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=48"])
+                let mut cmd = GuestCommand::new(&guest);
+                cmd.args(&["--cpus", "boot=48"])
                     .args(&["--memory", "size=5120M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
                     .default_disks()
-                    .default_net()
-                    .spawn()
-                    .unwrap();
+                    .default_net();
+
+                // Now AArch64 can only boot from direct kernel, command-line is needed.
+                #[cfg(target_arch = "aarch64")]
+                cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+
+                let mut child = cmd.spawn().unwrap();
 
                 thread::sleep(std::time::Duration::new(20, 0));
 
@@ -2167,19 +2170,22 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
-        #[cfg(target_arch = "x86_64")]
         fn test_huge_memory() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
                 let guest = Guest::new(&mut focal);
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=1"])
+                let mut cmd = GuestCommand::new(&guest);
+                cmd.args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=128G"])
                     .args(&["--kernel", guest.fw_path.as_str()])
                     .default_disks()
-                    .default_net()
-                    .spawn()
-                    .unwrap();
+                    .default_net();
+
+                // Now AArch64 can only boot from direct kernel, command-line is needed.
+                #[cfg(target_arch = "aarch64")]
+                cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+
+                let mut child = cmd.spawn().unwrap();
 
                 thread::sleep(std::time::Duration::new(20, 0));
 
@@ -2937,25 +2943,29 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
-        #[cfg(target_arch = "x86_64")]
         fn test_serial_null() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
                 let guest = Guest::new(&mut focal);
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=1"])
+                let mut cmd = GuestCommand::new(&guest);
+                cmd.args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
                     .default_disks()
                     .default_net()
                     .args(&["--serial", "null"])
                     .args(&["--console", "off"])
-                    .capture_output()
-                    .spawn()
-                    .unwrap();
+                    .capture_output();
+
+                // Now AArch64 can only boot from direct kernel, command-line is needed.
+                #[cfg(target_arch = "aarch64")]
+                cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+
+                let mut child = cmd.spawn().unwrap();
 
                 thread::sleep(std::time::Duration::new(20, 0));
 
+                #[cfg(target_arch = "x86_64")]
                 // Test that there is a ttyS0
                 aver_eq!(
                     tb,
