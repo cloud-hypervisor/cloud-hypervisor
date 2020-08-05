@@ -774,8 +774,55 @@ impl cpu::Vcpu for KvmVcpu {
         let xcrs = self.get_xcrs()?;
         let lapic_state = self.get_lapic()?;
         let fpu = self.get_fpu()?;
-        let mut msrs = self.msrs.clone();
-        self.get_msrs(&mut msrs)?;
+
+        // Try to get all MSRs based on the list previously retrieved from KVM.
+        // If the number of MSRs obtained from GET_MSRS is different from the
+        // expected amount, we fallback onto a slower method by getting MSRs
+        // by chunks. This is the only way to make sure we try to get as many
+        // MSRs as possible, even if some MSRs are not supported.
+        let mut msr_entries = self.msrs.clone();
+        let expected_num_msrs = msr_entries.as_fam_struct_ref().nmsrs as usize;
+        let num_msrs = self.get_msrs(&mut msr_entries)?;
+        let msrs = if num_msrs != expected_num_msrs {
+            let mut faulty_msr_index = num_msrs;
+            let mut msr_entries_tmp =
+                MsrEntries::from_entries(&msr_entries.as_slice()[..faulty_msr_index]);
+
+            loop {
+                warn!(
+                    "Detected faulty MSR 0x{:x} while getting MSRs",
+                    msr_entries.as_slice()[faulty_msr_index].index
+                );
+
+                let start_pos = faulty_msr_index + 1;
+                let mut sub_msr_entries =
+                    MsrEntries::from_entries(&msr_entries.as_slice()[start_pos..]);
+                let expected_num_msrs = sub_msr_entries.as_fam_struct_ref().nmsrs as usize;
+                let num_msrs = self.get_msrs(&mut sub_msr_entries)?;
+
+                for i in 0..num_msrs {
+                    msr_entries_tmp
+                        .push(sub_msr_entries.as_slice()[i])
+                        .map_err(|e| {
+                            cpu::HypervisorCpuError::GetMsrEntries(anyhow!(
+                                "Failed adding MSR entries: {:?}",
+                                e
+                            ))
+                        })?;
+                }
+
+                if num_msrs == expected_num_msrs {
+                    break;
+                }
+
+                faulty_msr_index = start_pos + num_msrs;
+            }
+
+            msr_entries_tmp
+        } else {
+            msr_entries
+        };
+
         let vcpu_events = self.get_vcpu_events()?;
 
         Ok(CpuState {
@@ -842,7 +889,36 @@ impl cpu::Vcpu for KvmVcpu {
         self.set_xcrs(&state.xcrs)?;
         self.set_lapic(&state.lapic_state)?;
         self.set_fpu(&state.fpu)?;
-        self.set_msrs(&state.msrs)?;
+
+        // Try to set all MSRs previously stored.
+        // If the number of MSRs set from SET_MSRS is different from the
+        // expected amount, we fallback onto a slower method by setting MSRs
+        // by chunks. This is the only way to make sure we try to set as many
+        // MSRs as possible, even if some MSRs are not supported.
+        let expected_num_msrs = state.msrs.as_fam_struct_ref().nmsrs as usize;
+        let num_msrs = self.set_msrs(&state.msrs)?;
+        if num_msrs != expected_num_msrs {
+            let mut faulty_msr_index = num_msrs;
+
+            loop {
+                warn!(
+                    "Detected faulty MSR 0x{:x} while setting MSRs",
+                    state.msrs.as_slice()[faulty_msr_index].index
+                );
+
+                let start_pos = faulty_msr_index + 1;
+                let sub_msr_entries = MsrEntries::from_entries(&state.msrs.as_slice()[start_pos..]);
+                let expected_num_msrs = sub_msr_entries.as_fam_struct_ref().nmsrs as usize;
+                let num_msrs = self.set_msrs(&sub_msr_entries)?;
+
+                if num_msrs == expected_num_msrs {
+                    break;
+                }
+
+                faulty_msr_index = start_pos + num_msrs;
+            }
+        }
+
         self.set_vcpu_events(&state.vcpu_events)?;
 
         Ok(())
