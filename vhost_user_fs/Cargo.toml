@@ -12,7 +12,7 @@ futures = { version = "0.3.5", features = ["thread-pool"] }
 libc = "0.2.74"
 log = "0.4.11"
 # Match the version in vmm
-seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.21.2" }
+seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.22.0" }
 tempdir = "0.3.7"
 virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
 virtio-devices = { path = "../virtio-devices" }
