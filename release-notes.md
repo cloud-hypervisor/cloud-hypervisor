@@ -1,11 +1,9 @@
- - [v0.8.0](#v080)
-    - [Experimental Snapshot and Restore Support](#experimental-snapshot-and-restore-support)
-    - [Experimental ARM64 Support](#experimental-arm64-support)
-    - [Support for Using 5-level Paging in Guests](#support-for-using-5-level-paging-in-guests)
-    - [Virtio Device Interrupt Suppression for Network Devices](#virtio-device-interrupt-suppression-for-network-devices)
-    - [`vhost_user_fs` Improvements](#vhost_user_fs-improvements)
+- [v0.10.0](#v0100)
+    - [`virtio-block` Support for Multiple Descriptors](#virtio-block-support-for-multiple-descriptors)
+    - [Memory Zones](#memory-zones)
+    - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements)
+    - [Preliminary KVM HyperV Emulation Control](#preliminary-kvm-hyperv-emulation-control)
     - [Notable Bug Fixes](#notable-bug-fixes)
-    - [Command Line and API Changes](#command-line-and-api-changes)
     - [Contributors](#contributors)
 - [v0.9.0](#v090)
     - [`io_uring` Based Block Device Support](#io_uring-based-block-device-support)
@@ -18,18 +16,18 @@
     - [Virtio Memory Ballooning Support](#virtio-memory-ballooning-support)
     - [Enhancements to ARM64 Support](#enhancements-to-arm64-support)
     - [Intel SGX Support](#intel-sgx-support)
-    - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements)
-    - [Notable Bug Fixes](#notable-bug-fixes)
-    - [Contributors](#contributors)
+    - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements-1)
+    - [Notable Bug Fixes](#notable-bug-fixes-1)
+    - [Contributors](#contributors-1)
 - [v0.8.0](#v080)
     - [Experimental Snapshot and Restore Support](#experimental-snapshot-and-restore-support)
     - [Experimental ARM64 Support](#experimental-arm64-support)
     - [Support for Using 5-level Paging in Guests](#support-for-using-5-level-paging-in-guests)
     - [Virtio Device Interrupt Suppression for Network Devices](#virtio-device-interrupt-suppression-for-network-devices)
     - [`vhost_user_fs` Improvements](#vhost_user_fs-improvements)
-    - [Notable Bug Fixes](#notable-bug-fixes-1)
+    - [Notable Bug Fixes](#notable-bug-fixes-2)
     - [Command Line and API Changes](#command-line-and-api-changes)
-    - [Contributors](#contributors-1)
+    - [Contributors](#contributors-2)
 - [v0.7.0](#v070)
     - [Block, Network, Persistent Memory (PMEM), VirtioFS and Vsock hotplug](#block-network-persistent-memory-pmem-virtiofs-and-vsock-hotplug)
     - [Alternative `libc` Support](#alternative-libc-support)
@@ -39,14 +37,14 @@
     - [`Seccomp` Sandboxing](#seccomp-sandboxing)
     - [Updated Distribution Support](#updated-distribution-support)
     - [Command Line and API Changes](#command-line-and-api-changes-1)
-    - [Contributors](#contributors-2)
+    - [Contributors](#contributors-3)
 - [v0.6.0](#v060)
     - [Directly Assigned Devices Hotplug](#directly-assigned-devices-hotplug)
     - [Shared Filesystem Improvements](#shared-filesystem-improvements)
     - [Block and Networking IO Self Offloading](#block-and-networking-io-self-offloading)
     - [Command Line Interface](#command-line-interface)
     - [PVH Boot](#pvh-boot)
-    - [Contributors](#contributors-3)
+    - [Contributors](#contributors-4)
 - [v0.5.1](#v051)
 - [v0.5.0](#v050)
     - [Virtual Machine Dynamic Resizing](#virtual-machine-dynamic-resizing)
@@ -54,7 +52,7 @@
     - [New Interrupt Management Framework](#new-interrupt-management-framework)
     - [Development Tools](#development-tools)
     - [Kata Containers Integration](#kata-containers-integration)
-    - [Contributors](#contributors-4)
+    - [Contributors](#contributors-5)
 - [v0.4.0](#v040)
     - [Dynamic virtual CPUs addition](#dynamic-virtual-cpus-addition)
     - [Programmatic firmware tables generation](#programmatic-firmware-tables-generation)
@@ -63,7 +61,7 @@
     - [Userspace IOAPIC by default](#userspace-ioapic-by-default)
     - [PCI BAR reprogramming](#pci-bar-reprogramming)
     - [New `cloud-hypervisor` organization](#new-cloud-hypervisor-organization)
-    - [Contributors](#contributors-5)
+    - [Contributors](#contributors-6)
 - [v0.3.0](#v030)
     - [Block device offloading](#block-device-offloading)
     - [Network device backend](#network-device-backend)
@@ -89,6 +87,52 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v0.10.0
+
+This release has been tracked through the [0.10.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/13).
+
+Highlights for `cloud-hypervisor` version 0.10.0 include:
+
+### `virtio-block` Support for Multiple Descriptors
+
+Some `virtio-block` device drivers may generate requests with multiple descriptors and support has been added for those drivers.
+
+### Memory Zones
+
+Support has been added for fine grained control of memory allocation for the guest. This includes controlling the backing of sections of guest memory, assigning to specific host NUMA nodes and assigning memory and vCPUs to specific memory nodes inside the guest. Full details of this can be found in the [memory documentation](docs/memory.md).
+
+### `Seccomp` Sandbox Improvements
+
+All the remaining threads and devices are now isolated within their own `seccomp` filters. This provides a layer of sandboxing and enhances the security model of `cloud-hypervisor`.
+
+### Preliminary KVM HyperV Emulation Control
+
+A new option (`kvm_hyperv`) has been added to `--cpus` to provide an option to toggle on KVM's HyperV emulation support. This enables progress towards booting Windows without adding extra emulated devices.
+
+### Notable Bug Fixes
+
+- When using `ch-remote` to resize the VM parameter now accepts the standard sizes suffices (#1596)
+- `cloud-hypervisor` no longer panics when started with `--memory hotplug_method=virtio-mem` and no `hotplug_size` (#1564)
+- After a reboot memory can remove when using `--memory hotplug_method=virtio-mem` (#1593)
+- `--version` shows the version for released binaries (#1669)
+- Errors generated by worker threads for `virtio` devices are now printed out (#1551)
+
+### Contributors
+
+Many thanks to everyone who has contributed to our 0.10.0 release including some new faces.
+
+* Alyssa Ross <hi@alyssa.is>
+* Amey Narkhede <ameynarkhede02@gmail.com>
+* Anatol Belski <ab@php.net>
+* Bo Chen <chen.bo@intel.com>
+* Hui Zhu <teawater@antfin.com>
+* Michael Zhao <michael.zhao@arm.com>
+* Muminul Islam <muislam@microsoft.com>
+* Rob Bradford <robert.bradford@intel.com>
+* Samuel Ortiz <sameo@linux.intel.com>
+* Sebastien Boeuf <sebastien.boeuf@intel.com>
+* Wei Liu <liuwe@microsoft.com>
 
 # v0.9.0
 
