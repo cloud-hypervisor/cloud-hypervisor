@@ -61,6 +61,9 @@ pipeline{
 							}
 						}
 						stage ('Run integration tests') {
+							options {
+								retry(3)
+							}
 							steps {
 								sh "scripts/dev_cli.sh tests --integration"
 							}
@@ -84,6 +87,9 @@ pipeline{
 							}
 						}
 						stage ('Run integration tests for musl') {
+							options {
+								retry(3)
+							}
 							steps {
 								sh "scripts/dev_cli.sh tests --integration --libc musl"
 							}
