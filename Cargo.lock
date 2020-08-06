@@ -1103,7 +1103,7 @@ checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 [[package]]
 name = "seccomp"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/firecracker?tag=v0.21.2#a06d358b2e40c6f67ed7070881672318a7518113"
+source = "git+https://github.com/firecracker-microvm/firecracker?tag=v0.22.0#cc5387637c132e500b4857b80b5a239d8d732b77"
 dependencies = [
  "libc",
 ]
