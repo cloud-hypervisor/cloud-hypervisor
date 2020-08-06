@@ -27,6 +27,8 @@ mod tests {
     use std::io::BufRead;
     use std::io::{Read, Write};
     use std::net::TcpStream;
+    #[cfg(target_arch = "x86_64")]
+    use std::os::unix::net::UnixStream;
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Stdio};
     use std::string::String;
@@ -4846,6 +4848,7 @@ mod tests {
                 // Restore the VM from the snapshot
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--api-socket", &api_socket])
+                    .args(&["--seccomp", "log"])
                     .args(&[
                         "--restore",
                         format!("source_url=file://{}", snapshot_dir).as_str(),
@@ -4855,10 +4858,21 @@ mod tests {
                     .unwrap();
 
                 // Wait for the VM to be restored
-                thread::sleep(std::time::Duration::new(10, 0));
+                for _ in 0..6 {
+                    if UnixStream::connect(&api_socket).is_ok() {
+                        break;
+                    }
+
+                    thread::sleep(std::time::Duration::new(10, 0));
+                }
 
                 // Resume the VM
                 aver!(tb, remote_command(&api_socket, "resume", None));
+
+                println!(
+                    "DMESG \n{:?}",
+                    String::from_utf8_lossy(&Command::new("dmesg").output().unwrap().stdout)
+                );
 
                 // Perform same checks to validate VM has been properly restored
                 aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 4);
