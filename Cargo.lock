@@ -1571,8 +1571,8 @@ dependencies = [
 
 [[package]]
 name = "vm-memory"
-version = "0.2.1"
-source = "git+https://github.com/cloud-hypervisor/vm-memory?branch=ch#708e9aa5d4317f7044d9835fe5080287e9c76f21"
+version = "0.2.2"
+source = "git+https://github.com/cloud-hypervisor/vm-memory?branch=ch#b28148d201b464acdef3124116ea43bb645cfd2f"
 dependencies = [
  "arc-swap",
  "libc",
