@@ -185,7 +185,7 @@ impl VhostUserBackend for VhostUserNetBackend {
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::all()
+        VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::REPLY_ACK
     }
 
     fn set_event_idx(&mut self, _enabled: bool) {}
