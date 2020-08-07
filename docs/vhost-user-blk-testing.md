@@ -73,7 +73,7 @@ VMs run in client mode. They connect to the socket created by the `dpdkvhostuser
 # From the test terminal. We need to create one vhost-user-blk device for the --disk.
 ./cloud-hypervisor \
         --cpus boot=4 \
-        --memory size=1024M,hugepages=on \
+        --memory size=1024M,hugepages=on,shared=true \
         --kernel linux/arch/x86/boot/compressed/vmlinux.bin \
         --cmdline "console=ttyS0 root=/dev/vda1 rw iommu=off" \
         --disk path=images/focal-server-cloudimg-amd64.raw vhost_user=true,socket=/var/tmp/vhost.1,num_queues=4,queue_size=128 \
