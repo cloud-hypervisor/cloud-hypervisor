@@ -76,7 +76,7 @@ VMs run in client mode. They connect to the socket created by the `dpdkvhostuser
 # From one terminal. We need to give the cloud-hypervisor binary the NET_ADMIN capabilities for it to set TAP interfaces up on the host.
 ./cloud-hypervisor \
         --cpus boot=2 \
-        --memory size=512M,hugepages=on   \
+        --memory size=512M,hugepages=on,shared=true \
         --kernel vmlinux \
         --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
         --disk path=focal-server-cloudimg-amd64.raw   \
@@ -85,7 +85,7 @@ VMs run in client mode. They connect to the socket created by the `dpdkvhostuser
 # From another terminal. We need to give the cloud-hypervisor binary the NET_ADMIN capabilities for it to set TAP interfaces up on the host.
 ./cloud-hypervisor \
         --cpus boot=2 \
-        --memory size=512M,hugepages=on   \
+        --memory size=512M,hugepages=on,shared=true \
         --kernel vmlinux \
         --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
         --disk path=focal-server-cloudimg-amd64.raw   \
