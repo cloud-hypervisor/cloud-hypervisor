@@ -5,6 +5,9 @@ authors = ["The Cloud Hypervisor Authors"]
 edition = "2018"
 default-run = "cloud-hypervisor"
 build = "build.rs"
+license = "LICENSE-APACHE & LICENSE-BSD-3-Clause"
+description = "Open source Virtual Machine Monitor (VMM) that runs on top of KVM"
+homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 
 [profile.release]
 lto = true
