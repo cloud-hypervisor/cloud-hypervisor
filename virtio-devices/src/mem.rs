@@ -180,6 +180,36 @@ struct VirtioMemConfig {
 // Safe because it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioMemConfig {}
 
+fn virtio_mem_config_resize(config: &mut VirtioMemConfig, size: u64) -> result::Result<(), Error> {
+    if config.requested_size == size {
+        return Err(Error::ResizeInval(format!(
+            "Virtio-mem resize {} is same with current config.requested_size",
+            size
+        )));
+    } else if size > config.region_size {
+        let region_size = config.region_size;
+        return Err(Error::ResizeInval(format!(
+            "Virtio-mem resize {} is bigger than config.region_size {}",
+            size, region_size
+        )));
+    } else if size % (config.block_size as u64) != 0 {
+        let block_size = config.block_size;
+        return Err(Error::ResizeInval(format!(
+            "Virtio-mem resize {} is not aligned with config.block_size {}",
+            size, block_size
+        )));
+    }
+
+    config.requested_size = size;
+    let tmp_size = cmp::min(
+        config.region_size,
+        config.requested_size + VIRTIO_MEM_USABLE_EXTENT,
+    );
+    config.usable_region_size = cmp::max(config.usable_region_size, tmp_size);
+
+    Ok(())
+}
+
 struct Request {
     req: VirtioMemReq,
     status_addr: GuestAddress,
@@ -617,37 +647,16 @@ impl EpollHelperHandler for MemEpollHandler {
                     let size = self.resize.get_size();
                     let mut config = self.config.lock().unwrap();
                     let mut signal_error = false;
-                    let r = if config.requested_size == size {
-                        Err(Error::ResizeInval(format!(
-                            "Virtio-mem resize {} is same with current config.requested_size",
-                            size
-                        )))
-                    } else if size > config.region_size {
-                        let region_size = config.region_size;
-                        Err(Error::ResizeInval(format!(
-                            "Virtio-mem resize {} is bigger than config.region_size {}",
-                            size, region_size
-                        )))
-                    } else if size % (config.block_size as u64) != 0 {
-                        let block_size = config.block_size;
-                        Err(Error::ResizeInval(format!(
-                            "Virtio-mem resize {} is not aligned with config.block_size {}",
-                            size, block_size
-                        )))
-                    } else {
-                        config.requested_size = size;
-                        let tmp_size = cmp::min(
-                            config.region_size,
-                            config.requested_size + VIRTIO_MEM_USABLE_EXTENT,
-                        );
-                        config.usable_region_size = cmp::max(config.usable_region_size, tmp_size);
-                        if let Err(e) = self.signal(&VirtioInterruptType::Config) {
-                            signal_error = true;
-                            error!("Error signalling config: {:?}", e);
-                            Err(Error::ResizeTriggerFail(e))
-                        } else {
-                            Ok(())
-                        }
+                    let mut r = virtio_mem_config_resize(&mut config, size);
+                    r = match r {
+                        Err(e) => Err(e),
+                        _ => match self.signal(&VirtioInterruptType::Config) {
+                            Err(e) => {
+                                signal_error = true;
+                                Err(Error::ResizeTriggerFail(e))
+                            }
+                            _ => Ok(()),
+                        },
                     };
                     if let Err(e) = self.resize.send(r) {
                         error!("Sending \"resize\" reponse: {:?}", e);
