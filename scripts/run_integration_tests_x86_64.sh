@@ -227,13 +227,13 @@ echo 4096 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 # Ensure test binary has the same caps as the cloud-hypervisor one
-time cargo test --no-run --features "integration_tests" -- --nocapture || exit 1
+time cargo test --no-run --features "integration_tests" || exit 1
 ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
 
 sudo adduser $USER kvm
 newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --features "integration_tests" "tests::parallel::$@" -- --nocapture
+time cargo test --features "integration_tests" "tests::parallel::$@"
 EOF
 RES=$?
 
@@ -242,7 +242,7 @@ RES=$?
 if [ $RES -eq 0 ]; then
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --features "integration_tests" "tests::sequential::$@" -- --nocapture --test-threads=1
+time cargo test --features "integration_tests" "tests::sequential::$@" -- --test-threads=1
 EOF
     RES=$?
 fi
@@ -257,12 +257,12 @@ if [ $RES -eq 0 ]; then
     sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/cloud-hypervisor
 
     # Ensure test binary has the same caps as the cloud-hypervisor one
-    time cargo test --no-run --features "integration_tests,mmio" -- --nocapture || exit 1
+    time cargo test --no-run --features "integration_tests,mmio" || exit 1
     ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
 
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --features "integration_tests,mmio" "tests::parallel::$@" -- --nocapture
+time cargo test --features "integration_tests,mmio" "tests::parallel::$@" 
 EOF
 
     RES=$?
@@ -272,7 +272,7 @@ EOF
     if [ $RES -eq 0 ]; then
         newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --features "integration_tests,mmio" "tests::sequential::$@" -- --nocapture --test-threads=1
+time cargo test --features "integration_tests,mmio" "tests::sequential::$@" -- --test-threads=1
 EOF
         RES=$?
     fi

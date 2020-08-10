@@ -206,7 +206,7 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 sudo adduser $USER kvm
 newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --no-default-features --features "integration_tests,pci,kvm" "tests::parallel::$@" -- --nocapture
+time cargo test --no-default-features --features "integration_tests,pci,kvm" "tests::parallel::$@" 
 EOF
 RES=$?
 
@@ -221,12 +221,12 @@ if [ $RES -eq 0 ]; then
     sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/vhost_user_net
 
     # Ensure test binary has the same caps as the cloud-hypervisor one
-    time cargo test --no-run --no-default-features --features "integration_tests,mmio,kvm" -- --nocapture || exit 1
+    time cargo test --no-run --no-default-features --features "integration_tests,mmio,kvm" || exit 1
     ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
 
     newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --no-default-features --features "integration_tests,mmio,kvm" "tests::parallel::$@" -- --nocapture
+time cargo test --no-default-features --features "integration_tests,mmio,kvm" "tests::parallel::$@"
 EOF
 
     RES=$?
