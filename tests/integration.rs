@@ -102,6 +102,44 @@ mod tests {
         }
     }
 
+    fn handle_child_output(
+        r: Result<(), std::boxed::Box<dyn std::any::Any + std::marker::Send>>,
+        output: &std::process::Output,
+    ) {
+        use std::os::unix::process::ExitStatusExt;
+        if r.is_ok() && output.status.success() {
+            return;
+        }
+
+        match output.status.code() {
+            None => {
+                // Don't treat child.kill() as a problem
+                if output.status.signal() == Some(9) && r.is_ok() {
+                    return;
+                }
+
+                eprintln!(
+                    "==== child killed by signal: {} ====",
+                    output.status.signal().unwrap()
+                );
+            }
+            Some(code) => {
+                eprintln!("\n\n==== child exit code: {} ====", code);
+            }
+        }
+
+        eprintln!(
+            "\n\n==== Start child stdout ====\n\n{}\n\n==== End child stdout ====",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        eprintln!(
+            "\n\n==== Start child stderr ====\n\n{}\n\n==== End child stderr ====",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        panic!("Test failed")
+    }
+
     fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<u64> {
         for i in 0..10 {
             let free_bytes = unsafe {
@@ -4903,41 +4941,39 @@ mod tests {
         #[cfg_attr(not(feature = "mmio"), test)]
         #[cfg(target_arch = "x86_64")]
         fn test_counters() {
-            test_block!(tb, "", {
-                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-                let guest = Guest::new(&mut focal);
-                let api_socket = temp_api_path(&guest.tmp_dir);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+            let api_socket = temp_api_path(&guest.tmp_dir);
 
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=1"])
-                    .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", guest.fw_path.as_str()])
-                    .default_disks()
-                    .args(&["--net", guest.default_net_string().as_str()])
-                    .args(&["--api-socket", &api_socket])
-                    .spawn()
-                    .unwrap();
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .default_disks()
+                .args(&["--net", guest.default_net_string().as_str()])
+                .args(&["--api-socket", &api_socket])
+                .capture_output()
+                .spawn()
+                .unwrap();
 
-                thread::sleep(std::time::Duration::new(20, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
+            let r = std::panic::catch_unwind(|| {
                 let orig_counters = get_counters(&api_socket);
-
-                aver!(
-                    tb,
-                    guest
-                        .ssh_command("dd if=/dev/zero of=test count=8 bs=1M")
-                        .is_ok()
-                );
+                assert!(guest
+                    .ssh_command("dd if=/dev/zero of=test count=8 bs=1M")
+                    .is_ok());
 
                 let new_counters = get_counters(&api_socket);
 
                 // Check that all the counters have increased
-                aver!(tb, new_counters > orig_counters);
-
-                let _ = child.kill();
-                let _ = child.wait();
-                Ok(())
+                assert!(new_counters > orig_counters);
             });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
         }
     }
 
