@@ -39,6 +39,9 @@ mod tests {
         static ref NEXT_VM_ID: Mutex<u8> = Mutex::new(1);
     }
 
+    const CLOUDINIT_USER: &str = "cloud";
+    const CLOUDINIT_PASSWD: &str = "cloud123";
+
     struct GuestNetworkConfig {
         guest_ip: String,
         l2_guest_ip1: String,
@@ -531,7 +534,7 @@ mod tests {
                 sess.set_tcp_stream(tcp);
                 sess.handshake().map_err(Error::Handshake)?;
 
-                sess.userauth_password("cloud", "cloud123")
+                sess.userauth_password(CLOUDINIT_USER, CLOUDINIT_PASSWD)
                     .map_err(Error::Authentication)?;
                 assert!(sess.authenticated());
 
@@ -4957,6 +4960,98 @@ mod tests {
         #[cfg_attr(not(feature = "mmio"), test)]
         fn test_memory_mergeable_on() {
             test_memory_mergeable(true)
+        }
+    }
+
+    mod generic {
+        use crate::tests::*;
+
+        #[test]
+        fn test_generic() {
+            test_block!(tb, "", {
+                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+                let guest = Guest::new(&mut focal);
+                let mut workload_path = dirs::home_dir().unwrap();
+                workload_path.push("workloads");
+
+                let mut kernel_path = workload_path;
+                kernel_path.push("bzImage");
+
+                // Retrieve parameters from environment variables.
+                let num_cpus =
+                    std::env::var("GENERIC_TEST_CPUS").unwrap_or_else(|_| String::from("1"));
+                let memory_size = std::env::var("GENERIC_TEST_MEMORY_SIZE")
+                    .unwrap_or_else(|_| String::from("1G"));
+                let hugepages = std::env::var("GENERIC_TEST_MEMORY_HUGEPAGES")
+                    .unwrap_or_else(|_| String::from("off"));
+                let vfio_device_path = std::env::var("GENERIC_TEST_VFIO_DEVICE").ok();
+                let script_path = std::env::var("GENERIC_TEST_SCRIPT").unwrap();
+                let timeout =
+                    std::env::var("GENERIC_TEST_TIMEOUT").unwrap_or_else(|_| String::from("60"));
+
+                // Convert the timeout into an integer.
+                let timeout: u64 = timeout.trim().parse().unwrap();
+
+                // Spawning the process makes standard I/O redirected to the
+                // parent's.
+                let mut guest_command = GuestCommand::new(&guest);
+                guest_command
+                    .args(&["--cpus", format!("boot={}", num_cpus).as_str()])
+                    .args(&[
+                        "--memory",
+                        format!("size={},hugepages={}", memory_size, hugepages).as_str(),
+                    ])
+                    .args(&["--kernel", kernel_path.to_str().unwrap()])
+                    .default_disks()
+                    .default_net()
+                    .args(&["--serial", "tty", "--console", "off"])
+                    .args(&["--cmdline", "root=/dev/vda1 console=ttyS0 rw"]);
+
+                if let Some(path) = &vfio_device_path {
+                    guest_command.args(&["--device", format!("path={}", path).as_str()]);
+                }
+
+                let mut ch_child = guest_command.spawn().unwrap();
+
+                thread::sleep(std::time::Duration::new(20, 0));
+
+                // Execute commands in the guest
+                let f = std::fs::File::open(script_path).unwrap();
+                let f = std::io::BufReader::new(f);
+                for command in f.lines() {
+                    let command = command.unwrap();
+                    println!("$ {}", command);
+
+                    let mut ssh_child = std::process::Command::new("ssh")
+                        .args(&[
+                            "-o",
+                            "StrictHostKeyChecking no",
+                            format!("{}@{}", CLOUDINIT_USER, guest.network.guest_ip).as_str(),
+                            command.as_str(),
+                        ])
+                        .spawn()
+                        .unwrap();
+
+                    let now = std::time::SystemTime::now();
+                    loop {
+                        if ssh_child.try_wait().unwrap().is_some() {
+                            break;
+                        }
+                        if now.elapsed().unwrap().as_secs() > timeout {
+                            let _ = ssh_child.kill();
+                            break;
+                        }
+                        thread::sleep(std::time::Duration::new(1, 0));
+                    }
+
+                    println!("Command status {:?}", ssh_child.wait().unwrap().code());
+                }
+
+                let _ = ch_child.kill();
+                let _ = ch_child.wait();
+
+                Ok(())
+            });
         }
     }
 }
