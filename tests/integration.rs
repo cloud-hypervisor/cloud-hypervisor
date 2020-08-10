@@ -4735,91 +4735,85 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_snapshot_restore() {
-            test_block!(tb, "", {
-                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-                let guest = Guest::new(&mut focal);
-                let mut workload_path = dirs::home_dir().unwrap();
-                workload_path.push("workloads");
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
 
-                let mut kernel_path = workload_path;
-                kernel_path.push("bzImage");
+            let mut kernel_path = workload_path;
+            kernel_path.push("bzImage");
 
-                let api_socket = temp_api_path(&guest.tmp_dir);
+            let api_socket = temp_api_path(&guest.tmp_dir);
 
-                let net_id = "net123";
-                let net_params = format!(
-                    "id={},tap=,mac={},ip={},mask=255.255.255.0",
-                    net_id, guest.network.guest_mac, guest.network.host_ip
-                );
+            let net_id = "net123";
+            let net_params = format!(
+                "id={},tap=,mac={},ip={},mask=255.255.255.0",
+                net_id, guest.network.guest_mac, guest.network.host_ip
+            );
 
-                let cloudinit_params = if cfg!(feature = "mmio") {
+            let cloudinit_params = if cfg!(feature = "mmio") {
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+            } else {
+                format!(
+                    "path={},iommu=on",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+            };
+
+            let socket = temp_vsock_path(&guest.tmp_dir);
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=4"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&[
+                    "--disk",
                     format!(
                         "path={}",
-                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                     )
-                } else {
-                    format!(
-                        "path={},iommu=on",
-                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                    )
-                };
+                    .as_str(),
+                    cloudinit_params.as_str(),
+                ])
+                .args(&["--net", net_params.as_str()])
+                .args(&["--vsock", format!("cid=3,socket={}", socket).as_str()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .capture_output()
+                .spawn()
+                .unwrap();
 
-                let socket = temp_vsock_path(&guest.tmp_dir);
+            thread::sleep(std::time::Duration::new(20, 0));
 
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--api-socket", &api_socket])
-                    .args(&["--cpus", "boot=4"])
-                    .args(&["--memory", "size=4G"])
-                    .args(&["--kernel", kernel_path.to_str().unwrap()])
-                    .args(&[
-                        "--disk",
-                        format!(
-                            "path={}",
-                            guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                        )
-                        .as_str(),
-                        cloudinit_params.as_str(),
-                    ])
-                    .args(&["--net", net_params.as_str()])
-                    .args(&["--vsock", format!("cid=3,socket={}", socket).as_str()])
-                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                    .capture_output()
-                    .spawn()
-                    .unwrap();
+            let console_text = String::from("On a branch floating down river a cricket, singing.");
+            let console_cmd = format!("echo {} | sudo tee /dev/hvc0", console_text);
+            // Create the snapshot directory
+            let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
 
-                thread::sleep(std::time::Duration::new(20, 0));
-
+            let r = std::panic::catch_unwind(|| {
                 // Check the number of vCPUs
-                aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 4);
+                assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
                 // Check the guest RAM
-                aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_840_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
                 // Check block devices are readable
-                aver!(
-                    tb,
-                    guest
-                        .ssh_command("dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
-                        .is_ok()
-                );
-                aver!(
-                    tb,
-                    guest
-                        .ssh_command("dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
-                        .is_ok()
-                );
+                assert!(guest
+                    .ssh_command("dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
+                    .is_ok());
+                assert!(guest
+                    .ssh_command("dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
+                    .is_ok());
                 // Check if the rng device is readable
-                aver!(
-                    tb,
-                    guest
-                        .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
-                        .is_ok()
-                );
+                assert!(guest
+                    .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
+                    .is_ok());
                 // Check vsock
                 guest.check_vsock(socket.as_str());
                 // Check if the console is usable
-                let console_text =
-                    String::from("On a branch floating down river a cricket, singing.");
-                let console_cmd = format!("echo {} | sudo tee /dev/hvc0", console_text);
-                aver!(tb, guest.ssh_command(&console_cmd).is_ok());
+
+                assert!(guest.ssh_command(&console_cmd).is_ok());
 
                 // Only for PCI, we can check that removing and adding back the
                 // virtio-net device does not break the snapshot/restore support
@@ -4829,113 +4823,93 @@ mod tests {
                 #[cfg(not(feature = "mmio"))]
                 {
                     // Unplug the virtio-net device
-                    aver!(
-                        tb,
-                        remote_command(&api_socket, "remove-device", Some(net_id),)
-                    );
+                    assert!(remote_command(&api_socket, "remove-device", Some(net_id),));
                     thread::sleep(std::time::Duration::new(10, 0));
 
                     // Plug the virtio-net device again
-                    aver!(
-                        tb,
-                        remote_command(&api_socket, "add-net", Some(net_params.as_str()),)
-                    );
+                    assert!(remote_command(
+                        &api_socket,
+                        "add-net",
+                        Some(net_params.as_str()),
+                    ));
                     thread::sleep(std::time::Duration::new(10, 0));
                 }
 
                 // Pause the VM
-                aver!(tb, remote_command(&api_socket, "pause", None));
-
-                // Create the snapshot directory
-                let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+                assert!(remote_command(&api_socket, "pause", None));
 
                 // Take a snapshot from the VM
-                aver!(
-                    tb,
-                    remote_command(
-                        &api_socket,
-                        "snapshot",
-                        Some(format!("file://{}", snapshot_dir).as_str()),
-                    )
-                );
+                assert!(remote_command(
+                    &api_socket,
+                    "snapshot",
+                    Some(format!("file://{}", snapshot_dir).as_str()),
+                ));
 
                 // Wait to make sure the snapshot is completed
                 thread::sleep(std::time::Duration::new(10, 0));
+            });
 
-                // Shutdown the source VM and check console output
-                let _ = child.kill();
-                match child.wait_with_output() {
-                    Ok(out) => {
-                        aver!(
-                            tb,
-                            String::from_utf8_lossy(&out.stdout).contains(&console_text)
-                        );
-                    }
-                    Err(_) => aver!(tb, false),
-                }
+            // Shutdown the source VM and check console output
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            handle_child_output(r, &output);
 
-                // Remove the vsock socket file.
-                Command::new("rm")
-                    .arg("-f")
-                    .arg(socket.as_str())
-                    .output()
-                    .unwrap();
+            let r = std::panic::catch_unwind(|| {
+                assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
+            });
 
-                // Restore the VM from the snapshot
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--api-socket", &api_socket])
-                    .args(&[
-                        "--restore",
-                        format!("source_url=file://{}", snapshot_dir).as_str(),
-                    ])
-                    .capture_output()
-                    .spawn()
-                    .unwrap();
+            handle_child_output(r, &output);
 
-                // Wait for the VM to be restored
-                thread::sleep(std::time::Duration::new(10, 0));
+            // Remove the vsock socket file.
+            Command::new("rm")
+                .arg("-f")
+                .arg(socket.as_str())
+                .output()
+                .unwrap();
 
+            // Restore the VM from the snapshot
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &api_socket])
+                .args(&[
+                    "--restore",
+                    format!("source_url=file://{}", snapshot_dir).as_str(),
+                ])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            // Wait for the VM to be restored
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            let r = std::panic::catch_unwind(|| {
                 // Resume the VM
-                aver!(tb, remote_command(&api_socket, "resume", None));
+                assert!(remote_command(&api_socket, "resume", None));
 
                 // Perform same checks to validate VM has been properly restored
-                aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 4);
-                aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_840_000);
-                aver!(
-                    tb,
-                    guest
-                        .ssh_command("dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
-                        .is_ok()
-                );
-                aver!(
-                    tb,
-                    guest
-                        .ssh_command("dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
-                        .is_ok()
-                );
-                aver!(
-                    tb,
-                    guest
-                        .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
-                        .is_ok()
-                );
+                assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
+                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+                assert!(guest
+                    .ssh_command("dd if=/dev/vda of=/dev/null bs=1M iflag=direct count=1024")
+                    .is_ok());
+                assert!(guest
+                    .ssh_command("dd if=/dev/vdb of=/dev/null bs=1M iflag=direct count=8")
+                    .is_ok());
+                assert!(guest
+                    .ssh_command("head -c 1000 /dev/hwrng > /dev/null")
+                    .is_ok());
                 guest.check_vsock(socket.as_str());
-                aver!(tb, guest.ssh_command(&console_cmd).is_ok());
-
+                assert!(guest.ssh_command(&console_cmd).is_ok());
                 // Shutdown the target VM and check console output
-                let _ = child.kill();
-                match child.wait_with_output() {
-                    Ok(out) => {
-                        aver!(
-                            tb,
-                            String::from_utf8_lossy(&out.stdout).contains(&console_text)
-                        );
-                    }
-                    Err(_) => aver!(tb, false),
-                }
-
-                Ok(())
             });
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+
+            let r = std::panic::catch_unwind(|| {
+                assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
+            });
+
+            handle_child_output(r, &output);
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
