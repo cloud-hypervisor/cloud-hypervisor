@@ -2451,6 +2451,7 @@ impl DeviceManager {
                             .map_err(DeviceManagerError::TryCloneVirtioMemResize)?,
                         self.seccomp_action.clone(),
                         node_id,
+                        0,
                     )
                     .map_err(DeviceManagerError::CreateVirtioMem)?,
                 ));
