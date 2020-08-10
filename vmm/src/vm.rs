@@ -787,10 +787,18 @@ impl Vm {
                 }
             }
 
-            // We update the VM config regardless of the actual guest resize
-            // operation result (happened or not), so that if the VM reboots
-            // it will be running with the last configure memory size.
-            self.config.lock().unwrap().memory.size = desired_memory;
+            let memory_config = &mut self.config.lock().unwrap().memory;
+            match memory_config.hotplug_method {
+                HotplugMethod::Acpi => {
+                    // We update the VM config regardless of the actual guest resize
+                    // operation result (happened or not), so that if the VM reboots
+                    // it will be running with the last configure memory size.
+                    memory_config.size = desired_memory;
+                }
+                HotplugMethod::VirtioMem => {
+                    memory_config.virtiomem_size = desired_memory - memory_config.size;
+                }
+            }
         }
 
         if let Some(desired_ram_w_balloon) = desired_ram_w_balloon {

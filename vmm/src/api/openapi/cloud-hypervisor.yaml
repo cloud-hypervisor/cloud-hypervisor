@@ -500,6 +500,9 @@ components:
         balloon_size:
           type: integer
           format: uint64
+        virtiomem_size:
+          type: integer
+          format: uint64
         zones:
           type: array
           items:

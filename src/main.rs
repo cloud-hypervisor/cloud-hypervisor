@@ -533,6 +533,7 @@ mod unit_tests {
                     hugepages: false,
                     balloon: false,
                     balloon_size: 0,
+                    virtiomem_size: 0,
                     zones: None,
                 },
                 kernel: Some(KernelConfig {

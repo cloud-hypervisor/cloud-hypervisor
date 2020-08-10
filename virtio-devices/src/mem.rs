@@ -712,6 +712,7 @@ impl Mem {
         id: String,
         region: &Arc<GuestRegionMmap>,
         resize: Resize,
+        size: u64,
         seccomp_action: SeccompAction,
     ) -> io::Result<Mem> {
         let region_len = region.len();
@@ -738,6 +739,15 @@ impl Mem {
             config.region_size,
             config.requested_size + VIRTIO_MEM_USABLE_EXTENT,
         );
+
+        if size != 0 {
+            virtio_mem_config_resize(&mut config, size).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Virtio-mem resize {} got {:?}", size, e),
+                )
+            })?;
+        }
 
         let host_fd = if let Some(f_offset) = region.file_offset() {
             Some(f_offset.file().as_raw_fd())

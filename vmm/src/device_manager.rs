@@ -2427,6 +2427,7 @@ impl DeviceManager {
                     resize
                         .try_clone()
                         .map_err(DeviceManagerError::TryCloneVirtioMemResize)?,
+                    self.config.lock().unwrap().memory.virtiomem_size,
                     self.seccomp_action.clone(),
                 )
                 .map_err(DeviceManagerError::CreateVirtioMem)?,
