@@ -102,6 +102,11 @@ pipeline{
 							}
 						}
 					}
+					post {
+						always {
+							deleteDir()
+						}
+					}
 				}
 				stage ('Worker build (musl)') {
 					agent { node { label 'bionic' } }
