@@ -160,7 +160,8 @@ if [ ! -d "$SHARED_DIR" ]; then
 fi
 
 VFIO_DIR="$WORKLOADS_DIR/vfio"
-rm -rf $VFIO_DIR
+VFIO_DISK_IMAGE="$WORKLOADS_DIR/vfio.img"
+rm -rf $VFIO_DIR $VFIO_DISK_IMAGE
 mkdir -p $VFIO_DIR
 cp $FOCAL_OS_IMAGE $VFIO_DIR
 cp $FW $VFIO_DIR

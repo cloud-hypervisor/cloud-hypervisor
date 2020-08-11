@@ -3247,7 +3247,7 @@ mod tests {
                 let mut kernel_path = workload_path.clone();
                 kernel_path.push("bzImage");
 
-                let mut vfio_path = workload_path;
+                let mut vfio_path = workload_path.clone();
                 vfio_path.push("vfio");
 
                 let mut cloud_init_vfio_base_path = vfio_path.clone();
@@ -3261,19 +3261,45 @@ mod tests {
                 )
                 .expect("copying of cloud-init disk failed");
 
+                let mut vfio_disk_path = workload_path;
+                vfio_disk_path.push("vfio.img");
+
+                // Create the vfio disk image
+                let output = Command::new("mkfs.ext4")
+                    .arg("-d")
+                    .arg(vfio_path.to_str().unwrap())
+                    .arg(vfio_disk_path.to_str().unwrap())
+                    .arg("2g")
+                    .output()
+                    .unwrap();
+                if !output.status.success() {
+                    eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+                    panic!("mkfs.ext4 command generated an error");
+                }
+
                 let vfio_tap0 = "vfio-tap0";
                 let vfio_tap1 = "vfio-tap1";
                 let vfio_tap2 = "vfio-tap2";
                 let vfio_tap3 = "vfio-tap3";
 
-                let (mut daemon_child, virtiofsd_socket_path) =
-                    prepare_virtiofsd(&guest.tmp_dir, vfio_path.to_str().unwrap(), "none");
-
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=4"])
                     .args(&["--memory", "size=2G,hugepages=on,shared=on"])
                     .args(&["--kernel", kernel_path.to_str().unwrap()])
-                    .default_disks()
+                    .args(&[
+                        "--disk",
+                        format!(
+                            "path={}",
+                            guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                        )
+                        .as_str(),
+                        format!(
+                            "path={}",
+                            guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                        )
+                        .as_str(),
+                        format!("path={}", vfio_disk_path.to_str().unwrap()).as_str(),
+                    ])
                     .args(&[
                         "--cmdline",
                         format!(
@@ -3298,14 +3324,6 @@ mod tests {
                         format!(
                             "tap={},mac={},iommu=on",
                             vfio_tap3, guest.network.l2_guest_mac3
-                        )
-                        .as_str(),
-                    ])
-                    .args(&[
-                        "--fs",
-                        format!(
-                            "tag=myfs,socket={},num_queues=1,queue_size=1024,dax=on",
-                            virtiofsd_socket_path,
                         )
                         .as_str(),
                     ])
@@ -3360,7 +3378,7 @@ mod tests {
 
                 // Hotplug an extra virtio-net device through L2 VM.
                 guest.ssh_command_l1(
-                    "echo 0000:00:07.0 | sudo tee /sys/bus/pci/devices/0000:00:07.0/driver/unbind",
+                    "echo 0000:00:08.0 | sudo tee /sys/bus/pci/devices/0000:00:08.0/driver/unbind",
                 )?;
                 guest.ssh_command_l1(
                     "echo 1af4 1041 | sudo tee /sys/bus/pci/drivers/vfio-pci/new_id",
@@ -3368,7 +3386,7 @@ mod tests {
                 let vfio_hotplug_output = guest.ssh_command_l1(
                     "sudo /mnt/ch-remote \
                  --api-socket=/tmp/ch_api.sock \
-                 add-device path=/sys/bus/pci/devices/0000:00:07.0,id=vfio123",
+                 add-device path=/sys/bus/pci/devices/0000:00:08.0,id=vfio123",
                 )?;
                 aver!(
                     tb,
@@ -3450,9 +3468,7 @@ mod tests {
                 );
 
                 let _ = child.kill();
-                let _ = daemon_child.kill();
                 let _ = child.wait();
-                let _ = daemon_child.wait();
 
                 Ok(())
             });
