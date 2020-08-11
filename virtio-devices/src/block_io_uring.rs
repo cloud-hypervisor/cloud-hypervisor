@@ -240,8 +240,9 @@ impl BlockIoUringEpollHandler {
 }
 
 impl EpollHelperHandler for BlockIoUringEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: u16) -> bool {
-        match event {
+    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+        let ev_type = event.data as u16;
+        match ev_type {
             QUEUE_AVAIL_EVENT => {
                 if let Err(e) = self.queue_evt.read() {
                     error!("Failed to get queue event: {:?}", e);
@@ -285,7 +286,7 @@ impl EpollHelperHandler for BlockIoUringEpollHandler {
                 }
             }
             _ => {
-                error!("Unexpected event: {}", event);
+                error!("Unexpected event: {}", ev_type);
                 return true;
             }
         }
