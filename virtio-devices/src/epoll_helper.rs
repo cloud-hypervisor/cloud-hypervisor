@@ -11,7 +11,7 @@
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::thread;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -69,6 +69,7 @@ impl EpollHelper {
     pub fn run(
         &mut self,
         paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
         handler: &mut dyn EpollHelperHandler,
     ) -> std::result::Result<(), EpollHelperError> {
         const EPOLL_EVENTS_LEN: usize = 100;
@@ -110,6 +111,11 @@ impl EpollHelper {
                     }
                     EPOLL_HELPER_EVENT_PAUSE => {
                         debug!("PAUSE_EVENT received, pausing epoll loop");
+
+                        // Acknowledge the pause is effective by using the
+                        // paused_sync barrier.
+                        paused_sync.wait();
+
                         // We loop here to handle spurious park() returns.
                         // Until we have not resumed, the paused boolean will
                         // be true.

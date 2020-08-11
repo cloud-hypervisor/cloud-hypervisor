@@ -14,7 +14,7 @@ use std::mem;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::vec::Vec;
 use vhost_rs::vhost_user::message::VhostUserConfigFlags;
@@ -44,6 +44,7 @@ pub struct Blk {
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     paused: Arc<AtomicBool>,
+    paused_sync: Arc<Barrier>,
 }
 
 impl Blk {
@@ -148,6 +149,7 @@ impl Blk {
             interrupt_cb: None,
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
+            paused_sync: Arc::new(Barrier::new(vu_cfg.num_queues + 1)),
         })
     }
 }
@@ -273,9 +275,10 @@ impl VirtioDevice for Blk {
             });
 
             let paused = self.paused.clone();
+            let paused_sync = self.paused_sync.clone();
             thread::Builder::new()
                 .name("vhost_user_blk".to_string())
-                .spawn(move || handler.run(paused))
+                .spawn(move || handler.run(paused, paused_sync))
                 .map(|thread| epoll_threads.push(thread))
                 .map_err(|e| {
                     error!("failed to clone virtio epoll thread: {}", e);

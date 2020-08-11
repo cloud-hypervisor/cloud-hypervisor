@@ -16,7 +16,7 @@ use net_util::MacAddr;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::vec::Vec;
 use vhost_rs::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
@@ -48,6 +48,7 @@ pub struct Net {
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), EpollHelperError>>>,
     paused: Arc<AtomicBool>,
+    paused_sync: Arc<Barrier>,
 }
 
 impl Net {
@@ -153,6 +154,7 @@ impl Net {
             epoll_threads: None,
             ctrl_queue_epoll_thread: None,
             paused: Arc::new(AtomicBool::new(false)),
+            paused_sync: Arc::new(Barrier::new((vu_cfg.num_queues / 2) + 1)),
         })
     }
 }
@@ -259,9 +261,14 @@ impl VirtioDevice for Net {
             };
 
             let paused = self.paused.clone();
+            // Let's update the barrier as we need 1 for each RX/TX pair +
+            // 1 for the control queue + 1 for the main thread signalling
+            // the pause.
+            self.paused_sync = Arc::new(Barrier::new((queue_num / 2) + 2));
+            let paused_sync = self.paused_sync.clone();
             thread::Builder::new()
                 .name("virtio_net".to_string())
-                .spawn(move || ctrl_handler.run_ctrl(paused))
+                .spawn(move || ctrl_handler.run_ctrl(paused, paused_sync))
                 .map(|thread| self.ctrl_queue_epoll_thread = Some(thread))
                 .map_err(|e| {
                     error!("failed to clone queue EventFd: {}", e);
@@ -294,9 +301,10 @@ impl VirtioDevice for Net {
             });
 
             let paused = self.paused.clone();
+            let paused_sync = self.paused_sync.clone();
             thread::Builder::new()
                 .name("vhost_user_net".to_string())
-                .spawn(move || handler.run(paused))
+                .spawn(move || handler.run(paused, paused_sync))
                 .map(|thread| epoll_threads.push(thread))
                 .map_err(|e| {
                     error!("failed to clone queue EventFd: {}", e);

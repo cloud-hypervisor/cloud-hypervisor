@@ -19,7 +19,7 @@ use std::ops::Bound::Included;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use vfio_ioctls::ExternalDmaMapping;
 use vm_memory::{
@@ -646,11 +646,15 @@ impl IommuEpollHandler {
             })
     }
 
-    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), EpollHelperError> {
+    fn run(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+    ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evts[0].as_raw_fd(), REQUEST_Q_EVENT)?;
         helper.add_event(self.queue_evts[1].as_raw_fd(), EVENT_Q_EVENT)?;
-        helper.run(paused, self)?;
+        helper.run(paused, paused_sync, self)?;
 
         Ok(())
     }
@@ -743,6 +747,7 @@ pub struct Iommu {
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     paused: Arc<AtomicBool>,
+    paused_sync: Arc<Barrier>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -783,6 +788,7 @@ impl Iommu {
                 interrupt_cb: None,
                 epoll_threads: None,
                 paused: Arc::new(AtomicBool::new(false)),
+                paused_sync: Arc::new(Barrier::new(2)),
             },
             mapping,
         ))
@@ -955,10 +961,11 @@ impl VirtioDevice for Iommu {
         };
 
         let paused = self.paused.clone();
+        let paused_sync = self.paused_sync.clone();
         let mut epoll_threads = Vec::new();
         thread::Builder::new()
             .name("virtio_iommu".to_string())
-            .spawn(move || handler.run(paused))
+            .spawn(move || handler.run(paused, paused_sync))
             .map(|thread| epoll_threads.push(thread))
             .map_err(|e| {
                 error!("failed to clone the virtio-iommu epoll thread: {}", e);

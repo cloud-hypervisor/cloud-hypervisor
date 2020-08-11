@@ -205,6 +205,13 @@ macro_rules! virtio_pausable_trait_inner {
                 pause_evt
                     .write(1)
                     .map_err(|e| MigratableError::Pause(e.into()))?;
+
+                // Wait for all threads to acknowledge the pause before going
+                // any further. This is exclusively performed when pause_evt
+                // eventfd is Some(), as this means the virtio device has been
+                // activated. One specific case where the device can be paused
+                // while it hasn't been yet activated is snapshot/restore.
+                self.paused_sync.wait();
             }
 
             Ok(())
