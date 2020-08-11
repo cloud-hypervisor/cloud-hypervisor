@@ -17,7 +17,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::VirtioInterrupt;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use vhost_rs::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 
 /// Collection of common parameters required by vhost-user devices while
@@ -67,7 +67,11 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
             .map_err(Error::FailedSignalingUsedQueue)
     }
 
-    pub fn run(&mut self, paused: Arc<AtomicBool>) -> std::result::Result<(), EpollHelperError> {
+    pub fn run(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+    ) -> std::result::Result<(), EpollHelperError> {
         let mut helper =
             EpollHelper::new(&self.vu_epoll_cfg.kill_evt, &self.vu_epoll_cfg.pause_evt)?;
 
@@ -81,7 +85,7 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
             helper.add_event(self_req_handler.as_raw_fd(), self.slave_evt_idx)?;
         }
 
-        helper.run(paused, self)?;
+        helper.run(paused, paused_sync, self)?;
 
         Ok(())
     }

@@ -28,7 +28,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
@@ -589,11 +589,15 @@ impl MemEpollHandler {
         used_count > 0
     }
 
-    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), EpollHelperError> {
+    fn run(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+    ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.resize.evt.as_raw_fd(), RESIZE_EVENT)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
-        helper.run(paused, self)?;
+        helper.run(paused, paused_sync, self)?;
 
         Ok(())
     }
@@ -687,6 +691,7 @@ pub struct Mem {
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     paused: Arc<AtomicBool>,
+    paused_sync: Arc<Barrier>,
 }
 
 impl Mem {
@@ -737,6 +742,7 @@ impl Mem {
             interrupt_cb: None,
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
+            paused_sync: Arc::new(Barrier::new(2)),
         })
     }
 }
@@ -844,10 +850,11 @@ impl VirtioDevice for Mem {
         };
 
         let paused = self.paused.clone();
+        let paused_sync = self.paused_sync.clone();
         let mut epoll_threads = Vec::new();
         thread::Builder::new()
             .name("virtio_mem".to_string())
-            .spawn(move || handler.run(paused))
+            .spawn(move || handler.run(paused, paused_sync))
             .map(|thread| epoll_threads.push(thread))
             .map_err(|e| {
                 error!("failed to clone virtio-mem epoll thread: {}", e);

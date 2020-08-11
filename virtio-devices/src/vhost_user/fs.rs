@@ -13,7 +13,7 @@ use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use vhost_rs::vhost_user::message::{
     VhostUserFSSlaveMsg, VhostUserFSSlaveMsgFlags, VhostUserProtocolFeatures,
@@ -280,6 +280,7 @@ pub struct Fs {
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     paused: Arc<AtomicBool>,
+    paused_sync: Arc<Barrier>,
 }
 
 impl Fs {
@@ -365,6 +366,7 @@ impl Fs {
             interrupt_cb: None,
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
+            paused_sync: Arc::new(Barrier::new(2)),
         })
     }
 }
@@ -500,10 +502,11 @@ impl VirtioDevice for Fs {
         });
 
         let paused = self.paused.clone();
+        let paused_sync = self.paused_sync.clone();
         let mut epoll_threads = Vec::new();
         thread::Builder::new()
             .name("virtio_fs".to_string())
-            .spawn(move || handler.run(paused))
+            .spawn(move || handler.run(paused, paused_sync))
             .map(|thread| epoll_threads.push(thread))
             .map_err(|e| {
                 error!("failed to clone queue EventFd: {}", e);

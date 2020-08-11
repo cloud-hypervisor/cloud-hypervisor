@@ -10,7 +10,7 @@ use net_util::MacAddr;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::{
     ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError, GuestMemoryMmap,
@@ -177,10 +177,11 @@ impl NetCtrlEpollHandler {
     pub fn run_ctrl(
         &mut self,
         paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
     ) -> std::result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.ctrl_q.queue_evt.as_raw_fd(), CTRL_QUEUE_EVENT)?;
-        helper.run(paused, self)?;
+        helper.run(paused, paused_sync, self)?;
 
         Ok(())
     }

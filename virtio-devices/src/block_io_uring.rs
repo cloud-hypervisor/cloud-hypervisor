@@ -26,7 +26,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::thread;
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{
@@ -229,11 +229,15 @@ impl BlockIoUringEpollHandler {
             })
     }
 
-    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), EpollHelperError> {
+    fn run(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+    ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
         helper.add_event(self.io_uring_evt.as_raw_fd(), IO_URING_EVENT)?;
-        helper.run(paused, self)?;
+        helper.run(paused, paused_sync, self)?;
 
         Ok(())
     }
@@ -309,6 +313,7 @@ pub struct BlockIoUring {
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     pause_evt: Option<EventFd>,
     paused: Arc<AtomicBool>,
+    paused_sync: Arc<Barrier>,
     queue_size: Vec<u16>,
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
@@ -381,6 +386,7 @@ impl BlockIoUring {
             epoll_threads: None,
             pause_evt: None,
             paused: Arc::new(AtomicBool::new(false)),
+            paused_sync: Arc::new(Barrier::new(num_queues + 1)),
             queue_size: vec![queue_size; num_queues],
             writeback: Arc::new(AtomicBool::new(true)),
             counters: BlockCounters::default(),
@@ -580,6 +586,7 @@ impl VirtioDevice for BlockIoUring {
             };
 
             let paused = self.paused.clone();
+            let paused_sync = self.paused_sync.clone();
 
             // Register the io_uring eventfd that will notify the epoll loop
             // when something in the completion queue is ready.
@@ -594,7 +601,7 @@ impl VirtioDevice for BlockIoUring {
 
             thread::Builder::new()
                 .name("virtio_blk".to_string())
-                .spawn(move || handler.run(paused))
+                .spawn(move || handler.run(paused, paused_sync))
                 .map(|thread| epoll_threads.push(thread))
                 .map_err(|e| {
                     error!("failed to clone the virtio-blk epoll thread: {}", e);

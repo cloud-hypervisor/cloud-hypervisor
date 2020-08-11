@@ -28,7 +28,7 @@ use std::num::Wrapping;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::vec::Vec;
 use virtio_bindings::bindings::virtio_net::*;
@@ -134,7 +134,11 @@ impl NetEpollHandler {
         Ok(())
     }
 
-    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), EpollHelperError> {
+    fn run(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+    ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt_pair[0].as_raw_fd(), RX_QUEUE_EVENT)?;
         helper.add_event(self.queue_evt_pair[1].as_raw_fd(), TX_QUEUE_EVENT)?;
@@ -153,7 +157,7 @@ impl NetEpollHandler {
         // The NetQueuePair needs the epoll fd.
         self.net.epoll_fd = Some(helper.as_raw_fd());
 
-        helper.run(paused, self)?;
+        helper.run(paused, paused_sync, self)?;
 
         Ok(())
     }
@@ -205,6 +209,7 @@ pub struct Net {
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
     paused: Arc<AtomicBool>,
+    paused_sync: Arc<Barrier>,
     queue_size: Vec<u16>,
     counters: NetCounters,
     seccomp_action: SeccompAction,
@@ -265,6 +270,7 @@ impl Net {
             epoll_threads: None,
             ctrl_queue_epoll_thread: None,
             paused: Arc::new(AtomicBool::new(false)),
+            paused_sync: Arc::new(Barrier::new((num_queues / 2) + 1)),
             queue_size: vec![queue_size; queue_num],
             counters: NetCounters::default(),
             seccomp_action,
@@ -419,6 +425,12 @@ impl VirtioDevice for Net {
                 };
 
                 let paused = self.paused.clone();
+                // Let's update the barrier as we need 1 for each RX/TX pair +
+                // 1 for the control queue + 1 for the main thread signalling
+                // the pause.
+                self.paused_sync = Arc::new(Barrier::new(taps.len() + 2));
+                let paused_sync = self.paused_sync.clone();
+
                 // Retrieve seccomp filter for virtio_net thread
                 let virtio_net_seccomp_filter =
                     get_seccomp_filter(&self.seccomp_action, Thread::VirtioNet)
@@ -428,7 +440,7 @@ impl VirtioDevice for Net {
                     .spawn(move || {
                         if let Err(e) = SeccompFilter::apply(virtio_net_seccomp_filter) {
                             error!("Error applying seccomp filter: {:?}", e);
-                        } else if let Err(e) = ctrl_handler.run_ctrl(paused) {
+                        } else if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync) {
                             error!("Error running worker: {:?}", e);
                         }
                     })
@@ -477,9 +489,10 @@ impl VirtioDevice for Net {
                 };
 
                 let paused = self.paused.clone();
+                let paused_sync = self.paused_sync.clone();
                 thread::Builder::new()
                     .name("virtio_net".to_string())
-                    .spawn(move || handler.run(paused))
+                    .spawn(move || handler.run(paused, paused_sync))
                     .map(|thread| epoll_threads.push(thread))
                     .map_err(|e| {
                         error!("failed to clone queue EventFd: {}", e);

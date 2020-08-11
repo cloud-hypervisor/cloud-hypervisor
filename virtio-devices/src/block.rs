@@ -27,7 +27,7 @@ use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
@@ -198,10 +198,14 @@ impl<T: DiskFile> BlockEpollHandler<T> {
         Ok(())
     }
 
-    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), EpollHelperError> {
+    fn run(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+    ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
-        helper.run(paused, self)?;
+        helper.run(paused, paused_sync, self)?;
 
         Ok(())
     }
@@ -268,6 +272,7 @@ pub struct Block<T: DiskFile> {
     epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     pause_evt: Option<EventFd>,
     paused: Arc<AtomicBool>,
+    paused_sync: Arc<Barrier>,
     queue_size: Vec<u16>,
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
@@ -346,6 +351,7 @@ impl<T: DiskFile> Block<T> {
             epoll_threads: None,
             pause_evt: None,
             paused: Arc::new(AtomicBool::new(false)),
+            paused_sync: Arc::new(Barrier::new(num_queues + 1)),
             queue_size: vec![queue_size; num_queues],
             writeback: Arc::new(AtomicBool::new(true)),
             counters: BlockCounters::default(),
@@ -534,6 +540,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
             handler.queue.set_event_idx(event_idx);
 
             let paused = self.paused.clone();
+            let paused_sync = self.paused_sync.clone();
 
             // Retrieve seccomp filter for virtio_blk thread
             let virtio_blk_seccomp_filter =
@@ -545,7 +552,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                 .spawn(move || {
                     if let Err(e) = SeccompFilter::apply(virtio_blk_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);
-                    } else if let Err(e) = handler.run(paused) {
+                    } else if let Err(e) = handler.run(paused, paused_sync) {
                         error!("Error running worker: {:?}", e);
                     }
                 })

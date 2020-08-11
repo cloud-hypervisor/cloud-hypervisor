@@ -25,7 +25,7 @@ use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::thread;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
@@ -243,10 +243,14 @@ impl PmemEpollHandler {
             })
     }
 
-    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), EpollHelperError> {
+    fn run(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+    ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
-        helper.run(paused, self)?;
+        helper.run(paused, paused_sync, self)?;
 
         Ok(())
     }
@@ -288,6 +292,7 @@ pub struct Pmem {
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     paused: Arc<AtomicBool>,
+    paused_sync: Arc<Barrier>,
     mapping: UserspaceMapping,
     seccomp_action: SeccompAction,
 
@@ -336,6 +341,7 @@ impl Pmem {
             interrupt_cb: None,
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
+            paused_sync: Arc::new(Barrier::new(2)),
             mapping,
             seccomp_action,
             _region,
@@ -461,6 +467,7 @@ impl VirtioDevice for Pmem {
             };
 
             let paused = self.paused.clone();
+            let paused_sync = self.paused_sync.clone();
             let mut epoll_threads = Vec::new();
             // Retrieve seccomp filter for virtio_pmem thread
             let virtio_pmem_seccomp_filter =
@@ -471,7 +478,7 @@ impl VirtioDevice for Pmem {
                 .spawn(move || {
                     if let Err(e) = SeccompFilter::apply(virtio_pmem_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);
-                    } else if let Err(e) = handler.run(paused) {
+                    } else if let Err(e) = handler.run(paused, paused_sync) {
                         error!("Error running worker: {:?}", e);
                     }
                 })

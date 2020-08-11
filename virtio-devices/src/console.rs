@@ -21,7 +21,7 @@ use std::ops::DerefMut;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_migration::{
@@ -180,13 +180,17 @@ impl ConsoleEpollHandler {
             })
     }
 
-    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), EpollHelperError> {
+    fn run(
+        &mut self,
+        paused: Arc<AtomicBool>,
+        paused_sync: Arc<Barrier>,
+    ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.input_queue_evt.as_raw_fd(), INPUT_QUEUE_EVENT)?;
         helper.add_event(self.output_queue_evt.as_raw_fd(), OUTPUT_QUEUE_EVENT)?;
         helper.add_event(self.input_evt.as_raw_fd(), INPUT_EVENT)?;
         helper.add_event(self.config_evt.as_raw_fd(), CONFIG_EVENT)?;
-        helper.run(paused, self)?;
+        helper.run(paused, paused_sync, self)?;
 
         Ok(())
     }
@@ -306,6 +310,7 @@ pub struct Console {
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     paused: Arc<AtomicBool>,
+    paused_sync: Arc<Barrier>,
     seccomp_action: SeccompAction,
 }
 
@@ -358,6 +363,7 @@ impl Console {
                 interrupt_cb: None,
                 epoll_threads: None,
                 paused: Arc::new(AtomicBool::new(false)),
+                paused_sync: Arc::new(Barrier::new(2)),
                 seccomp_action,
             },
             console_input,
@@ -495,6 +501,7 @@ impl VirtioDevice for Console {
         };
 
         let paused = self.paused.clone();
+        let paused_sync = self.paused_sync.clone();
         let mut epoll_threads = Vec::new();
         // Retrieve seccomp filter for virtio_console thread
         let virtio_console_seccomp_filter =
@@ -505,7 +512,7 @@ impl VirtioDevice for Console {
             .spawn(move || {
                 if let Err(e) = SeccompFilter::apply(virtio_console_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);
-                } else if let Err(e) = handler.run(paused) {
+                } else if let Err(e) = handler.run(paused, paused_sync) {
                     error!("Error running worker: {:?}", e);
                 }
             })
