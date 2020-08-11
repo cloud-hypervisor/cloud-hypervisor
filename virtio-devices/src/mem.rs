@@ -600,8 +600,9 @@ impl MemEpollHandler {
 }
 
 impl EpollHelperHandler for MemEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: u16) -> bool {
-        match event {
+    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+        let ev_type = event.data as u16;
+        match ev_type {
             RESIZE_EVENT => {
                 if let Err(e) = self.resize.evt.read() {
                     error!("Failed to get resize event: {:?}", e);
@@ -663,7 +664,7 @@ impl EpollHelperHandler for MemEpollHandler {
                 }
             }
             _ => {
-                error!("Unexpected event: {}", event);
+                error!("Unexpected event: {}", ev_type);
                 return true;
             }
         }

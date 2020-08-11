@@ -160,8 +160,9 @@ impl NetEpollHandler {
 }
 
 impl EpollHelperHandler for NetEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: u16) -> bool {
-        match event {
+    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+        let ev_type = event.data as u16;
+        match ev_type {
             RX_QUEUE_EVENT => {
                 self.driver_awake = true;
                 if let Err(e) = self.handle_rx_event() {
@@ -183,7 +184,7 @@ impl EpollHelperHandler for NetEpollHandler {
                 }
             }
             _ => {
-                error!("Unknown event: {}", event);
+                error!("Unknown event: {}", ev_type);
                 return true;
             }
         }

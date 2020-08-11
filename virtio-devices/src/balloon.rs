@@ -241,8 +241,9 @@ impl BalloonEpollHandler {
 }
 
 impl EpollHelperHandler for BalloonEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: u16) -> bool {
-        match event {
+    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+        let ev_type = event.data as u16;
+        match ev_type {
             RESIZE_EVENT => {
                 if let Err(e) = self.resize_receiver.evt.read() {
                     error!("Failed to get resize event: {:?}", e);
@@ -275,7 +276,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                 if let Err(e) = self.inflate_queue_evt.read() {
                     error!("Failed to get inflate queue event: {:?}", e);
                     return true;
-                } else if let Err(e) = self.process_queue(event) {
+                } else if let Err(e) = self.process_queue(ev_type) {
                     error!("Failed to signal used inflate queue: {:?}", e);
                     return true;
                 }
@@ -284,7 +285,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                 if let Err(e) = self.deflate_queue_evt.read() {
                     error!("Failed to get deflate queue event: {:?}", e);
                     return true;
-                } else if let Err(e) = self.process_queue(event) {
+                } else if let Err(e) = self.process_queue(ev_type) {
                     error!("Failed to signal used deflate queue: {:?}", e);
                     return true;
                 }

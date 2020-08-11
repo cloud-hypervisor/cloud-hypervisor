@@ -193,8 +193,9 @@ impl ConsoleEpollHandler {
 }
 
 impl EpollHelperHandler for ConsoleEpollHandler {
-    fn handle_event(&mut self, _helper: &mut EpollHelper, event: u16) -> bool {
-        match event {
+    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+        let ev_type = event.data as u16;
+        match ev_type {
             INPUT_QUEUE_EVENT => {
                 if let Err(e) = self.input_queue_evt.read() {
                     error!("Failed to get queue event: {:?}", e);
