@@ -161,10 +161,11 @@ mod tests {
     use super::packet::VSOCK_PKT_HDR_SIZE;
     use super::*;
     use crate::device::{VirtioInterrupt, VirtioInterruptType};
+    use crate::epoll_helper::EpollHelperHandler;
+    use crate::EpollHelper;
     use libc::EFD_NONBLOCK;
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
-    use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, RwLock};
     use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
@@ -339,23 +340,19 @@ mod tests {
     impl<'a> EpollHandlerContext<'a> {
         pub fn signal_txq_event(&mut self) {
             self.handler.queue_evts[1].write(1).unwrap();
-            self.handler
-                .handle_event(
-                    TX_QUEUE_EVENT,
-                    epoll::Events::EPOLLIN,
-                    Arc::new(AtomicBool::new(false)),
-                )
-                .unwrap();
+            let events = epoll::Events::EPOLLIN;
+            let event = epoll::Event::new(events, TX_QUEUE_EVENT as u64);
+            let mut epoll_helper =
+                EpollHelper::new(&self.handler.kill_evt, &self.handler.pause_evt).unwrap();
+            self.handler.handle_event(&mut epoll_helper, &event);
         }
         pub fn signal_rxq_event(&mut self) {
             self.handler.queue_evts[0].write(1).unwrap();
-            self.handler
-                .handle_event(
-                    RX_QUEUE_EVENT,
-                    epoll::Events::EPOLLIN,
-                    Arc::new(AtomicBool::new(false)),
-                )
-                .unwrap();
+            let events = epoll::Events::EPOLLIN;
+            let event = epoll::Event::new(events, RX_QUEUE_EVENT as u64);
+            let mut epoll_helper =
+                EpollHelper::new(&self.handler.kill_evt, &self.handler.pause_evt).unwrap();
+            self.handler.handle_event(&mut epoll_helper, &event);
         }
     }
 }
