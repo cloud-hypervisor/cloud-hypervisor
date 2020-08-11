@@ -350,6 +350,7 @@ fn api_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_accept4),
         allow_syscall(libc::SYS_bind),
+        allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
