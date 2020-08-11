@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, DeviceEventT, Queue, VirtioDevice, VirtioDeviceType,
-    VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
+    VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
 use crate::vm_memory::GuestMemory;
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use libc::EFD_NONBLOCK;
-use std::fs::File;
 use std::io;
 use std::mem::size_of;
-use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -41,15 +39,11 @@ const NUM_QUEUES: usize = 2;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
 
 // Get resize event.
-const RESIZE_EVENT: DeviceEventT = 0;
+const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 // New descriptors are pending on the virtio queue.
-const INFLATE_QUEUE_EVENT: DeviceEventT = 1;
+const INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // New descriptors are pending on the virtio queue.
-const DEFLATE_QUEUE_EVENT: DeviceEventT = 2;
-// The device has been dropped.
-const KILL_EVENT: DeviceEventT = 3;
-// The device should be paused.
-const PAUSE_EVENT: DeviceEventT = 4;
+const DEFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
 // Page shift in the host.
 const PAGE_SHIFT: u32 = 12;
@@ -235,160 +229,73 @@ impl BalloonEpollHandler {
         Ok(())
     }
 
-    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), DeviceError> {
-        // Create the epoll file descriptor
-        let epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
-        // Use 'File' to enforce closing on 'epoll_fd'
-        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
+    fn run(&mut self, paused: Arc<AtomicBool>) -> result::Result<(), EpollHelperError> {
+        let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
+        helper.add_event(self.resize_receiver.evt.as_raw_fd(), RESIZE_EVENT)?;
+        helper.add_event(self.inflate_queue_evt.as_raw_fd(), INFLATE_QUEUE_EVENT)?;
+        helper.add_event(self.deflate_queue_evt.as_raw_fd(), DEFLATE_QUEUE_EVENT)?;
+        helper.run(paused, self)?;
 
-        // Add events
-        epoll::ctl(
-            epoll_file.as_raw_fd(),
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.resize_receiver.evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(RESIZE_EVENT)),
-        )
-        .map_err(DeviceError::EpollCtl)?;
+        Ok(())
+    }
+}
 
-        epoll::ctl(
-            epoll_file.as_raw_fd(),
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.inflate_queue_evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(INFLATE_QUEUE_EVENT)),
-        )
-        .map_err(DeviceError::EpollCtl)?;
-
-        epoll::ctl(
-            epoll_file.as_raw_fd(),
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.deflate_queue_evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(DEFLATE_QUEUE_EVENT)),
-        )
-        .map_err(DeviceError::EpollCtl)?;
-
-        epoll::ctl(
-            epoll_file.as_raw_fd(),
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.kill_evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(KILL_EVENT)),
-        )
-        .map_err(DeviceError::EpollCtl)?;
-
-        epoll::ctl(
-            epoll_file.as_raw_fd(),
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            self.pause_evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, u64::from(PAUSE_EVENT)),
-        )
-        .map_err(DeviceError::EpollCtl)?;
-
-        const EPOLL_EVENTS_LEN: usize = 100;
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
-
-        'epoll: loop {
-            let num_events = match epoll::wait(epoll_file.as_raw_fd(), -1, &mut events[..]) {
-                Ok(res) => res,
-                Err(e) => {
-                    if e.kind() == io::ErrorKind::Interrupted {
-                        // It's well defined from the epoll_wait() syscall
-                        // documentation that the epoll loop can be interrupted
-                        // before any of the requested events occurred or the
-                        // timeout expired. In both those cases, epoll_wait()
-                        // returns an error of type EINTR, but this should not
-                        // be considered as a regular error. Instead it is more
-                        // appropriate to retry, by calling into epoll_wait().
-                        continue;
-                    }
-                    return Err(DeviceError::EpollWait(e));
+impl EpollHelperHandler for BalloonEpollHandler {
+    fn handle_event(&mut self, _helper: &mut EpollHelper, event: u16) -> bool {
+        match event {
+            RESIZE_EVENT => {
+                if let Err(e) = self.resize_receiver.evt.read() {
+                    error!("Failed to get resize event: {:?}", e);
+                    return true;
                 }
-            };
-
-            for event in events.iter().take(num_events) {
-                let ev_type = event.data as u16;
-
-                match ev_type {
-                    RESIZE_EVENT => {
-                        if let Err(e) = self.resize_receiver.evt.read() {
-                            return Err(DeviceError::EpollHander(format!(
-                                "Failed to get resize event: {:?}",
-                                e
-                            )));
-                        }
-                        let mut signal_error = false;
-                        let r = {
-                            let mut config = self.config.lock().unwrap();
-                            config.num_pages =
-                                (self.resize_receiver.get_size() >> PAGE_SHIFT) as u32;
-                            if let Err(e) = self.signal(&VirtioInterruptType::Config, None) {
-                                signal_error = true;
-                                Err(e)
-                            } else {
-                                Ok(())
-                            }
-                        };
-                        if let Err(e) = &r {
-                            // This error will send back to resize caller.
-                            error!("Handle resize event get error: {:?}", e);
-                        }
-                        if let Err(e) = self.resize_receiver.send(r) {
-                            return Err(DeviceError::EpollHander(format!(
-                                "Sending \"resize\" generated error: {:?}",
-                                e
-                            )));
-                        }
-                        if signal_error {
-                            return Err(DeviceError::EpollHander(String::from("Signal get error")));
-                        }
+                let mut signal_error = false;
+                let r = {
+                    let mut config = self.config.lock().unwrap();
+                    config.num_pages = (self.resize_receiver.get_size() >> PAGE_SHIFT) as u32;
+                    if let Err(e) = self.signal(&VirtioInterruptType::Config, None) {
+                        signal_error = true;
+                        Err(e)
+                    } else {
+                        Ok(())
                     }
-                    INFLATE_QUEUE_EVENT => {
-                        if let Err(e) = self.inflate_queue_evt.read() {
-                            return Err(DeviceError::EpollHander(format!(
-                                "Failed to get inflate queue event: {:?}",
-                                e
-                            )));
-                        } else if let Err(e) = self.process_queue(ev_type) {
-                            return Err(DeviceError::EpollHander(format!(
-                                "Failed to signal used inflate queue: {:?}",
-                                e
-                            )));
-                        }
-                    }
-                    DEFLATE_QUEUE_EVENT => {
-                        if let Err(e) = self.deflate_queue_evt.read() {
-                            return Err(DeviceError::EpollHander(format!(
-                                "Failed to get deflate queue event: {:?}",
-                                e
-                            )));
-                        } else if let Err(e) = self.process_queue(ev_type) {
-                            return Err(DeviceError::EpollHander(format!(
-                                "Failed to signal used deflate queue: {:?}",
-                                e
-                            )));
-                        }
-                    }
-                    KILL_EVENT => {
-                        debug!("kill_evt received, stopping epoll loop");
-                        break 'epoll;
-                    }
-                    PAUSE_EVENT => {
-                        debug!("PAUSE_EVENT received, pausing virtio-balloon epoll loop");
-                        // We loop here to handle spurious park() returns.
-                        // Until we have not resumed, the paused boolean will
-                        // be true.
-                        while paused.load(Ordering::SeqCst) {
-                            thread::park();
-                        }
-                    }
-                    _ => {
-                        return Err(DeviceError::EpollHander(String::from(
-                            "Unknown event for virtio-mem",
-                        )));
-                    }
+                };
+                if let Err(e) = &r {
+                    // This error will send back to resize caller.
+                    error!("Handle resize event get error: {:?}", e);
                 }
+                if let Err(e) = self.resize_receiver.send(r) {
+                    error!("Sending \"resize\" generated error: {:?}", e);
+                    return true;
+                }
+                if signal_error {
+                    return true;
+                }
+            }
+            INFLATE_QUEUE_EVENT => {
+                if let Err(e) = self.inflate_queue_evt.read() {
+                    error!("Failed to get inflate queue event: {:?}", e);
+                    return true;
+                } else if let Err(e) = self.process_queue(event) {
+                    error!("Failed to signal used inflate queue: {:?}", e);
+                    return true;
+                }
+            }
+            DEFLATE_QUEUE_EVENT => {
+                if let Err(e) = self.deflate_queue_evt.read() {
+                    error!("Failed to get deflate queue event: {:?}", e);
+                    return true;
+                } else if let Err(e) = self.process_queue(event) {
+                    error!("Failed to signal used deflate queue: {:?}", e);
+                    return true;
+                }
+            }
+            _ => {
+                error!("Unknown event for virtio-mem");
+                return true;
             }
         }
 
-        Ok(())
+        false
     }
 }
 
@@ -403,7 +310,7 @@ pub struct Balloon {
     config: Arc<Mutex<VirtioBalloonConfig>>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     paused: Arc<AtomicBool>,
 }
 
