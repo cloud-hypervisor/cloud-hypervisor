@@ -3237,102 +3237,103 @@ mod tests {
         // The third device is added to validate that hotplug works correctly since
         // it is being added to the L2 VM through hotplugging mechanism.
         fn test_vfio() {
-            test_block!(tb, "", {
-                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-                let guest = Guest::new_from_ip_range(&mut focal, "172.17", 0);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new_from_ip_range(&mut focal, "172.17", 0);
 
-                let mut workload_path = dirs::home_dir().unwrap();
-                workload_path.push("workloads");
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
 
-                let mut kernel_path = workload_path.clone();
-                kernel_path.push("bzImage");
+            let mut kernel_path = workload_path.clone();
+            kernel_path.push("bzImage");
 
-                let mut vfio_path = workload_path.clone();
-                vfio_path.push("vfio");
+            let mut vfio_path = workload_path.clone();
+            vfio_path.push("vfio");
 
-                let mut cloud_init_vfio_base_path = vfio_path.clone();
-                cloud_init_vfio_base_path.push("cloudinit.img");
+            let mut cloud_init_vfio_base_path = vfio_path.clone();
+            cloud_init_vfio_base_path.push("cloudinit.img");
 
-                // We copy our cloudinit into the vfio mount point, for the nested
-                // cloud-hypervisor guest to use.
-                rate_limited_copy(
-                    &guest.disk_config.disk(DiskType::CloudInit).unwrap(),
-                    &cloud_init_vfio_base_path,
-                )
-                .expect("copying of cloud-init disk failed");
+            // We copy our cloudinit into the vfio mount point, for the nested
+            // cloud-hypervisor guest to use.
+            rate_limited_copy(
+                &guest.disk_config.disk(DiskType::CloudInit).unwrap(),
+                &cloud_init_vfio_base_path,
+            )
+            .expect("copying of cloud-init disk failed");
 
-                let mut vfio_disk_path = workload_path;
-                vfio_disk_path.push("vfio.img");
+            let mut vfio_disk_path = workload_path;
+            vfio_disk_path.push("vfio.img");
 
-                // Create the vfio disk image
-                let output = Command::new("mkfs.ext4")
-                    .arg("-d")
-                    .arg(vfio_path.to_str().unwrap())
-                    .arg(vfio_disk_path.to_str().unwrap())
-                    .arg("2g")
-                    .output()
-                    .unwrap();
-                if !output.status.success() {
-                    eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-                    panic!("mkfs.ext4 command generated an error");
-                }
+            // Create the vfio disk image
+            let output = Command::new("mkfs.ext4")
+                .arg("-d")
+                .arg(vfio_path.to_str().unwrap())
+                .arg(vfio_disk_path.to_str().unwrap())
+                .arg("2g")
+                .output()
+                .unwrap();
+            if !output.status.success() {
+                eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+                panic!("mkfs.ext4 command generated an error");
+            }
 
-                let vfio_tap0 = "vfio-tap0";
-                let vfio_tap1 = "vfio-tap1";
-                let vfio_tap2 = "vfio-tap2";
-                let vfio_tap3 = "vfio-tap3";
+            let vfio_tap0 = "vfio-tap0";
+            let vfio_tap1 = "vfio-tap1";
+            let vfio_tap2 = "vfio-tap2";
+            let vfio_tap3 = "vfio-tap3";
 
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=4"])
-                    .args(&["--memory", "size=2G,hugepages=on,shared=on"])
-                    .args(&["--kernel", kernel_path.to_str().unwrap()])
-                    .args(&[
-                        "--disk",
-                        format!(
-                            "path={}",
-                            guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                        )
-                        .as_str(),
-                        format!(
-                            "path={}",
-                            guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                        )
-                        .as_str(),
-                        format!("path={}", vfio_disk_path.to_str().unwrap()).as_str(),
-                    ])
-                    .args(&[
-                        "--cmdline",
-                        format!(
-                            "{} kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts",
-                            DIRECT_KERNEL_BOOT_CMDLINE
-                        )
-                        .as_str(),
-                    ])
-                    .args(&[
-                        "--net",
-                        format!("tap={},mac={}", vfio_tap0, guest.network.guest_mac).as_str(),
-                        format!(
-                            "tap={},mac={},iommu=on",
-                            vfio_tap1, guest.network.l2_guest_mac1
-                        )
-                        .as_str(),
-                        format!(
-                            "tap={},mac={},iommu=on",
-                            vfio_tap2, guest.network.l2_guest_mac2
-                        )
-                        .as_str(),
-                        format!(
-                            "tap={},mac={},iommu=on",
-                            vfio_tap3, guest.network.l2_guest_mac3
-                        )
-                        .as_str(),
-                    ])
-                    .spawn()
-                    .unwrap();
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=4"])
+                .args(&["--memory", "size=2G,hugepages=on,shared=on"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                    format!("path={}", vfio_disk_path.to_str().unwrap()).as_str(),
+                ])
+                .args(&[
+                    "--cmdline",
+                    format!(
+                        "{} kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts",
+                        DIRECT_KERNEL_BOOT_CMDLINE
+                    )
+                    .as_str(),
+                ])
+                .args(&[
+                    "--net",
+                    format!("tap={},mac={}", vfio_tap0, guest.network.guest_mac).as_str(),
+                    format!(
+                        "tap={},mac={},iommu=on",
+                        vfio_tap1, guest.network.l2_guest_mac1
+                    )
+                    .as_str(),
+                    format!(
+                        "tap={},mac={},iommu=on",
+                        vfio_tap2, guest.network.l2_guest_mac2
+                    )
+                    .as_str(),
+                    format!(
+                        "tap={},mac={},iommu=on",
+                        vfio_tap3, guest.network.l2_guest_mac3
+                    )
+                    .as_str(),
+                ])
+                .capture_output()
+                .spawn()
+                .unwrap();
 
-                thread::sleep(std::time::Duration::new(30, 0));
+            thread::sleep(std::time::Duration::new(30, 0));
 
-                guest.ssh_command_l1("sudo systemctl start vfio")?;
+            let r = std::panic::catch_unwind(|| {
+                guest.ssh_command_l1("sudo systemctl start vfio").unwrap();
                 thread::sleep(std::time::Duration::new(120, 0));
 
                 // We booted our cloud hypervisor L2 guest with a "VFIOTAG" tag
@@ -3340,8 +3341,7 @@ mod tests {
                 // Let's ssh into it and verify that it's there. If it is it means
                 // we're in the right guest (The L2 one) because the QEMU L1 guest
                 // does not have this command line tag.
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command_l2_1("grep -c VFIOTAG /proc/cmdline")
                         .unwrap_or_default()
@@ -3353,8 +3353,7 @@ mod tests {
 
                 // Let's also verify from the second virtio-net device passed to
                 // the L2 VM.
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command_l2_2("grep -c VFIOTAG /proc/cmdline")
                         .unwrap_or_default()
@@ -3365,8 +3364,7 @@ mod tests {
                 );
 
                 // Check the amount of PCI devices appearing in L2 VM.
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
                         .unwrap_or_default()
@@ -3379,17 +3377,20 @@ mod tests {
                 // Hotplug an extra virtio-net device through L2 VM.
                 guest.ssh_command_l1(
                     "echo 0000:00:08.0 | sudo tee /sys/bus/pci/devices/0000:00:08.0/driver/unbind",
-                )?;
-                guest.ssh_command_l1(
-                    "echo 1af4 1041 | sudo tee /sys/bus/pci/drivers/vfio-pci/new_id",
-                )?;
-                let vfio_hotplug_output = guest.ssh_command_l1(
-                    "sudo /mnt/ch-remote \
+                ).unwrap();
+                guest
+                    .ssh_command_l1(
+                        "echo 1af4 1041 | sudo tee /sys/bus/pci/drivers/vfio-pci/new_id",
+                    )
+                    .unwrap();
+                let vfio_hotplug_output = guest
+                    .ssh_command_l1(
+                        "sudo /mnt/ch-remote \
                  --api-socket=/tmp/ch_api.sock \
                  add-device path=/sys/bus/pci/devices/0000:00:08.0,id=vfio123",
-                )?;
-                aver!(
-                    tb,
+                    )
+                    .unwrap();
+                assert!(
                     vfio_hotplug_output.contains("{\"id\":\"vfio123\",\"bdf\":\"0000:00:07.0\"}")
                 );
 
@@ -3398,8 +3399,7 @@ mod tests {
                 // Let's also verify from the third virtio-net device passed to
                 // the L2 VM. This third device has been hotplugged through the L2
                 // VM, so this is our way to validate hotplug works for VFIO PCI.
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command_l2_3("grep -c VFIOTAG /proc/cmdline")
                         .unwrap_or_default()
@@ -3412,8 +3412,7 @@ mod tests {
                 // Check the amount of PCI devices appearing in L2 VM.
                 // There should be one more device than before, raising the count
                 // up to 8 PCI devices.
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
                         .unwrap_or_default()
@@ -3426,17 +3425,18 @@ mod tests {
                 // Let's now verify that we can correctly remove the virtio-net
                 // device through the "remove-device" command responsible for
                 // unplugging VFIO devices.
-                guest.ssh_command_l1(
-                    "sudo /mnt/ch-remote \
+                guest
+                    .ssh_command_l1(
+                        "sudo /mnt/ch-remote \
                  --api-socket=/tmp/ch_api.sock \
                  remove-device vfio123",
-                )?;
+                    )
+                    .unwrap();
                 thread::sleep(std::time::Duration::new(10, 0));
 
                 // Check the amount of PCI devices appearing in L2 VM is back down
                 // to 7 devices.
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
                         .unwrap_or_default()
@@ -3450,28 +3450,24 @@ mod tests {
                 // up as expected. In order to check, we will use the virtio-net
                 // device already passed through L2 as a VFIO device, this will
                 // verify that VFIO devices are functional with memory hotplug.
-                aver!(
-                    tb,
-                    guest.get_total_memory_l2().unwrap_or_default() > 480_000
-                );
+                assert!(guest.get_total_memory_l2().unwrap_or_default() > 480_000);
                 guest.ssh_command_l2_1(
                     "sudo bash -c 'echo online > /sys/devices/system/memory/auto_online_blocks'",
-                )?;
-                guest.ssh_command_l1(
-                    "sudo /mnt/ch-remote \
+                ).unwrap();
+                guest
+                    .ssh_command_l1(
+                        "sudo /mnt/ch-remote \
                  --api-socket=/tmp/ch_api.sock \
                  resize --memory=1073741824",
-                )?;
-                aver!(
-                    tb,
-                    guest.get_total_memory_l2().unwrap_or_default() > 960_000
-                );
-
-                let _ = child.kill();
-                let _ = child.wait();
-
-                Ok(())
+                    )
+                    .unwrap();
+                assert!(guest.get_total_memory_l2().unwrap_or_default() > 960_000);
             });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
         }
 
         #[cfg_attr(feature = "mmio", test)]
