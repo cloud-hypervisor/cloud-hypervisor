@@ -1188,72 +1188,72 @@ mod tests {
         prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,
         self_spawned: bool,
     ) {
-        test_block!(tb, "", {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut focal);
-            let api_socket = temp_api_path(&guest.tmp_dir);
+        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(&mut focal);
+        let api_socket = temp_api_path(&guest.tmp_dir);
 
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path().unwrap();
 
-            let (blk_params, daemon_child) = if self_spawned {
-                let mut blk_file_path = workload_path;
-                blk_file_path.push("blk.img");
-                let blk_file_path = String::from(blk_file_path.to_str().unwrap());
+        let (blk_params, daemon_child) = if self_spawned {
+            let mut blk_file_path = workload_path;
+            blk_file_path.push("blk.img");
+            let blk_file_path = String::from(blk_file_path.to_str().unwrap());
 
-                (
-                    format!(
-                        "vhost_user=true,path={},num_queues={},queue_size=128",
-                        blk_file_path, num_queues,
-                    ),
-                    None,
+            (
+                format!(
+                    "vhost_user=true,path={},num_queues={},queue_size=128",
+                    blk_file_path, num_queues,
+                ),
+                None,
+            )
+        } else {
+            let prepare_daemon = prepare_vhost_user_blk_daemon.unwrap();
+            // Start the daemon
+            let (daemon_child, vubd_socket_path) =
+                prepare_daemon(&guest.tmp_dir, "blk.img", num_queues, readonly, direct);
+
+            (
+                format!(
+                    "vhost_user=true,socket={},num_queues={},queue_size=128",
+                    vubd_socket_path, num_queues,
+                ),
+                Some(daemon_child),
+            )
+        };
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", format!("boot={}", num_queues).as_str()])
+            .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
+            .args(&["--kernel", kernel_path.to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(&[
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
-            } else {
-                let prepare_daemon = prepare_vhost_user_blk_daemon.unwrap();
-                // Start the daemon
-                let (daemon_child, vubd_socket_path) =
-                    prepare_daemon(&guest.tmp_dir, "blk.img", num_queues, readonly, direct);
-
-                (
-                    format!(
-                        "vhost_user=true,socket={},num_queues={},queue_size=128",
-                        vubd_socket_path, num_queues,
-                    ),
-                    Some(daemon_child),
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
-            };
+                .as_str(),
+                blk_params.as_str(),
+            ])
+            .default_net()
+            .args(&["--api-socket", &api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
 
-            let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", format!("boot={}", num_queues).as_str()])
-                .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                .args(&[
-                    "--disk",
-                    format!(
-                        "path={}",
-                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                    )
-                    .as_str(),
-                    format!(
-                        "path={}",
-                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                    )
-                    .as_str(),
-                    blk_params.as_str(),
-                ])
-                .default_net()
-                .args(&["--api-socket", &api_socket])
-                .spawn()
-                .unwrap();
+        thread::sleep(std::time::Duration::new(120, 0));
 
-            thread::sleep(std::time::Duration::new(120, 0));
-
+        let r = std::panic::catch_unwind(|| {
             // Check both if /dev/vdc exists and if the block size is 16M.
-            aver_eq!(
-                tb,
+            assert_eq!(
                 guest
                     .ssh_command("lsblk | grep vdc | grep -c 16M")
                     .unwrap_or_default()
@@ -1264,8 +1264,7 @@ mod tests {
             );
 
             // Check if this block is RO or RW.
-            aver_eq!(
-                tb,
+            assert_eq!(
                 guest
                     .ssh_command("lsblk | grep vdc | awk '{print $5}'")
                     .unwrap_or_default()
@@ -1277,8 +1276,7 @@ mod tests {
 
             // Check if the number of queues in /sys/block/vdc/mq matches the
             // expected num_queues.
-            aver_eq!(
-                tb,
+            assert_eq!(
                 guest
                     .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
                     .unwrap_or_default()
@@ -1290,19 +1288,20 @@ mod tests {
 
             // Mount the device
             let mount_ro_rw_flag = if readonly { "ro,noload" } else { "rw" };
-            guest.ssh_command("mkdir mount_image")?;
-            guest.ssh_command(
-                format!(
-                    "sudo mount -o {} -t ext4 /dev/vdc mount_image/",
-                    mount_ro_rw_flag
+            guest.ssh_command("mkdir mount_image").unwrap();
+            guest
+                .ssh_command(
+                    format!(
+                        "sudo mount -o {} -t ext4 /dev/vdc mount_image/",
+                        mount_ro_rw_flag
+                    )
+                    .as_str(),
                 )
-                .as_str(),
-            )?;
+                .unwrap();
 
             // Check the content of the block device. The file "foo" should
             // contain "bar".
-            aver_eq!(
-                tb,
+            assert_eq!(
                 guest
                     .ssh_command("cat mount_image/foo")
                     .unwrap_or_default()
@@ -1326,12 +1325,11 @@ mod tests {
 
                 thread::sleep(std::time::Duration::new(10, 0));
 
-                aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
 
                 // Check again the content of the block device after the resize
                 // has been performed.
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command("cat mount_image/foo")
                         .unwrap_or_default()
@@ -1341,20 +1339,20 @@ mod tests {
             }
 
             // Unmount the device
-            guest.ssh_command("sudo umount /dev/vdc")?;
-            guest.ssh_command("rm -r mount_image")?;
-
-            let _ = cloud_child.kill();
-            let _ = cloud_child.wait();
-
-            if let Some(mut daemon_child) = daemon_child {
-                thread::sleep(std::time::Duration::new(5, 0));
-                let _ = daemon_child.kill();
-                let _ = daemon_child.wait();
-            }
-
-            Ok(())
+            guest.ssh_command("sudo umount /dev/vdc").unwrap();
+            guest.ssh_command("rm -r mount_image").unwrap();
         });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        if let Some(mut daemon_child) = daemon_child {
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = daemon_child.kill();
+            let _ = daemon_child.wait();
+        }
+
+        handle_child_output(r, &output);
     }
 
     fn test_boot_from_vhost_user_blk(
@@ -1364,75 +1362,72 @@ mod tests {
         prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,
         self_spawned: bool,
     ) {
-        test_block!(tb, "", {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut focal);
+        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(&mut focal);
 
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path().unwrap();
 
-            let disk_path = guest
-                .disk_config
-                .disk(DiskType::RawOperatingSystem)
-                .unwrap();
+        let disk_path = guest
+            .disk_config
+            .disk(DiskType::RawOperatingSystem)
+            .unwrap();
 
-            let (blk_boot_params, daemon_child) = if self_spawned {
-                (
-                    format!(
-                        "vhost_user=true,path={},num_queues={},queue_size=128",
-                        disk_path, num_queues,
-                    ),
-                    None,
-                )
-            } else {
-                let prepare_daemon = prepare_vhost_user_blk_daemon.unwrap();
-                // Start the daemon
-                let (daemon_child, vubd_socket_path) = prepare_daemon(
-                    &guest.tmp_dir,
-                    disk_path.as_str(),
-                    num_queues,
-                    readonly,
-                    direct,
-                );
-
-                (
-                    format!(
-                        "vhost_user=true,socket={},num_queues={},queue_size=128",
-                        vubd_socket_path, num_queues,
-                    ),
-                    Some(daemon_child),
-                )
-            };
-
-            let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", format!("boot={}", num_queues).as_str()])
-                .args(&["--memory", "size=512M,shared=on"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                .args(&[
-                    "--disk",
-                    blk_boot_params.as_str(),
-                    format!(
-                        "path={}",
-                        guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                    )
-                    .as_str(),
-                ])
-                .default_net()
-                .spawn()
-                .unwrap();
-
-            thread::sleep(std::time::Duration::new(40, 0));
-
-            // Just check the VM booted correctly.
-            aver_eq!(
-                tb,
-                guest.get_cpu_count().unwrap_or_default(),
-                num_queues as u32
+        let (blk_boot_params, daemon_child) = if self_spawned {
+            (
+                format!(
+                    "vhost_user=true,path={},num_queues={},queue_size=128",
+                    disk_path, num_queues,
+                ),
+                None,
+            )
+        } else {
+            let prepare_daemon = prepare_vhost_user_blk_daemon.unwrap();
+            // Start the daemon
+            let (daemon_child, vubd_socket_path) = prepare_daemon(
+                &guest.tmp_dir,
+                disk_path.as_str(),
+                num_queues,
+                readonly,
+                direct,
             );
-            aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
+
+            (
+                format!(
+                    "vhost_user=true,socket={},num_queues={},queue_size=128",
+                    vubd_socket_path, num_queues,
+                ),
+                Some(daemon_child),
+            )
+        };
+
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", format!("boot={}", num_queues).as_str()])
+            .args(&["--memory", "size=512M,shared=on"])
+            .args(&["--kernel", kernel_path.to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(&[
+                "--disk",
+                blk_boot_params.as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        thread::sleep(std::time::Duration::new(40, 0));
+
+        let r = std::panic::catch_unwind(|| {
+            // Just check the VM booted correctly.
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), num_queues as u32);
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
             if self_spawned {
                 // The reboot is not supported with mmio, so no reason to test it.
@@ -1445,7 +1440,7 @@ mod tests {
                         .parse::<u32>()
                         .unwrap_or(1);
 
-                    aver_eq!(tb, reboot_count, 0);
+                    assert_eq!(reboot_count, 0);
                     guest.ssh_command("sudo reboot").unwrap_or_default();
 
                     thread::sleep(std::time::Duration::new(20, 0));
@@ -1455,21 +1450,20 @@ mod tests {
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default();
-                    aver_eq!(tb, reboot_count, 1);
+                    assert_eq!(reboot_count, 1);
                 }
             }
-
-            let _ = cloud_child.kill();
-            let _ = cloud_child.wait();
-
-            if let Some(mut daemon_child) = daemon_child {
-                thread::sleep(std::time::Duration::new(5, 0));
-                let _ = daemon_child.kill();
-                let _ = daemon_child.wait();
-            }
-
-            Ok(())
         });
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        if let Some(mut daemon_child) = daemon_child {
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = daemon_child.kill();
+            let _ = daemon_child.wait();
+        }
+
+        handle_child_output(r, &output);
     }
 
     fn test_virtio_fs(
