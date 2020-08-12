@@ -1,10 +1,11 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
+use super::super::{
+    ActivateError, ActivateResult, EpollHelperError, Queue, VirtioDevice, VirtioDeviceType,
+};
 use super::handler::*;
 use super::vu_common_ctrl::*;
-use super::Error as DeviceError;
 use super::{Error, Result};
 use crate::VirtioInterrupt;
 use block_util::VirtioBlockConfig;
@@ -41,7 +42,7 @@ pub struct Blk {
     queue_sizes: Vec<u16>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     paused: Arc<AtomicBool>,
 }
 
