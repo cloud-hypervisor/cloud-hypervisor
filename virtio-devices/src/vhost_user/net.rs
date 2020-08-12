@@ -5,10 +5,11 @@ use super::super::net_util::{
     build_net_config_space, CtrlVirtio, NetCtrlEpollHandler, VirtioNetConfig,
 };
 use super::super::Error as CtrlError;
-use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
+use super::super::{
+    ActivateError, ActivateResult, EpollHelperError, Queue, VirtioDevice, VirtioDeviceType,
+};
 use super::handler::*;
 use super::vu_common_ctrl::*;
-use super::Error as DeviceError;
 use super::{Error, Result};
 use crate::VirtioInterrupt;
 use libc::EFD_NONBLOCK;
@@ -45,7 +46,7 @@ pub struct Net {
     queue_sizes: Vec<u16>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), CtrlError>>>,
     paused: Arc<AtomicBool>,
 }

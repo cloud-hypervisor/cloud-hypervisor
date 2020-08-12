@@ -34,14 +34,6 @@ pub enum Error {
     CloneKillEventFd(io::Error),
     /// Invalid descriptor table address.
     DescriptorTableAddress,
-    /// Create Epoll eventfd failed
-    EpollCreateFd(io::Error),
-    /// Epoll ctl error
-    EpollCtl(io::Error),
-    /// Epoll wait error
-    EpollWait(io::Error),
-    /// Read queue failed.
-    FailedReadingQueue(io::Error),
     /// Signal used queue failed.
     FailedSignalingUsedQueue(io::Error),
     /// Failed to read vhost eventfd.
@@ -88,8 +80,6 @@ pub enum Error {
     VhostIrqRead(io::Error),
     /// Failed to read vhost eventfd.
     VhostUserMemoryRegion(MmapError),
-    /// Failed to handle vhost-user slave request.
-    VhostUserSlaveRequest(vhost_rs::vhost_user::Error),
     /// Failed to create the master request handler from slave.
     MasterReqHandlerCreation(vhost_rs::vhost_user::Error),
     /// Set slave request fd failed.

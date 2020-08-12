@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::vu_common_ctrl::{reset_vhost_user, setup_vhost_user, update_mem_table};
-use super::Error as DeviceError;
 use super::{Error, Result};
 use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::{
-    ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, EpollHelperError, Queue, UserspaceMapping, VirtioDevice,
+    VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
 };
 use libc::{self, c_void, off64_t, pread64, pwrite64, EFD_NONBLOCK};
 use std::io;
@@ -279,7 +278,7 @@ pub struct Fs {
     slave_req_support: bool,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), DeviceError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
     paused: Arc<AtomicBool>,
 }
 
