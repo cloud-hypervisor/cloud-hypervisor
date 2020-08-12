@@ -1775,53 +1775,51 @@ mod tests {
     }
 
     fn _test_virtio_vsock(hotplug: bool) {
-        test_block!(tb, "", {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut focal);
+        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(&mut focal);
 
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path().unwrap();
 
-            let socket = temp_vsock_path(&guest.tmp_dir);
-            let api_socket = temp_api_path(&guest.tmp_dir);
+        let socket = temp_vsock_path(&guest.tmp_dir);
+        let api_socket = temp_api_path(&guest.tmp_dir);
 
-            let mut cmd = GuestCommand::new(&guest);
-            cmd.args(&["--api-socket", &api_socket]);
-            cmd.args(&["--cpus", "boot=1"]);
-            cmd.args(&["--memory", "size=512M"]);
-            cmd.args(&["--kernel", kernel_path.to_str().unwrap()]);
-            cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
-            cmd.default_disks();
-            cmd.default_net();
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(&["--api-socket", &api_socket]);
+        cmd.args(&["--cpus", "boot=1"]);
+        cmd.args(&["--memory", "size=512M"]);
+        cmd.args(&["--kernel", kernel_path.to_str().unwrap()]);
+        cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+        cmd.default_disks();
+        cmd.default_net();
 
-            if !hotplug {
-                cmd.args(&["--vsock", format!("cid=3,socket={}", socket).as_str()]);
-            }
+        if !hotplug {
+            cmd.args(&["--vsock", format!("cid=3,socket={}", socket).as_str()]);
+        }
 
-            let mut child = cmd.spawn().unwrap();
+        let mut child = cmd.capture_output().spawn().unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
+        thread::sleep(std::time::Duration::new(20, 0));
 
+        let r = std::panic::catch_unwind(|| {
             if hotplug {
                 let (cmd_success, cmd_output) = remote_command_w_output(
                     &api_socket,
                     "add-vsock",
                     Some(format!("cid=3,socket={},id=test0", socket).as_str()),
                 );
-                aver!(tb, cmd_success);
-                aver!(
-                    tb,
-                    String::from_utf8_lossy(&cmd_output)
-                        .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
-                );
+                assert!(cmd_success);
+                assert!(String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}"));
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Check adding a second one fails
-                aver!(
-                    tb,
-                    !remote_command(&api_socket, "add-vsock", Some("cid=1234,socket=/tmp/fail"))
-                );
+                assert!(!remote_command(
+                    &api_socket,
+                    "add-vsock",
+                    Some("cid=1234,socket=/tmp/fail")
+                ));
             }
 
             // Validate vsock works as expected.
@@ -1839,7 +1837,7 @@ mod tests {
                     .parse::<u32>()
                     .unwrap_or(1);
 
-                aver_eq!(tb, reboot_count, 0);
+                assert_eq!(reboot_count, 0);
                 guest.ssh_command("sudo reboot").unwrap_or_default();
 
                 thread::sleep(std::time::Duration::new(30, 0));
@@ -1849,23 +1847,20 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
-                aver_eq!(tb, reboot_count, 1);
+                assert_eq!(reboot_count, 1);
 
                 // Validate vsock still works after a reboot.
                 guest.check_vsock(socket.as_str());
             }
             if hotplug {
-                aver!(
-                    tb,
-                    remote_command(&api_socket, "remove-device", Some("test0"))
-                );
+                assert!(remote_command(&api_socket, "remove-device", Some("test0")));
             }
-
-            let _ = child.kill();
-            let _ = child.wait();
-
-            Ok(())
         });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
     }
 
     fn get_pss(pid: u32) -> u32 {
