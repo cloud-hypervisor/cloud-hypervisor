@@ -104,6 +104,7 @@ pipeline{
 					}
 					post {
 						always {
+							sh "sudo chown -R jenkins.jenkins ${WORKSPACE}"
 							deleteDir()
 						}
 					}
