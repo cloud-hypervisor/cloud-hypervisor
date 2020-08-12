@@ -1684,52 +1684,51 @@ mod tests {
     }
 
     fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
-        test_block!(tb, "", {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut focal);
+        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(&mut focal);
 
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path().unwrap();
 
-            let mut pmem_temp_file = NamedTempFile::new().unwrap();
-            pmem_temp_file.as_file_mut().set_len(128 << 20).unwrap();
+        let mut pmem_temp_file = NamedTempFile::new().unwrap();
+        pmem_temp_file.as_file_mut().set_len(128 << 20).unwrap();
 
-            std::process::Command::new("mkfs.ext4")
-                .arg(pmem_temp_file.path())
-                .output()
-                .expect("Expect creating disk image to succeed");
+        std::process::Command::new("mkfs.ext4")
+            .arg(pmem_temp_file.path())
+            .output()
+            .expect("Expect creating disk image to succeed");
 
-            let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                .default_disks()
-                .default_net()
-                .args(&[
-                    "--pmem",
-                    format!(
-                        "file={}{}{}",
-                        pmem_temp_file.path().to_str().unwrap(),
-                        if specify_size { ",size=128M" } else { "" },
-                        if discard_writes {
-                            ",discard_writes=on"
-                        } else {
-                            ""
-                        }
-                    )
-                    .as_str(),
-                ])
-                .spawn()
-                .unwrap();
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", "boot=1"])
+            .args(&["--memory", "size=512M"])
+            .args(&["--kernel", kernel_path.to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .args(&[
+                "--pmem",
+                format!(
+                    "file={}{}{}",
+                    pmem_temp_file.path().to_str().unwrap(),
+                    if specify_size { ",size=128M" } else { "" },
+                    if discard_writes {
+                        ",discard_writes=on"
+                    } else {
+                        ""
+                    }
+                )
+                .as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
-
+        thread::sleep(std::time::Duration::new(20, 0));
+        let r = std::panic::catch_unwind(|| {
             // Check for the presence of /dev/pmem0
-            aver_eq!(
-                tb,
+            assert_eq!(
                 guest
                     .ssh_command("ls /dev/pmem0")
                     .unwrap_or_default()
@@ -1738,17 +1737,13 @@ mod tests {
             );
 
             // Check changes persist after reboot
-            aver_eq!(
-                tb,
-                guest.ssh_command("sudo mount /dev/pmem0 /mnt").unwrap(),
-                ""
-            );
-            aver_eq!(tb, guest.ssh_command("ls /mnt").unwrap(), "lost+found\n");
+            assert_eq!(guest.ssh_command("sudo mount /dev/pmem0 /mnt").unwrap(), "");
+            assert_eq!(guest.ssh_command("ls /mnt").unwrap(), "lost+found\n");
             guest
                 .ssh_command("echo test123 | sudo tee /mnt/test")
                 .unwrap();
-            aver_eq!(tb, guest.ssh_command("sudo umount /mnt").unwrap(), "");
-            aver_eq!(tb, guest.ssh_command("ls /mnt").unwrap(), "");
+            assert_eq!(guest.ssh_command("sudo umount /mnt").unwrap(), "");
+            assert_eq!(guest.ssh_command("ls /mnt").unwrap(), "");
 
             guest.ssh_command("sudo reboot").unwrap();
             thread::sleep(std::time::Duration::new(30, 0));
@@ -1758,26 +1753,21 @@ mod tests {
                 .trim()
                 .parse::<u32>()
                 .unwrap_or_default();
-            aver_eq!(tb, reboot_count, 1);
-            aver_eq!(
-                tb,
-                guest.ssh_command("sudo mount /dev/pmem0 /mnt").unwrap(),
-                ""
-            );
-            aver_eq!(
-                tb,
+            assert_eq!(reboot_count, 1);
+            assert_eq!(guest.ssh_command("sudo mount /dev/pmem0 /mnt").unwrap(), "");
+            assert_eq!(
                 guest
                     .ssh_command("sudo cat /mnt/test")
                     .unwrap_or_default()
                     .trim(),
                 if discard_writes { "" } else { "test123" }
             );
-
-            let _ = child.kill();
-            let _ = child.wait();
-
-            Ok(())
         });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
     }
 
     fn get_fd_count(pid: u32) -> usize {
