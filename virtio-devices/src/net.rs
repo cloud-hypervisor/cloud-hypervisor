@@ -203,7 +203,7 @@ pub struct Net {
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
-    ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), DeviceError>>>,
+    ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
     paused: Arc<AtomicBool>,
     queue_size: Vec<u16>,
     counters: NetCounters,
@@ -426,10 +426,11 @@ impl VirtioDevice for Net {
                 thread::Builder::new()
                     .name("virtio_net".to_string())
                     .spawn(move || {
-                        SeccompFilter::apply(virtio_net_seccomp_filter)
-                            .map_err(DeviceError::ApplySeccompFilter)?;
-
-                        ctrl_handler.run_ctrl(paused)
+                        if let Err(e) = SeccompFilter::apply(virtio_net_seccomp_filter) {
+                            error!("Error applying seccomp filter: {:?}", e);
+                        } else if let Err(e) = ctrl_handler.run_ctrl(paused) {
+                            error!("Error running worker: {:?}", e);
+                        }
                     })
                     .map(|thread| self.ctrl_queue_epoll_thread = Some(thread))
                     .map_err(|e| {

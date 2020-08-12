@@ -4,7 +4,6 @@
 use super::super::net_util::{
     build_net_config_space, CtrlVirtio, NetCtrlEpollHandler, VirtioNetConfig,
 };
-use super::super::Error as CtrlError;
 use super::super::{
     ActivateError, ActivateResult, EpollHelperError, Queue, VirtioDevice, VirtioDeviceType,
 };
@@ -47,7 +46,7 @@ pub struct Net {
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
-    ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), CtrlError>>>,
+    ctrl_queue_epoll_thread: Option<thread::JoinHandle<result::Result<(), EpollHelperError>>>,
     paused: Arc<AtomicBool>,
 }
 

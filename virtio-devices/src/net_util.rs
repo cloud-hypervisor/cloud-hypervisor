@@ -2,15 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::Error as DeviceError;
-use super::{DescriptorChain, DeviceEventT, Queue};
-use net_util::{register_listener, MacAddr};
+use super::{
+    DescriptorChain, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
+    EPOLL_HELPER_EVENT_LAST,
+};
+use net_util::MacAddr;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
-use std::fs::File;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::thread;
 use virtio_bindings::bindings::virtio_net::*;
 use vm_memory::{
     ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError, GuestMemoryMmap,
@@ -21,16 +21,8 @@ type Result<T> = std::result::Result<T, Error>;
 
 const QUEUE_SIZE: usize = 256;
 
-// The device has been dropped.
-pub const KILL_EVENT: DeviceEventT = 3;
-// The device should be paused.
-pub const PAUSE_EVENT: DeviceEventT = 4;
-// Number of DeviceEventT events supported by this implementation.
-pub const NET_EVENTS_COUNT: usize = 5;
-// The device has been dropped.
-const CTRL_QUEUE_EVENT: DeviceEventT = 0;
-// Number of DeviceEventT events supported by this implementation.
-const CTRL_EVENT_COUNT: usize = 3;
+// Event available on the control queue.
+const CTRL_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
 #[repr(C, packed)]
 #[derive(Copy, Clone, Debug, Default, Deserialize)]
@@ -182,93 +174,40 @@ pub struct NetCtrlEpollHandler {
 }
 
 impl NetCtrlEpollHandler {
-    pub fn run_ctrl(&mut self, paused: Arc<AtomicBool>) -> std::result::Result<(), DeviceError> {
-        // Create the epoll file descriptor
-        self.epoll_fd = epoll::create(true).map_err(DeviceError::EpollCreateFd)?;
-        // Use 'File' to enforce closing on 'epoll_fd'
-        let epoll_file = unsafe { File::from_raw_fd(self.epoll_fd) };
+    pub fn run_ctrl(
+        &mut self,
+        paused: Arc<AtomicBool>,
+    ) -> std::result::Result<(), EpollHelperError> {
+        let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
+        helper.add_event(self.ctrl_q.queue_evt.as_raw_fd(), CTRL_QUEUE_EVENT)?;
+        helper.run(paused, self)?;
 
-        register_listener(
-            epoll_file.as_raw_fd(),
-            self.ctrl_q.queue_evt.as_raw_fd(),
-            epoll::Events::EPOLLIN,
-            u64::from(CTRL_QUEUE_EVENT),
-        )
-        .unwrap();
-        register_listener(
-            epoll_file.as_raw_fd(),
-            self.kill_evt.as_raw_fd(),
-            epoll::Events::EPOLLIN,
-            u64::from(KILL_EVENT),
-        )
-        .unwrap();
-        register_listener(
-            epoll_file.as_raw_fd(),
-            self.pause_evt.as_raw_fd(),
-            epoll::Events::EPOLLIN,
-            u64::from(PAUSE_EVENT),
-        )
-        .unwrap();
+        Ok(())
+    }
+}
 
-        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); CTRL_EVENT_COUNT];
-
-        // Before jumping into the epoll loop, check if the device is expected
-        // to be in a paused state. This is helpful for the restore code path
-        // as the device thread should not start processing anything before the
-        // device has been resumed.
-        while paused.load(Ordering::SeqCst) {
-            thread::park();
-        }
-
-        'epoll: loop {
-            let num_events = match epoll::wait(epoll_file.as_raw_fd(), -1, &mut events[..]) {
-                Ok(res) => res,
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::Interrupted {
-                        continue;
-                    }
-                    return Err(DeviceError::EpollWait(e));
+impl EpollHelperHandler for NetCtrlEpollHandler {
+    fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
+        let ev_type = event.data as u16;
+        match ev_type {
+            CTRL_QUEUE_EVENT => {
+                let mem = self.mem.memory();
+                if let Err(e) = self.ctrl_q.queue_evt.read() {
+                    error!("failed to get ctl queue event: {:?}", e);
+                    return true;
                 }
-            };
-
-            for event in events.iter().take(num_events) {
-                let ev_type = event.data as u16;
-
-                match ev_type {
-                    CTRL_QUEUE_EVENT => {
-                        let mem = self.mem.memory();
-                        if let Err(e) = self.ctrl_q.queue_evt.read() {
-                            error!("failed to get ctl queue event: {:?}", e);
-                        }
-                        if let Err(e) = self.ctrl_q.process_cvq(&mem) {
-                            error!("failed to process ctrl queue: {:?}", e);
-                        }
-                    }
-                    KILL_EVENT => {
-                        break 'epoll;
-                    }
-                    PAUSE_EVENT => {
-                        debug!("PAUSE_EVENT received, pausing vhost-user epoll loop");
-                        // We loop here to handle spurious park() returns.
-                        // Until we have not resumed, the paused boolean will
-                        // be true.
-                        while paused.load(Ordering::SeqCst) {
-                            std::thread::park();
-                        }
-
-                        // Drain pause event after the device has been resumed.
-                        // This ensures the pause event has been seen by each
-                        // and every thread related to this virtio device.
-                        let _ = self.pause_evt.read();
-                    }
-                    _ => {
-                        error!("Unknown event for virtio-net");
-                    }
+                if let Err(e) = self.ctrl_q.process_cvq(&mem) {
+                    error!("failed to process ctrl queue: {:?}", e);
+                    return true;
                 }
+            }
+            _ => {
+                error!("Unknown event for virtio-net");
+                return true;
             }
         }
 
-        Ok(())
+        false
     }
 }
 
