@@ -1024,24 +1024,23 @@ mod tests {
         self_spawned: bool,
         generate_host_mac: bool,
     ) {
-        test_block!(tb, "", {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut focal);
-            let api_socket = temp_api_path(&guest.tmp_dir);
+        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(&mut focal);
+        let api_socket = temp_api_path(&guest.tmp_dir);
 
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path().unwrap();
 
-            let host_mac = if generate_host_mac {
-                Some(MacAddr::local_random())
-            } else {
-                None
-            };
+        let host_mac = if generate_host_mac {
+            Some(MacAddr::local_random())
+        } else {
+            None
+        };
 
-            let (net_params, daemon_child) = if self_spawned {
-                (
+        let (net_params, daemon_child) = if self_spawned {
+            (
                     format!(
                         "vhost_user=true,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size=1024{}",
                         guest.network.guest_mac, guest.network.host_ip, num_queues,
@@ -1053,48 +1052,49 @@ mod tests {
                     ),
                     None,
                 )
-            } else {
-                let prepare_daemon = prepare_vhost_user_net_daemon.unwrap();
-                // Start the daemon
-                let (daemon_child, vunet_socket_path) =
-                    prepare_daemon(&guest.tmp_dir, &guest.network.host_ip, tap, num_queues);
+        } else {
+            let prepare_daemon = prepare_vhost_user_net_daemon.unwrap();
+            // Start the daemon
+            let (daemon_child, vunet_socket_path) =
+                prepare_daemon(&guest.tmp_dir, &guest.network.host_ip, tap, num_queues);
 
-                (
-                    format!(
-                        "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024{}",
-                        guest.network.guest_mac,
-                        vunet_socket_path,
-                        num_queues,
-                        if let Some(host_mac) = host_mac {
-                            format!(",host_mac={}", host_mac)
-                        } else {
-                            "".to_owned()
-                        }
-                    ),
-                    Some(daemon_child),
-                )
-            };
+            (
+                format!(
+                    "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024{}",
+                    guest.network.guest_mac,
+                    vunet_socket_path,
+                    num_queues,
+                    if let Some(host_mac) = host_mac {
+                        format!(",host_mac={}", host_mac)
+                    } else {
+                        "".to_owned()
+                    }
+                ),
+                Some(daemon_child),
+            )
+        };
 
-            let mut cloud_child = GuestCommand::new(&guest)
-                .args(&["--cpus", format!("boot={}", num_queues / 2).as_str()])
-                .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                .default_disks()
-                .args(&["--net", net_params.as_str()])
-                .args(&["--api-socket", &api_socket])
-                .spawn()
-                .unwrap();
+        let mut child = GuestCommand::new(&guest)
+            .args(&["--cpus", format!("boot={}", num_queues / 2).as_str()])
+            .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
+            .args(&["--kernel", kernel_path.to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(&["--net", net_params.as_str()])
+            .args(&["--api-socket", &api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
-
+        thread::sleep(std::time::Duration::new(20, 0));
+        let r = std::panic::catch_unwind(|| {
             if let Some(tap_name) = tap {
                 let tap_count = std::process::Command::new("bash")
                     .arg("-c")
                     .arg(format!("ip link | grep -c {}", tap_name))
                     .output()
                     .expect("Expected checking of tap count to succeed");
-                aver_eq!(tb, String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
+                assert_eq!(String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
             }
 
             if let Some(host_mac) = tap {
@@ -1103,7 +1103,7 @@ mod tests {
                     .arg(format!("ip link | grep -c {}", host_mac))
                     .output()
                     .expect("Expected checking of host mac to succeed");
-                aver_eq!(tb, String::from_utf8_lossy(&mac_count.stdout).trim(), "1");
+                assert_eq!(String::from_utf8_lossy(&mac_count.stdout).trim(), "1");
             }
 
             // 1 network interface + default localhost ==> 2 interfaces
@@ -1112,8 +1112,7 @@ mod tests {
             // it does not define any --net network interface. That means all
             // the ssh communication in that test happens through the network
             // interface backed by vhost-user-net.
-            aver_eq!(
-                tb,
+            assert_eq!(
                 guest
                     .ssh_command("ip -o link | wc -l")
                     .unwrap_or_default()
@@ -1134,8 +1133,7 @@ mod tests {
             // Based on the above, the total vectors should 14.
             // This is a PCI only feature.
             #[cfg(all(not(feature = "mmio"), feature = "acpi"))]
-            aver_eq!(
-                tb,
+            assert_eq!(
                 guest
                     .ssh_command("grep -c PCI-MSI /proc/interrupts")
                     .unwrap_or_default()
@@ -1164,20 +1162,20 @@ mod tests {
                 // Here by simply checking the size (through ssh), we validate
                 // the connection is still working, which means vhost-user-net
                 // keeps working after the resize.
-                aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
             }
-
-            let _ = cloud_child.kill();
-            let _ = cloud_child.wait();
-
-            if let Some(mut daemon_child) = daemon_child {
-                thread::sleep(std::time::Duration::new(5, 0));
-                let _ = daemon_child.kill();
-                let _ = daemon_child.wait();
-            }
-
-            Ok(())
         });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        if let Some(mut daemon_child) = daemon_child {
+            thread::sleep(std::time::Duration::new(5, 0));
+            let _ = daemon_child.kill();
+            let _ = daemon_child.wait();
+        }
+
+        handle_child_output(r, &output);
     }
 
     type PrepareBlkDaemon =
