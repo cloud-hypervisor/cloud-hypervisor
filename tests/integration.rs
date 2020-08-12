@@ -4666,49 +4666,48 @@ mod tests {
 
         #[test]
         fn test_initramfs() {
-            test_block!(tb, "", {
-                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-                let guest = Guest::new(&mut focal);
-                let mut workload_path = dirs::home_dir().unwrap();
-                workload_path.push("workloads");
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
 
-                let mut kernels = vec![];
-                kernels.push(direct_kernel_boot_path().unwrap());
+            let mut kernels = vec![];
+            kernels.push(direct_kernel_boot_path().unwrap());
 
-                #[cfg(target_arch = "x86_64")]
-                {
-                    let mut pvh_kernel_path = workload_path.clone();
-                    pvh_kernel_path.push("vmlinux.pvh");
-                    kernels.push(pvh_kernel_path);
-                }
+            #[cfg(target_arch = "x86_64")]
+            {
+                let mut pvh_kernel_path = workload_path.clone();
+                pvh_kernel_path.push("vmlinux.pvh");
+                kernels.push(pvh_kernel_path);
+            }
 
-                let mut initramfs_path = workload_path;
-                initramfs_path.push("alpine_initramfs.img");
+            let mut initramfs_path = workload_path;
+            initramfs_path.push("alpine_initramfs.img");
 
-                let test_string = String::from("axz34i9rylotd8n50wbv6kcj7f2qushme1pg");
-                let cmdline = format!("console=hvc0 quiet TEST_STRING={}", test_string);
+            let test_string = String::from("axz34i9rylotd8n50wbv6kcj7f2qushme1pg");
+            let cmdline = format!("console=hvc0 quiet TEST_STRING={}", test_string);
 
-                kernels.iter().for_each(|k_path| {
-                    let mut child = GuestCommand::new(&guest)
-                        .args(&["--kernel", k_path.to_str().unwrap()])
-                        .args(&["--initramfs", initramfs_path.to_str().unwrap()])
-                        .args(&["--cmdline", &cmdline])
-                        .capture_output()
-                        .spawn()
-                        .unwrap();
+            kernels.iter().for_each(|k_path| {
+                let mut child = GuestCommand::new(&guest)
+                    .args(&["--kernel", k_path.to_str().unwrap()])
+                    .args(&["--initramfs", initramfs_path.to_str().unwrap()])
+                    .args(&["--cmdline", &cmdline])
+                    .capture_output()
+                    .spawn()
+                    .unwrap();
 
-                    thread::sleep(std::time::Duration::new(20, 0));
+                thread::sleep(std::time::Duration::new(20, 0));
 
-                    let _ = child.kill();
-                    match child.wait_with_output() {
-                        Ok(out) => {
-                            let s = String::from_utf8_lossy(&out.stdout);
-                            aver_ne!(tb, s.lines().position(|line| line == test_string), None);
-                        }
-                        Err(_) => aver!(tb, false),
-                    }
+                let _ = child.kill();
+                let output = child.wait_with_output().unwrap();
+
+                let r = std::panic::catch_unwind(|| {
+                    let s = String::from_utf8_lossy(&output.stdout);
+
+                    assert_ne!(s.lines().position(|line| line == test_string), None);
                 });
-                Ok(())
+
+                handle_child_output(r, &output);
             });
         }
 
