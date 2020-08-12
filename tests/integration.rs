@@ -1881,52 +1881,52 @@ mod tests {
     }
 
     fn test_memory_mergeable(mergeable: bool) {
-        test_block!(tb, "", {
-            let memory_param = if mergeable {
-                "mergeable=on"
-            } else {
-                "mergeable=off"
-            };
+        let memory_param = if mergeable {
+            "mergeable=on"
+        } else {
+            "mergeable=off"
+        };
 
-            let mut focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let mut focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
 
-            let guest1 = Guest::new(&mut focal1 as &mut dyn DiskConfig);
+        let guest1 = Guest::new(&mut focal1 as &mut dyn DiskConfig);
 
-            let mut child1 = GuestCommand::new(&guest1)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
-                .args(&["--kernel", guest1.fw_path.as_str()])
-                .default_disks()
-                .args(&["--net", guest1.default_net_string().as_str()])
-                .args(&["--serial", "tty", "--console", "off"])
-                .spawn()
-                .unwrap();
+        let mut child1 = GuestCommand::new(&guest1)
+            .args(&["--cpus", "boot=1"])
+            .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
+            .args(&["--kernel", guest1.fw_path.as_str()])
+            .default_disks()
+            .args(&["--net", guest1.default_net_string().as_str()])
+            .args(&["--serial", "tty", "--console", "off"])
+            .spawn()
+            .unwrap();
 
-            // Let enough time for the first VM to be spawned, and to make
-            // sure the PSS measurement is accurate.
-            thread::sleep(std::time::Duration::new(120, 0));
+        // Let enough time for the first VM to be spawned, and to make
+        // sure the PSS measurement is accurate.
+        thread::sleep(std::time::Duration::new(120, 0));
 
-            // Get initial PSS
-            let old_pss = get_pss(child1.id());
+        // Get initial PSS
+        let old_pss = get_pss(child1.id());
 
-            let guest2 = Guest::new(&mut focal2 as &mut dyn DiskConfig);
+        let guest2 = Guest::new(&mut focal2 as &mut dyn DiskConfig);
 
-            let mut child2 = GuestCommand::new(&guest2)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
-                .args(&["--kernel", guest2.fw_path.as_str()])
-                .default_disks()
-                .args(&["--net", guest2.default_net_string().as_str()])
-                .args(&["--serial", "tty", "--console", "off"])
-                .spawn()
-                .unwrap();
+        let mut child2 = GuestCommand::new(&guest2)
+            .args(&["--cpus", "boot=1"])
+            .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
+            .args(&["--kernel", guest2.fw_path.as_str()])
+            .default_disks()
+            .args(&["--net", guest2.default_net_string().as_str()])
+            .args(&["--serial", "tty", "--console", "off"])
+            .capture_output()
+            .spawn()
+            .unwrap();
 
-            // Let enough time for the second VM to be spawned, and to make
-            // sure KSM has enough time to merge identical pages between the
-            // 2 VMs.
-            thread::sleep(std::time::Duration::new(60, 0));
-
+        // Let enough time for the second VM to be spawned, and to make
+        // sure KSM has enough time to merge identical pages between the
+        // 2 VMs.
+        thread::sleep(std::time::Duration::new(60, 0));
+        let r = std::panic::catch_unwind(|| {
             // Get new PSS
             let new_pss = get_pss(child1.id());
 
@@ -1937,17 +1937,19 @@ mod tests {
             println!("old PSS {}, new PSS {}", old_pss, new_pss);
 
             if mergeable {
-                aver!(tb, new_pss < (old_pss * 0.95));
+                assert!(new_pss < (old_pss * 0.95));
             } else {
-                aver!(tb, (old_pss * 0.95) < new_pss && new_pss < (old_pss * 1.05));
+                assert!((old_pss * 0.95) < new_pss && new_pss < (old_pss * 1.05));
             }
-
-            let _ = child1.kill();
-            let _ = child2.kill();
-            let _ = child1.wait();
-            let _ = child2.wait();
-            Ok(())
         });
+
+        let _ = child1.kill();
+        let _ = child2.kill();
+
+        let output = child1.wait_with_output().unwrap();
+        child2.wait().unwrap();
+
+        handle_child_output(r, &output);
     }
 
     fn _get_vmm_overhead(pid: u32, guest_memory_size: u32) -> HashMap<String, u32> {
