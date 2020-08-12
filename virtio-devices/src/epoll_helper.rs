@@ -25,6 +25,7 @@ pub enum EpollHelperError {
     CreateFd(std::io::Error),
     Ctl(std::io::Error),
     Wait(std::io::Error),
+    Other(String),
 }
 
 pub const EPOLL_HELPER_EVENT_PAUSE: u16 = 0;

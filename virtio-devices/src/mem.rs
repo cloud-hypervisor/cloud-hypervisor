@@ -631,6 +631,19 @@ impl MemEpollHandler {
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
         helper.run(paused, paused_sync, self)?;
 
+        let resp_type = MemEpollHandler::virtio_mem_unplug_all(
+            *self.config.lock().unwrap(),
+            &mut self.mem_state,
+            self.host_addr,
+            self.host_fd,
+        );
+        if resp_type != VIRTIO_MEM_RESP_ACK {
+            return Err(EpollHelperError::Other(format!(
+                "virtio_mem_unplug_all got {}",
+                resp_type
+            )));
+        }
+
         Ok(())
     }
 }
