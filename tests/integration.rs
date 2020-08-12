@@ -1473,65 +1473,61 @@ mod tests {
         prepare_daemon: &dyn Fn(&TempDir, &str, &str) -> (std::process::Child, String),
         hotplug: bool,
     ) {
-        test_block!(tb, "", {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut focal);
-            let api_socket = temp_api_path(&guest.tmp_dir);
+        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(&mut focal);
+        let api_socket = temp_api_path(&guest.tmp_dir);
 
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
 
-            let mut shared_dir = workload_path;
-            shared_dir.push("shared_dir");
+        let mut shared_dir = workload_path;
+        shared_dir.push("shared_dir");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path().unwrap();
 
-            let (dax_vmm_param, dax_mount_param) = if dax { ("on", "-o dax") } else { ("off", "") };
-            let cache_size_vmm_param = if let Some(cache) = cache_size {
-                format!(",cache_size={}", cache)
-            } else {
-                "".to_string()
-            };
+        let (dax_vmm_param, dax_mount_param) = if dax { ("on", "-o dax") } else { ("off", "") };
+        let cache_size_vmm_param = if let Some(cache) = cache_size {
+            format!(",cache_size={}", cache)
+        } else {
+            "".to_string()
+        };
 
-            let (mut daemon_child, virtiofsd_socket_path) = prepare_daemon(
-                &guest.tmp_dir,
-                shared_dir.to_str().unwrap(),
-                virtiofsd_cache,
-            );
+        let (mut daemon_child, virtiofsd_socket_path) = prepare_daemon(
+            &guest.tmp_dir,
+            shared_dir.to_str().unwrap(),
+            virtiofsd_cache,
+        );
 
-            let mut guest_command = GuestCommand::new(&guest);
-            guest_command
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .default_disks()
-                .default_net()
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                .args(&["--api-socket", &api_socket]);
+        let mut guest_command = GuestCommand::new(&guest);
+        guest_command
+            .args(&["--cpus", "boot=1"])
+            .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
+            .args(&["--kernel", kernel_path.to_str().unwrap()])
+            .default_disks()
+            .default_net()
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(&["--api-socket", &api_socket]);
 
-            let fs_params = format!(
-                "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024,dax={}{}",
-                virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
-            );
+        let fs_params = format!(
+            "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024,dax={}{}",
+            virtiofsd_socket_path, dax_vmm_param, cache_size_vmm_param
+        );
 
-            if !hotplug {
-                guest_command.args(&["--fs", fs_params.as_str()]);
-            }
+        if !hotplug {
+            guest_command.args(&["--fs", fs_params.as_str()]);
+        }
 
-            let mut child = guest_command.spawn().unwrap();
+        let mut child = guest_command.capture_output().spawn().unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
-
+        thread::sleep(std::time::Duration::new(20, 0));
+        let r = std::panic::catch_unwind(|| {
             if hotplug {
                 // Add fs to the VM
                 let (cmd_success, cmd_output) =
                     remote_command_w_output(&api_socket, "add-fs", Some(&fs_params));
-                aver!(tb, cmd_success);
-                aver!(
-                    tb,
-                    String::from_utf8_lossy(&cmd_output)
-                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}")
-                );
+                assert!(cmd_success);
+                assert!(String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}"));
 
                 thread::sleep(std::time::Duration::new(10, 0));
             }
@@ -1543,8 +1539,7 @@ mod tests {
                  echo ok",
                 dax_mount_param
             );
-            aver_eq!(
-                tb,
+            assert_eq!(
                 guest.ssh_command(&mount_cmd).unwrap_or_default().trim(),
                 "ok"
             );
@@ -1552,16 +1547,14 @@ mod tests {
             // Check the cache size is the expected one.
             // With virtio-mmio the cache doesn't appear in /proc/iomem
             #[cfg(not(feature = "mmio"))]
-            aver_eq!(
-                tb,
+            assert_eq!(
                 guest
                     .valid_virtio_fs_cache_size(dax, cache_size)
                     .unwrap_or_default(),
                 true
             );
             // Check file1 exists and its content is "foo"
-            aver_eq!(
-                tb,
+            assert_eq!(
                 guest
                     .ssh_command("cat mount_dir/file1")
                     .unwrap_or_default()
@@ -1569,8 +1562,7 @@ mod tests {
                 "foo"
             );
             // Check file2 does not exist
-            aver_ne!(
-                tb,
+            assert_ne!(
                 guest
                     .ssh_command("ls mount_dir/file2")
                     .unwrap_or_default()
@@ -1578,8 +1570,7 @@ mod tests {
                 "mount_dir/file2"
             );
             // Check file3 exists and its content is "bar"
-            aver_eq!(
-                tb,
+            assert_eq!(
                 guest
                     .ssh_command("cat mount_dir/file3")
                     .unwrap_or_default()
@@ -1604,12 +1595,11 @@ mod tests {
                 resize_command(&api_socket, None, Some(desired_ram), None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
-                aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
 
                 // After the resize, check again that file1 exists and its
                 // content is "foo".
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command("cat mount_dir/file1")
                         .unwrap_or_default()
@@ -1620,25 +1610,26 @@ mod tests {
 
             if hotplug {
                 // Remove from VM
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command("sudo umount mount_dir && echo ok")
                         .unwrap_or_default()
                         .trim(),
                     "ok"
                 );
-                aver!(
-                    tb,
-                    remote_command(&api_socket, "remove-device", Some("myfs0"),)
-                );
+                assert!(remote_command(&api_socket, "remove-device", Some("myfs0")));
+            }
+        });
 
-                thread::sleep(std::time::Duration::new(10, 0));
-                let (mut daemon_child, virtiofsd_socket_path) = prepare_daemon(
-                    &guest.tmp_dir,
-                    shared_dir.to_str().unwrap(),
-                    virtiofsd_cache,
-                );
+        let (r, hotplug_daemon_child) = if r.is_ok() && hotplug {
+            thread::sleep(std::time::Duration::new(10, 0));
+            let (daemon_child, virtiofsd_socket_path) = prepare_daemon(
+                &guest.tmp_dir,
+                shared_dir.to_str().unwrap(),
+                virtiofsd_cache,
+            );
+
+            let r = std::panic::catch_unwind(|| {
                 thread::sleep(std::time::Duration::new(10, 0));
                 let fs_params = format!(
                     "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024,dax={}{}",
@@ -1648,12 +1639,9 @@ mod tests {
                 // Add back and check it works
                 let (cmd_success, cmd_output) =
                     remote_command_w_output(&api_socket, "add-fs", Some(&fs_params));
-                aver!(tb, cmd_success);
-                aver!(
-                    tb,
-                    String::from_utf8_lossy(&cmd_output)
-                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}")
-                );
+                assert!(cmd_success);
+                assert!(String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}"));
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Mount shared directory through virtio_fs filesystem
                 let mount_cmd = format!(
@@ -1662,30 +1650,37 @@ mod tests {
                      echo ok",
                     dax_mount_param
                 );
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest.ssh_command(&mount_cmd).unwrap_or_default().trim(),
                     "ok"
                 );
                 // Check file1 exists and its content is "foo"
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command("cat mount_dir/file1")
                         .unwrap_or_default()
                         .trim(),
                     "foo"
                 );
-                let _ = daemon_child.kill();
-                let _ = daemon_child.wait();
-            }
+            });
 
-            let _ = child.kill();
+            (r, Some(daemon_child))
+        } else {
+            (r, None)
+        };
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        let _ = daemon_child.kill();
+        let _ = daemon_child.wait();
+
+        if let Some(mut daemon_child) = hotplug_daemon_child {
             let _ = daemon_child.kill();
-            let _ = child.wait();
             let _ = daemon_child.wait();
-            Ok(())
-        });
+        }
+
+        handle_child_output(r, &output);
     }
 
     fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
