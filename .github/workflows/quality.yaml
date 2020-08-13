@@ -1,0 +1,39 @@
+name: Cloud Hypervisor Quality Checks
+on: [pull_request, create]
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    name: Quality (clippy, rustfmt)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+        target:
+          - x86_64-unknown-linux-gnu
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v2
+      - name: Install Rust toolchain (${{ matrix.rust }})
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: ${{ matrix.rust }}
+            target: ${{ matrix.target }}
+            override: true
+            components: rustfmt, clippy
+      
+      - name: Formatting (rustfmt)
+        run: cargo fmt -- --check
+
+      - name: Clippy (all features)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      
+      - name: Clippy (pci,acpi,kvm)
+        run: cargo clippy --all-targets --no-default-features --features "pci,acpi,kvm" -- -D warnings
+      
+      - name: Clippy (pci,kvm)
+        run: cargo clippy --all-targets --no-default-features --features "pci,kvm" -- -D warnings
+      
+      - name: Clippy (mmio,kvm)
+        run: cargo clippy --all-targets --no-default-features --features "mmio,kvm" -- -D warnings
