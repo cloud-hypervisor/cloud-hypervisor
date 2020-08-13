@@ -25,5 +25,17 @@ jobs:
             target: ${{ matrix.target }}
             override: true
 
-      - name: Build
+      - name: Debug Build (default features)
+        run: cargo build --all --target=${{ matrix.target }}
+
+      - name: Build (pci,acpi,kvm)
+        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "pci,acpi,kvm"  -- -D warnings
+
+      - name: Build (pci,kvm)
+        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "pci,kvm"  -- -D warnings
+        
+      - name: Build (mmio,kvm)
+        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "mmio,kvm"  -- -D warnings
+
+      - name: Release Build (default features)
         run: cargo build --all --release --target=${{ matrix.target }}
