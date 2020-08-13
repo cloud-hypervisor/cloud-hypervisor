@@ -58,7 +58,7 @@ impl RawFile {
         }
         RawFile {
             file,
-            alignment: alignment.try_into().unwrap(),
+            alignment,
             position: 0,
         }
     }
@@ -175,7 +175,7 @@ impl Read for RawFile {
 
             self.seek(SeekFrom::Current(to_copy.try_into().unwrap()))
                 .unwrap();
-            Ok(to_copy.try_into().unwrap())
+            Ok(to_copy)
         }
     }
 }
@@ -259,7 +259,7 @@ impl Write for RawFile {
 
                 self.seek(SeekFrom::Current(to_seek.try_into().unwrap()))
                     .unwrap();
-                Ok(to_seek.try_into().unwrap())
+                Ok(to_seek)
             }
         }
     }
