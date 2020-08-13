@@ -32,11 +32,6 @@ pipeline{
 								checkout scm
 							}
 						}
-						stage ('Run Cargo tests') {
-							steps {
-								sh "scripts/dev_cli.sh tests --cargo"
-							}
-						}
 						stage ('Run OpenAPI tests') {
 							steps {
 								sh "scripts/run_openapi_tests.sh"
