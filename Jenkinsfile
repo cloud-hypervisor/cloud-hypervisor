@@ -24,21 +24,6 @@ pipeline{
 		stage ('Build') {
 			failFast true
             parallel {
-				stage ('Master build') {
-					agent { node { label 'master' } }
-					stages {
-						stage ('Checkout') {
-							steps {
-								checkout scm
-							}
-						}
-						stage ('Run OpenAPI tests') {
-							steps {
-								sh "scripts/run_openapi_tests.sh"
-							}
-						}
-					}
-				}	
 				stage ('Worker build') {
 					agent { node { label 'bionic' } }
 					options {
@@ -48,6 +33,11 @@ pipeline{
 						stage ('Checkout') {
 							steps {
 								checkout scm
+							}
+						}
+						stage ('Run OpenAPI tests') {
+							steps {
+								sh "scripts/run_openapi_tests.sh"
 							}
 						}
 						stage ('Run unit tests') {
