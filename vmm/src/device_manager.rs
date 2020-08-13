@@ -3438,6 +3438,7 @@ impl Aml for DeviceManager {
                 vec![
                     &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
                     &aml::Name::new("_STA".into(), &0x0bu8),
+                    &aml::Name::new("_UID".into(), &"PCI Hotplug Controller"),
                     &aml::Mutex::new("BLCK".into(), 0),
                     // I/O port for PCI hotplug controller
                     &aml::Name::new(
