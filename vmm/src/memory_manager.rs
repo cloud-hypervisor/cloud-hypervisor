@@ -1225,6 +1225,7 @@ impl Aml for MemoryManager {
                 "_SB_.MHPC".into(),
                 vec![
                     &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
+                    &aml::Name::new("_UID".into(), &"Memory Hotplug Controller"),
                     // Mutex to protect concurrent access as we write to choose slot and then read back status
                     &aml::Mutex::new("MLCK".into(), 0),
                     // I/O port for memory controller
