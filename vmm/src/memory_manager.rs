@@ -1034,12 +1034,16 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn virtiomem_resize(&mut self, size: u64) -> Result<(), Error> {
+    pub fn virtiomem_setup(&mut self) -> Result<(), Error> {
         let region = self.virtiomem_region.take();
-        if let Some(region) = region {
-            self.add_region(region)?;
+        if let Some(r) = region {
+            self.add_region(r)
+        } else {
+            Ok(())
         }
+    }
 
+    pub fn virtiomem_resize(&mut self, size: u64) -> Result<(), Error> {
         if let Some(resize) = &self.virtiomem_resize {
             resize.work(size).map_err(Error::VirtioMemResizeFail)?;
         } else {

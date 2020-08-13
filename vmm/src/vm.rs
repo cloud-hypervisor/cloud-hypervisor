@@ -1119,6 +1119,17 @@ impl Vm {
 
         self.configure_system(entry_point)?;
 
+        // configure_system will setup all region in memory_manager to
+        // guest system as normal memory.
+        // But virtio-mem region should be not available before virtio-mem
+        // setup.
+        // So setup virtio-mem region after configure_system.
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .virtiomem_setup()
+            .map_err(Error::MemoryManager)?;
+
         self.cpu_manager
             .lock()
             .unwrap()
