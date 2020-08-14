@@ -431,14 +431,14 @@ impl VirtioDevice for Net {
                 self.paused_sync = Arc::new(Barrier::new(taps.len() + 2));
                 let paused_sync = self.paused_sync.clone();
 
-                // Retrieve seccomp filter for virtio_net thread
-                let virtio_net_seccomp_filter =
-                    get_seccomp_filter(&self.seccomp_action, Thread::VirtioNet)
+                // Retrieve seccomp filter for virtio_net_ctl thread
+                let virtio_net_ctl_seccomp_filter =
+                    get_seccomp_filter(&self.seccomp_action, Thread::VirtioNetCtl)
                         .map_err(ActivateError::CreateSeccompFilter)?;
                 thread::Builder::new()
-                    .name("virtio_net".to_string())
+                    .name("virtio_net_ctl".to_string())
                     .spawn(move || {
-                        if let Err(e) = SeccompFilter::apply(virtio_net_seccomp_filter) {
+                        if let Err(e) = SeccompFilter::apply(virtio_net_ctl_seccomp_filter) {
                             error!("Error applying seccomp filter: {:?}", e);
                         } else if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync) {
                             error!("Error running worker: {:?}", e);
