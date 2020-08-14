@@ -490,10 +490,16 @@ impl VirtioDevice for Net {
 
                 let paused = self.paused.clone();
                 let paused_sync = self.paused_sync.clone();
+                // Retrieve seccomp filter for virtio_net thread
+                let virtio_net_seccomp_filter =
+                    get_seccomp_filter(&self.seccomp_action, Thread::VirtioNet)
+                        .map_err(ActivateError::CreateSeccompFilter)?;
                 thread::Builder::new()
                     .name("virtio_net".to_string())
                     .spawn(move || {
-                        if let Err(e) = handler.run(paused, paused_sync) {
+                        if let Err(e) = SeccompFilter::apply(virtio_net_seccomp_filter) {
+                            error!("Error applying seccomp filter: {:?}", e);
+                        } else if let Err(e) = handler.run(paused, paused_sync) {
                             error!("Error running worker: {:?}", e);
                         }
                     })
