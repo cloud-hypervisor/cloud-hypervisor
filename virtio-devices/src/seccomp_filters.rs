@@ -13,7 +13,7 @@ pub enum Thread {
     VirtioBlk,
     VirtioConsole,
     VirtioIommu,
-    VirtioNet,
+    VirtioNetCtl,
     VirtioPmem,
     VirtioRng,
 }
@@ -96,7 +96,7 @@ fn virtio_iommu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     ])
 }
 
-fn virtio_net_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+fn virtio_net_ctl_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -166,7 +166,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
         Thread::VirtioBlk => virtio_blk_thread_rules()?,
         Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioIommu => virtio_iommu_thread_rules()?,
-        Thread::VirtioNet => virtio_net_thread_rules()?,
+        Thread::VirtioNetCtl => virtio_net_ctl_thread_rules()?,
         Thread::VirtioPmem => virtio_pmem_thread_rules()?,
         Thread::VirtioRng => virtio_rng_thread_rules()?,
     };
@@ -182,7 +182,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
         Thread::VirtioBlk => virtio_blk_thread_rules()?,
         Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioIommu => virtio_iommu_thread_rules()?,
-        Thread::VirtioNet => virtio_net_thread_rules()?,
+        Thread::VirtioNetCtl => virtio_net_ctl_thread_rules()?,
         Thread::VirtioPmem => virtio_pmem_thread_rules()?,
         Thread::VirtioRng => virtio_rng_thread_rules()?,
     };
