@@ -8,9 +8,11 @@ use super::{
     EpollHelperHandler, Queue, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
     VIRTIO_F_VERSION_1,
 };
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
+use seccomp::{SeccompAction, SeccompFilter};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display};
 use std::io;
@@ -748,6 +750,7 @@ pub struct Iommu {
     epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     paused: Arc<AtomicBool>,
     paused_sync: Arc<Barrier>,
+    seccomp_action: SeccompAction,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -759,7 +762,7 @@ struct IommuState {
 }
 
 impl Iommu {
-    pub fn new(id: String) -> io::Result<(Self, Arc<IommuMapping>)> {
+    pub fn new(id: String, seccomp_action: SeccompAction) -> io::Result<(Self, Arc<IommuMapping>)> {
         let config = VirtioIommuConfig {
             page_size_mask: VIRTIO_IOMMU_PAGE_SIZE_MASK,
             probe_size: PROBE_PROP_SIZE,
@@ -789,6 +792,7 @@ impl Iommu {
                 epoll_threads: None,
                 paused: Arc::new(AtomicBool::new(false)),
                 paused_sync: Arc::new(Barrier::new(2)),
+                seccomp_action,
             },
             mapping,
         ))
@@ -963,10 +967,16 @@ impl VirtioDevice for Iommu {
         let paused = self.paused.clone();
         let paused_sync = self.paused_sync.clone();
         let mut epoll_threads = Vec::new();
+        // Retrieve seccomp filter for virtio_iommu thread
+        let virtio_iommu_seccomp_filter =
+            get_seccomp_filter(&self.seccomp_action, Thread::VirtioIommu)
+                .map_err(ActivateError::CreateSeccompFilter)?;
         thread::Builder::new()
             .name("virtio_iommu".to_string())
             .spawn(move || {
-                if let Err(e) = handler.run(paused, paused_sync) {
+                if let Err(e) = SeccompFilter::apply(virtio_iommu_seccomp_filter) {
+                    error!("Error applying seccomp filter: {:?}", e);
+                } else if let Err(e) = handler.run(paused, paused_sync) {
                     error!("Error running worker: {:?}", e);
                 }
             })
