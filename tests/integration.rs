@@ -4112,7 +4112,7 @@ mod tests {
                 aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
                 aver!(tb, guest.get_total_memory().unwrap_or_default() < 960_000);
 
-                let reboot_count = guest
+/*                let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
                     .unwrap_or_default()
                     .trim()
@@ -4129,7 +4129,7 @@ mod tests {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
-                aver_eq!(tb, reboot_count, 1);
+                aver_eq!(tb, reboot_count, 1);*/
 
                 aver!(tb, guest.get_total_memory().unwrap_or_default() < 960_000);
 
@@ -4228,13 +4228,33 @@ mod tests {
                 thread::sleep(std::time::Duration::new(10, 0));
                 aver!(tb, guest.get_total_memory().unwrap_or_default() > 1_920_000);
 
-                // Remove RAM to the VM
+                // Remove RAM from the VM
                 let desired_ram = 1024 << 20;
                 resize_command(&api_socket, None, Some(desired_ram), None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
                 aver!(tb, guest.get_total_memory().unwrap_or_default() > 960_000);
                 aver!(tb, guest.get_total_memory().unwrap_or_default() < 1_920_000);
+
+                // Reboot guest kernel
+                let reboot_count = guest
+                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1);
+
+                aver_eq!(tb, reboot_count, 0);
+                guest.ssh_command("sudo reboot").unwrap_or_default();
+
+                thread::sleep(std::time::Duration::new(30, 0));
+                let reboot_count = guest
+                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default();
+                aver_eq!(tb, reboot_count, 1);
 
                 let _ = child.kill();
                 let _ = child.wait();
