@@ -206,7 +206,7 @@ pub struct Net {
     config: VirtioNetConfig,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
     paused: Arc<AtomicBool>,
     paused_sync: Arc<Barrier>,
@@ -492,7 +492,11 @@ impl VirtioDevice for Net {
                 let paused_sync = self.paused_sync.clone();
                 thread::Builder::new()
                     .name("virtio_net".to_string())
-                    .spawn(move || handler.run(paused, paused_sync))
+                    .spawn(move || {
+                        if let Err(e) = handler.run(paused, paused_sync) {
+                            error!("Error running worker: {:?}", e);
+                        }
+                    })
                     .map(|thread| epoll_threads.push(thread))
                     .map_err(|e| {
                         error!("failed to clone queue EventFd: {}", e);
