@@ -1009,8 +1009,9 @@ impl DeviceManager {
             let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
             let (iommu_device, iommu_mapping) = if self.config.lock().unwrap().iommu {
-                let (device, mapping) = virtio_devices::Iommu::new(iommu_id.clone())
-                    .map_err(DeviceManagerError::CreateVirtioIommu)?;
+                let (device, mapping) =
+                    virtio_devices::Iommu::new(iommu_id.clone(), self.seccomp_action.clone())
+                        .map_err(DeviceManagerError::CreateVirtioIommu)?;
                 let device = Arc::new(Mutex::new(device));
                 self.iommu_device = Some(Arc::clone(&device));
 
