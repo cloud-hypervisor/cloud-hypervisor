@@ -305,7 +305,7 @@ pub struct Vsock<B: VsockBackend> {
     acked_features: u64,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     paused: Arc<AtomicBool>,
     paused_sync: Arc<Barrier>,
     path: PathBuf,
@@ -486,7 +486,11 @@ where
         let mut epoll_threads = Vec::new();
         thread::Builder::new()
             .name("virtio_vsock".to_string())
-            .spawn(move || handler.run(paused, paused_sync))
+            .spawn(move || {
+                if let Err(e) = handler.run(paused, paused_sync) {
+                    error!("Error running worker: {:?}", e);
+                }
+            })
             .map(|thread| epoll_threads.push(thread))
             .map_err(|e| {
                 error!("failed to clone the vsock epoll thread: {}", e);

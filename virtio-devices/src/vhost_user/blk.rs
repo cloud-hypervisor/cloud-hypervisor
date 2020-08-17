@@ -1,9 +1,7 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::{
-    ActivateError, ActivateResult, EpollHelperError, Queue, VirtioDevice, VirtioDeviceType,
-};
+use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
 use super::handler::*;
 use super::vu_common_ctrl::*;
 use super::{Error, Result};
@@ -42,7 +40,7 @@ pub struct Blk {
     queue_sizes: Vec<u16>,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     paused: Arc<AtomicBool>,
     paused_sync: Arc<Barrier>,
 }
@@ -278,7 +276,11 @@ impl VirtioDevice for Blk {
             let paused_sync = self.paused_sync.clone();
             thread::Builder::new()
                 .name("vhost_user_blk".to_string())
-                .spawn(move || handler.run(paused, paused_sync))
+                .spawn(move || {
+                    if let Err(e) = handler.run(paused, paused_sync) {
+                        error!("Error running worker: {:?}", e);
+                    }
+                })
                 .map(|thread| epoll_threads.push(thread))
                 .map_err(|e| {
                     error!("failed to clone virtio epoll thread: {}", e);
