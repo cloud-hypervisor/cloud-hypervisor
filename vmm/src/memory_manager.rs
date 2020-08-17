@@ -613,11 +613,9 @@ impl MemoryManager {
         };
 
         #[cfg(target_arch = "x86_64")]
-        let start_addr = if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
-            arch::layout::RAM_64BIT_START
-        } else {
-            start_addr
-        };
+        if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
+            return arch::layout::RAM_64BIT_START;
+        }
 
         start_addr
     }
