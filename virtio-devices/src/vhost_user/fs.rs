@@ -5,8 +5,8 @@ use super::vu_common_ctrl::{reset_vhost_user, setup_vhost_user, update_mem_table
 use super::{Error, Result};
 use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::{
-    ActivateError, ActivateResult, EpollHelperError, Queue, UserspaceMapping, VirtioDevice,
-    VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioDevice, VirtioDeviceType,
+    VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
 };
 use libc::{self, c_void, off64_t, pread64, pwrite64, EFD_NONBLOCK};
 use std::io;
@@ -278,7 +278,7 @@ pub struct Fs {
     slave_req_support: bool,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<result::Result<(), EpollHelperError>>>>,
+    epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     paused: Arc<AtomicBool>,
     paused_sync: Arc<Barrier>,
 }
@@ -506,7 +506,11 @@ impl VirtioDevice for Fs {
         let mut epoll_threads = Vec::new();
         thread::Builder::new()
             .name("virtio_fs".to_string())
-            .spawn(move || handler.run(paused, paused_sync))
+            .spawn(move || {
+                if let Err(e) = handler.run(paused, paused_sync) {
+                    error!("Error running worker: {:?}", e);
+                }
+            })
             .map(|thread| epoll_threads.push(thread))
             .map_err(|e| {
                 error!("failed to clone queue EventFd: {}", e);
