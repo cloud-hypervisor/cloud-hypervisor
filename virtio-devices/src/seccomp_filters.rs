@@ -60,6 +60,7 @@ fn virtio_blk_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 
 fn virtio_console_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
+        allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
@@ -85,6 +86,7 @@ fn virtio_console_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 
 fn virtio_iommu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
+        allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_epoll_create1),
         allow_syscall(libc::SYS_epoll_ctl),
         allow_syscall(libc::SYS_dup),
@@ -99,6 +101,7 @@ fn virtio_iommu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 
 fn virtio_net_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
+        allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_epoll_create1),
         allow_syscall(libc::SYS_epoll_ctl),
@@ -119,6 +122,7 @@ fn virtio_net_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 
 fn virtio_net_ctl_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
+        allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
@@ -138,6 +142,7 @@ fn virtio_net_ctl_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 
 fn virtio_pmem_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
+        allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
