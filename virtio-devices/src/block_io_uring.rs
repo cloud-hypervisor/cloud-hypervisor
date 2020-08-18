@@ -13,11 +13,13 @@ use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
     VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
 use block_util::{build_disk_image_id, Request, RequestType, VirtioBlockConfig};
 use io_uring::IoUring;
 use libc::EFD_NONBLOCK;
+use seccomp::{SeccompAction, SeccompFilter};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
@@ -308,6 +310,7 @@ pub struct BlockIoUring {
     config: VirtioBlockConfig,
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
+    seccomp_action: SeccompAction,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -321,6 +324,7 @@ pub struct BlockState {
 
 impl BlockIoUring {
     /// Create a new virtio block device that operates on the given file.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         mut disk_image: File,
@@ -329,6 +333,7 @@ impl BlockIoUring {
         iommu: bool,
         num_queues: usize,
         queue_size: u16,
+        seccomp_action: SeccompAction,
     ) -> io::Result<Self> {
         let disk_size = disk_image.seek(SeekFrom::End(0))? as u64;
         if disk_size % SECTOR_SIZE != 0 {
@@ -378,6 +383,7 @@ impl BlockIoUring {
             config,
             writeback: Arc::new(AtomicBool::new(true)),
             counters: BlockCounters::default(),
+            seccomp_action,
         })
     }
 
@@ -545,10 +551,17 @@ impl VirtioDevice for BlockIoUring {
                     ActivateError::BadActivate
                 })?;
 
+            // Retrieve seccomp filter for virtio_blk_io_uring thread
+            let virtio_blk_io_uring_seccomp_filter =
+                get_seccomp_filter(&self.seccomp_action, Thread::VirtioBlkIoUring)
+                    .map_err(ActivateError::CreateSeccompFilter)?;
+
             thread::Builder::new()
-                .name("virtio_blk".to_string())
+                .name("virtio_blk_io_uring".to_string())
                 .spawn(move || {
-                    if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
+                    if let Err(e) = SeccompFilter::apply(virtio_blk_io_uring_seccomp_filter) {
+                        error!("Error applying seccomp filter: {:?}", e);
+                    } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
                     }
                 })

@@ -12,6 +12,7 @@ use std::convert::TryInto;
 pub enum Thread {
     VirtioBalloon,
     VirtioBlk,
+    VirtioBlkIoUring,
     VirtioConsole,
     VirtioIommu,
     VirtioMem,
@@ -24,6 +25,9 @@ pub enum Thread {
     VirtioVhostNet,
     VirtioVhostNetCtl,
 }
+
+// Define io_uring syscalls as they are not yet part of libc.
+const SYS_IO_URING_ENTER: i64 = 426;
 
 fn virtio_balloon_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
@@ -85,6 +89,28 @@ fn virtio_blk_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     ])
 }
 
+fn virtio_blk_io_uring_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+    Ok(vec![
+        allow_syscall(libc::SYS_brk),
+        allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_dup),
+        allow_syscall(libc::SYS_epoll_create1),
+        allow_syscall(libc::SYS_epoll_ctl),
+        allow_syscall(libc::SYS_epoll_pwait),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_epoll_wait),
+        allow_syscall(libc::SYS_exit),
+        allow_syscall(libc::SYS_futex),
+        allow_syscall(SYS_IO_URING_ENTER),
+        allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_munmap),
+        allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_rt_sigprocmask),
+        allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_write),
+    ])
+}
+
 fn virtio_console_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_brk),
@@ -114,9 +140,9 @@ fn virtio_console_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 fn virtio_iommu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_brk),
+        allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
         allow_syscall(libc::SYS_epoll_ctl),
-        allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_pwait),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_epoll_wait),
@@ -147,9 +173,9 @@ fn virtio_net_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
         allow_syscall(libc::SYS_epoll_ctl),
-        allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_pwait),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_epoll_wait),
@@ -327,6 +353,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
     let rules = match thread_type {
         Thread::VirtioBalloon => virtio_balloon_thread_rules()?,
         Thread::VirtioBlk => virtio_blk_thread_rules()?,
+        Thread::VirtioBlkIoUring => virtio_blk_io_uring_thread_rules()?,
         Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioIommu => virtio_iommu_thread_rules()?,
         Thread::VirtioMem => virtio_mem_thread_rules()?,
@@ -350,6 +377,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
         Thread::VirtioBalloon => virtio_balloon_thread_rules()?,
         Thread::VirtioBlk => virtio_blk_thread_rules()?,
+        Thread::VirtioBlkIoUring => virtio_blk_io_uring_thread_rules()?,
         Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioIommu => virtio_iommu_thread_rules()?,
         Thread::VirtioMem => virtio_mem_thread_rules()?,
