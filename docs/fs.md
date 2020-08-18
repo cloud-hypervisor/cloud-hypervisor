@@ -56,7 +56,7 @@ Assuming you have `focal-server-cloudimg-amd64.raw` and `custom-vmlinux.bin` on 
 ```bash
 ./cloud-hypervisor \
     --cpus 4 \
-    --memory "size=512,file=/dev/shm" \
+    --memory "size=512M,shared=on" \
     --disk path=focal-server-cloudimg-amd64.raw \
     --kernel custom-vmlinux.bin \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
