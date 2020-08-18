@@ -13,6 +13,7 @@ pub enum Thread {
     VirtioBlk,
     VirtioConsole,
     VirtioIommu,
+    VirtioMem,
     VirtioNet,
     VirtioNetCtl,
     VirtioPmem,
@@ -94,6 +95,23 @@ fn virtio_iommu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_epoll_wait),
         allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_write),
+    ])
+}
+
+fn virtio_mem_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+    Ok(vec![
+        allow_syscall(libc::SYS_brk),
+        allow_syscall(libc::SYS_dup),
+        allow_syscall(libc::SYS_epoll_create1),
+        allow_syscall(libc::SYS_epoll_ctl),
+        allow_syscall(libc::SYS_epoll_pwait),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_epoll_wait),
+        allow_syscall(libc::SYS_fallocate),
+        allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_madvise),
         allow_syscall(libc::SYS_read),
         allow_syscall(libc::SYS_write),
     ])
@@ -193,6 +211,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
         Thread::VirtioBlk => virtio_blk_thread_rules()?,
         Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioIommu => virtio_iommu_thread_rules()?,
+        Thread::VirtioMem => virtio_mem_thread_rules()?,
         Thread::VirtioNet => virtio_net_thread_rules()?,
         Thread::VirtioNetCtl => virtio_net_ctl_thread_rules()?,
         Thread::VirtioPmem => virtio_pmem_thread_rules()?,
@@ -210,6 +229,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
         Thread::VirtioBlk => virtio_blk_thread_rules()?,
         Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioIommu => virtio_iommu_thread_rules()?,
+        Thread::VirtioMem => virtio_mem_thread_rules()?,
         Thread::VirtioNet => virtio_net_thread_rules()?,
         Thread::VirtioNetCtl => virtio_net_ctl_thread_rules()?,
         Thread::VirtioPmem => virtio_pmem_thread_rules()?,

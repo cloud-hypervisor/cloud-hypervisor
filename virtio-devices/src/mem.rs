@@ -19,8 +19,10 @@ use super::{
     VIRTIO_F_VERSION_1,
 };
 
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use libc::EFD_NONBLOCK;
+use seccomp::{SeccompAction, SeccompFilter};
 use std::cmp;
 use std::io;
 use std::mem::size_of;
@@ -692,11 +694,17 @@ pub struct Mem {
     epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     paused: Arc<AtomicBool>,
     paused_sync: Arc<Barrier>,
+    seccomp_action: SeccompAction,
 }
 
 impl Mem {
     // Create a new virtio-mem device.
-    pub fn new(id: String, region: &Arc<GuestRegionMmap>, resize: Resize) -> io::Result<Mem> {
+    pub fn new(
+        id: String,
+        region: &Arc<GuestRegionMmap>,
+        resize: Resize,
+        seccomp_action: SeccompAction,
+    ) -> io::Result<Mem> {
         let region_len = region.len();
 
         if region_len != region_len / VIRTIO_MEM_DEFAULT_BLOCK_SIZE * VIRTIO_MEM_DEFAULT_BLOCK_SIZE
@@ -743,6 +751,7 @@ impl Mem {
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
             paused_sync: Arc::new(Barrier::new(2)),
+            seccomp_action,
         })
     }
 }
@@ -852,10 +861,15 @@ impl VirtioDevice for Mem {
         let paused = self.paused.clone();
         let paused_sync = self.paused_sync.clone();
         let mut epoll_threads = Vec::new();
+        // Retrieve seccomp filter for virtio_mem thread
+        let virtio_mem_seccomp_filter = get_seccomp_filter(&self.seccomp_action, Thread::VirtioMem)
+            .map_err(ActivateError::CreateSeccompFilter)?;
         thread::Builder::new()
             .name("virtio_mem".to_string())
             .spawn(move || {
-                if let Err(e) = handler.run(paused, paused_sync) {
+                if let Err(e) = SeccompFilter::apply(virtio_mem_seccomp_filter) {
+                    error!("Error applying seccomp filter: {:?}", e);
+                } else if let Err(e) = handler.run(paused, paused_sync) {
                     error!("Error running worker: {:?}", e);
                 }
             })
