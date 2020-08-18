@@ -42,6 +42,8 @@ pub enum Error {
     ParseCpus(OptionParserError),
     /// Error parsing memory options
     ParseMemory(OptionParserError),
+    /// Error parsing memory region options
+    ParseMemoryRegion(OptionParserError),
     /// Error parsing disk options
     ParseDisk(OptionParserError),
     /// Error parsing network options
@@ -147,6 +149,7 @@ impl fmt::Display for Error {
             ParseVsockCidMissing => write!(f, "Error parsing --vsock: cid missing"),
             ParseVsockSockMissing => write!(f, "Error parsing --vsock: socket missing"),
             ParseMemory(o) => write!(f, "Error parsing --memory: {}", o),
+            ParseMemoryRegion(o) => write!(f, "Error parsing --memory-region: {}", o),
             ParseNetwork(o) => write!(f, "Error parsing --net: {}", o),
             ParseDisk(o) => write!(f, "Error parsing --disk: {}", o),
             ParseRNG(o) => write!(f, "Error parsing --rng: {}", o),
@@ -166,6 +169,7 @@ pub type Result<T> = result::Result<T, Error>;
 pub struct VmParams<'a> {
     pub cpus: &'a str,
     pub memory: &'a str,
+    pub memory_regions: Option<Vec<&'a str>>,
     pub kernel: Option<&'a str>,
     pub initramfs: Option<&'a str>,
     pub cmdline: Option<&'a str>,
@@ -187,6 +191,8 @@ impl<'a> VmParams<'a> {
         // These .unwrap()s cannot fail as there is a default value defined
         let cpus = args.value_of("cpus").unwrap();
         let memory = args.value_of("memory").unwrap();
+        let memory_regions: Option<Vec<&str>> =
+            args.values_of("memory-region").map(|x| x.collect());
         let rng = args.value_of("rng").unwrap();
         let serial = args.value_of("serial").unwrap();
 
@@ -207,6 +213,7 @@ impl<'a> VmParams<'a> {
         VmParams {
             cpus,
             memory,
+            memory_regions,
             kernel,
             initramfs,
             cmdline,
@@ -338,6 +345,19 @@ impl Default for CpusConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct MemoryRegionConfig {
+    pub size: u64,
+    #[serde(default)]
+    pub file: Option<PathBuf>,
+    #[serde(default)]
+    pub mergeable: bool,
+    #[serde(default)]
+    pub shared: bool,
+    #[serde(default)]
+    pub hugepages: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub size: u64,
     #[serde(default)]
@@ -356,10 +376,12 @@ pub struct MemoryConfig {
     pub balloon: bool,
     #[serde(default)]
     pub balloon_size: u64,
+    #[serde(default)]
+    pub regions: Option<Vec<MemoryRegionConfig>>,
 }
 
 impl MemoryConfig {
-    pub fn parse(memory: &str) -> Result<Self> {
+    pub fn parse(memory: &str, memory_regions: Option<Vec<&str>>) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
             .add("size")
@@ -407,6 +429,56 @@ impl MemoryConfig {
             .unwrap_or(Toggle(false))
             .0;
 
+        let regions: Option<Vec<MemoryRegionConfig>> = if let Some(memory_regions) = &memory_regions
+        {
+            let mut regions = Vec::new();
+            for memory_region in memory_regions.iter() {
+                let mut parser = OptionParser::new();
+                parser
+                    .add("size")
+                    .add("file")
+                    .add("mergeable")
+                    .add("shared")
+                    .add("hugepages");
+                parser
+                    .parse(memory_region)
+                    .map_err(Error::ParseMemoryRegion)?;
+
+                let size = parser
+                    .convert::<ByteSized>("size")
+                    .map_err(Error::ParseMemoryRegion)?
+                    .unwrap_or(ByteSized(DEFAULT_MEMORY_MB << 20))
+                    .0;
+                let file = parser.get("file").map(PathBuf::from);
+                let mergeable = parser
+                    .convert::<Toggle>("mergeable")
+                    .map_err(Error::ParseMemoryRegion)?
+                    .unwrap_or(Toggle(false))
+                    .0;
+                let shared = parser
+                    .convert::<Toggle>("shared")
+                    .map_err(Error::ParseMemoryRegion)?
+                    .unwrap_or(Toggle(false))
+                    .0;
+                let hugepages = parser
+                    .convert::<Toggle>("hugepages")
+                    .map_err(Error::ParseMemoryRegion)?
+                    .unwrap_or(Toggle(false))
+                    .0;
+
+                regions.push(MemoryRegionConfig {
+                    size,
+                    file,
+                    mergeable,
+                    shared,
+                    hugepages,
+                });
+            }
+            Some(regions)
+        } else {
+            None
+        };
+
         Ok(MemoryConfig {
             size,
             file,
@@ -417,6 +489,7 @@ impl MemoryConfig {
             hugepages,
             balloon,
             balloon_size: 0,
+            regions,
         })
     }
 }
@@ -433,6 +506,7 @@ impl Default for MemoryConfig {
             hugepages: false,
             balloon: false,
             balloon_size: 0,
+            regions: None,
         }
     }
 }
@@ -1388,7 +1462,7 @@ impl VmConfig {
 
         let config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
-            memory: MemoryConfig::parse(vm_params.memory)?,
+            memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_regions)?,
             kernel,
             initramfs,
             cmdline: CmdlineConfig::parse(vm_params.cmdline)?,
@@ -1481,11 +1555,14 @@ mod tests {
 
     #[test]
     fn test_mem_parsing() -> Result<()> {
-        assert_eq!(MemoryConfig::parse("")?, MemoryConfig::default());
+        assert_eq!(MemoryConfig::parse("", None)?, MemoryConfig::default());
         // Default string
-        assert_eq!(MemoryConfig::parse("size=512M")?, MemoryConfig::default());
         assert_eq!(
-            MemoryConfig::parse("size=512M,file=/some/file")?,
+            MemoryConfig::parse("size=512M", None)?,
+            MemoryConfig::default()
+        );
+        assert_eq!(
+            MemoryConfig::parse("size=512M,file=/some/file", None)?,
             MemoryConfig {
                 size: 512 << 20,
                 file: Some(PathBuf::from("/some/file")),
@@ -1493,7 +1570,7 @@ mod tests {
             }
         );
         assert_eq!(
-            MemoryConfig::parse("size=512M,mergeable=on")?,
+            MemoryConfig::parse("size=512M,mergeable=on", None)?,
             MemoryConfig {
                 size: 512 << 20,
                 mergeable: true,
@@ -1501,14 +1578,14 @@ mod tests {
             }
         );
         assert_eq!(
-            MemoryConfig::parse("mergeable=on")?,
+            MemoryConfig::parse("mergeable=on", None)?,
             MemoryConfig {
                 mergeable: true,
                 ..Default::default()
             }
         );
         assert_eq!(
-            MemoryConfig::parse("size=1G,mergeable=off")?,
+            MemoryConfig::parse("size=1G,mergeable=off", None)?,
             MemoryConfig {
                 size: 1 << 30,
                 mergeable: false,
@@ -1516,20 +1593,20 @@ mod tests {
             }
         );
         assert_eq!(
-            MemoryConfig::parse("hotplug_method=acpi")?,
+            MemoryConfig::parse("hotplug_method=acpi", None)?,
             MemoryConfig {
                 ..Default::default()
             }
         );
         assert_eq!(
-            MemoryConfig::parse("hotplug_method=acpi,hotplug_size=512M")?,
+            MemoryConfig::parse("hotplug_method=acpi,hotplug_size=512M", None)?,
             MemoryConfig {
                 hotplug_size: Some(512 << 20),
                 ..Default::default()
             }
         );
         assert_eq!(
-            MemoryConfig::parse("hotplug_method=virtio-mem,hotplug_size=512M")?,
+            MemoryConfig::parse("hotplug_method=virtio-mem,hotplug_size=512M", None)?,
             MemoryConfig {
                 hotplug_size: Some(512 << 20),
                 hotplug_method: HotplugMethod::VirtioMem,
@@ -1951,6 +2028,7 @@ mod tests {
                 hugepages: false,
                 balloon: false,
                 balloon_size: 0,
+                regions: None,
             },
             kernel: Some(KernelConfig {
                 path: PathBuf::from("/path/to/kernel"),

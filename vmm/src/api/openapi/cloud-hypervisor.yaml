@@ -448,6 +448,27 @@ components:
         topology:
             $ref: '#/components/schemas/CpuTopology'
 
+    MemoryRegionConfig:
+      required:
+      - size
+      type: object
+      properties:
+        size:
+          type: integer
+          format: int64
+          default: 512 MB
+        file:
+          type: string
+        mergeable:
+          type: boolean
+          default: false
+        shared:
+          type: boolean
+          default: false
+        hugepages:
+          type: boolean
+          default: false
+
     MemoryConfig:
       required:
       - size
@@ -477,6 +498,10 @@ components:
         balloon:
           type: boolean
           default: false
+        regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryRegionConfig'
 
     KernelConfig:
       required:
