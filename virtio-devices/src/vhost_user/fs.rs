@@ -3,12 +3,14 @@
 
 use super::vu_common_ctrl::{reset_vhost_user, setup_vhost_user, update_mem_table};
 use super::{Error, Result};
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::{
     ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioDevice, VirtioDeviceType,
     VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
 };
 use libc::{self, c_void, off64_t, pread64, pwrite64, EFD_NONBLOCK};
+use seccomp::{SeccompAction, SeccompFilter};
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
@@ -281,6 +283,7 @@ pub struct Fs {
     epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     paused: Arc<AtomicBool>,
     paused_sync: Arc<Barrier>,
+    seccomp_action: SeccompAction,
 }
 
 impl Fs {
@@ -292,6 +295,7 @@ impl Fs {
         req_num_queues: usize,
         queue_size: u16,
         cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
+        seccomp_action: SeccompAction,
     ) -> Result<Fs> {
         let mut slave_req_support = false;
 
@@ -367,6 +371,7 @@ impl Fs {
             epoll_threads: None,
             paused: Arc::new(AtomicBool::new(false)),
             paused_sync: Arc::new(Barrier::new(2)),
+            seccomp_action,
         })
     }
 }
@@ -504,10 +509,15 @@ impl VirtioDevice for Fs {
         let paused = self.paused.clone();
         let paused_sync = self.paused_sync.clone();
         let mut epoll_threads = Vec::new();
+        let virtio_vhost_fs_seccomp_filter =
+            get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostFs)
+                .map_err(ActivateError::CreateSeccompFilter)?;
         thread::Builder::new()
-            .name("virtio_fs".to_string())
+            .name("vhost_fs".to_string())
             .spawn(move || {
-                if let Err(e) = handler.run(paused, paused_sync) {
+                if let Err(e) = SeccompFilter::apply(virtio_vhost_fs_seccomp_filter) {
+                    error!("Error applying seccomp filter: {:?}", e);
+                } else if let Err(e) = handler.run(paused, paused_sync) {
                     error!("Error running worker: {:?}", e);
                 }
             })

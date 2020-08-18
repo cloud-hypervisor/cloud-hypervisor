@@ -2121,6 +2121,7 @@ impl DeviceManager {
                     fs_cfg.num_queues,
                     fs_cfg.queue_size,
                     cache,
+                    self.seccomp_action.clone(),
                 )
                 .map_err(DeviceManagerError::CreateVirtioFs)?,
             ));
