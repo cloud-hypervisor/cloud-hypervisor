@@ -115,6 +115,18 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
+            Arg::with_name("memory-zone")
+                .long("memory-zone")
+                .help(
+                    "User defined memory zone parameters \
+                     \"size=<guest_memory_region_size>,file=<backing_file>,\
+                     mergeable=on|off,shared=on|off,hugepages=on|off\"",
+                )
+                .takes_value(true)
+                .min_values(1)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::with_name("kernel")
                 .long("kernel")
                 .help("Path to kernel image (vmlinux)")
@@ -522,6 +534,7 @@ mod unit_tests {
                     hugepages: false,
                     balloon: false,
                     balloon_size: 0,
+                    zones: None,
                 },
                 kernel: Some(KernelConfig {
                     path: PathBuf::from("/path/to/kernel"),
