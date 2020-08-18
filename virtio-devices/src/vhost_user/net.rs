@@ -8,9 +8,11 @@ use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDev
 use super::handler::*;
 use super::vu_common_ctrl::*;
 use super::{Error, Result};
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use libc::EFD_NONBLOCK;
 use net_util::MacAddr;
+use seccomp::{SeccompAction, SeccompFilter};
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,12 +49,18 @@ pub struct Net {
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
     paused: Arc<AtomicBool>,
     paused_sync: Arc<Barrier>,
+    seccomp_action: SeccompAction,
 }
 
 impl Net {
     /// Create a new vhost-user-net device
     /// Create a new vhost-user-net device
-    pub fn new(id: String, mac_addr: MacAddr, vu_cfg: VhostUserConfig) -> Result<Net> {
+    pub fn new(
+        id: String,
+        mac_addr: MacAddr,
+        vu_cfg: VhostUserConfig,
+        seccomp_action: SeccompAction,
+    ) -> Result<Net> {
         let mut vhost_user_net = Master::connect(&vu_cfg.socket, vu_cfg.num_queues as u64)
             .map_err(Error::VhostUserCreateMaster)?;
 
@@ -153,6 +161,7 @@ impl Net {
             ctrl_queue_epoll_thread: None,
             paused: Arc::new(AtomicBool::new(false)),
             paused_sync: Arc::new(Barrier::new((vu_cfg.num_queues / 2) + 1)),
+            seccomp_action,
         })
     }
 }
@@ -264,10 +273,15 @@ impl VirtioDevice for Net {
             // the pause.
             self.paused_sync = Arc::new(Barrier::new((queue_num / 2) + 2));
             let paused_sync = self.paused_sync.clone();
+            let virtio_vhost_net_ctl_seccomp_filter =
+                get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostNetCtl)
+                    .map_err(ActivateError::CreateSeccompFilter)?;
             thread::Builder::new()
-                .name("virtio_net".to_string())
+                .name("vhost_net_ctl".to_string())
                 .spawn(move || {
-                    if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync) {
+                    if let Err(e) = SeccompFilter::apply(virtio_vhost_net_ctl_seccomp_filter) {
+                        error!("Error applying seccomp filter: {:?}", e);
+                    } else if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync) {
                         error!("Error running worker: {:?}", e);
                     }
                 })

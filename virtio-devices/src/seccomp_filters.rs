@@ -20,6 +20,7 @@ pub enum Thread {
     VirtioPmem,
     VirtioRng,
     VirtioVhostFs,
+    VirtioVhostNetCtl,
 }
 
 fn virtio_balloon_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
@@ -253,6 +254,20 @@ fn virtio_vhost_fs_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     ])
 }
 
+fn virtio_vhost_net_ctl_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+    Ok(vec![
+        allow_syscall(libc::SYS_brk),
+        allow_syscall(libc::SYS_dup),
+        allow_syscall(libc::SYS_epoll_create1),
+        allow_syscall(libc::SYS_epoll_ctl),
+        allow_syscall(libc::SYS_epoll_pwait),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_epoll_wait),
+        allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_read),
+    ])
+}
+
 fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
         Thread::VirtioBalloon => virtio_balloon_thread_rules()?,
@@ -265,6 +280,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
         Thread::VirtioPmem => virtio_pmem_thread_rules()?,
         Thread::VirtioRng => virtio_rng_thread_rules()?,
         Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules()?,
+        Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules()?,
     };
 
     Ok(SeccompFilter::new(
@@ -285,6 +301,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
         Thread::VirtioPmem => virtio_pmem_thread_rules()?,
         Thread::VirtioRng => virtio_rng_thread_rules()?,
         Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules()?,
+        Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules()?,
     };
 
     Ok(SeccompFilter::new(

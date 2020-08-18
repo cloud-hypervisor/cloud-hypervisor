@@ -1874,8 +1874,13 @@ impl DeviceManager {
                 queue_size: net_cfg.queue_size,
             };
             let vhost_user_net_device = Arc::new(Mutex::new(
-                virtio_devices::vhost_user::Net::new(id.clone(), net_cfg.mac, vu_cfg)
-                    .map_err(DeviceManagerError::CreateVhostUserNet)?,
+                virtio_devices::vhost_user::Net::new(
+                    id.clone(),
+                    net_cfg.mac,
+                    vu_cfg,
+                    self.seccomp_action.clone(),
+                )
+                .map_err(DeviceManagerError::CreateVhostUserNet)?,
             ));
 
             // Fill the device tree with a new node. In case of restore, we
