@@ -1642,8 +1642,12 @@ impl DeviceManager {
                 queue_size: disk_cfg.queue_size,
             };
             let vhost_user_block_device = Arc::new(Mutex::new(
-                virtio_devices::vhost_user::Blk::new(id.clone(), vu_cfg)
-                    .map_err(DeviceManagerError::CreateVhostUserBlk)?,
+                virtio_devices::vhost_user::Blk::new(
+                    id.clone(),
+                    vu_cfg,
+                    self.seccomp_action.clone(),
+                )
+                .map_err(DeviceManagerError::CreateVhostUserBlk)?,
             ));
 
             // Fill the device tree with a new node. In case of restore, we
