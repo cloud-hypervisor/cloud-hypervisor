@@ -10,6 +10,7 @@ use seccomp::{
 use std::convert::TryInto;
 
 pub enum Thread {
+    VirtioBalloon,
     VirtioBlk,
     VirtioConsole,
     VirtioIommu,
@@ -18,6 +19,27 @@ pub enum Thread {
     VirtioNetCtl,
     VirtioPmem,
     VirtioRng,
+}
+
+fn virtio_balloon_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+    Ok(vec![
+        allow_syscall(libc::SYS_brk),
+        allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_dup),
+        allow_syscall(libc::SYS_epoll_create1),
+        allow_syscall(libc::SYS_epoll_ctl),
+        allow_syscall(libc::SYS_epoll_pwait),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_epoll_wait),
+        allow_syscall(libc::SYS_exit),
+        allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_munmap),
+        allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_rt_sigprocmask),
+        allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_write),
+    ])
 }
 
 // The filter containing the allowed syscall rules required by the
@@ -208,6 +230,7 @@ fn virtio_rng_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 
 fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
+        Thread::VirtioBalloon => virtio_balloon_thread_rules()?,
         Thread::VirtioBlk => virtio_blk_thread_rules()?,
         Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioIommu => virtio_iommu_thread_rules()?,
@@ -226,6 +249,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
 
 fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
+        Thread::VirtioBalloon => virtio_balloon_thread_rules()?,
         Thread::VirtioBlk => virtio_blk_thread_rules()?,
         Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioIommu => virtio_iommu_thread_rules()?,
