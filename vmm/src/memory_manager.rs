@@ -5,7 +5,7 @@
 extern crate hypervisor;
 #[cfg(target_arch = "x86_64")]
 use crate::config::SgxEpcConfig;
-use crate::config::{HotplugMethod, MemoryConfig};
+use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
@@ -81,6 +81,7 @@ pub struct MemoryManager {
     balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
     #[cfg(target_arch = "x86_64")]
     sgx_epc_region: Option<SgxEpcRegion>,
+    use_zones: bool,
 }
 
 #[derive(Debug)]
@@ -156,6 +157,20 @@ pub enum Error {
     /// Failed creating a new MmapRegion instance.
     #[cfg(target_arch = "x86_64")]
     NewMmapRegion(vm_memory::mmap::MmapRegionError),
+
+    /// No memory zones found.
+    MissingMemoryZones,
+
+    /// Memory configuration is not valid.
+    InvalidMemoryParameters,
+
+    /// Forbidden operation. Impossible to resize guest memory if it is
+    /// backed by user defined memory regions.
+    InvalidResizeWithMemoryZones,
+
+    /// Forbidden operation. Impossible to restore guest memory if it is
+    /// backed by user defined memory regions.
+    InvalidRestoreWithMemoryZones,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -246,52 +261,179 @@ impl BusDevice for MemoryManager {
 }
 
 impl MemoryManager {
+    /// Creates all memory regions based on the available RAM ranges defined
+    /// by `ram_regions`, and based on the description of the memory zones.
+    /// In practice, this function can perform multiple memory mappings of the
+    /// same backing file if there's a hole in the address space between two
+    /// RAM ranges.
+    /// One example might be ram_regions containing 2 regions (0-3G and 4G-6G)
+    /// and zones containing two zones (size 1G and size 4G).
+    /// This function will create 3 resulting memory regions:
+    /// - First one mapping entirely the first memory zone on 0-1G range
+    /// - Second one mapping partially the second memory zone on 1G-3G range
+    /// - Third one mapping partially the second memory zone on 4G-6G range
+    fn create_memory_regions_from_zones(
+        ram_regions: &[(GuestAddress, usize)],
+        zones: &[MemoryZoneConfig],
+        prefault: bool,
+    ) -> Result<Vec<Arc<GuestRegionMmap>>, Error> {
+        let mut zones = zones.to_owned();
+        let mut mem_regions = Vec::new();
+        let mut zone = zones.remove(0);
+        let mut zone_offset = 0;
+
+        for ram_region in ram_regions.iter() {
+            let mut ram_region_offset = 0;
+            let mut exit = false;
+
+            loop {
+                let mut ram_region_consumed = false;
+                let mut pull_next_zone = false;
+
+                let ram_region_sub_size = ram_region.1 - ram_region_offset;
+                let zone_sub_size = zone.size as usize - zone_offset;
+
+                let file_offset = zone_offset as u64;
+                let region_start = ram_region.0.unchecked_add(ram_region_offset as u64);
+                let region_size = if zone_sub_size <= ram_region_sub_size {
+                    if zone_sub_size == ram_region_sub_size {
+                        ram_region_consumed = true;
+                    }
+
+                    ram_region_offset += zone_sub_size;
+                    pull_next_zone = true;
+
+                    zone_sub_size
+                } else {
+                    zone_offset += ram_region_sub_size;
+                    ram_region_consumed = true;
+
+                    ram_region_sub_size
+                };
+
+                mem_regions.push(MemoryManager::create_ram_region(
+                    &zone.file,
+                    file_offset,
+                    region_start,
+                    region_size,
+                    false,
+                    prefault,
+                    zone.shared,
+                    zone.hugepages,
+                )?);
+
+                if pull_next_zone {
+                    // Get the next zone and reset the offset.
+                    zone_offset = 0;
+                    if zones.is_empty() {
+                        exit = true;
+                        break;
+                    }
+                    zone = zones.remove(0);
+                }
+
+                if ram_region_consumed {
+                    break;
+                }
+            }
+
+            if exit {
+                break;
+            }
+        }
+
+        Ok(mem_regions)
+    }
+
     pub fn new(
         vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
         ext_regions: Option<Vec<MemoryRegion>>,
         prefault: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
-        // Init guest memory
-        let arch_mem_regions = arch::arch_memory_regions(config.size);
-
-        let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
-            .iter()
-            .filter(|r| r.2 == RegionType::Ram)
-            .map(|r| (r.0, r.1))
-            .collect();
-
         let mut mem_regions = Vec::new();
-        if let Some(ext_regions) = &ext_regions {
-            if ram_regions.len() > ext_regions.len() {
-                return Err(Error::InvalidAmountExternalBackingFiles);
+        let arch_mem_regions: Vec<(GuestAddress, usize, RegionType)>;
+        let use_zones = config.size == 0;
+
+        if !use_zones {
+            if config.zones.is_some() {
+                error!(
+                    "User defined memory regions can't be provided if the \
+                    memory size is not 0"
+                );
+                return Err(Error::InvalidMemoryParameters);
             }
 
-            for region in ext_regions.iter() {
-                mem_regions.push(MemoryManager::create_ram_region(
-                    &Some(region.backing_file.clone()),
-                    0,
-                    region.start_addr,
-                    region.size as usize,
-                    true,
-                    prefault,
-                    false,
-                    false,
-                )?);
+            // Init guest memory
+            arch_mem_regions = arch::arch_memory_regions(config.size);
+
+            let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
+                .iter()
+                .filter(|r| r.2 == RegionType::Ram)
+                .map(|r| (r.0, r.1))
+                .collect();
+
+            if let Some(ext_regions) = &ext_regions {
+                if ram_regions.len() > ext_regions.len() {
+                    return Err(Error::InvalidAmountExternalBackingFiles);
+                }
+
+                for region in ext_regions.iter() {
+                    mem_regions.push(MemoryManager::create_ram_region(
+                        &Some(region.backing_file.clone()),
+                        0,
+                        region.start_addr,
+                        region.size as usize,
+                        true,
+                        prefault,
+                        false,
+                        false,
+                    )?);
+                }
+            } else {
+                for region in ram_regions.iter() {
+                    mem_regions.push(MemoryManager::create_ram_region(
+                        &config.file,
+                        0,
+                        region.0,
+                        region.1,
+                        false,
+                        prefault,
+                        config.shared,
+                        config.hugepages,
+                    )?);
+                }
             }
         } else {
-            for region in ram_regions.iter() {
-                mem_regions.push(MemoryManager::create_ram_region(
-                    &config.file,
-                    0,
-                    region.0,
-                    region.1,
-                    false,
-                    prefault,
-                    config.shared,
-                    config.hugepages,
-                )?);
+            if config.zones.is_none() {
+                error!(
+                    "User defined memory regions must be provided if the \
+                    memory size is 0"
+                );
+                return Err(Error::MissingMemoryZones);
             }
+
+            // Safe to unwrap as we checked right above there were some
+            // regions.
+            let zones = config.zones.clone().unwrap();
+            if zones.is_empty() {
+                return Err(Error::MissingMemoryZones);
+            }
+
+            let mut total_ram_size: u64 = 0;
+            for zone in zones.iter() {
+                total_ram_size += zone.size;
+            }
+
+            arch_mem_regions = arch::arch_memory_regions(total_ram_size as GuestUsize);
+
+            let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
+                .iter()
+                .filter(|r| r.2 == RegionType::Ram)
+                .map(|r| (r.0, r.1))
+                .collect();
+
+            mem_regions = Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault)?;
         }
 
         let guest_memory =
@@ -311,16 +453,19 @@ impl MemoryManager {
                         / virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE
                         * virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE,
                 );
-                virtiomem_region = Some(MemoryManager::create_ram_region(
-                    &config.file,
-                    0,
-                    start_addr,
-                    size as usize,
-                    false,
-                    false,
-                    config.shared,
-                    config.hugepages,
-                )?);
+
+                if !use_zones {
+                    virtiomem_region = Some(MemoryManager::create_ram_region(
+                        &config.file,
+                        0,
+                        start_addr,
+                        size as usize,
+                        false,
+                        false,
+                        config.shared,
+                        config.hugepages,
+                    )?);
+                }
 
                 virtiomem_resize = Some(virtio_devices::Resize::new().map_err(Error::EventFdFail)?);
 
@@ -378,6 +523,7 @@ impl MemoryManager {
             balloon: None,
             #[cfg(target_arch = "x86_64")]
             sgx_epc_region: None,
+            use_zones,
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -425,6 +571,14 @@ impl MemoryManager {
         source_url: &str,
         prefault: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
+        if config.size == 0 {
+            error!(
+                "Not allowed to restore guest memory when backed with user \
+                defined memory regions."
+            );
+            return Err(Error::InvalidRestoreWithMemoryZones);
+        }
+
         let url = Url::parse(source_url).unwrap();
         /* url must be valid dir which is verified in recv_vm_snapshot() */
         let vm_snapshot_path = url.to_file_path().unwrap();
@@ -863,6 +1017,15 @@ impl MemoryManager {
     /// use case never adds a new region as the whole hotpluggable memory has
     /// already been allocated at boot time.
     pub fn resize(&mut self, desired_ram: u64) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
+        if self.use_zones {
+            error!(
+                "Not allowed to resize guest memory when backed with user \
+                defined memory regions.\n Try adding new memory regions \
+                instead."
+            );
+            return Err(Error::InvalidResizeWithMemoryZones);
+        }
+
         let mut region: Option<Arc<GuestRegionMmap>> = None;
         match self.hotplug_method {
             HotplugMethod::VirtioMem => {
@@ -1364,6 +1527,13 @@ impl Snapshottable for MemoryManager {
     }
 
     fn snapshot(&self) -> result::Result<Snapshot, MigratableError> {
+        if self.use_zones {
+            return Err(MigratableError::Snapshot(anyhow!(
+                "Not allowed to snapshot guest memory when backed with user \
+                defined memory regions."
+            )));
+        }
+
         let mut memory_manager_snapshot = Snapshot::new(MEMORY_MANAGER_SNAPSHOT_ID);
         let guest_memory = self.guest_memory.memory();
 
