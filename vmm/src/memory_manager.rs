@@ -270,6 +270,7 @@ impl MemoryManager {
             for region in ext_regions.iter() {
                 mem_regions.push(MemoryManager::create_ram_region(
                     &Some(region.backing_file.clone()),
+                    0,
                     region.start_addr,
                     region.size as usize,
                     true,
@@ -282,6 +283,7 @@ impl MemoryManager {
             for region in ram_regions.iter() {
                 mem_regions.push(MemoryManager::create_ram_region(
                     &config.file,
+                    0,
                     region.0,
                     region.1,
                     false,
@@ -311,6 +313,7 @@ impl MemoryManager {
                 );
                 virtiomem_region = Some(MemoryManager::create_ram_region(
                     &config.file,
+                    0,
                     start_addr,
                     size as usize,
                     false,
@@ -501,8 +504,10 @@ impl MemoryManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn create_ram_region(
         backing_file: &Option<PathBuf>,
+        mut file_offset: u64,
         start_addr: GuestAddress,
         size: usize,
         copy_on_write: bool,
@@ -513,6 +518,12 @@ impl MemoryManager {
         Ok(Arc::new(match backing_file {
             Some(ref file) => {
                 let f = if file.is_dir() {
+                    // Override file offset as it does not apply in this case.
+                    info!(
+                        "Ignoring file offset since the backing file is a \
+                        temporary file created from the specified directory."
+                    );
+                    file_offset = 0;
                     let fs_str = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
                     let fs = ffi::CString::new(fs_str).unwrap();
                     let mut path = fs.as_bytes_with_nul().to_owned();
@@ -540,7 +551,7 @@ impl MemoryManager {
                 }
                 GuestRegionMmap::new(
                     MmapRegion::build(
-                        Some(FileOffset::new(f, 0)),
+                        Some(FileOffset::new(f, file_offset)),
                         size,
                         libc::PROT_READ | libc::PROT_WRITE,
                         mmap_flags,
@@ -643,6 +654,7 @@ impl MemoryManager {
         // Allocate memory for the region
         let region = MemoryManager::create_ram_region(
             &self.backing_file,
+            0,
             start_addr,
             size,
             false,
