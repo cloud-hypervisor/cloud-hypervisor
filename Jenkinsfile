@@ -84,12 +84,6 @@ pipeline{
 							}
 						}
 					}
-					post {
-						always {
-							sh "sudo chown -R jenkins.jenkins ${WORKSPACE}"
-							deleteDir()
-						}
-					}
 				}
 				stage ('Worker build (musl)') {
 					agent { node { label 'bionic' } }
@@ -114,6 +108,13 @@ pipeline{
 						}
 					}
 				}
+			}
+		}
+		stage ('Cleanup') {
+			agent { node { label 'bionic-arm64' } }
+			steps {
+				sh "sudo chown -R jenkins.jenkins ${WORKSPACE}"
+				deleteDir()
 			}
 		}
 	}
