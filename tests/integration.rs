@@ -2210,6 +2210,35 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        fn test_user_defined_memory_regions() {
+            test_block!(tb, "", {
+                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+                let guest = Guest::new(&mut focal);
+                let mut cmd = GuestCommand::new(&guest);
+                cmd.args(&["--cpus", "boot=1"])
+                    .args(&["--memory", "size=0"])
+                    .args(&["--memory-region", "size=1G", "size=3G,file=/dev/shm"])
+                    .args(&["--kernel", guest.fw_path.as_str()])
+                    .default_disks()
+                    .default_net();
+
+                // Now AArch64 can only boot from direct kernel, command-line is needed.
+                #[cfg(target_arch = "aarch64")]
+                cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+
+                let mut child = cmd.spawn().unwrap();
+
+                thread::sleep(std::time::Duration::new(20, 0));
+
+                aver!(tb, guest.get_total_memory().unwrap_or_default() > 3_840_000);
+
+                let _ = child.kill();
+                let _ = child.wait();
+                Ok(())
+            });
+        }
+
+        #[cfg_attr(not(feature = "mmio"), test)]
         #[cfg(target_arch = "x86_64")]
         fn test_pci_msi() {
             test_block!(tb, "", {
