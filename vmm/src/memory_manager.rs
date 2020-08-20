@@ -23,9 +23,7 @@ use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
 use std::io;
-#[cfg(target_arch = "x86_64")]
-use std::os::unix::io::AsRawFd;
-use std::os::unix::io::{FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Mutex};
@@ -82,6 +80,7 @@ pub struct MemoryManager {
     #[cfg(target_arch = "x86_64")]
     sgx_epc_region: Option<SgxEpcRegion>,
     use_zones: bool,
+    snapshot_memory_regions: Vec<MemoryRegion>,
 }
 
 #[derive(Debug)]
@@ -524,6 +523,7 @@ impl MemoryManager {
             #[cfg(target_arch = "x86_64")]
             sgx_epc_region: None,
             use_zones,
+            snapshot_memory_regions: Vec::new(),
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -1137,6 +1137,17 @@ impl MemoryManager {
     pub fn sgx_epc_region(&self) -> &Option<SgxEpcRegion> {
         &self.sgx_epc_region
     }
+
+    pub fn is_hardlink(f: &File) -> bool {
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        let ret = unsafe { libc::fstat(f.as_raw_fd(), stat.as_mut_ptr()) };
+        if ret != 0 {
+            error!("Couldn't fstat the backing file");
+            return false;
+        }
+
+        unsafe { (*stat.as_ptr()).st_nlink as usize > 0 }
+    }
 }
 
 #[cfg(feature = "acpi")]
@@ -1514,7 +1525,7 @@ impl Pausable for MemoryManager {}
 #[serde(remote = "GuestAddress")]
 pub struct GuestAddressDef(pub u64);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MemoryRegion {
     backing_file: Option<PathBuf>,
     #[serde(with = "GuestAddressDef")]
@@ -1543,21 +1554,49 @@ impl Snapshottable for MemoryManager {
         let mut memory_manager_snapshot = Snapshot::new(MEMORY_MANAGER_SNAPSHOT_ID);
         let guest_memory = self.guest_memory.memory();
 
-        let mut memory_regions: Vec<MemoryRegion> = Vec::with_capacity(10);
+        let mut memory_regions: Vec<MemoryRegion> = Vec::new();
 
         guest_memory.with_regions_mut(|index, region| {
             if region.len() == 0 {
                 return Err(MigratableError::Snapshot(anyhow!("Zero length region")));
             }
 
+            let mut backing_file = Some(PathBuf::from(format!("memory-region-{}", index)));
+            if let Some(file_offset) = region.file_offset() {
+                if (region.flags() & libc::MAP_SHARED == libc::MAP_SHARED)
+                    && Self::is_hardlink(file_offset.file())
+                {
+                    // In this very specific case, we know the memory region
+                    // is backed by a file on the host filesystem that can be
+                    // accessed by the user, and additionally the mapping is
+                    // shared, which means that modifications to the content
+                    // are written to the actual file.
+                    // When meeting these conditions, we can skip the copy of
+                    // the memory content for this specific region, as we can
+                    // assume the user will have it saved through the backing
+                    // file already.
+                    backing_file = None;
+                }
+            }
+
             memory_regions.push(MemoryRegion {
-                backing_file: Some(PathBuf::from(format!("memory-region-{}", index))),
+                backing_file,
                 start_addr: region.start_addr(),
                 size: region.len(),
             });
 
             Ok(())
         })?;
+
+        // Store locally this list of regions as it will be used through the
+        // Transportable::send() implementation. The point is to avoid the
+        // duplication of code regarding the creation of the path for each
+        // region. The 'snapshot' step creates the list of memory regions,
+        // including information about the need to copy a memory region or
+        // not. This saves the 'send' step having to go through the same
+        // process, and instead it can directly proceed with storing the
+        // memory region content for the regions requiring it.
+        self.snapshot_memory_regions = memory_regions.clone();
 
         let snapshot_data_section =
             serde_json::to_vec(&MemoryManagerSnapshotData { memory_regions })
@@ -1604,28 +1643,28 @@ impl Transportable for MemoryManager {
                     })?;
 
                 if let Some(guest_memory) = &*self.snapshot.lock().unwrap() {
-                    guest_memory.with_regions_mut(|index, region| {
-                        let mut memory_region_path = vm_memory_snapshot_path.clone();
-                        memory_region_path.push(format!("memory-region-{}", index));
+                    for region in self.snapshot_memory_regions.iter() {
+                        if let Some(backing_file) = &region.backing_file {
+                            let mut memory_region_path = vm_memory_snapshot_path.clone();
+                            memory_region_path.push(backing_file);
 
-                        // Create the snapshot file for the region
-                        let mut memory_region_file = OpenOptions::new()
-                            .read(true)
-                            .write(true)
-                            .create_new(true)
-                            .open(memory_region_path)
-                            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+                            // Create the snapshot file for the region
+                            let mut memory_region_file = OpenOptions::new()
+                                .read(true)
+                                .write(true)
+                                .create_new(true)
+                                .open(memory_region_path)
+                                .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-                        guest_memory
-                            .write_to(
-                                region.start_addr(),
-                                &mut memory_region_file,
-                                region.len().try_into().unwrap(),
-                            )
-                            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
-
-                        Ok(())
-                    })?;
+                            guest_memory
+                                .write_to(
+                                    region.start_addr,
+                                    &mut memory_region_file,
+                                    region.size as usize,
+                                )
+                                .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+                        }
+                    }
                 }
             }
             _ => {
