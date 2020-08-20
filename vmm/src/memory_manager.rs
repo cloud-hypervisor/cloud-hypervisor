@@ -519,7 +519,9 @@ impl MemoryManager {
                     let path_ptr = path.as_mut_ptr() as *mut _;
                     let fd = unsafe { libc::mkstemp(path_ptr) };
                     unsafe { libc::unlink(path_ptr) };
-                    unsafe { File::from_raw_fd(fd) }
+                    let f = unsafe { File::from_raw_fd(fd) };
+                    f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
+                    f
                 } else {
                     OpenOptions::new()
                         .read(true)
@@ -527,8 +529,6 @@ impl MemoryManager {
                         .open(file)
                         .map_err(Error::SharedFileCreate)?
                 };
-
-                f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
 
                 let mut mmap_flags = if copy_on_write {
                     libc::MAP_NORESERVE | libc::MAP_PRIVATE
