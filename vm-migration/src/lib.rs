@@ -111,7 +111,7 @@ pub trait Snapshottable: Pausable {
     }
 
     /// Take a component snapshot.
-    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         Ok(Snapshot::new(""))
     }
 

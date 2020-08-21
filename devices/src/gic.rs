@@ -70,7 +70,7 @@ impl Snapshottable for Gic {
         GIC_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         unimplemented!();
     }
 

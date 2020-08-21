@@ -400,7 +400,7 @@ impl Snapshottable for Vcpu {
         VCPU_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot = serde_json::to_vec(&self.saved_state)
             .map_err(|e| MigratableError::Snapshot(e.into()))?;
 
@@ -1368,7 +1368,7 @@ impl Snapshottable for CpuManager {
         CPU_MANAGER_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         let mut cpu_manager_snapshot = Snapshot::new(CPU_MANAGER_SNAPSHOT_ID);
 
         // The CpuManager snapshot is a collection of all vCPUs snapshots.
