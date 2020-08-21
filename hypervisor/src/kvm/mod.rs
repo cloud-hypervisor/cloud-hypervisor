@@ -8,20 +8,20 @@
 //
 //
 
-use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::result;
-use std::sync::Arc;
-#[cfg(target_arch = "x86_64")]
-use vm_memory::Address;
-use vmm_sys_util::eventfd::EventFd;
-
 #[cfg(target_arch = "aarch64")]
 pub use crate::aarch64::{check_required_kvm_extensions, VcpuInit, VcpuKvmState as CpuState};
 use crate::cpu;
 use crate::device;
 use crate::hypervisor;
 use crate::vm;
+use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
+use serde_derive::{Deserialize, Serialize};
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::result;
+use std::sync::Arc;
+#[cfg(target_arch = "x86_64")]
+use vm_memory::Address;
+use vmm_sys_util::eventfd::EventFd;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
@@ -66,12 +66,16 @@ pub use {
     kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
     kvm_ioctls::VcpuExit,
 };
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+pub struct KvmVmState {}
 
+use KvmVmState as VmState;
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
+    state: KvmVmState,
 }
 
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
@@ -314,6 +318,18 @@ impl vm::Vm for KvmVm {
         self.create_device(&mut vfio_dev)
             .map_err(|e| vm::HypervisorVmError::CreatePassthroughDevice(e.into()))
     }
+    ///
+    /// Get the Vm state. Return VM specific data
+    ///
+    fn state(&self) -> vm::Result<VmState> {
+        Ok(self.state)
+    }
+    ///
+    /// Set the VM state
+    ///
+    fn set_state(&self, _state: &VmState) -> vm::Result<()> {
+        Ok(())
+    }
 }
 /// Wrapper over KVM system ioctls.
 pub struct KvmHypervisor {
@@ -381,12 +397,19 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 msr_entries[pos].index = *index;
             }
 
-            Ok(Arc::new(KvmVm { fd: vm_fd, msrs }))
+            Ok(Arc::new(KvmVm {
+                fd: vm_fd,
+                msrs,
+                state: VmState {},
+            }))
         }
 
         #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
         {
-            Ok(Arc::new(KvmVm { fd: vm_fd }))
+            Ok(Arc::new(KvmVm {
+                fd: vm_fd,
+                state: VmState {},
+            }))
         }
     }
 

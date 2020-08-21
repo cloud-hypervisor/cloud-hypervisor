@@ -14,6 +14,7 @@ use crate::cpu::Vcpu;
 use crate::device::Device;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
+use crate::KvmVmState as VmState;
 use crate::{CreateDevice, IoEventAddress, IrqRoutingEntry, MemoryRegion};
 use kvm_ioctls::Cap;
 use std::sync::Arc;
@@ -179,4 +180,8 @@ pub trait Vm: Send + Sync {
     fn check_extension(&self, c: Cap) -> bool;
     /// Create a device that is used for passthrough
     fn create_passthrough_device(&self) -> Result<Arc<dyn Device>>;
+    /// Get the Vm state. Return VM specific data
+    fn state(&self) -> Result<VmState>;
+    /// Set the VM state
+    fn set_state(&self, state: &VmState) -> Result<()>;
 }

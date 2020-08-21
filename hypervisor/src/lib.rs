@@ -52,6 +52,7 @@ pub use kvm::*;
 pub use vm::{DataMatch, HypervisorVmError, Vm};
 
 use std::sync::Arc;
+
 pub fn new() -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
     #[cfg(feature = "kvm")]
     let hv = kvm::KvmHypervisor::new()?;
