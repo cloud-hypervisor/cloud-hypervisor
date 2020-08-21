@@ -251,7 +251,6 @@ pub struct Vm {
     state: RwLock<VmState>,
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     memory_manager: Arc<Mutex<MemoryManager>>,
-    #[cfg(target_arch = "x86_64")]
     #[cfg_attr(not(feature = "kvm"), allow(dead_code))]
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
@@ -323,7 +322,6 @@ impl Vm {
             state: RwLock::new(VmState::Created),
             cpu_manager,
             memory_manager,
-            #[cfg(target_arch = "x86_64")]
             vm,
             #[cfg(target_arch = "x86_64")]
             saved_clock: _saved_clock,
@@ -404,6 +402,10 @@ impl Vm {
         vm.enable_split_irq().unwrap();
         let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
         let config = vm_snapshot.config.clone();
+        if let Some(state) = vm_snapshot.state {
+            vm.set_state(&state)
+                .map_err(|e| Error::Restore(MigratableError::Restore(e.into())))?;
+        }
 
         let memory_manager = if let Some(memory_manager_snapshot) =
             snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
@@ -1256,6 +1258,7 @@ pub struct VmSnapshot {
     pub config: Arc<Mutex<VmConfig>>,
     #[cfg(target_arch = "x86_64")]
     pub clock: Option<hypervisor::ClockData>,
+    pub state: Option<hypervisor::VmState>,
 }
 
 pub const VM_SNAPSHOT_ID: &str = "vm";
@@ -1273,10 +1276,15 @@ impl Snapshottable for Vm {
         }
 
         let mut vm_snapshot = Snapshot::new(VM_SNAPSHOT_ID);
+        let vm_state = self
+            .vm
+            .state()
+            .map_err(|e| MigratableError::Snapshot(e.into()))?;
         let vm_snapshot_data = serde_json::to_vec(&VmSnapshot {
             config: self.get_config(),
             #[cfg(target_arch = "x86_64")]
             clock: self.saved_clock,
+            state: Some(vm_state),
         })
         .map_err(|e| MigratableError::Snapshot(e.into()))?;
 
