@@ -380,7 +380,7 @@ impl MemoryManager {
 
                 for region in ext_regions.iter() {
                     mem_regions.push(MemoryManager::create_ram_region(
-                        &Some(region.backing_file.clone()),
+                        &region.backing_file,
                         0,
                         region.start_addr,
                         region.size as usize,
@@ -600,9 +600,11 @@ impl MemoryManager {
 
             let mut ext_regions = mem_snapshot.memory_regions;
             for region in ext_regions.iter_mut() {
-                let mut memory_region_path = vm_snapshot_path.clone();
-                memory_region_path.push(region.backing_file.clone());
-                region.backing_file = memory_region_path;
+                if let Some(backing_file) = &mut region.backing_file {
+                    let mut memory_region_path = vm_snapshot_path.clone();
+                    memory_region_path.push(backing_file.clone());
+                    *backing_file = memory_region_path;
+                }
             }
 
             // In case there was no backing file, we can safely use CoW by
@@ -621,20 +623,24 @@ impl MemoryManager {
             // new regions so that we can still use MAP_SHARED when restoring
             // the VM.
             guest_memory.memory().with_regions(|index, region| {
-                // Open (read only) the snapshot file for the given region.
-                let mut memory_region_file = OpenOptions::new()
-                    .read(true)
-                    .open(&ext_regions[index].backing_file)
-                    .map_err(|e| Error::Restore(MigratableError::MigrateReceive(e.into())))?;
+                if let Some(backing_file) = &ext_regions[index].backing_file {
+                    // Open (read only) the snapshot file for the given region.
+                    let mut memory_region_file = OpenOptions::new()
+                        .read(true)
+                        .open(backing_file)
+                        .map_err(|e| {
+                        Error::Restore(MigratableError::MigrateReceive(e.into()))
+                    })?;
 
-                // Fill the region with the file content.
-                region
-                    .read_from(
-                        MemoryRegionAddress(0),
-                        &mut memory_region_file,
-                        region.len().try_into().unwrap(),
-                    )
-                    .map_err(|e| Error::Restore(MigratableError::MigrateReceive(e.into())))?;
+                    // Fill the region with the file content.
+                    region
+                        .read_from(
+                            MemoryRegionAddress(0),
+                            &mut memory_region_file,
+                            region.len().try_into().unwrap(),
+                        )
+                        .map_err(|e| Error::Restore(MigratableError::MigrateReceive(e.into())))?;
+                }
 
                 Ok(())
             })?;
@@ -1510,7 +1516,7 @@ pub struct GuestAddressDef(pub u64);
 
 #[derive(Serialize, Deserialize)]
 pub struct MemoryRegion {
-    backing_file: PathBuf,
+    backing_file: Option<PathBuf>,
     #[serde(with = "GuestAddressDef")]
     start_addr: GuestAddress,
     size: GuestUsize,
@@ -1545,7 +1551,7 @@ impl Snapshottable for MemoryManager {
             }
 
             memory_regions.push(MemoryRegion {
-                backing_file: PathBuf::from(format!("memory-region-{}", index)),
+                backing_file: Some(PathBuf::from(format!("memory-region-{}", index))),
                 start_addr: region.start_addr(),
                 size: region.len(),
             });
