@@ -3628,7 +3628,7 @@ impl Snapshottable for DeviceManager {
         DEVICE_MANAGER_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         let mut snapshot = Snapshot::new(DEVICE_MANAGER_SNAPSHOT_ID);
 
         // We aggregate all devices snapshots.

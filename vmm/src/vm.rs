@@ -1267,7 +1267,7 @@ impl Snapshottable for Vm {
         VM_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         let current_state = self.get_state().unwrap();
         if current_state != VmState::Paused {
             return Err(MigratableError::Snapshot(anyhow!(
