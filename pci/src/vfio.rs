@@ -504,12 +504,9 @@ impl VfioPciDevice {
     ///
     /// # Arguments
     ///
-    /// * `vm` - The KVM VM file descriptor. It is used to set the VFIO MMIO regions
-    ///          as KVM user memory regions.
-    /// * `mem_slot` - The KVM memory slot to set the user memopry regions.
-    /// # Return value
-    ///
-    /// This function returns the updated KVM memory slot id.
+    /// * `vm` - The VM object. It is used to set the VFIO MMIO regions
+    ///          as user memory regions.
+    /// * `mem_slot` - The closure to return a memory slot.
     pub fn map_mmio_regions<F>(&mut self, vm: &Arc<dyn hypervisor::Vm>, mem_slot: F) -> Result<()>
     where
         F: Fn() -> u32,
