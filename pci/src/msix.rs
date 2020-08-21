@@ -158,7 +158,7 @@ impl MsixConfig {
         self.masked = ((reg >> FUNCTION_MASK_BIT) & 1u16) == 1u16;
         self.enabled = ((reg >> MSIX_ENABLE_BIT) & 1u16) == 1u16;
 
-        // Update KVM routes
+        // Update interrupt routing
         if old_masked != self.masked || old_enabled != self.enabled {
             if self.enabled && !self.masked {
                 for (idx, table_entry) in self.table_entries.iter().enumerate() {
