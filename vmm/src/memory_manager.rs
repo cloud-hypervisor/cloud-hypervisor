@@ -1526,7 +1526,7 @@ impl Snapshottable for MemoryManager {
         MEMORY_MANAGER_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&self) -> result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
         if self.use_zones {
             return Err(MigratableError::Snapshot(anyhow!(
                 "Not allowed to snapshot guest memory when backed with user \

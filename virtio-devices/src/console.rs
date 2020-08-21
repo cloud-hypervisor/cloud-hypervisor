@@ -552,7 +552,7 @@ impl Snapshottable for Console {
         self.id.clone()
     }
 
-    fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
