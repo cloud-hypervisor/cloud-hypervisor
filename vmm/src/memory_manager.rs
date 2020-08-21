@@ -275,6 +275,7 @@ impl MemoryManager {
         ram_regions: &[(GuestAddress, usize)],
         zones: &[MemoryZoneConfig],
         prefault: bool,
+        ext_regions: Option<Vec<MemoryRegion>>,
     ) -> Result<Vec<Arc<GuestRegionMmap>>, Error> {
         let mut zones = zones.to_owned();
         let mut mem_regions = Vec::new();
@@ -315,10 +316,10 @@ impl MemoryManager {
                     file_offset,
                     region_start,
                     region_size,
-                    false,
                     prefault,
                     zone.shared,
                     zone.hugepages,
+                    &ext_regions,
                 )?);
 
                 if pull_next_zone {
@@ -372,36 +373,17 @@ impl MemoryManager {
                 .map(|r| (r.0, r.1))
                 .collect();
 
-            if let Some(ext_regions) = &ext_regions {
-                if ram_regions.len() > ext_regions.len() {
-                    return Err(Error::InvalidAmountExternalBackingFiles);
-                }
-
-                for region in ext_regions.iter() {
-                    mem_regions.push(MemoryManager::create_ram_region(
-                        &region.backing_file,
-                        0,
-                        region.start_addr,
-                        region.size as usize,
-                        true,
-                        prefault,
-                        false,
-                        false,
-                    )?);
-                }
-            } else {
-                for region in ram_regions.iter() {
-                    mem_regions.push(MemoryManager::create_ram_region(
-                        &config.file,
-                        0,
-                        region.0,
-                        region.1,
-                        false,
-                        prefault,
-                        config.shared,
-                        config.hugepages,
-                    )?);
-                }
+            for region in ram_regions.iter() {
+                mem_regions.push(MemoryManager::create_ram_region(
+                    &config.file,
+                    0,
+                    region.0,
+                    region.1,
+                    prefault,
+                    config.shared,
+                    config.hugepages,
+                    &ext_regions,
+                )?);
             }
         } else {
             if config.zones.is_none() {
@@ -432,7 +414,12 @@ impl MemoryManager {
                 .map(|r| (r.0, r.1))
                 .collect();
 
-            mem_regions = Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault)?;
+            mem_regions = Self::create_memory_regions_from_zones(
+                &ram_regions,
+                &zones,
+                prefault,
+                ext_regions,
+            )?;
         }
 
         let guest_memory =
@@ -460,9 +447,9 @@ impl MemoryManager {
                         start_addr,
                         size as usize,
                         false,
-                        false,
                         config.shared,
                         config.hugepages,
+                        &None,
                     )?);
                 }
 
@@ -598,6 +585,14 @@ impl MemoryManager {
                     }
                 };
 
+            // Here we turn the backing file name into a backing file path as
+            // this will be needed when the memory region will be created with
+            // mmap().
+            // We simply ignore the backing files that are None, as they
+            // represent files that have been directly saved by the user, with
+            // no need for saving into a dedicated external file. For these
+            // files, the VmConfig already contains the information on where to
+            // find them.
             let mut ext_regions = mem_snapshot.memory_regions;
             for region in ext_regions.iter_mut() {
                 if let Some(backing_file) = &mut region.backing_file {
@@ -607,45 +602,7 @@ impl MemoryManager {
                 }
             }
 
-            // In case there was no backing file, we can safely use CoW by
-            // mapping the source files provided for restoring. This case
-            // allows for a faster VM restoration and does not require us to
-            // fill the memory content, hence we can return right away.
-            if config.file.is_none() {
-                return MemoryManager::new(vm, config, Some(ext_regions), prefault);
-            };
-
-            let memory_manager = MemoryManager::new(vm, config, None, false)?;
-            let guest_memory = memory_manager.lock().unwrap().guest_memory();
-
-            // In case the previous config was using a backing file, this means
-            // it was MAP_SHARED, therefore we must copy the content into the
-            // new regions so that we can still use MAP_SHARED when restoring
-            // the VM.
-            guest_memory.memory().with_regions(|index, region| {
-                if let Some(backing_file) = &ext_regions[index].backing_file {
-                    // Open (read only) the snapshot file for the given region.
-                    let mut memory_region_file = OpenOptions::new()
-                        .read(true)
-                        .open(backing_file)
-                        .map_err(|e| {
-                        Error::Restore(MigratableError::MigrateReceive(e.into()))
-                    })?;
-
-                    // Fill the region with the file content.
-                    region
-                        .read_from(
-                            MemoryRegionAddress(0),
-                            &mut memory_region_file,
-                            region.len().try_into().unwrap(),
-                        )
-                        .map_err(|e| Error::Restore(MigratableError::MigrateReceive(e.into())))?;
-                }
-
-                Ok(())
-            })?;
-
-            Ok(memory_manager)
+            MemoryManager::new(vm, config, Some(ext_regions), prefault)
         } else {
             Err(Error::Restore(MigratableError::Restore(anyhow!(
                 "Could not find {}-section from snapshot",
@@ -666,24 +623,52 @@ impl MemoryManager {
 
     #[allow(clippy::too_many_arguments)]
     fn create_ram_region(
-        backing_file: &Option<PathBuf>,
+        file: &Option<PathBuf>,
         mut file_offset: u64,
         start_addr: GuestAddress,
         size: usize,
-        copy_on_write: bool,
         prefault: bool,
         shared: bool,
         hugepages: bool,
+        ext_regions: &Option<Vec<MemoryRegion>>,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
-        Ok(Arc::new(match backing_file {
+        let mut backing_file: Option<PathBuf> = file.clone();
+        let mut copy_ext_region_content: Option<PathBuf> = None;
+
+        if let Some(ext_regions) = ext_regions {
+            for ext_region in ext_regions.iter() {
+                if ext_region.start_addr == start_addr && ext_region.size as usize == size {
+                    if ext_region.backing_file.is_some() {
+                        // If the region is memory mapped as "shared", then we
+                        // don't replace the backing file, but expect to copy
+                        // the content from the external backing file after the
+                        // region has been created.
+                        if shared {
+                            copy_ext_region_content = ext_region.backing_file.clone();
+                        } else {
+                            backing_file = ext_region.backing_file.clone();
+                            // We must override the file offset as in this case
+                            // we're restoring an existing region, which means
+                            // it will fit perfectly the calculated region.
+                            file_offset = 0;
+                        }
+                    }
+
+                    // No need to iterate further as we found the external
+                    // region matching the current region.
+                    break;
+                }
+            }
+        }
+
+        let (f, f_off) = match backing_file {
             Some(ref file) => {
-                let f = if file.is_dir() {
+                if file.is_dir() {
                     // Override file offset as it does not apply in this case.
                     info!(
                         "Ignoring file offset since the backing file is a \
                         temporary file created from the specified directory."
                     );
-                    file_offset = 0;
                     let fs_str = format!("{}{}", file.display(), "/tmpfile_XXXXXX");
                     let fs = ffi::CString::new(fs_str).unwrap();
                     let mut path = fs.as_bytes_with_nul().to_owned();
@@ -692,34 +677,17 @@ impl MemoryManager {
                     unsafe { libc::unlink(path_ptr) };
                     let f = unsafe { File::from_raw_fd(fd) };
                     f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
-                    f
+
+                    (f, 0)
                 } else {
-                    OpenOptions::new()
+                    let f = OpenOptions::new()
                         .read(true)
                         .write(true)
                         .open(file)
-                        .map_err(Error::SharedFileCreate)?
-                };
+                        .map_err(Error::SharedFileCreate)?;
 
-                let mut mmap_flags = if copy_on_write {
-                    libc::MAP_NORESERVE | libc::MAP_PRIVATE
-                } else {
-                    libc::MAP_NORESERVE | libc::MAP_SHARED
-                };
-                if prefault {
-                    mmap_flags |= libc::MAP_POPULATE;
+                    (f, file_offset)
                 }
-                GuestRegionMmap::new(
-                    MmapRegion::build(
-                        Some(FileOffset::new(f, file_offset)),
-                        size,
-                        libc::PROT_READ | libc::PROT_WRITE,
-                        mmap_flags,
-                    )
-                    .map_err(Error::GuestMemoryRegion)?,
-                    start_addr,
-                )
-                .map_err(Error::GuestMemory)?
             }
             None => {
                 let fd = Self::memfd_create(
@@ -735,25 +703,47 @@ impl MemoryManager {
                 let f = unsafe { File::from_raw_fd(fd) };
                 f.set_len(size as u64).map_err(Error::SharedFileSetLen)?;
 
-                let mmap_flags = libc::MAP_NORESERVE
-                    | if shared {
-                        libc::MAP_SHARED
-                    } else {
-                        libc::MAP_PRIVATE
-                    };
-                GuestRegionMmap::new(
-                    MmapRegion::build(
-                        Some(FileOffset::new(f, 0)),
-                        size,
-                        libc::PROT_READ | libc::PROT_WRITE,
-                        mmap_flags,
-                    )
-                    .map_err(Error::GuestMemoryRegion)?,
-                    start_addr,
-                )
-                .map_err(Error::GuestMemory)?
+                (f, 0)
             }
-        }))
+        };
+
+        let mut mmap_flags = libc::MAP_NORESERVE
+            | if shared {
+                libc::MAP_SHARED
+            } else {
+                libc::MAP_PRIVATE
+            };
+        if prefault {
+            mmap_flags |= libc::MAP_POPULATE;
+        }
+
+        let region = GuestRegionMmap::new(
+            MmapRegion::build(
+                Some(FileOffset::new(f, f_off)),
+                size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                mmap_flags,
+            )
+            .map_err(Error::GuestMemoryRegion)?,
+            start_addr,
+        )
+        .map_err(Error::GuestMemory)?;
+
+        // Copy data to the region if needed
+        if let Some(ext_backing_file) = &copy_ext_region_content {
+            // Open (read only) the snapshot file for the given region.
+            let mut memory_region_file = OpenOptions::new()
+                .read(true)
+                .open(ext_backing_file)
+                .unwrap();
+
+            // Fill the region with the file content.
+            region
+                .read_from(MemoryRegionAddress(0), &mut memory_region_file, size)
+                .unwrap();
+        }
+
+        Ok(Arc::new(region))
     }
 
     // Update the GuestMemoryMmap with the new range
@@ -818,9 +808,9 @@ impl MemoryManager {
             start_addr,
             size,
             false,
-            false,
             self.shared,
             self.hugepages,
+            &None,
         )?;
 
         // Map it into the guest
