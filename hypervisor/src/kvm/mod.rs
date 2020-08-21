@@ -69,7 +69,7 @@ pub use {
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub struct KvmVmState {}
 
-use KvmVmState as VmState;
+pub use KvmVmState as VmState;
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
     fd: Arc<VmFd>,
