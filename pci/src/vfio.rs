@@ -61,7 +61,7 @@ impl fmt::Display for VfioPciError {
             VfioPciError::MapRegionGuest(e) => {
                 write!(f, "failed to map VFIO PCI region into guest: {}", e)
             }
-            VfioPciError::SetGsiRouting(e) => write!(f, "failed to set GSI routes for KVM: {}", e),
+            VfioPciError::SetGsiRouting(e) => write!(f, "failed to set GSI routes: {}", e),
             VfioPciError::MsiNotConfigured => write!(f, "MSI interrupt not yet configured"),
             VfioPciError::MsixNotConfigured => write!(f, "MSI-X interrupt not yet configured"),
             VfioPciError::UpdateMemory(e) => write!(f, "failed to update memory: {}", e),
@@ -584,8 +584,8 @@ impl VfioPciDevice {
             {
                 let (mmap_offset, _) = self.device.get_region_mmap(region.index);
 
-                // Remove region from KVM
-                let kvm_region = self.vm.make_user_memory_region(
+                // Remove region
+                let r = self.vm.make_user_memory_region(
                     mem_slot,
                     region.start.raw_value() + mmap_offset,
                     0,
@@ -593,11 +593,8 @@ impl VfioPciDevice {
                     false,
                 );
 
-                if let Err(e) = self.vm.set_user_memory_region(kvm_region) {
-                    error!(
-                        "Could not remove the userspace memory region from KVM: {}",
-                        e
-                    );
+                if let Err(e) = self.vm.set_user_memory_region(r) {
+                    error!("Could not remove the userspace memory region: {}", e);
                 }
 
                 let ret = unsafe { libc::munmap(host_addr as *mut libc::c_void, mmap_size) };
@@ -788,7 +785,7 @@ impl PciDevice for VfioPciDevice {
 
                 // We need to allocate a guest MMIO address range for that BAR.
                 // In case the BAR is mappable directly, this means it might be
-                // set as KVM user memory region, which expects to deal with 4K
+                // set as user memory region, which expects to deal with 4K
                 // pages. Therefore, the aligment has to be set accordingly.
                 let bar_alignment = if (bar_id == VFIO_PCI_ROM_REGION_INDEX)
                     || (self.device.get_region_flags(bar_id) & VFIO_REGION_INFO_FLAG_MMAP != 0)
@@ -1012,7 +1009,7 @@ impl PciDevice for VfioPciDevice {
                     if let Some(host_addr) = region.host_addr {
                         let (mmap_offset, mmap_size) = self.device.get_region_mmap(region.index);
 
-                        // Remove old region from KVM
+                        // Remove old region
                         let old_mem_region = self.vm.make_user_memory_region(
                             mem_slot,
                             old_base + mmap_offset,
@@ -1025,7 +1022,7 @@ impl PciDevice for VfioPciDevice {
                             .set_user_memory_region(old_mem_region)
                             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-                        // Insert new region to KVM
+                        // Insert new region
                         let new_mem_region = self.vm.make_user_memory_region(
                             mem_slot,
                             new_base + mmap_offset,
