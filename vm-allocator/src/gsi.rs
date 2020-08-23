@@ -2,8 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 
-#[cfg(target_arch = "aarch64")]
-use arch;
 #[cfg(target_arch = "x86_64")]
 use std::collections::btree_map::BTreeMap;
 use std::result;
@@ -65,6 +63,7 @@ impl GsiAllocator {
     }
 
     #[cfg(target_arch = "aarch64")]
+    #[allow(clippy::new_without_default)]
     /// New GSI allocator
     pub fn new() -> Self {
         GsiAllocator {

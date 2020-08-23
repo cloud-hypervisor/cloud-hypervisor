@@ -981,12 +981,10 @@ impl CpuManager {
 
     #[cfg(target_arch = "aarch64")]
     pub fn get_mpidrs(&self) -> Vec<u64> {
-        let vcpu_mpidrs = self
-            .vcpus
+        self.vcpus
             .iter()
             .map(|cpu| cpu.lock().unwrap().get_mpidr())
-            .collect();
-        vcpu_mpidrs
+            .collect()
     }
 
     #[cfg(feature = "acpi")]
