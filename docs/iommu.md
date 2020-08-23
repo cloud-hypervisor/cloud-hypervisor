@@ -86,7 +86,7 @@ virtual IOMMU:
 
 ```bash
 ./cloud-hypervisor \
-    --cpus 1 \
+    --cpus boot=1 \
     --memory size=512M \
     --disk path=focal-server-cloudimg-amd64.raw,iommu=on \
     --kernel custom-bzImage \
@@ -163,8 +163,8 @@ be consumed.
 
 ```bash
 ./cloud-hypervisor \
-    --cpus 1 \
-    --memory size=8G,file=/dev/hugepages \
+    --cpus boot=1 \
+    --memory size=8G,hugepages=on \
     --disk path=focal-server-cloudimg-amd64.raw \
     --kernel custom-bzImage \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw hugepagesz=2M hugepages=2048" \
@@ -180,8 +180,8 @@ passing through is `0000:00:01.0`.
 
 ```bash
 ./cloud-hypervisor \
-    --cpus 1 \
-    --memory size=8G,file=/dev/hugepages \
+    --cpus boot=1 \
+    --memory size=8G,hugepages=on \
     --disk path=focal-server-cloudimg-amd64.raw \
     --kernel custom-bzImage \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw kvm-intel.nested=1 vfio_iommu_type1.allow_unsafe_interrupts rw hugepagesz=2M hugepages=2048" \
@@ -200,8 +200,8 @@ Last thing is to start the L2 guest with the huge pages memory backend.
 
 ```bash
 ./cloud-hypervisor \
-    --cpus 1 \
-    --memory size=4G,file=/dev/hugepages \
+    --cpus boot=1 \
+    --memory size=4G,hugepages=on \
     --disk path=focal-server-cloudimg-amd64.raw \
     --kernel custom-bzImage \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
