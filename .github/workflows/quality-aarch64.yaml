@@ -1,0 +1,40 @@
+name: Cloud Hypervisor Quality Checks
+on: [pull_request, create]
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    name: Quality (clippy, rustfmt)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+        target:
+          - aarch64-unknown-linux-gnu
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v2
+      - name: Install Rust toolchain (${{ matrix.rust }})
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: ${{ matrix.rust }}
+            target: ${{ matrix.target }}
+            override: true
+            components: rustfmt, clippy
+      - name: Install arm64 libfdt
+        run: wget http://ftp.us.debian.org/debian/pool/main/d/device-tree-compiler/libfdt-dev_1.6.0-1_arm64.deb && dpkg-deb -xv libfdt-dev_1.6.0-1_arm64.deb ./tlibfdtdev && sudo mkdir /tmmmp && mkdir target && mkdir target/debug && mkdir target/debug/deps && sudo cp ./tlibfdtdev/usr/lib/aarch64-linux-gnu/libfdt.a target/debug/deps/libfdt.a && echo "libfdt installed"
+      - name: Formatting (rustfmt)
+        run: cargo fmt -- --check
+      - name: Clippy (mmio,kvm)
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: clippy
+          args: --target=${{ matrix.target }} --no-default-features --features "mmio,kvm" -- -D warnings
+      - name: Clippy (pci,kvm)
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: clippy
+          args: --target=${{ matrix.target }} --no-default-features --features "pci,kvm" -- -D warnings
