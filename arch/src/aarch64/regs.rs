@@ -52,7 +52,7 @@ const PSTATE_FAULT_BITS_64: u64 = PSR_MODE_EL1h | PSR_A_BIT | PSR_F_BIT | PSR_I_
 // we're just doing pointer math on it, so in theory, it should safe.
 macro_rules! offset__of {
     ($str:ty, $field:ident) => {
-        unsafe { &(*(0 as *const $str)).$field as *const _ as usize }
+        unsafe { &(*std::ptr::null::<user_pt_regs>()).$field as *const _ as usize }
     };
 }
 

@@ -136,13 +136,14 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
 ///
 /// * `guest_mem` - The memory to be used by the guest.
 /// * `num_cpus` - Number of virtual CPUs the guest will have.
-pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
+#[allow(clippy::too_many_arguments)]
+pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::BuildHasher>(
     vm: &Arc<dyn hypervisor::Vm>,
     guest_mem: &GuestMemoryMmap,
     cmdline_cstring: &CStr,
     vcpu_count: u64,
     vcpu_mpidr: Vec<u64>,
-    device_info: &HashMap<(DeviceType, String), T>,
+    device_info: &HashMap<(DeviceType, String), T, S>,
     initrd: &Option<super::InitramfsConfig>,
     pci_space_address: &Option<(u64, u64)>,
 ) -> super::Result<()> {
@@ -157,7 +158,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug>(
         cmdline_cstring,
         vcpu_mpidr,
         device_info,
-        &gic_device,
+        &*gic_device,
         initrd,
         pci_space_address,
     )

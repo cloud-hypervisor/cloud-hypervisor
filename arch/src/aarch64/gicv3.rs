@@ -84,20 +84,20 @@ pub mod kvm {
             vcpu_count: u64,
         ) -> Box<dyn GICDevice> {
             Box::new(KvmGICv3 {
-                device: device,
+                device,
                 properties: [
                     KvmGICv3::get_dist_addr(),
                     KvmGICv3::get_dist_size(),
                     KvmGICv3::get_redists_addr(vcpu_count),
                     KvmGICv3::get_redists_size(vcpu_count),
                 ],
-                vcpu_count: vcpu_count,
+                vcpu_count,
             })
         }
 
         fn init_device_attributes(
             _vm: &Arc<dyn hypervisor::Vm>,
-            gic_device: &Box<dyn GICDevice>,
+            gic_device: &dyn GICDevice,
         ) -> Result<()> {
             /* Setting up the distributor attribute.
              We are placing the GIC below 1GB so we need to substract the size of the distributor.
@@ -117,8 +117,7 @@ pub mod kvm {
                 gic_device.device(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_V3_ADDR_TYPE_REDIST),
-                &KvmGICv3::get_redists_addr(u64::from(gic_device.vcpu_count())) as *const u64
-                    as u64,
+                &KvmGICv3::get_redists_addr(gic_device.vcpu_count()) as *const u64 as u64,
                 0,
             )?;
 

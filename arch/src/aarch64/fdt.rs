@@ -90,12 +90,12 @@ pub enum Error {
 type Result<T> = result::Result<T, Error>;
 
 /// Creates the flattened device tree for this aarch64 VM.
-pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug>(
+pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::BuildHasher>(
     guest_mem: &GuestMemoryMmap,
     cmdline: &CStr,
     vcpu_mpidr: Vec<u64>,
-    device_info: &HashMap<(DeviceType, String), T>,
-    gic_device: &Box<dyn GICDevice>,
+    device_info: &HashMap<(DeviceType, String), T, S>,
+    gic_device: &dyn GICDevice,
     initrd: &Option<InitramfsConfig>,
     pci_space_address: &Option<(u64, u64)>,
 ) -> Result<Vec<u8>> {
@@ -311,7 +311,7 @@ fn generate_prop64(cells: &[u64]) -> Vec<u8> {
 }
 
 // Following are the auxiliary function for creating the different nodes that we append to our FDT.
-fn create_cpu_nodes(fdt: &mut Vec<u8>, vcpu_mpidr: &Vec<u64>) -> Result<()> {
+fn create_cpu_nodes(fdt: &mut Vec<u8>, vcpu_mpidr: &[u64]) -> Result<()> {
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/arm/cpus.yaml.
     append_begin_node(fdt, "cpus")?;
     // As per documentation, on ARM v8 64-bit systems value should be set to 2.
@@ -319,7 +319,7 @@ fn create_cpu_nodes(fdt: &mut Vec<u8>, vcpu_mpidr: &Vec<u64>) -> Result<()> {
     append_property_u32(fdt, "#size-cells", 0x0)?;
     let num_cpus = vcpu_mpidr.len();
 
-    for cpu_index in 0..num_cpus {
+    for (cpu_index, mpidr) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
         let cpu_name = format!("cpu@{:x}", cpu_index);
         append_begin_node(fdt, &cpu_name)?;
         append_property_string(fdt, "device_type", "cpu")?;
@@ -330,7 +330,7 @@ fn create_cpu_nodes(fdt: &mut Vec<u8>, vcpu_mpidr: &Vec<u64>) -> Result<()> {
         }
         // Set the field to first 24 bits of the MPIDR - Multiprocessor Affinity Register.
         // See http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0488c/BABHBJCI.html.
-        append_property_u64(fdt, "reg", vcpu_mpidr[cpu_index] & 0x7FFFFF)?;
+        append_property_u64(fdt, "reg", mpidr & 0x7FFFFF)?;
         append_end_node(fdt)?;
     }
     append_end_node(fdt)?;
@@ -376,7 +376,7 @@ fn create_chosen_node(
     Ok(())
 }
 
-fn create_gic_node(fdt: &mut Vec<u8>, gic_device: &Box<dyn GICDevice>) -> Result<()> {
+fn create_gic_node(fdt: &mut Vec<u8>, gic_device: &dyn GICDevice) -> Result<()> {
     let gic_reg_prop = generate_prop64(gic_device.device_properties());
 
     append_begin_node(fdt, "intc")?;
@@ -521,9 +521,9 @@ fn create_rtc_node<T: DeviceInfoForFDT + Clone + Debug>(
     Ok(())
 }
 
-fn create_devices_node<T: DeviceInfoForFDT + Clone + Debug>(
+fn create_devices_node<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::BuildHasher>(
     fdt: &mut Vec<u8>,
-    dev_info: &HashMap<(DeviceType, String), T>,
+    dev_info: &HashMap<(DeviceType, String), T, S>,
 ) -> Result<()> {
     // Create one temp Vec to store all virtio devices
     let mut ordered_virtio_device: Vec<&T> = Vec::new();
