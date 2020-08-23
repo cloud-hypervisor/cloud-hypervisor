@@ -71,7 +71,7 @@ pub mod kvm {
         /// Setup the device-specific attributes
         fn init_device_attributes(
             vm: &Arc<dyn hypervisor::Vm>,
-            gic_device: &Box<dyn GICDevice>,
+            gic_device: &dyn GICDevice,
         ) -> Result<()>;
 
         /// Initialize a GIC device
@@ -95,10 +95,10 @@ pub mod kvm {
             flags: u32,
         ) -> Result<()> {
             let attr = kvm_bindings::kvm_device_attr {
-                group: group,
-                attr: attr,
-                addr: addr,
-                flags: flags,
+                group,
+                attr,
+                addr,
+                flags,
             };
             device
                 .set_device_attr(&attr)
@@ -108,7 +108,7 @@ pub mod kvm {
         }
 
         /// Finalize the setup of a GIC device
-        fn finalize_device(gic_device: &Box<dyn GICDevice>) -> Result<()> {
+        fn finalize_device(gic_device: &dyn GICDevice) -> Result<()> {
             /* We need to tell the kernel how many irqs to support with this vgic.
              * See the `layout` module for details.
              */
@@ -142,9 +142,9 @@ pub mod kvm {
 
             let device = Self::create_device(vgic_fd, vcpu_count);
 
-            Self::init_device_attributes(vm, &device)?;
+            Self::init_device_attributes(vm, &*device)?;
 
-            Self::finalize_device(&device)?;
+            Self::finalize_device(&*device)?;
 
             Ok(device)
         }

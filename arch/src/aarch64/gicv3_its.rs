@@ -80,7 +80,7 @@ pub mod kvm {
             vcpu_count: u64,
         ) -> Box<dyn GICDevice> {
             Box::new(KvmGICv3ITS {
-                device: device,
+                device,
                 gic_properties: [
                     KvmGICv3::get_dist_addr(),
                     KvmGICv3::get_dist_size(),
@@ -91,13 +91,13 @@ pub mod kvm {
                     KvmGICv3ITS::get_msi_addr(vcpu_count),
                     KvmGICv3ITS::get_msi_size(),
                 ],
-                vcpu_count: vcpu_count,
+                vcpu_count,
             })
         }
 
         fn init_device_attributes(
             vm: &Arc<dyn hypervisor::Vm>,
-            gic_device: &Box<dyn GICDevice>,
+            gic_device: &dyn GICDevice,
         ) -> Result<()> {
             KvmGICv3::init_device_attributes(vm, gic_device)?;
 
@@ -115,7 +115,7 @@ pub mod kvm {
                 &its_fd,
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ADDR,
                 u64::from(kvm_bindings::KVM_VGIC_ITS_ADDR_TYPE),
-                &KvmGICv3ITS::get_msi_addr(u64::from(gic_device.vcpu_count())) as *const u64 as u64,
+                &KvmGICv3ITS::get_msi_addr(gic_device.vcpu_count()) as *const u64 as u64,
                 0,
             )?;
 
