@@ -6,7 +6,6 @@ BUILD_TARGET=${BUILD_TARGET-x86_64-unknown-linux-gnu}
 cargo_args=("$@")
 [ $(uname -m) = "aarch64" ] && cargo_args+=("--no-default-features")
 [ $(uname -m) = "aarch64" ] && cargo_args+=("--features mmio,kvm")
-[ $(uname -m) = "aarch64" ] && sed -i 's/"with-serde",\ //g' hypervisor/Cargo.toml
 
 cargo test --target $BUILD_TARGET --workspace --no-run ${cargo_args[@]}
 pushd target/$BUILD_TARGET/debug
