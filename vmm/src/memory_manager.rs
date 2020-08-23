@@ -604,6 +604,7 @@ impl MemoryManager {
     // If the next area is hotplugged RAM, the start address needs to be aligned
     // to 128MiB boundary, and a gap of 256MiB need to be set before it.
     // On x86_64, it must also start at the 64bit start.
+    #[allow(clippy::let_and_return)]
     fn start_addr(mem_end: GuestAddress, with_gap: bool) -> GuestAddress {
         let start_addr = if with_gap {
             GuestAddress((mem_end.0 + 1 + (256 << 20)) & !((128 << 20) - 1))

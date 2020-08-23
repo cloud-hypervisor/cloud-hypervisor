@@ -949,6 +949,7 @@ impl cpu::Vcpu for KvmVcpu {
     #[allow(unused_variables)]
     #[cfg(target_arch = "aarch64")]
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+        warn!("CPU state was not restored");
         Ok(())
     }
 }

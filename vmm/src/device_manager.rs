@@ -1356,7 +1356,7 @@ impl DeviceManager {
 
         self.address_manager
             .mmio_bus
-            .insert(rtc_device.clone(), addr.0, MMIO_LEN)
+            .insert(rtc_device, addr.0, MMIO_LEN)
             .map_err(DeviceManagerError::BusError)?;
 
         self.id_to_dev_info.insert(

@@ -47,8 +47,7 @@ impl Gic {
 
 impl InterruptController for Gic {
     fn enable(&self) -> Result<()> {
-        &self
-            .interrupt_source_group
+        self.interrupt_source_group
             .enable()
             .map_err(Error::EnableInterrupt)?;
         Ok(())

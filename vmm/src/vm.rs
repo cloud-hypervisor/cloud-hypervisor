@@ -401,7 +401,7 @@ impl Vm {
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
         let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
-        let config = vm_snapshot.config.clone();
+        let config = vm_snapshot.config;
         if let Some(state) = vm_snapshot.state {
             vm.set_state(&state)
                 .map_err(|e| Error::Restore(MigratableError::Restore(e.into())))?;
@@ -1576,7 +1576,7 @@ mod tests {
             &CString::new("console=tty0").unwrap(),
             vec![0],
             &dev_info,
-            &gic,
+            &*gic,
             &None,
             &None,
         )
