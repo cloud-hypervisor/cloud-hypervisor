@@ -346,11 +346,9 @@ impl MemoryManager {
         ext_regions: Option<Vec<MemoryRegion>>,
         prefault: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
-        let mut mem_regions = Vec::new();
-        let arch_mem_regions: Vec<(GuestAddress, usize, RegionType)>;
         let use_zones = config.size == 0;
 
-        if !use_zones {
+        let (ram_size, zones) = if !use_zones {
             if config.zones.is_some() {
                 error!(
                     "User defined memory regions can't be provided if the \
@@ -359,27 +357,17 @@ impl MemoryManager {
                 return Err(Error::InvalidMemoryParameters);
             }
 
-            // Init guest memory
-            arch_mem_regions = arch::arch_memory_regions(config.size);
+            // Create a single zone from the global memory config. This lets
+            // us reuse the codepath for user defined memory zones.
+            let zones = vec![MemoryZoneConfig {
+                size: config.size,
+                file: None,
+                mergeable: config.mergeable,
+                shared: config.shared,
+                hugepages: config.hugepages,
+            }];
 
-            let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
-                .iter()
-                .filter(|r| r.2 == RegionType::Ram)
-                .map(|r| (r.0, r.1))
-                .collect();
-
-            for region in ram_regions.iter() {
-                mem_regions.push(MemoryManager::create_ram_region(
-                    &None,
-                    0,
-                    region.0,
-                    region.1,
-                    prefault,
-                    config.shared,
-                    config.hugepages,
-                    &ext_regions,
-                )?);
-            }
+            (config.size, zones)
         } else {
             if config.zones.is_none() {
                 error!(
@@ -401,21 +389,20 @@ impl MemoryManager {
                 total_ram_size += zone.size;
             }
 
-            arch_mem_regions = arch::arch_memory_regions(total_ram_size as GuestUsize);
+            (total_ram_size, zones)
+        };
 
-            let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
-                .iter()
-                .filter(|r| r.2 == RegionType::Ram)
-                .map(|r| (r.0, r.1))
-                .collect();
+        // Init guest memory
+        let arch_mem_regions = arch::arch_memory_regions(ram_size);
 
-            mem_regions = Self::create_memory_regions_from_zones(
-                &ram_regions,
-                &zones,
-                prefault,
-                ext_regions,
-            )?;
-        }
+        let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
+            .iter()
+            .filter(|r| r.2 == RegionType::Ram)
+            .map(|r| (r.0, r.1))
+            .collect();
+
+        let mem_regions =
+            Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, ext_regions)?;
 
         let guest_memory =
             GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
