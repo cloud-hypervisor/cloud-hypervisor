@@ -3513,8 +3513,6 @@ impl Aml for DeviceManager {
             &aml::ResourceTemplate::new(vec![
                 &aml::AddressSpace::new_bus_number(0x0u16, 0xffu16),
                 &aml::IO::new(0xcf8, 0xcf8, 1, 0x8),
-                &aml::AddressSpace::new_io(0x0u16, 0xcf7u16),
-                &aml::AddressSpace::new_io(0xd00u16, 0xffffu16),
                 &aml::AddressSpace::new_memory(
                     aml::AddressSpaceCachable::NotCacheable,
                     true,
