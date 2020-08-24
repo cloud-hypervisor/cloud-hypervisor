@@ -526,7 +526,6 @@ mod unit_tests {
                 },
                 memory: MemoryConfig {
                     size: 536_870_912,
-                    file: None,
                     mergeable: false,
                     hotplug_method: HotplugMethod::Acpi,
                     hotplug_size: None,

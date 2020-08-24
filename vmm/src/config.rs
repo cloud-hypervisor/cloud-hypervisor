@@ -361,8 +361,6 @@ pub struct MemoryRegionConfig {
 pub struct MemoryConfig {
     pub size: u64,
     #[serde(default)]
-    pub file: Option<PathBuf>,
-    #[serde(default)]
     pub mergeable: bool,
     #[serde(default)]
     pub hotplug_method: HotplugMethod,
@@ -399,7 +397,6 @@ impl MemoryConfig {
             .map_err(Error::ParseMemory)?
             .unwrap_or(ByteSized(DEFAULT_MEMORY_MB << 20))
             .0;
-        let file = parser.get("file").map(PathBuf::from);
         let mergeable = parser
             .convert::<Toggle>("mergeable")
             .map_err(Error::ParseMemory)?
@@ -481,7 +478,6 @@ impl MemoryConfig {
 
         Ok(MemoryConfig {
             size,
-            file,
             mergeable,
             hotplug_method,
             hotplug_size,
@@ -498,7 +494,6 @@ impl Default for MemoryConfig {
     fn default() -> Self {
         MemoryConfig {
             size: DEFAULT_MEMORY_MB << 20,
-            file: None,
             mergeable: false,
             hotplug_method: HotplugMethod::Acpi,
             hotplug_size: None,
@@ -1292,10 +1287,6 @@ impl VmConfig {
             return Err(ValidationError::CpusMaxLowerThanBoot);
         }
 
-        if self.memory.file.is_some() {
-            error!("Use of backing file ('--memory file=') is deprecated. Use the 'shared' and 'hugepages' controls.");
-        }
-
         if let Some(disks) = &self.disks {
             for disk in disks {
                 if disk.vhost_socket.as_ref().and(disk.path.as_ref()).is_some() {
@@ -1565,7 +1556,6 @@ mod tests {
             MemoryConfig::parse("size=512M,file=/some/file", None)?,
             MemoryConfig {
                 size: 512 << 20,
-                file: Some(PathBuf::from("/some/file")),
                 ..Default::default()
             }
         );
@@ -2020,7 +2010,6 @@ mod tests {
             },
             memory: MemoryConfig {
                 size: 536_870_912,
-                file: None,
                 mergeable: false,
                 hotplug_method: HotplugMethod::Acpi,
                 hotplug_size: None,

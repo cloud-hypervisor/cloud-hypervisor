@@ -66,7 +66,6 @@ pub struct MemoryManager {
     pub vm: Arc<dyn hypervisor::Vm>,
     hotplug_slots: Vec<HotPlugState>,
     selected_slot: usize,
-    backing_file: Option<PathBuf>,
     mergeable: bool,
     allocator: Arc<Mutex<SystemAllocator>>,
     hotplug_method: HotplugMethod,
@@ -373,7 +372,7 @@ impl MemoryManager {
 
             for region in ram_regions.iter() {
                 mem_regions.push(MemoryManager::create_ram_region(
-                    &config.file,
+                    &None,
                     0,
                     region.0,
                     region.1,
@@ -440,7 +439,7 @@ impl MemoryManager {
 
                 if !use_custom_regions {
                     virtiomem_region = Some(MemoryManager::create_ram_region(
-                        &config.file,
+                        &None,
                         0,
                         start_addr,
                         size as usize,
@@ -492,7 +491,6 @@ impl MemoryManager {
             vm,
             hotplug_slots,
             selected_slot: 0,
-            backing_file: config.file.clone(),
             mergeable: config.mergeable,
             allocator: allocator.clone(),
             hotplug_method: config.hotplug_method.clone(),
@@ -793,7 +791,7 @@ impl MemoryManager {
 
         // Allocate memory for the region
         let region = MemoryManager::create_ram_region(
-            &self.backing_file,
+            &None,
             0,
             start_addr,
             size,
