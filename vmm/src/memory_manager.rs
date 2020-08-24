@@ -166,10 +166,6 @@ pub enum Error {
     /// Forbidden operation. Impossible to resize guest memory if it is
     /// backed by user defined memory regions.
     InvalidResizeWithMemoryZones,
-
-    /// Forbidden operation. Impossible to restore guest memory if it is
-    /// backed by user defined memory regions.
-    InvalidRestoreWithMemoryZones,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -558,14 +554,6 @@ impl MemoryManager {
         source_url: &str,
         prefault: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
-        if config.size == 0 {
-            error!(
-                "Not allowed to restore guest memory when backed with user \
-                defined memory regions."
-            );
-            return Err(Error::InvalidRestoreWithMemoryZones);
-        }
-
         let url = Url::parse(source_url).unwrap();
         /* url must be valid dir which is verified in recv_vm_snapshot() */
         let vm_snapshot_path = url.to_file_path().unwrap();
@@ -1534,13 +1522,6 @@ impl Snapshottable for MemoryManager {
     }
 
     fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
-        if self.use_zones {
-            return Err(MigratableError::Snapshot(anyhow!(
-                "Not allowed to snapshot guest memory when backed with user \
-                defined memory regions."
-            )));
-        }
-
         let mut memory_manager_snapshot = Snapshot::new(MEMORY_MANAGER_SNAPSHOT_ID);
         let guest_memory = self.guest_memory.memory();
 
