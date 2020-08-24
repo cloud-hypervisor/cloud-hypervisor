@@ -481,8 +481,6 @@ components:
         hotplug_size:
           type: integer
           format: int64
-        file:
-          type: string
         mergeable:
           type: boolean
           default: false
