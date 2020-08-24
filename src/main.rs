@@ -526,7 +526,6 @@ mod unit_tests {
                 },
                 memory: MemoryConfig {
                     size: 536_870_912,
-                    file: None,
                     mergeable: false,
                     hotplug_method: HotplugMethod::Acpi,
                     hotplug_size: None,
@@ -641,18 +640,6 @@ mod unit_tests {
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory": {"size": 1073741824}
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory",
-                    "size=1G,file=/path/to/shared/file",
-                ],
-                r#"{
-                    "kernel": {"path": "/path/to/kernel"},
-                    "memory": {"size": 1073741824, "file": "/path/to/shared/file"}
                 }"#,
                 true,
             ),

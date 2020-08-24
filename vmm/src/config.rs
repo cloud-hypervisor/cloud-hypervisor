@@ -360,8 +360,6 @@ pub struct MemoryZoneConfig {
 pub struct MemoryConfig {
     pub size: u64,
     #[serde(default)]
-    pub file: Option<PathBuf>,
-    #[serde(default)]
     pub mergeable: bool,
     #[serde(default)]
     pub hotplug_method: HotplugMethod,
@@ -398,7 +396,6 @@ impl MemoryConfig {
             .map_err(Error::ParseMemory)?
             .unwrap_or(ByteSized(DEFAULT_MEMORY_MB << 20))
             .0;
-        let file = parser.get("file").map(PathBuf::from);
         let mergeable = parser
             .convert::<Toggle>("mergeable")
             .map_err(Error::ParseMemory)?
@@ -477,7 +474,6 @@ impl MemoryConfig {
 
         Ok(MemoryConfig {
             size,
-            file,
             mergeable,
             hotplug_method,
             hotplug_size,
@@ -494,7 +490,6 @@ impl Default for MemoryConfig {
     fn default() -> Self {
         MemoryConfig {
             size: DEFAULT_MEMORY_MB << 20,
-            file: None,
             mergeable: false,
             hotplug_method: HotplugMethod::Acpi,
             hotplug_size: None,
@@ -1288,10 +1283,6 @@ impl VmConfig {
             return Err(ValidationError::CpusMaxLowerThanBoot);
         }
 
-        if self.memory.file.is_some() {
-            error!("Use of backing file ('--memory file=') is deprecated. Use the 'shared' and 'hugepages' controls.");
-        }
-
         if let Some(disks) = &self.disks {
             for disk in disks {
                 if disk.vhost_socket.as_ref().and(disk.path.as_ref()).is_some() {
@@ -1489,21 +1480,16 @@ mod tests {
         let mut parser = OptionParser::new();
         parser
             .add("size")
-            .add("file")
             .add("mergeable")
             .add("hotplug_method")
             .add("hotplug_size");
 
-        assert!(parser
-            .parse("size=128M,file=/dev/shm,hanging_param")
-            .is_err());
-        assert!(parser
-            .parse("size=128M,file=/dev/shm,too_many_equals=foo=bar")
-            .is_err());
-        assert!(parser.parse("size=128M,file=/dev/shm").is_ok());
+        assert!(parser.parse("size=128M,hanging_param").is_err());
+        assert!(parser.parse("size=128M,too_many_equals=foo=bar").is_err());
+        assert!(parser.parse("size=128M,file=/dev/shm").is_err());
+        assert!(parser.parse("size=128M").is_ok());
 
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
-        assert_eq!(parser.get("file"), Some("/dev/shm".to_owned()));
         assert!(!parser.is_set("mergeable"));
         assert!(parser.is_set("size"));
         Ok(())
@@ -1556,14 +1542,6 @@ mod tests {
         assert_eq!(
             MemoryConfig::parse("size=512M", None)?,
             MemoryConfig::default()
-        );
-        assert_eq!(
-            MemoryConfig::parse("size=512M,file=/some/file", None)?,
-            MemoryConfig {
-                size: 512 << 20,
-                file: Some(PathBuf::from("/some/file")),
-                ..Default::default()
-            }
         );
         assert_eq!(
             MemoryConfig::parse("size=512M,mergeable=on", None)?,
@@ -2016,7 +1994,6 @@ mod tests {
             },
             memory: MemoryConfig {
                 size: 536_870_912,
-                file: None,
                 mergeable: false,
                 hotplug_method: HotplugMethod::Acpi,
                 hotplug_size: None,

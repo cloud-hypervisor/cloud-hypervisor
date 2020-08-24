@@ -38,4 +38,4 @@ write_files:
         # 1G ram requires 512 pages
         echo 512 | sudo tee /proc/sys/vm/nr_hugepages
         sudo chmod a+rwX /dev/hugepages
-        /mnt/cloud-hypervisor --kernel /mnt/vmlinux --cmdline "console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda1 VFIOTAG" --disk path=/mnt/focal-server-cloudimg-amd64-custom.qcow2 path=/mnt/cloudinit.img --cpus boot=1 --memory size=512M,hotplug_size=1G,file=/dev/hugepages --device path=/sys/bus/pci/devices/0000:00:06.0/ path=/sys/bus/pci/devices/0000:00:07.0/ --api-socket /tmp/ch_api.sock
+        /mnt/cloud-hypervisor --kernel /mnt/vmlinux --cmdline "console=hvc0 reboot=k panic=1 nomodules i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd root=/dev/vda1 VFIOTAG" --disk path=/mnt/focal-server-cloudimg-amd64-custom.qcow2 path=/mnt/cloudinit.img --cpus boot=1 --memory size=512M,hotplug_size=1G,hugepages=on --device path=/sys/bus/pci/devices/0000:00:06.0/ path=/sys/bus/pci/devices/0000:00:07.0/ --api-socket /tmp/ch_api.sock
