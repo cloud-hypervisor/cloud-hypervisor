@@ -467,6 +467,8 @@ components:
         hugepages:
           type: boolean
           default: false
+        host_numa_node:
+          type: uint64
 
     MemoryConfig:
       required:
