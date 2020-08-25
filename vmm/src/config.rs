@@ -534,6 +534,24 @@ impl MemoryConfig {
             zones,
         })
     }
+
+    pub fn total_size(&self) -> u64 {
+        let mut size = self.size;
+        if let Some(hotplugged_size) = self.hotplugged_size {
+            size += hotplugged_size;
+        }
+
+        if let Some(zones) = &self.zones {
+            for zone in zones.iter() {
+                size += zone.size;
+                if let Some(hotplugged_size) = zone.hotplugged_size {
+                    size += hotplugged_size;
+                }
+            }
+        }
+
+        size
+    }
 }
 
 impl Default for MemoryConfig {

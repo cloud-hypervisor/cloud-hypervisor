@@ -1493,6 +1493,11 @@ impl Vm {
 
         Ok(())
     }
+
+    /// Gets the actual size of the balloon.
+    pub fn get_balloon_actual(&self) -> u64 {
+        self.memory_manager.lock().unwrap().get_balloon_actual()
+    }
 }
 
 impl Pausable for Vm {

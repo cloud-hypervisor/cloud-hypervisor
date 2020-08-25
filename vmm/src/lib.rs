@@ -465,9 +465,17 @@ impl Vmm {
                     None => VmState::Created,
                 };
 
+                let config = Arc::clone(config);
+
+                let mut memory_actual_size = config.lock().unwrap().memory.total_size();
+                if let Some(vm) = &self.vm {
+                    memory_actual_size -= vm.get_balloon_actual();
+                }
+
                 Ok(VmInfo {
-                    config: Arc::clone(config),
+                    config,
                     state,
+                    memory_actual_size,
                 })
             }
             None => Err(VmError::VmNotCreated),

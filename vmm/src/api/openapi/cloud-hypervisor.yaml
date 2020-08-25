@@ -360,6 +360,9 @@ components:
         state:
           type: string
           enum: [Created, Running, Shutdown, Paused]
+        memory_actual_size:
+          type: integer
+          format: int64
       description: Virtual Machine information
 
     VmCounters:
