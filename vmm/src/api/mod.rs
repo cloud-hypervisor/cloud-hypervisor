@@ -145,6 +145,7 @@ pub type ApiResult<T> = std::result::Result<T, ApiError>;
 pub struct VmInfo {
     pub config: Arc<Mutex<VmConfig>>,
     pub state: VmState,
+    pub memory_actual_size: u64,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

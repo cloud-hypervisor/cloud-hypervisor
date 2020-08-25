@@ -47,9 +47,6 @@ const INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // New descriptors are pending on the virtio queue.
 const DEFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
-// Page shift in the host.
-const PAGE_SHIFT: u32 = 12;
-
 // Size of a PFN in the balloon interface.
 const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
 
@@ -78,7 +75,7 @@ pub enum Error {
 }
 
 // Got from include/uapi/linux/virtio_balloon.h
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
 struct VirtioBalloonConfig {
     // Number of pages host wants Guest to give up.
@@ -86,6 +83,9 @@ struct VirtioBalloonConfig {
     // Number of pages we've actually got in balloon.
     actual: u32,
 }
+
+const CONFIG_ACTUAL_OFFSET: u64 = 4;
+const CONFIG_ACTUAL_SIZE: usize = 4;
 
 // Safe because it only has data and has no implicit padding.
 unsafe impl ByteValued for VirtioBalloonConfig {}
@@ -207,7 +207,7 @@ impl BalloonEpollHandler {
                     let res = unsafe {
                         libc::madvise(
                             hva as *mut libc::c_void,
-                            (1 << PAGE_SHIFT) as libc::size_t,
+                            (1 << VIRTIO_BALLOON_PFN_SHIFT) as libc::size_t,
                             advice,
                         )
                     };
@@ -258,7 +258,8 @@ impl EpollHelperHandler for BalloonEpollHandler {
                 let mut signal_error = false;
                 let r = {
                     let mut config = self.config.lock().unwrap();
-                    config.num_pages = (self.resize_receiver.get_size() >> PAGE_SHIFT) as u32;
+                    config.num_pages =
+                        (self.resize_receiver.get_size() >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
                     if let Err(e) = self.signal(&VirtioInterruptType::Config, None) {
                         signal_error = true;
                         Err(e)
@@ -321,7 +322,7 @@ impl Balloon {
         let avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
         let mut config = VirtioBalloonConfig::default();
-        config.num_pages = (size >> PAGE_SHIFT) as u32;
+        config.num_pages = (size >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
 
         Ok(Balloon {
             common: VirtioCommon {
@@ -340,6 +341,11 @@ impl Balloon {
 
     pub fn resize(&self, size: u64) -> Result<(), Error> {
         self.resize.work(size)
+    }
+
+    // Get the actual size of the virtio-balloon.
+    pub fn get_actual(&self) -> u64 {
+        (self.config.lock().unwrap().actual as u64) << VIRTIO_BALLOON_PFN_SHIFT
     }
 }
 
@@ -371,6 +377,20 @@ impl VirtioDevice for Balloon {
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
         self.read_config_from_slice(self.config.lock().unwrap().as_slice(), offset, data);
+    }
+
+    fn write_config(&mut self, offset: u64, data: &[u8]) {
+        // The "actual" field is the only mutable field
+        if offset != CONFIG_ACTUAL_OFFSET || data.len() != CONFIG_ACTUAL_SIZE {
+            error!(
+                "Attempt to write to read-only field: offset {:x} length {}",
+                offset,
+                data.len()
+            );
+            return;
+        }
+
+        self.write_config_helper(self.config.lock().unwrap().as_mut_slice(), offset, data);
     }
 
     fn activate(

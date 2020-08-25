@@ -1236,6 +1236,14 @@ impl MemoryManager {
         Ok(balloon_size)
     }
 
+    pub fn get_balloon_actual(&self) -> u64 {
+        if let Some(balloon) = &self.balloon {
+            return balloon.lock().unwrap().get_actual();
+        }
+
+        0
+    }
+
     /// In case this function resulted in adding a new memory region to the
     /// guest memory, the new region is returned to the caller. The virtio-mem
     /// use case never adds a new region as the whole hotpluggable memory has
