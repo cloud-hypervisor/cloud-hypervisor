@@ -120,7 +120,7 @@ fn create_app<'a, 'b>(
                 .help(
                     "User defined memory zone parameters \
                      \"size=<guest_memory_region_size>,file=<backing_file>,\
-                     shared=on|off,hugepages=on|off\"",
+                     shared=on|off,hugepages=on|off,host_numa_node=<node_id>\"",
                 )
                 .takes_value(true)
                 .min_values(1)

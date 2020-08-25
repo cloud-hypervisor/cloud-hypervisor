@@ -352,6 +352,8 @@ pub struct MemoryZoneConfig {
     pub shared: bool,
     #[serde(default)]
     pub hugepages: bool,
+    #[serde(default)]
+    pub host_numa_node: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -431,7 +433,8 @@ impl MemoryConfig {
                     .add("size")
                     .add("file")
                     .add("shared")
-                    .add("hugepages");
+                    .add("hugepages")
+                    .add("host_numa_node");
                 parser.parse(memory_zone).map_err(Error::ParseMemoryZone)?;
 
                 let size = parser
@@ -450,12 +453,16 @@ impl MemoryConfig {
                     .map_err(Error::ParseMemoryZone)?
                     .unwrap_or(Toggle(false))
                     .0;
+                let host_numa_node = parser
+                    .convert::<u64>("host_numa_node")
+                    .map_err(Error::ParseMemoryZone)?;
 
                 zones.push(MemoryZoneConfig {
                     size,
                     file,
                     shared,
                     hugepages,
+                    host_numa_node,
                 });
             }
             Some(zones)

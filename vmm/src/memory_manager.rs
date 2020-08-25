@@ -364,6 +364,7 @@ impl MemoryManager {
                 file: None,
                 shared: config.shared,
                 hugepages: config.hugepages,
+                host_numa_node: None,
             }];
 
             (config.size, zones)
