@@ -23,6 +23,7 @@ use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
 use std::io;
+use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
@@ -46,6 +47,11 @@ use vm_migration::{
 const X86_64_IRQ_BASE: u32 = 5;
 
 const HOTPLUG_COUNT: usize = 8;
+
+// Memory policy constants
+const MPOL_BIND: u32 = 2;
+const MPOL_MF_STRICT: u32 = 1 << 0;
+const MPOL_MF_MOVE: u32 = 1 << 1;
 
 #[derive(Default)]
 struct HotPlugState {
@@ -165,6 +171,13 @@ pub enum Error {
     /// Forbidden operation. Impossible to resize guest memory if it is
     /// backed by user defined memory regions.
     InvalidResizeWithMemoryZones,
+
+    /// It's invalid to try applying a NUMA policy to a memory zone that is
+    /// memory mapped with MAP_SHARED.
+    InvalidSharedMemoryZoneWithHostNuma,
+
+    /// Failed applying NUMA memory policy.
+    ApplyNumaPolicy(io::Error),
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -314,6 +327,7 @@ impl MemoryManager {
                     prefault,
                     zone.shared,
                     zone.hugepages,
+                    zone.host_numa_node,
                     &ext_regions,
                 )?);
 
@@ -387,6 +401,14 @@ impl MemoryManager {
             let mut total_ram_size: u64 = 0;
             for zone in zones.iter() {
                 total_ram_size += zone.size;
+
+                if zone.shared && zone.host_numa_node.is_some() {
+                    error!(
+                        "Invalid to set host NUMA policy for a memory zone \
+                        mapped as 'shared'"
+                    );
+                    return Err(Error::InvalidSharedMemoryZoneWithHostNuma);
+                }
             }
 
             (total_ram_size, zones)
@@ -431,6 +453,7 @@ impl MemoryManager {
                         false,
                         config.shared,
                         config.hugepages,
+                        None,
                         &None,
                     )?);
                 }
@@ -594,6 +617,33 @@ impl MemoryManager {
         }
     }
 
+    fn mbind(
+        addr: *mut u8,
+        len: u64,
+        mode: u32,
+        nodemask: Vec<u64>,
+        maxnode: u64,
+        flags: u32,
+    ) -> Result<(), io::Error> {
+        let res = unsafe {
+            libc::syscall(
+                libc::SYS_mbind,
+                addr as *mut libc::c_void,
+                len,
+                mode,
+                nodemask.as_ptr(),
+                maxnode,
+                flags,
+            )
+        };
+
+        if res < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn create_ram_region(
         file: &Option<PathBuf>,
@@ -603,6 +653,7 @@ impl MemoryManager {
         prefault: bool,
         shared: bool,
         hugepages: bool,
+        host_numa_node: Option<u64>,
         ext_regions: &Option<Vec<MemoryRegion>>,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
         let mut backing_file: Option<PathBuf> = file.clone();
@@ -716,6 +767,38 @@ impl MemoryManager {
                 .unwrap();
         }
 
+        // Apply NUMA policy if needed.
+        if let Some(node) = host_numa_node {
+            let addr = region.deref().as_ptr();
+            let len = region.deref().size() as u64;
+            let mode = MPOL_BIND;
+            let mut nodemask: Vec<u64> = Vec::new();
+            let flags = MPOL_MF_STRICT | MPOL_MF_MOVE;
+
+            // Linux is kind of buggy in the way it interprets maxnode as it
+            // will cut off the last node. That's why we have to add 1 to what
+            // we would consider as the proper maxnode value.
+            let maxnode = node + 1 + 1;
+
+            // Allocate the right size for the vector.
+            nodemask.resize((node as usize / 64) + 1, 0);
+
+            // Fill the global bitmask through the nodemask vector.
+            let idx = (node / 64) as usize;
+            let shift = node % 64;
+            nodemask[idx] |= 1u64 << shift;
+
+            // Policies are enforced by using MPOL_MF_MOVE flag as it will
+            // force the kernel to move all pages that might have been already
+            // allocated to the proper set of NUMA nodes. MPOL_MF_STRICT is
+            // used to throw an error if MPOL_MF_MOVE didn't succeed.
+            // MPOL_BIND is the selected mode as it specifies a strict policy
+            // that restricts memory allocation to the nodes specified in the
+            // nodemask.
+            Self::mbind(addr, len, mode, nodemask, maxnode, flags)
+                .map_err(Error::ApplyNumaPolicy)?;
+        }
+
         Ok(Arc::new(region))
     }
 
@@ -783,6 +866,7 @@ impl MemoryManager {
             false,
             self.shared,
             self.hugepages,
+            None,
             &None,
         )?;
 

@@ -2217,7 +2217,12 @@ mod tests {
                 let mut cmd = GuestCommand::new(&guest);
                 cmd.args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=0"])
-                    .args(&["--memory-zone", "size=1G", "size=3G,file=/dev/shm"])
+                    .args(&[
+                        "--memory-zone",
+                        "size=1G",
+                        "size=3G,file=/dev/shm",
+                        "size=1G,host_numa_node=0",
+                    ])
                     .args(&["--kernel", guest.fw_path.as_str()])
                     .default_disks()
                     .default_net();
