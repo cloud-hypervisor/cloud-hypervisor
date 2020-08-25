@@ -369,7 +369,6 @@ components:
     VmConfig:
       required:
       - kernel
-      - cmdline
       type: object
       properties:
         cpus:
