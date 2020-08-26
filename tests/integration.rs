@@ -2098,24 +2098,27 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
-        #[cfg(target_arch = "x86_64")]
         fn test_multi_cpu() {
             test_block!(tb, "", {
                 let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
                 let guest = Guest::new(&mut bionic);
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=2,max=4"])
+                let mut cmd = GuestCommand::new(&guest);
+                cmd.args(&["--cpus", "boot=2,max=4"])
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
                     .default_raw_disks()
-                    .default_net()
-                    .spawn()
-                    .unwrap();
+                    .default_net();
+
+                #[cfg(target_arch = "aarch64")]
+                cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+
+                let mut child = cmd.spawn().unwrap();
 
                 thread::sleep(std::time::Duration::new(20, 0));
 
                 aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 2);
 
+                #[cfg(target_arch = "x86_64")]
                 aver_eq!(
                     tb,
                     guest
@@ -2126,6 +2129,18 @@ mod tests {
                         .trim(),
                     "smpboot: Allowing 4 CPUs, 2 hotplug CPUs"
                 );
+                #[cfg(target_arch = "aarch64")]
+                aver_eq!(
+                    tb,
+                    guest
+                        .ssh_command(
+                            r#"dmesg | grep "smp: Brought up" | sed "s/\[\ *[0-9.]*\] //""#
+                        )
+                        .unwrap_or_default()
+                        .trim(),
+                    "smp: Brought up 1 node, 2 CPUs"
+                );
+
                 let _ = child.kill();
                 let _ = child.wait();
                 Ok(())
