@@ -362,7 +362,6 @@ impl MemoryManager {
             let zones = vec![MemoryZoneConfig {
                 size: config.size,
                 file: None,
-                mergeable: config.mergeable,
                 shared: config.shared,
                 hugepages: config.hugepages,
             }];
