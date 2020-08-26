@@ -2587,13 +2587,11 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_net_self_spawning() {
             test_vhost_user_net(None, 4, None, true, false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_net_self_spawning_host_mac() {
             test_vhost_user_net(None, 2, None, true, true)
         }
