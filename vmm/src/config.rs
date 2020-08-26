@@ -349,8 +349,6 @@ pub struct MemoryZoneConfig {
     #[serde(default)]
     pub file: Option<PathBuf>,
     #[serde(default)]
-    pub mergeable: bool,
-    #[serde(default)]
     pub shared: bool,
     #[serde(default)]
     pub hugepages: bool,
@@ -432,7 +430,6 @@ impl MemoryConfig {
                 parser
                     .add("size")
                     .add("file")
-                    .add("mergeable")
                     .add("shared")
                     .add("hugepages");
                 parser.parse(memory_zone).map_err(Error::ParseMemoryZone)?;
@@ -443,11 +440,6 @@ impl MemoryConfig {
                     .unwrap_or(ByteSized(DEFAULT_MEMORY_MB << 20))
                     .0;
                 let file = parser.get("file").map(PathBuf::from);
-                let mergeable = parser
-                    .convert::<Toggle>("mergeable")
-                    .map_err(Error::ParseMemoryZone)?
-                    .unwrap_or(Toggle(false))
-                    .0;
                 let shared = parser
                     .convert::<Toggle>("shared")
                     .map_err(Error::ParseMemoryZone)?
@@ -462,7 +454,6 @@ impl MemoryConfig {
                 zones.push(MemoryZoneConfig {
                     size,
                     file,
-                    mergeable,
                     shared,
                     hugepages,
                 });
