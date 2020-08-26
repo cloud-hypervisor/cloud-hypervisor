@@ -276,6 +276,10 @@ fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         // The definition of libc::SYS_ftruncate is missing on AArch64.
         // Use a hard-code number instead.
         allow_syscall(46),
+        #[cfg(target_arch = "aarch64")]
+        allow_syscall(libc::SYS_faccessat),
+        #[cfg(target_arch = "aarch64")]
+        allow_syscall(libc::SYS_newfstatat),
         allow_syscall(libc::SYS_futex),
         allow_syscall(libc::SYS_getpid),
         allow_syscall(libc::SYS_getrandom),
