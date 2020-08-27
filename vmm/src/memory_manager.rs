@@ -402,10 +402,10 @@ impl MemoryManager {
             for zone in zones.iter() {
                 total_ram_size += zone.size;
 
-                if zone.shared && zone.host_numa_node.is_some() {
+                if zone.shared && zone.file.is_some() && zone.host_numa_node.is_some() {
                     error!(
                         "Invalid to set host NUMA policy for a memory zone \
-                        mapped as 'shared'"
+                        backed by a regular file and mapped as 'shared'"
                     );
                     return Err(Error::InvalidSharedMemoryZoneWithHostNuma);
                 }
