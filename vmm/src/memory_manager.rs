@@ -19,6 +19,7 @@ use devices::BusDevice;
 
 #[cfg(target_arch = "x86_64")]
 use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
+use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
@@ -62,6 +63,19 @@ struct HotPlugState {
     removing: bool,
 }
 
+#[derive(Clone)]
+pub struct NumaNode {
+    memory_regions: Vec<Arc<GuestRegionMmap>>,
+}
+
+impl NumaNode {
+    pub fn memory_regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
+        &self.memory_regions
+    }
+}
+
+pub type NumaNodes = BTreeMap<u32, NumaNode>;
+
 pub struct MemoryManager {
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     next_memory_slot: u32,
@@ -86,6 +100,7 @@ pub struct MemoryManager {
     sgx_epc_region: Option<SgxEpcRegion>,
     use_zones: bool,
     snapshot_memory_regions: Vec<MemoryRegion>,
+    numa_nodes: NumaNodes,
 }
 
 #[derive(Debug)]
@@ -284,11 +299,12 @@ impl MemoryManager {
         zones: &[MemoryZoneConfig],
         prefault: bool,
         ext_regions: Option<Vec<MemoryRegion>>,
-    ) -> Result<Vec<Arc<GuestRegionMmap>>, Error> {
+    ) -> Result<(Vec<Arc<GuestRegionMmap>>, NumaNodes), Error> {
         let mut zones = zones.to_owned();
         let mut mem_regions = Vec::new();
         let mut zone = zones.remove(0);
         let mut zone_offset = 0;
+        let mut numa_nodes = BTreeMap::new();
 
         for ram_region in ram_regions.iter() {
             let mut ram_region_offset = 0;
@@ -319,7 +335,7 @@ impl MemoryManager {
                     ram_region_sub_size
                 };
 
-                mem_regions.push(MemoryManager::create_ram_region(
+                let region = MemoryManager::create_ram_region(
                     &zone.file,
                     file_offset,
                     region_start,
@@ -329,7 +345,23 @@ impl MemoryManager {
                     zone.hugepages,
                     zone.host_numa_node,
                     &ext_regions,
-                )?);
+                )?;
+
+                // Fill the list of NUMA nodes.
+                if let Some(node_id) = zone.guest_numa_node {
+                    if let Some(node) = numa_nodes.get_mut(&node_id) as Option<&mut NumaNode> {
+                        node.memory_regions.push(region.clone());
+                    } else {
+                        numa_nodes.insert(
+                            node_id,
+                            NumaNode {
+                                memory_regions: vec![region.clone()],
+                            },
+                        );
+                    }
+                }
+
+                mem_regions.push(region);
 
                 if pull_next_zone {
                     // Get the next zone and reset the offset.
@@ -351,7 +383,7 @@ impl MemoryManager {
             }
         }
 
-        Ok(mem_regions)
+        Ok((mem_regions, numa_nodes))
     }
 
     pub fn new(
@@ -424,7 +456,7 @@ impl MemoryManager {
             .map(|r| (r.0, r.1))
             .collect();
 
-        let mem_regions =
+        let (mem_regions, numa_nodes) =
             Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, ext_regions)?;
 
         let guest_memory =
@@ -516,6 +548,7 @@ impl MemoryManager {
             sgx_epc_region: None,
             use_zones,
             snapshot_memory_regions: Vec::new(),
+            numa_nodes,
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -1195,6 +1228,10 @@ impl MemoryManager {
         }
 
         unsafe { (*stat.as_ptr()).st_nlink as usize > 0 }
+    }
+
+    pub fn numa_nodes(&self) -> &NumaNodes {
+        &self.numa_nodes
     }
 }
 
