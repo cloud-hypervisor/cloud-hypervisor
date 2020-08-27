@@ -2,21 +2,17 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+use crate::cpu::CpuManager;
+use crate::device_manager::DeviceManager;
+use crate::memory_manager::MemoryManager;
 use acpi_tables::{
     aml::Aml,
     rsdp::RSDP,
     sdt::{GenericAddress, SDT},
 };
-use vm_memory::{GuestAddress, GuestMemoryMmap};
-
-use vm_memory::{Address, ByteValued, Bytes};
-
-use std::sync::{Arc, Mutex};
-
-use crate::cpu::CpuManager;
-use crate::device_manager::DeviceManager;
-use crate::memory_manager::MemoryManager;
 use arch::layout;
+use std::sync::{Arc, Mutex};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryMmap, GuestMemoryRegion};
 
 #[repr(packed)]
 #[derive(Default)]
@@ -26,6 +22,22 @@ struct PCIRangeEntry {
     pub start: u8,
     pub end: u8,
     _reserved: u32,
+}
+
+#[repr(packed)]
+#[derive(Default)]
+struct MemoryAffinity {
+    pub type_: u8,
+    pub length: u8,
+    pub proximity_domain: u32,
+    _reserved1: u16,
+    pub base_addr_lo: u32,
+    pub base_addr_hi: u32,
+    pub length_lo: u32,
+    pub length_hi: u32,
+    _reserved2: u32,
+    pub flags: u32,
+    _reserved3: u64,
 }
 
 pub fn create_dsdt_table(
@@ -125,6 +137,60 @@ pub fn create_acpi_tables(
         .expect("Error writing MCFG table");
     tables.push(mcfg_offset.0);
 
+    // SRAT
+    // Only created if the NUMA nodes list is not empty.
+    let numa_nodes = memory_manager.lock().unwrap().numa_nodes().clone();
+    let (prev_tbl_len, prev_tbl_off) = if numa_nodes.is_empty() {
+        (mcfg.len(), mcfg_offset)
+    } else {
+        let mut srat = SDT::new(*b"SRAT", 36, 3, *b"CLOUDH", *b"CHSRAT  ", 1);
+        // SRAT reserved 12 bytes
+        srat.append_slice(&[0u8; 12]);
+
+        // Check the MemoryAffinity structure is the right size as expected by
+        // the ACPI specification.
+        assert_eq!(std::mem::size_of::<MemoryAffinity>(), 40);
+
+        for (node_id, node) in numa_nodes.iter() {
+            for region in node.memory_regions() {
+                let proximity_domain = *node_id as u32;
+                let base_addr = region.start_addr().raw_value();
+                let base_addr_lo = (base_addr & 0xffff_ffff) as u32;
+                let base_addr_hi = (base_addr >> 32) as u32;
+                let length = region.len() as u64;
+                let length_lo = (length & 0xffff_ffff) as u32;
+                let length_hi = (length >> 32) as u32;
+
+                // Flags
+                // - Enabled = 1 (bit 0)
+                // - Hot Pluggable = 0 (bit 1)
+                // - NonVolatile = 0 (bit 2)
+                // - Reserved bits 3-31
+                let flags = 1;
+
+                srat.append(MemoryAffinity {
+                    type_: 1,
+                    length: 40,
+                    proximity_domain,
+                    base_addr_lo,
+                    base_addr_hi,
+                    length_lo,
+                    length_hi,
+                    flags,
+                    ..Default::default()
+                });
+            }
+        }
+
+        let srat_offset = mcfg_offset.checked_add(mcfg.len() as u64).unwrap();
+        guest_mem
+            .write_slice(srat.as_slice(), srat_offset)
+            .expect("Error writing SRAT table");
+        tables.push(srat_offset.0);
+
+        (srat.len(), srat_offset)
+    };
+
     // XSDT
     let mut xsdt = SDT::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
     for table in tables {
@@ -132,7 +198,7 @@ pub fn create_acpi_tables(
     }
     xsdt.update_checksum();
 
-    let xsdt_offset = mcfg_offset.checked_add(mcfg.len() as u64).unwrap();
+    let xsdt_offset = prev_tbl_off.checked_add(prev_tbl_len as u64).unwrap();
     guest_mem
         .write_slice(xsdt.as_slice(), xsdt_offset)
         .expect("Error writing XSDT table");
