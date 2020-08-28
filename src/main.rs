@@ -222,6 +222,14 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
+            Arg::with_name("numa")
+                .long("numa")
+                .help(config::NumaConfig::SYNTAX)
+                .takes_value(true)
+                .min_values(1)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::with_name("v")
                 .short("v")
                 .multiple(true)
@@ -566,6 +574,7 @@ mod unit_tests {
                 iommu: false,
                 #[cfg(target_arch = "x86_64")]
                 sgx_epc: None,
+                numa: None,
             };
 
             aver_eq!(tb, expected_vm_config, result_vm_config);

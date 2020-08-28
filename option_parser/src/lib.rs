@@ -170,3 +170,47 @@ impl FromStr for ByteSized {
         }))
     }
 }
+
+pub struct IntegerList(pub Vec<u64>);
+
+pub enum IntegerListParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for IntegerList {
+    type Err = IntegerListParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let mut integer_list = Vec::new();
+        let ranges_list: Vec<&str> = s.trim().split(':').collect();
+
+        for range in ranges_list.iter() {
+            let items: Vec<&str> = range.split('-').collect();
+
+            if items.len() > 2 {
+                return Err(IntegerListParseError::InvalidValue(range.to_string()));
+            }
+
+            let start_range = items[0]
+                .parse::<u64>()
+                .map_err(|_| IntegerListParseError::InvalidValue(items[0].to_owned()))?;
+
+            integer_list.push(start_range);
+
+            if items.len() == 2 {
+                let end_range = items[1]
+                    .parse::<u64>()
+                    .map_err(|_| IntegerListParseError::InvalidValue(items[1].to_owned()))?;
+                if start_range >= end_range {
+                    return Err(IntegerListParseError::InvalidValue(range.to_string()));
+                }
+
+                for i in start_range..end_range {
+                    integer_list.push(i + 1);
+                }
+            }
+        }
+
+        Ok(IntegerList(integer_list))
+    }
+}

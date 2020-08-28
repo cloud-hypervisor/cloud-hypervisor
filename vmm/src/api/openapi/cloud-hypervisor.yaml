@@ -413,6 +413,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SgxEpcConfig'
+        numa:
+          type: array
+          items:
+            $ref: '#/components/schemas/NumaConfig'
         iommu:
           type: boolean
           default: false
@@ -716,6 +720,20 @@ components:
         prefault:
           type: boolean
           default: false
+
+    NumaConfig:
+      required:
+      - id
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+        cpus:
+          type: array
+          items:
+            type: integer
+            format: uint8
 
     VmResize:
       type: object
