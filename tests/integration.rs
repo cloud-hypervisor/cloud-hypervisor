@@ -1132,16 +1132,22 @@ mod tests {
             // 1 virtio-net     with 5 vectors: config, Rx (2), Tx (2)
             // Based on the above, the total vectors should 14.
             // This is a PCI only feature.
-            #[cfg(all(not(feature = "mmio"), feature = "acpi"))]
-            assert_eq!(
-                guest
-                    .ssh_command("grep -c PCI-MSI /proc/interrupts")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                10 + (num_queues as u32)
-            );
+            #[cfg(not(feature = "mmio"))]
+            {
+                #[cfg(target_arch = "x86_64")]
+                let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
+                #[cfg(target_arch = "aarch64")]
+                let grep_cmd = "grep -c ITS-MSI /proc/interrupts";
+                assert_eq!(
+                    guest
+                        .ssh_command(grep_cmd)
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    10 + (num_queues as u32)
+                );
+            }
 
             // ACPI is not built with mmio, hence we can't test the resize
             // feature for mmio.
@@ -2259,26 +2265,32 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
-        #[cfg(target_arch = "x86_64")]
         fn test_pci_msi() {
             test_block!(tb, "", {
                 let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
                 let guest = Guest::new(&mut focal);
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=1"])
+                let mut cmd = GuestCommand::new(&guest);
+                cmd.args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
                     .default_disks()
-                    .default_net()
-                    .spawn()
-                    .unwrap();
+                    .default_net();
+
+                #[cfg(target_arch = "aarch64")]
+                cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+
+                let mut child = cmd.spawn().unwrap();
 
                 thread::sleep(std::time::Duration::new(20, 0));
 
+                #[cfg(target_arch = "x86_64")]
+                let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
+                #[cfg(target_arch = "aarch64")]
+                let grep_cmd = "grep -c ITS-MSI /proc/interrupts";
                 aver_eq!(
                     tb,
                     guest
-                        .ssh_command("grep -c PCI-MSI /proc/interrupts")
+                        .ssh_command(grep_cmd)
                         .unwrap_or_default()
                         .trim()
                         .parse::<u32>()
