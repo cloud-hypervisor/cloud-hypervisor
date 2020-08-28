@@ -24,8 +24,8 @@ extern crate vm_allocator;
 extern crate vm_memory;
 
 use crate::config::{
-    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig, ValidationError,
-    VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, NumaConfig, PmemConfig,
+    ValidationError, VmConfig, VsockConfig,
 };
 use crate::cpu;
 use crate::device_manager::{self, get_win_size, Console, DeviceManager, DeviceManagerError};
@@ -311,6 +311,11 @@ impl Vm {
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
+        // Update NUMA based on NumaConfig.
+        if let Some(numa_cfg) = config.lock().unwrap().numa.clone() {
+            Self::update_numa(numa_cfg, &memory_manager)?;
+        }
+
         Ok(Vm {
             kernel,
             initramfs,
@@ -326,6 +331,24 @@ impl Vm {
             #[cfg(target_arch = "x86_64")]
             saved_clock: _saved_clock,
         })
+    }
+
+    fn update_numa(
+        configs: Vec<NumaConfig>,
+        memory_manager: &Arc<Mutex<MemoryManager>>,
+    ) -> Result<()> {
+        let mut mm = memory_manager.lock().unwrap();
+        let numa_nodes = mm.numa_nodes_mut();
+
+        for config in configs.iter() {
+            if let Some(cpus) = &config.cpus {
+                if let Some(node) = numa_nodes.get_mut(&config.id) {
+                    node.cpus_mut().extend(cpus);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn new(

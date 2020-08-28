@@ -66,11 +66,20 @@ struct HotPlugState {
 #[derive(Clone)]
 pub struct NumaNode {
     memory_regions: Vec<Arc<GuestRegionMmap>>,
+    cpus: Vec<u8>,
 }
 
 impl NumaNode {
     pub fn memory_regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
         &self.memory_regions
+    }
+
+    pub fn cpus(&self) -> &Vec<u8> {
+        &self.cpus
+    }
+
+    pub fn cpus_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.cpus
     }
 }
 
@@ -356,6 +365,7 @@ impl MemoryManager {
                             node_id,
                             NumaNode {
                                 memory_regions: vec![region.clone()],
+                                cpus: Vec::new(),
                             },
                         );
                     }
@@ -1232,6 +1242,10 @@ impl MemoryManager {
 
     pub fn numa_nodes(&self) -> &NumaNodes {
         &self.numa_nodes
+    }
+
+    pub fn numa_nodes_mut(&mut self) -> &mut NumaNodes {
+        &mut self.numa_nodes
     }
 }
 
