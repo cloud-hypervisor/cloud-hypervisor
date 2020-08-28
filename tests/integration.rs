@@ -734,6 +734,21 @@ mod tests {
                 .map_err(Error::Parsing)?)
         }
 
+        fn get_numa_node_memory(&self, node_id: usize) -> Result<u32, Error> {
+            Ok(self
+                .ssh_command(
+                    format!(
+                        "grep MemTotal /sys/devices/system/node/node{}/meminfo \
+                        | cut -d \":\" -f 2 | grep -o \"[0-9]*\"",
+                        node_id
+                    )
+                    .as_str(),
+                )?
+                .trim()
+                .parse()
+                .map_err(Error::Parsing)?)
+        }
+
         fn get_entropy(&self) -> Result<u32, Error> {
             Ok(self
                 .ssh_command("cat /proc/sys/kernel/random/entropy_avail")?
@@ -2262,6 +2277,39 @@ mod tests {
                 let _ = child.wait();
                 Ok(())
             });
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        #[cfg_attr(not(feature = "mmio"), test)]
+        fn test_guest_numa_nodes() {
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+            let mut cmd = GuestCommand::new(&guest);
+            cmd.args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=0"])
+                .args(&[
+                    "--memory-zone",
+                    "size=1G,guest_numa_node=0",
+                    "size=2G,guest_numa_node=1",
+                    "size=3G,guest_numa_node=2",
+                ])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .default_disks()
+                .default_net();
+
+            let mut child = cmd.spawn().unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            let r = std::panic::catch_unwind(|| {
+                assert!(guest.get_numa_node_memory(0).unwrap_or_default() > 960_000);
+                assert!(guest.get_numa_node_memory(1).unwrap_or_default() > 1_920_000);
+                assert!(guest.get_numa_node_memory(2).unwrap_or_default() > 2_880_000);
+            });
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
