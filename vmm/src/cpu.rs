@@ -1595,7 +1595,13 @@ mod tests {
 mod tests {
     use arch::aarch64::layout;
     use arch::aarch64::regs::*;
-    use hypervisor::kvm::kvm_bindings;
+    use hypervisor::kvm::aarch64::is_system_register;
+    use hypervisor::kvm::kvm_bindings::{
+        kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE,
+        KVM_REG_SIZE_U64,
+    };
+    use hypervisor::{arm64_core_reg_id, offset__of};
+    use std::mem;
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 
     #[test]
@@ -1610,7 +1616,11 @@ mod tests {
         ));
         let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
 
-        let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
+        let res = setup_regs(&vcpu, 0, 0x0, &mem);
+        // Must fail when vcpu is not initialized yet.
+        assert!(res.is_err());
+
+        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
         vcpu.vcpu_init(&kvi).unwrap();
 
@@ -1622,7 +1632,7 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
-        let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
+        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
@@ -1630,5 +1640,14 @@ mod tests {
 
         vcpu.vcpu_init(&kvi).unwrap();
         assert_eq!(read_mpidr(&vcpu).unwrap(), 0x80000000);
+    }
+
+    #[test]
+    fn test_is_system_register() {
+        let offset = offset__of!(user_pt_regs, pc);
+        let regid = arm64_core_reg_id!(KVM_REG_SIZE_U64, offset);
+        assert!(!is_system_register(regid));
+        let regid = KVM_REG_ARM64 as u64 | KVM_REG_SIZE_U64 as u64 | KVM_REG_ARM64_SYSREG as u64;
+        assert!(is_system_register(regid));
     }
 }
