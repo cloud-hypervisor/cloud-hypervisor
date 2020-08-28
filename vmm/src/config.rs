@@ -5,7 +5,7 @@
 
 use clap::ArgMatches;
 use net_util::MacAddr;
-use option_parser::{ByteSized, OptionParser, OptionParserError, Toggle};
+use option_parser::{ByteSized, IntegerList, OptionParser, OptionParserError, Toggle};
 use std::convert::From;
 use std::fmt;
 use std::net::Ipv4Addr;
@@ -69,6 +69,8 @@ pub enum Error {
     /// Failed to parse SGX EPC parameters
     #[cfg(target_arch = "x86_64")]
     ParseSgxEpc(OptionParserError),
+    /// Failed to parse NUMA parameters
+    ParseNuma(OptionParserError),
     /// Failed to validate configuration
     Validation(ValidationError),
 }
@@ -156,6 +158,7 @@ impl fmt::Display for Error {
             ParseRestore(o) => write!(f, "Error parsing --restore: {}", o),
             #[cfg(target_arch = "x86_64")]
             ParseSgxEpc(o) => write!(f, "Error parsing --sgx-epc: {}", o),
+            ParseNuma(o) => write!(f, "Error parsing --numa: {}", o),
             ParseRestoreSourceUrlMissing => {
                 write!(f, "Error parsing --restore: source_url missing")
             }
@@ -184,6 +187,7 @@ pub struct VmParams<'a> {
     pub vsock: Option<&'a str>,
     #[cfg(target_arch = "x86_64")]
     pub sgx_epc: Option<Vec<&'a str>>,
+    pub numa: Option<Vec<&'a str>>,
 }
 
 impl<'a> VmParams<'a> {
@@ -208,6 +212,7 @@ impl<'a> VmParams<'a> {
         let vsock: Option<&str> = args.value_of("vsock");
         #[cfg(target_arch = "x86_64")]
         let sgx_epc: Option<Vec<&str>> = args.values_of("sgx-epc").map(|x| x.collect());
+        let numa: Option<Vec<&str>> = args.values_of("numa").map(|x| x.collect());
 
         VmParams {
             cpus,
@@ -227,6 +232,7 @@ impl<'a> VmParams<'a> {
             vsock,
             #[cfg(target_arch = "x86_64")]
             sgx_epc,
+            numa,
         }
     }
 }
@@ -1205,6 +1211,35 @@ impl SgxEpcConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+pub struct NumaConfig {
+    #[serde(default)]
+    pub id: u32,
+    #[serde(default)]
+    pub cpus: Option<Vec<u8>>,
+}
+
+impl NumaConfig {
+    pub const SYNTAX: &'static str = "Settings related to a given NUMA node \
+        \"id=<node_id>,cpus=<cpus_id>\"";
+    pub fn parse(numa: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("id").add("cpus");
+        parser.parse(numa).map_err(Error::ParseNuma)?;
+
+        let id = parser
+            .convert::<u32>("id")
+            .map_err(Error::ParseNuma)?
+            .unwrap_or(0);
+        let cpus = parser
+            .convert::<IntegerList>("cpus")
+            .map_err(Error::ParseNuma)?
+            .map(|v| v.0.iter().map(|e| *e as u8).collect());
+
+        Ok(NumaConfig { id, cpus })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct RestoreConfig {
     pub source_url: PathBuf,
     #[serde(default)]
@@ -1265,6 +1300,7 @@ pub struct VmConfig {
     pub iommu: bool,
     #[cfg(target_arch = "x86_64")]
     pub sgx_epc: Option<Vec<SgxEpcConfig>>,
+    pub numa: Option<Vec<NumaConfig>>,
 }
 
 impl VmConfig {
@@ -1438,6 +1474,16 @@ impl VmConfig {
             }
         }
 
+        let mut numa: Option<Vec<NumaConfig>> = None;
+        if let Some(numa_list) = &vm_params.numa {
+            let mut numa_config_list = Vec::new();
+            for item in numa_list.iter() {
+                let numa_config = NumaConfig::parse(item)?;
+                numa_config_list.push(numa_config);
+            }
+            numa = Some(numa_config_list);
+        }
+
         let mut kernel: Option<KernelConfig> = None;
         if let Some(k) = vm_params.kernel {
             kernel = Some(KernelConfig {
@@ -1470,6 +1516,7 @@ impl VmConfig {
             iommu,
             #[cfg(target_arch = "x86_64")]
             sgx_epc,
+            numa,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -2038,6 +2085,7 @@ mod tests {
             iommu: false,
             #[cfg(target_arch = "x86_64")]
             sgx_epc: None,
+            numa: None,
         };
 
         assert!(valid_config.validate().is_ok());
