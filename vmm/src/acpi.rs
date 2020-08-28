@@ -40,6 +40,19 @@ struct MemoryAffinity {
     _reserved3: u64,
 }
 
+#[repr(packed)]
+#[derive(Default)]
+struct ProcessorLocalX2ApicAffinity {
+    pub type_: u8,
+    pub length: u8,
+    _reserved1: u16,
+    pub proximity_domain: u32,
+    pub x2apic_id: u32,
+    pub flags: u32,
+    pub clock_domain: u32,
+    _reserved2: u32,
+}
+
 pub fn create_dsdt_table(
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
@@ -152,8 +165,9 @@ pub fn create_acpi_tables(
         assert_eq!(std::mem::size_of::<MemoryAffinity>(), 40);
 
         for (node_id, node) in numa_nodes.iter() {
+            let proximity_domain = *node_id as u32;
+
             for region in node.memory_regions() {
-                let proximity_domain = *node_id as u32;
                 let base_addr = region.start_addr().raw_value();
                 let base_addr_lo = (base_addr & 0xffff_ffff) as u32;
                 let base_addr_hi = (base_addr >> 32) as u32;
@@ -177,6 +191,25 @@ pub fn create_acpi_tables(
                     length_lo,
                     length_hi,
                     flags,
+                    ..Default::default()
+                });
+            }
+
+            for cpu in node.cpus() {
+                let x2apic_id = *cpu as u32;
+
+                // Flags
+                // - Enabled = 1 (bit 0)
+                // - Reserved bits 1-31
+                let flags = 1;
+
+                srat.append(ProcessorLocalX2ApicAffinity {
+                    type_: 2,
+                    length: 24,
+                    proximity_domain,
+                    x2apic_id,
+                    flags,
+                    clock_domain: 0,
                     ..Default::default()
                 });
             }
