@@ -153,6 +153,11 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to enable HyperV SynIC")]
     EnableHyperVSynIC(#[source] anyhow::Error),
+    ///
+    /// Getting AArch64 system register error
+    ///
+    #[error("Failed to get system register: {0}")]
+    GetSysRegister(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -306,6 +311,11 @@ pub trait Vcpu: Send + Sync {
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
     fn get_one_reg(&self, reg_id: u64) -> Result<u64>;
     ///
+    /// Read the MPIDR - Multiprocessor Affinity Register.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn read_mpidr(&self) -> Result<u64>;
+    ///
     /// Retrieve the vCPU state.
     /// This function is necessary to snapshot the VM
     ///
@@ -315,7 +325,6 @@ pub trait Vcpu: Send + Sync {
     /// This function is required when restoring the VM
     ///
     fn set_state(&self, state: &CpuState) -> Result<()>;
-
     ///
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///

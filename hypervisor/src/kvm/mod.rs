@@ -9,7 +9,9 @@
 //
 
 #[cfg(target_arch = "aarch64")]
-pub use crate::aarch64::{check_required_kvm_extensions, VcpuInit, VcpuKvmState as CpuState};
+pub use crate::aarch64::{
+    check_required_kvm_extensions, VcpuInit, VcpuKvmState as CpuState, MPIDR_EL1,
+};
 use crate::cpu;
 use crate::device;
 use crate::hypervisor;
@@ -762,6 +764,15 @@ impl cpu::Vcpu for KvmVcpu {
         self.fd
             .get_one_reg(reg_id)
             .map_err(|e| cpu::HypervisorCpuError::GetOneReg(e.into()))
+    }
+    ///
+    /// Read the MPIDR - Multiprocessor Affinity Register.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn read_mpidr(&self) -> cpu::Result<u64> {
+        self.fd
+            .get_one_reg(MPIDR_EL1)
+            .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))
     }
     #[cfg(target_arch = "x86_64")]
     ///

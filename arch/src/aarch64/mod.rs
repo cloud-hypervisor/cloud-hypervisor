@@ -42,6 +42,9 @@ pub enum Error {
     /// Error configuring the general purpose registers
     REGSConfiguration(regs::Error),
 
+    /// Error configuring the MPIDR register
+    VcpuRegMPIDR(hypervisor::HypervisorCpuError),
+
     /// Error fetching prefered target
     VcpuArmPreferredTarget(hypervisor::HypervisorVmError),
 
@@ -94,7 +97,7 @@ pub fn configure_vcpu(
         .map_err(Error::REGSConfiguration)?;
     }
 
-    let mpidr = regs::read_mpidr(fd).map_err(Error::REGSConfiguration)?;
+    let mpidr = fd.read_mpidr().map_err(Error::VcpuRegMPIDR)?;
     Ok(mpidr)
 }
 
