@@ -1595,10 +1595,10 @@ mod tests {
 mod tests {
     use arch::aarch64::layout;
     use arch::aarch64::regs::*;
-    use hypervisor::kvm::aarch64::is_system_register;
+    use hypervisor::kvm::aarch64::{is_system_register, MPIDR_EL1};
     use hypervisor::kvm::kvm_bindings::{
-        kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE,
-        KVM_REG_SIZE_U64,
+        kvm_one_reg, kvm_regs, kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
+        KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
     };
     use hypervisor::{arm64_core_reg_id, offset__of};
     use std::mem;
@@ -1636,10 +1636,10 @@ mod tests {
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
-        assert!(read_mpidr(&vcpu).is_err());
+        assert!(vcpu.read_mpidr().is_err());
 
         vcpu.vcpu_init(&kvi).unwrap();
-        assert_eq!(read_mpidr(&vcpu).unwrap(), 0x80000000);
+        assert_eq!(vcpu.read_mpidr().unwrap(), 0x80000000);
     }
 
     #[test]
@@ -1649,5 +1649,95 @@ mod tests {
         assert!(!is_system_register(regid));
         let regid = KVM_REG_ARM64 as u64 | KVM_REG_SIZE_U64 as u64 | KVM_REG_ARM64_SYSREG as u64;
         assert!(is_system_register(regid));
+    }
+
+    #[test]
+    fn test_save_restore_core_regs() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let vcpu = vm.create_vcpu(0).unwrap();
+        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        vm.get_preferred_target(&mut kvi).unwrap();
+
+        // Must fail when vcpu is not initialized yet.
+        let mut state = kvm_regs::default();
+        let res = vcpu.core_registers(&mut state);
+        assert!(res.is_err());
+        assert_eq!(
+            format!("{}", res.unwrap_err()),
+            "Failed to get core register: Exec format error (os error 8)"
+        );
+
+        let res = vcpu.set_core_registers(&mut state);
+        assert!(res.is_err());
+        assert_eq!(
+            format!("{}", res.unwrap_err()),
+            "Failed to set core register: Exec format error (os error 8)"
+        );
+
+        vcpu.vcpu_init(&kvi).unwrap();
+        assert!(vcpu.core_registers(&mut state).is_ok());
+        assert_eq!(state.regs.pstate, 0x3C5);
+
+        assert!(vcpu.set_core_registers(&state).is_ok());
+        let off = offset__of!(user_pt_regs, pstate);
+        let pstate = vcpu
+            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
+            .expect("Failed to call kvm get one reg");
+        assert_eq!(state.regs.pstate, pstate);
+    }
+
+    #[test]
+    fn test_save_restore_system_regs() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let vcpu = vm.create_vcpu(0).unwrap();
+        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        vm.get_preferred_target(&mut kvi).unwrap();
+
+        // Must fail when vcpu is not initialized yet.
+        let mut state: Vec<kvm_one_reg> = Vec::new();
+        let res = vcpu.system_registers(&mut state);
+        assert!(res.is_err());
+        assert_eq!(
+            format!("{}", res.unwrap_err()),
+            "Failed to retrieve list of registers: Exec format error (os error 8)"
+        );
+
+        state.push(kvm_one_reg {
+            id: MPIDR_EL1,
+            addr: 0x00,
+        });
+        let res = vcpu.set_system_registers(&mut state);
+        assert!(res.is_err());
+        assert_eq!(
+            format!("{}", res.unwrap_err()),
+            "Failed to set system register: Exec format error (os error 8)"
+        );
+
+        vcpu.vcpu_init(&kvi).unwrap();
+        assert!(vcpu.system_registers(&mut state).is_ok());
+        let initial_mpidr: u64 = vcpu.read_mpidr().expect("Fail to read mpidr");
+        assert!(state.contains(&kvm_one_reg {
+            id: MPIDR_EL1,
+            addr: initial_mpidr
+        }));
+
+        assert!(vcpu.set_system_registers(&state).is_ok());
+        let mpidr: u64 = vcpu.read_mpidr().expect("Fail to read mpidr");
+        assert_eq!(initial_mpidr, mpidr);
+    }
+
+    #[test]
+    fn test_get_set_mpstate() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let vcpu = vm.create_vcpu(0).unwrap();
+        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        vm.get_preferred_target(&mut kvi).unwrap();
+
+        let res = vcpu.get_mp_state();
+        assert!(res.is_ok());
+        assert!(vcpu.set_mp_state(res.unwrap()).is_ok());
     }
 }
