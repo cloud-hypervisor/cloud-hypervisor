@@ -20,6 +20,7 @@
 
 #[macro_use]
 extern crate anyhow;
+#[cfg(target_arch = "x86_64")]
 #[macro_use]
 extern crate log;
 extern crate serde;
