@@ -10,6 +10,8 @@
 
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::VcpuInit;
+#[cfg(target_arch = "aarch64")]
+use crate::aarch64::{OneRegister, RegList, StandardRegisters};
 use crate::{CpuState, MpState};
 
 #[cfg(target_arch = "x86_64")]
@@ -154,10 +156,30 @@ pub enum HypervisorCpuError {
     #[error("Failed to enable HyperV SynIC")]
     EnableHyperVSynIC(#[source] anyhow::Error),
     ///
+    /// Getting AArch64 core register error
+    ///
+    #[error("Failed to get core register: {0}")]
+    GetCoreRegister(#[source] anyhow::Error),
+    ///
+    /// Setting AArch64 core register error
+    ///
+    #[error("Failed to set core register: {0}")]
+    SetCoreRegister(#[source] anyhow::Error),
+    ///
+    /// Getting AArch64 registers list error
+    ///
+    #[error("Failed to retrieve list of registers: {0}")]
+    GetRegList(#[source] anyhow::Error),
+    ///
     /// Getting AArch64 system register error
     ///
     #[error("Failed to get system register: {0}")]
     GetSysRegister(#[source] anyhow::Error),
+    ///
+    /// Setting AArch64 system register error
+    ///
+    #[error("Failed to set system register: {0}")]
+    SetSysRegister(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -310,6 +332,32 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
     fn get_one_reg(&self, reg_id: u64) -> Result<u64>;
+    ///
+    /// Gets a list of the guest registers that are supported for the
+    /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn get_reg_list(&self, reg_list: &mut RegList) -> Result<()>;
+    ///
+    /// Save the state of the core registers.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn core_registers(&self, state: &mut StandardRegisters) -> Result<()>;
+    ///
+    /// Restore the state of the core registers.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn set_core_registers(&self, state: &StandardRegisters) -> Result<()>;
+    ///
+    /// Save the state of the system registers.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn system_registers(&self, state: &mut Vec<OneRegister>) -> Result<()>;
+    ///
+    /// Restore the state of the system registers.
+    ///
+    #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+    fn set_system_registers(&self, state: &[OneRegister]) -> Result<()>;
     ///
     /// Read the MPIDR - Multiprocessor Affinity Register.
     ///
