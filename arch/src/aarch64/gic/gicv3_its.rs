@@ -5,9 +5,9 @@ pub mod kvm {
     use std::sync::Arc;
     use std::{boxed::Box, result};
     type Result<T> = result::Result<T, Error>;
+    use crate::aarch64::gic::gicv3::kvm::KvmGICv3;
     use crate::aarch64::gic::kvm::KvmGICDevice;
     use crate::aarch64::gic::{Error, GICDevice};
-    use crate::aarch64::gicv3::kvm::KvmGICv3;
     use hypervisor::kvm::kvm_bindings;
 
     pub struct KvmGICv3ITS {
