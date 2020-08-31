@@ -749,6 +749,20 @@ mod tests {
                 .map_err(Error::Parsing)?)
         }
 
+        fn check_numa_node_cpus(&self, node_id: usize, cpus: Vec<usize>) -> Result<bool, Error> {
+            for cpu in cpus.iter() {
+                let cmd = format!(
+                    "[ -d \"/sys/devices/system/node/node{}/cpu{}\" ]  && echo ok",
+                    node_id, cpu
+                );
+                if self.ssh_command(cmd.as_str())?.trim() != "ok" {
+                    return Ok(false);
+                }
+            }
+
+            Ok(true)
+        }
+
         fn get_entropy(&self) -> Result<u32, Error> {
             Ok(self
                 .ssh_command("cat /proc/sys/kernel/random/entropy_avail")?
@@ -2285,7 +2299,7 @@ mod tests {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
             let mut cmd = GuestCommand::new(&guest);
-            cmd.args(&["--cpus", "boot=1"])
+            cmd.args(&["--cpus", "boot=6"])
                 .args(&["--memory", "size=0"])
                 .args(&[
                     "--memory-zone",
@@ -2293,6 +2307,7 @@ mod tests {
                     "size=2G,guest_numa_node=1",
                     "size=3G,guest_numa_node=2",
                 ])
+                .args(&["--numa", "id=0,cpus=0-2", "id=1,cpus=3-4", "id=2,cpus=5"])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
                 .default_net();
@@ -2302,9 +2317,16 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             let r = std::panic::catch_unwind(|| {
+                // Check each NUMA node has been assigned the right amount of
+                // memory.
                 assert!(guest.get_numa_node_memory(0).unwrap_or_default() > 960_000);
                 assert!(guest.get_numa_node_memory(1).unwrap_or_default() > 1_920_000);
                 assert!(guest.get_numa_node_memory(2).unwrap_or_default() > 2_880_000);
+
+                // Check each NUMA node has been assigned the right CPUs set.
+                assert!(guest.check_numa_node_cpus(0, vec![0, 1, 2]).unwrap());
+                assert!(guest.check_numa_node_cpus(1, vec![3, 4]).unwrap());
+                assert!(guest.check_numa_node_cpus(2, vec![5]).unwrap());
             });
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
