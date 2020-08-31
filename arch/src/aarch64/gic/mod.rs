@@ -5,8 +5,10 @@ pub mod dist_regs;
 mod gicv2;
 mod gicv3;
 mod gicv3_its;
+pub mod redist_regs;
 
 pub use self::dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
+pub use self::redist_regs::{get_redist_regs, set_redist_regs};
 use std::result;
 use std::sync::Arc;
 
