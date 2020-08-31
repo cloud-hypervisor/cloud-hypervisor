@@ -527,7 +527,7 @@ dependencies = [
 [[package]]
 name = "kvm-bindings"
 version = "0.2.0"
-source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=ch#6453253aff8b804796bce547c7a23e09464b7491"
+source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=ch#2164129ff03bb4d7a4243de5e2078845064d922c"
 dependencies = [
  "serde",
  "serde_derive",
@@ -537,7 +537,7 @@ dependencies = [
 [[package]]
 name = "kvm-ioctls"
 version = "0.5.0"
-source = "git+https://github.com/cloud-hypervisor/kvm-ioctls?branch=ch#37953e968b9064f42d6b71b7afc13872ac4171ce"
+source = "git+https://github.com/cloud-hypervisor/kvm-ioctls?branch=ch#f5312ea1734d6b9777236323039ab032b3ce4287"
 dependencies = [
  "kvm-bindings",
  "libc",
