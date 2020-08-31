@@ -395,7 +395,7 @@ pub mod kvm {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
-    use arch::aarch64::gic::kvm::create_gic;
+    use arch::aarch64::gic::kvm::{create_gic, save_pending_tables};
     use arch::aarch64::gic::{
         get_dist_regs, get_icc_regs, get_redist_regs, set_dist_regs, set_icc_regs, set_redist_regs,
     };
@@ -458,5 +458,15 @@ mod tests {
         assert!(state.len() == 9);
 
         assert!(set_icc_regs(gic.device(), &gicr_typer, &state).is_ok());
+    }
+
+    #[test]
+    fn test_save_pending_tables() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let _ = vm.create_vcpu(0).unwrap();
+        let gic = create_gic(&vm, 1, false).expect("Cannot create gic");
+
+        assert!(save_pending_tables(gic.device()).is_ok());
     }
 }
