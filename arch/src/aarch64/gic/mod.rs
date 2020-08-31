@@ -15,6 +15,8 @@ pub enum Error {
     CreateGIC(hypervisor::HypervisorVmError),
     /// Error while setting device attributes for the GIC.
     SetDeviceAttribute(hypervisor::HypervisorDeviceError),
+    /// Error while getting device attributes for the GIC.
+    GetDeviceAttribute(hypervisor::HypervisorDeviceError),
 }
 type Result<T> = result::Result<T, Error>;
 
@@ -107,6 +109,27 @@ pub mod kvm {
             device
                 .set_device_attr(&attr)
                 .map_err(super::Error::SetDeviceAttribute)?;
+
+            Ok(())
+        }
+
+        /// Get a GIC device attribute
+        fn get_device_attribute(
+            device: &Arc<dyn hypervisor::Device>,
+            group: u32,
+            attr: u64,
+            addr: u64,
+            flags: u32,
+        ) -> Result<()> {
+            let mut attr = kvm_bindings::kvm_device_attr {
+                group,
+                attr,
+                addr,
+                flags,
+            };
+            device
+                .get_device_attr(&mut attr)
+                .map_err(super::Error::GetDeviceAttribute)?;
 
             Ok(())
         }
