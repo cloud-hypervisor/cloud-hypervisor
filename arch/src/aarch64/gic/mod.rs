@@ -204,4 +204,18 @@ pub mod kvm {
             })
         }
     }
+
+    /// Function that saves RDIST pending tables into guest RAM.
+    ///
+    /// The tables get flushed to guest RAM whenever the VM gets stopped.
+    pub fn save_pending_tables(gic: &Arc<dyn hypervisor::Device>) -> Result<()> {
+        let init_gic_attr = kvm_bindings::kvm_device_attr {
+            group: kvm_bindings::KVM_DEV_ARM_VGIC_GRP_CTRL,
+            attr: u64::from(kvm_bindings::KVM_DEV_ARM_VGIC_SAVE_PENDING_TABLES),
+            addr: 0,
+            flags: 0,
+        };
+        gic.set_device_attr(&init_gic_attr)
+            .map_err(super::Error::SetDeviceAttribute)
+    }
 }
