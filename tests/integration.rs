@@ -763,6 +763,19 @@ mod tests {
             Ok(true)
         }
 
+        fn check_numa_node_distances(
+            &self,
+            node_id: usize,
+            distances: &str,
+        ) -> Result<bool, Error> {
+            let cmd = format!("cat /sys/devices/system/node/node{}/distance", node_id);
+            if self.ssh_command(cmd.as_str())?.trim() == distances {
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+
         fn get_entropy(&self) -> Result<u32, Error> {
             Ok(self
                 .ssh_command("cat /proc/sys/kernel/random/entropy_avail")?
@@ -2307,7 +2320,12 @@ mod tests {
                     "size=2G,guest_numa_node=1",
                     "size=3G,guest_numa_node=2",
                 ])
-                .args(&["--numa", "id=0,cpus=0-2", "id=1,cpus=3-4", "id=2,cpus=5"])
+                .args(&[
+                    "--numa",
+                    "id=0,cpus=0-2,distances=1@15:2@20",
+                    "id=1,cpus=3-4,distances=0@20:2@25",
+                    "id=2,cpus=5,distances=0@25:1@30",
+                ])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .default_disks()
                 .default_net();
@@ -2327,6 +2345,11 @@ mod tests {
                 assert!(guest.check_numa_node_cpus(0, vec![0, 1, 2]).unwrap());
                 assert!(guest.check_numa_node_cpus(1, vec![3, 4]).unwrap());
                 assert!(guest.check_numa_node_cpus(2, vec![5]).unwrap());
+
+                // Check each NUMA node has been assigned the right distances.
+                assert!(guest.check_numa_node_distances(0, "10 15 20").unwrap());
+                assert!(guest.check_numa_node_distances(1, "20 10 25").unwrap());
+                assert!(guest.check_numa_node_distances(2, "25 30 10").unwrap());
             });
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
