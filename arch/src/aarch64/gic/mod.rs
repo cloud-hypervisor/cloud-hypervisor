@@ -1,6 +1,10 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+mod gicv2;
+mod gicv3;
+mod gicv3_its;
+
 use std::result;
 use std::sync::Arc;
 
@@ -49,9 +53,9 @@ pub trait GICDevice {
 pub mod kvm {
     use super::GICDevice;
     use super::Result;
-    use crate::aarch64::gicv2::kvm::KvmGICv2;
-    use crate::aarch64::gicv3::kvm::KvmGICv3;
-    use crate::aarch64::gicv3_its::kvm::KvmGICv3ITS;
+    use crate::aarch64::gic::gicv2::kvm::KvmGICv2;
+    use crate::aarch64::gic::gicv3::kvm::KvmGICv3;
+    use crate::aarch64::gic::gicv3_its::kvm::KvmGICv3ITS;
     use crate::layout;
     use hypervisor::kvm::kvm_bindings;
     use std::boxed::Box;
