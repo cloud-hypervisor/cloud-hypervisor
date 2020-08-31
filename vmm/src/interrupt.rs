@@ -396,6 +396,9 @@ pub mod kvm {
 #[cfg(test)]
 mod tests {
     use arch::aarch64::gic::kvm::create_gic;
+    use arch::aarch64::gic::{
+        get_dist_regs, get_icc_regs, get_redist_regs, set_dist_regs, set_icc_regs, set_redist_regs,
+    };
 
     #[test]
     fn test_create_gic() {
@@ -403,5 +406,57 @@ mod tests {
         let vm = hv.create_vm().unwrap();
 
         assert!(create_gic(&vm, 1, false).is_ok());
+    }
+
+    #[test]
+    fn test_get_set_dist_regs() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let _ = vm.create_vcpu(0).unwrap();
+        let gic = create_gic(&vm, 1, false).expect("Cannot create gic");
+
+        let res = get_dist_regs(gic.device());
+        assert!(res.is_ok());
+        let state = res.unwrap();
+        assert_eq!(state.len(), 244);
+
+        let res = set_dist_regs(gic.device(), &state);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_get_set_redist_regs() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let _ = vm.create_vcpu(0).unwrap();
+        let gic = create_gic(&vm, 1, false).expect("Cannot create gic");
+
+        let mut gicr_typer = Vec::new();
+        gicr_typer.push(123);
+        let res = get_redist_regs(gic.device(), &gicr_typer);
+        assert!(res.is_ok());
+        let state = res.unwrap();
+        println!("{}", state.len());
+        assert!(state.len() == 24);
+
+        assert!(set_redist_regs(gic.device(), &gicr_typer, &state).is_ok());
+    }
+
+    #[test]
+    fn test_get_set_icc_regs() {
+        let hv = hypervisor::new().unwrap();
+        let vm = hv.create_vm().unwrap();
+        let _ = vm.create_vcpu(0).unwrap();
+        let gic = create_gic(&vm, 1, false).expect("Cannot create gic");
+
+        let mut gicr_typer = Vec::new();
+        gicr_typer.push(123);
+        let res = get_icc_regs(gic.device(), &gicr_typer);
+        assert!(res.is_ok());
+        let state = res.unwrap();
+        println!("{}", state.len());
+        assert!(state.len() == 9);
+
+        assert!(set_icc_regs(gic.device(), &gicr_typer, &state).is_ok());
     }
 }
