@@ -67,6 +67,7 @@ struct HotPlugState {
 pub struct NumaNode {
     memory_regions: Vec<Arc<GuestRegionMmap>>,
     cpus: Vec<u8>,
+    distances: BTreeMap<u32, u8>,
 }
 
 impl NumaNode {
@@ -80,6 +81,14 @@ impl NumaNode {
 
     pub fn cpus_mut(&mut self) -> &mut Vec<u8> {
         &mut self.cpus
+    }
+
+    pub fn distances(&self) -> &BTreeMap<u32, u8> {
+        &self.distances
+    }
+
+    pub fn distances_mut(&mut self) -> &mut BTreeMap<u32, u8> {
+        &mut self.distances
     }
 }
 
@@ -366,6 +375,7 @@ impl MemoryManager {
                             NumaNode {
                                 memory_regions: vec![region.clone()],
                                 cpus: Vec::new(),
+                                distances: BTreeMap::new(),
                             },
                         );
                     }
