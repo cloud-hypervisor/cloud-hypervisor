@@ -22,6 +22,11 @@ pub enum HypervisorDeviceError {
     ///
     #[error("Failed to set device attribute: {0}")]
     SetDeviceAttribute(#[source] anyhow::Error),
+    ///
+    /// Get device attribute error
+    ///
+    #[error("Failed to get device attribute: {0}")]
+    GetDeviceAttribute(#[source] anyhow::Error),
 }
 
 ///
@@ -37,4 +42,6 @@ pub type Result<T> = std::result::Result<T, HypervisorDeviceError>;
 pub trait Device: Send + Sync + AsRawFd {
     /// Set device attribute.
     fn set_device_attr(&self, attr: &DeviceAttr) -> Result<()>;
+    /// Get device attribute.
+    fn get_device_attr(&self, attr: &mut DeviceAttr) -> Result<()>;
 }

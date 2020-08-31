@@ -1254,6 +1254,14 @@ impl device::Device for KvmDevice {
             .set_device_attr(attr)
             .map_err(|e| device::HypervisorDeviceError::SetDeviceAttribute(e.into()))
     }
+    ///
+    /// Get device attribute
+    ///
+    fn get_device_attr(&self, attr: &mut DeviceAttr) -> device::Result<()> {
+        self.fd
+            .get_device_attr(attr)
+            .map_err(|e| device::HypervisorDeviceError::GetDeviceAttribute(e.into()))
+    }
 }
 
 impl AsRawFd for KvmDevice {
