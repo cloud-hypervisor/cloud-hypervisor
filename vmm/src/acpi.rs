@@ -150,12 +150,13 @@ pub fn create_acpi_tables(
         .expect("Error writing MCFG table");
     tables.push(mcfg_offset.0);
 
-    // SRAT
+    // SRAT and SLIT
     // Only created if the NUMA nodes list is not empty.
     let numa_nodes = memory_manager.lock().unwrap().numa_nodes().clone();
     let (prev_tbl_len, prev_tbl_off) = if numa_nodes.is_empty() {
         (mcfg.len(), mcfg_offset)
     } else {
+        // SRAT
         let mut srat = SDT::new(*b"SRAT", 36, 3, *b"CLOUDH", *b"CHSRAT  ", 1);
         // SRAT reserved 12 bytes
         srat.append_slice(&[0u8; 12]);
@@ -221,7 +222,34 @@ pub fn create_acpi_tables(
             .expect("Error writing SRAT table");
         tables.push(srat_offset.0);
 
-        (srat.len(), srat_offset)
+        // SLIT
+        let mut slit = SDT::new(*b"SLIT", 36, 1, *b"CLOUDH", *b"CHSLIT  ", 1);
+        // Number of System Localities on 8 bytes.
+        slit.append(numa_nodes.len() as u64);
+
+        let existing_nodes: Vec<u32> = numa_nodes.keys().cloned().collect();
+        for (node_id, node) in numa_nodes.iter() {
+            let distances = node.distances();
+            for i in existing_nodes.iter() {
+                let dist: u8 = if *node_id == *i {
+                    10
+                } else if let Some(distance) = distances.get(i) {
+                    *distance as u8
+                } else {
+                    20
+                };
+
+                slit.append(dist);
+            }
+        }
+
+        let slit_offset = srat_offset.checked_add(srat.len() as u64).unwrap();
+        guest_mem
+            .write_slice(slit.as_slice(), slit_offset)
+            .expect("Error writing SRAT table");
+        tables.push(slit_offset.0);
+
+        (slit.len(), slit_offset)
     };
 
     // XSDT
