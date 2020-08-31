@@ -195,6 +195,9 @@ pub enum Error {
 
     /// Failed serializing into JSON
     SerializeJson(serde_json::Error),
+
+    /// Invalid configuration for NUMA.
+    InvalidNumaConfig,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -339,12 +342,30 @@ impl Vm {
     ) -> Result<()> {
         let mut mm = memory_manager.lock().unwrap();
         let numa_nodes = mm.numa_nodes_mut();
+        let existing_nodes: Vec<u32> = numa_nodes.keys().cloned().collect();
 
         for config in configs.iter() {
-            if let Some(cpus) = &config.cpus {
-                if let Some(node) = numa_nodes.get_mut(&config.id) {
+            if let Some(node) = numa_nodes.get_mut(&config.id) {
+                if let Some(cpus) = &config.cpus {
                     node.cpus_mut().extend(cpus);
                 }
+
+                if let Some(distances) = &config.distances {
+                    for distance in distances.iter() {
+                        let dest = distance.destination;
+                        let dist = distance.distance;
+
+                        if !existing_nodes.contains(&dest) {
+                            error!("Unknown destination NUMA node {}", dest);
+                            return Err(Error::InvalidNumaConfig);
+                        }
+
+                        node.distances_mut().insert(dest, dist);
+                    }
+                }
+            } else {
+                error!("Unknown NUMA node {}", config.id);
+                return Err(Error::InvalidNumaConfig);
             }
         }
 
