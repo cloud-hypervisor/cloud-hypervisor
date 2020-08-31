@@ -214,3 +214,37 @@ impl FromStr for IntegerList {
         Ok(IntegerList(integer_list))
     }
 }
+
+pub struct TupleTwoIntegers(pub Vec<(u64, u64)>);
+
+pub enum TupleTwoIntegersParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for TupleTwoIntegers {
+    type Err = TupleTwoIntegersParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let mut list = Vec::new();
+        let tuples_list: Vec<&str> = s.trim().split(':').collect();
+
+        for tuple in tuples_list.iter() {
+            let items: Vec<&str> = tuple.split('@').collect();
+
+            if items.len() != 2 {
+                return Err(TupleTwoIntegersParseError::InvalidValue(tuple.to_string()));
+            }
+
+            let item1 = items[0]
+                .parse::<u64>()
+                .map_err(|_| TupleTwoIntegersParseError::InvalidValue(items[0].to_owned()))?;
+            let item2 = items[1]
+                .parse::<u64>()
+                .map_err(|_| TupleTwoIntegersParseError::InvalidValue(items[1].to_owned()))?;
+
+            list.push((item1, item2));
+        }
+
+        Ok(TupleTwoIntegers(list))
+    }
+}
