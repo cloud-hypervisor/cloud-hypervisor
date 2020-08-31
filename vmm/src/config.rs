@@ -5,7 +5,9 @@
 
 use clap::ArgMatches;
 use net_util::MacAddr;
-use option_parser::{ByteSized, IntegerList, OptionParser, OptionParserError, Toggle};
+use option_parser::{
+    ByteSized, IntegerList, OptionParser, OptionParserError, Toggle, TupleTwoIntegers,
+};
 use std::convert::From;
 use std::fmt;
 use std::net::Ipv4Addr;
@@ -1211,19 +1213,29 @@ impl SgxEpcConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+pub struct NumaDistance {
+    #[serde(default)]
+    pub destination: u32,
+    #[serde(default)]
+    pub distance: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct NumaConfig {
     #[serde(default)]
     pub id: u32,
     #[serde(default)]
     pub cpus: Option<Vec<u8>>,
+    #[serde(default)]
+    pub distances: Option<Vec<NumaDistance>>,
 }
 
 impl NumaConfig {
     pub const SYNTAX: &'static str = "Settings related to a given NUMA node \
-        \"id=<node_id>,cpus=<cpus_id>\"";
+        \"id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>\"";
     pub fn parse(numa: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("id").add("cpus");
+        parser.add("id").add("cpus").add("distances");
         parser.parse(numa).map_err(Error::ParseNuma)?;
 
         let id = parser
@@ -1234,8 +1246,23 @@ impl NumaConfig {
             .convert::<IntegerList>("cpus")
             .map_err(Error::ParseNuma)?
             .map(|v| v.0.iter().map(|e| *e as u8).collect());
+        let distances = parser
+            .convert::<TupleTwoIntegers>("distances")
+            .map_err(Error::ParseNuma)?
+            .map(|v| {
+                v.0.iter()
+                    .map(|(e1, e2)| NumaDistance {
+                        destination: *e1 as u32,
+                        distance: *e2 as u8,
+                    })
+                    .collect()
+            });
 
-        Ok(NumaConfig { id, cpus })
+        Ok(NumaConfig {
+            id,
+            cpus,
+            distances,
+        })
     }
 }
 

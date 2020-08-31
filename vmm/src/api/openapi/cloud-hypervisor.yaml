@@ -721,6 +721,19 @@ components:
           type: boolean
           default: false
 
+    NumaDistance:
+      required:
+      - destination
+      - distance
+      type: object
+      properties:
+        destination:
+          type: integer
+          format: uint32
+        distance:
+          type: integer
+          format: uint8
+
     NumaConfig:
       required:
       - id
@@ -734,6 +747,10 @@ components:
           items:
             type: integer
             format: uint8
+        distances:
+          type: array
+          items:
+            $ref: '#/components/schemas/NumaDistance'
 
     VmResize:
       type: object
