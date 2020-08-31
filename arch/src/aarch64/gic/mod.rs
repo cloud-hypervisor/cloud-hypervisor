@@ -1,10 +1,12 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod dist_regs;
 mod gicv2;
 mod gicv3;
 mod gicv3_its;
 
+pub use self::dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
 use std::result;
 use std::sync::Arc;
 
