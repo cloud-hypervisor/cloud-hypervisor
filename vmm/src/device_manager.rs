@@ -27,6 +27,8 @@ use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "aarch64")]
+use arch::aarch64::gic::GICDevice;
+#[cfg(target_arch = "aarch64")]
 use arch::aarch64::DeviceInfoForFDT;
 #[cfg(feature = "acpi")]
 use arch::layout;
@@ -727,6 +729,9 @@ pub struct DeviceManager {
     #[cfg(target_arch = "aarch64")]
     interrupt_controller: Option<Arc<Mutex<gic::Gic>>>,
 
+    #[cfg(target_arch = "aarch64")]
+    gic_device_entity: Option<Arc<Mutex<Box<dyn GICDevice>>>>,
+
     // Things to be added to the commandline (i.e. for virtio-mmio)
     cmdline_additions: Vec<String>,
 
@@ -853,6 +858,8 @@ impl DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
             interrupt_controller: None,
+            #[cfg(target_arch = "aarch64")]
+            gic_device_entity: None,
             cmdline_additions: Vec::new(),
             #[cfg(feature = "acpi")]
             ged_notification_device: None,
@@ -1153,6 +1160,16 @@ impl DeviceManager {
             .insert(id.clone(), device_node!(id, interrupt_controller));
 
         Ok(interrupt_controller)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn set_gic_device_entity(&mut self, device_entity: Arc<Mutex<Box<dyn GICDevice>>>) {
+        self.gic_device_entity = Some(device_entity);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn get_gic_device_entity(&self) -> Option<&Arc<Mutex<Box<dyn GICDevice>>>> {
+        self.gic_device_entity.as_ref()
     }
 
     #[cfg(target_arch = "aarch64")]
