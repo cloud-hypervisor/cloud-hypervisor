@@ -26,7 +26,7 @@ pub enum Error {
 }
 type Result<T> = result::Result<T, Error>;
 
-pub trait GICDevice {
+pub trait GICDevice: Send {
     /// Returns the hypervisor agnostic Device of the GIC device
     fn device(&self) -> &Arc<dyn hypervisor::Device>;
 

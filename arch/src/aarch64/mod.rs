@@ -14,6 +14,7 @@ pub mod regs;
 pub use self::fdt::DeviceInfoForFDT;
 use crate::DeviceType;
 use crate::RegionType;
+use aarch64::gic::GICDevice;
 use hypervisor::kvm::kvm_bindings;
 use std::collections::HashMap;
 use std::ffi::CStr;
@@ -146,7 +147,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::Bui
     device_info: &HashMap<(DeviceType, String), T, S>,
     initrd: &Option<super::InitramfsConfig>,
     pci_space_address: &Option<(u64, u64)>,
-) -> super::Result<()> {
+) -> super::Result<Box<dyn GICDevice>> {
     // If pci_space_address is present, it means PCI devices are used ("pci" feature enabled).
     // Then GITv3-ITS is required for MSI messaging.
     // Otherwise ("mmio" feature enabled), any version of GIC is OK.
@@ -164,7 +165,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::Bui
     )
     .map_err(Error::SetupFDT)?;
 
-    Ok(())
+    Ok(gic_device)
 }
 
 /// Returns the memory address where the initramfs could be loaded.
