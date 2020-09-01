@@ -653,7 +653,7 @@ impl MemoryManager {
         prefault: bool,
         shared: bool,
         hugepages: bool,
-        host_numa_node: Option<u64>,
+        host_numa_node: Option<u32>,
         ext_regions: &Option<Vec<MemoryRegion>>,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
         let mut backing_file: Option<PathBuf> = file.clone();
@@ -778,7 +778,7 @@ impl MemoryManager {
             // Linux is kind of buggy in the way it interprets maxnode as it
             // will cut off the last node. That's why we have to add 1 to what
             // we would consider as the proper maxnode value.
-            let maxnode = node + 1 + 1;
+            let maxnode = node as u64 + 1 + 1;
 
             // Allocate the right size for the vector.
             nodemask.resize((node as usize / 64) + 1, 0);
