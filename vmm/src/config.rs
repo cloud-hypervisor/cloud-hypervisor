@@ -353,7 +353,7 @@ pub struct MemoryZoneConfig {
     #[serde(default)]
     pub hugepages: bool,
     #[serde(default)]
-    pub host_numa_node: Option<u64>,
+    pub host_numa_node: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -454,7 +454,7 @@ impl MemoryConfig {
                     .unwrap_or(Toggle(false))
                     .0;
                 let host_numa_node = parser
-                    .convert::<u64>("host_numa_node")
+                    .convert::<u32>("host_numa_node")
                     .map_err(Error::ParseMemoryZone)?;
 
                 zones.push(MemoryZoneConfig {

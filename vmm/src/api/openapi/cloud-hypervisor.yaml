@@ -468,7 +468,8 @@ components:
           type: boolean
           default: false
         host_numa_node:
-          type: uint64
+          type: integer
+          format: uint32
 
     MemoryConfig:
       required:
