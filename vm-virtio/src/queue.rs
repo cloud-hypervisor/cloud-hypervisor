@@ -486,6 +486,12 @@ impl Queue {
         self.size = self.max_size;
         self.next_avail = Wrapping(0);
         self.next_used = Wrapping(0);
+        self.vector = 0;
+        self.desc_table = GuestAddress(0);
+        self.avail_ring = GuestAddress(0);
+        self.used_ring = GuestAddress(0);
+        self.event_idx = false;
+        self.signalled_used = None;
     }
 
     pub fn is_valid(&self, mem: &GuestMemoryMmap) -> bool {
