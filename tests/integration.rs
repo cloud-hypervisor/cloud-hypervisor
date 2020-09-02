@@ -3168,33 +3168,32 @@ mod tests {
         #[cfg_attr(not(feature = "mmio"), test)]
         #[cfg(target_arch = "x86_64")]
         fn test_serial_tty() {
-            test_block!(tb, "", {
-                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-                let guest = Guest::new(&mut focal);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
 
-                let mut workload_path = dirs::home_dir().unwrap();
-                workload_path.push("workloads");
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
 
-                let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path().unwrap();
 
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=1"])
-                    .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", kernel_path.to_str().unwrap()])
-                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                    .default_disks()
-                    .default_net()
-                    .args(&["--serial", "tty"])
-                    .args(&["--console", "off"])
-                    .capture_output()
-                    .spawn()
-                    .unwrap();
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .default_disks()
+                .default_net()
+                .args(&["--serial", "tty"])
+                .args(&["--console", "off"])
+                .capture_output()
+                .spawn()
+                .unwrap();
 
-                thread::sleep(std::time::Duration::new(20, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
+            let r = std::panic::catch_unwind(|| {
                 // Test that there is a ttyS0
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
                         .unwrap_or_default()
@@ -3203,19 +3202,17 @@ mod tests {
                         .unwrap_or_default(),
                     1
                 );
-
-                let _ = child.kill();
-                match child.wait_with_output() {
-                    Ok(out) => {
-                        aver!(
-                            tb,
-                            String::from_utf8_lossy(&out.stdout).contains("cloud login:")
-                        );
-                    }
-                    Err(_) => aver!(tb, false),
-                }
-                Ok(())
             });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+
+            let r = std::panic::catch_unwind(|| {
+                assert!(String::from_utf8_lossy(&output.stdout).contains("cloud login:"));
+            });
+
+            handle_child_output(r, &output);
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
