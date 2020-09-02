@@ -3275,53 +3275,50 @@ mod tests {
 
         #[test]
         fn test_virtio_console() {
-            test_block!(tb, "", {
-                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-                let guest = Guest::new(&mut focal);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
 
-                let mut workload_path = dirs::home_dir().unwrap();
-                workload_path.push("workloads");
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
 
-                let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path().unwrap();
 
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=1"])
-                    .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", kernel_path.to_str().unwrap()])
-                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                    .default_disks()
-                    .default_net()
-                    .args(&["--console", "tty"])
-                    .args(&["--serial", "null"])
-                    .capture_output()
-                    .spawn()
-                    .unwrap();
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .default_disks()
+                .default_net()
+                .args(&["--console", "tty"])
+                .args(&["--serial", "null"])
+                .capture_output()
+                .spawn()
+                .unwrap();
 
-                thread::sleep(std::time::Duration::new(20, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
+            let text = String::from("On a branch floating down river a cricket, singing.");
+            let cmd = format!("echo {} | sudo tee /dev/hvc0", text);
+
+            let r = std::panic::catch_unwind(|| {
                 #[cfg(all(not(feature = "mmio"), feature = "acpi"))]
-                aver!(
-                    tb,
-                    guest
-                        .does_device_vendor_pair_match("0x1043", "0x1af4")
-                        .unwrap_or_default()
-                );
+                assert!(guest
+                    .does_device_vendor_pair_match("0x1043", "0x1af4")
+                    .unwrap_or_default());
 
-                let text = String::from("On a branch floating down river a cricket, singing.");
-                let cmd = format!("echo {} | sudo tee /dev/hvc0", text);
-                guest.ssh_command(&cmd)?;
-
-                let _ = child.kill();
-
-                match child.wait_with_output() {
-                    Ok(out) => {
-                        aver!(tb, String::from_utf8_lossy(&out.stdout).contains(&text));
-                    }
-                    Err(_) => aver!(tb, false),
-                }
-
-                Ok(())
+                guest.ssh_command(&cmd).unwrap();
             });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+
+            let r = std::panic::catch_unwind(|| {
+                assert!(String::from_utf8_lossy(&output.stdout).contains(&text));
+            });
+
+            handle_child_output(r, &output);
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
