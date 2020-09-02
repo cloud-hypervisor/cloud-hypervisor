@@ -46,14 +46,9 @@ pub enum HypervisorError {
     #[error("Failed to get number of max vcpus: {0}")]
     GetMaxVcpu(#[source] anyhow::Error),
     ///
-    /// Recommended Vcpu error
-    ///
-    #[error("Failed to get number of max vcpus: {0}")]
-    GetNrVcpus(#[source] anyhow::Error),
-    ///
     /// CpuId error
     ///
-    #[error("Failed to get number of max vcpus: {0}")]
+    #[error("Failed to get cpuid: {0}")]
     GetCpuId(#[source] anyhow::Error),
     ///
     /// Failed to retrieve list of MSRs.
