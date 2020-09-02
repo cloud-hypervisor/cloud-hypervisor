@@ -3120,31 +3120,30 @@ mod tests {
 
         #[cfg_attr(not(feature = "mmio"), test)]
         fn test_serial_null() {
-            test_block!(tb, "", {
-                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-                let guest = Guest::new(&mut focal);
-                let mut cmd = GuestCommand::new(&guest);
-                cmd.args(&["--cpus", "boot=1"])
-                    .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", guest.fw_path.as_str()])
-                    .default_disks()
-                    .default_net()
-                    .args(&["--serial", "null"])
-                    .args(&["--console", "off"])
-                    .capture_output();
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+            let mut cmd = GuestCommand::new(&guest);
+            cmd.args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .default_disks()
+                .default_net()
+                .args(&["--serial", "null"])
+                .args(&["--console", "off"])
+                .capture_output();
 
-                // Now AArch64 can only boot from direct kernel, command-line is needed.
-                #[cfg(target_arch = "aarch64")]
-                cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+            // Now AArch64 can only boot from direct kernel, command-line is needed.
+            #[cfg(target_arch = "aarch64")]
+            cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
 
-                let mut child = cmd.spawn().unwrap();
+            let mut child = cmd.spawn().unwrap();
 
-                thread::sleep(std::time::Duration::new(20, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
+            let r = std::panic::catch_unwind(|| {
                 #[cfg(target_arch = "x86_64")]
                 // Test that there is a ttyS0
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
                         .unwrap_or_default()
@@ -3153,19 +3152,17 @@ mod tests {
                         .unwrap_or_default(),
                     1
                 );
-
-                let _ = child.kill();
-                match child.wait_with_output() {
-                    Ok(out) => {
-                        aver!(
-                            tb,
-                            !String::from_utf8_lossy(&out.stdout).contains("cloud login:")
-                        );
-                    }
-                    Err(_) => aver!(tb, false),
-                }
-                Ok(())
             });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+
+            let r = std::panic::catch_unwind(|| {
+                assert!(!String::from_utf8_lossy(&output.stdout).contains("cloud login:"));
+            });
+
+            handle_child_output(r, &output);
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
