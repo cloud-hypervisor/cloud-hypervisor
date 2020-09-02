@@ -3218,29 +3218,29 @@ mod tests {
         #[cfg_attr(not(feature = "mmio"), test)]
         #[cfg(target_arch = "x86_64")]
         fn test_serial_file() {
-            test_block!(tb, "", {
-                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-                let guest = Guest::new(&mut focal);
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
 
-                let serial_path = guest.tmp_dir.path().join("/tmp/serial-output");
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=1"])
-                    .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", guest.fw_path.as_str()])
-                    .default_disks()
-                    .default_net()
-                    .args(&[
-                        "--serial",
-                        format!("file={}", serial_path.to_str().unwrap()).as_str(),
-                    ])
-                    .spawn()
-                    .unwrap();
+            let serial_path = guest.tmp_dir.path().join("/tmp/serial-output");
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .default_disks()
+                .default_net()
+                .args(&[
+                    "--serial",
+                    format!("file={}", serial_path.to_str().unwrap()).as_str(),
+                ])
+                .capture_output()
+                .spawn()
+                .unwrap();
 
-                thread::sleep(std::time::Duration::new(20, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
+            let r = std::panic::catch_unwind(|| {
                 // Test that there is a ttyS0
-                aver_eq!(
-                    tb,
+                assert_eq!(
                     guest
                         .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
                         .unwrap_or_default()
@@ -3250,21 +3250,27 @@ mod tests {
                     1
                 );
 
-                guest.ssh_command("sudo shutdown -h now")?;
+                guest.ssh_command("sudo shutdown -h now").unwrap();
+                thread::sleep(std::time::Duration::new(20, 0));
+            });
 
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+
+            let r = std::panic::catch_unwind(|| {
                 // Check that the cloud-hypervisor binary actually terminated
-                if let Ok(status) = child.wait() {
-                    aver_eq!(tb, status.success(), true);
-                }
+                assert_eq!(output.status.success(), true);
+
                 // Do this check after shutdown of the VM as an easy way to ensure
                 // all writes are flushed to disk
-                let mut f = std::fs::File::open(serial_path)?;
+                let mut f = std::fs::File::open(serial_path).unwrap();
                 let mut buf = String::new();
-                f.read_to_string(&mut buf)?;
-                aver!(tb, buf.contains("cloud login:"));
-
-                Ok(())
+                f.read_to_string(&mut buf).unwrap();
+                assert!(buf.contains("cloud login:"));
             });
+
+            handle_child_output(r, &output);
         }
 
         #[test]
