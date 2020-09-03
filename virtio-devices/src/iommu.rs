@@ -5,8 +5,8 @@
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DescriptorChain, EpollHelper, EpollHelperError,
-    EpollHelperHandler, Queue, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_VERSION_1,
+    EpollHelperHandler, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
@@ -736,11 +736,10 @@ impl DmaRemapping for IommuMapping {
 }
 
 pub struct Iommu {
+    common: VirtioCommon,
     id: String,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
-    avail_features: u64,
-    acked_features: u64,
     config: VirtioIommuConfig,
     config_topo_pci_ranges: Vec<VirtioIommuTopoPciRange>,
     mapping: Arc<IommuMapping>,
@@ -779,10 +778,12 @@ impl Iommu {
                 id,
                 kill_evt: None,
                 pause_evt: None,
-                avail_features: 1u64 << VIRTIO_F_VERSION_1
-                    | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
-                    | 1u64 << VIRTIO_IOMMU_F_PROBE,
-                acked_features: 0u64,
+                common: VirtioCommon {
+                    avail_features: 1u64 << VIRTIO_F_VERSION_1
+                        | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
+                        | 1u64 << VIRTIO_IOMMU_F_PROBE,
+                    acked_features: 0u64,
+                },
                 config,
                 config_topo_pci_ranges: Vec::new(),
                 mapping: mapping.clone(),
@@ -800,16 +801,16 @@ impl Iommu {
 
     fn state(&self) -> IommuState {
         IommuState {
-            avail_features: self.avail_features,
-            acked_features: self.acked_features,
+            avail_features: self.common.avail_features,
+            acked_features: self.common.acked_features,
             endpoints: self.mapping.endpoints.read().unwrap().clone(),
             mappings: self.mapping.mappings.read().unwrap().clone(),
         }
     }
 
     fn set_state(&mut self, state: &IommuState) -> io::Result<()> {
-        self.avail_features = state.avail_features;
-        self.acked_features = state.acked_features;
+        self.common.avail_features = state.avail_features;
+        self.common.acked_features = state.acked_features;
         *(self.mapping.endpoints.write().unwrap()) = state.endpoints.clone();
         *(self.mapping.mappings.write().unwrap()) = state.mappings.clone();
 
@@ -832,7 +833,7 @@ impl Iommu {
 
         // If there is at least one device attached to the virtual IOMMU, we
         // need the topology feature to be enabled.
-        self.avail_features |= 1u64 << VIRTIO_IOMMU_F_TOPOLOGY;
+        self.common.avail_features |= 1u64 << VIRTIO_IOMMU_F_TOPOLOGY;
 
         // Update the topology.
         let mut topo_pci_ranges = Vec::new();
@@ -879,20 +880,11 @@ impl VirtioDevice for Iommu {
     }
 
     fn features(&self) -> u64 {
-        self.avail_features
+        self.common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
-        let mut v = value;
-        // Check if the guest is ACK'ing a feature that we didn't claim to have.
-        let unrequested_features = v & !self.avail_features;
-        if unrequested_features != 0 {
-            warn!("Received acknowledge request for unknown feature.");
-
-            // Don't count these features as acked.
-            v &= !unrequested_features;
-        }
-        self.acked_features |= v;
+        self.common.ack_features(value)
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
