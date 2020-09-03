@@ -5,9 +5,6 @@
 
 #[cfg(test)]
 #[cfg(feature = "integration_tests")]
-#[macro_use]
-extern crate credibility;
-
 #[cfg(test)]
 #[cfg(feature = "integration_tests")]
 #[macro_use]
@@ -2153,44 +2150,42 @@ mod tests {
         #[cfg_attr(not(feature = "mmio"), test)]
         #[cfg(target_arch = "x86_64")]
         fn test_simple_launch() {
-            test_block!(tb, "", {
-                let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
-                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
 
-                vec![
-                    &mut bionic as &mut dyn DiskConfig,
-                    &mut focal as &mut dyn DiskConfig,
-                ]
-                .iter_mut()
-                .for_each(|disk_config| {
-                    let guest = Guest::new(*disk_config);
+            vec![
+                &mut bionic as &mut dyn DiskConfig,
+                &mut focal as &mut dyn DiskConfig,
+            ]
+            .iter_mut()
+            .for_each(|disk_config| {
+                let guest = Guest::new(*disk_config);
 
-                    let mut child = GuestCommand::new(&guest)
-                        .args(&["--cpus", "boot=1"])
-                        .args(&["--memory", "size=512M"])
-                        .args(&["--kernel", guest.fw_path.as_str()])
-                        .default_raw_disks()
-                        .default_net()
-                        .args(&["--serial", "tty", "--console", "off"])
-                        .spawn()
-                        .unwrap();
+                let mut child = GuestCommand::new(&guest)
+                    .args(&["--cpus", "boot=1"])
+                    .args(&["--memory", "size=512M"])
+                    .args(&["--kernel", guest.fw_path.as_str()])
+                    .default_raw_disks()
+                    .default_net()
+                    .args(&["--serial", "tty", "--console", "off"])
+                    .capture_output()
+                    .spawn()
+                    .unwrap();
 
-                    thread::sleep(std::time::Duration::new(20, 0));
+                thread::sleep(std::time::Duration::new(20, 0));
 
-                    aver_eq!(tb, guest.get_cpu_count().unwrap_or_default(), 1);
-                    aver_eq!(tb, guest.get_initial_apicid().unwrap_or(1), 0);
-                    aver!(tb, guest.get_total_memory().unwrap_or_default() > 480_000);
-                    aver!(tb, guest.get_entropy().unwrap_or_default() >= 900);
-                    aver_eq!(
-                        tb,
-                        guest.get_pci_bridge_class().unwrap_or_default(),
-                        "0x060000"
-                    );
-
-                    let _ = child.kill();
-                    let _ = child.wait();
+                let r = std::panic::catch_unwind(|| {
+                    assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
+                    assert_eq!(guest.get_initial_apicid().unwrap_or(1), 0);
+                    assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+                    assert!(guest.get_entropy().unwrap_or_default() >= 900);
+                    assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
                 });
-                Ok(())
+
+                let _ = child.kill();
+                let output = child.wait_with_output().unwrap();
+
+                handle_child_output(r, &output);
             });
         }
 
