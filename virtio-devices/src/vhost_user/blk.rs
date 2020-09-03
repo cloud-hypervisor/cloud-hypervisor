@@ -142,6 +142,7 @@ impl Blk {
             common: VirtioCommon {
                 avail_features,
                 acked_features,
+                ..Default::default()
             },
             id,
             vhost_user_blk,

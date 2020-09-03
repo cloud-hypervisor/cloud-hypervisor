@@ -151,6 +151,7 @@ impl Net {
             common: VirtioCommon {
                 avail_features,
                 acked_features,
+                ..Default::default()
             },
             vhost_user_net,
             kill_evt: None,

@@ -333,7 +333,7 @@ impl Balloon {
         Ok(Balloon {
             common: VirtioCommon {
                 avail_features,
-                acked_features: 0u64,
+                ..Default::default()
             },
             id,
             resize: VirtioBalloonResize::new()?,

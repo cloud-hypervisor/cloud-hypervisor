@@ -338,7 +338,7 @@ where
         Ok(Vsock {
             common: VirtioCommon {
                 avail_features,
-                acked_features: 0u64,
+                ..Default::default()
             },
             id,
             cid,
