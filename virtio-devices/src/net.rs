@@ -388,22 +388,21 @@ impl VirtioDevice for Net {
             })?;
         self.pause_evt = Some(self_pause_evt);
 
-        if let Some(mut taps) = self.taps.clone() {
-            // Save the interrupt EventFD as we need to return it on reset
+        // Save the interrupt EventFD as we need to return it on reset
+        // but clone it to pass into the thread.
+        self.interrupt_cb = Some(interrupt_cb.clone());
+        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
+        for queue_evt in queue_evts.iter() {
+            // Save the queue EventFD as we need to return it on reset
             // but clone it to pass into the thread.
-            self.interrupt_cb = Some(interrupt_cb.clone());
+            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                ActivateError::BadActivate
+            })?);
+        }
+        self.queue_evts = Some(tmp_queue_evts);
 
-            let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
-            for queue_evt in queue_evts.iter() {
-                // Save the queue EventFD as we need to return it on reset
-                // but clone it to pass into the thread.
-                tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
-                    error!("failed to clone queue EventFd: {}", e);
-                    ActivateError::BadActivate
-                })?);
-            }
-            self.queue_evts = Some(tmp_queue_evts);
-
+        if let Some(mut taps) = self.taps.clone() {
             let queue_num = queues.len();
             if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && queue_num % 2 != 0 {
                 let cvq_queue = queues.remove(queue_num - 1);
