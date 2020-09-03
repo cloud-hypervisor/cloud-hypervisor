@@ -470,6 +470,7 @@ name = "hypervisor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "kvm-bindings",
  "kvm-ioctls",
  "libc",

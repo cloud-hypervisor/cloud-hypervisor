@@ -9,6 +9,7 @@ kvm = []
 
 [dependencies]
 anyhow = "1.0"
+arc-swap = ">=0.4.4"
 thiserror = "1.0"
 libc = "0.2.78"
 log = "0.4.11"
