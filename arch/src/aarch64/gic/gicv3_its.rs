@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod kvm {
+    use std::convert::TryInto;
     use std::sync::Arc;
     use std::{boxed::Box, result};
     type Result<T> = result::Result<T, Error>;
@@ -13,6 +14,9 @@ pub mod kvm {
     pub struct KvmGICv3ITS {
         /// The hypervisor agnostic device
         device: Arc<dyn hypervisor::Device>,
+
+        /// Vector holding values of GICR_TYPER for each vCPU
+        gicr_typers: Vec<u64>,
 
         /// GIC device properties, to be used for setting up the fdt entry
         gic_properties: [u64; 4],
@@ -68,6 +72,10 @@ pub mod kvm {
         fn vcpu_count(&self) -> u64 {
             self.vcpu_count
         }
+
+        fn set_gicr_typers(&mut self, gicr_typers: Vec<u64>) {
+            self.gicr_typers = gicr_typers;
+        }
     }
 
     impl KvmGICDevice for KvmGICv3ITS {
@@ -81,6 +89,7 @@ pub mod kvm {
         ) -> Box<dyn GICDevice> {
             Box::new(KvmGICv3ITS {
                 device,
+                gicr_typers: vec![0; vcpu_count.try_into().unwrap()],
                 gic_properties: [
                     KvmGICv3::get_dist_addr(),
                     KvmGICv3::get_dist_size(),
