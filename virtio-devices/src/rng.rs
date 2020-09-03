@@ -5,7 +5,7 @@
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM,
     VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -127,12 +127,11 @@ impl EpollHelperHandler for RngEpollHandler {
 
 /// Virtio device for exposing entropy to the guest OS through virtio.
 pub struct Rng {
+    common: VirtioCommon,
     id: String,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
     random_file: Option<File>,
-    avail_features: u64,
-    acked_features: u64,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
@@ -164,12 +163,14 @@ impl Rng {
         }
 
         Ok(Rng {
+            common: VirtioCommon {
+                avail_features,
+                acked_features: 0u64,
+            },
             id,
             kill_evt: None,
             pause_evt: None,
             random_file: Some(random_file),
-            avail_features,
-            acked_features: 0u64,
             queue_evts: None,
             interrupt_cb: None,
             epoll_threads: None,
@@ -181,15 +182,15 @@ impl Rng {
 
     fn state(&self) -> RngState {
         RngState {
-            avail_features: self.avail_features,
-            acked_features: self.acked_features,
+            avail_features: self.common.avail_features,
+            acked_features: self.common.acked_features,
             paused: self.paused.clone(),
         }
     }
 
     fn set_state(&mut self, state: &RngState) -> io::Result<()> {
-        self.avail_features = state.avail_features;
-        self.acked_features = state.acked_features;
+        self.common.avail_features = state.avail_features;
+        self.common.acked_features = state.acked_features;
         self.paused = state.paused.clone();
 
         Ok(())
@@ -215,20 +216,11 @@ impl VirtioDevice for Rng {
     }
 
     fn features(&self) -> u64 {
-        self.avail_features
+        self.common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
-        let mut v = value;
-        // Check if the guest is ACK'ing a feature that we didn't claim to have.
-        let unrequested_features = v & !self.avail_features;
-        if unrequested_features != 0 {
-            warn!("Received acknowledge request for unknown feature.");
-
-            // Don't count these features as acked.
-            v &= !unrequested_features;
-        }
-        self.acked_features |= v;
+        self.common.ack_features(value)
     }
 
     fn activate(
