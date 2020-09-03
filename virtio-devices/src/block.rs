@@ -482,7 +482,9 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
             })?;
         self.pause_evt = Some(self_pause_evt);
 
-        let disk_image_id = build_disk_image_id(&self.disk_path);
+        // Save the interrupt EventFD as we need to return it on reset
+        // but clone it to pass into the thread.
+        self.interrupt_cb = Some(interrupt_cb.clone());
 
         let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
         for queue_evt in queue_evts.iter() {
@@ -495,6 +497,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         }
         self.queue_evts = Some(tmp_queue_evts);
 
+        let disk_image_id = build_disk_image_id(&self.disk_path);
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
         self.update_writeback();
 
@@ -541,10 +544,6 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                     ActivateError::BadActivate
                 })?;
         }
-
-        // Save the interrupt EventFD as we need to return it on reset
-        // but clone it to pass into the thread.
-        self.interrupt_cb = Some(interrupt_cb);
 
         self.epoll_threads = Some(epoll_threads);
 
