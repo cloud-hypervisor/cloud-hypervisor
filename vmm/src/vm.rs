@@ -42,6 +42,7 @@ use anyhow::anyhow;
 use arch::BootProtocol;
 use arch::EntryPoint;
 use devices::HotPlugNotificationFlags;
+use hypervisor::vm::{HypervisorVmError, VmmOps};
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
@@ -53,6 +54,8 @@ use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 use std::collections::{BTreeMap, HashMap};
 use std::convert::TryInto;
 use std::ffi::CString;
+#[cfg(target_arch = "x86_64")]
+use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::io::{Seek, SeekFrom};
@@ -62,8 +65,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use url::Url;
+use vm_device::Bus;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryMmap, GuestRegionMmap,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+    GuestRegionMmap,
 };
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
@@ -217,6 +222,9 @@ pub enum Error {
 
     /// Failed resizing a memory zone.
     ResizeZone,
+
+    /// Failed setting the VmmOps interface.
+    SetVmmOpsInterface(hypervisor::HypervisorVmError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -295,6 +303,134 @@ impl VmState {
     }
 }
 
+// Debug I/O port
+#[cfg(target_arch = "x86_64")]
+const DEBUG_IOPORT: u16 = 0x80;
+#[cfg(target_arch = "x86_64")]
+const DEBUG_IOPORT_PREFIX: &str = "Debug I/O port";
+
+#[cfg(target_arch = "x86_64")]
+/// Debug I/O port, see:
+/// https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html
+///
+/// Since we're not a physical platform, we can freely assign code ranges for
+/// debugging specific parts of our virtual platform.
+pub enum DebugIoPortRange {
+    Firmware,
+    Bootloader,
+    Kernel,
+    Userspace,
+    Custom,
+}
+#[cfg(target_arch = "x86_64")]
+impl DebugIoPortRange {
+    fn from_u8(value: u8) -> DebugIoPortRange {
+        match value {
+            0x00..=0x1f => DebugIoPortRange::Firmware,
+            0x20..=0x3f => DebugIoPortRange::Bootloader,
+            0x40..=0x5f => DebugIoPortRange::Kernel,
+            0x60..=0x7f => DebugIoPortRange::Userspace,
+            _ => DebugIoPortRange::Custom,
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+impl fmt::Display for DebugIoPortRange {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DebugIoPortRange::Firmware => write!(f, "{}: Firmware", DEBUG_IOPORT_PREFIX),
+            DebugIoPortRange::Bootloader => write!(f, "{}: Bootloader", DEBUG_IOPORT_PREFIX),
+            DebugIoPortRange::Kernel => write!(f, "{}: Kernel", DEBUG_IOPORT_PREFIX),
+            DebugIoPortRange::Userspace => write!(f, "{}: Userspace", DEBUG_IOPORT_PREFIX),
+            DebugIoPortRange::Custom => write!(f, "{}: Custom", DEBUG_IOPORT_PREFIX),
+        }
+    }
+}
+
+struct VmOps {
+    memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    #[cfg(target_arch = "x86_64")]
+    io_bus: Arc<Bus>,
+    mmio_bus: Arc<Bus>,
+    #[cfg(target_arch = "x86_64")]
+    timestamp: std::time::Instant,
+}
+
+impl VmOps {
+    #[cfg(target_arch = "x86_64")]
+    // Log debug io port codes.
+    fn log_debug_ioport(&self, code: u8) {
+        let elapsed = self.timestamp.elapsed();
+
+        debug!(
+            "[{} code 0x{:x}] {}.{:>06} seconds",
+            DebugIoPortRange::from_u8(code),
+            code,
+            elapsed.as_secs(),
+            elapsed.as_micros()
+        );
+    }
+}
+
+impl VmmOps for VmOps {
+    fn guest_mem_write(&self, buf: &[u8], gpa: u64) -> hypervisor::vm::Result<usize> {
+        self.memory
+            .memory()
+            .write(buf, GuestAddress(gpa))
+            .map_err(|e| HypervisorVmError::GuestMemWrite(e.into()))
+    }
+
+    fn guest_mem_read(&self, buf: &mut [u8], gpa: u64) -> hypervisor::vm::Result<usize> {
+        self.memory
+            .memory()
+            .read(buf, GuestAddress(gpa))
+            .map_err(|e| HypervisorVmError::GuestMemRead(e.into()))
+    }
+
+    fn mmio_read(&self, addr: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
+        if let Err(e) = self.mmio_bus.read(addr, data) {
+            if let vm_device::BusError::MissingAddressRange = e {
+                warn!("Guest MMIO read to unregistered address 0x{:x}", addr);
+            }
+        }
+        Ok(())
+    }
+
+    fn mmio_write(&self, addr: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
+        if let Err(e) = self.mmio_bus.write(addr, data) {
+            if let vm_device::BusError::MissingAddressRange = e {
+                warn!("Guest MMIO write to unregistered address 0x{:x}", addr);
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn pio_read(&self, addr: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
+        if let Err(e) = self.io_bus.read(addr, data) {
+            if let vm_device::BusError::MissingAddressRange = e {
+                warn!("Guest PIO read to unregistered address 0x{:x}", addr);
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn pio_write(&self, addr: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
+        if addr == DEBUG_IOPORT as u64 && data.len() == 1 {
+            self.log_debug_ioport(data[0]);
+        }
+
+        if let Err(e) = self.io_bus.write(addr, data) {
+            if let vm_device::BusError::MissingAddressRange = e {
+                warn!("Guest PIO write to unregistered address 0x{:x}", addr);
+            }
+        }
+        Ok(())
+    }
+}
+
 pub struct Vm {
     kernel: File,
     initramfs: Option<File>,
@@ -353,6 +489,22 @@ impl Vm {
             numa_nodes.clone(),
         )
         .map_err(Error::DeviceManager)?;
+
+        let memory = memory_manager.lock().unwrap().guest_memory();
+        #[cfg(target_arch = "x86_64")]
+        let io_bus = Arc::clone(device_manager.lock().unwrap().io_bus());
+        let mmio_bus = Arc::clone(device_manager.lock().unwrap().mmio_bus());
+        // Create the VmOps structure, which implements the VmmOps trait.
+        // And send it to the hypervisor.
+        let vm_ops = Box::new(VmOps {
+            memory,
+            #[cfg(target_arch = "x86_64")]
+            io_bus,
+            mmio_bus,
+            #[cfg(target_arch = "x86_64")]
+            timestamp: std::time::Instant::now(),
+        });
+        vm.set_vmmops(vm_ops).map_err(Error::SetVmmOpsInterface)?;
 
         let cpu_manager = cpu::CpuManager::new(
             &config.lock().unwrap().cpus.clone(),
@@ -516,7 +668,6 @@ impl Vm {
             .unwrap()
             .create_devices()
             .map_err(Error::DeviceManager)?;
-
         Ok(new_vm)
     }
 
