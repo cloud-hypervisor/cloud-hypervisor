@@ -11,7 +11,7 @@
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
@@ -259,13 +259,12 @@ impl<T: DiskFile> EpollHelperHandler for BlockEpollHandler<T> {
 
 /// Virtio device for exposing block level read/write operations on a host file.
 pub struct Block<T: DiskFile> {
+    common: VirtioCommon,
     id: String,
     kill_evt: Option<EventFd>,
     disk_image: Arc<Mutex<T>>,
     disk_path: PathBuf,
     disk_nsectors: u64,
-    avail_features: u64,
-    acked_features: u64,
     config: VirtioBlockConfig,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
@@ -338,13 +337,15 @@ impl<T: DiskFile> Block<T> {
         }
 
         Ok(Block {
+            common: VirtioCommon {
+                avail_features,
+                acked_features: 0u64,
+            },
             id,
             kill_evt: None,
             disk_image: Arc::new(Mutex::new(disk_image)),
             disk_path,
             disk_nsectors,
-            avail_features,
-            acked_features: 0u64,
             config,
             queue_evts: None,
             interrupt_cb: None,
@@ -363,8 +364,8 @@ impl<T: DiskFile> Block<T> {
         BlockState {
             disk_path: self.disk_path.clone(),
             disk_nsectors: self.disk_nsectors,
-            avail_features: self.avail_features,
-            acked_features: self.acked_features,
+            avail_features: self.common.avail_features,
+            acked_features: self.common.acked_features,
             config: self.config,
         }
     }
@@ -372,8 +373,8 @@ impl<T: DiskFile> Block<T> {
     fn set_state(&mut self, state: &BlockState) -> io::Result<()> {
         self.disk_path = state.disk_path.clone();
         self.disk_nsectors = state.disk_nsectors;
-        self.avail_features = state.avail_features;
-        self.acked_features = state.acked_features;
+        self.common.avail_features = state.avail_features;
+        self.common.acked_features = state.acked_features;
         self.config = state.config;
 
         Ok(())
@@ -381,13 +382,12 @@ impl<T: DiskFile> Block<T> {
 
     fn update_writeback(&mut self) {
         // Use writeback from config if VIRTIO_BLK_F_CONFIG_WCE
-        let writeback =
-            if self.acked_features & 1 << VIRTIO_BLK_F_CONFIG_WCE == 1 << VIRTIO_BLK_F_CONFIG_WCE {
-                self.config.writeback == 1
-            } else {
-                // Else check if VIRTIO_BLK_F_FLUSH negotiated
-                self.acked_features & 1 << VIRTIO_BLK_F_FLUSH == 1 << VIRTIO_BLK_F_FLUSH
-            };
+        let writeback = if self.common.feature_acked(VIRTIO_BLK_F_CONFIG_WCE.into()) {
+            self.config.writeback == 1
+        } else {
+            // Else check if VIRTIO_BLK_F_FLUSH negotiated
+            self.common.feature_acked(VIRTIO_BLK_F_FLUSH.into())
+        };
 
         info!(
             "Changing cache mode to {}",
@@ -420,20 +420,11 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
     }
 
     fn features(&self) -> u64 {
-        self.avail_features
+        self.common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
-        let mut v = value;
-        // Check if the guest is ACK'ing a feature that we didn't claim to have.
-        let unrequested_features = v & !self.avail_features;
-        if unrequested_features != 0 {
-            warn!("Received acknowledge request for unknown feature.");
-
-            // Don't count these features as acked.
-            v &= !unrequested_features;
-        }
-        self.acked_features |= v;
+        self.common.ack_features(value)
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -515,8 +506,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         }
         self.queue_evts = Some(tmp_queue_evts);
 
-        let event_idx = self.acked_features & 1u64 << VIRTIO_RING_F_EVENT_IDX
-            == 1u64 << VIRTIO_RING_F_EVENT_IDX;
+        let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
         self.update_writeback();
 
         let mut epoll_threads = Vec::new();
