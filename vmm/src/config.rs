@@ -46,6 +46,8 @@ pub enum Error {
     ParseMemory(OptionParserError),
     /// Error parsing memory zone options
     ParseMemoryZone(OptionParserError),
+    /// Missing 'id' from memory zone
+    ParseMemoryZoneIdMissing,
     /// Error parsing disk options
     ParseDisk(OptionParserError),
     /// Error parsing network options
@@ -154,6 +156,7 @@ impl fmt::Display for Error {
             ParseVsockSockMissing => write!(f, "Error parsing --vsock: socket missing"),
             ParseMemory(o) => write!(f, "Error parsing --memory: {}", o),
             ParseMemoryZone(o) => write!(f, "Error parsing --memory-zone: {}", o),
+            ParseMemoryZoneIdMissing => write!(f, "Error parsing --memory-zone: id missing"),
             ParseNetwork(o) => write!(f, "Error parsing --net: {}", o),
             ParseDisk(o) => write!(f, "Error parsing --disk: {}", o),
             ParseRNG(o) => write!(f, "Error parsing --rng: {}", o),
@@ -353,6 +356,7 @@ impl Default for CpusConfig {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct MemoryZoneConfig {
+    pub id: String,
     pub size: u64,
     #[serde(default)]
     pub file: Option<PathBuf>,
@@ -440,6 +444,7 @@ impl MemoryConfig {
             for memory_zone in memory_zones.iter() {
                 let mut parser = OptionParser::new();
                 parser
+                    .add("id")
                     .add("size")
                     .add("file")
                     .add("shared")
@@ -448,6 +453,7 @@ impl MemoryConfig {
                     .add("guest_numa_node");
                 parser.parse(memory_zone).map_err(Error::ParseMemoryZone)?;
 
+                let id = parser.get("id").ok_or(Error::ParseMemoryZoneIdMissing)?;
                 let size = parser
                     .convert::<ByteSized>("size")
                     .map_err(Error::ParseMemoryZone)?
@@ -472,6 +478,7 @@ impl MemoryConfig {
                     .map_err(Error::ParseMemoryZone)?;
 
                 zones.push(MemoryZoneConfig {
+                    id,
                     size,
                     file,
                     shared,

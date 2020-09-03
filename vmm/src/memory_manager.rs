@@ -44,6 +44,8 @@ use vm_migration::{
     Transportable,
 };
 
+const DEFAULT_MEMORY_ZONE: &str = "mem0";
+
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
 
@@ -426,6 +428,7 @@ impl MemoryManager {
             // Create a single zone from the global memory config. This lets
             // us reuse the codepath for user defined memory zones.
             let zones = vec![MemoryZoneConfig {
+                id: String::from(DEFAULT_MEMORY_ZONE),
                 size: config.size,
                 file: None,
                 shared: config.shared,

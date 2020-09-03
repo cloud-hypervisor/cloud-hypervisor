@@ -453,9 +453,12 @@ components:
 
     MemoryZoneConfig:
       required:
+      - id
       - size
       type: object
       properties:
+        id:
+          type: string
         size:
           type: integer
           format: int64
