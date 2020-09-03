@@ -183,6 +183,7 @@ pub trait DmaRemapping: Send + Sync {
 }
 
 /// Structure to handle device state common to all devices
+#[derive(Default)]
 pub struct VirtioCommon {
     pub avail_features: u64,
     pub acked_features: u64,

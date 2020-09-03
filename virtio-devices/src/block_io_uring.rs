@@ -374,7 +374,7 @@ impl BlockIoUring {
         Ok(BlockIoUring {
             common: VirtioCommon {
                 avail_features,
-                acked_features: 0u64,
+                ..Default::default()
             },
             id,
             kill_evt: None,

@@ -358,6 +358,7 @@ impl Fs {
             common: VirtioCommon {
                 avail_features,
                 acked_features,
+                ..Default::default()
             },
             id,
             vu: master,

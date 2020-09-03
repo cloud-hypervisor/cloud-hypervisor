@@ -782,7 +782,7 @@ impl Iommu {
                     avail_features: 1u64 << VIRTIO_F_VERSION_1
                         | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
                         | 1u64 << VIRTIO_IOMMU_F_PROBE,
-                    acked_features: 0u64,
+                    ..Default::default()
                 },
                 config,
                 config_topo_pci_ranges: Vec::new(),
