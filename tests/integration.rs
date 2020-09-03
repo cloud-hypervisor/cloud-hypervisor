@@ -3713,27 +3713,28 @@ mod tests {
         #[cfg_attr(not(feature = "mmio"), test)]
         #[cfg(target_arch = "x86_64")]
         fn test_bzimage_reboot() {
-            test_block!(tb, "", {
-                let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-                let guest = Guest::new(&mut focal);
-                let mut workload_path = dirs::home_dir().unwrap();
-                workload_path.push("workloads");
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
 
-                let mut kernel_path = workload_path;
-                kernel_path.push("bzImage");
+            let mut kernel_path = workload_path;
+            kernel_path.push("bzImage");
 
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=1"])
-                    .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", kernel_path.to_str().unwrap()])
-                    .default_disks()
-                    .default_net()
-                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                    .spawn()
-                    .unwrap();
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .default_disks()
+                .default_net()
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .capture_output()
+                .spawn()
+                .unwrap();
 
-                thread::sleep(std::time::Duration::new(20, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
+            let r = std::panic::catch_unwind(|| {
                 let reboot_count = guest
                     .ssh_command("journalctl | grep -c -- \"-- Reboot --\"")
                     .unwrap_or_default()
@@ -3742,8 +3743,8 @@ mod tests {
                     .unwrap_or(1);
                 let fd_count_1 = get_fd_count(child.id());
 
-                aver_eq!(tb, reboot_count, 0);
-                guest.ssh_command("sudo reboot")?;
+                assert_eq!(reboot_count, 0);
+                guest.ssh_command("sudo reboot").unwrap();
 
                 thread::sleep(std::time::Duration::new(20, 0));
                 let reboot_count = guest
@@ -3753,19 +3754,23 @@ mod tests {
                     .parse::<u32>()
                     .unwrap_or_default();
                 let fd_count_2 = get_fd_count(child.id());
-                aver_eq!(tb, reboot_count, 1);
-                aver_eq!(tb, fd_count_1, fd_count_2);
+                assert_eq!(reboot_count, 1);
+                assert_eq!(fd_count_1, fd_count_2);
 
-                guest.ssh_command("sudo shutdown -h now")?;
+                guest.ssh_command("sudo shutdown -h now").unwrap();
                 thread::sleep(std::time::Duration::new(20, 0));
-
-                // Check that the cloud-hypervisor binary actually terminated
-                if let Ok(status) = child.wait() {
-                    aver_eq!(tb, status.success(), true);
-                }
-                let _ = child.wait();
-                Ok(())
             });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+
+            let r = std::panic::catch_unwind(|| {
+                // Check that the cloud-hypervisor binary actually terminated
+                assert_eq!(output.status.success(), true);
+            });
+
+            handle_child_output(r, &output);
         }
 
         #[test]
