@@ -12,7 +12,7 @@ use super::net_util::{
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
@@ -197,12 +197,11 @@ impl EpollHelperHandler for NetEpollHandler {
 }
 
 pub struct Net {
+    common: VirtioCommon,
     id: String,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
     taps: Option<Vec<Tap>>,
-    avail_features: u64,
-    acked_features: u64,
     config: VirtioNetConfig,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
@@ -258,12 +257,14 @@ impl Net {
         }
 
         Ok(Net {
+            common: VirtioCommon {
+                avail_features,
+                acked_features: 0u64,
+            },
             id,
             kill_evt: None,
             pause_evt: None,
             taps: Some(taps),
-            avail_features,
-            acked_features: 0u64,
             config,
             queue_evts: None,
             interrupt_cb: None,
@@ -308,16 +309,16 @@ impl Net {
 
     fn state(&self) -> NetState {
         NetState {
-            avail_features: self.avail_features,
-            acked_features: self.acked_features,
+            avail_features: self.common.avail_features,
+            acked_features: self.common.acked_features,
             config: self.config,
             queue_size: self.queue_size.clone(),
         }
     }
 
     fn set_state(&mut self, state: &NetState) -> Result<()> {
-        self.avail_features = state.avail_features;
-        self.acked_features = state.acked_features;
+        self.common.avail_features = state.avail_features;
+        self.common.acked_features = state.acked_features;
         self.config = state.config;
         self.queue_size = state.queue_size.clone();
 
@@ -344,19 +345,11 @@ impl VirtioDevice for Net {
     }
 
     fn features(&self) -> u64 {
-        self.avail_features
+        self.common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
-        let mut v = value;
-        // Check if the guest is ACK'ing a feature that we didn't claim to have.
-        let unrequested_features = v & !self.avail_features;
-        if unrequested_features != 0 {
-            warn!("Received acknowledge request for unknown feature: {:x}", v);
-            // Don't count these features as acked.
-            v &= !unrequested_features;
-        }
-        self.acked_features |= v;
+        self.common.ack_features(value)
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -412,7 +405,7 @@ impl VirtioDevice for Net {
             self.queue_evts = Some(tmp_queue_evts);
 
             let queue_num = queues.len();
-            if (self.acked_features & 1 << VIRTIO_NET_F_CTRL_VQ) != 0 && queue_num % 2 != 0 {
+            if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && queue_num % 2 != 0 {
                 let cvq_queue = queues.remove(queue_num - 1);
                 let cvq_queue_evt = queue_evts.remove(queue_num - 1);
 
@@ -451,7 +444,7 @@ impl VirtioDevice for Net {
                     })?;
             }
 
-            let event_idx = self.acked_features & 1 << VIRTIO_RING_F_EVENT_IDX != 0;
+            let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
 
             let mut epoll_threads = Vec::new();
             for _ in 0..taps.len() {
