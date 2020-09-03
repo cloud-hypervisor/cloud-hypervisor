@@ -13,7 +13,7 @@ use crate::Error as DeviceError;
 use crate::VirtioInterrupt;
 use crate::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
     VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use anyhow::anyhow;
@@ -296,13 +296,12 @@ where
 
 /// Virtio device exposing virtual socket to the guest.
 pub struct Vsock<B: VsockBackend> {
+    common: VirtioCommon,
     id: String,
     cid: u64,
     backend: Arc<RwLock<B>>,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
-    avail_features: u64,
-    acked_features: u64,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
@@ -337,13 +336,15 @@ where
         }
 
         Ok(Vsock {
+            common: VirtioCommon {
+                avail_features,
+                acked_features: 0u64,
+            },
             id,
             cid,
             backend: Arc::new(RwLock::new(backend)),
             kill_evt: None,
             pause_evt: None,
-            avail_features,
-            acked_features: 0u64,
             queue_evts: None,
             interrupt_cb: None,
             epoll_threads: None,
@@ -355,14 +356,14 @@ where
 
     fn state(&self) -> VsockState {
         VsockState {
-            avail_features: self.avail_features,
-            acked_features: self.acked_features,
+            avail_features: self.common.avail_features,
+            acked_features: self.common.acked_features,
         }
     }
 
     fn set_state(&mut self, state: &VsockState) -> io::Result<()> {
-        self.avail_features = state.avail_features;
-        self.acked_features = state.acked_features;
+        self.common.avail_features = state.avail_features;
+        self.common.acked_features = state.acked_features;
 
         Ok(())
     }
@@ -393,20 +394,11 @@ where
     }
 
     fn features(&self) -> u64 {
-        self.avail_features
+        self.common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
-        let mut v = value;
-        // Check if the guest is ACK'ing a feature that we didn't claim to have.
-        let unrequested_features = v & !self.avail_features;
-        if unrequested_features != 0 {
-            warn!("Received acknowledge request for unknown feature.");
-
-            // Don't count these features as acked.
-            v &= !unrequested_features;
-        }
-        self.acked_features |= v;
+        self.common.ack_features(value)
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -608,7 +600,10 @@ mod tests {
         ctx.device.ack_features(u64::from(driver_pages[1]) << 32);
         // Check that no side effect are present, and that the acked features are exactly the same
         // as the device features.
-        assert_eq!(ctx.device.acked_features, device_features & driver_features);
+        assert_eq!(
+            ctx.device.common.acked_features,
+            device_features & driver_features
+        );
 
         // Test reading 32-bit chunks.
         let mut data = [0u8; 8];
