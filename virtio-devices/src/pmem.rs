@@ -9,7 +9,7 @@
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DescriptorChain, EpollHelper, EpollHelperError,
-    EpollHelperHandler, Queue, UserspaceMapping, VirtioDevice, VirtioDeviceType,
+    EpollHelperHandler, Queue, UserspaceMapping, VirtioCommon, VirtioDevice, VirtioDeviceType,
     EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -281,12 +281,11 @@ impl EpollHelperHandler for PmemEpollHandler {
 }
 
 pub struct Pmem {
+    common: VirtioCommon,
     id: String,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
     disk: Option<File>,
-    avail_features: u64,
-    acked_features: u64,
     config: VirtioPmemConfig,
     queue_evts: Option<Vec<EventFd>>,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
@@ -330,12 +329,14 @@ impl Pmem {
         }
 
         Ok(Pmem {
+            common: VirtioCommon {
+                avail_features,
+                acked_features: 0u64,
+            },
             id,
             kill_evt: None,
             pause_evt: None,
             disk: Some(disk),
-            avail_features,
-            acked_features: 0u64,
             config,
             queue_evts: None,
             interrupt_cb: None,
@@ -350,15 +351,15 @@ impl Pmem {
 
     fn state(&self) -> PmemState {
         PmemState {
-            avail_features: self.avail_features,
-            acked_features: self.acked_features,
+            avail_features: self.common.avail_features,
+            acked_features: self.common.acked_features,
             config: self.config,
         }
     }
 
     fn set_state(&mut self, state: &PmemState) -> io::Result<()> {
-        self.avail_features = state.avail_features;
-        self.acked_features = state.acked_features;
+        self.common.avail_features = state.avail_features;
+        self.common.acked_features = state.acked_features;
         self.config = state.config;
 
         Ok(())
@@ -384,20 +385,11 @@ impl VirtioDevice for Pmem {
     }
 
     fn features(&self) -> u64 {
-        self.avail_features
+        self.common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
-        let mut v = value;
-        // Check if the guest is ACK'ing a feature that we didn't claim to have.
-        let unrequested_features = v & !self.avail_features;
-        if unrequested_features != 0 {
-            warn!("Received acknowledge request for unknown feature.");
-
-            // Don't count these features as acked.
-            v &= !unrequested_features;
-        }
-        self.acked_features |= v;
+        self.common.ack_features(value)
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
