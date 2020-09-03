@@ -56,6 +56,9 @@ pub trait GICDevice: Send {
     fn msi_properties(&self) -> &[u64] {
         &[]
     }
+
+    /// Get the values of GICR_TYPER for each vCPU.
+    fn set_gicr_typers(&mut self, gicr_typers: Vec<u64>);
 }
 
 pub mod kvm {
