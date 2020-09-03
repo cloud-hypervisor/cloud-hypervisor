@@ -182,6 +182,31 @@ pub trait DmaRemapping: Send + Sync {
     fn translate(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error>;
 }
 
+/// Structure to handle device state common to all devices
+pub struct VirtioCommon {
+    pub avail_features: u64,
+    pub acked_features: u64,
+}
+
+impl VirtioCommon {
+    pub fn feature_acked(&self, feature: u64) -> bool {
+        self.acked_features & 1 << feature == 1 << feature
+    }
+
+    pub fn ack_features(&mut self, value: u64) {
+        let mut v = value;
+        // Check if the guest is ACK'ing a feature that we didn't claim to have.
+        let unrequested_features = v & !self.avail_features;
+        if unrequested_features != 0 {
+            warn!("Received acknowledge request for unknown feature.");
+
+            // Don't count these features as acked.
+            v &= !unrequested_features;
+        }
+        self.acked_features |= v;
+    }
+}
+
 #[macro_export]
 macro_rules! virtio_pausable_trait_definition {
     () => {
