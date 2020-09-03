@@ -42,6 +42,7 @@ use anyhow::anyhow;
 use arch::BootProtocol;
 use arch::EntryPoint;
 use devices::HotPlugNotificationFlags;
+use hypervisor::vm::{HypervisorVmError, VmmOps};
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
@@ -514,7 +515,6 @@ impl Vm {
             .unwrap()
             .create_devices()
             .map_err(Error::DeviceManager)?;
-
         Ok(new_vm)
     }
 
@@ -1537,6 +1537,58 @@ impl Pausable for Vm {
         *state = new_state;
 
         Ok(())
+    }
+}
+
+impl VmmOps for Vm {
+    fn guest_mem_write(&self, buf: &[u8], gpa: u64) -> hypervisor::vm::Result<usize> {
+        let guest_memory = self.memory_manager.lock().unwrap().guest_memory().memory();
+        guest_memory
+            .write(buf, GuestAddress(gpa))
+            .map_err(|e| HypervisorVmError::GuestMemWrite(e.into()))
+    }
+
+    fn guest_mem_read(&self, buf: &mut [u8], gpa: u64) -> hypervisor::vm::Result<usize> {
+        let guest_memory = self.memory_manager.lock().unwrap().guest_memory().memory();
+        guest_memory
+            .read(buf, GuestAddress(gpa))
+            .map_err(|e| HypervisorVmError::GuestMemRead(e.into()))
+    }
+
+    fn mmio_read(&self, addr: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .mmio_bus()
+            .read(addr, data)
+            .map_err(|e| HypervisorVmError::MmioBusRead(e.into()))
+    }
+
+    fn mmio_write(&self, addr: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .mmio_bus()
+            .write(addr, data)
+            .map_err(|e| HypervisorVmError::MmioBusWrite(e.into()))
+    }
+
+    fn pio_read(&self, addr: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .io_bus()
+            .read(addr, data)
+            .map_err(|e| HypervisorVmError::IoBusRead(e.into()))
+    }
+
+    fn pio_write(&self, addr: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .io_bus()
+            .write(addr, data)
+            .map_err(|e| HypervisorVmError::IoBusWrite(e.into()))
     }
 }
 

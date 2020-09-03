@@ -427,10 +427,11 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
         #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
         {
-            Ok(Arc::new(KvmVm {
+            Ok(Arc::new(Mutex::new(KvmVm {
                 fd: vm_fd,
+                vmmops,
                 state: VmState {},
-            }))
+            })))
         }
     }
 

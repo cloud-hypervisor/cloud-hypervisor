@@ -511,6 +511,7 @@ impl VfioPciDevice {
         F: Fn() -> u32,
     {
         let fd = self.device.as_raw_fd();
+        let vm = vm.lock().unwrap();
 
         for region in self.mmio_regions.iter_mut() {
             // We want to skip the mapping of the BAR containing the MSI-X
