@@ -495,17 +495,6 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         }
         self.queue_evts = Some(tmp_queue_evts);
 
-        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
-        for queue_evt in queue_evts.iter() {
-            // Save the queue EventFD as we need to return it on reset
-            // but clone it to pass into the thread.
-            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?);
-        }
-        self.queue_evts = Some(tmp_queue_evts);
-
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
         self.update_writeback();
 
