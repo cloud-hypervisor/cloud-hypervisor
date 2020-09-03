@@ -15,8 +15,8 @@
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, DescriptorChain, EpollHelper, EpollHelperError,
-    EpollHelperHandler, Queue, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_VERSION_1,
+    EpollHelperHandler, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
 
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -680,12 +680,11 @@ impl EpollHelperHandler for MemEpollHandler {
 
 // Virtio device for exposing entropy to the guest OS through virtio.
 pub struct Mem {
+    common: VirtioCommon,
     id: String,
     resize: Resize,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
-    avail_features: u64,
-    pub acked_features: u64,
     host_addr: u64,
     host_fd: Option<RawFd>,
     config: Arc<Mutex<VirtioMemConfig>>,
@@ -737,12 +736,14 @@ impl Mem {
         };
 
         Ok(Mem {
+            common: VirtioCommon {
+                avail_features,
+                acked_features: 0u64,
+            },
             id,
             resize,
             kill_evt: None,
             pause_evt: None,
-            avail_features,
-            acked_features: 0u64,
             host_addr: region.as_ptr() as u64,
             host_fd,
             config: Arc::new(Mutex::new(config)),
@@ -775,20 +776,11 @@ impl VirtioDevice for Mem {
     }
 
     fn features(&self) -> u64 {
-        self.avail_features
+        self.common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
-        let mut v = value;
-        // Check if the guest is ACK'ing a feature that we didn't claim to have.
-        let unrequested_features = v & !self.avail_features;
-        if unrequested_features != 0 {
-            warn!("Received acknowledge request for unknown feature.");
-
-            // Don't count these features as acked.
-            v &= !unrequested_features;
-        }
-        self.acked_features |= v;
+        self.common.ack_features(value)
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
