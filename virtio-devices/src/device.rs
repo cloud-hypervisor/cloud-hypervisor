@@ -6,12 +6,18 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::{ActivateResult, Error, Queue};
+use crate::{ActivateError, ActivateResult, Error, Queue};
+use libc::EFD_NONBLOCK;
 use std::collections::HashMap;
 use std::io::Write;
 use std::num::Wrapping;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Barrier,
+};
+use std::thread;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize};
+use vm_migration::{MigratableError, Pausable};
 use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -187,6 +193,15 @@ pub trait DmaRemapping: Send + Sync {
 pub struct VirtioCommon {
     pub avail_features: u64,
     pub acked_features: u64,
+    pub kill_evt: Option<EventFd>,
+    pub interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
+    pub queue_evts: Option<Vec<EventFd>>,
+    pub pause_evt: Option<EventFd>,
+    pub paused: Arc<AtomicBool>,
+    pub paused_sync: Option<Arc<Barrier>>,
+    pub epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
+    pub queue_sizes: Vec<u16>,
+    pub device_type: u32,
 }
 
 impl VirtioCommon {
@@ -205,6 +220,107 @@ impl VirtioCommon {
             v &= !unrequested_features;
         }
         self.acked_features |= v;
+    }
+
+    pub fn activate(
+        &mut self,
+        queues: &[Queue],
+        queue_evts: &[EventFd],
+        interrupt_cb: &Arc<dyn VirtioInterrupt>,
+    ) -> ActivateResult {
+        if queues.len() != self.queue_sizes.len() || queue_evts.len() != self.queue_sizes.len() {
+            error!(
+                "Cannot perform activate. Expected {} queue(s), got {}",
+                self.queue_sizes.len(),
+                queues.len()
+            );
+            return Err(ActivateError::BadActivate);
+        }
+
+        let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(|e| {
+            error!("failed creating kill EventFd: {}", e);
+            ActivateError::BadActivate
+        })?;
+        self.kill_evt = Some(kill_evt);
+
+        let pause_evt = EventFd::new(EFD_NONBLOCK).map_err(|e| {
+            error!("failed creating pause EventFd: {}", e);
+            ActivateError::BadActivate
+        })?;
+        self.pause_evt = Some(pause_evt);
+
+        // Save the interrupt EventFD as we need to return it on reset
+        // but clone it to pass into the thread.
+        self.interrupt_cb = Some(interrupt_cb.clone());
+
+        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
+        for queue_evt in queue_evts.iter() {
+            // Save the queue EventFD as we need to return it on reset
+            // but clone it to pass into the thread.
+            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
+                error!("failed to clone queue EventFd: {}", e);
+                ActivateError::BadActivate
+            })?);
+        }
+        self.queue_evts = Some(tmp_queue_evts);
+        Ok(())
+    }
+
+    pub fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
+        // We first must resume the virtio thread if it was paused.
+        if self.pause_evt.take().is_some() {
+            self.resume().ok()?;
+        }
+
+        if let Some(kill_evt) = self.kill_evt.take() {
+            // Ignore the result because there is nothing we can do about it.
+            let _ = kill_evt.write(1);
+        }
+
+        // Return the interrupt and queue EventFDs
+        Some((
+            self.interrupt_cb.take().unwrap(),
+            self.queue_evts.take().unwrap(),
+        ))
+    }
+}
+
+impl Pausable for VirtioCommon {
+    fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+        debug!(
+            "Pausing virtio-{}",
+            VirtioDeviceType::from(self.device_type)
+        );
+        self.paused.store(true, Ordering::SeqCst);
+        if let Some(pause_evt) = &self.pause_evt {
+            pause_evt
+                .write(1)
+                .map_err(|e| MigratableError::Pause(e.into()))?;
+
+            // Wait for all threads to acknowledge the pause before going
+            // any further. This is exclusively performed when pause_evt
+            // eventfd is Some(), as this means the virtio device has been
+            // activated. One specific case where the device can be paused
+            // while it hasn't been yet activated is snapshot/restore.
+            self.paused_sync.as_ref().unwrap().wait();
+        }
+
+        Ok(())
+    }
+
+    fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        debug!(
+            "Resuming virtio-{}",
+            VirtioDeviceType::from(self.device_type)
+        );
+        self.paused.store(false, Ordering::SeqCst);
+        if let Some(epoll_threads) = &self.epoll_threads {
+            for t in epoll_threads.iter() {
+                t.thread().unpark();
+            }
+        }
+
+        Ok(())
     }
 }
 
