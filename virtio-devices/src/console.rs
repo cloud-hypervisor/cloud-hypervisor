@@ -4,7 +4,7 @@
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
     VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -298,11 +298,10 @@ impl VirtioConsoleConfig {
 
 /// Virtio device for exposing console to the guest OS through virtio.
 pub struct Console {
+    common: VirtioCommon,
     id: String,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
-    avail_features: u64,
-    acked_features: u64,
     config: Arc<Mutex<VirtioConsoleConfig>>,
     input: Arc<ConsoleInput>,
     out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
@@ -351,11 +350,13 @@ impl Console {
 
         Ok((
             Console {
+                common: VirtioCommon {
+                    avail_features,
+                    acked_features: 0u64,
+                },
                 id,
                 kill_evt: None,
                 pause_evt: None,
-                avail_features,
-                acked_features: 0u64,
                 config: console_config,
                 input: console_input.clone(),
                 out: Arc::new(Mutex::new(out)),
@@ -372,16 +373,16 @@ impl Console {
 
     fn state(&self) -> ConsoleState {
         ConsoleState {
-            avail_features: self.avail_features,
-            acked_features: self.acked_features,
+            avail_features: self.common.avail_features,
+            acked_features: self.common.acked_features,
             config: *(self.config.lock().unwrap()),
             in_buffer: self.input.in_buffer.lock().unwrap().clone(),
         }
     }
 
     fn set_state(&mut self, state: &ConsoleState) -> io::Result<()> {
-        self.avail_features = state.avail_features;
-        self.acked_features = state.acked_features;
+        self.common.avail_features = state.avail_features;
+        self.common.acked_features = state.acked_features;
         *(self.config.lock().unwrap()) = state.config;
         *(self.input.in_buffer.lock().unwrap()) = state.in_buffer.clone();
 
@@ -408,20 +409,11 @@ impl VirtioDevice for Console {
     }
 
     fn features(&self) -> u64 {
-        self.avail_features
+        self.common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
-        let mut v = value;
-        // Check if the guest is ACK'ing a feature that we didn't claim to have.
-        let unrequested_features = v & !self.avail_features;
-        if unrequested_features != 0 {
-            warn!("Received acknowledge request for unknown feature.");
-
-            // Don't count these features as acked.
-            v &= !unrequested_features;
-        }
-        self.acked_features |= v;
+        self.common.ack_features(value)
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -478,9 +470,9 @@ impl VirtioDevice for Console {
 
         self.input
             .acked_features
-            .store(self.acked_features, Ordering::Relaxed);
+            .store(self.common.acked_features, Ordering::Relaxed);
 
-        if (self.acked_features & (1u64 << VIRTIO_CONSOLE_F_SIZE)) != 0 {
+        if self.common.feature_acked(VIRTIO_CONSOLE_F_SIZE) {
             if let Err(e) = interrupt_cb.trigger(&VirtioInterruptType::Config, None) {
                 error!("Failed to signal console driver: {:?}", e);
             }
