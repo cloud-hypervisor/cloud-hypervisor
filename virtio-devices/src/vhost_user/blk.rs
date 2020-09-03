@@ -1,7 +1,9 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::{ActivateError, ActivateResult, Queue, VirtioDevice, VirtioDeviceType};
+use super::super::{
+    ActivateError, ActivateResult, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
+};
 use super::handler::*;
 use super::vu_common_ctrl::*;
 use super::{Error, Result};
@@ -32,12 +34,11 @@ struct SlaveReqHandler {}
 impl VhostUserMasterReqHandler for SlaveReqHandler {}
 
 pub struct Blk {
+    common: VirtioCommon,
     id: String,
     vhost_user_blk: Master,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
-    avail_features: u64,
-    acked_features: u64,
     config: VirtioBlockConfig,
     queue_sizes: Vec<u16>,
     queue_evts: Option<Vec<EventFd>>,
@@ -138,12 +139,14 @@ impl Blk {
         }
 
         Ok(Blk {
+            common: VirtioCommon {
+                avail_features,
+                acked_features,
+            },
             id,
             vhost_user_blk,
             kill_evt: None,
             pause_evt: None,
-            avail_features,
-            acked_features,
             config,
             queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
             queue_evts: None,
@@ -176,19 +179,11 @@ impl VirtioDevice for Blk {
     }
 
     fn features(&self) -> u64 {
-        self.avail_features
+        self.common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
-        let mut v = value;
-        // Check if the guest is ACK'ing a feature that we didn't claim to have.
-        let unrequested_features = v & !self.avail_features;
-        if unrequested_features != 0 {
-            warn!("Received acknowledge request for unknown feature: {:x}", v);
-            // Don't count these features as acked.
-            v &= !unrequested_features;
-        }
-        self.acked_features |= v;
+        self.common.ack_features(value)
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -259,7 +254,7 @@ impl VirtioDevice for Blk {
             queues,
             queue_evts,
             &interrupt_cb,
-            self.acked_features,
+            self.common.acked_features,
         )
         .map_err(ActivateError::VhostUserBlkSetup)?;
 
