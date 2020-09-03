@@ -1358,6 +1358,17 @@ impl Pausable for Vm {
     }
 }
 
+impl hypervisor::vm::VmmOps for Vm {
+    fn write_guest_mem(&self, buf: &[u8], gpa:u64,) -> hypervisor::vm::Result<usize>{
+        let guest_memory = self.memory_manager.lock().unwrap().guest_memory().memory();
+        guest_memory.write(buf, GuestAddress(gpa)).map_err(|e| hypervisor::vm::HypervisorVmError::GuestMemWrite(e.into()))
+    }
+    fn read_guest_mem(&self, buf: &mut [u8], gpa:u64,) -> hypervisor::vm::Result<usize>{
+        let guest_memory = self.memory_manager.lock().unwrap().guest_memory().memory();
+        guest_memory.read(buf, GuestAddress(gpa)).map_err(|e| hypervisor::vm::HypervisorVmError::GuestMemRead(e.into()))
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
     pub config: Arc<Mutex<VmConfig>>,

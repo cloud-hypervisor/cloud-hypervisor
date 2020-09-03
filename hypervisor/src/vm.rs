@@ -11,6 +11,7 @@
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::VcpuInit;
 use crate::cpu::Vcpu;
+use crate::vm;
 use crate::device::Device;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
@@ -117,6 +118,16 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to create passthrough device: {0}")]
     CreatePassthroughDevice(#[source] anyhow::Error),
+    ///
+    /// Write to Guest memory
+    ///
+    #[error("Failed to write to guest memory: {0}")]
+    GuestMemWrite(#[source] anyhow::Error),
+    ///
+    /// Read Guest memory
+    ///
+    #[error("Failed to read guest memory: {0}")]
+    GuestMemRead(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -184,4 +195,9 @@ pub trait Vm: Send + Sync {
     fn state(&self) -> Result<VmState>;
     /// Set the VM state
     fn set_state(&self, state: &VmState) -> Result<()>;
+}
+
+pub trait VmmOps {
+    fn write_guest_mem(&self, buf: &[u8], gpa:u64,) -> vm::Result<usize>;
+    fn read_guest_mem(&self, buf: &mut [u8], gpa:u64,) -> vm::Result<usize>;
 }
