@@ -6,8 +6,8 @@ use super::{Error, Result};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::{
-    ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, Queue, UserspaceMapping, VirtioCommon, VirtioDevice,
+    VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
 };
 use libc::{self, c_void, off64_t, pread64, pwrite64, EFD_NONBLOCK};
 use seccomp::{SeccompAction, SeccompFilter};
@@ -266,11 +266,10 @@ impl Default for VirtioFsConfig {
 unsafe impl ByteValued for VirtioFsConfig {}
 
 pub struct Fs {
+    common: VirtioCommon,
     id: String,
     vu: Master,
     queue_sizes: Vec<u16>,
-    avail_features: u64,
-    acked_features: u64,
     config: VirtioFsConfig,
     kill_evt: Option<EventFd>,
     pause_evt: Option<EventFd>,
@@ -356,11 +355,13 @@ impl Fs {
         config.num_request_queues = req_num_queues as u32;
 
         Ok(Fs {
+            common: VirtioCommon {
+                avail_features,
+                acked_features,
+            },
             id,
             vu: master,
             queue_sizes: vec![queue_size; num_queues],
-            avail_features,
-            acked_features,
             config,
             kill_evt: None,
             pause_evt: None,
@@ -395,20 +396,11 @@ impl VirtioDevice for Fs {
     }
 
     fn features(&self) -> u64 {
-        self.avail_features
+        self.common.avail_features
     }
 
     fn ack_features(&mut self, value: u64) {
-        let mut v = value;
-        // Check if the guest is ACK'ing a feature that we didn't claim to have.
-        let unrequested_features = v & !self.avail_features;
-        if unrequested_features != 0 {
-            warn!("fs: virtio-fs got unknown feature ack: {:x}", v);
-
-            // Don't count these features as acked.
-            v &= !unrequested_features;
-        }
-        self.acked_features |= v;
+        self.common.ack_features(value)
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -468,7 +460,7 @@ impl VirtioDevice for Fs {
             queues,
             queue_evts,
             &interrupt_cb,
-            self.acked_features,
+            self.common.acked_features,
         )
         .map_err(ActivateError::VhostUserSetup)?;
 
