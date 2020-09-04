@@ -19,7 +19,7 @@ use devices::BusDevice;
 
 #[cfg(target_arch = "x86_64")]
 use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
@@ -96,6 +96,8 @@ impl NumaNode {
 
 pub type NumaNodes = BTreeMap<u32, NumaNode>;
 
+pub type MemoryZones = HashMap<String, Vec<Arc<GuestRegionMmap>>>;
+
 pub struct MemoryManager {
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     next_memory_slot: u32,
@@ -121,6 +123,7 @@ pub struct MemoryManager {
     use_zones: bool,
     snapshot_memory_regions: Vec<MemoryRegion>,
     numa_nodes: NumaNodes,
+    memory_zones: MemoryZones,
 }
 
 #[derive(Debug)]
@@ -213,6 +216,9 @@ pub enum Error {
 
     /// Failed applying NUMA memory policy.
     ApplyNumaPolicy(io::Error),
+
+    /// Memory zone identifier is not unique.
+    DuplicateZoneId,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -319,12 +325,16 @@ impl MemoryManager {
         zones: &[MemoryZoneConfig],
         prefault: bool,
         ext_regions: Option<Vec<MemoryRegion>>,
-    ) -> Result<(Vec<Arc<GuestRegionMmap>>, NumaNodes), Error> {
+    ) -> Result<(Vec<Arc<GuestRegionMmap>>, NumaNodes, MemoryZones), Error> {
         let mut zones = zones.to_owned();
         let mut mem_regions = Vec::new();
         let mut zone = zones.remove(0);
         let mut zone_offset = 0;
         let mut numa_nodes = BTreeMap::new();
+        let mut memory_zones = HashMap::new();
+
+        // Add zone id to the list of memory zones.
+        memory_zones.insert(zone.id.clone(), Vec::new());
 
         for ram_region in ram_regions.iter() {
             let mut ram_region_offset = 0;
@@ -383,6 +393,12 @@ impl MemoryManager {
                     }
                 }
 
+                // Add region to the list of regions associated with the
+                // current memory zone.
+                if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
+                    memory_zone.push(region.clone());
+                }
+
                 mem_regions.push(region);
 
                 if pull_next_zone {
@@ -393,6 +409,19 @@ impl MemoryManager {
                         break;
                     }
                     zone = zones.remove(0);
+
+                    // Check if zone id already exist. In case it does, throw
+                    // an error as we need unique identifiers. Otherwise, add
+                    // the new zone id to the list of memory zones.
+                    if memory_zones.contains_key(&zone.id) {
+                        error!(
+                            "Memory zone identifier '{}' found more than once. \
+                            It must be unique",
+                            zone.id,
+                        );
+                        return Err(Error::DuplicateZoneId);
+                    }
+                    memory_zones.insert(zone.id.clone(), Vec::new());
                 }
 
                 if ram_region_consumed {
@@ -405,7 +434,7 @@ impl MemoryManager {
             }
         }
 
-        Ok((mem_regions, numa_nodes))
+        Ok((mem_regions, numa_nodes, memory_zones))
     }
 
     pub fn new(
@@ -479,7 +508,7 @@ impl MemoryManager {
             .map(|r| (r.0, r.1))
             .collect();
 
-        let (mem_regions, numa_nodes) =
+        let (mem_regions, numa_nodes, memory_zones) =
             Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, ext_regions)?;
 
         let guest_memory =
@@ -572,6 +601,7 @@ impl MemoryManager {
             use_zones,
             snapshot_memory_regions: Vec::new(),
             numa_nodes,
+            memory_zones,
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -1259,6 +1289,10 @@ impl MemoryManager {
 
     pub fn numa_nodes_mut(&mut self) -> &mut NumaNodes {
         &mut self.numa_nodes
+    }
+
+    pub fn memory_zones(&self) -> &MemoryZones {
+        &self.memory_zones
     }
 }
 
