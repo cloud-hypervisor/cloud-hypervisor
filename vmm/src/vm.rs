@@ -23,9 +23,11 @@ extern crate signal_hook;
 extern crate vm_allocator;
 extern crate vm_memory;
 
+#[cfg(feature = "acpi")]
+use crate::config::NumaConfig;
 use crate::config::{
-    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, NumaConfig, PmemConfig,
-    ValidationError, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig, ValidationError,
+    VmConfig, VsockConfig,
 };
 use crate::cpu;
 use crate::device_manager::{self, get_win_size, Console, DeviceManager, DeviceManagerError};
@@ -47,7 +49,7 @@ use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 use linux_loader::loader::KernelLoader;
 use seccomp::SeccompAction;
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryInto;
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
@@ -59,7 +61,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
 use url::Url;
-use vm_memory::{Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryMmap};
+use vm_memory::{
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryMmap, GuestRegionMmap,
+};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
@@ -201,6 +205,29 @@ pub enum Error {
 }
 pub type Result<T> = result::Result<T, Error>;
 
+#[derive(Clone)]
+pub struct NumaNode {
+    memory_regions: Vec<Arc<GuestRegionMmap>>,
+    cpus: Vec<u8>,
+    distances: BTreeMap<u32, u8>,
+}
+
+impl NumaNode {
+    pub fn memory_regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
+        &self.memory_regions
+    }
+
+    pub fn cpus(&self) -> &Vec<u8> {
+        &self.cpus
+    }
+
+    pub fn distances(&self) -> &BTreeMap<u32, u8> {
+        &self.distances
+    }
+}
+
+pub type NumaNodes = BTreeMap<u32, NumaNode>;
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 pub enum VmState {
     Created,
@@ -259,6 +286,8 @@ pub struct Vm {
     vm: Arc<dyn hypervisor::Vm>,
     #[cfg(target_arch = "x86_64")]
     saved_clock: Option<hypervisor::ClockData>,
+    #[cfg(feature = "acpi")]
+    numa_nodes: NumaNodes,
 }
 
 impl Vm {
@@ -314,10 +343,10 @@ impl Vm {
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
-        // Update NUMA based on NumaConfig.
-        if let Some(numa_cfg) = config.lock().unwrap().numa.clone() {
-            Self::update_numa(numa_cfg, &memory_manager)?;
-        }
+        // Create NUMA nodes based on NumaConfig.
+        #[cfg(feature = "acpi")]
+        let numa_nodes =
+            Self::create_numa_nodes(config.lock().unwrap().numa.clone(), &memory_manager)?;
 
         Ok(Vm {
             kernel,
@@ -333,21 +362,48 @@ impl Vm {
             vm,
             #[cfg(target_arch = "x86_64")]
             saved_clock: _saved_clock,
+            #[cfg(feature = "acpi")]
+            numa_nodes,
         })
     }
 
-    fn update_numa(
-        configs: Vec<NumaConfig>,
+    #[cfg(feature = "acpi")]
+    fn create_numa_nodes(
+        configs: Option<Vec<NumaConfig>>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
-    ) -> Result<()> {
-        let mut mm = memory_manager.lock().unwrap();
-        let numa_nodes = mm.numa_nodes_mut();
-        let existing_nodes: Vec<u32> = numa_nodes.keys().cloned().collect();
+    ) -> Result<NumaNodes> {
+        let mm = memory_manager.lock().unwrap();
+        let mm_zones = mm.memory_zones();
+        let mut numa_nodes = BTreeMap::new();
 
-        for config in configs.iter() {
-            if let Some(node) = numa_nodes.get_mut(&config.id) {
+        if let Some(configs) = &configs {
+            let node_id_list: Vec<u32> = configs.iter().map(|cfg| cfg.id).collect();
+
+            for config in configs.iter() {
+                if numa_nodes.contains_key(&config.id) {
+                    error!("Can't define twice the same NUMA node");
+                    return Err(Error::InvalidNumaConfig);
+                }
+
+                let mut node = NumaNode {
+                    memory_regions: Vec::new(),
+                    cpus: Vec::new(),
+                    distances: BTreeMap::new(),
+                };
+
+                if let Some(memory_zones) = &config.memory_zones {
+                    for memory_zone in memory_zones.iter() {
+                        if let Some(mm_zone) = mm_zones.get(memory_zone) {
+                            node.memory_regions.extend(mm_zone.clone());
+                        } else {
+                            error!("Unknown memory zone '{}'", memory_zone);
+                            return Err(Error::InvalidNumaConfig);
+                        }
+                    }
+                }
+
                 if let Some(cpus) = &config.cpus {
-                    node.cpus_mut().extend(cpus);
+                    node.cpus.extend(cpus);
                 }
 
                 if let Some(distances) = &config.distances {
@@ -355,21 +411,25 @@ impl Vm {
                         let dest = distance.destination;
                         let dist = distance.distance;
 
-                        if !existing_nodes.contains(&dest) {
+                        if !node_id_list.contains(&dest) {
                             error!("Unknown destination NUMA node {}", dest);
                             return Err(Error::InvalidNumaConfig);
                         }
 
-                        node.distances_mut().insert(dest, dist);
+                        if node.distances.contains_key(&dest) {
+                            error!("Destination NUMA node {} has been already set", dest);
+                            return Err(Error::InvalidNumaConfig);
+                        }
+
+                        node.distances.insert(dest, dist);
                     }
                 }
-            } else {
-                error!("Unknown NUMA node {}", config.id);
-                return Err(Error::InvalidNumaConfig);
+
+                numa_nodes.insert(config.id, node);
             }
         }
 
-        Ok(())
+        Ok(numa_nodes)
     }
 
     pub fn new(
@@ -630,6 +690,7 @@ impl Vm {
                 &self.device_manager,
                 &self.cpu_manager,
                 &self.memory_manager,
+                &self.numa_nodes,
             ));
         }
 

@@ -19,7 +19,7 @@ use devices::BusDevice;
 
 #[cfg(target_arch = "x86_64")]
 use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
@@ -65,37 +65,6 @@ struct HotPlugState {
     removing: bool,
 }
 
-#[derive(Clone)]
-pub struct NumaNode {
-    memory_regions: Vec<Arc<GuestRegionMmap>>,
-    cpus: Vec<u8>,
-    distances: BTreeMap<u32, u8>,
-}
-
-impl NumaNode {
-    pub fn memory_regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
-        &self.memory_regions
-    }
-
-    pub fn cpus(&self) -> &Vec<u8> {
-        &self.cpus
-    }
-
-    pub fn cpus_mut(&mut self) -> &mut Vec<u8> {
-        &mut self.cpus
-    }
-
-    pub fn distances(&self) -> &BTreeMap<u32, u8> {
-        &self.distances
-    }
-
-    pub fn distances_mut(&mut self) -> &mut BTreeMap<u32, u8> {
-        &mut self.distances
-    }
-}
-
-pub type NumaNodes = BTreeMap<u32, NumaNode>;
-
 pub type MemoryZones = HashMap<String, Vec<Arc<GuestRegionMmap>>>;
 
 pub struct MemoryManager {
@@ -122,7 +91,6 @@ pub struct MemoryManager {
     sgx_epc_region: Option<SgxEpcRegion>,
     use_zones: bool,
     snapshot_memory_regions: Vec<MemoryRegion>,
-    numa_nodes: NumaNodes,
     memory_zones: MemoryZones,
 }
 
@@ -325,12 +293,11 @@ impl MemoryManager {
         zones: &[MemoryZoneConfig],
         prefault: bool,
         ext_regions: Option<Vec<MemoryRegion>>,
-    ) -> Result<(Vec<Arc<GuestRegionMmap>>, NumaNodes, MemoryZones), Error> {
+    ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
         let mut zones = zones.to_owned();
         let mut mem_regions = Vec::new();
         let mut zone = zones.remove(0);
         let mut zone_offset = 0;
-        let mut numa_nodes = BTreeMap::new();
         let mut memory_zones = HashMap::new();
 
         // Add zone id to the list of memory zones.
@@ -377,22 +344,6 @@ impl MemoryManager {
                     &ext_regions,
                 )?;
 
-                // Fill the list of NUMA nodes.
-                if let Some(node_id) = zone.guest_numa_node {
-                    if let Some(node) = numa_nodes.get_mut(&node_id) as Option<&mut NumaNode> {
-                        node.memory_regions.push(region.clone());
-                    } else {
-                        numa_nodes.insert(
-                            node_id,
-                            NumaNode {
-                                memory_regions: vec![region.clone()],
-                                cpus: Vec::new(),
-                                distances: BTreeMap::new(),
-                            },
-                        );
-                    }
-                }
-
                 // Add region to the list of regions associated with the
                 // current memory zone.
                 if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
@@ -434,7 +385,7 @@ impl MemoryManager {
             }
         }
 
-        Ok((mem_regions, numa_nodes, memory_zones))
+        Ok((mem_regions, memory_zones))
     }
 
     pub fn new(
@@ -508,7 +459,7 @@ impl MemoryManager {
             .map(|r| (r.0, r.1))
             .collect();
 
-        let (mem_regions, numa_nodes, memory_zones) =
+        let (mem_regions, memory_zones) =
             Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, ext_regions)?;
 
         let guest_memory =
@@ -600,7 +551,6 @@ impl MemoryManager {
             sgx_epc_region: None,
             use_zones,
             snapshot_memory_regions: Vec::new(),
-            numa_nodes,
             memory_zones,
         }));
 
@@ -1281,14 +1231,6 @@ impl MemoryManager {
         }
 
         unsafe { (*stat.as_ptr()).st_nlink as usize > 0 }
-    }
-
-    pub fn numa_nodes(&self) -> &NumaNodes {
-        &self.numa_nodes
-    }
-
-    pub fn numa_nodes_mut(&mut self) -> &mut NumaNodes {
-        &mut self.numa_nodes
     }
 
     pub fn memory_zones(&self) -> &MemoryZones {

@@ -5,6 +5,7 @@
 use crate::cpu::CpuManager;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
+use crate::vm::NumaNodes;
 use acpi_tables::{
     aml::Aml,
     rsdp::RSDP,
@@ -73,6 +74,7 @@ pub fn create_acpi_tables(
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
     memory_manager: &Arc<Mutex<MemoryManager>>,
+    numa_nodes: &NumaNodes,
 ) -> GuestAddress {
     // RSDP is at the EBDA
     let rsdp_offset = layout::RSDP_POINTER;
@@ -152,7 +154,6 @@ pub fn create_acpi_tables(
 
     // SRAT and SLIT
     // Only created if the NUMA nodes list is not empty.
-    let numa_nodes = memory_manager.lock().unwrap().numa_nodes().clone();
     let (prev_tbl_len, prev_tbl_off) = if numa_nodes.is_empty() {
         (mcfg.len(), mcfg_offset)
     } else {
