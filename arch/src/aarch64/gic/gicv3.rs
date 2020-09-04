@@ -10,6 +10,7 @@ pub mod kvm {
     use crate::layout;
     use anyhow::anyhow;
     use hypervisor::kvm::kvm_bindings;
+    use std::any::Any;
     use std::convert::TryInto;
     use std::sync::Arc;
     use std::{boxed::Box, result};
@@ -163,6 +164,10 @@ pub mod kvm {
         fn set_gicr_typers(&mut self, gicr_typers: Vec<u64>) {
             self.gicr_typers = gicr_typers;
         }
+
+        fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
+            self
+        }
     }
 
     impl KvmGICDevice for KvmGICv3 {
@@ -217,7 +222,7 @@ pub mod kvm {
         }
     }
 
-    const GIC_V3_SNAPSHOT_ID: &str = "gic-v3";
+    pub const GIC_V3_SNAPSHOT_ID: &str = "gic-v3";
     impl Snapshottable for KvmGICv3 {
         fn id(&self) -> String {
             GIC_V3_SNAPSHOT_ID.to_string()
