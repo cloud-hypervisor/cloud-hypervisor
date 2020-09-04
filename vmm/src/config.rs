@@ -366,8 +366,6 @@ pub struct MemoryZoneConfig {
     pub hugepages: bool,
     #[serde(default)]
     pub host_numa_node: Option<u32>,
-    #[serde(default)]
-    pub guest_numa_node: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -449,8 +447,7 @@ impl MemoryConfig {
                     .add("file")
                     .add("shared")
                     .add("hugepages")
-                    .add("host_numa_node")
-                    .add("guest_numa_node");
+                    .add("host_numa_node");
                 parser.parse(memory_zone).map_err(Error::ParseMemoryZone)?;
 
                 let id = parser.get("id").ok_or(Error::ParseMemoryZoneIdMissing)?;
@@ -473,9 +470,6 @@ impl MemoryConfig {
                 let host_numa_node = parser
                     .convert::<u32>("host_numa_node")
                     .map_err(Error::ParseMemoryZone)?;
-                let guest_numa_node = parser
-                    .convert::<u32>("guest_numa_node")
-                    .map_err(Error::ParseMemoryZone)?;
 
                 zones.push(MemoryZoneConfig {
                     id,
@@ -484,7 +478,6 @@ impl MemoryConfig {
                     shared,
                     hugepages,
                     host_numa_node,
-                    guest_numa_node,
                 });
             }
             Some(zones)
