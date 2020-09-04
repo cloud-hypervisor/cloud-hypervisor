@@ -8,7 +8,6 @@ use std::sync::Arc;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 type Result<T> = result::Result<T, Error>;
 
@@ -63,22 +62,3 @@ impl InterruptController for Gic {
         Ok(())
     }
 }
-
-const GIC_SNAPSHOT_ID: &str = "gic";
-impl Snapshottable for Gic {
-    fn id(&self) -> String {
-        GIC_SNAPSHOT_ID.to_string()
-    }
-
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        unimplemented!();
-    }
-
-    fn restore(&mut self, _snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        unimplemented!();
-    }
-}
-
-impl Pausable for Gic {}
-impl Transportable for Gic {}
-impl Migratable for Gic {}

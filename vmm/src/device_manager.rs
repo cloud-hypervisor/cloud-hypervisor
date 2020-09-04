@@ -108,8 +108,6 @@ const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
 
 #[cfg(target_arch = "x86_64")]
 const IOAPIC_DEVICE_NAME: &str = "_ioapic";
-#[cfg(target_arch = "aarch64")]
-const GIC_DEVICE_NAME: &str = "_gic";
 
 const SERIAL_DEVICE_NAME_PREFIX: &str = "_serial";
 
@@ -1141,8 +1139,6 @@ impl DeviceManager {
     fn add_interrupt_controller(
         &mut self,
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
-        let id = String::from(GIC_DEVICE_NAME);
-
         let interrupt_controller: Arc<Mutex<gic::Gic>> = Arc::new(Mutex::new(
             gic::Gic::new(
                 self.config.lock().unwrap().cpus.boot_vcpus,
@@ -1153,13 +1149,10 @@ impl DeviceManager {
 
         self.interrupt_controller = Some(interrupt_controller.clone());
 
-        // Fill the device tree with a new node. In case of restore, we
-        // know there is nothing to do, so we can simply override the
-        // existing entry.
-        self.device_tree
-            .lock()
-            .unwrap()
-            .insert(id.clone(), device_node!(id, interrupt_controller));
+        // Unlike x86_64, the "interrupt_controller" here for AArch64 is only
+        // a `Gic` object that implements the `InterruptController` to provide
+        // interrupt delivery service. This is not the real GIC device so that
+        // we do not need to insert it to the device tree.
 
         Ok(interrupt_controller)
     }
