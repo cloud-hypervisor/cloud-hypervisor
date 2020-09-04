@@ -2282,9 +2282,9 @@ mod tests {
                 .args(&["--memory", "size=0"])
                 .args(&[
                     "--memory-zone",
-                    "size=1G",
-                    "size=3G,file=/dev/shm",
-                    "size=1G,host_numa_node=0",
+                    "id=mem0,size=1G",
+                    "id=mem1,size=3G,file=/dev/shm",
+                    "id=mem2,size=1G,host_numa_node=0",
                 ])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .capture_output()
@@ -2319,15 +2319,15 @@ mod tests {
                 .args(&["--memory", "size=0"])
                 .args(&[
                     "--memory-zone",
-                    "size=1G,guest_numa_node=0",
-                    "size=2G,guest_numa_node=1",
-                    "size=3G,guest_numa_node=2",
+                    "id=mem0,size=1G",
+                    "id=mem1,size=2G",
+                    "id=mem2,size=3G",
                 ])
                 .args(&[
                     "--numa",
-                    "id=0,cpus=0-2,distances=1@15:2@20",
-                    "id=1,cpus=3-4,distances=0@20:2@25",
-                    "id=2,cpus=5,distances=0@25:1@30",
+                    "id=0,cpus=0-2,distances=1@15:2@20,memory_zones=mem0",
+                    "id=1,cpus=3-4,distances=0@20:2@25,memory_zones=mem1",
+                    "id=2,cpus=5,distances=0@25:1@30,memory_zones=mem2",
                 ])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .capture_output()
