@@ -10,12 +10,10 @@ use super::{Error, Result};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use block_util::VirtioBlockConfig;
-use libc::EFD_NONBLOCK;
 use seccomp::{SeccompAction, SeccompFilter};
 use std::mem;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::vec::Vec;
@@ -37,15 +35,7 @@ pub struct Blk {
     common: VirtioCommon,
     id: String,
     vhost_user_blk: Master,
-    kill_evt: Option<EventFd>,
-    pause_evt: Option<EventFd>,
     config: VirtioBlockConfig,
-    queue_sizes: Vec<u16>,
-    queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
-    paused: Arc<AtomicBool>,
-    paused_sync: Arc<Barrier>,
     seccomp_action: SeccompAction,
 }
 
@@ -140,21 +130,16 @@ impl Blk {
 
         Ok(Blk {
             common: VirtioCommon {
+                device_type: VirtioDeviceType::TYPE_BLOCK as u32,
+                queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
                 avail_features,
                 acked_features,
+                paused_sync: Some(Arc::new(Barrier::new(vu_cfg.num_queues + 1))),
                 ..Default::default()
             },
             id,
             vhost_user_blk,
-            kill_evt: None,
-            pause_evt: None,
             config,
-            queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
-            queue_evts: None,
-            interrupt_cb: None,
-            epoll_threads: None,
-            paused: Arc::new(AtomicBool::new(false)),
-            paused_sync: Arc::new(Barrier::new(vu_cfg.num_queues + 1)),
             seccomp_action,
         })
     }
@@ -162,7 +147,7 @@ impl Blk {
 
 impl Drop for Blk {
     fn drop(&mut self) {
-        if let Some(kill_evt) = self.kill_evt.take() {
+        if let Some(kill_evt) = self.common.kill_evt.take() {
             if let Err(e) = kill_evt.write(1) {
                 error!("failed to kill vhost-user-blk: {:?}", e);
             }
@@ -172,11 +157,11 @@ impl Drop for Blk {
 
 impl VirtioDevice for Blk {
     fn device_type(&self) -> u32 {
-        VirtioDeviceType::TYPE_BLOCK as u32
+        self.common.device_type
     }
 
     fn queue_max_sizes(&self) -> &[u16] {
-        &self.queue_sizes
+        &self.common.queue_sizes
     }
 
     fn features(&self) -> u64 {
@@ -218,36 +203,7 @@ impl VirtioDevice for Blk {
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
-        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
-            .and_then(|e| Ok((e.try_clone()?, e)))
-            .map_err(|e| {
-                error!("failed creating kill EventFd pair: {}", e);
-                ActivateError::BadActivate
-            })?;
-        self.kill_evt = Some(self_kill_evt);
-
-        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
-            .and_then(|e| Ok((e.try_clone()?, e)))
-            .map_err(|e| {
-                error!("failed creating pause EventFd pair: {}", e);
-                ActivateError::BadActivate
-            })?;
-        self.pause_evt = Some(self_pause_evt);
-
-        // Save the interrupt EventFD as we need to return it on reset
-        // but clone it to pass into the thread.
-        self.interrupt_cb = Some(interrupt_cb.clone());
-
-        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
-        for queue_evt in queue_evts.iter() {
-            // Save the queue EventFD as we need to return it on reset
-            // but clone it to pass into the thread.
-            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?);
-        }
-        self.queue_evts = Some(tmp_queue_evts);
+        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
 
         let mut vu_interrupt_list = setup_vhost_user(
             &mut self.vhost_user_blk,
@@ -264,16 +220,37 @@ impl VirtioDevice for Blk {
             let mut interrupt_list_sub: Vec<(Option<EventFd>, Queue)> = Vec::with_capacity(1);
             interrupt_list_sub.push(vu_interrupt_list.remove(0));
 
+            let kill_evt = self
+                .common
+                .kill_evt
+                .as_ref()
+                .unwrap()
+                .try_clone()
+                .map_err(|e| {
+                    error!("failed to clone kill_evt eventfd: {}", e);
+                    ActivateError::BadActivate
+                })?;
+            let pause_evt = self
+                .common
+                .pause_evt
+                .as_ref()
+                .unwrap()
+                .try_clone()
+                .map_err(|e| {
+                    error!("failed to clone pause_evt eventfd: {}", e);
+                    ActivateError::BadActivate
+                })?;
+
             let mut handler = VhostUserEpollHandler::<SlaveReqHandler>::new(VhostUserEpollConfig {
                 interrupt_cb: interrupt_cb.clone(),
-                kill_evt: kill_evt.try_clone().unwrap(),
-                pause_evt: pause_evt.try_clone().unwrap(),
+                kill_evt,
+                pause_evt,
                 vu_interrupt_list: interrupt_list_sub,
                 slave_req_handler: None,
             });
 
-            let paused = self.paused.clone();
-            let paused_sync = self.paused_sync.clone();
+            let paused = self.common.paused.clone();
+            let paused_sync = self.common.paused_sync.clone();
             let virtio_vhost_blk_seccomp_filter =
                 get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostBlk)
                     .map_err(ActivateError::CreateSeccompFilter)?;
@@ -282,7 +259,7 @@ impl VirtioDevice for Blk {
                 .spawn(move || {
                     if let Err(e) = SeccompFilter::apply(virtio_vhost_blk_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);
-                    } else if let Err(e) = handler.run(paused, paused_sync) {
+                    } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
                     }
                 })
@@ -292,31 +269,31 @@ impl VirtioDevice for Blk {
                     ActivateError::BadActivate
                 })?;
         }
-        self.epoll_threads = Some(epoll_threads);
+        self.common.epoll_threads = Some(epoll_threads);
 
         Ok(())
     }
 
     fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
         // We first must resume the virtio thread if it was paused.
-        if self.pause_evt.take().is_some() {
-            self.resume().ok()?;
+        if self.common.pause_evt.take().is_some() {
+            self.common.resume().ok()?;
         }
 
-        if let Err(e) = reset_vhost_user(&mut self.vhost_user_blk, self.queue_sizes.len()) {
+        if let Err(e) = reset_vhost_user(&mut self.vhost_user_blk, self.common.queue_sizes.len()) {
             error!("Failed to reset vhost-user daemon: {:?}", e);
             return None;
         }
 
-        if let Some(kill_evt) = self.kill_evt.take() {
+        if let Some(kill_evt) = self.common.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
         }
 
         // Return the interrupt and queue EventFDs
         Some((
-            self.interrupt_cb.take().unwrap(),
-            self.queue_evts.take().unwrap(),
+            self.common.interrupt_cb.take().unwrap(),
+            self.common.queue_evts.take().unwrap(),
         ))
     }
 
@@ -329,7 +306,16 @@ impl VirtioDevice for Blk {
     }
 }
 
-virtio_pausable!(Blk);
+impl Pausable for Blk {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
+        self.common.pause()
+    }
+
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
+        self.common.resume()
+    }
+}
+
 impl Snapshottable for Blk {
     fn id(&self) -> String {
         self.id.clone()
