@@ -17,7 +17,6 @@ use super::{
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
-use libc::EFD_NONBLOCK;
 use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
 };
@@ -199,17 +198,9 @@ impl EpollHelperHandler for NetEpollHandler {
 pub struct Net {
     common: VirtioCommon,
     id: String,
-    kill_evt: Option<EventFd>,
-    pause_evt: Option<EventFd>,
     taps: Option<Vec<Tap>>,
     config: VirtioNetConfig,
-    queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
-    paused: Arc<AtomicBool>,
-    paused_sync: Arc<Barrier>,
-    queue_size: Vec<u16>,
     counters: NetCounters,
     seccomp_action: SeccompAction,
 }
@@ -258,21 +249,16 @@ impl Net {
 
         Ok(Net {
             common: VirtioCommon {
+                device_type: VirtioDeviceType::TYPE_NET as u32,
                 avail_features,
+                queue_sizes: vec![queue_size; queue_num],
+                paused_sync: Some(Arc::new(Barrier::new((num_queues / 2) + 1))),
                 ..Default::default()
             },
             id,
-            kill_evt: None,
-            pause_evt: None,
             taps: Some(taps),
             config,
-            queue_evts: None,
-            interrupt_cb: None,
-            epoll_threads: None,
             ctrl_queue_epoll_thread: None,
-            paused: Arc::new(AtomicBool::new(false)),
-            paused_sync: Arc::new(Barrier::new((num_queues / 2) + 1)),
-            queue_size: vec![queue_size; queue_num],
             counters: NetCounters::default(),
             seccomp_action,
         })
@@ -312,7 +298,7 @@ impl Net {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
             config: self.config,
-            queue_size: self.queue_size.clone(),
+            queue_size: self.common.queue_sizes.clone(),
         }
     }
 
@@ -320,7 +306,7 @@ impl Net {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         self.config = state.config;
-        self.queue_size = state.queue_size.clone();
+        self.common.queue_sizes = state.queue_size.clone();
 
         Ok(())
     }
@@ -328,7 +314,7 @@ impl Net {
 
 impl Drop for Net {
     fn drop(&mut self) {
-        if let Some(kill_evt) = self.kill_evt.take() {
+        if let Some(kill_evt) = self.common.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
         }
@@ -337,11 +323,11 @@ impl Drop for Net {
 
 impl VirtioDevice for Net {
     fn device_type(&self) -> u32 {
-        VirtioDeviceType::TYPE_NET as u32
+        self.common.device_type
     }
 
     fn queue_max_sizes(&self) -> &[u16] {
-        &self.queue_size.as_slice()
+        &self.common.queue_sizes
     }
 
     fn features(&self) -> u64 {
@@ -363,65 +349,49 @@ impl VirtioDevice for Net {
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
-        if queues.len() != self.queue_size.len() || queue_evts.len() != self.queue_size.len() {
-            error!(
-                "Cannot perform activate. Expected {} queue(s), got {}",
-                self.queue_size.len(),
-                queues.len()
-            );
-            return Err(ActivateError::BadActivate);
-        }
-
-        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
-            .and_then(|e| Ok((e.try_clone()?, e)))
-            .map_err(|e| {
-                error!("failed creating kill EventFd pair: {}", e);
-                ActivateError::BadActivate
-            })?;
-        self.kill_evt = Some(self_kill_evt);
-
-        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
-            .and_then(|e| Ok((e.try_clone()?, e)))
-            .map_err(|e| {
-                error!("failed creating pause EventFd pair: {}", e);
-                ActivateError::BadActivate
-            })?;
-        self.pause_evt = Some(self_pause_evt);
-
-        // Save the interrupt EventFD as we need to return it on reset
-        // but clone it to pass into the thread.
-        self.interrupt_cb = Some(interrupt_cb.clone());
-        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
-        for queue_evt in queue_evts.iter() {
-            // Save the queue EventFD as we need to return it on reset
-            // but clone it to pass into the thread.
-            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?);
-        }
-        self.queue_evts = Some(tmp_queue_evts);
-
         if let Some(mut taps) = self.taps.clone() {
+            self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+
             let queue_num = queues.len();
             if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && queue_num % 2 != 0 {
                 let cvq_queue = queues.remove(queue_num - 1);
                 let cvq_queue_evt = queue_evts.remove(queue_num - 1);
 
+                let kill_evt = self
+                    .common
+                    .kill_evt
+                    .as_ref()
+                    .unwrap()
+                    .try_clone()
+                    .map_err(|e| {
+                        error!("failed to clone kill_evt eventfd: {}", e);
+                        ActivateError::BadActivate
+                    })?;
+                let pause_evt = self
+                    .common
+                    .pause_evt
+                    .as_ref()
+                    .unwrap()
+                    .try_clone()
+                    .map_err(|e| {
+                        error!("failed to clone pause_evt eventfd: {}", e);
+                        ActivateError::BadActivate
+                    })?;
+
                 let mut ctrl_handler = NetCtrlEpollHandler {
                     mem: mem.clone(),
-                    kill_evt: kill_evt.try_clone().unwrap(),
-                    pause_evt: pause_evt.try_clone().unwrap(),
+                    kill_evt,
+                    pause_evt,
                     ctrl_q: CtrlVirtio::new(cvq_queue, cvq_queue_evt),
                     epoll_fd: 0,
                 };
 
-                let paused = self.paused.clone();
+                let paused = self.common.paused.clone();
                 // Let's update the barrier as we need 1 for each RX/TX pair +
                 // 1 for the control queue + 1 for the main thread signalling
                 // the pause.
-                self.paused_sync = Arc::new(Barrier::new(taps.len() + 2));
-                let paused_sync = self.paused_sync.clone();
+                self.common.paused_sync = Some(Arc::new(Barrier::new(taps.len() + 2)));
+                let paused_sync = self.common.paused_sync.clone();
 
                 // Retrieve seccomp filter for virtio_net_ctl thread
                 let virtio_net_ctl_seccomp_filter =
@@ -432,7 +402,7 @@ impl VirtioDevice for Net {
                     .spawn(move || {
                         if let Err(e) = SeccompFilter::apply(virtio_net_ctl_seccomp_filter) {
                             error!("Error applying seccomp filter: {:?}", e);
-                        } else if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync) {
+                        } else if let Err(e) = ctrl_handler.run_ctrl(paused, paused_sync.unwrap()) {
                             error!("Error running worker: {:?}", e);
                         }
                     })
@@ -461,6 +431,27 @@ impl VirtioDevice for Net {
                 queue_evt_pair.push(queue_evts.remove(0));
                 queue_evt_pair.push(queue_evts.remove(0));
 
+                let kill_evt = self
+                    .common
+                    .kill_evt
+                    .as_ref()
+                    .unwrap()
+                    .try_clone()
+                    .map_err(|e| {
+                        error!("failed to clone kill_evt eventfd: {}", e);
+                        ActivateError::BadActivate
+                    })?;
+                let pause_evt = self
+                    .common
+                    .pause_evt
+                    .as_ref()
+                    .unwrap()
+                    .try_clone()
+                    .map_err(|e| {
+                        error!("failed to clone pause_evt eventfd: {}", e);
+                        ActivateError::BadActivate
+                    })?;
+
                 let mut handler = NetEpollHandler {
                     net: NetQueuePair {
                         mem: Some(mem.clone()),
@@ -475,13 +466,13 @@ impl VirtioDevice for Net {
                     queue_pair,
                     queue_evt_pair,
                     interrupt_cb: interrupt_cb.clone(),
-                    kill_evt: kill_evt.try_clone().unwrap(),
-                    pause_evt: pause_evt.try_clone().unwrap(),
+                    kill_evt,
+                    pause_evt,
                     driver_awake: false,
                 };
 
-                let paused = self.paused.clone();
-                let paused_sync = self.paused_sync.clone();
+                let paused = self.common.paused.clone();
+                let paused_sync = self.common.paused_sync.clone();
                 // Retrieve seccomp filter for virtio_net thread
                 let virtio_net_seccomp_filter =
                     get_seccomp_filter(&self.seccomp_action, Thread::VirtioNet)
@@ -491,7 +482,7 @@ impl VirtioDevice for Net {
                     .spawn(move || {
                         if let Err(e) = SeccompFilter::apply(virtio_net_seccomp_filter) {
                             error!("Error applying seccomp filter: {:?}", e);
-                        } else if let Err(e) = handler.run(paused, paused_sync) {
+                        } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                             error!("Error running worker: {:?}", e);
                         }
                     })
@@ -502,7 +493,7 @@ impl VirtioDevice for Net {
                     })?;
             }
 
-            self.epoll_threads = Some(epoll_threads);
+            self.common.epoll_threads = Some(epoll_threads);
 
             return Ok(());
         }
@@ -510,21 +501,7 @@ impl VirtioDevice for Net {
     }
 
     fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
-        // We first must resume the virtio thread if it was paused.
-        if self.pause_evt.take().is_some() {
-            self.resume().ok()?;
-        }
-
-        if let Some(kill_evt) = self.kill_evt.take() {
-            // Ignore the result because there is nothing we can do about it.
-            let _ = kill_evt.write(1);
-        }
-
-        // Return the interrupt and queue EventFDs
-        Some((
-            self.interrupt_cb.take().unwrap(),
-            self.queue_evts.take().unwrap(),
-        ))
+        self.common.reset()
     }
 
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
@@ -551,7 +528,21 @@ impl VirtioDevice for Net {
     }
 }
 
-virtio_ctrl_q_pausable!(Net);
+impl Pausable for Net {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
+        self.common.pause()
+    }
+
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
+        self.common.resume()?;
+
+        if let Some(ctrl_queue_epoll_thread) = &self.ctrl_queue_epoll_thread {
+            ctrl_queue_epoll_thread.thread().unpark();
+        }
+        Ok(())
+    }
+}
+
 impl Snapshottable for Net {
     fn id(&self) -> String {
         self.id.clone()
