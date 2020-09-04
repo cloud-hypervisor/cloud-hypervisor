@@ -14,6 +14,7 @@
     clippy::cast_ptr_alignment
 )]
 
+extern crate anyhow;
 extern crate byteorder;
 extern crate hypervisor;
 extern crate libc;
@@ -23,7 +24,13 @@ extern crate log;
 extern crate acpi_tables;
 extern crate arch_gen;
 extern crate linux_loader;
+extern crate serde;
 extern crate vm_memory;
+extern crate vm_migration;
+#[cfg(target_arch = "aarch64")]
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
 
 use std::fmt;
 use std::result;
