@@ -321,7 +321,11 @@ impl Vcpu {
             Ok(run) => match run {
                 #[cfg(target_arch = "x86_64")]
                 VmExit::IoIn(addr, data) => {
-                    self.io_bus.read(u64::from(addr), data);
+                    if let Err(e) = self.io_bus.read(u64::from(addr), data) {
+                        if let devices::BusError::MissingAddressRange = e {
+                            warn!("Guest PIO read to unregistered address 0x{:x}", addr);
+                        }
+                    }
                     Ok(true)
                 }
                 #[cfg(target_arch = "x86_64")]
@@ -329,15 +333,27 @@ impl Vcpu {
                     if addr == DEBUG_IOPORT && data.len() == 1 {
                         self.log_debug_ioport(data[0]);
                     }
-                    self.io_bus.write(u64::from(addr), data);
+                    if let Err(e) = self.io_bus.write(u64::from(addr), data) {
+                        if let devices::BusError::MissingAddressRange = e {
+                            warn!("Guest PIO write to unregistered address 0x{:x}", addr);
+                        }
+                    }
                     Ok(true)
                 }
                 VmExit::MmioRead(addr, data) => {
-                    self.mmio_bus.read(addr as u64, data);
+                    if let Err(e) = self.mmio_bus.read(addr as u64, data) {
+                        if let devices::BusError::MissingAddressRange = e {
+                            warn!("Guest MMIO read to unregistered address 0x{:x}", addr);
+                        }
+                    }
                     Ok(true)
                 }
                 VmExit::MmioWrite(addr, data) => {
-                    self.mmio_bus.write(addr as u64, data);
+                    if let Err(e) = self.mmio_bus.write(addr as u64, data) {
+                        if let devices::BusError::MissingAddressRange = e {
+                            warn!("Guest MMIO write to unregistered address 0x{:x}", addr);
+                        }
+                    }
                     Ok(true)
                 }
                 #[cfg(target_arch = "x86_64")]

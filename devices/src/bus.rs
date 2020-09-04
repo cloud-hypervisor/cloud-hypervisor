@@ -214,30 +214,30 @@ impl Bus {
     /// Reads data from the device that owns the range containing `addr` and puts it into `data`.
     ///
     /// Returns true on success, otherwise `data` is untouched.
-    pub fn read(&self, addr: u64, data: &mut [u8]) -> bool {
+    pub fn read(&self, addr: u64, data: &mut [u8]) -> Result<()> {
         if let Some((base, offset, dev)) = self.resolve(addr) {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
             dev.lock()
                 .expect("Failed to acquire device lock")
                 .read(base, offset, data);
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::MissingAddressRange)
         }
     }
 
     /// Writes `data` to the device that owns the range containing `addr`.
     ///
     /// Returns true on success, otherwise `data` is untouched.
-    pub fn write(&self, addr: u64, data: &[u8]) -> bool {
+    pub fn write(&self, addr: u64, data: &[u8]) -> Result<()> {
         if let Some((base, offset, dev)) = self.resolve(addr) {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
             dev.lock()
                 .expect("Failed to acquire device lock")
                 .write(base, offset, data);
-            true
+            Ok(())
         } else {
-            false
+            Err(Error::MissingAddressRange)
         }
     }
 }
@@ -290,16 +290,16 @@ mod tests {
         let bus = Bus::new();
         let dummy = Arc::new(Mutex::new(DummyDevice));
         assert!(bus.insert(dummy.clone(), 0x10, 0x10).is_ok());
-        assert!(bus.read(0x10, &mut [0, 0, 0, 0]));
-        assert!(bus.write(0x10, &[0, 0, 0, 0]));
-        assert!(bus.read(0x11, &mut [0, 0, 0, 0]));
-        assert!(bus.write(0x11, &[0, 0, 0, 0]));
-        assert!(bus.read(0x16, &mut [0, 0, 0, 0]));
-        assert!(bus.write(0x16, &[0, 0, 0, 0]));
-        assert!(!bus.read(0x20, &mut [0, 0, 0, 0]));
-        assert!(!bus.write(0x20, &mut [0, 0, 0, 0]));
-        assert!(!bus.read(0x06, &mut [0, 0, 0, 0]));
-        assert!(!bus.write(0x06, &mut [0, 0, 0, 0]));
+        assert!(bus.read(0x10, &mut [0, 0, 0, 0]).is_ok());
+        assert!(bus.write(0x10, &[0, 0, 0, 0]).is_ok());
+        assert!(bus.read(0x11, &mut [0, 0, 0, 0]).is_ok());
+        assert!(bus.write(0x11, &[0, 0, 0, 0]).is_ok());
+        assert!(bus.read(0x16, &mut [0, 0, 0, 0]).is_ok());
+        assert!(bus.write(0x16, &[0, 0, 0, 0]).is_ok());
+        assert!(bus.read(0x20, &mut [0, 0, 0, 0]).is_err());
+        assert!(bus.write(0x20, &mut [0, 0, 0, 0]).is_err());
+        assert!(bus.read(0x06, &mut [0, 0, 0, 0]).is_err());
+        assert!(bus.write(0x06, &mut [0, 0, 0, 0]).is_err());
     }
 
     #[test]
@@ -309,12 +309,12 @@ mod tests {
         assert!(bus.insert(dummy.clone(), 0x10, 0x10).is_ok());
 
         let mut values = [0, 1, 2, 3];
-        assert!(bus.read(0x10, &mut values));
+        assert!(bus.read(0x10, &mut values).is_ok());
         assert_eq!(values, [0, 1, 2, 3]);
-        assert!(bus.write(0x10, &values));
-        assert!(bus.read(0x15, &mut values));
+        assert!(bus.write(0x10, &values).is_ok());
+        assert!(bus.read(0x15, &mut values).is_ok());
         assert_eq!(values, [5, 6, 7, 8]);
-        assert!(bus.write(0x15, &values));
+        assert!(bus.write(0x15, &values).is_ok());
     }
 
     #[test]
@@ -332,8 +332,8 @@ mod tests {
         let mut data = [1, 2, 3, 4];
         let device = Arc::new(Mutex::new(DummyDevice));
         assert!(bus.insert(device.clone(), 0x10, 0x10).is_ok());
-        assert!(bus.write(0x10, &mut data));
-        assert!(bus.read(0x10, &mut data));
+        assert!(bus.write(0x10, &mut data).is_ok());
+        assert!(bus.read(0x10, &mut data).is_ok());
         assert_eq!(data, [1, 2, 3, 4]);
     }
 
