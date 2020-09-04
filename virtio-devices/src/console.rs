@@ -300,16 +300,9 @@ impl VirtioConsoleConfig {
 pub struct Console {
     common: VirtioCommon,
     id: String,
-    kill_evt: Option<EventFd>,
-    pause_evt: Option<EventFd>,
     config: Arc<Mutex<VirtioConsoleConfig>>,
     input: Arc<ConsoleInput>,
     out: Arc<Mutex<Box<dyn io::Write + Send + Sync + 'static>>>,
-    queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
-    paused: Arc<AtomicBool>,
-    paused_sync: Arc<Barrier>,
     seccomp_action: SeccompAction,
 }
 
@@ -351,20 +344,16 @@ impl Console {
         Ok((
             Console {
                 common: VirtioCommon {
+                    device_type: VirtioDeviceType::TYPE_CONSOLE as u32,
+                    queue_sizes: QUEUE_SIZES.to_vec(),
                     avail_features,
+                    paused_sync: Some(Arc::new(Barrier::new(2))),
                     ..Default::default()
                 },
                 id,
-                kill_evt: None,
-                pause_evt: None,
                 config: console_config,
                 input: console_input.clone(),
                 out: Arc::new(Mutex::new(out)),
-                queue_evts: None,
-                interrupt_cb: None,
-                epoll_threads: None,
-                paused: Arc::new(AtomicBool::new(false)),
-                paused_sync: Arc::new(Barrier::new(2)),
                 seccomp_action,
             },
             console_input,
@@ -392,7 +381,7 @@ impl Console {
 
 impl Drop for Console {
     fn drop(&mut self) {
-        if let Some(kill_evt) = self.kill_evt.take() {
+        if let Some(kill_evt) = self.common.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
         }
@@ -401,11 +390,11 @@ impl Drop for Console {
 
 impl VirtioDevice for Console {
     fn device_type(&self) -> u32 {
-        VirtioDeviceType::TYPE_CONSOLE as u32
+        self.common.device_type
     }
 
     fn queue_max_sizes(&self) -> &[u16] {
-        QUEUE_SIZES
+        &self.common.queue_sizes
     }
 
     fn features(&self) -> u64 {
@@ -427,47 +416,7 @@ impl VirtioDevice for Console {
         queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
-        if queues.len() != NUM_QUEUES || queue_evts.len() != NUM_QUEUES {
-            error!(
-                "Cannot perform activate. Expected {} queue(s), got {}",
-                NUM_QUEUES,
-                queues.len()
-            );
-            return Err(ActivateError::BadActivate);
-        }
-
-        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
-            .and_then(|e| Ok((e.try_clone()?, e)))
-            .map_err(|e| {
-                error!("failed creating kill EventFd pair: {}", e);
-                ActivateError::BadActivate
-            })?;
-
-        self.kill_evt = Some(self_kill_evt);
-
-        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
-            .and_then(|e| Ok((e.try_clone()?, e)))
-            .map_err(|e| {
-                error!("failed creating pause EventFd pair: {}", e);
-                ActivateError::BadActivate
-            })?;
-        self.pause_evt = Some(self_pause_evt);
-
-        // Save the interrupt EventFD as we need to return it on reset
-        // but clone it to pass into the thread.
-        self.interrupt_cb = Some(interrupt_cb.clone());
-
-        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
-        for queue_evt in queue_evts.iter() {
-            // Save the queue EventFD as we need to return it on reset
-            // but clone it to pass into the thread.
-            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?);
-        }
-        self.queue_evts = Some(tmp_queue_evts);
-
+        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
         self.input
             .acked_features
             .store(self.common.acked_features, Ordering::Relaxed);
@@ -477,6 +426,27 @@ impl VirtioDevice for Console {
                 error!("Failed to signal console driver: {:?}", e);
             }
         }
+
+        let kill_evt = self
+            .common
+            .kill_evt
+            .as_ref()
+            .unwrap()
+            .try_clone()
+            .map_err(|e| {
+                error!("failed to clone kill_evt eventfd: {}", e);
+                ActivateError::BadActivate
+            })?;
+        let pause_evt = self
+            .common
+            .pause_evt
+            .as_ref()
+            .unwrap()
+            .try_clone()
+            .map_err(|e| {
+                error!("failed to clone pause_evt eventfd: {}", e);
+                ActivateError::BadActivate
+            })?;
 
         let mut handler = ConsoleEpollHandler {
             queues,
@@ -492,8 +462,8 @@ impl VirtioDevice for Console {
             pause_evt,
         };
 
-        let paused = self.paused.clone();
-        let paused_sync = self.paused_sync.clone();
+        let paused = self.common.paused.clone();
+        let paused_sync = self.common.paused_sync.clone();
         let mut epoll_threads = Vec::new();
         // Retrieve seccomp filter for virtio_console thread
         let virtio_console_seccomp_filter =
@@ -504,7 +474,7 @@ impl VirtioDevice for Console {
             .spawn(move || {
                 if let Err(e) = SeccompFilter::apply(virtio_console_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);
-                } else if let Err(e) = handler.run(paused, paused_sync) {
+                } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);
                 }
             })
@@ -514,31 +484,26 @@ impl VirtioDevice for Console {
                 ActivateError::BadActivate
             })?;
 
-        self.epoll_threads = Some(epoll_threads);
+        self.common.epoll_threads = Some(epoll_threads);
 
         Ok(())
     }
 
     fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
-        // We first must resume the virtio thread if it was paused.
-        if self.pause_evt.take().is_some() {
-            self.resume().ok()?;
-        }
-
-        if let Some(kill_evt) = self.kill_evt.take() {
-            // Ignore the result because there is nothing we can do about it.
-            let _ = kill_evt.write(1);
-        }
-
-        // Return the interrupt and queue EventFDs
-        Some((
-            self.interrupt_cb.take().unwrap(),
-            self.queue_evts.take().unwrap(),
-        ))
+        self.common.reset()
     }
 }
 
-virtio_pausable!(Console);
+impl Pausable for Console {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
+        self.common.pause()
+    }
+
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
+        self.common.resume()
+    }
+}
+
 impl Snapshottable for Console {
     fn id(&self) -> String {
         self.id.clone()
