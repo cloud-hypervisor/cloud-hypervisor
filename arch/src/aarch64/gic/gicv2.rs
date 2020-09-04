@@ -4,6 +4,7 @@
 pub mod kvm {
     use crate::aarch64::gic::kvm::KvmGICDevice;
     use crate::aarch64::gic::{Error, GICDevice};
+    use std::any::Any;
     use std::{boxed::Box, result};
     type Result<T> = result::Result<T, Error>;
     use crate::layout;
@@ -81,6 +82,10 @@ pub mod kvm {
 
         fn set_gicr_typers(&mut self, gicr_typers: Vec<u64>) {
             self.gicr_typers = gicr_typers;
+        }
+
+        fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
+            self
         }
     }
 

@@ -72,6 +72,11 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
 
+#[cfg(target_arch = "aarch64")]
+use arch::aarch64::gic::gicv3::kvm::{KvmGICv3, GIC_V3_SNAPSHOT_ID};
+#[cfg(target_arch = "aarch64")]
+use arch::aarch64::gic::kvm::create_gic;
+
 // 64 bit direct boot entry offset for bzImage
 #[cfg(target_arch = "x86_64")]
 const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
@@ -1386,6 +1391,94 @@ impl Vm {
             .map_err(|_| Error::PoisonedState)
             .map(|state| *state)
     }
+
+    #[cfg(target_arch = "aarch64")]
+    /// Add the vGIC section to the VM snapshot.
+    fn add_vgic_snapshot_section(
+        &self,
+        vm_snapshot: &mut Snapshot,
+    ) -> std::result::Result<(), MigratableError> {
+        let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
+        self.device_manager
+            .lock()
+            .unwrap()
+            .construct_gicr_typers(&saved_vcpu_states);
+
+        vm_snapshot.add_snapshot(
+            self.device_manager
+                .lock()
+                .unwrap()
+                .get_gic_device_entity()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .as_any_concrete_mut()
+                .downcast_mut::<KvmGICv3>()
+                .unwrap()
+                .snapshot()?,
+        );
+
+        Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    /// Restore the vGIC from the VM snapshot and enable the interrupt controller routing.
+    fn restore_vgic_and_enable_interrupt(
+        &self,
+        vm_snapshot: &Snapshot,
+    ) -> std::result::Result<(), MigratableError> {
+        let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
+        // The number of vCPUs is the same as the number of saved vCPU states.
+        let vcpu_numbers = saved_vcpu_states.len();
+
+        // Creating a GIC device here, as the GIC will not be created when
+        // restoring the device manager. Note that currently only the bare GICv3
+        // without ITS is supported.
+        let gic_device = create_gic(&self.vm, vcpu_numbers.try_into().unwrap(), false)
+            .map_err(|e| MigratableError::Restore(anyhow!("Could not create GIC: {:#?}", e)))?;
+
+        // Update the GIC entity in device manager
+        self.device_manager
+            .lock()
+            .unwrap()
+            .set_gic_device_entity(Arc::new(Mutex::new(gic_device)));
+
+        // Here we prepare the GICR_TYPER registers from the restored vCPU states.
+        self.device_manager
+            .lock()
+            .unwrap()
+            .construct_gicr_typers(&saved_vcpu_states);
+
+        // Restore GIC states.
+        if let Some(gic_v3_snapshot) = vm_snapshot.snapshots.get(GIC_V3_SNAPSHOT_ID) {
+            self.device_manager
+                .lock()
+                .unwrap()
+                .get_gic_device_entity()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .as_any_concrete_mut()
+                .downcast_mut::<KvmGICv3>()
+                .unwrap()
+                .restore(*gic_v3_snapshot.clone())?;
+        } else {
+            return Err(MigratableError::Restore(anyhow!("Missing GICv3 snapshot")));
+        }
+
+        self.device_manager
+            .lock()
+            .unwrap()
+            .enable_interrupt_controller()
+            .map_err(|e| {
+                MigratableError::Restore(anyhow!(
+                    "Could not enable interrupt controller routing: {:#?}",
+                    e
+                ))
+            })?;
+
+        Ok(())
+    }
 }
 
 impl Pausable for Vm {
@@ -1484,6 +1577,11 @@ impl Snapshottable for Vm {
 
         vm_snapshot.add_snapshot(self.cpu_manager.lock().unwrap().snapshot()?);
         vm_snapshot.add_snapshot(self.memory_manager.lock().unwrap().snapshot()?);
+
+        #[cfg(target_arch = "aarch64")]
+        self.add_vgic_snapshot_section(&mut vm_snapshot)
+            .map_err(|e| MigratableError::Snapshot(e.into()))?;
+
         vm_snapshot.add_snapshot(self.device_manager.lock().unwrap().snapshot()?);
         vm_snapshot.add_data_section(SnapshotDataSection {
             id: format!("{}-section", VM_SNAPSHOT_ID),
@@ -1534,6 +1632,9 @@ impl Snapshottable for Vm {
                 "Missing device manager snapshot"
             )));
         }
+
+        #[cfg(target_arch = "aarch64")]
+        self.restore_vgic_and_enable_interrupt(&snapshot)?;
 
         // Now we can start all vCPUs from here.
         self.cpu_manager

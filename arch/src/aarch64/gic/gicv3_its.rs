@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod kvm {
+    use std::any::Any;
     use std::convert::TryInto;
     use std::sync::Arc;
     use std::{boxed::Box, result};
@@ -75,6 +76,10 @@ pub mod kvm {
 
         fn set_gicr_typers(&mut self, gicr_typers: Vec<u64>) {
             self.gicr_typers = gicr_typers;
+        }
+
+        fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
+            self
         }
     }
 
