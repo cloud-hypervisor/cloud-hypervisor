@@ -143,17 +143,17 @@ describing how every memory region is backed and exposed to the guest.
 
 ```rust
 struct MemoryZoneConfig {
+    id: String,
     size: u64,
     file: Option<PathBuf>,
     shared: bool,
     hugepages: bool,
     host_numa_node: Option<u32>,
-    guest_numa_node: Option<u32>,
 }
 ```
 
 ```
---memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,host_numa_node=<node_id>,guest_numa_node=<node_id>"
+--memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,host_numa_node=<node_id>,id=<zone_identifier>"
 ```
 
 This parameter expects one or more occurences, allowing for a list of memory
@@ -162,6 +162,26 @@ that the memory will be described through advanced parameters.
 
 Each zone is given a list of options which we detail through the following
 sections.
+
+### `id`
+
+Memory zone identifier. This identifier must be unique, otherwise an error will
+be returned.
+
+This option is useful when referring to a memory zone previously created. In
+particular, the `--numa` parameter can associate a memory zone to a specific
+NUMA node based on the memory zone identifier.
+
+This option is mandatory when using the `--memory-zone` parameter.
+
+Value is a string.
+
+_Example_
+
+```
+--memory size=0
+--memory-zone id=mem0,size=1G
+```
 
 ### `size`
 
@@ -175,7 +195,7 @@ _Example_
 
 ```
 --memory size=0
---memory-zone size=1G
+--memory-zone id=mem0,size=1G
 ```
 
 ### `file`
@@ -199,7 +219,7 @@ _Example_
 
 ```
 --memory size=0
---memory-zone size=1G,file=/foo/bar
+--memory-zone id=mem0,size=1G,file=/foo/bar
 ```
 
 ### `shared`
@@ -218,7 +238,7 @@ _Example_
 
 ```
 --memory size=0
---memory-zone size=1G,shared=on
+--memory-zone id=mem0,size=1G,shared=on
 ```
 
 ### `hugepages`
@@ -238,7 +258,7 @@ _Example_
 
 ```
 --memory size=0
---memory-zone size=1G,hugepages=on
+--memory-zone id=mem0,size=1G,hugepages=on
 ```
 
 ### `host_numa_node`
@@ -265,52 +285,33 @@ _Example_
 
 ```
 --memory size=0
---memory-zone size=1G,host_numa_node=0
-```
-
-### `guest_numa_node`
-
-Node identifier of a node that must be created in the guest. This option gives
-the user a way to create NUMA nodes in the guest and associate them with memory
-zones.
-
-This option can be very useful and powerful when combined with `host_numa_node`
-as it allows for creating a VM with non uniform memory accesses, and let the
-guest know about it. It allows for exposing memory zones through different NUMA
-nodes, which can help the guest workload run more efficiently.
-
-Value is an unsigned integer of 32 bits.
-
-_Example_
-
-```
---memory size=0
---memory-zone size=1G,guest_numa_node=0
+--memory-zone id=mem0,size=1G,host_numa_node=0
 ```
 
 ## NUMA settings
 
-Along with the guest NUMA nodes created through the `--memory-zone` parameter,
 `NumaConfig` or what is known as `--numa` from the CLI perspective has been
-introduced to define additional settings related to each NUMA node.
+introduced to define a guest NUMA topology. It allows for a fine description
+about the CPUs and memory ranges associated with each NUMA node. Additionally
+it allows for specifying the distance between each NUMA node.
 
 ```rust
 struct NumaConfig {
     id: u32,
     cpus: Option<Vec<u8>>,
     distances: Option<Vec<NumaDistance>>,
+    memory_zones: Option<Vec<String>>,
 }
 ```
 
 ```
---numa <numa>	Settings related to a given NUMA node "id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>"
+--numa <numa>	Settings related to a given NUMA node "id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,memory_zones=<list_of_memory_zones>"
 ```
 
 ### `id`
 
-Node identifier of a guest NUMA node. The node referred by this identifier has
-been created through the `guest_numa_node` option from the `--memory-zone`
-parameter.
+Node identifier of a guest NUMA node. This identifier must be unique, otherwise
+an error will be returned.
 
 This option is mandatory when using the `--numa` parameter.
 
@@ -319,8 +320,6 @@ Value is an unsigned integer of 32 bits.
 _Example_
 
 ```
---memory size=0
---memory-zone size=1G,guest_numa_node=0
 --numa id=0
 ```
 
@@ -349,9 +348,6 @@ _Example_
 
 ```
 --cpus boot=8
---memory size=0
---memory-zone size=1G,guest_numa_node=0
---memory-zone size=1G,guest_numa_node=1
 --numa id=0,cpus=1-3:7
 --numa id=1,cpus=0:4-6
 ```
@@ -378,11 +374,34 @@ different distances, it can be described with the following example.
 _Example_
 
 ```
---memory size=0
---memory-zone size=1G,guest_numa_node=0
---memory-zone size=1G,guest_numa_node=1
---memory-zone size=1G,guest_numa_node=2
 --numa id=0,distances=1@15:2@25
 --numa id=1,distances=0@15:2@20
 --numa id=2,distances=0@25:1@20
+```
+
+### `memory_zones`
+
+List of memory zones attached to the guest NUMA node identified by the `id`
+option. This allows for describing a list of memory ranges which must be seen
+by the guest as belonging to the NUMA node `id`.
+
+This option can be very useful and powerful when combined with `host_numa_node`
+option from `--memory-zone` parameter as it allows for creating a VM with non
+uniform memory accesses, and let the guest know about it. It allows for
+exposing memory zones through different NUMA nodes, which can help the guest
+workload run more efficiently.
+
+Multiple values can be provided to define the list. Each value is a string
+referring to an existing memory zone identifier. Values are separated from
+each other with the `:` separator.
+
+_Example_
+
+```
+--memory size=0
+--memory-zone id=mem0,size=1G
+--memory-zone id=mem1,size=1G
+--memory-zone id=mem2,size=1G
+--numa id=0,memory_zones=mem0:mem2
+--numa id=1,memory_zones=mem1
 ```
