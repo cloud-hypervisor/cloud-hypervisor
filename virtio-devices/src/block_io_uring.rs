@@ -302,18 +302,10 @@ impl EpollHelperHandler for BlockIoUringEpollHandler {
 pub struct BlockIoUring {
     common: VirtioCommon,
     id: String,
-    kill_evt: Option<EventFd>,
     disk_image: File,
     disk_path: PathBuf,
     disk_nsectors: u64,
     config: VirtioBlockConfig,
-    queue_evts: Option<Vec<EventFd>>,
-    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
-    epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
-    pause_evt: Option<EventFd>,
-    paused: Arc<AtomicBool>,
-    paused_sync: Arc<Barrier>,
-    queue_size: Vec<u16>,
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
 }
@@ -373,22 +365,17 @@ impl BlockIoUring {
 
         Ok(BlockIoUring {
             common: VirtioCommon {
+                device_type: VirtioDeviceType::TYPE_BLOCK as u32,
                 avail_features,
+                paused_sync: Some(Arc::new(Barrier::new(num_queues + 1))),
+                queue_sizes: vec![queue_size; num_queues],
                 ..Default::default()
             },
             id,
-            kill_evt: None,
             disk_image,
             disk_path,
             disk_nsectors,
             config,
-            queue_evts: None,
-            interrupt_cb: None,
-            epoll_threads: None,
-            pause_evt: None,
-            paused: Arc::new(AtomicBool::new(false)),
-            paused_sync: Arc::new(Barrier::new(num_queues + 1)),
-            queue_size: vec![queue_size; num_queues],
             writeback: Arc::new(AtomicBool::new(true)),
             counters: BlockCounters::default(),
         })
@@ -437,7 +424,7 @@ impl BlockIoUring {
 
 impl Drop for BlockIoUring {
     fn drop(&mut self) {
-        if let Some(kill_evt) = self.kill_evt.take() {
+        if let Some(kill_evt) = self.common.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
         }
@@ -446,11 +433,11 @@ impl Drop for BlockIoUring {
 
 impl VirtioDevice for BlockIoUring {
     fn device_type(&self) -> u32 {
-        VirtioDeviceType::TYPE_BLOCK as u32
+        self.common.device_type
     }
 
     fn queue_max_sizes(&self) -> &[u16] {
-        self.queue_size.as_slice()
+        &self.common.queue_sizes
     }
 
     fn features(&self) -> u64 {
@@ -490,66 +477,40 @@ impl VirtioDevice for BlockIoUring {
         mut queues: Vec<Queue>,
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
-        if queues.len() != self.queue_size.len() || queue_evts.len() != self.queue_size.len() {
-            error!(
-                "Cannot perform activate. Expected {} queue(s), got {}",
-                self.queue_size.len(),
-                queues.len()
-            );
-            return Err(ActivateError::BadActivate);
-        }
-
-        let (self_kill_evt, kill_evt) = EventFd::new(EFD_NONBLOCK)
-            .and_then(|e| Ok((e.try_clone()?, e)))
-            .map_err(|e| {
-                error!("failed creating kill EventFd pair: {}", e);
-                ActivateError::BadActivate
-            })?;
-
-        self.kill_evt = Some(self_kill_evt);
-
-        let (self_pause_evt, pause_evt) = EventFd::new(EFD_NONBLOCK)
-            .and_then(|e| Ok((e.try_clone()?, e)))
-            .map_err(|e| {
-                error!("failed creating pause EventFd pair: {}", e);
-                ActivateError::BadActivate
-            })?;
-        self.pause_evt = Some(self_pause_evt);
+        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
 
         let disk_image_id = build_disk_image_id(&self.disk_path);
-
-        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
-        for queue_evt in queue_evts.iter() {
-            // Save the queue EventFD as we need to return it on reset
-            // but clone it to pass into the thread.
-            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?);
-        }
-        self.queue_evts = Some(tmp_queue_evts);
-
-        let mut tmp_queue_evts: Vec<EventFd> = Vec::new();
-        for queue_evt in queue_evts.iter() {
-            // Save the queue EventFD as we need to return it on reset
-            // but clone it to pass into the thread.
-            tmp_queue_evts.push(queue_evt.try_clone().map_err(|e| {
-                error!("failed to clone queue EventFd: {}", e);
-                ActivateError::BadActivate
-            })?);
-        }
-        self.queue_evts = Some(tmp_queue_evts);
-
         self.update_writeback();
 
         let mut epoll_threads = Vec::new();
-        for i in 0..self.queue_size.len() {
-            let queue_size = self.queue_size[i] as usize;
+        for i in 0..self.common.queue_sizes.len() {
+            let queue_size = self.common.queue_sizes[i] as usize;
             let queue_evt = queue_evts.remove(0);
             let io_uring = IoUring::new(queue_size as u32).map_err(|e| {
                 error!("failed to create io_uring instance: {}", e);
                 ActivateError::BadActivate
             })?;
+            let kill_evt = self
+                .common
+                .kill_evt
+                .as_ref()
+                .unwrap()
+                .try_clone()
+                .map_err(|e| {
+                    error!("failed to clone kill_evt eventfd: {}", e);
+                    ActivateError::BadActivate
+                })?;
+            let pause_evt = self
+                .common
+                .pause_evt
+                .as_ref()
+                .unwrap()
+                .try_clone()
+                .map_err(|e| {
+                    error!("failed to clone pause_evt eventfd: {}", e);
+                    ActivateError::BadActivate
+                })?;
+
             let mut handler = BlockIoUringEpollHandler {
                 queue: queues.remove(0),
                 mem: mem.clone(),
@@ -557,14 +518,8 @@ impl VirtioDevice for BlockIoUring {
                 disk_nsectors: self.disk_nsectors,
                 interrupt_cb: interrupt_cb.clone(),
                 disk_image_id: disk_image_id.clone(),
-                kill_evt: kill_evt.try_clone().map_err(|e| {
-                    error!("failed to clone kill_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?,
-                pause_evt: pause_evt.try_clone().map_err(|e| {
-                    error!("failed to clone pause_evt eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?,
+                kill_evt,
+                pause_evt,
                 writeback: self.writeback.clone(),
                 counters: self.counters.clone(),
                 queue_evt,
@@ -576,8 +531,8 @@ impl VirtioDevice for BlockIoUring {
                 request_list: HashMap::with_capacity(queue_size),
             };
 
-            let paused = self.paused.clone();
-            let paused_sync = self.paused_sync.clone();
+            let paused = self.common.paused.clone();
+            let paused_sync = self.common.paused_sync.clone();
 
             // Register the io_uring eventfd that will notify the epoll loop
             // when something in the completion queue is ready.
@@ -593,7 +548,7 @@ impl VirtioDevice for BlockIoUring {
             thread::Builder::new()
                 .name("virtio_blk".to_string())
                 .spawn(move || {
-                    if let Err(e) = handler.run(paused, paused_sync) {
+                    if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
                     }
                 })
@@ -604,31 +559,13 @@ impl VirtioDevice for BlockIoUring {
                 })?;
         }
 
-        // Save the interrupt EventFD as we need to return it on reset
-        // but clone it to pass into the thread.
-        self.interrupt_cb = Some(interrupt_cb);
-
-        self.epoll_threads = Some(epoll_threads);
+        self.common.epoll_threads = Some(epoll_threads);
 
         Ok(())
     }
 
     fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
-        // We first must resume the virtio thread if it was paused.
-        if self.pause_evt.take().is_some() {
-            self.resume().ok()?;
-        }
-
-        if let Some(kill_evt) = self.kill_evt.take() {
-            // Ignore the result because there is nothing we can do about it.
-            let _ = kill_evt.write(1);
-        }
-
-        // Return the interrupt and queue EventFDs
-        Some((
-            self.interrupt_cb.take().unwrap(),
-            self.queue_evts.take().unwrap(),
-        ))
+        self.common.reset()
     }
 
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
@@ -655,7 +592,16 @@ impl VirtioDevice for BlockIoUring {
     }
 }
 
-virtio_pausable!(BlockIoUring);
+impl Pausable for BlockIoUring {
+    fn pause(&mut self) -> result::Result<(), MigratableError> {
+        self.common.pause()
+    }
+
+    fn resume(&mut self) -> result::Result<(), MigratableError> {
+        self.common.resume()
+    }
+}
+
 impl Snapshottable for BlockIoUring {
     fn id(&self) -> String {
         self.id.clone()
