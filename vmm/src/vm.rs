@@ -1513,6 +1513,17 @@ impl Snapshottable for Vm {
             )));
         }
 
+        if let Some(cpu_manager_snapshot) = snapshot.snapshots.get(CPU_MANAGER_SNAPSHOT_ID) {
+            self.cpu_manager
+                .lock()
+                .unwrap()
+                .restore(*cpu_manager_snapshot.clone())?;
+        } else {
+            return Err(MigratableError::Restore(anyhow!(
+                "Missing CPU manager snapshot"
+            )));
+        }
+
         if let Some(device_manager_snapshot) = snapshot.snapshots.get(DEVICE_MANAGER_SNAPSHOT_ID) {
             self.device_manager
                 .lock()
@@ -1524,16 +1535,14 @@ impl Snapshottable for Vm {
             )));
         }
 
-        if let Some(cpu_manager_snapshot) = snapshot.snapshots.get(CPU_MANAGER_SNAPSHOT_ID) {
-            self.cpu_manager
-                .lock()
-                .unwrap()
-                .restore(*cpu_manager_snapshot.clone())?;
-        } else {
-            return Err(MigratableError::Restore(anyhow!(
-                "Missing CPU manager snapshot"
-            )));
-        }
+        // Now we can start all vCPUs from here.
+        self.cpu_manager
+            .lock()
+            .unwrap()
+            .start_restored_vcpus()
+            .map_err(|e| {
+                MigratableError::Restore(anyhow!("Cannot start restored vCPUs: {:#?}", e))
+            })?;
 
         if self
             .device_manager

@@ -75,7 +75,7 @@ pub struct Snapshot {
     pub id: String,
 
     /// The Snapshottable component snapshots.
-    pub snapshots: std::collections::HashMap<String, Box<Snapshot>>,
+    pub snapshots: std::collections::BTreeMap<String, Box<Snapshot>>,
 
     /// The Snapshottable component's snapshot data.
     /// A map of snapshot sections, indexed by the section ids.

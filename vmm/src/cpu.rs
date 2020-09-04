@@ -211,6 +211,9 @@ pub enum Error {
 
     /// Cannot apply seccomp filter
     ApplySeccompFilter(seccomp::Error),
+
+    /// Error starting vCPU after restore
+    StartRestoreVcpu(anyhow::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -801,6 +804,11 @@ impl CpuManager {
                     .set_cpuid2(&cpuid)
                     .map_err(|e| Error::SetSupportedCpusFailed(e.into()))?;
             }
+
+            // AArch64 vCPUs should be initialized after created.
+            #[cfg(target_arch = "aarch64")]
+            vcpu.lock().unwrap().init(&self.vm)?;
+
             vcpu.lock()
                 .unwrap()
                 .restore(snapshot)
@@ -1011,6 +1019,25 @@ impl CpuManager {
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
     pub fn start_boot_vcpus(&mut self) -> Result<()> {
         self.activate_vcpus(self.boot_vcpus(), false)
+    }
+
+    pub fn start_restored_vcpus(&mut self) -> Result<()> {
+        let vcpu_numbers = self.vcpus.len();
+        let vcpu_thread_barrier = Arc::new(Barrier::new((vcpu_numbers + 1) as usize));
+        // Restore the vCPUs in "paused" state.
+        self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
+
+        for vcpu_index in 0..vcpu_numbers {
+            let vcpu = Arc::clone(&self.vcpus[vcpu_index as usize]);
+
+            self.start_vcpu(vcpu, vcpu_thread_barrier.clone(), false)
+                .map_err(|e| {
+                    Error::StartRestoreVcpu(anyhow!("Failed to start restored vCPUs: {:#?}", e))
+                })?;
+        }
+        // Unblock all restored CPU threads.
+        vcpu_thread_barrier.wait();
+        Ok(())
     }
 
     pub fn resize(&mut self, desired_vcpus: u8) -> Result<bool> {
@@ -1476,22 +1503,12 @@ impl Snapshottable for CpuManager {
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        let vcpu_thread_barrier = Arc::new(Barrier::new((snapshot.snapshots.len() + 1) as usize));
-
-        // Restore the vCPUs in "paused" state.
-        self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
-
         for (cpu_id, snapshot) in snapshot.snapshots.iter() {
             debug!("Restoring VCPU {}", cpu_id);
-            let vcpu = self
-                .create_vcpu(cpu_id.parse::<u8>().unwrap(), None, Some(*snapshot.clone()))
+            self.create_vcpu(cpu_id.parse::<u8>().unwrap(), None, Some(*snapshot.clone()))
                 .map_err(|e| MigratableError::Restore(anyhow!("Could not create vCPU {:?}", e)))?;
-            self.start_vcpu(vcpu, vcpu_thread_barrier.clone(), false)
-                .map_err(|e| MigratableError::Restore(anyhow!("Could not restore vCPU {:?}", e)))?;
         }
 
-        // Unblock all restored CPU threads.
-        vcpu_thread_barrier.wait();
         Ok(())
     }
 }
