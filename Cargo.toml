@@ -24,6 +24,9 @@ vhost_user_net = { path = "vhost_user_net"}
 vmm = { path = "vmm" }
 vmm-sys-util = "0.6.1"
 
+[build-dependencies]
+clap = { version = "2.33.3", features = ["wrap_help"] }
+
 [patch.crates-io]
 vm-memory = { git = "https://github.com/cloud-hypervisor/vm-memory", branch = "ch" }
 
