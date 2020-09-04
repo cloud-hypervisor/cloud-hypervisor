@@ -477,9 +477,6 @@ components:
         host_numa_node:
           type: integer
           format: uint32
-        guest_numa_node:
-          type: integer
-          format: uint32
 
     MemoryConfig:
       required:
