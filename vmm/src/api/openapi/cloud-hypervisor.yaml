@@ -754,6 +754,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/NumaDistance'
+        memory_zones:
+          type: array
+          items:
+            type: string
 
     VmResize:
       type: object

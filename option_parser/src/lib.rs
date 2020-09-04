@@ -248,3 +248,19 @@ impl FromStr for TupleTwoIntegers {
         Ok(TupleTwoIntegers(list))
     }
 }
+
+pub struct StringList(pub Vec<String>);
+
+pub enum StringListParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for StringList {
+    type Err = StringListParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let string_list: Vec<String> = s.trim().split(':').map(|e| e.to_owned()).collect();
+
+        Ok(StringList(string_list))
+    }
+}
