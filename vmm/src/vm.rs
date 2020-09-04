@@ -377,10 +377,10 @@ impl Vm {
         let mut numa_nodes = BTreeMap::new();
 
         if let Some(configs) = &configs {
-            let node_id_list: Vec<u32> = configs.iter().map(|cfg| cfg.id).collect();
+            let node_id_list: Vec<u32> = configs.iter().map(|cfg| cfg.guest_numa_id).collect();
 
             for config in configs.iter() {
-                if numa_nodes.contains_key(&config.id) {
+                if numa_nodes.contains_key(&config.guest_numa_id) {
                     error!("Can't define twice the same NUMA node");
                     return Err(Error::InvalidNumaConfig);
                 }
@@ -425,7 +425,7 @@ impl Vm {
                     }
                 }
 
-                numa_nodes.insert(config.id, node);
+                numa_nodes.insert(config.guest_numa_id, node);
             }
         }
 

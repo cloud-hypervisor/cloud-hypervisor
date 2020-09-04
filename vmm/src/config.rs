@@ -1223,7 +1223,7 @@ pub struct NumaDistance {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct NumaConfig {
     #[serde(default)]
-    pub id: u32,
+    pub guest_numa_id: u32,
     #[serde(default)]
     pub cpus: Option<Vec<u8>>,
     #[serde(default)]
@@ -1234,19 +1234,19 @@ pub struct NumaConfig {
 
 impl NumaConfig {
     pub const SYNTAX: &'static str = "Settings related to a given NUMA node \
-        \"id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,\
+        \"guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,\
         memory_zones=<list_of_memory_zones>\"";
     pub fn parse(numa: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
-            .add("id")
+            .add("guest_numa_id")
             .add("cpus")
             .add("distances")
             .add("memory_zones");
         parser.parse(numa).map_err(Error::ParseNuma)?;
 
-        let id = parser
-            .convert::<u32>("id")
+        let guest_numa_id = parser
+            .convert::<u32>("guest_numa_id")
             .map_err(Error::ParseNuma)?
             .unwrap_or(0);
         let cpus = parser
@@ -1270,7 +1270,7 @@ impl NumaConfig {
             .map(|v| v.0);
 
         Ok(NumaConfig {
-            id,
+            guest_numa_id,
             cpus,
             distances,
             memory_zones,

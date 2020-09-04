@@ -308,7 +308,7 @@ struct NumaConfig {
 --numa <numa>	Settings related to a given NUMA node "id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,memory_zones=<list_of_memory_zones>"
 ```
 
-### `id`
+### `guest_numa_id`
 
 Node identifier of a guest NUMA node. This identifier must be unique, otherwise
 an error will be returned.
@@ -320,14 +320,14 @@ Value is an unsigned integer of 32 bits.
 _Example_
 
 ```
---numa id=0
+--numa guest_numa_id=0
 ```
 
 ### `cpus`
 
-List of virtual CPUs attached to the guest NUMA node identified by the `id`
-option. This allows for describing a list of CPUs which must be seen by the
-guest as belonging to the NUMA node `id`.
+List of virtual CPUs attached to the guest NUMA node identified by the
+`guest_numa_id` option. This allows for describing a list of CPUs which
+must be seen by the guest as belonging to the NUMA node `guest_numa_id`.
 
 One can use this option for a fine grained description of the NUMA topology
 regarding the CPUs associated with it, which might help the guest run more
@@ -348,17 +348,17 @@ _Example_
 
 ```
 --cpus boot=8
---numa id=0,cpus=1-3:7
---numa id=1,cpus=0:4-6
+--numa guest_numa_id=0,cpus=1-3:7
+--numa guest_numa_id=1,cpus=0:4-6
 ```
 
 ### `distances`
 
-List of distances between the current NUMA node referred by `id` and the
-destination NUMA nodes listed along with distances. This option let the user
-choose the distances between guest NUMA nodes. This is important to provide an
-accurate description of the way non uniform memory accesses will perform in the
-guest.
+List of distances between the current NUMA node referred by `guest_numa_id`
+and the destination NUMA nodes listed along with distances. This option let
+the user choose the distances between guest NUMA nodes. This is important to
+provide an accurate description of the way non uniform memory accesses will
+perform in the guest.
 
 One or more tuple of two values must be provided through this option. The first
 value is an unsigned integer of 32 bits as it represents the destination NUMA
@@ -374,16 +374,16 @@ different distances, it can be described with the following example.
 _Example_
 
 ```
---numa id=0,distances=1@15:2@25
---numa id=1,distances=0@15:2@20
---numa id=2,distances=0@25:1@20
+--numa guest_numa_id=0,distances=1@15:2@25
+--numa guest_numa_id=1,distances=0@15:2@20
+--numa guest_numa_id=2,distances=0@25:1@20
 ```
 
 ### `memory_zones`
 
-List of memory zones attached to the guest NUMA node identified by the `id`
-option. This allows for describing a list of memory ranges which must be seen
-by the guest as belonging to the NUMA node `id`.
+List of memory zones attached to the guest NUMA node identified by the
+`guest_numa_id` option. This allows for describing a list of memory ranges
+which must be seen by the guest as belonging to the NUMA node `guest_numa_id`.
 
 This option can be very useful and powerful when combined with `host_numa_node`
 option from `--memory-zone` parameter as it allows for creating a VM with non
@@ -402,6 +402,6 @@ _Example_
 --memory-zone id=mem0,size=1G
 --memory-zone id=mem1,size=1G
 --memory-zone id=mem2,size=1G
---numa id=0,memory_zones=mem0:mem2
---numa id=1,memory_zones=mem1
+--numa guest_numa_id=0,memory_zones=mem0:mem2
+--numa guest_numa_id=1,memory_zones=mem1
 ```
