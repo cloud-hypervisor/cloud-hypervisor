@@ -736,10 +736,10 @@ components:
 
     NumaConfig:
       required:
-      - id
+      - guest_numa_id
       type: object
       properties:
-        id:
+        guest_numa_id:
           type: integer
           format: uint32
         cpus:

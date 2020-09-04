@@ -2325,9 +2325,9 @@ mod tests {
                 ])
                 .args(&[
                     "--numa",
-                    "id=0,cpus=0-2,distances=1@15:2@20,memory_zones=mem0",
-                    "id=1,cpus=3-4,distances=0@20:2@25,memory_zones=mem1",
-                    "id=2,cpus=5,distances=0@25:1@30,memory_zones=mem2",
+                    "guest_numa_id=0,cpus=0-2,distances=1@15:2@20,memory_zones=mem0",
+                    "guest_numa_id=1,cpus=3-4,distances=0@20:2@25,memory_zones=mem1",
+                    "guest_numa_id=2,cpus=5,distances=0@25:1@30,memory_zones=mem2",
                 ])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .capture_output()
