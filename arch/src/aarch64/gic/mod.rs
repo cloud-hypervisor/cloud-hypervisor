@@ -196,14 +196,13 @@ pub mod kvm {
         its_required: bool,
     ) -> Result<Box<dyn GICDevice>> {
         if its_required {
+            debug!("GICv3-ITS is required, creating a GICv3-ITS here.");
             KvmGICv3ITS::new(vm, vcpu_count)
         } else {
-            KvmGICv3ITS::new(vm, vcpu_count).or_else(|_| {
-                debug!("Failed to create GICv3-ITS, will try GICv3 instead.");
-                KvmGICv3::new(vm, vcpu_count).or_else(|_| {
-                    debug!("Failed to create GICv3, will try GICv2 instead.");
-                    KvmGICv2::new(vm, vcpu_count)
-                })
+            debug!("GICv3-ITS is not required, will try GICv3 instead.");
+            KvmGICv3::new(vm, vcpu_count).or_else(|_| {
+                debug!("Failed to create GICv3, will try GICv2 instead.");
+                KvmGICv2::new(vm, vcpu_count)
             })
         }
     }
