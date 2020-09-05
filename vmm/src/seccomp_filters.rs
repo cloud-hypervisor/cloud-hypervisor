@@ -106,6 +106,7 @@ const KVM_GET_ONE_REG: u64 = 0x4010_aeab;
 const KVM_GET_REGS: u64 = 0x8090_ae81;
 const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
 const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
+const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
 
 fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
     Ok(or![
@@ -122,6 +123,7 @@ fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MP_STATE)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_ONE_REG)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_REGS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_REG_LIST)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_SUPPORTED_CPUID,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_VCPU_EVENTS,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_VCPU_MMAP_SIZE,)?],
