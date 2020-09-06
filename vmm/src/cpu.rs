@@ -29,6 +29,8 @@ use arch::EntryPoint;
 #[cfg(target_arch = "x86_64")]
 use arch::{CpuidPatch, CpuidReg};
 use devices::interrupt_controller::InterruptController;
+#[cfg(target_arch = "aarch64")]
+use hypervisor::kvm::kvm_bindings;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuId;
 use hypervisor::{CpuState, VmExit};
@@ -126,6 +128,14 @@ pub enum Error {
 
     /// Error configuring VCPU
     VcpuConfiguration(arch::Error),
+
+    #[cfg(target_arch = "aarch64")]
+    /// Error fetching prefered target
+    VcpuArmPreferredTarget(hypervisor::HypervisorVmError),
+
+    #[cfg(target_arch = "aarch64")]
+    /// Error doing vCPU init on Arm.
+    VcpuArmInit(hypervisor::HypervisorCpuError),
 
     /// Failed to join on vCPU threads
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
@@ -303,9 +313,9 @@ impl Vcpu {
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
-            self.mpidr =
-                arch::configure_vcpu(&self.vcpu, self.id, vm, kernel_entry_point, vm_memory)
-                    .map_err(Error::VcpuConfiguration)?;
+            self.init(vm)?;
+            self.mpidr = arch::configure_vcpu(&self.vcpu, self.id, kernel_entry_point, vm_memory)
+                .map_err(Error::VcpuConfiguration)?;
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -332,6 +342,23 @@ impl Vcpu {
     #[cfg(target_arch = "aarch64")]
     pub fn get_saved_state(&self) -> Option<CpuState> {
         self.saved_state.clone()
+    }
+
+    /// Initializes an aarch64 specific vcpu for booting Linux.
+    #[cfg(target_arch = "aarch64")]
+    pub fn init(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
+        let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
+
+        // This reads back the kernel's preferred target type.
+        vm.get_preferred_target(&mut kvi)
+            .map_err(Error::VcpuArmPreferredTarget)?;
+        // We already checked that the capability is supported.
+        kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
+        // Non-boot cpus are powered off initially.
+        if self.id > 0 {
+            kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_POWER_OFF;
+        }
+        self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)
     }
 
     /// Runs the VCPU until it exits, returning the reason.

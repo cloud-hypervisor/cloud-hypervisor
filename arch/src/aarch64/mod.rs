@@ -15,7 +15,6 @@ pub use self::fdt::DeviceInfoForFDT;
 use crate::DeviceType;
 use crate::RegionType;
 use aarch64::gic::GICDevice;
-use hypervisor::kvm::kvm_bindings;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
@@ -42,12 +41,6 @@ pub enum Error {
 
     /// Error configuring the MPIDR register
     VcpuRegMPIDR(hypervisor::HypervisorCpuError),
-
-    /// Error fetching prefered target
-    VcpuArmPreferredTarget(hypervisor::HypervisorVmError),
-
-    /// Error doing Vcpu Init on Arm.
-    VcpuArmInit(hypervisor::HypervisorCpuError),
 }
 
 impl From<Error> for super::Error {
@@ -68,23 +61,9 @@ pub struct EntryPoint {
 pub fn configure_vcpu(
     fd: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
-    vm: &Arc<dyn hypervisor::Vm>,
     kernel_entry_point: Option<EntryPoint>,
     vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
 ) -> super::Result<u64> {
-    let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
-
-    // This reads back the kernel's preferred target type.
-    vm.get_preferred_target(&mut kvi)
-        .map_err(Error::VcpuArmPreferredTarget)?;
-    // We already checked that the capability is supported.
-    kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
-    // Non-boot cpus are powered off initially.
-    if id > 0 {
-        kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_POWER_OFF;
-    }
-
-    fd.vcpu_init(&kvi).map_err(Error::VcpuArmInit)?;
     if let Some(kernel_entry_point) = kernel_entry_point {
         regs::setup_regs(
             fd,
