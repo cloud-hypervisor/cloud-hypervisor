@@ -425,12 +425,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     }
 
     ///
-    /// Returns the KVM API version.
-    ///
-    fn get_api_version(&self) -> i32 {
-        self.kvm.get_api_version()
-    }
-    ///
     ///  Returns the size of the memory mapping required to use the vcpu's `kvm_run` structure.
     ///
     fn get_vcpu_mmap_size(&self) -> hypervisor::Result<usize> {

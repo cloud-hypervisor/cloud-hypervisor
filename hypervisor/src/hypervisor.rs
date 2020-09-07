@@ -79,10 +79,6 @@ pub trait Hypervisor: Send + Sync {
     ///
     fn create_vm(&self) -> Result<Arc<dyn Vm>>;
     ///
-    /// Get the API version of the hypervisor
-    ///
-    fn get_api_version(&self) -> i32;
-    ///
     /// Returns the size of the memory mapping required to use the vcpu's structures
     ///
     fn get_vcpu_mmap_size(&self) -> Result<usize>;
