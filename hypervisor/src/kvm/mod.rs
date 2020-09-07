@@ -345,6 +345,12 @@ impl KvmHypervisor {
     /// Create a hypervisor based on Kvm
     pub fn new() -> hypervisor::Result<KvmHypervisor> {
         let kvm_obj = Kvm::new().map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+        let api_version = kvm_obj.get_api_version();
+
+        if api_version != kvm_bindings::KVM_API_VERSION as i32 {
+            return Err(hypervisor::HypervisorError::IncompatibleApiVersion);
+        }
+
         Ok(KvmHypervisor { kvm: kvm_obj })
     }
 }

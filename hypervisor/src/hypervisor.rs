@@ -55,6 +55,11 @@ pub enum HypervisorError {
     ///
     #[error("Failed to get the list of supported MSRs: {0}")]
     GetMsrList(#[source] anyhow::Error),
+    ///
+    /// API version is not compatible
+    ///
+    #[error("Incompatible API version")]
+    IncompatibleApiVersion,
 }
 
 ///
