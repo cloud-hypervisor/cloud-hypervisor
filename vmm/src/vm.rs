@@ -1367,6 +1367,12 @@ impl hypervisor::vm::VmmOps for Vm {
         let guest_memory = self.memory_manager.lock().unwrap().guest_memory().memory();
         guest_memory.read(buf, GuestAddress(gpa)).map_err(|e| hypervisor::vm::HypervisorVmError::GuestMemRead(e.into()))
     }
+    fn mmio_write(&self, addr: u64, data: &[u8]) -> bool {
+        self.device_manager.lock().unwrap().mmio_bus().write(addr, data)
+    }
+    fn mmio_read(&self, addr: u64, data: &mut [u8]) -> bool {
+        self.device_manager.lock().unwrap().mmio_bus().read(addr, data)
+    }
 }
 
 #[derive(Serialize, Deserialize)]

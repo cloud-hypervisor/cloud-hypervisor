@@ -128,6 +128,16 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to read guest memory: {0}")]
     GuestMemRead(#[source] anyhow::Error),
+    ///
+    /// Read from MMIO Bus
+    ///
+    #[error("Failed to read from MMIO Bus: {0}")]
+    MMioBusRead(#[source] anyhow::Error),
+    ///
+    /// Write to MMIO Bus
+    ///
+    #[error("Failed to write to MMIO Bus: {0}")]
+    MMioBusWrite(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -200,4 +210,6 @@ pub trait Vm: Send + Sync {
 pub trait VmmOps {
     fn write_guest_mem(&self, buf: &[u8], gpa:u64,) -> vm::Result<usize>;
     fn read_guest_mem(&self, buf: &mut [u8], gpa:u64,) -> vm::Result<usize>;
+    fn mmio_write(&self, addr: u64, data: &[u8]) -> bool;
+    fn mmio_read(&self, addr: u64, data: &mut [u8]) -> bool;
 }
