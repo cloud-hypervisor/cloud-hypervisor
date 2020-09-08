@@ -143,6 +143,7 @@ impl FromStr for Toggle {
 
 pub struct ByteSized(pub u64);
 
+#[derive(Debug)]
 pub enum ByteSizedParseError {
     InvalidValue(String),
 }

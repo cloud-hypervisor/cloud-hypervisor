@@ -206,6 +206,7 @@ dependencies = [
  "libc",
  "log 0.4.11",
  "net_util",
+ "option_parser",
  "seccomp",
  "serde_json",
  "ssh2",
