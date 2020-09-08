@@ -84,6 +84,8 @@ mod tests {
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64";
     #[cfg(target_arch = "x86_64")]
     const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom";
+    #[cfg(target_arch = "x86_64")]
+    const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx";
     #[cfg(target_arch = "aarch64")]
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64";
     #[cfg(target_arch = "aarch64")]
@@ -774,6 +776,41 @@ mod tests {
             } else {
                 Ok(false)
             }
+        }
+
+        fn check_sgx_support(&self) -> Result<bool, Error> {
+            if self
+                .ssh_command(
+                    "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX: \
+                    Software Guard Extensions supported = true' && echo ok",
+                )?
+                .trim()
+                != "ok"
+            {
+                return Ok(false);
+            }
+            if self
+                .ssh_command(
+                    "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX_LC: \
+                    SGX launch config supported = true' && echo ok",
+                )?
+                .trim()
+                != "ok"
+            {
+                return Ok(false);
+            }
+            if self
+                .ssh_command(
+                    "cpuid -l 0x12 -s 0 | tr -s [:space:] | grep -q 'SGX1 \
+                    supported = true' && echo ok",
+                )?
+                .trim()
+                != "ok"
+            {
+                return Ok(false);
+            }
+
+            Ok(true)
         }
 
         fn get_entropy(&self) -> Result<u32, Error> {
@@ -5098,6 +5135,67 @@ mod tests {
         #[cfg_attr(not(feature = "mmio"), test)]
         fn test_memory_mergeable_on() {
             test_memory_mergeable(true)
+        }
+    }
+
+    mod sgx {
+        use crate::tests::*;
+
+        #[test]
+        #[cfg(target_arch = "x86_64")]
+        fn test_sgx() {
+            let mut focal = UbuntuDiskConfig::new(FOCAL_SGX_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path;
+            kernel_path.push("bzImage_w_sgx");
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .default_disks()
+                .default_net()
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .args(&["--sgx-epc", "size=64M"])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            let r = std::panic::catch_unwind(|| {
+                // Check if SGX is correctly detected in the guest.
+                assert!(guest.check_sgx_support().unwrap());
+
+                // Validate the SGX EPC section is 64MiB.
+                assert_eq!(
+                    guest
+                        .ssh_command("cpuid -l 0x12 -s 2 | grep 'section size' | cut -d '=' -f 2")
+                        .unwrap_or_default()
+                        .trim(),
+                    "0x0000000004000000"
+                );
+
+                // Run a test relying on SGX enclaves and check if it runs
+                // successfully.
+                assert!(guest
+                    .ssh_command("cd /linux-sgx/SampleCode/LocalAttestation/bin/ && sudo ./app")
+                    .unwrap_or_default()
+                    .trim()
+                    .contains(
+                        "succeed to load enclaves.\nsucceed to \
+                        establish secure channel.\nSucceed to exchange \
+                        secure message...\nSucceed to close Session..."
+                    ));
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
         }
     }
 }

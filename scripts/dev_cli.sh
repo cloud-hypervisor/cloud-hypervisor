@@ -161,6 +161,7 @@ cmd_help() {
     echo "        --unit               Run the unit tests."
     echo "        --cargo              Run the cargo tests."
     echo "        --integration        Run the integration tests."
+    echo "        --integration-sgx    Run the SGX integration tests."
     echo "        --libc               Select the C library Cloud Hypervisor will be built against. Default is gnu"
     echo "        --all                Run all tests."
     echo ""
@@ -246,6 +247,7 @@ cmd_tests() {
     unit=false
     cargo=false
     integration=false
+    integration_sgx=false
     libc="gnu"
 
     while [ $# -gt 0 ]; do
@@ -254,6 +256,7 @@ cmd_tests() {
             "--unit")                { unit=true;      } ;;
             "--cargo")               { cargo=true;    } ;;
             "--integration")         { integration=true;    } ;;
+            "--integration-sgx")     { integration_sgx=true;    } ;;
             "--libc")
                 shift
                 [[ "$1" =~ ^(musl|gnu)$ ]] || \
@@ -320,6 +323,25 @@ cmd_tests() {
 	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_integration_tests_$(uname -m).sh "$@" || fix_dir_perms $? || exit $?
+    fi
+
+    if [ "$integration_sgx" = true ] ;  then
+	say "Running integration tests for $target..."
+	$DOCKER_RUNTIME run \
+	       --workdir "$CTR_CLH_ROOT_DIR" \
+	       --rm \
+	       --privileged \
+	       --security-opt seccomp=unconfined \
+	       --ipc=host \
+	       --net="$CTR_CLH_NET" \
+	       --mount type=tmpfs,destination=/tmp \
+	       --volume /dev:/dev \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+	       --env USER="root" \
+	       --env CH_LIBC="${libc}" \
+	       "$CTR_IMAGE" \
+	       ./scripts/run_integration_tests_sgx.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     fix_dir_perms $?
