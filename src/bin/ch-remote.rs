@@ -9,6 +9,7 @@ extern crate serde_json;
 extern crate vmm;
 
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
+use option_parser::{ByteSized, ByteSizedParseError};
 use std::fmt;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -22,8 +23,8 @@ enum Error {
     ContentLengthParsing(std::num::ParseIntError),
     ServerResponse(StatusCode, Option<String>),
     InvalidCPUCount(std::num::ParseIntError),
-    InvalidMemorySize(std::num::ParseIntError),
-    InvalidBalloonSize(std::num::ParseIntError),
+    InvalidMemorySize(ByteSizedParseError),
+    InvalidBalloonSize(ByteSizedParseError),
     AddDeviceConfig(vmm::config::Error),
     AddDiskConfig(vmm::config::Error),
     AddFsConfig(vmm::config::Error),
@@ -49,8 +50,8 @@ impl fmt::Display for Error {
                 }
             }
             InvalidCPUCount(e) => write!(f, "Error parsing CPU count: {}", e),
-            InvalidMemorySize(e) => write!(f, "Error parsing memory size: {}", e),
-            InvalidBalloonSize(e) => write!(f, "Error parsing balloon size: {}", e),
+            InvalidMemorySize(e) => write!(f, "Error parsing memory size: {:?}", e),
+            InvalidBalloonSize(e) => write!(f, "Error parsing balloon size: {:?}", e),
             AddDeviceConfig(e) => write!(f, "Error parsing device syntax: {}", e),
             AddDiskConfig(e) => write!(f, "Error parsing disk syntax: {}", e),
             AddFsConfig(e) => write!(f, "Error parsing filesystem syntax: {}", e),
@@ -215,13 +216,23 @@ fn resize_api_command(
     };
 
     let desired_ram: Option<u64> = if let Some(memory) = memory {
-        Some(memory.parse().map_err(Error::InvalidMemorySize)?)
+        Some(
+            memory
+                .parse::<ByteSized>()
+                .map_err(Error::InvalidMemorySize)?
+                .0,
+        )
     } else {
         None
     };
 
     let desired_ram_w_balloon: Option<u64> = if let Some(balloon) = balloon {
-        Some(balloon.parse().map_err(Error::InvalidBalloonSize)?)
+        Some(
+            balloon
+                .parse::<ByteSized>()
+                .map_err(Error::InvalidBalloonSize)?
+                .0,
+        )
     } else {
         None
     };
@@ -529,14 +540,14 @@ fn main() {
                 .arg(
                     Arg::with_name("memory")
                         .long("memory")
-                        .help("New memory size (in MiB)")
+                        .help("New memory size in bytes (supports K/M/G suffix)")
                         .takes_value(true)
                         .number_of_values(1),
                 )
                 .arg(
                     Arg::with_name("balloon")
                         .long("balloon")
-                        .help("New memory with balloon size")
+                        .help("New memory with balloon size in bytes (supports K/M/G suffix)")
                         .takes_value(true)
                         .number_of_values(1),
                 ),
