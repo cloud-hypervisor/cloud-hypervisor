@@ -33,6 +33,7 @@ use crate::cpu;
 use crate::device_manager::{self, get_win_size, Console, DeviceManager, DeviceManagerError};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
 };
@@ -47,7 +48,7 @@ use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 use linux_loader::loader::KernelLoader;
-use seccomp::SeccompAction;
+use seccomp::{SeccompAction, SeccompFilter};
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 use std::collections::{BTreeMap, HashMap};
 use std::convert::TryInto;
@@ -202,6 +203,12 @@ pub enum Error {
 
     /// Invalid configuration for NUMA.
     InvalidNumaConfig,
+
+    /// Cannot create seccomp filter
+    CreateSeccompFilter(seccomp::SeccompError),
+
+    /// Cannot apply seccomp filter
+    ApplySeccompFilter(seccomp::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -288,6 +295,7 @@ pub struct Vm {
     saved_clock: Option<hypervisor::ClockData>,
     #[cfg(feature = "acpi")]
     numa_nodes: NumaNodes,
+    seccomp_action: SeccompAction,
 }
 
 impl Vm {
@@ -365,6 +373,7 @@ impl Vm {
             saved_clock: _saved_clock,
             #[cfg(feature = "acpi")]
             numa_nodes,
+            seccomp_action: seccomp_action.clone(),
         })
     }
 
@@ -1237,10 +1246,22 @@ impl Vm {
                     self.signals = Some(signals.clone());
 
                     let on_tty = self.on_tty;
+                    let signal_handler_seccomp_filter =
+                        get_seccomp_filter(&self.seccomp_action, Thread::SignalHandler)
+                            .map_err(Error::CreateSeccompFilter)?;
                     self.threads.push(
                         thread::Builder::new()
                             .name("signal_handler".to_string())
-                            .spawn(move || Vm::os_signal_handler(signals, console, on_tty))
+                            .spawn(move || {
+                                if let Err(e) = SeccompFilter::apply(signal_handler_seccomp_filter)
+                                    .map_err(Error::ApplySeccompFilter)
+                                {
+                                    error!("Error applying seccomp filter: {:?}", e);
+                                    return;
+                                }
+
+                                Vm::os_signal_handler(signals, console, on_tty);
+                            })
                             .map_err(Error::SignalHandlerSpawn)?,
                     );
                 }
@@ -1461,10 +1482,29 @@ impl Snapshottable for Vm {
                     self.signals = Some(signals.clone());
 
                     let on_tty = self.on_tty;
+                    let signal_handler_seccomp_filter =
+                        get_seccomp_filter(&self.seccomp_action, Thread::SignalHandler).map_err(
+                            |e| {
+                                MigratableError::Restore(anyhow!(
+                                    "Could not create seccomp filter: {:#?}",
+                                    Error::CreateSeccompFilter(e)
+                                ))
+                            },
+                        )?;
+
                     self.threads.push(
                         thread::Builder::new()
                             .name("signal_handler".to_string())
-                            .spawn(move || Vm::os_signal_handler(signals, console, on_tty))
+                            .spawn(move || {
+                                if let Err(e) = SeccompFilter::apply(signal_handler_seccomp_filter)
+                                    .map_err(Error::ApplySeccompFilter)
+                                {
+                                    error!("Error applying seccomp filter: {:?}", e);
+                                    return;
+                                }
+
+                                Vm::os_signal_handler(signals, console, on_tty)
+                            })
                             .map_err(|e| {
                                 MigratableError::Restore(anyhow!(
                                     "Could not start console signal thread: {:#?}",

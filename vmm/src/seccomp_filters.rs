@@ -13,6 +13,7 @@ use std::convert::TryInto;
 
 pub enum Thread {
     Api,
+    SignalHandler,
     Vcpu,
     Vmm,
 }
@@ -238,6 +239,28 @@ fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
     Ok(or![and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO)?],])
 }
 
+fn create_signal_handler_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+    Ok(or![and![Cond::new(1, ArgLen::DWORD, Eq, TIOCGWINSZ)?],])
+}
+
+fn signal_handler_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+    Ok(vec![
+        allow_syscall(libc::SYS_brk),
+        allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_exit),
+        allow_syscall(libc::SYS_exit_group),
+        allow_syscall(libc::SYS_futex),
+        allow_syscall_if(libc::SYS_ioctl, create_signal_handler_ioctl_seccomp_rule()?),
+        allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_munmap),
+        allow_syscall(libc::SYS_recvfrom),
+        allow_syscall(libc::SYS_rt_sigprocmask),
+        allow_syscall(libc::SYS_sendto),
+        allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_write),
+    ])
+}
+
 // The filter containing the white listed syscall rules required by the VMM to
 // function.
 fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
@@ -460,6 +483,7 @@ fn api_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
         Thread::Api => api_thread_rules()?,
+        Thread::SignalHandler => signal_handler_thread_rules()?,
         Thread::Vcpu => vcpu_thread_rules()?,
         Thread::Vmm => vmm_thread_rules()?,
     };
@@ -473,6 +497,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
 fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
         Thread::Api => api_thread_rules()?,
+        Thread::SignalHandler => signal_handler_thread_rules()?,
         Thread::Vcpu => vcpu_thread_rules()?,
         Thread::Vmm => vmm_thread_rules()?,
     };
