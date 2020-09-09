@@ -7,11 +7,11 @@ use crate::configuration::{
 };
 use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
 use byteorder::{ByteOrder, LittleEndian};
-use devices::BusDevice;
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
+use vm_device::{Bus, BusDevice};
 use vm_memory::{Address, GuestAddress, GuestUsize};
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
@@ -26,9 +26,9 @@ pub enum PciRootError {
     /// Could not allocate an IRQ number.
     AllocateIrq,
     /// Could not add a device to the port io bus.
-    PioInsert(devices::BusError),
+    PioInsert(vm_device::BusError),
     /// Could not add a device to the mmio bus.
-    MmioInsert(devices::BusError),
+    MmioInsert(vm_device::BusError),
     /// Could not find an available device slot on the PCI bus.
     NoPciDeviceSlotAvailable,
     /// Invalid PCI device identifier provided.
@@ -110,8 +110,8 @@ impl PciBus {
     pub fn register_mapping(
         &self,
         dev: Arc<Mutex<dyn BusDevice>>,
-        #[cfg(target_arch = "x86_64")] io_bus: &devices::Bus,
-        mmio_bus: &devices::Bus,
+        #[cfg(target_arch = "x86_64")] io_bus: &Bus,
+        mmio_bus: &Bus,
         bars: Vec<(GuestAddress, GuestUsize, PciBarRegionType)>,
     ) -> Result<()> {
         for (address, size, type_) in bars {

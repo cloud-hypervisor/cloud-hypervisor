@@ -5,8 +5,7 @@
 use libc::{clock_gettime, gmtime_r, time_t, timespec, tm, CLOCK_REALTIME};
 use std::cmp::min;
 use std::mem;
-
-use crate::BusDevice;
+use vm_device::BusDevice;
 
 const INDEX_MASK: u8 = 0x7f;
 const INDEX_OFFSET: u64 = 0x0;

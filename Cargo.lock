@@ -742,7 +742,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "byteorder",
- "devices",
  "hypervisor",
  "libc",
  "log 0.4.11",
@@ -1525,7 +1524,6 @@ dependencies = [
  "arc-swap",
  "block_util",
  "byteorder",
- "devices",
  "epoll",
  "io-uring",
  "libc",

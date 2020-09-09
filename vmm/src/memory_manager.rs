@@ -15,8 +15,6 @@ use arch::x86_64::{SgxEpcRegion, SgxEpcSection};
 use arch::{get_host_cpu_phys_bits, layout, RegionType};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
-use devices::BusDevice;
-
 #[cfg(target_arch = "x86_64")]
 use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
 use std::collections::HashMap;
@@ -33,6 +31,7 @@ use url::Url;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
 use vm_allocator::SystemAllocator;
+use vm_device::BusDevice;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     mmap::MmapRegionError, Address, Bytes, Error as MmapError, GuestAddress, GuestAddressSpace,

@@ -1,8 +1,23 @@
+// Copyright © 2020 Intel Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+
 #[macro_use]
 extern crate serde_derive;
 extern crate vm_memory;
 
+use std::io;
+
+mod bus;
 pub mod interrupt;
+
+pub use self::bus::{Bus, BusDevice, Error as BusError};
+
+#[derive(Debug)]
+pub enum Error {
+    IoError(io::Error),
+}
 
 /// Type of Message Singaled Interrupt
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]

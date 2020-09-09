@@ -7,8 +7,8 @@ use acpi_tables::{aml, aml::Aml};
 use std::sync::Arc;
 use std::time::Instant;
 use vm_device::interrupt::InterruptSourceGroup;
+use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
-use BusDevice;
 use HotPlugNotificationFlags;
 
 /// A device for handling ACPI shutdown and reboot
