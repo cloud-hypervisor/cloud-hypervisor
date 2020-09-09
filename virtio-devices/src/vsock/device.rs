@@ -9,6 +9,7 @@
 // found in the THIRD-PARTY file.
 
 use super::{VsockBackend, VsockPacket};
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::Error as DeviceError;
 use crate::VirtioInterrupt;
 use crate::{
@@ -37,6 +38,7 @@ use anyhow::anyhow;
 /// - a backend FD.
 ///
 use byteorder::{ByteOrder, LittleEndian};
+use seccomp::{SeccompAction, SeccompFilter};
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
@@ -300,6 +302,7 @@ pub struct Vsock<B: VsockBackend> {
     cid: u64,
     backend: Arc<RwLock<B>>,
     path: PathBuf,
+    seccomp_action: SeccompAction,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -320,6 +323,7 @@ where
         path: PathBuf,
         backend: B,
         iommu: bool,
+        seccomp_action: SeccompAction,
     ) -> io::Result<Vsock<B>> {
         let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_F_IN_ORDER;
 
@@ -339,6 +343,7 @@ where
             cid,
             backend: Arc::new(RwLock::new(backend)),
             path,
+            seccomp_action,
         })
     }
 
@@ -446,10 +451,16 @@ where
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
         let mut epoll_threads = Vec::new();
+        // Retrieve seccomp filter for virtio_vsock thread
+        let virtio_vsock_seccomp_filter =
+            get_seccomp_filter(&self.seccomp_action, Thread::VirtioVsock)
+                .map_err(ActivateError::CreateSeccompFilter)?;
         thread::Builder::new()
             .name("virtio_vsock".to_string())
             .spawn(move || {
-                if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
+                if let Err(e) = SeccompFilter::apply(virtio_vsock_seccomp_filter) {
+                    error!("Error applying seccomp filter: {:?}", e);
+                } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                     error!("Error running worker: {:?}", e);
                 }
             })

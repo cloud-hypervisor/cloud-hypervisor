@@ -5,7 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use seccomp::{
-    allow_syscall, BpfProgram, Error, SeccompAction, SeccompError, SeccompFilter, SyscallRuleSet,
+    allow_syscall, allow_syscall_if, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen,
+    SeccompCmpOp::Eq, SeccompCondition as Cond, SeccompError, SeccompFilter, SeccompRule,
+    SyscallRuleSet,
 };
 use std::convert::TryInto;
 
@@ -24,10 +26,34 @@ pub enum Thread {
     VirtioVhostFs,
     VirtioVhostNet,
     VirtioVhostNetCtl,
+    VirtioVsock,
+}
+
+/// Shorthand for chaining `SeccompCondition`s with the `and` operator  in a `SeccompRule`.
+/// The rule will take the `Allow` action if _all_ the conditions are true.
+///
+/// [`Allow`]: enum.SeccompAction.html
+/// [`SeccompCondition`]: struct.SeccompCondition.html
+/// [`SeccompRule`]: struct.SeccompRule.html
+macro_rules! and {
+    ($($x:expr,)*) => (SeccompRule::new(vec![$($x),*], SeccompAction::Allow));
+    ($($x:expr),*) => (SeccompRule::new(vec![$($x),*], SeccompAction::Allow))
+}
+
+/// Shorthand for chaining `SeccompRule`s with the `or` operator in a `SeccompFilter`.
+///
+/// [`SeccompFilter`]: struct.SeccompFilter.html
+/// [`SeccompRule`]: struct.SeccompRule.html
+macro_rules! or {
+    ($($x:expr,)*) => (vec![$($x),*]);
+    ($($x:expr),*) => (vec![$($x),*])
 }
 
 // Define io_uring syscalls as they are not yet part of libc.
 const SYS_IO_URING_ENTER: i64 = 426;
+
+// See include/uapi/asm-generic/ioctls.h in the kernel code.
+const FIONBIO: u64 = 0x5421;
 
 fn virtio_balloon_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
@@ -349,6 +375,33 @@ fn virtio_vhost_net_ctl_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     ])
 }
 
+fn create_vsock_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
+    Ok(or![and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO,)?],])
+}
+
+fn virtio_vsock_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+    Ok(vec![
+        allow_syscall(libc::SYS_accept4),
+        allow_syscall(libc::SYS_close),
+        allow_syscall(libc::SYS_dup),
+        allow_syscall(libc::SYS_epoll_create1),
+        allow_syscall(libc::SYS_epoll_ctl),
+        allow_syscall(libc::SYS_epoll_pwait),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_epoll_wait),
+        allow_syscall(libc::SYS_exit),
+        allow_syscall_if(libc::SYS_ioctl, create_vsock_ioctl_seccomp_rule()?),
+        allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_munmap),
+        allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_recvfrom),
+        allow_syscall(libc::SYS_rt_sigprocmask),
+        allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_write),
+    ])
+}
+
 fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
         Thread::VirtioBalloon => virtio_balloon_thread_rules()?,
@@ -365,6 +418,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
         Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules()?,
         Thread::VirtioVhostNet => virtio_vhost_net_thread_rules()?,
         Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules()?,
+        Thread::VirtioVsock => virtio_vsock_thread_rules()?,
     };
 
     Ok(SeccompFilter::new(
@@ -389,6 +443,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
         Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules()?,
         Thread::VirtioVhostNet => virtio_vhost_net_thread_rules()?,
         Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules()?,
+        Thread::VirtioVsock => virtio_vsock_thread_rules()?,
     };
 
     Ok(SeccompFilter::new(

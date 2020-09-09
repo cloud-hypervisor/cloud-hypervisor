@@ -2378,6 +2378,7 @@ impl DeviceManager {
                 vsock_cfg.socket.clone(),
                 backend,
                 vsock_cfg.iommu,
+                self.seccomp_action.clone(),
             )
             .map_err(DeviceManagerError::CreateVirtioVsock)?,
         ));
