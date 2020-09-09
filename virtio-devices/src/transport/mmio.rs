@@ -10,13 +10,13 @@ use crate::{
 };
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
-use devices::BusDevice;
 use libc::EFD_NONBLOCK;
 use std::num::Wrapping;
 use std::result;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use vm_device::interrupt::InterruptSourceGroup;
+use vm_device::BusDevice;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,

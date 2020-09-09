@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-extern crate devices;
 extern crate vm_allocator;
 
 use crate::{
@@ -12,7 +11,6 @@ use crate::{
     PciDevice, PciDeviceError, PciHeaderType, PciSubclass, MSIX_TABLE_ENTRY_SIZE,
 };
 use byteorder::{ByteOrder, LittleEndian};
-use devices::BusDevice;
 use std::any::Any;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
@@ -25,6 +23,7 @@ use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
+use vm_device::BusDevice;
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap, GuestRegionMmap,
     GuestUsize,

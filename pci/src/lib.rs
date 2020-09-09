@@ -5,7 +5,6 @@
 //! Implements pci devices and busses.
 #[macro_use]
 extern crate log;
-extern crate devices;
 extern crate hypervisor;
 extern crate serde;
 #[macro_use]

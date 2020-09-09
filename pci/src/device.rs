@@ -3,11 +3,11 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use crate::configuration::{self, PciBarRegionType};
-use devices::BusDevice;
 use std::any::Any;
 use std::fmt::{self, Display};
 use std::{self, io, result};
 use vm_allocator::SystemAllocator;
+use vm_device::BusDevice;
 use vm_memory::{GuestAddress, GuestUsize};
 
 #[derive(Debug)]

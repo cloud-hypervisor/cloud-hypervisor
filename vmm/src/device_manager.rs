@@ -39,7 +39,7 @@ use devices::gic;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 use devices::{
-    interrupt_controller, interrupt_controller::InterruptController, legacy::Serial, BusDevice,
+    interrupt_controller, interrupt_controller::InterruptController, legacy::Serial,
     HotPlugNotificationFlags,
 };
 use hypervisor::kvm_ioctls;
@@ -81,7 +81,7 @@ use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
-use vm_device::Resource;
+use vm_device::{Bus, BusDevice, Resource};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize, MmapRegion,
@@ -249,7 +249,7 @@ pub enum DeviceManagerError {
     Mmap(io::Error),
 
     /// Cannot add legacy device to Bus.
-    BusError(devices::BusError),
+    BusError(vm_device::BusError),
 
     /// Failed to allocate IO port
     AllocateIOPort,
@@ -298,10 +298,10 @@ pub enum DeviceManagerError {
     RemoveDeviceFromPciBus(pci::PciRootError),
 
     /// Failed removing a bus device from the IO bus.
-    RemoveDeviceFromIoBus(devices::BusError),
+    RemoveDeviceFromIoBus(vm_device::BusError),
 
     /// Failed removing a bus device from the MMIO bus.
-    RemoveDeviceFromMmioBus(devices::BusError),
+    RemoveDeviceFromMmioBus(vm_device::BusError),
 
     /// Failed to find the device corresponding to a specific PCI b/d/f.
     #[cfg(feature = "pci_support")]
@@ -459,8 +459,8 @@ impl Console {
 struct AddressManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     #[cfg(target_arch = "x86_64")]
-    io_bus: Arc<devices::Bus>,
-    mmio_bus: Arc<devices::Bus>,
+    io_bus: Arc<Bus>,
+    mmio_bus: Arc<Bus>,
     vm: Arc<dyn hypervisor::Vm>,
     #[cfg(feature = "pci_support")]
     device_tree: Arc<Mutex<DeviceTree>>,
@@ -822,8 +822,8 @@ impl DeviceManager {
         let address_manager = Arc::new(AddressManager {
             allocator: memory_manager.lock().unwrap().allocator(),
             #[cfg(target_arch = "x86_64")]
-            io_bus: Arc::new(devices::Bus::new()),
-            mmio_bus: Arc::new(devices::Bus::new()),
+            io_bus: Arc::new(Bus::new()),
+            mmio_bus: Arc::new(Bus::new()),
             vm: vm.clone(),
             #[cfg(feature = "pci_support")]
             device_tree: Arc::clone(&device_tree),
@@ -2998,11 +2998,11 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn io_bus(&self) -> &Arc<devices::Bus> {
+    pub fn io_bus(&self) -> &Arc<Bus> {
         &self.address_manager.io_bus
     }
 
-    pub fn mmio_bus(&self) -> &Arc<devices::Bus> {
+    pub fn mmio_bus(&self) -> &Arc<Bus> {
         &self.address_manager.mmio_bus
     }
 

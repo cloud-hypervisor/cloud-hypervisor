@@ -12,9 +12,8 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{io, result};
-
-use crate::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
+use vm_device::BusDevice;
 
 // As you can see in https://static.docs.arm.com/ddi0224/c/real_time_clock_pl031_r1p3_technical_reference_manual_DDI0224C.pdf
 // at section 3.2 Summary of RTC registers, the total size occupied by this device is 0x000 -> 0xFFC + 4 = 0x1000.

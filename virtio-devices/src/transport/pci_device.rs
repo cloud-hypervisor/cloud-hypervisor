@@ -6,7 +6,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-extern crate devices;
 #[cfg(feature = "pci_support")]
 extern crate pci;
 extern crate vm_allocator;
@@ -21,7 +20,6 @@ use crate::{
     DEVICE_INIT, VIRTIO_MSI_NO_VECTOR,
 };
 use anyhow::anyhow;
-use devices::BusDevice;
 use libc::EFD_NONBLOCK;
 use pci::{
     BarReprogrammingParams, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
@@ -39,6 +37,7 @@ use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
+use vm_device::BusDevice;
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
     GuestUsize, Le32,

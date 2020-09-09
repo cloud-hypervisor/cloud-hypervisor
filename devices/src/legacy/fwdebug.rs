@@ -7,7 +7,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use BusDevice;
+use vm_device::BusDevice;
 
 /// Provides firmware debug output via I/O port controls
 #[derive(Default)]
