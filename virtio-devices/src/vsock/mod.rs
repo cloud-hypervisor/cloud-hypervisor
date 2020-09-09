@@ -273,6 +273,7 @@ mod tests {
                     PathBuf::from("/test/sock"),
                     TestBackend::new(),
                     false,
+                    seccomp::SeccompAction::Trap,
                 )
                 .unwrap(),
             }
