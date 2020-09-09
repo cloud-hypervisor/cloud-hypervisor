@@ -327,6 +327,7 @@ impl Vm {
             vm.clone(),
             reset_evt,
             hypervisor,
+            seccomp_action.clone(),
         )
         .map_err(Error::CpuManager)?;
 

@@ -16,6 +16,7 @@ use crate::config::CpuTopology;
 use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
@@ -31,6 +32,8 @@ use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuId;
 use hypervisor::{CpuState, VmExit};
+use seccomp::{SeccompAction, SeccompFilter};
+
 use libc::{c_void, siginfo_t};
 #[cfg(target_arch = "x86_64")]
 use std::fmt;
@@ -192,6 +195,12 @@ pub enum Error {
 
     /// Error resuming vCPU on shutdown
     ResumeOnShutdown(MigratableError),
+
+    /// Cannot create seccomp filter
+    CreateSeccompFilter(seccomp::SeccompError),
+
+    /// Cannot apply seccomp filter
+    ApplySeccompFilter(seccomp::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -475,6 +484,7 @@ pub struct CpuManager {
     vcpu_states: Vec<VcpuState>,
     selected_cpu: u8,
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
+    seccomp_action: SeccompAction,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -601,6 +611,7 @@ impl CpuManager {
         vm: Arc<dyn hypervisor::Vm>,
         reset_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
+        seccomp_action: SeccompAction,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
@@ -633,6 +644,7 @@ impl CpuManager {
             reset_evt,
             selected_cpu: 0,
             vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
+            seccomp_action,
         }));
 
         #[cfg(target_arch = "x86_64")]
@@ -812,10 +824,22 @@ impl CpuManager {
 
         info!("Starting vCPU: cpu_id = {}", cpu_id);
 
+        // Retrieve seccomp filter for vcpu thread
+        let vcpu_seccomp_filter = get_seccomp_filter(&self.seccomp_action, Thread::Vcpu)
+            .map_err(Error::CreateSeccompFilter)?;
+
         let handle = Some(
             thread::Builder::new()
                 .name(format!("vcpu{}", cpu_id))
                 .spawn(move || {
+                    // Apply seccomp filter for vcpu thread.
+                    if let Err(e) =
+                        SeccompFilter::apply(vcpu_seccomp_filter).map_err(Error::ApplySeccompFilter)
+                    {
+                        error!("Error applying seccomp filter: {:?}", e);
+                        return;
+                    }
+
                     extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
                     // This uses an async signal safe handler to kill the vcpu handles.
                     register_signal_handler(SIGRTMIN(), handle_signal)
