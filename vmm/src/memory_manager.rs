@@ -64,7 +64,26 @@ struct HotPlugState {
     removing: bool,
 }
 
-pub type MemoryZones = HashMap<String, Vec<Arc<GuestRegionMmap>>>;
+#[derive(Default)]
+pub struct MemoryZone {
+    regions: Vec<Arc<GuestRegionMmap>>,
+    virtiomem_region: Option<Arc<GuestRegionMmap>>,
+    virtiomem_resize: Option<virtio_devices::Resize>,
+}
+
+impl MemoryZone {
+    pub fn regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
+        &self.regions
+    }
+    pub fn virtiomem_region(&self) -> &Option<Arc<GuestRegionMmap>> {
+        &self.virtiomem_region
+    }
+    pub fn virtiomem_resize(&self) -> &Option<virtio_devices::Resize> {
+        &self.virtiomem_resize
+    }
+}
+
+pub type MemoryZones = HashMap<String, MemoryZone>;
 
 pub struct MemoryManager {
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -300,7 +319,7 @@ impl MemoryManager {
         let mut memory_zones = HashMap::new();
 
         // Add zone id to the list of memory zones.
-        memory_zones.insert(zone.id.clone(), Vec::new());
+        memory_zones.insert(zone.id.clone(), MemoryZone::default());
 
         for ram_region in ram_regions.iter() {
             let mut ram_region_offset = 0;
@@ -346,7 +365,7 @@ impl MemoryManager {
                 // Add region to the list of regions associated with the
                 // current memory zone.
                 if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
-                    memory_zone.push(region.clone());
+                    memory_zone.regions.push(region.clone());
                 }
 
                 mem_regions.push(region);
@@ -371,7 +390,7 @@ impl MemoryManager {
                         );
                         return Err(Error::DuplicateZoneId);
                     }
-                    memory_zones.insert(zone.id.clone(), Vec::new());
+                    memory_zones.insert(zone.id.clone(), MemoryZone::default());
                 }
 
                 if ram_region_consumed {
