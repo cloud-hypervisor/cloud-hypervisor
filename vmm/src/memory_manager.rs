@@ -207,8 +207,8 @@ pub enum Error {
     /// No virtio-mem resizing handler found.
     MissingVirtioMemHandler,
 
-    /// No default memory zone found.
-    MissingDefaultMemoryZone,
+    /// Unknown memory zone.
+    UnknownMemoryZone,
 
     /// Invalid size for resizing. Can be anything except 0.
     InvalidHotplugSize,
@@ -1120,21 +1120,24 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn virtiomem_resize(&mut self, size: u64) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
-        let virtiomem_region =
-            if let Some(memory_zone) = self.memory_zones.get_mut(DEFAULT_MEMORY_ZONE) {
-                if let Some(resize) = &memory_zone.virtiomem_resize {
-                    resize.work(size).map_err(Error::VirtioMemResizeFail)?;
-                } else {
-                    error!("Failed resizing virtio-mem region: No virtio-mem handler");
-                    return Err(Error::MissingVirtioMemHandler);
-                }
-
-                memory_zone.virtiomem_region.take()
+    pub fn virtiomem_resize(
+        &mut self,
+        id: &str,
+        size: u64,
+    ) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
+        let virtiomem_region = if let Some(memory_zone) = self.memory_zones.get_mut(id) {
+            if let Some(resize) = &memory_zone.virtiomem_resize {
+                resize.work(size).map_err(Error::VirtioMemResizeFail)?;
             } else {
-                error!("Failed resizing virtio-mem region: No default memory zone");
-                return Err(Error::MissingDefaultMemoryZone);
-            };
+                error!("Failed resizing virtio-mem region: No virtio-mem handler");
+                return Err(Error::MissingVirtioMemHandler);
+            }
+
+            memory_zone.virtiomem_region.take()
+        } else {
+            error!("Failed resizing virtio-mem region: Unknown memory zone");
+            return Err(Error::UnknownMemoryZone);
+        };
 
         // Add the region if that's the first time we resize.
         if let Some(region) = virtiomem_region.clone() {
@@ -1178,7 +1181,8 @@ impl MemoryManager {
         match self.hotplug_method {
             HotplugMethod::VirtioMem => {
                 if desired_ram >= self.boot_ram {
-                    region = self.virtiomem_resize(desired_ram - self.boot_ram)?;
+                    region =
+                        self.virtiomem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
                     self.current_ram = desired_ram;
                 }
             }
