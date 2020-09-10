@@ -160,7 +160,7 @@ pub trait Vm: Send + Sync {
     /// Unregister an event that will, when signaled, trigger the `gsi` IRQ.
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> Result<()>;
     /// Creates a new KVM vCPU file descriptor and maps the memory corresponding
-    fn create_vcpu(&self, id: u8) -> Result<Arc<dyn Vcpu>>;
+    fn create_vcpu(&self, id: u8, vmmops: Arc<dyn vm::VmmOps>) -> Result<Arc<dyn Vcpu>>;
     /// Registers an event to be signaled whenever a certain address is written to.
     fn register_ioevent(
         &self,
@@ -205,9 +205,13 @@ pub trait Vm: Send + Sync {
     fn state(&self) -> Result<VmState>;
     /// Set the VM state
     fn set_state(&self, state: &VmState) -> Result<()>;
+    /// set vmmops interface
+    fn set_vmmops(&mut self, vmmops: Arc<dyn VmmOps>) -> vm::Result<()>;
+    /// get vmmops interface
+    fn get_vmmops(&self) -> Result<Arc<dyn VmmOps>>;
 }
 
-pub trait VmmOps {
+pub trait VmmOps: Send + Sync {
     fn write_guest_mem(&self, buf: &[u8], gpa:u64,) -> vm::Result<usize>;
     fn read_guest_mem(&self, buf: &mut [u8], gpa:u64,) -> vm::Result<usize>;
     fn mmio_write(&self, addr: u64, data: &[u8]) -> bool;

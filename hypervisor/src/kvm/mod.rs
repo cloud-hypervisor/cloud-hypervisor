@@ -18,10 +18,17 @@ use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::Address;
 use vmm_sys_util::eventfd::EventFd;
+#[cfg(target_arch = "aarch64")]
+pub use crate::aarch64::{check_required_kvm_extensions, VcpuInit, VcpuKvmState as CpuState};
+use crate::cpu;
+use crate::device;
+use crate::hypervisor;
+use crate::vm;
+use crate::vm::VmmOps;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
@@ -73,6 +80,7 @@ pub use KvmVmState as VmState;
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
     fd: Arc<VmFd>,
+    vmmops: Option<Arc<dyn vm::VmmOps>>,
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
     state: KvmVmState,
@@ -155,7 +163,7 @@ impl vm::Vm for KvmVm {
     ///
     /// Creates a VcpuFd object from a vcpu RawFd.
     ///
-    fn create_vcpu(&self, id: u8) -> vm::Result<Arc<dyn cpu::Vcpu>> {
+    fn create_vcpu(&self, id: u8, vmmops: Arc<dyn VmmOps>) -> vm::Result<Arc<dyn cpu::Vcpu>> {
         let vc = self
             .fd
             .create_vcpu(id)
@@ -164,6 +172,7 @@ impl vm::Vm for KvmVm {
             fd: vc,
             #[cfg(target_arch = "x86_64")]
             msrs: self.msrs.clone(),
+            vmmops: vmmops.clone(),
         };
         Ok(Arc::new(vcpu))
     }
@@ -330,6 +339,16 @@ impl vm::Vm for KvmVm {
     fn set_state(&self, _state: &VmState) -> vm::Result<()> {
         Ok(())
     }
+
+    // set vmmops interface
+    fn set_vmmops(&mut self, vmmops: Arc<dyn VmmOps>) -> vm::Result<()>{
+        self.vmmops = Some(vmmops.clone());
+        Ok(())
+    }
+    // get vmmops interface
+    fn get_vmmops(&self) -> vm::Result<Arc<dyn VmmOps>>{
+        Ok(self.vmmops.clone().unwrap())
+    }
 }
 /// Wrapper over KVM system ioctls.
 pub struct KvmHypervisor {
@@ -371,7 +390,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     /// let hypervisor = KvmHypervisor::new().unwrap();
     /// let vm = hypervisor.create_vm().unwrap()
     ///
-    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+    fn create_vm(&self, vmmops: Option<Arc<dyn vm::VmmOps>>) -> hypervisor::Result<Arc<Mutex<dyn vm::Vm>>> {
         let fd: VmFd;
         loop {
             match self.kvm.create_vm() {
@@ -406,6 +425,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
                 msrs,
+                vmmops: vmmops,
                 state: VmState {},
             }))
         }
@@ -414,6 +434,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
+                vmmops: vmmops,
                 state: VmState {},
             }))
         }
@@ -475,6 +496,7 @@ pub struct KvmVcpu {
     fd: VcpuFd,
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
+    vmmops: Arc<dyn vm::VmmOps>,
 }
 /// Implementation of Vcpu trait for KVM
 /// Example:

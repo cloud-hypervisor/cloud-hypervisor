@@ -259,8 +259,9 @@ impl Vcpu {
         interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
         creation_ts: std::time::Instant,
     ) -> Result<Arc<Mutex<Self>>> {
+        let vmmops = vm.get_vmmops().unwrap();
         let vcpu = vm
-            .create_vcpu(id)
+            .create_vcpu(id, vmmops)
             .map_err(|e| Error::VcpuCreate(e.into()))?;
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Arc::new(Mutex::new(Vcpu {

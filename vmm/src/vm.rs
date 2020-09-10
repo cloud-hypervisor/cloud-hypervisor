@@ -70,6 +70,7 @@ use vm_migration::{
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
+use hypervisor::vm::{VmmOps, HypervisorVmError};
 
 // 64 bit direct boot entry offset for bzImage
 #[cfg(target_arch = "x86_64")]
@@ -295,7 +296,7 @@ impl Vm {
     fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        vm: Arc<dyn hypervisor::Vm>,
+        vm: Arc<Mutex<dyn hypervisor::Vm>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
@@ -310,7 +311,7 @@ impl Vm {
             .map_err(Error::ConfigValidation)?;
 
         let device_manager = DeviceManager::new(
-            vm.clone(),
+            vm.lock().unwrap(),
             config.clone(),
             memory_manager.clone(),
             &exit_evt,
@@ -348,7 +349,7 @@ impl Vm {
         let numa_nodes =
             Self::create_numa_nodes(config.lock().unwrap().numa.clone(), &memory_manager)?;
 
-        Ok(Vm {
+        let new_vm = Vm {
             kernel,
             initramfs,
             device_manager,
@@ -364,7 +365,10 @@ impl Vm {
             saved_clock: _saved_clock,
             #[cfg(feature = "acpi")]
             numa_nodes,
-        })
+        };
+        vm.set_vmmops(Arc::new(new_vm));
+
+        Ok(new_vm)
     }
 
     #[cfg(feature = "acpi")]
@@ -442,11 +446,11 @@ impl Vm {
     ) -> Result<Self> {
         #[cfg(target_arch = "x86_64")]
         hypervisor.check_required_extensions().unwrap();
-        let vm = hypervisor.create_vm().unwrap();
+        let vm = hypervisor.create_vm(None).unwrap();
         #[cfg(target_arch = "x86_64")]
-        vm.enable_split_irq().unwrap();
+        vm.lock().unwrap().enable_split_irq().unwrap();
         let memory_manager = MemoryManager::new(
-            vm.clone(),
+            vm.lock().unwrap().clone(),
             &config.lock().unwrap().memory.clone(),
             None,
             false,
@@ -501,7 +505,7 @@ impl Vm {
     ) -> Result<Self> {
         #[cfg(target_arch = "x86_64")]
         hypervisor.check_required_extensions().unwrap();
-        let vm = hypervisor.create_vm().unwrap();
+        let vm = hypervisor.create_vm(None).unwrap();
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
         let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
@@ -528,7 +532,7 @@ impl Vm {
             ))));
         };
 
-        Vm::new_from_memory_manager(
+       Vm::new_from_memory_manager(
             config,
             memory_manager,
             vm,
@@ -540,7 +544,7 @@ impl Vm {
             #[cfg(target_arch = "x86_64")]
             vm_snapshot.clock,
             #[cfg(target_arch = "aarch64")]
-            None,
+            None
         )
     }
 
@@ -1358,14 +1362,14 @@ impl Pausable for Vm {
     }
 }
 
-impl hypervisor::vm::VmmOps for Vm {
+impl VmmOps for Vm {
     fn write_guest_mem(&self, buf: &[u8], gpa:u64,) -> hypervisor::vm::Result<usize>{
         let guest_memory = self.memory_manager.lock().unwrap().guest_memory().memory();
-        guest_memory.write(buf, GuestAddress(gpa)).map_err(|e| hypervisor::vm::HypervisorVmError::GuestMemWrite(e.into()))
+        guest_memory.write(buf, GuestAddress(gpa)).map_err(|e| HypervisorVmError::GuestMemWrite(e.into()))
     }
     fn read_guest_mem(&self, buf: &mut [u8], gpa:u64,) -> hypervisor::vm::Result<usize>{
         let guest_memory = self.memory_manager.lock().unwrap().guest_memory().memory();
-        guest_memory.read(buf, GuestAddress(gpa)).map_err(|e| hypervisor::vm::HypervisorVmError::GuestMemRead(e.into()))
+        guest_memory.read(buf, GuestAddress(gpa)).map_err(|e| HypervisorVmError::GuestMemRead(e.into()))
     }
     fn mmio_write(&self, addr: u64, data: &[u8]) -> bool {
         self.device_manager.lock().unwrap().mmio_bus().write(addr, data)
