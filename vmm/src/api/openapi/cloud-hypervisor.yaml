@@ -477,6 +477,9 @@ components:
         host_numa_node:
           type: integer
           format: uint32
+        hotplug_size:
+          type: integer
+          format: int64
 
     MemoryConfig:
       required:
