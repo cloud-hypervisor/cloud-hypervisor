@@ -404,7 +404,7 @@ impl Vm {
                 if let Some(memory_zones) = &config.memory_zones {
                     for memory_zone in memory_zones.iter() {
                         if let Some(mm_zone) = mm_zones.get(memory_zone) {
-                            node.memory_regions.extend(mm_zone.clone());
+                            node.memory_regions.extend(mm_zone.regions().clone());
                         } else {
                             error!("Unknown memory zone '{}'", memory_zone);
                             return Err(Error::InvalidNumaConfig);
