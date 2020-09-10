@@ -99,8 +99,6 @@ pub struct MemoryManager {
     boot_ram: u64,
     current_ram: u64,
     next_hotplug_slot: usize,
-    pub virtiomem_region: Option<Arc<GuestRegionMmap>>,
-    pub virtiomem_resize: Option<virtio_devices::Resize>,
     snapshot: Mutex<Option<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
     shared: bool,
     hugepages: bool,
@@ -205,6 +203,18 @@ pub enum Error {
 
     /// Memory zone identifier is not unique.
     DuplicateZoneId,
+
+    /// No virtio-mem resizing handler found.
+    MissingVirtioMemHandler,
+
+    /// No default memory zone found.
+    MissingDefaultMemoryZone,
+
+    /// Failed getting the expected amount of memory zones.
+    InvalidNumberOfMemoryZones,
+
+    /// Invalid size for resizing. Can be anything except 0.
+    InvalidHotplugSize,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -476,7 +486,7 @@ impl MemoryManager {
             .map(|r| (r.0, r.1))
             .collect();
 
-        let (mem_regions, memory_zones) =
+        let (mem_regions, mut memory_zones) =
             Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, ext_regions)?;
 
         let guest_memory =
@@ -485,37 +495,55 @@ impl MemoryManager {
         let end_of_device_area = GuestAddress(mmio_address_space_size() - 1);
 
         let mut start_of_device_area = MemoryManager::start_addr(guest_memory.last_addr(), false);
+        let mut virtiomem_regions: Vec<Arc<GuestRegionMmap>> = Vec::new();
 
-        let mut virtiomem_region = None;
-        let mut virtiomem_resize = None;
-        if let Some(size) = config.hotplug_size {
-            if config.hotplug_method == HotplugMethod::VirtioMem {
-                // Alignment must be "natural" i.e. same as size of block
-                let start_addr = GuestAddress(
-                    (start_of_device_area.0 + virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE - 1)
-                        / virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE
-                        * virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE,
-                );
+        if !use_zones {
+            if memory_zones.len() != 1 {
+                return Err(Error::InvalidNumberOfMemoryZones);
+            }
 
-                if !use_zones {
-                    virtiomem_region = Some(MemoryManager::create_ram_region(
-                        &None,
-                        0,
-                        start_addr,
-                        size as usize,
-                        false,
-                        config.shared,
-                        config.hugepages,
-                        None,
-                        &None,
-                    )?);
+            if let Some(memory_zone) = memory_zones.get_mut(DEFAULT_MEMORY_ZONE) {
+                if let Some(size) = config.hotplug_size {
+                    if size == 0 {
+                        error!("'hotplug_size' can't be 0");
+                        return Err(Error::InvalidHotplugSize);
+                    }
+
+                    if config.hotplug_method == HotplugMethod::VirtioMem {
+                        // Alignment must be "natural" i.e. same as size of block
+                        let start_addr = GuestAddress(
+                            (start_of_device_area.0
+                                + virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE
+                                - 1)
+                                / virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE
+                                * virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE,
+                        );
+
+                        let region = MemoryManager::create_ram_region(
+                            &None,
+                            0,
+                            start_addr,
+                            size as usize,
+                            false,
+                            config.shared,
+                            config.hugepages,
+                            None,
+                            &None,
+                        )?;
+
+                        virtiomem_regions.push(region.clone());
+
+                        memory_zone.virtiomem_region = Some(region);
+                        memory_zone.virtiomem_resize =
+                            Some(virtio_devices::Resize::new().map_err(Error::EventFdFail)?);
+
+                        start_of_device_area = start_addr.unchecked_add(size);
+                    } else {
+                        start_of_device_area = start_of_device_area.unchecked_add(size);
+                    }
                 }
-
-                virtiomem_resize = Some(virtio_devices::Resize::new().map_err(Error::EventFdFail)?);
-
-                start_of_device_area = start_addr.unchecked_add(size);
             } else {
-                start_of_device_area = start_of_device_area.unchecked_add(size);
+                return Err(Error::MissingDefaultMemoryZone);
             }
         }
 
@@ -558,8 +586,6 @@ impl MemoryManager {
             boot_ram: config.size,
             current_ram: config.size,
             next_hotplug_slot: 0,
-            virtiomem_region: virtiomem_region.clone(),
-            virtiomem_resize,
             snapshot: Mutex::new(None),
             shared: config.shared,
             hugepages: config.hugepages,
@@ -582,7 +608,7 @@ impl MemoryManager {
             Ok(())
         })?;
 
-        if let Some(region) = virtiomem_region {
+        for region in virtiomem_regions.iter() {
             memory_manager.lock().unwrap().create_userspace_mapping(
                 region.start_addr().raw_value(),
                 region.len() as u64,
@@ -1089,18 +1115,27 @@ impl MemoryManager {
     }
 
     pub fn virtiomem_resize(&mut self, size: u64) -> Result<(), Error> {
-        let region = self.virtiomem_region.take();
-        if let Some(region) = region {
-            self.add_region(region)?;
-        }
+        let virtiomem_region =
+            if let Some(memory_zone) = self.memory_zones.get_mut(DEFAULT_MEMORY_ZONE) {
+                if let Some(resize) = &memory_zone.virtiomem_resize {
+                    resize.work(size).map_err(Error::VirtioMemResizeFail)?;
+                } else {
+                    error!("Failed resizing virtio-mem region: No virtio-mem handler");
+                    return Err(Error::MissingVirtioMemHandler);
+                }
 
-        if let Some(resize) = &self.virtiomem_resize {
-            resize.work(size).map_err(Error::VirtioMemResizeFail)?;
+                memory_zone.virtiomem_region.take()
+            } else {
+                error!("Failed resizing virtio-mem region: No default memory zone");
+                return Err(Error::MissingDefaultMemoryZone);
+            };
+
+        // Add the region if that's the first time we resize.
+        if let Some(region) = virtiomem_region {
+            self.add_region(region)
         } else {
-            panic!("should not fail here");
+            Ok(())
         }
-
-        Ok(())
     }
 
     pub fn balloon_resize(&mut self, expected_ram: u64) -> Result<u64, Error> {
