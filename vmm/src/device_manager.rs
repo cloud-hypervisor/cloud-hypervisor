@@ -110,7 +110,7 @@ const SERIAL_DEVICE_NAME_PREFIX: &str = "_serial";
 const CONSOLE_DEVICE_NAME: &str = "_console";
 const DISK_DEVICE_NAME_PREFIX: &str = "_disk";
 const FS_DEVICE_NAME_PREFIX: &str = "_fs";
-const MEM_DEVICE_NAME: &str = "_mem";
+const MEM_DEVICE_NAME_PREFIX: &str = "_mem";
 const BALLOON_DEVICE_NAME: &str = "_balloon";
 const NET_DEVICE_NAME_PREFIX: &str = "_net";
 const PMEM_DEVICE_NAME_PREFIX: &str = "_pmem";
@@ -2419,34 +2419,39 @@ impl DeviceManager {
 
         let mm = self.memory_manager.clone();
         let mm = mm.lock().unwrap();
-        if let (Some(region), Some(resize)) = (&mm.virtiomem_region, &mm.virtiomem_resize) {
-            let id = String::from(MEM_DEVICE_NAME);
+        for (_, memory_zone) in mm.memory_zones().iter() {
+            if let (Some(region), Some(resize)) = (
+                memory_zone.virtiomem_region(),
+                memory_zone.virtiomem_resize(),
+            ) {
+                let id = self.next_device_name(MEM_DEVICE_NAME_PREFIX)?;
 
-            let virtio_mem_device = Arc::new(Mutex::new(
-                virtio_devices::Mem::new(
+                let virtio_mem_device = Arc::new(Mutex::new(
+                    virtio_devices::Mem::new(
+                        id.clone(),
+                        &region,
+                        resize
+                            .try_clone()
+                            .map_err(DeviceManagerError::TryCloneVirtioMemResize)?,
+                        self.seccomp_action.clone(),
+                    )
+                    .map_err(DeviceManagerError::CreateVirtioMem)?,
+                ));
+
+                devices.push((
+                    Arc::clone(&virtio_mem_device) as VirtioDeviceArc,
+                    false,
                     id.clone(),
-                    &region,
-                    resize
-                        .try_clone()
-                        .map_err(DeviceManagerError::TryCloneVirtioMemResize)?,
-                    self.seccomp_action.clone(),
-                )
-                .map_err(DeviceManagerError::CreateVirtioMem)?,
-            ));
+                ));
 
-            devices.push((
-                Arc::clone(&virtio_mem_device) as VirtioDeviceArc,
-                false,
-                id.clone(),
-            ));
-
-            // Fill the device tree with a new node. In case of restore, we
-            // know there is nothing to do, so we can simply override the
-            // existing entry.
-            self.device_tree
-                .lock()
-                .unwrap()
-                .insert(id.clone(), device_node!(id, virtio_mem_device));
+                // Fill the device tree with a new node. In case of restore, we
+                // know there is nothing to do, so we can simply override the
+                // existing entry.
+                self.device_tree
+                    .lock()
+                    .unwrap()
+                    .insert(id.clone(), device_node!(id, virtio_mem_device));
+            }
         }
 
         Ok(devices)
