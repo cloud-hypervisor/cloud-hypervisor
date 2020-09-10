@@ -210,14 +210,14 @@ pub enum Error {
     /// No default memory zone found.
     MissingDefaultMemoryZone,
 
-    /// Failed getting the expected amount of memory zones.
-    InvalidNumberOfMemoryZones,
-
     /// Invalid size for resizing. Can be anything except 0.
     InvalidHotplugSize,
 
     /// Invalid hotplug method associated with memory zones resizing capability.
     InvalidHotplugMethodWithMemoryZones,
+
+    /// Could not find specified memory zone identifier from hash map.
+    MissingZoneIdentifier,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -506,19 +506,18 @@ impl MemoryManager {
         let mut start_of_device_area = MemoryManager::start_addr(guest_memory.last_addr(), false);
         let mut virtiomem_regions: Vec<Arc<GuestRegionMmap>> = Vec::new();
 
-        if !use_zones {
-            if memory_zones.len() != 1 {
-                return Err(Error::InvalidNumberOfMemoryZones);
-            }
-
-            if let Some(memory_zone) = memory_zones.get_mut(DEFAULT_MEMORY_ZONE) {
-                if let Some(size) = config.hotplug_size {
-                    if size == 0 {
+        // Update list of memory zones for resize.
+        for zone in zones {
+            if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
+                if let Some(hotplug_size) = zone.hotplug_size {
+                    if hotplug_size == 0 {
                         error!("'hotplug_size' can't be 0");
                         return Err(Error::InvalidHotplugSize);
                     }
 
-                    if config.hotplug_method == HotplugMethod::VirtioMem {
+                    if !use_zones && config.hotplug_method == HotplugMethod::Acpi {
+                        start_of_device_area = start_of_device_area.unchecked_add(hotplug_size);
+                    } else {
                         // Alignment must be "natural" i.e. same as size of block
                         let start_addr = GuestAddress(
                             (start_of_device_area.0
@@ -532,7 +531,7 @@ impl MemoryManager {
                             &None,
                             0,
                             start_addr,
-                            size as usize,
+                            hotplug_size as usize,
                             false,
                             config.shared,
                             config.hugepages,
@@ -546,13 +545,11 @@ impl MemoryManager {
                         memory_zone.virtiomem_resize =
                             Some(virtio_devices::Resize::new().map_err(Error::EventFdFail)?);
 
-                        start_of_device_area = start_addr.unchecked_add(size);
-                    } else {
-                        start_of_device_area = start_of_device_area.unchecked_add(size);
+                        start_of_device_area = start_addr.unchecked_add(hotplug_size);
                     }
                 }
             } else {
-                return Err(Error::MissingDefaultMemoryZone);
+                return Err(Error::MissingZoneIdentifier);
             }
         }
 
