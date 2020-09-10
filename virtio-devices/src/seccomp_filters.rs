@@ -382,6 +382,7 @@ fn create_vsock_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
 fn virtio_vsock_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_accept4),
+        allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
