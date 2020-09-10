@@ -2601,37 +2601,6 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
-        let bars = vfio_pci_device
-            .allocate_bars(&mut self.address_manager.allocator.lock().unwrap())
-            .map_err(DeviceManagerError::AllocateBars)?;
-
-        vfio_pci_device
-            .map_mmio_regions(&self.address_manager.vm, || {
-                self.memory_manager.lock().unwrap().allocate_memory_slot()
-            })
-            .map_err(DeviceManagerError::VfioMapRegion)?;
-
-        let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
-
-        pci.add_device(pci_device_bdf, vfio_pci_device.clone())
-            .map_err(DeviceManagerError::AddPciDevice)?;
-
-        self.pci_devices.insert(
-            pci_device_bdf,
-            Arc::clone(&vfio_pci_device) as Arc<dyn Any + Send + Sync>,
-        );
-        self.bus_devices
-            .push(Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>);
-
-        pci.register_mapping(
-            vfio_pci_device,
-            #[cfg(target_arch = "x86_64")]
-            self.address_manager.io_bus.as_ref(),
-            self.address_manager.mmio_bus.as_ref(),
-            bars,
-        )
-        .map_err(DeviceManagerError::AddPciDevice)?;
-
         let vfio_name = if let Some(id) = &device_cfg.id {
             if self.pci_id_list.contains_key(id) {
                 return Err(DeviceManagerError::DeviceIdAlreadyInUse);
@@ -2643,9 +2612,64 @@ impl DeviceManager {
             device_cfg.id = Some(id.clone());
             id
         };
-        self.pci_id_list.insert(vfio_name.clone(), pci_device_bdf);
+
+        vfio_pci_device
+            .map_mmio_regions(&self.address_manager.vm, || {
+                self.memory_manager.lock().unwrap().allocate_memory_slot()
+            })
+            .map_err(DeviceManagerError::VfioMapRegion)?;
+
+        self.add_pci_device(
+            pci,
+            Arc::new(Mutex::new(vfio_pci_device)),
+            pci_device_bdf,
+            vfio_name.clone(),
+        )?;
 
         Ok((pci_device_bdf, vfio_name))
+    }
+
+    #[cfg(feature = "pci_support")]
+    fn add_pci_device<T>(
+        &mut self,
+        pci_bus: &mut PciBus,
+        device: Arc<Mutex<T>>,
+        bdf: u32,
+        device_id: String,
+    ) -> DeviceManagerResult<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>>
+    where
+        T: BusDevice + PciDevice + Any + Send + Sync,
+    {
+        let bars = device
+            .lock()
+            .unwrap()
+            .allocate_bars(&mut self.address_manager.allocator.lock().unwrap())
+            .map_err(DeviceManagerError::AllocateBars)?;
+
+        pci_bus
+            .add_device(bdf, device.clone())
+            .map_err(DeviceManagerError::AddPciDevice)?;
+
+        self.pci_devices
+            .insert(bdf, Arc::clone(&device) as Arc<dyn Any + Send + Sync>);
+        self.bus_devices
+            .push(Arc::clone(&device) as Arc<Mutex<dyn BusDevice>>);
+
+        pci_bus
+            .register_mapping(
+                device,
+                #[cfg(target_arch = "x86_64")]
+                self.address_manager.io_bus.as_ref(),
+                self.address_manager.mmio_bus.as_ref(),
+                bars.clone(),
+            )
+            .map_err(DeviceManagerError::AddPciDevice)?;
+
+        if self.pci_id_list.contains_key(&device_id) {
+            return Err(DeviceManagerError::DeviceIdAlreadyInUse);
+        }
+        self.pci_id_list.insert(device_id, bdf);
+        Ok(bars)
     }
 
     #[cfg(feature = "pci_support")]
@@ -2789,45 +2813,22 @@ impl DeviceManager {
             virtio_pci_device.set_config_bar_addr(addr);
         }
 
-        let allocator = self.address_manager.allocator.clone();
-        let mut allocator = allocator.lock().unwrap();
-        let bars = virtio_pci_device
-            .allocate_bars(&mut allocator)
-            .map_err(DeviceManagerError::AllocateBars)?;
+        let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
+        let bars = self.add_pci_device(
+            pci,
+            virtio_pci_device.clone(),
+            pci_device_bdf,
+            virtio_device_id,
+        )?;
 
-        let bar_addr = virtio_pci_device.config_bar_addr();
-        for (event, addr) in virtio_pci_device.ioeventfds(bar_addr) {
+        let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
+        for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
             let io_addr = IoEventAddress::Mmio(addr);
             self.address_manager
                 .vm
                 .register_ioevent(event, &io_addr, None)
                 .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
         }
-
-        let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
-
-        pci.add_device(pci_device_bdf, virtio_pci_device.clone())
-            .map_err(DeviceManagerError::AddPciDevice)?;
-        self.pci_devices.insert(
-            pci_device_bdf,
-            Arc::clone(&virtio_pci_device) as Arc<dyn Any + Send + Sync>,
-        );
-        self.bus_devices
-            .push(Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn BusDevice>>);
-
-        if self.pci_id_list.contains_key(&virtio_device_id) {
-            return Err(DeviceManagerError::DeviceIdAlreadyInUse);
-        }
-        self.pci_id_list.insert(virtio_device_id, pci_device_bdf);
-
-        pci.register_mapping(
-            virtio_pci_device.clone(),
-            #[cfg(target_arch = "x86_64")]
-            self.address_manager.io_bus.as_ref(),
-            self.address_manager.mmio_bus.as_ref(),
-            bars.clone(),
-        )
-        .map_err(DeviceManagerError::AddPciDevice)?;
 
         // Update the device tree with correct resource information.
         for pci_bar in bars.iter() {
