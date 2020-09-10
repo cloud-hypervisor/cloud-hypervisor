@@ -251,6 +251,23 @@ fn resize_api_command(
     )
 }
 
+fn resize_zone_api_command(socket: &mut UnixStream, id: &str, size: &str) -> Result<(), Error> {
+    let resize_zone = vmm::api::VmResizeZoneData {
+        id: id.to_owned(),
+        desired_ram: size
+            .parse::<ByteSized>()
+            .map_err(Error::InvalidMemorySize)?
+            .0,
+    };
+
+    simple_api_command(
+        socket,
+        "PUT",
+        "resize-zone",
+        Some(&serde_json::to_string(&resize_zone).unwrap()),
+    )
+}
+
 fn add_device_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Error> {
     let device_config = vmm::config::DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
 
@@ -373,6 +390,19 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .subcommand_matches("resize")
                 .unwrap()
                 .value_of("balloon"),
+        ),
+        Some("resize-zone") => resize_zone_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("resize-zone")
+                .unwrap()
+                .value_of("id")
+                .unwrap(),
+            matches
+                .subcommand_matches("resize-zone")
+                .unwrap()
+                .value_of("size")
+                .unwrap(),
         ),
         Some("add-device") => add_device_api_command(
             &mut socket,
@@ -548,6 +578,24 @@ fn main() {
                     Arg::with_name("balloon")
                         .long("balloon")
                         .help("New memory with balloon size in bytes (supports K/M/G suffix)")
+                        .takes_value(true)
+                        .number_of_values(1),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("resize-zone")
+                .about("Resize a memory zone")
+                .arg(
+                    Arg::with_name("id")
+                        .long("id")
+                        .help("Memory zone identifier")
+                        .takes_value(true)
+                        .number_of_values(1),
+                )
+                .arg(
+                    Arg::with_name("size")
+                        .long("size")
+                        .help("New memory zone size in bytes (supports K/M/G suffix)")
                         .takes_value(true)
                         .number_of_values(1),
                 ),

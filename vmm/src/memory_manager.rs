@@ -218,6 +218,9 @@ pub enum Error {
 
     /// Could not find specified memory zone identifier from hash map.
     MissingZoneIdentifier,
+
+    /// Resizing the memory zone failed.
+    ResizeZone,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -1171,8 +1174,7 @@ impl MemoryManager {
         if self.use_zones {
             error!(
                 "Not allowed to resize guest memory when backed with user \
-                defined memory regions.\n Try adding new memory regions \
-                instead."
+                defined memory zones."
             );
             return Err(Error::InvalidResizeWithMemoryZones);
         }
@@ -1195,6 +1197,41 @@ impl MemoryManager {
             }
         }
         Ok(region)
+    }
+
+    pub fn resize_zone(
+        &mut self,
+        id: &str,
+        desired_ram: u64,
+        config: &MemoryConfig,
+    ) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
+        if !self.use_zones {
+            error!(
+                "Not allowed to resize guest memory zone when no zone is \
+                defined."
+            );
+            return Err(Error::ResizeZone);
+        }
+
+        if let Some(zones) = &config.zones {
+            for zone in zones.iter() {
+                if zone.id == id {
+                    if desired_ram >= zone.size {
+                        return self.virtiomem_resize(id, desired_ram - zone.size);
+                    } else {
+                        error!(
+                            "Invalid to ask less ({}) than boot RAM ({}) for \
+                            this memory zone",
+                            desired_ram, zone.size,
+                        );
+                        return Err(Error::ResizeZone);
+                    }
+                }
+            }
+        }
+
+        error!("Could not find the memory zone {} for the resize", id);
+        Err(Error::ResizeZone)
     }
 
     #[cfg(target_arch = "x86_64")]
