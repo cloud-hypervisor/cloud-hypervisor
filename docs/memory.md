@@ -112,8 +112,7 @@ _Example_
 
 Amount of memory that can be dynamically added to the VM.
 
-Value is an unsigned integer of 64 bits. A value of 0 simply means that no
-memory can be added to the VM.
+Value is an unsigned integer of 64 bits. A value of 0 is invalid.
 
 _Example_
 
@@ -149,11 +148,12 @@ struct MemoryZoneConfig {
     shared: bool,
     hugepages: bool,
     host_numa_node: Option<u32>,
+    hotplug_size: Option<u64>,
 }
 ```
 
 ```
---memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,host_numa_node=<node_id>,id=<zone_identifier>"
+--memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>"
 ```
 
 This parameter expects one or more occurences, allowing for a list of memory
@@ -286,6 +286,21 @@ _Example_
 ```
 --memory size=0
 --memory-zone id=mem0,size=1G,host_numa_node=0
+```
+
+### `hotplug_size`
+
+Amount of memory that can be dynamically added to the memory zone. Since
+`virtio-mem` is the only way of resizing a memory zone, one must specify
+the `hotplug_method=virtio-mem` to the `--memory` parameter.
+
+Value is an unsigned integer of 64 bits. A value of 0 is invalid.
+
+_Example_
+
+```
+--memory size=0,hotplug_method=virtio-mem
+--memory-zone id=mem0,size=1G,hotplug_size=1G
 ```
 
 ## NUMA settings

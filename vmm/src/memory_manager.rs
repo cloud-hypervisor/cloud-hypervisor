@@ -215,6 +215,9 @@ pub enum Error {
 
     /// Invalid size for resizing. Can be anything except 0.
     InvalidHotplugSize,
+
+    /// Invalid hotplug method associated with memory zones resizing capability.
+    InvalidHotplugMethodWithMemoryZones,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -442,6 +445,7 @@ impl MemoryManager {
                 shared: config.shared,
                 hugepages: config.hugepages,
                 host_numa_node: None,
+                hotplug_size: config.hotplug_size,
             }];
 
             (config.size, zones)
@@ -471,6 +475,11 @@ impl MemoryManager {
                         backed by a regular file and mapped as 'shared'"
                     );
                     return Err(Error::InvalidSharedMemoryZoneWithHostNuma);
+                }
+
+                if zone.hotplug_size.is_some() && config.hotplug_method == HotplugMethod::Acpi {
+                    error!("Invalid to set ACPI hotplug method for memory zones");
+                    return Err(Error::InvalidHotplugMethodWithMemoryZones);
                 }
             }
 
