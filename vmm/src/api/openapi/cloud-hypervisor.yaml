@@ -150,6 +150,22 @@ paths:
         404:
           description: The VM instance could not be resized because it is not created.
 
+  /vm.resize-zone:
+    put:
+      summary: Resize a memory zone
+      requestBody:
+        description: The target size for the memory zone
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VmResizeZone'
+        required: true
+      responses:
+        204:
+          description: The memory zone was successfully resized.
+        500:
+          description: The memory zone could not be resized.
+
   /vm.add-device:
     put:
       summary: Add a new device to the VM
@@ -771,6 +787,16 @@ components:
           format: int64
         desired_ram_w_balloon:
           description: desired ballon size in bytes
+          type: integer
+          format: int64
+
+    VmResizeZone:
+      type: object
+      properties:
+        id:
+          type: string
+        desired_ram:
+          description: desired memory zone size in bytes
           type: integer
           format: int64
 

@@ -109,6 +109,9 @@ pub enum ApiError {
     /// The VM could not be resized
     VmResize(VmError),
 
+    /// The memory zone could not be resized.
+    VmResizeZone(VmError),
+
     /// The device could not be added to the VM.
     VmAddDevice(VmError),
 
@@ -154,6 +157,12 @@ pub struct VmResizeData {
     pub desired_vcpus: Option<u8>,
     pub desired_ram: Option<u64>,
     pub desired_ram_w_balloon: Option<u64>,
+}
+
+#[derive(Clone, Deserialize, Serialize, Default)]
+pub struct VmResizeZoneData {
+    pub id: String,
+    pub desired_ram: u64,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default)]
@@ -235,6 +244,9 @@ pub enum ApiRequest {
 
     /// Resize the VM.
     VmResize(Arc<VmResizeData>, Sender<ApiResponse>),
+
+    /// Resize the memory zone.
+    VmResizeZone(Arc<VmResizeZoneData>, Sender<ApiResponse>),
 
     /// Add a device to the VM.
     VmAddDevice(Arc<DeviceConfig>, Sender<ApiResponse>),
@@ -331,6 +343,9 @@ pub enum VmAction {
     /// Resize VM
     Resize(Arc<VmResizeData>),
 
+    /// Resize memory zone
+    ResizeZone(Arc<VmResizeZoneData>),
+
     /// Restore VM
     Restore(Arc<RestoreConfig>),
 
@@ -362,6 +377,7 @@ fn vm_action(
         AddVsock(v) => ApiRequest::VmAddVsock(v, response_sender),
         RemoveDevice(v) => ApiRequest::VmRemoveDevice(v, response_sender),
         Resize(v) => ApiRequest::VmResize(v, response_sender),
+        ResizeZone(v) => ApiRequest::VmResizeZone(v, response_sender),
         Restore(v) => ApiRequest::VmRestore(v, response_sender),
         Snapshot(v) => ApiRequest::VmSnapshot(v, response_sender),
     };
@@ -476,6 +492,14 @@ pub fn vm_resize(
     data: Arc<VmResizeData>,
 ) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Resize(data))
+}
+
+pub fn vm_resize_zone(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VmResizeZoneData>,
+) -> ApiResult<Option<Body>> {
+    vm_action(api_evt, api_sender, VmAction::ResizeZone(data))
 }
 
 pub fn vm_add_device(

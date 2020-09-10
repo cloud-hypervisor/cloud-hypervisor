@@ -922,6 +922,25 @@ impl Vm {
         Ok(())
     }
 
+    pub fn resize_zone(&mut self, id: String, desired_memory: u64) -> Result<()> {
+        let new_region = self
+            .memory_manager
+            .lock()
+            .unwrap()
+            .resize_zone(&id, desired_memory, &self.config.lock().unwrap().memory)
+            .map_err(Error::MemoryManager)?;
+
+        if let Some(new_region) = &new_region {
+            self.device_manager
+                .lock()
+                .unwrap()
+                .update_memory(&new_region)
+                .map_err(Error::DeviceManager)?;
+        }
+
+        Ok(())
+    }
+
     #[cfg(not(feature = "pci_support"))]
     pub fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
         Err(Error::NoPciSupport)

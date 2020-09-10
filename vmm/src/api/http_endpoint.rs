@@ -7,8 +7,8 @@ use crate::api::http::{error_response, EndpointHandler, HttpError};
 use crate::api::{
     vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_add_vsock, vm_boot,
     vm_counters, vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_remove_device, vm_resize,
-    vm_restore, vm_resume, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown, ApiRequest, VmAction,
-    VmConfig,
+    vm_resize_zone, vm_restore, vm_resume, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown,
+    ApiRequest, VmAction, VmConfig,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use std::sync::mpsc::Sender;
@@ -131,6 +131,13 @@ impl EndpointHandler for VmActionHandler {
                     Arc::new(serde_json::from_slice(body.raw())?),
                 )
                 .map_err(HttpError::VmResize),
+
+                ResizeZone(_) => vm_resize_zone(
+                    api_notifier,
+                    api_sender,
+                    Arc::new(serde_json::from_slice(body.raw())?),
+                )
+                .map_err(HttpError::VmResizeZone),
 
                 Restore(_) => vm_restore(
                     api_notifier,

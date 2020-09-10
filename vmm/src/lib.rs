@@ -517,6 +517,19 @@ impl Vmm {
         }
     }
 
+    fn vm_resize_zone(&mut self, id: String, desired_ram: u64) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            if let Err(e) = vm.resize_zone(id, desired_ram) {
+                error!("Error when resizing VM: {:?}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn vm_add_device(&mut self, device_cfg: DeviceConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_device(device_cfg).map_err(|e| {
@@ -783,6 +796,16 @@ impl Vmm {
                                             resize_data.desired_ram_w_balloon,
                                         )
                                         .map_err(ApiError::VmResize)
+                                        .map(|_| ApiResponsePayload::Empty);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmResizeZone(resize_zone_data, sender) => {
+                                    let response = self
+                                        .vm_resize_zone(
+                                            resize_zone_data.id.clone(),
+                                            resize_zone_data.desired_ram,
+                                        )
+                                        .map_err(ApiError::VmResizeZone)
                                         .map(|_| ApiResponsePayload::Empty);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }

@@ -88,7 +88,8 @@ Reboot the VM                      | `/vm.reboot`        | N/A                  
 Pause the VM                       | `/vm.pause`         | N/A                       | N/A                      | The VM is booted
 Resume the VM                      | `/vm.resume`        | N/A                       | N/A                      | The VM is paused
 Add/remove CPUs to/from the VM     | `/vm.resize`        | `/schemas/VmResize`       | N/A                      | The VM is booted
-Remove memory from the VM          | `/vm.resize`        | `/schemas/VmResize`       | N/A                      | The VM is booted
+Add/remove memory from the VM      | `/vm.resize`        | `/schemas/VmResize`       | N/A                      | The VM is booted
+Add/remove memory from a zone      | `/vm.resize-zone`   | `/schemas/VmResizeZone`   | N/A                      | The VM is booted
 Dump the VM information            | `/vm.info`          | N/A                       | `/schemas/VmInfo`        | The VM is created
 Add VFIO PCI device to the VM      | `/vm.add-device`    | `/schemas/VmAddDevice`    | `/schemas/PciDeviceInfo` | The VM is booted
 Add disk device to the VM          | `/vm.add-disk`      | `/schemas/DiskConfig`     | `/schemas/PciDeviceInfo` | The VM is booted
