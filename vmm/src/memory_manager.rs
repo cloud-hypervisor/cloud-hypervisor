@@ -1120,7 +1120,7 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn virtiomem_resize(&mut self, size: u64) -> Result<(), Error> {
+    pub fn virtiomem_resize(&mut self, size: u64) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
         let virtiomem_region =
             if let Some(memory_zone) = self.memory_zones.get_mut(DEFAULT_MEMORY_ZONE) {
                 if let Some(resize) = &memory_zone.virtiomem_resize {
@@ -1137,11 +1137,11 @@ impl MemoryManager {
             };
 
         // Add the region if that's the first time we resize.
-        if let Some(region) = virtiomem_region {
-            self.add_region(region)
-        } else {
-            Ok(())
+        if let Some(region) = virtiomem_region.clone() {
+            self.add_region(region)?;
         }
+
+        Ok(virtiomem_region)
     }
 
     pub fn balloon_resize(&mut self, expected_ram: u64) -> Result<u64, Error> {
@@ -1178,7 +1178,7 @@ impl MemoryManager {
         match self.hotplug_method {
             HotplugMethod::VirtioMem => {
                 if desired_ram >= self.boot_ram {
-                    self.virtiomem_resize(desired_ram - self.boot_ram)?;
+                    region = self.virtiomem_resize(desired_ram - self.boot_ram)?;
                     self.current_ram = desired_ram;
                 }
             }
