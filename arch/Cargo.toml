@@ -11,7 +11,7 @@ acpi = ["acpi_tables"]
 anyhow = "1.0"
 byteorder = "1.3.4"
 hypervisor = { path = "../hypervisor" }
-libc = "0.2.76"
+libc = "0.2.77"
 log = "0.4.11"
 vm-memory = { version = "0.2.1", features = ["backend-mmap"] }
 acpi_tables = { path = "../acpi_tables", optional = true }
