@@ -2421,8 +2421,8 @@ impl DeviceManager {
         let mm = mm.lock().unwrap();
         for (_, memory_zone) in mm.memory_zones().iter() {
             if let (Some(region), Some(resize)) = (
-                memory_zone.virtiomem_region(),
-                memory_zone.virtiomem_resize(),
+                memory_zone.virtio_mem_region(),
+                memory_zone.virtio_mem_resize(),
             ) {
                 let id = self.next_device_name(MEM_DEVICE_NAME_PREFIX)?;
 
