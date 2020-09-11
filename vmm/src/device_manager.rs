@@ -18,6 +18,8 @@ use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::kvm::KvmMsiInterruptManager as MsiInterruptManager;
 use crate::interrupt::LegacyUserspaceInterruptManager;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+#[cfg(feature = "acpi")]
+use crate::vm::NumaNodes;
 #[cfg(feature = "pci_support")]
 use crate::PciDeviceInfo;
 use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
@@ -805,9 +807,14 @@ pub struct DeviceManager {
 
     // seccomp action
     seccomp_action: SeccompAction,
+
+    // List of guest NUMA nodes.
+    #[cfg(feature = "acpi")]
+    numa_nodes: NumaNodes,
 }
 
 impl DeviceManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         vm: Arc<dyn hypervisor::Vm>,
         config: Arc<Mutex<VmConfig>>,
@@ -816,6 +823,7 @@ impl DeviceManager {
         #[cfg_attr(target_arch = "aarch64", allow(unused_variables))] reset_evt: &EventFd,
         vmm_path: PathBuf,
         seccomp_action: SeccompAction,
+        #[cfg(feature = "acpi")] numa_nodes: NumaNodes,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
 
@@ -878,6 +886,8 @@ impl DeviceManager {
             #[cfg(target_arch = "aarch64")]
             id_to_dev_info: HashMap::new(),
             seccomp_action,
+            #[cfg(feature = "acpi")]
+            numa_nodes,
         };
 
         #[cfg(feature = "acpi")]
@@ -2419,12 +2429,18 @@ impl DeviceManager {
 
         let mm = self.memory_manager.clone();
         let mm = mm.lock().unwrap();
-        for (_, memory_zone) in mm.memory_zones().iter() {
+        for (_memory_zone_id, memory_zone) in mm.memory_zones().iter() {
             if let (Some(region), Some(resize)) = (
                 memory_zone.virtio_mem_region(),
                 memory_zone.virtio_mem_resize(),
             ) {
                 let id = self.next_device_name(MEM_DEVICE_NAME_PREFIX)?;
+
+                #[cfg(not(feature = "acpi"))]
+                let node_id: Option<u16> = None;
+                #[cfg(feature = "acpi")]
+                let node_id = numa_node_id_from_memory_zone_id(&self.numa_nodes, _memory_zone_id)
+                    .map(|i| i as u16);
 
                 let virtio_mem_device = Arc::new(Mutex::new(
                     virtio_devices::Mem::new(
@@ -2434,7 +2450,7 @@ impl DeviceManager {
                             .try_clone()
                             .map_err(DeviceManagerError::TryCloneVirtioMemResize)?,
                         self.seccomp_action.clone(),
-                        None,
+                        node_id,
                     )
                     .map_err(DeviceManagerError::CreateVirtioMem)?,
                 ));
@@ -3354,6 +3370,20 @@ impl DeviceManager {
 
         counters
     }
+}
+
+#[cfg(feature = "acpi")]
+fn numa_node_id_from_memory_zone_id(numa_nodes: &NumaNodes, memory_zone_id: &str) -> Option<u32> {
+    for (numa_node_id, numa_node) in numa_nodes.iter() {
+        if numa_node
+            .memory_zones()
+            .contains(&memory_zone_id.to_owned())
+        {
+            return Some(*numa_node_id);
+        }
+    }
+
+    None
 }
 
 #[cfg(feature = "acpi")]

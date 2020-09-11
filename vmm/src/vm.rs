@@ -212,11 +212,12 @@ pub enum Error {
 }
 pub type Result<T> = result::Result<T, Error>;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct NumaNode {
     memory_regions: Vec<Arc<GuestRegionMmap>>,
     cpus: Vec<u8>,
     distances: BTreeMap<u32, u8>,
+    memory_zones: Vec<String>,
 }
 
 impl NumaNode {
@@ -230,6 +231,10 @@ impl NumaNode {
 
     pub fn distances(&self) -> &BTreeMap<u32, u8> {
         &self.distances
+    }
+
+    pub fn memory_zones(&self) -> &Vec<String> {
+        &self.memory_zones
     }
 }
 
@@ -317,6 +322,11 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
+        // Create NUMA nodes based on NumaConfig.
+        #[cfg(feature = "acpi")]
+        let numa_nodes =
+            Self::create_numa_nodes(config.lock().unwrap().numa.clone(), &memory_manager)?;
+
         let device_manager = DeviceManager::new(
             vm.clone(),
             config.clone(),
@@ -325,6 +335,8 @@ impl Vm {
             &reset_evt,
             vmm_path,
             seccomp_action.clone(),
+            #[cfg(feature = "acpi")]
+            numa_nodes.clone(),
         )
         .map_err(Error::DeviceManager)?;
 
@@ -351,11 +363,6 @@ impl Vm {
             .map(|i| File::open(&i.path))
             .transpose()
             .map_err(Error::InitramfsFile)?;
-
-        // Create NUMA nodes based on NumaConfig.
-        #[cfg(feature = "acpi")]
-        let numa_nodes =
-            Self::create_numa_nodes(config.lock().unwrap().numa.clone(), &memory_manager)?;
 
         Ok(Vm {
             kernel,
@@ -395,16 +402,13 @@ impl Vm {
                     return Err(Error::InvalidNumaConfig);
                 }
 
-                let mut node = NumaNode {
-                    memory_regions: Vec::new(),
-                    cpus: Vec::new(),
-                    distances: BTreeMap::new(),
-                };
+                let mut node = NumaNode::default();
 
                 if let Some(memory_zones) = &config.memory_zones {
                     for memory_zone in memory_zones.iter() {
                         if let Some(mm_zone) = mm_zones.get(memory_zone) {
                             node.memory_regions.extend(mm_zone.regions().clone());
+                            node.memory_zones.push(memory_zone.clone());
                         } else {
                             error!("Unknown memory zone '{}'", memory_zone);
                             return Err(Error::InvalidNumaConfig);
