@@ -67,19 +67,19 @@ struct HotPlugState {
 #[derive(Default)]
 pub struct MemoryZone {
     regions: Vec<Arc<GuestRegionMmap>>,
-    virtiomem_region: Option<Arc<GuestRegionMmap>>,
-    virtiomem_resize: Option<virtio_devices::Resize>,
+    virtio_mem_region: Option<Arc<GuestRegionMmap>>,
+    virtio_mem_resize: Option<virtio_devices::Resize>,
 }
 
 impl MemoryZone {
     pub fn regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
         &self.regions
     }
-    pub fn virtiomem_region(&self) -> &Option<Arc<GuestRegionMmap>> {
-        &self.virtiomem_region
+    pub fn virtio_mem_region(&self) -> &Option<Arc<GuestRegionMmap>> {
+        &self.virtio_mem_region
     }
-    pub fn virtiomem_resize(&self) -> &Option<virtio_devices::Resize> {
-        &self.virtiomem_resize
+    pub fn virtio_mem_resize(&self) -> &Option<virtio_devices::Resize> {
+        &self.virtio_mem_resize
     }
 }
 
@@ -507,7 +507,7 @@ impl MemoryManager {
         let end_of_device_area = GuestAddress(mmio_address_space_size() - 1);
 
         let mut start_of_device_area = MemoryManager::start_addr(guest_memory.last_addr(), false);
-        let mut virtiomem_regions: Vec<Arc<GuestRegionMmap>> = Vec::new();
+        let mut virtio_mem_regions: Vec<Arc<GuestRegionMmap>> = Vec::new();
 
         // Update list of memory zones for resize.
         for zone in zones {
@@ -542,10 +542,10 @@ impl MemoryManager {
                             &None,
                         )?;
 
-                        virtiomem_regions.push(region.clone());
+                        virtio_mem_regions.push(region.clone());
 
-                        memory_zone.virtiomem_region = Some(region);
-                        memory_zone.virtiomem_resize =
+                        memory_zone.virtio_mem_region = Some(region);
+                        memory_zone.virtio_mem_resize =
                             Some(virtio_devices::Resize::new().map_err(Error::EventFdFail)?);
 
                         start_of_device_area = start_addr.unchecked_add(hotplug_size);
@@ -617,7 +617,7 @@ impl MemoryManager {
             Ok(())
         })?;
 
-        for region in virtiomem_regions.iter() {
+        for region in virtio_mem_regions.iter() {
             memory_manager.lock().unwrap().create_userspace_mapping(
                 region.start_addr().raw_value(),
                 region.len() as u64,
@@ -1123,31 +1123,31 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn virtiomem_resize(
+    pub fn virtio_mem_resize(
         &mut self,
         id: &str,
         size: u64,
     ) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
-        let virtiomem_region = if let Some(memory_zone) = self.memory_zones.get_mut(id) {
-            if let Some(resize) = &memory_zone.virtiomem_resize {
+        let virtio_mem_region = if let Some(memory_zone) = self.memory_zones.get_mut(id) {
+            if let Some(resize) = &memory_zone.virtio_mem_resize {
                 resize.work(size).map_err(Error::VirtioMemResizeFail)?;
             } else {
                 error!("Failed resizing virtio-mem region: No virtio-mem handler");
                 return Err(Error::MissingVirtioMemHandler);
             }
 
-            memory_zone.virtiomem_region.take()
+            memory_zone.virtio_mem_region.take()
         } else {
             error!("Failed resizing virtio-mem region: Unknown memory zone");
             return Err(Error::UnknownMemoryZone);
         };
 
         // Add the region if that's the first time we resize.
-        if let Some(region) = virtiomem_region.clone() {
+        if let Some(region) = virtio_mem_region.clone() {
             self.add_region(region)?;
         }
 
-        Ok(virtiomem_region)
+        Ok(virtio_mem_region)
     }
 
     pub fn balloon_resize(&mut self, expected_ram: u64) -> Result<u64, Error> {
@@ -1184,7 +1184,7 @@ impl MemoryManager {
             HotplugMethod::VirtioMem => {
                 if desired_ram >= self.boot_ram {
                     region =
-                        self.virtiomem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
+                        self.virtio_mem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
                     self.current_ram = desired_ram;
                 }
             }
@@ -1217,7 +1217,7 @@ impl MemoryManager {
             for zone in zones.iter() {
                 if zone.id == id {
                     if desired_ram >= zone.size {
-                        return self.virtiomem_resize(id, desired_ram - zone.size);
+                        return self.virtio_mem_resize(id, desired_ram - zone.size);
                     } else {
                         error!(
                             "Invalid to ask less ({}) than boot RAM ({}) for \
