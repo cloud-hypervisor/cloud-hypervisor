@@ -90,6 +90,9 @@ const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 // New descriptors are pending on the virtio queue.
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 
+// Virtio features
+const VIRTIO_MEM_F_ACPI_PXM: u8 = 0;
+
 #[derive(Debug)]
 pub enum Error {
     // Guest gave us bad memory addresses.
@@ -695,6 +698,7 @@ impl Mem {
         region: &Arc<GuestRegionMmap>,
         resize: Resize,
         seccomp_action: SeccompAction,
+        numa_node_id: Option<u16>,
     ) -> io::Result<Mem> {
         let region_len = region.len();
 
@@ -709,8 +713,7 @@ impl Mem {
             ));
         }
 
-        // Fixme: Not support VIRTIO_MEM_F_ACPI_PXM
-        let avail_features = 1u64 << VIRTIO_F_VERSION_1;
+        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
         let mut config = VirtioMemConfig::default();
         config.block_size = VIRTIO_MEM_DEFAULT_BLOCK_SIZE;
@@ -720,6 +723,11 @@ impl Mem {
             config.region_size,
             config.requested_size + VIRTIO_MEM_USABLE_EXTENT,
         );
+
+        if let Some(node_id) = numa_node_id {
+            avail_features |= 1u64 << VIRTIO_MEM_F_ACPI_PXM;
+            config.node_id = node_id;
+        }
 
         let host_fd = if let Some(f_offset) = region.file_offset() {
             Some(f_offset.file().as_raw_fd())
