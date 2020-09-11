@@ -28,7 +28,7 @@ serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
 tempfile = "3.1.0"
 vfio-ioctls = { git = "https://github.com/cloud-hypervisor/vfio-ioctls", branch = "ch" }
-vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-master", "vhost-user-slave"] }
+vhost_rs = { git = "https://github.com/rust-vmm/vhost", branch = "master", package = "vhost", features = ["vhost-user-master", "vhost-user-slave"] }
 virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }

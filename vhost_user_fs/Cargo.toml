@@ -16,7 +16,7 @@ seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v
 tempdir = "0.3.7"
 virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
 virtio-devices = { path = "../virtio-devices" }
-vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-slave"] }
+vhost_rs = { git = "https://github.com/rust-vmm/vhost", branch = "master", package = "vhost", features = ["vhost-user-slave"] }
 vhost_user_backend = { path = "../vhost_user_backend"}
 vm-memory = "0.2.1"
 vm-virtio = { path = "../vm-virtio" }

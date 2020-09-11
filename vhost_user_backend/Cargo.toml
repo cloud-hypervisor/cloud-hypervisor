@@ -15,4 +15,4 @@ virtio-bindings = "0.1.0"
 vm-memory = "0.2.1"
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
-vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-slave"] }
+vhost_rs = { git = "https://github.com/rust-vmm/vhost", branch = "master", package = "vhost", features = ["vhost-user-slave"] }
