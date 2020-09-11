@@ -520,6 +520,18 @@ mod tests {
         cmd.status().expect("Failed to launch ch-remote").success()
     }
 
+    fn resize_zone_command(api_socket: &str, id: &str, desired_size: &str) -> bool {
+        let mut cmd = Command::new(clh_command("ch-remote"));
+        cmd.args(&[
+            &format!("--api-socket={}", api_socket),
+            "resize-zone",
+            &format!("--id={}", id),
+            &format!("--size={}", desired_size),
+        ]);
+
+        cmd.status().expect("Failed to launch ch-remote").success()
+    }
+
     const DEFAULT_SSH_RETRIES: u8 = 6;
     const DEFAULT_SSH_TIMEOUT: u8 = 10;
     fn ssh_command_ip(command: &str, ip: &str, retries: u8, timeout: u8) -> Result<String, Error> {
@@ -2310,34 +2322,60 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
+        #[test]
         fn test_user_defined_memory_regions() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
-            let mut cmd = GuestCommand::new(&guest);
-            cmd.args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=0"])
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path;
+            kernel_path.push("bzImage");
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=0,hotplug_method=virtio-mem"])
                 .args(&[
                     "--memory-zone",
-                    "id=mem0,size=1G",
-                    "id=mem1,size=3G,file=/dev/shm",
-                    "id=mem2,size=1G,host_numa_node=0",
+                    "id=mem0,size=1G,hotplug_size=2G",
+                    "id=mem1,size=1G,file=/dev/shm",
+                    "id=mem2,size=1G,host_numa_node=0,hotplug_size=2G",
                 ])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .args(&["--api-socket", &api_socket])
                 .capture_output()
                 .default_disks()
-                .default_net();
-
-            // Now AArch64 can only boot from direct kernel, command-line is needed.
-            #[cfg(target_arch = "aarch64")]
-            cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
-
-            let mut child = cmd.spawn().unwrap();
+                .default_net()
+                .spawn()
+                .unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
 
             let r = std::panic::catch_unwind(|| {
-                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
+
+                guest
+                    .ssh_command(
+                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
+                    )
+                    .unwrap_or_default();
+
+                resize_zone_command(&api_socket, "mem0", "3G");
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
+                resize_zone_command(&api_socket, "mem2", "3G");
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() > 6_720_000);
+                resize_zone_command(&api_socket, "mem0", "2G");
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+                resize_zone_command(&api_socket, "mem2", "2G");
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
             });
 
             let _ = child.kill();
