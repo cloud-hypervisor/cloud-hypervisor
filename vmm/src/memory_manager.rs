@@ -105,7 +105,7 @@ pub struct MemoryManager {
     balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
     #[cfg(target_arch = "x86_64")]
     sgx_epc_region: Option<SgxEpcRegion>,
-    use_zones: bool,
+    user_provided_zones: bool,
     snapshot_memory_regions: Vec<MemoryRegion>,
     memory_zones: MemoryZones,
 }
@@ -428,9 +428,9 @@ impl MemoryManager {
         ext_regions: Option<Vec<MemoryRegion>>,
         prefault: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
-        let use_zones = config.size == 0;
+        let user_provided_zones = config.size == 0;
 
-        let (ram_size, zones) = if !use_zones {
+        let (ram_size, zones) = if !user_provided_zones {
             if config.zones.is_some() {
                 error!(
                     "User defined memory regions can't be provided if the \
@@ -518,7 +518,7 @@ impl MemoryManager {
                         return Err(Error::InvalidHotplugSize);
                     }
 
-                    if !use_zones && config.hotplug_method == HotplugMethod::Acpi {
+                    if !user_provided_zones && config.hotplug_method == HotplugMethod::Acpi {
                         start_of_device_area = start_of_device_area.unchecked_add(hotplug_size);
                     } else {
                         // Alignment must be "natural" i.e. same as size of block
@@ -601,7 +601,7 @@ impl MemoryManager {
             balloon: None,
             #[cfg(target_arch = "x86_64")]
             sgx_epc_region: None,
-            use_zones,
+            user_provided_zones,
             snapshot_memory_regions: Vec::new(),
             memory_zones,
         }));
@@ -1171,7 +1171,7 @@ impl MemoryManager {
     /// use case never adds a new region as the whole hotpluggable memory has
     /// already been allocated at boot time.
     pub fn resize(&mut self, desired_ram: u64) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
-        if self.use_zones {
+        if self.user_provided_zones {
             error!(
                 "Not allowed to resize guest memory when backed with user \
                 defined memory zones."
@@ -1205,7 +1205,7 @@ impl MemoryManager {
         desired_ram: u64,
         config: &MemoryConfig,
     ) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
-        if !self.use_zones {
+        if !self.user_provided_zones {
             error!(
                 "Not allowed to resize guest memory zone when no zone is \
                 defined."
