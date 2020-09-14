@@ -209,6 +209,9 @@ pub enum Error {
 
     /// Cannot apply seccomp filter
     ApplySeccompFilter(seccomp::Error),
+
+    /// Failed resizing a memory zone.
+    ResizeZone,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -884,6 +887,8 @@ impl Vm {
                 .resize(desired_memory)
                 .map_err(Error::MemoryManager)?;
 
+            let mut memory_config = &mut self.config.lock().unwrap().memory;
+
             if let Some(new_region) = &new_region {
                 self.device_manager
                     .lock()
@@ -891,7 +896,6 @@ impl Vm {
                     .update_memory(&new_region)
                     .map_err(Error::DeviceManager)?;
 
-                let memory_config = &self.config.lock().unwrap().memory;
                 match memory_config.hotplug_method {
                     HotplugMethod::Acpi => {
                         self.device_manager
@@ -907,7 +911,16 @@ impl Vm {
             // We update the VM config regardless of the actual guest resize
             // operation result (happened or not), so that if the VM reboots
             // it will be running with the last configure memory size.
-            self.config.lock().unwrap().memory.size = desired_memory;
+            match memory_config.hotplug_method {
+                HotplugMethod::Acpi => memory_config.size = desired_memory,
+                HotplugMethod::VirtioMem => {
+                    if desired_memory > memory_config.size {
+                        memory_config.hotplugged_size = Some(desired_memory - memory_config.size);
+                    } else {
+                        memory_config.hotplugged_size = None;
+                    }
+                }
+            }
         }
 
         if let Some(desired_ram_w_balloon) = desired_ram_w_balloon {
@@ -925,11 +938,39 @@ impl Vm {
     }
 
     pub fn resize_zone(&mut self, id: String, desired_memory: u64) -> Result<()> {
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .resize_zone(&id, desired_memory, &self.config.lock().unwrap().memory)
-            .map_err(Error::MemoryManager)
+        let memory_config = &mut self.config.lock().unwrap().memory;
+
+        if let Some(zones) = &mut memory_config.zones {
+            for zone in zones.iter_mut() {
+                if zone.id == id {
+                    if desired_memory >= zone.size {
+                        let hotplugged_size = desired_memory - zone.size;
+                        self.memory_manager
+                            .lock()
+                            .unwrap()
+                            .resize_zone(&id, desired_memory - zone.size)
+                            .map_err(Error::MemoryManager)?;
+                        // We update the memory zone config regardless of the
+                        // actual 'resize-zone' operation result (happened or
+                        // not), so that if the VM reboots it will be running
+                        // with the last configured memory zone size.
+                        zone.hotplugged_size = Some(hotplugged_size);
+
+                        return Ok(());
+                    } else {
+                        error!(
+                            "Invalid to ask less ({}) than boot RAM ({}) for \
+                            this memory zone",
+                            desired_memory, zone.size,
+                        );
+                        return Err(Error::ResizeZone);
+                    }
+                }
+            }
+        }
+
+        error!("Could not find the memory zone {} for the resize", id);
+        Err(Error::ResizeZone)
     }
 
     #[cfg(not(feature = "pci_support"))]
