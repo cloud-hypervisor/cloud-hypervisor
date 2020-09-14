@@ -496,6 +496,9 @@ components:
         hotplug_size:
           type: integer
           format: int64
+        hotplugged_size:
+          type: integer
+          format: int64
 
     MemoryConfig:
       required:
@@ -507,6 +510,9 @@ components:
           format: int64
           default: 512 MB
         hotplug_size:
+          type: integer
+          format: int64
+        hotplugged_size:
           type: integer
           format: int64
         mergeable:

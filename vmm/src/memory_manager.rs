@@ -440,6 +440,32 @@ impl MemoryManager {
                 return Err(Error::InvalidMemoryParameters);
             }
 
+            if let Some(hotplugged_size) = config.hotplugged_size {
+                if let Some(hotplug_size) = config.hotplug_size {
+                    if hotplugged_size > hotplug_size {
+                        error!(
+                            "'hotplugged_size' {} can't be bigger than \
+                            'hotplug_size' {}",
+                            hotplugged_size, hotplug_size,
+                        );
+                        return Err(Error::InvalidMemoryParameters);
+                    }
+                } else {
+                    error!(
+                        "Invalid to define 'hotplugged_size' when there is\
+                        no 'hotplug_size'"
+                    );
+                    return Err(Error::InvalidMemoryParameters);
+                }
+                if config.hotplug_method == HotplugMethod::Acpi {
+                    error!(
+                        "Invalid to define 'hotplugged_size' with hotplug \
+                        method 'acpi'"
+                    );
+                    return Err(Error::InvalidMemoryParameters);
+                }
+            }
+
             // Create a single zone from the global memory config. This lets
             // us reuse the codepath for user defined memory zones.
             let zones = vec![MemoryZoneConfig {
@@ -450,6 +476,7 @@ impl MemoryManager {
                 hugepages: config.hugepages,
                 host_numa_node: None,
                 hotplug_size: config.hotplug_size,
+                hotplugged_size: config.hotplugged_size,
             }];
 
             (config.size, zones)
@@ -484,6 +511,32 @@ impl MemoryManager {
                 if zone.hotplug_size.is_some() && config.hotplug_method == HotplugMethod::Acpi {
                     error!("Invalid to set ACPI hotplug method for memory zones");
                     return Err(Error::InvalidHotplugMethodWithMemoryZones);
+                }
+
+                if let Some(hotplugged_size) = zone.hotplugged_size {
+                    if let Some(hotplug_size) = zone.hotplug_size {
+                        if hotplugged_size > hotplug_size {
+                            error!(
+                                "'hotplugged_size' {} can't be bigger than \
+                                'hotplug_size' {}",
+                                hotplugged_size, hotplug_size,
+                            );
+                            return Err(Error::InvalidMemoryParameters);
+                        }
+                    } else {
+                        error!(
+                            "Invalid to define 'hotplugged_size' when there is\
+                            no 'hotplug_size' for a memory zone"
+                        );
+                        return Err(Error::InvalidMemoryParameters);
+                    }
+                    if config.hotplug_method == HotplugMethod::Acpi {
+                        error!(
+                            "Invalid to define 'hotplugged_size' with hotplug \
+                            method 'acpi'"
+                        );
+                        return Err(Error::InvalidMemoryParameters);
+                    }
                 }
             }
 

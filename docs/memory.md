@@ -17,6 +17,7 @@ struct MemoryConfig {
     hugepages: bool,
     hotplug_method: HotplugMethod,
     hotplug_size: Option<u64>,
+    hotplugged_size: Option<u64>,
     balloon: bool,
     balloon_size: u64,
     zones: Option<Vec<MemoryZoneConfig>>,
@@ -24,7 +25,7 @@ struct MemoryConfig {
 ```
 
 ```
---memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,balloon=on|off"
+--memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,balloon=on|off"
 ```
 
 ### `size`
@@ -120,6 +121,27 @@ _Example_
 --memory size=1G,hotplug_size=1G
 ```
 
+### `hotplugged_size`
+
+Amount of memory that will be dynamically added to the VM at boot. This option
+allows for starting a VM with a certain amount of memory that can be reduced
+during runtime.
+
+This is only valid when the `hotplug_method` is `virtio-mem` as it does not
+make sense for the `acpi` use case. When using ACPI, the memory can't be
+resized after it has been extended.
+
+This option is only valid when `hotplug_size` is specified, and its value can't
+exceed the value of `hotplug_size`.
+
+Value is an unsigned integer of 64 bits. A value of 0 is invalid.
+
+_Example_
+
+```
+--memory size=1G,hotplug_method=virtio-mem,hotplug_size=1G,hotplugged_size=512M
+```
+
 ### `balloon`
 
 Specifies if the `virtio-balloon` device must be activated. This creates a
@@ -149,11 +171,12 @@ struct MemoryZoneConfig {
     hugepages: bool,
     host_numa_node: Option<u32>,
     hotplug_size: Option<u64>,
+    hotplugged_size: Option<u64>,
 }
 ```
 
 ```
---memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>"
+--memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>"
 ```
 
 This parameter expects one or more occurences, allowing for a list of memory
@@ -301,6 +324,28 @@ _Example_
 ```
 --memory size=0,hotplug_method=virtio-mem
 --memory-zone id=mem0,size=1G,hotplug_size=1G
+```
+
+### `hotplugged_size`
+
+Amount of memory that will be dynamically added to a memory zone at VM's boot.
+This option allows for starting a VM with a certain amount of memory that can
+be reduced during runtime.
+
+This is only valid when the `hotplug_method` is `virtio-mem` as it does not
+make sense for the `acpi` use case. When using ACPI, the memory can't be
+resized after it has been extended.
+
+This option is only valid when `hotplug_size` is specified, and its value can't
+exceed the value of `hotplug_size`.
+
+Value is an unsigned integer of 64 bits. A value of 0 is invalid.
+
+_Example_
+
+```
+--memory size=0,hotplug_method=virtio-mem
+--memory-zone id=mem0,size=1G,hotplug_size=1G,hotplugged_size=512M
 ```
 
 ## NUMA settings
