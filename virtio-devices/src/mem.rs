@@ -42,8 +42,11 @@ use vmm_sys_util::eventfd::EventFd;
 const QUEUE_SIZE: u16 = 128;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
 
+// 128MiB is the standard memory block size in Linux. A virtio-mem region must
+// be aligned on this size, and the region size must be a multiple of it.
+pub const VIRTIO_MEM_ALIGN_SIZE: u64 = 128 * 1024 * 1024;
 // Use 2 MiB alignment so transparent hugepages can be used by KVM.
-pub const VIRTIO_MEM_DEFAULT_BLOCK_SIZE: u64 = 512 * 4096;
+const VIRTIO_MEM_DEFAULT_BLOCK_SIZE: u64 = 512 * 4096;
 const VIRTIO_MEM_USABLE_EXTENT: u64 = 256 * 1024 * 1024;
 
 // Request processed successfully, applicable for
@@ -702,13 +705,12 @@ impl Mem {
     ) -> io::Result<Mem> {
         let region_len = region.len();
 
-        if region_len != region_len / VIRTIO_MEM_DEFAULT_BLOCK_SIZE * VIRTIO_MEM_DEFAULT_BLOCK_SIZE
-        {
+        if region_len != region_len / VIRTIO_MEM_ALIGN_SIZE * VIRTIO_MEM_ALIGN_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 format!(
                     "Virtio-mem size is not aligned with {}",
-                    VIRTIO_MEM_DEFAULT_BLOCK_SIZE
+                    VIRTIO_MEM_ALIGN_SIZE
                 ),
             ));
         }
