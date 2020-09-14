@@ -925,22 +925,11 @@ impl Vm {
     }
 
     pub fn resize_zone(&mut self, id: String, desired_memory: u64) -> Result<()> {
-        let new_region = self
-            .memory_manager
+        self.memory_manager
             .lock()
             .unwrap()
             .resize_zone(&id, desired_memory, &self.config.lock().unwrap().memory)
-            .map_err(Error::MemoryManager)?;
-
-        if let Some(new_region) = &new_region {
-            self.device_manager
-                .lock()
-                .unwrap()
-                .update_memory(&new_region)
-                .map_err(Error::DeviceManager)?;
-        }
-
-        Ok(())
+            .map_err(Error::MemoryManager)
     }
 
     #[cfg(not(feature = "pci_support"))]
