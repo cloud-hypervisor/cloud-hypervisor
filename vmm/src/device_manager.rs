@@ -2430,10 +2430,7 @@ impl DeviceManager {
         let mm = self.memory_manager.clone();
         let mm = mm.lock().unwrap();
         for (_memory_zone_id, memory_zone) in mm.memory_zones().iter() {
-            if let (Some(region), Some(resize)) = (
-                memory_zone.virtio_mem_region(),
-                memory_zone.virtio_mem_resize(),
-            ) {
+            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
                 let id = self.next_device_name(MEM_DEVICE_NAME_PREFIX)?;
 
                 #[cfg(not(feature = "acpi"))]
@@ -2445,8 +2442,9 @@ impl DeviceManager {
                 let virtio_mem_device = Arc::new(Mutex::new(
                     virtio_devices::Mem::new(
                         id.clone(),
-                        &region,
-                        resize
+                        virtio_mem_zone.region(),
+                        virtio_mem_zone
+                            .resize_handler()
                             .try_clone()
                             .map_err(DeviceManagerError::TryCloneVirtioMemResize)?,
                         self.seccomp_action.clone(),
