@@ -381,6 +381,8 @@ pub struct MemoryZoneConfig {
     pub host_numa_node: Option<u32>,
     #[serde(default)]
     pub hotplug_size: Option<u64>,
+    #[serde(default)]
+    pub hotplugged_size: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -392,6 +394,8 @@ pub struct MemoryConfig {
     pub hotplug_method: HotplugMethod,
     #[serde(default)]
     pub hotplug_size: Option<u64>,
+    #[serde(default)]
+    pub hotplugged_size: Option<u64>,
     #[serde(default)]
     pub shared: bool,
     #[serde(default)]
@@ -413,6 +417,7 @@ impl MemoryConfig {
             .add("mergeable")
             .add("hotplug_method")
             .add("hotplug_size")
+            .add("hotplugged_size")
             .add("shared")
             .add("hugepages")
             .add("balloon");
@@ -434,6 +439,10 @@ impl MemoryConfig {
             .unwrap_or_default();
         let hotplug_size = parser
             .convert::<ByteSized>("hotplug_size")
+            .map_err(Error::ParseMemory)?
+            .map(|v| v.0);
+        let hotplugged_size = parser
+            .convert::<ByteSized>("hotplugged_size")
             .map_err(Error::ParseMemory)?
             .map(|v| v.0);
         let shared = parser
@@ -463,7 +472,8 @@ impl MemoryConfig {
                     .add("shared")
                     .add("hugepages")
                     .add("host_numa_node")
-                    .add("hotplug_size");
+                    .add("hotplug_size")
+                    .add("hotplugged_size");
                 parser.parse(memory_zone).map_err(Error::ParseMemoryZone)?;
 
                 let id = parser.get("id").ok_or(Error::ParseMemoryZoneIdMissing)?;
@@ -490,6 +500,10 @@ impl MemoryConfig {
                     .convert::<ByteSized>("hotplug_size")
                     .map_err(Error::ParseMemoryZone)?
                     .map(|v| v.0);
+                let hotplugged_size = parser
+                    .convert::<ByteSized>("hotplugged_size")
+                    .map_err(Error::ParseMemoryZone)?
+                    .map(|v| v.0);
 
                 zones.push(MemoryZoneConfig {
                     id,
@@ -499,6 +513,7 @@ impl MemoryConfig {
                     hugepages,
                     host_numa_node,
                     hotplug_size,
+                    hotplugged_size,
                 });
             }
             Some(zones)
@@ -511,6 +526,7 @@ impl MemoryConfig {
             mergeable,
             hotplug_method,
             hotplug_size,
+            hotplugged_size,
             shared,
             hugepages,
             balloon,
@@ -527,6 +543,7 @@ impl Default for MemoryConfig {
             mergeable: false,
             hotplug_method: HotplugMethod::Acpi,
             hotplug_size: None,
+            hotplugged_size: None,
             shared: false,
             hugepages: false,
             balloon: false,
@@ -2118,6 +2135,7 @@ mod tests {
                 mergeable: false,
                 hotplug_method: HotplugMethod::Acpi,
                 hotplug_size: None,
+                hotplugged_size: None,
                 shared: false,
                 hugepages: false,
                 balloon: false,

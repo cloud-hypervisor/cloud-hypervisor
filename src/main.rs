@@ -109,7 +109,8 @@ fn create_app<'a, 'b>(
                     "Memory parameters \
                      \"size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,\
                      hotplug_method=acpi|virtio-mem,\
-                     hotplug_size=<hotpluggable_memory_size>\"",
+                     hotplug_size=<hotpluggable_memory_size>,\
+                     hotplugged_size=<hotplugged_memory_size>\"",
                 )
                 .default_value(&default_memory)
                 .group("vm-config"),
@@ -121,7 +122,8 @@ fn create_app<'a, 'b>(
                     "User defined memory zone parameters \
                      \"size=<guest_memory_region_size>,file=<backing_file>,\
                      shared=on|off,hugepages=on|off,host_numa_node=<node_id>,\
-                     id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>\"",
+                     id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,\
+                     hotplugged_size=<hotplugged_memory_size>\"",
                 )
                 .takes_value(true)
                 .min_values(1)
@@ -539,6 +541,7 @@ mod unit_tests {
                     mergeable: false,
                     hotplug_method: HotplugMethod::Acpi,
                     hotplug_size: None,
+                    hotplugged_size: None,
                     shared: false,
                     hugepages: false,
                     balloon: false,
