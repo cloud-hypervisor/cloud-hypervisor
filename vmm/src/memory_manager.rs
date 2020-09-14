@@ -67,6 +67,7 @@ struct HotPlugState {
 pub struct VirtioMemZone {
     region: Arc<GuestRegionMmap>,
     resize_handler: virtio_devices::Resize,
+    hotplugged_size: u64,
 }
 
 impl VirtioMemZone {
@@ -75,6 +76,9 @@ impl VirtioMemZone {
     }
     pub fn resize_handler(&self) -> &virtio_devices::Resize {
         &self.resize_handler
+    }
+    pub fn hotplugged_size(&self) -> u64 {
+        self.hotplugged_size
     }
 }
 
@@ -612,6 +616,7 @@ impl MemoryManager {
                             region,
                             resize_handler: virtio_devices::Resize::new()
                                 .map_err(Error::EventFdFail)?,
+                            hotplugged_size: zone.hotplugged_size.unwrap_or(0),
                         });
 
                         start_of_device_area = start_addr.unchecked_add(hotplug_size);
