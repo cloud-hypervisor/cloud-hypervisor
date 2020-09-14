@@ -64,22 +64,32 @@ struct HotPlugState {
     removing: bool,
 }
 
+pub struct VirtioMemZone {
+    region: Arc<GuestRegionMmap>,
+    resize_handler: virtio_devices::Resize,
+}
+
+impl VirtioMemZone {
+    pub fn region(&self) -> &Arc<GuestRegionMmap> {
+        &self.region
+    }
+    pub fn resize_handler(&self) -> &virtio_devices::Resize {
+        &self.resize_handler
+    }
+}
+
 #[derive(Default)]
 pub struct MemoryZone {
     regions: Vec<Arc<GuestRegionMmap>>,
-    virtio_mem_region: Option<Arc<GuestRegionMmap>>,
-    virtio_mem_resize: Option<virtio_devices::Resize>,
+    virtio_mem_zone: Option<VirtioMemZone>,
 }
 
 impl MemoryZone {
     pub fn regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
         &self.regions
     }
-    pub fn virtio_mem_region(&self) -> &Option<Arc<GuestRegionMmap>> {
-        &self.virtio_mem_region
-    }
-    pub fn virtio_mem_resize(&self) -> &Option<virtio_devices::Resize> {
-        &self.virtio_mem_resize
+    pub fn virtio_mem_zone(&self) -> &Option<VirtioMemZone> {
+        &self.virtio_mem_zone
     }
 }
 
@@ -598,9 +608,11 @@ impl MemoryManager {
 
                         virtio_mem_regions.push(region.clone());
 
-                        memory_zone.virtio_mem_region = Some(region);
-                        memory_zone.virtio_mem_resize =
-                            Some(virtio_devices::Resize::new().map_err(Error::EventFdFail)?);
+                        memory_zone.virtio_mem_zone = Some(VirtioMemZone {
+                            region,
+                            resize_handler: virtio_devices::Resize::new()
+                                .map_err(Error::EventFdFail)?,
+                        });
 
                         start_of_device_area = start_addr.unchecked_add(hotplug_size);
                     }
@@ -1186,8 +1198,11 @@ impl MemoryManager {
 
     pub fn virtio_mem_resize(&mut self, id: &str, size: u64) -> Result<(), Error> {
         if let Some(memory_zone) = self.memory_zones.get_mut(id) {
-            if let Some(resize) = &memory_zone.virtio_mem_resize {
-                resize.work(size).map_err(Error::VirtioMemResizeFail)?;
+            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
+                virtio_mem_zone
+                    .resize_handler()
+                    .work(size)
+                    .map_err(Error::VirtioMemResizeFail)?;
             } else {
                 error!("Failed resizing virtio-mem region: No virtio-mem handler");
                 return Err(Error::MissingVirtioMemHandler);
