@@ -171,14 +171,18 @@ impl BlockIoUringEpollHandler {
             let (status, len) = if result >= 0 {
                 match request.request_type {
                     RequestType::In => {
-                        read_bytes += Wrapping(request.data_len as u64);
+                        for (_, data_len) in &request.data_descriptors {
+                            read_bytes += Wrapping(*data_len as u64);
+                        }
                         read_ops += Wrapping(1);
                     }
                     RequestType::Out => {
                         if !request.writeback {
                             unsafe { libc::fsync(self.disk_image_fd) };
                         }
-                        write_bytes += Wrapping(request.data_len as u64);
+                        for (_, data_len) in &request.data_descriptors {
+                            write_bytes += Wrapping(*data_len as u64);
+                        }
                         write_ops += Wrapping(1);
                     }
                     _ => {}
