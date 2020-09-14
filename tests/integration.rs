@@ -2389,14 +2389,22 @@ mod tests {
         fn test_guest_numa_nodes() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
-            let mut cmd = GuestCommand::new(&guest);
-            cmd.args(&["--cpus", "boot=6"])
-                .args(&["--memory", "size=0"])
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut kernel_path = workload_path;
+            kernel_path.push("bzImage");
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=6"])
+                .args(&["--memory", "size=0,hotplug_method=virtio-mem"])
                 .args(&[
                     "--memory-zone",
-                    "id=mem0,size=1G",
-                    "id=mem1,size=2G",
-                    "id=mem2,size=3G",
+                    "id=mem0,size=1G,hotplug_size=3G",
+                    "id=mem1,size=2G,hotplug_size=3G",
+                    "id=mem2,size=3G,hotplug_size=3G",
                 ])
                 .args(&[
                     "--numa",
@@ -2404,12 +2412,14 @@ mod tests {
                     "guest_numa_id=1,cpus=3-4,distances=0@20:2@25,memory_zones=mem1",
                     "guest_numa_id=2,cpus=5,distances=0@25:1@30,memory_zones=mem2",
                 ])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .args(&["--api-socket", &api_socket])
                 .capture_output()
                 .default_disks()
-                .default_net();
-
-            let mut child = cmd.spawn().unwrap();
+                .default_net()
+                .spawn()
+                .unwrap();
 
             thread::sleep(std::time::Duration::new(20, 0));
 
@@ -2429,6 +2439,24 @@ mod tests {
                 assert!(guest.check_numa_node_distances(0, "10 15 20").unwrap());
                 assert!(guest.check_numa_node_distances(1, "20 10 25").unwrap());
                 assert!(guest.check_numa_node_distances(2, "25 30 10").unwrap());
+
+                guest
+                    .ssh_command(
+                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
+                    )
+                    .unwrap_or_default();
+
+                // Resize every memory zone and check each associated NUMA node
+                // has been assigned the right amount of memory.
+                resize_zone_command(&api_socket, "mem0", "4G");
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_numa_node_memory(0).unwrap_or_default() > 3_840_000);
+                resize_zone_command(&api_socket, "mem1", "4G");
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_numa_node_memory(1).unwrap_or_default() > 3_840_000);
+                resize_zone_command(&api_socket, "mem2", "4G");
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_numa_node_memory(2).unwrap_or_default() > 3_840_000);
             });
 
             let _ = child.kill();
