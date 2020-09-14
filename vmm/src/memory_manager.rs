@@ -664,8 +664,8 @@ impl MemoryManager {
             mergeable: config.mergeable,
             allocator: allocator.clone(),
             hotplug_method: config.hotplug_method.clone(),
-            boot_ram: config.size,
-            current_ram: config.size,
+            boot_ram: ram_size,
+            current_ram: ram_size,
             next_hotplug_slot: 0,
             snapshot: Mutex::new(None),
             shared: config.shared,
@@ -1268,12 +1268,7 @@ impl MemoryManager {
         Ok(region)
     }
 
-    pub fn resize_zone(
-        &mut self,
-        id: &str,
-        desired_ram: u64,
-        config: &MemoryConfig,
-    ) -> Result<(), Error> {
+    pub fn resize_zone(&mut self, id: &str, virtio_mem_size: u64) -> Result<(), Error> {
         if !self.user_provided_zones {
             error!(
                 "Not allowed to resize guest memory zone when no zone is \
@@ -1282,25 +1277,7 @@ impl MemoryManager {
             return Err(Error::ResizeZone);
         }
 
-        if let Some(zones) = &config.zones {
-            for zone in zones.iter() {
-                if zone.id == id {
-                    if desired_ram >= zone.size {
-                        return self.virtio_mem_resize(id, desired_ram - zone.size);
-                    } else {
-                        error!(
-                            "Invalid to ask less ({}) than boot RAM ({}) for \
-                            this memory zone",
-                            desired_ram, zone.size,
-                        );
-                        return Err(Error::ResizeZone);
-                    }
-                }
-            }
-        }
-
-        error!("Could not find the memory zone {} for the resize", id);
-        Err(Error::ResizeZone)
+        self.virtio_mem_resize(id, virtio_mem_size)
     }
 
     #[cfg(target_arch = "x86_64")]
