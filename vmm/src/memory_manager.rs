@@ -523,11 +523,9 @@ impl MemoryManager {
                     } else {
                         // Alignment must be "natural" i.e. same as size of block
                         let start_addr = GuestAddress(
-                            (start_of_device_area.0
-                                + virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE
-                                - 1)
-                                / virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE
-                                * virtio_devices::VIRTIO_MEM_DEFAULT_BLOCK_SIZE,
+                            (start_of_device_area.0 + virtio_devices::VIRTIO_MEM_ALIGN_SIZE - 1)
+                                / virtio_devices::VIRTIO_MEM_ALIGN_SIZE
+                                * virtio_devices::VIRTIO_MEM_ALIGN_SIZE,
                         );
 
                         let region = MemoryManager::create_ram_region(
