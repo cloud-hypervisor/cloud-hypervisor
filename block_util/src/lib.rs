@@ -50,6 +50,8 @@ pub enum Error {
     GetFileMetadata,
     /// The requested operation would cause a seek beyond disk end.
     InvalidOffset,
+    /// The requested operation does not support multiple descriptors.
+    TooManyDescriptors,
 }
 
 fn build_device_id(disk_path: &PathBuf) -> result::Result<String, Error> {
@@ -147,8 +149,7 @@ fn sector(mem: &GuestMemoryMmap, desc_addr: GuestAddress) -> result::Result<u64,
 pub struct Request {
     pub request_type: RequestType,
     pub sector: u64,
-    pub data_addr: GuestAddress,
-    pub data_len: u32,
+    pub data_descriptors: Vec<(GuestAddress, u32)>,
     pub status_addr: GuestAddress,
     pub writeback: bool,
 }
@@ -166,15 +167,13 @@ impl Request {
         let mut req = Request {
             request_type: request_type(&mem, avail_desc.addr)?,
             sector: sector(&mem, avail_desc.addr)?,
-            data_addr: GuestAddress(0),
-            data_len: 0,
+            data_descriptors: Vec::new(),
             status_addr: GuestAddress(0),
             writeback: true,
         };
 
-        let data_desc;
         let status_desc;
-        let desc = avail_desc
+        let mut desc = avail_desc
             .next_descriptor()
             .ok_or(Error::DescriptorChainTooShort)?;
 
@@ -185,23 +184,22 @@ impl Request {
                 return Err(Error::DescriptorChainTooShort);
             }
         } else {
-            data_desc = desc;
-            status_desc = data_desc
-                .next_descriptor()
-                .ok_or(Error::DescriptorChainTooShort)?;
-
-            if data_desc.is_write_only() && req.request_type == RequestType::Out {
-                return Err(Error::UnexpectedWriteOnlyDescriptor);
+            while desc.has_next() {
+                if desc.is_write_only() && req.request_type == RequestType::Out {
+                    return Err(Error::UnexpectedWriteOnlyDescriptor);
+                }
+                if !desc.is_write_only() && req.request_type == RequestType::In {
+                    return Err(Error::UnexpectedReadOnlyDescriptor);
+                }
+                if !desc.is_write_only() && req.request_type == RequestType::GetDeviceID {
+                    return Err(Error::UnexpectedReadOnlyDescriptor);
+                }
+                req.data_descriptors.push((desc.addr, desc.len));
+                desc = desc
+                    .next_descriptor()
+                    .ok_or(Error::DescriptorChainTooShort)?;
             }
-            if !data_desc.is_write_only() && req.request_type == RequestType::In {
-                return Err(Error::UnexpectedReadOnlyDescriptor);
-            }
-            if !data_desc.is_write_only() && req.request_type == RequestType::GetDeviceID {
-                return Err(Error::UnexpectedReadOnlyDescriptor);
-            }
-
-            req.data_addr = data_desc.addr;
-            req.data_len = data_desc.len;
+            status_desc = desc;
         }
 
         // The status MUST always be writable.
@@ -226,44 +224,46 @@ impl Request {
         mem: &GuestMemoryMmap,
         disk_id: &Vec<u8>,
     ) -> result::Result<u32, ExecuteError> {
-        let mut top: u64 = u64::from(self.data_len) / SECTOR_SIZE;
-        if u64::from(self.data_len) % SECTOR_SIZE != 0 {
-            top += 1;
-        }
-        top = top
-            .checked_add(self.sector)
-            .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
-        if top > disk_nsectors {
-            return Err(ExecuteError::BadRequest(Error::InvalidOffset));
-        }
-
         disk.seek(SeekFrom::Start(self.sector << SECTOR_SHIFT))
             .map_err(ExecuteError::Seek)?;
+        let mut len = 0;
+        for (data_addr, data_len) in &self.data_descriptors {
+            let mut top: u64 = u64::from(*data_len) / SECTOR_SIZE;
+            if u64::from(*data_len) % SECTOR_SIZE != 0 {
+                top += 1;
+            }
+            top = top
+                .checked_add(self.sector)
+                .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
+            if top > disk_nsectors {
+                return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+            }
 
-        match self.request_type {
-            RequestType::In => {
-                mem.read_exact_from(self.data_addr, disk, self.data_len as usize)
-                    .map_err(ExecuteError::Read)?;
-                return Ok(self.data_len);
-            }
-            RequestType::Out => {
-                mem.write_all_to(self.data_addr, disk, self.data_len as usize)
-                    .map_err(ExecuteError::Write)?;
-                if !self.writeback {
-                    disk.flush().map_err(ExecuteError::Flush)?;
+            match self.request_type {
+                RequestType::In => {
+                    mem.read_exact_from(*data_addr, disk, *data_len as usize)
+                        .map_err(ExecuteError::Read)?;
+                    len += data_len;
                 }
-            }
-            RequestType::Flush => disk.flush().map_err(ExecuteError::Flush)?,
-            RequestType::GetDeviceID => {
-                if (self.data_len as usize) < disk_id.len() {
-                    return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                RequestType::Out => {
+                    mem.write_all_to(*data_addr, disk, *data_len as usize)
+                        .map_err(ExecuteError::Write)?;
+                    if !self.writeback {
+                        disk.flush().map_err(ExecuteError::Flush)?;
+                    }
                 }
-                mem.write_slice(&disk_id.as_slice(), self.data_addr)
-                    .map_err(ExecuteError::Write)?;
-            }
-            RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
-        };
-        Ok(0)
+                RequestType::Flush => disk.flush().map_err(ExecuteError::Flush)?,
+                RequestType::GetDeviceID => {
+                    if (*data_len as usize) < disk_id.len() {
+                        return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                    }
+                    mem.write_slice(&disk_id.as_slice(), *data_addr)
+                        .map_err(ExecuteError::Write)?;
+                }
+                RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
+            };
+        }
+        Ok(len)
     }
 
     #[cfg(feature = "io_uring")]
@@ -276,36 +276,36 @@ impl Request {
         disk_id: &[u8],
         user_data: u64,
     ) -> result::Result<bool, ExecuteError> {
-        let data_len = self.data_len;
         let sector = self.sector;
-        let data_addr = self.data_addr;
         let request_type = self.request_type;
-
-        let mut top: u64 = u64::from(data_len) / SECTOR_SIZE;
-        if u64::from(data_len) % SECTOR_SIZE != 0 {
-            top += 1;
-        }
-        top = top
-            .checked_add(sector)
-            .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
-        if top > disk_nsectors {
-            return Err(ExecuteError::BadRequest(Error::InvalidOffset));
-        }
-
-        let mut iovecs = Vec::new();
-        let buf = mem
-            .get_slice(data_addr, data_len as usize)
-            .map_err(ExecuteError::GetHostAddress)?
-            .as_ptr();
-        let iovec = libc::iovec {
-            iov_base: buf as *mut libc::c_void,
-            iov_len: data_len as libc::size_t,
-        };
-        iovecs.push(iovec);
         let offset = (sector as i64) << SECTOR_SHIFT;
 
         let (submitter, sq, _) = io_uring.split();
         let mut avail_sq = sq.available();
+
+        let mut iovecs = Vec::new();
+        for (data_addr, data_len) in &self.data_descriptors {
+            let mut top: u64 = u64::from(*data_len) / SECTOR_SIZE;
+            if u64::from(*data_len) % SECTOR_SIZE != 0 {
+                top += 1;
+            }
+            top = top
+                .checked_add(sector)
+                .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
+            if top > disk_nsectors {
+                return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+            }
+
+            let buf = mem
+                .get_slice(*data_addr, *data_len as usize)
+                .map_err(ExecuteError::GetHostAddress)?
+                .as_ptr();
+            let iovec = libc::iovec {
+                iov_base: buf as *mut libc::c_void,
+                iov_len: *data_len as libc::size_t,
+            };
+            iovecs.push(iovec);
+        }
 
         // Queue operations expected to be submitted.
         match request_type {
@@ -352,6 +352,11 @@ impl Request {
                 };
             }
             RequestType::GetDeviceID => {
+                let (data_addr, data_len) = if self.data_descriptors.len() == 1 {
+                    (self.data_descriptors[0].0, self.data_descriptors[0].1)
+                } else {
+                    return Err(ExecuteError::BadRequest(Error::TooManyDescriptors));
+                };
                 if (data_len as usize) < disk_id.len() {
                     return Err(ExecuteError::BadRequest(Error::InvalidOffset));
                 }

@@ -122,11 +122,15 @@ impl<T: DiskFile> BlockEpollHandler<T> {
                             len = l;
                             match request.request_type {
                                 RequestType::In => {
-                                    read_bytes += Wrapping(request.data_len as u64);
+                                    for (_, data_len) in &request.data_descriptors {
+                                        read_bytes += Wrapping(*data_len as u64);
+                                    }
                                     read_ops += Wrapping(1);
                                 }
                                 RequestType::Out => {
-                                    write_bytes += Wrapping(request.data_len as u64);
+                                    for (_, data_len) in &request.data_descriptors {
+                                        write_bytes += Wrapping(*data_len as u64);
+                                    }
                                     write_ops += Wrapping(1);
                                 }
                                 _ => {}
