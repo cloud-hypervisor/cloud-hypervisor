@@ -9,7 +9,7 @@ libc = "0.2.77"
 log = "0.4.11"
 net_gen = { path = "../net_gen" }
 rand = "0.7.3"
-serde = "1.0.115"
+serde = "1.0.116"
 virtio-bindings = "0.1.0"
 vm-memory = { version = "0.2.1", features = ["backend-mmap", "backend-atomic"] }
 vm-virtio = { path = "../vm-virtio" }
