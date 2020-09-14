@@ -684,11 +684,10 @@ impl Vm {
     #[cfg(target_arch = "x86_64")]
     fn configure_system(&mut self, entry_addr: EntryPoint) -> Result<()> {
         let cmdline_cstring = self.get_cmdline()?;
-        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
-        let mem = guest_memory.memory();
+        let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
 
         let initramfs_config = match self.initramfs {
-            Some(_) => Some(self.load_initramfs(mem.deref())?),
+            Some(_) => Some(self.load_initramfs(&mem)?),
             None => None,
         };
 
@@ -700,7 +699,7 @@ impl Vm {
         #[cfg(feature = "acpi")]
         {
             rsdp_addr = Some(crate::acpi::create_acpi_tables(
-                mem.deref(),
+                &mem,
                 &self.device_manager,
                 &self.cpu_manager,
                 &self.memory_manager,
@@ -753,10 +752,9 @@ impl Vm {
     fn configure_system(&mut self, _entry_addr: EntryPoint) -> Result<()> {
         let cmdline_cstring = self.get_cmdline()?;
         let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
-        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
-        let mem = guest_memory.memory();
+        let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
         let initramfs_config = match self.initramfs {
-            Some(_) => Some(self.load_initramfs(mem.deref())?),
+            Some(_) => Some(self.load_initramfs(&mem)?),
             None => None,
         };
 

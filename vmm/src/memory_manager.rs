@@ -86,6 +86,7 @@ impl MemoryZone {
 pub type MemoryZones = HashMap<String, MemoryZone>;
 
 pub struct MemoryManager {
+    boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     next_memory_slot: u32,
     start_of_device_area: GuestAddress,
@@ -504,6 +505,8 @@ impl MemoryManager {
         let guest_memory =
             GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
 
+        let boot_guest_memory = guest_memory.clone();
+
         let end_of_device_area = GuestAddress(mmio_address_space_size() - 1);
 
         let mut start_of_device_area = MemoryManager::start_addr(guest_memory.last_addr(), false);
@@ -580,6 +583,7 @@ impl MemoryManager {
         ));
 
         let memory_manager = Arc::new(Mutex::new(MemoryManager {
+            boot_guest_memory,
             guest_memory: guest_memory.clone(),
             next_memory_slot: 0,
             start_of_device_area,
@@ -993,6 +997,10 @@ impl MemoryManager {
 
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.guest_memory.clone()
+    }
+
+    pub fn boot_guest_memory(&self) -> GuestMemoryMmap {
+        self.boot_guest_memory.clone()
     }
 
     pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {
