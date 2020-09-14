@@ -619,8 +619,9 @@ impl MemoryManager {
             Ok(())
         })?;
 
-        for region in virtio_mem_regions.iter() {
-            memory_manager.lock().unwrap().create_userspace_mapping(
+        for region in virtio_mem_regions.drain(..) {
+            let mut mm = memory_manager.lock().unwrap();
+            mm.create_userspace_mapping(
                 region.start_addr().raw_value(),
                 region.len() as u64,
                 region.as_ptr() as u64,
@@ -632,6 +633,7 @@ impl MemoryManager {
                 .unwrap()
                 .allocate_mmio_addresses(Some(region.start_addr()), region.len(), None)
                 .ok_or(Error::MemoryRangeAllocation)?;
+            mm.add_region(region)?;
         }
 
         // Allocate RAM and Reserved address ranges.
@@ -1129,12 +1131,8 @@ impl MemoryManager {
         Ok(())
     }
 
-    pub fn virtio_mem_resize(
-        &mut self,
-        id: &str,
-        size: u64,
-    ) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
-        let virtio_mem_region = if let Some(memory_zone) = self.memory_zones.get_mut(id) {
+    pub fn virtio_mem_resize(&mut self, id: &str, size: u64) -> Result<(), Error> {
+        if let Some(memory_zone) = self.memory_zones.get_mut(id) {
             if let Some(resize) = &memory_zone.virtio_mem_resize {
                 resize.work(size).map_err(Error::VirtioMemResizeFail)?;
             } else {
@@ -1142,18 +1140,11 @@ impl MemoryManager {
                 return Err(Error::MissingVirtioMemHandler);
             }
 
-            memory_zone.virtio_mem_region.take()
-        } else {
-            error!("Failed resizing virtio-mem region: Unknown memory zone");
-            return Err(Error::UnknownMemoryZone);
-        };
-
-        // Add the region if that's the first time we resize.
-        if let Some(region) = virtio_mem_region.clone() {
-            self.add_region(region)?;
+            return Ok(());
         }
 
-        Ok(virtio_mem_region)
+        error!("Failed resizing virtio-mem region: Unknown memory zone");
+        Err(Error::UnknownMemoryZone)
     }
 
     pub fn balloon_resize(&mut self, expected_ram: u64) -> Result<u64, Error> {
@@ -1189,8 +1180,7 @@ impl MemoryManager {
         match self.hotplug_method {
             HotplugMethod::VirtioMem => {
                 if desired_ram >= self.boot_ram {
-                    region =
-                        self.virtio_mem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
+                    self.virtio_mem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
                     self.current_ram = desired_ram;
                 }
             }
@@ -1210,7 +1200,7 @@ impl MemoryManager {
         id: &str,
         desired_ram: u64,
         config: &MemoryConfig,
-    ) -> Result<Option<Arc<GuestRegionMmap>>, Error> {
+    ) -> Result<(), Error> {
         if !self.user_provided_zones {
             error!(
                 "Not allowed to resize guest memory zone when no zone is \
