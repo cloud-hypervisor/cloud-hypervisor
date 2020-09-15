@@ -692,6 +692,7 @@ impl cpu::Vcpu for KvmVcpu {
 
                 VcpuExit::MmioRead(addr, data) => Ok(cpu::VmExit::MmioRead(addr, data)),
                 VcpuExit::MmioWrite(addr, data) => Ok(cpu::VmExit::MmioWrite(addr, data)),
+                VcpuExit::Hyperv => Ok(cpu::VmExit::Hyperv),
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "Unexpected exit reason on vcpu run: {:?}",
