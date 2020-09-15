@@ -318,12 +318,18 @@ pub struct CpusConfig {
     pub max_vcpus: u8,
     #[serde(default)]
     pub topology: Option<CpuTopology>,
+    #[serde(default)]
+    pub kvm_hyperv: bool,
 }
 
 impl CpusConfig {
     pub fn parse(cpus: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("boot").add("max").add("topology");
+        parser
+            .add("boot")
+            .add("max")
+            .add("topology")
+            .add("kvm_hyperv");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
         let boot_vcpus: u8 = parser
@@ -335,11 +341,17 @@ impl CpusConfig {
             .map_err(Error::ParseCpus)?
             .unwrap_or(boot_vcpus);
         let topology = parser.convert("topology").map_err(Error::ParseCpus)?;
+        let kvm_hyperv = parser
+            .convert::<Toggle>("kvm_hyperv")
+            .map_err(Error::ParseCpus)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         Ok(CpusConfig {
             boot_vcpus,
             max_vcpus,
             topology,
+            kvm_hyperv,
         })
     }
 }
@@ -350,6 +362,7 @@ impl Default for CpusConfig {
             boot_vcpus: DEFAULT_VCPUS,
             max_vcpus: DEFAULT_VCPUS,
             topology: None,
+            kvm_hyperv: false,
         }
     }
 }
@@ -1595,7 +1608,7 @@ mod tests {
             CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 1,
-                topology: None
+                ..Default::default()
             }
         );
         assert_eq!(
@@ -1603,7 +1616,7 @@ mod tests {
             CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 2,
-                topology: None
+                ..Default::default()
             }
         );
         assert_eq!(
@@ -1616,13 +1629,22 @@ mod tests {
                     cores_per_die: 2,
                     dies_per_package: 1,
                     packages: 2
-                })
+                }),
+                ..Default::default()
             }
         );
 
         assert!(CpusConfig::parse("boot=8,topology=2:2:1").is_err());
         assert!(CpusConfig::parse("boot=8,topology=2:2:1:x").is_err());
-
+        assert_eq!(
+            CpusConfig::parse("boot=1,kvm_hyperv=on")?,
+            CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 1,
+                kvm_hyperv: true,
+                ..Default::default()
+            }
+        );
         Ok(())
     }
 
@@ -2081,7 +2103,7 @@ mod tests {
             cpus: CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 1,
-                topology: None,
+                ..Default::default()
             },
             memory: MemoryConfig {
                 size: 536_870_912,
