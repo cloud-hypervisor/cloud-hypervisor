@@ -97,7 +97,7 @@ fn create_app<'a, 'b>(
                 .long("cpus")
                 .help(
                     "boot=<boot_vcpus>,max=<max_vcpus>,\
-                    topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>",
+                    topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off",
                 )
                 .default_value(&default_vcpus)
                 .group("vm-config"),
@@ -532,6 +532,7 @@ mod unit_tests {
                     boot_vcpus: 1,
                     max_vcpus: 1,
                     topology: None,
+                    kvm_hyperv: false,
                 },
                 memory: MemoryConfig {
                     size: 536_870_912,
