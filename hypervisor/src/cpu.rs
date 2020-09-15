@@ -148,6 +148,11 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to notify guest its clock was paused: {0}")]
     NotifyGuestClockPaused(#[source] anyhow::Error),
+    ///
+    /// Enabling HyperV SynIC error
+    ///
+    #[error("Failed to enable HyperV SynIC")]
+    EnableHyperVSynIC(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -208,6 +213,11 @@ pub trait Vcpu: Send + Sync {
     /// X86 specific call to setup the CPUID registers.
     ///
     fn set_cpuid2(&self, cpuid: &CpuId) -> Result<()>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call to enable HyperV SynIC
+    ///
+    fn enable_hyperv_synic(&self) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call to retrieve the CPUID registers.
