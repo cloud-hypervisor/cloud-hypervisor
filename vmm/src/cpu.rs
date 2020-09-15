@@ -377,6 +377,8 @@ impl Vcpu {
 
                 VmExit::Ignore => Ok(true),
                 VmExit::Reset => Ok(false),
+                // No need to handle anything from a KVM HyperV exit
+                VmExit::Hyperv => Ok(true),
             },
 
             Err(e) => Err(Error::VcpuRun(e.into())),
