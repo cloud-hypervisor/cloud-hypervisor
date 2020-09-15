@@ -38,7 +38,7 @@ pub use x86_64::{
 };
 
 #[cfg(target_arch = "x86_64")]
-use kvm_bindings::{kvm_enable_cap, MsrList, KVM_CAP_SPLIT_IRQCHIP};
+use kvm_bindings::{kvm_enable_cap, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP};
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
@@ -549,6 +549,17 @@ impl cpu::Vcpu for KvmVcpu {
         self.fd
             .set_cpuid2(cpuid)
             .map_err(|e| cpu::HypervisorCpuError::SetCpuid(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call to enable HyperV SynIC
+    ///
+    fn enable_hyperv_synic(&self) -> cpu::Result<()> {
+        let mut cap: kvm_enable_cap = Default::default();
+        cap.cap = KVM_CAP_HYPERV_SYNIC;
+        self.fd
+            .enable_cap(&cap)
+            .map_err(|e| cpu::HypervisorCpuError::EnableHyperVSynIC(e.into()))
     }
     ///
     /// X86 specific call to retrieve the CPUID registers.
