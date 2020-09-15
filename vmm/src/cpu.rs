@@ -299,6 +299,7 @@ impl Vcpu {
         kernel_entry_point: Option<EntryPoint>,
         vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         #[cfg(target_arch = "x86_64")] cpuid: CpuId,
+        #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
@@ -308,8 +309,15 @@ impl Vcpu {
         }
 
         #[cfg(target_arch = "x86_64")]
-        arch::configure_vcpu(&self.vcpu, self.id, kernel_entry_point, vm_memory, cpuid)
-            .map_err(Error::VcpuConfiguration)?;
+        arch::configure_vcpu(
+            &self.vcpu,
+            self.id,
+            kernel_entry_point,
+            vm_memory,
+            cpuid,
+            kvm_hyperv,
+        )
+        .map_err(Error::VcpuConfiguration)?;
 
         Ok(())
     }
@@ -770,7 +778,12 @@ impl CpuManager {
             #[cfg(target_arch = "x86_64")]
             vcpu.lock()
                 .unwrap()
-                .configure(entry_point, &vm_memory, self.cpuid.clone())
+                .configure(
+                    entry_point,
+                    &vm_memory,
+                    self.cpuid.clone(),
+                    self.config.kvm_hyperv,
+                )
                 .expect("Failed to configure vCPU");
 
             #[cfg(target_arch = "aarch64")]

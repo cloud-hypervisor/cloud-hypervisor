@@ -174,6 +174,9 @@ pub enum Error {
 
     /// Missing SGX_LC CPU feature
     MissingSgxLaunchControlFeature,
+
+    // Error populating Cpuid
+    PopulatingCpuid,
 }
 
 impl From<Error> for super::Error {
@@ -333,12 +336,70 @@ pub fn configure_vcpu(
     kernel_entry_point: Option<EntryPoint>,
     vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
     cpuid: CpuId,
+    kvm_hyperv: bool,
 ) -> super::Result<()> {
     let mut cpuid = cpuid;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(id));
+
+    if kvm_hyperv {
+        // Remove conflicting entries
+        cpuid.retain(|c| c.function != 0x4000_0000);
+        cpuid.retain(|c| c.function != 0x4000_0001);
+
+        // See "Hypervisor Top Level Functional Specification" for details
+        // Compliance with "Hv#1" requires leaves up to 0x4000_000a
+        cpuid
+            .push(CpuIdEntry {
+                function: 0x40000000,
+                eax: 0x4000000a, // Maximum cpuid leaf
+                ebx: 0x756e694c, // "Linu"
+                ecx: 0x564b2078, // "x KV"
+                edx: 0x7648204d, // "M Hv"
+                ..Default::default()
+            })
+            .map_err(|_| Error::PopulatingCpuid)?;
+        cpuid
+            .push(CpuIdEntry {
+                function: 0x40000001,
+                eax: 0x31237648, // "Hv#1"
+                ..Default::default()
+            })
+            .map_err(|_| Error::PopulatingCpuid)?;
+        cpuid
+            .push(CpuIdEntry {
+                function: 0x40000002,
+                eax: 0x3839,  // "Build number"
+                ebx: 0xa0000, // "Version"
+                ..Default::default()
+            })
+            .map_err(|_| Error::PopulatingCpuid)?;
+        cpuid
+            .push(CpuIdEntry {
+                function: 0x4000_0003,
+                eax: 1 << 1 // AccessPartitionReferenceCounter
+                   | 1 << 2 // AccessSynicRegs
+                   | 1 << 3 // AccessSyntheticTimerRegs
+                   | 1 << 9, // AccessPartitionReferenceTsc
+                ..Default::default()
+            })
+            .map_err(|_| Error::PopulatingCpuid)?;
+        for i in 0x4000_0004..=0x4000_000a {
+            cpuid
+                .push(CpuIdEntry {
+                    function: i,
+                    ..Default::default()
+                })
+                .map_err(|_| Error::PopulatingCpuid)?;
+        }
+    }
+
     fd.set_cpuid2(&cpuid)
         .map_err(|e| Error::SetSupportedCpusFailed(e.into()))?;
+
+    if kvm_hyperv {
+        fd.enable_hyperv_synic().unwrap();
+    }
 
     regs::setup_msrs(fd).map_err(Error::MSRSConfiguration)?;
     if let Some(kernel_entry_point) = kernel_entry_point {
