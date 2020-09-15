@@ -2323,7 +2323,7 @@ mod tests {
         }
 
         #[cfg(target_arch = "x86_64")]
-        #[test]
+        #[cfg_attr(not(feature = "mmio"), test)]
         fn test_user_defined_memory_regions() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -2376,6 +2376,28 @@ mod tests {
                 resize_zone_command(&api_socket, "mem2", "2G");
                 thread::sleep(std::time::Duration::new(5, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
+
+                guest.ssh_command("sudo reboot").unwrap();
+                thread::sleep(std::time::Duration::new(30, 0));
+                let reboot_count = guest
+                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default();
+                assert_eq!(reboot_count, 1);
+
+                // Check the amount of RAM after reboot
+                assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
+                assert!(guest.get_total_memory().unwrap_or_default() < 5_760_000);
+
+                // Check if we can still resize down to the initial 'boot'size
+                resize_zone_command(&api_socket, "mem0", "1G");
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() < 4_800_000);
+                resize_zone_command(&api_socket, "mem2", "1G");
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() < 3_840_000);
             });
 
             let _ = child.kill();
@@ -4416,8 +4438,8 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[test]
         #[cfg(target_arch = "x86_64")]
+        #[cfg_attr(not(feature = "mmio"), test)]
         fn test_virtio_mem() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -4467,13 +4489,34 @@ mod tests {
                 thread::sleep(std::time::Duration::new(10, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
 
-                // Remove RAM to the VM
+                // Remove RAM from the VM
                 let desired_ram = 1024 << 20;
                 resize_command(&api_socket, None, Some(desired_ram), None);
 
                 thread::sleep(std::time::Duration::new(10, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
                 assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
+
+                guest.ssh_command("sudo reboot").unwrap();
+                thread::sleep(std::time::Duration::new(30, 0));
+                let reboot_count = guest
+                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default();
+                assert_eq!(reboot_count, 1);
+
+                // Check the amount of memory after reboot is 1GiB
+                assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+                assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
+
+                // Check we can still resize to 512MiB
+                let desired_ram = 512 << 20;
+                resize_command(&api_socket, None, Some(desired_ram), None);
+                thread::sleep(std::time::Duration::new(10, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+                assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
             });
 
             let _ = child.kill();
