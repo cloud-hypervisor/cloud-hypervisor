@@ -292,10 +292,16 @@ impl Request {
             return Err(ExecuteError::BadRequest(Error::InvalidOffset));
         }
 
+        let mut iovecs = Vec::new();
         let buf = mem
             .get_slice(data_addr, data_len as usize)
             .map_err(ExecuteError::GetHostAddress)?
             .as_ptr();
+        let iovec = libc::iovec {
+            iov_base: buf as *mut libc::c_void,
+            iov_len: data_len as libc::size_t,
+        };
+        iovecs.push(iovec);
         let offset = (sector as i64) << SECTOR_SHIFT;
 
         let (submitter, sq, _) = io_uring.split();
@@ -308,10 +314,14 @@ impl Request {
                 // relied on vm-memory to provide the buffer address.
                 let _ = unsafe {
                     avail_sq.push(
-                        opcode::Read::new(opcode::types::Fd(disk_image_fd), buf, data_len)
-                            .offset(offset)
-                            .build()
-                            .user_data(user_data),
+                        opcode::Readv::new(
+                            opcode::types::Fd(disk_image_fd),
+                            iovecs.as_ptr(),
+                            iovecs.len() as u32,
+                        )
+                        .offset(offset)
+                        .build()
+                        .user_data(user_data),
                     )
                 };
             }
@@ -320,10 +330,14 @@ impl Request {
                 // relied on vm-memory to provide the buffer address.
                 let _ = unsafe {
                     avail_sq.push(
-                        opcode::Write::new(opcode::types::Fd(disk_image_fd), buf, data_len)
-                            .offset(offset)
-                            .build()
-                            .user_data(user_data),
+                        opcode::Writev::new(
+                            opcode::types::Fd(disk_image_fd),
+                            iovecs.as_ptr(),
+                            iovecs.len() as u32,
+                        )
+                        .offset(offset)
+                        .build()
+                        .user_data(user_data),
                     )
                 };
             }
