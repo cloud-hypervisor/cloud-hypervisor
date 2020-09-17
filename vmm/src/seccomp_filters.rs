@@ -108,6 +108,12 @@ const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
 const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
 const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
 
+// The definition of libc::SYS_ftruncate on AArch64 is different from that on x86_64.
+#[cfg(target_arch = "aarch64")]
+pub const SYS_FTRUNCATE: libc::c_long = 46;
+#[cfg(target_arch = "x86_64")]
+pub const SYS_FTRUNCATE: libc::c_long = 77;
+
 fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
     Ok(or![
         and![Cond::new(1, ArgLen::DWORD, Eq, FIOCLEX)?],
@@ -300,12 +306,7 @@ fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_fork),
         allow_syscall(libc::SYS_fstat),
         allow_syscall(libc::SYS_fsync),
-        #[cfg(target_arch = "x86_64")]
-        allow_syscall(libc::SYS_ftruncate),
-        #[cfg(target_arch = "aarch64")]
-        // The definition of libc::SYS_ftruncate is missing on AArch64.
-        // Use a hard-code number instead.
-        allow_syscall(46),
+        allow_syscall(SYS_FTRUNCATE),
         #[cfg(target_arch = "aarch64")]
         allow_syscall(libc::SYS_faccessat),
         #[cfg(target_arch = "aarch64")]
