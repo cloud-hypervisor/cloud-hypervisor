@@ -221,22 +221,22 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 
 # 3. Status
 
-`cloud-hypervisor` is in a very early, pre-alpha stage. Use at your own risk!
+`cloud-hypervisor` is under active development. No API or feature stability is guaranteed.
 
 As of 2020-07-02, the following cloud images are supported:
 * [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (cloudimg)
 * [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (cloudimg)
 
-Direct kernel boot to userspace should work with most rootfs.
+Direct kernel boot to userspace should work with a rootfs from most distributions.
 
 ## Hot Plug
 
-This [document](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/hotplug.md) details how to add devices to
-a running VM. Currently only CPU hot plug is supported.
+Cloud Hypervisor supports hotplug of CPUs, passthrough devices (VFIO), `virtio-{net,block,pmem,fs,vsock}` and memory resizing. This [document](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/hotplug.md) details how to add devices to
+a running VM.
 
 ## Device Model
 
-Follow this [documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/device_model.md).
+Details of the device model can be found in this [documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/device_model.md).
 
 ## TODO
 
