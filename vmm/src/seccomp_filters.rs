@@ -407,6 +407,7 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_fallocate),
         allow_syscall(libc::SYS_fcntl),
         allow_syscall(libc::SYS_fdatasync),
+        allow_syscall(libc::SYS_fstat),
         allow_syscall(libc::SYS_fsync),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_ftruncate),
@@ -416,8 +417,6 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(46),
         #[cfg(target_arch = "aarch64")]
         allow_syscall(libc::SYS_faccessat),
-        #[cfg(target_arch = "aarch64")]
-        allow_syscall(libc::SYS_newfstatat),
         allow_syscall(libc::SYS_futex),
         allow_syscall(libc::SYS_getpid),
         allow_syscall(libc::SYS_getrandom),
@@ -432,6 +431,8 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_nanosleep),
         allow_syscall(libc::SYS_openat),
+        #[cfg(target_arch = "aarch64")]
+        allow_syscall(libc::SYS_newfstatat),
         allow_syscall(libc::SYS_prctl),
         allow_syscall(libc::SYS_pread64),
         allow_syscall(libc::SYS_pwrite64),
