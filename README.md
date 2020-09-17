@@ -27,8 +27,7 @@
 
 Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on top of [KVM](https://www.kernel.org/doc/Documentation/virtual/kvm/api.txt).
 The project focuses on exclusively running modern, cloud workloads, on top of a limited set of hardware architectures and platforms.
-Cloud workloads refers to those that are usually run by customers inside a cloud provider. For our purposes this means modern
-Linux* distributions with most I/O handled by paravirtualised devices (i.e. virtio), no requirement for legacy devices and recent CPUs and KVM.
+Cloud workloads refers to those that are usually run by customers inside a cloud provider. For our purposes this means modern operating systems with most I/O handled by paravirtualised devices (i.e. virtio), no requirement for legacy devices, and 64-bit CPUs.
 
 Cloud Hypervisor is implemented in [Rust](https://www.rust-lang.org/) and is based on the [rust-vmm](https://github.com/rust-vmm) crates.
 
@@ -36,7 +35,7 @@ Cloud Hypervisor is implemented in [Rust](https://www.rust-lang.org/) and is bas
 
 ### High Level
 
-* KVM and KVM only based
+* KVM based
 * Minimal emulation
 * Low latency
 * Low memory footprint
