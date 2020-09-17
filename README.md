@@ -151,8 +151,7 @@ Multiple arguments can be given to the `--disk` parameter.
 
 #### Building your kernel
 
-`cloud-hypervisor` also supports direct kernel boot into a `vmlinux` ELF kernel
-image. In order to support virtio-fs and virtio-iommu we have our own development branch. You are of course able to use your own kernel but these instructions will continue with the version that we develop and test against.
+`cloud-hypervisor` also supports direct kernel boot into a `vmlinux` ELF kernel or `bzImage`. In order to support virtio-fs and virtio-iommu we have our own development branch. You are of course able to use your own kernel but these instructions will continue with the version that we develop and test against.
 
 To build the kernel:
 
