@@ -48,14 +48,11 @@ Cloud Hypervisor is implemented in [Rust](https://www.rust-lang.org/) and is bas
 
 ### Architectures
 
-`cloud-hypervisor` only supports the `x86-64` CPU architecture for now.
-
-We're planning to add support for the `AArch64` architecture in the future.
+`cloud-hypervisor` supports the `x86-64` and `AArch64` architecture. There are some small differences in functionality between the two architectures.
 
 ### Guest OS
-* `64-bit Linux`
 
-Support for *modern* 64-bit Windows guest is being evaluated.
+`cloud-hypervisor` supports `64-bit Linux` with support for *modern* 64-bit Windows guests currently under development.
 
 # 2. Getting Started
 
