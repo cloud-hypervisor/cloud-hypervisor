@@ -43,7 +43,7 @@ Cloud Hypervisor is implemented in [Rust](https://www.rust-lang.org/) and is bas
 * High performance
 * Small attack surface
 * 64-bit support only
-* Build time configurable CPU, memory, PCI and NVDIMM hotplug
+* CPU, memory, PCI hotplug
 * Machine to machine migration
 
 ### Architectures
