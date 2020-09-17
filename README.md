@@ -248,7 +248,7 @@ We are not tracking the Cloud Hypervisor TODO list from a specific git tracked f
 
 In order to satisfy the design goal of having a high-performance, security-focused hypervisor the decision
 was made to use the [Rust](https://www.rust-lang.org/) programming language.
-The language's strong focus on memory and thread safety makes it an ideal candidate for implementing VMMs
+The language's strong focus on memory and thread safety makes it an ideal candidate for implementing VMMs.
 
 Instead of implementing the VMM components from scratch, Cloud Hypervisor is importing the [rust-vmm](https://github.com/rust-vmm)
 crates, and sharing code and architecture together with other VMMs like e.g. Amazon's [Firecracker](https://firecracker-microvm.github.io/)
