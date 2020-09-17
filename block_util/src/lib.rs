@@ -14,7 +14,7 @@ extern crate log;
 extern crate serde_derive;
 
 #[cfg(feature = "io_uring")]
-use io_uring::{opcode, IoUring, Probe};
+use io_uring::{opcode, squeue, IoUring, Probe};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -278,7 +278,7 @@ impl Request {
     ) -> result::Result<bool, ExecuteError> {
         let sector = self.sector;
         let request_type = self.request_type;
-        let offset = (sector as i64) << SECTOR_SHIFT;
+        let offset = (sector << SECTOR_SHIFT) as libc::off_t;
 
         let (submitter, sq, _) = io_uring.split();
         let mut avail_sq = sq.available();
@@ -321,6 +321,7 @@ impl Request {
                         )
                         .offset(offset)
                         .build()
+                        .flags(squeue::Flags::ASYNC)
                         .user_data(user_data),
                     )
                 };
@@ -337,6 +338,7 @@ impl Request {
                         )
                         .offset(offset)
                         .build()
+                        .flags(squeue::Flags::ASYNC)
                         .user_data(user_data),
                     )
                 };
@@ -347,6 +349,7 @@ impl Request {
                     avail_sq.push(
                         opcode::Fsync::new(opcode::types::Fd(disk_image_fd))
                             .build()
+                            .flags(squeue::Flags::ASYNC)
                             .user_data(user_data),
                     )
                 };
