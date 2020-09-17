@@ -48,11 +48,11 @@ Cloud Hypervisor is implemented in [Rust](https://www.rust-lang.org/) and is bas
 
 ### Architectures
 
-`cloud-hypervisor` supports the `x86-64` and `AArch64` architecture. There are some small differences in functionality between the two architectures.
+Cloud Hypervisor supports the `x86-64` and `AArch64` architecture. There are some small differences in functionality between the two architectures.
 
 ### Guest OS
 
-`cloud-hypervisor` supports `64-bit Linux` with support for *modern* 64-bit Windows guests currently under development.
+Cloud Hypervisor supports `64-bit Linux` with support for *modern* 64-bit Windows guests currently under development.
 
 # 2. Getting Started
 
@@ -115,7 +115,7 @@ You can run a guest VM by either using an existing cloud image or booting into y
 
 ### Cloud image
 
-`cloud-hypervisor` supports booting disk images containing all needed
+Cloud Hypervisor supports booting disk images containing all needed
 components to run cloud workloads, a.k.a. cloud images.  To do that we rely on
 the [Rust Hypervisor
 Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware) project to provide
@@ -151,7 +151,7 @@ Multiple arguments can be given to the `--disk` parameter.
 
 #### Building your kernel
 
-`cloud-hypervisor` also supports direct kernel boot into a `vmlinux` ELF kernel or `bzImage`. In order to support virtio-fs and virtio-iommu we have our own development branch. You are of course able to use your own kernel but these instructions will continue with the version that we develop and test against.
+Cloud Hypervisor also supports direct kernel boot into a `vmlinux` ELF kernel or `bzImage`. In order to support virtio-fs and virtio-iommu we have our own development branch. You are of course able to use your own kernel but these instructions will continue with the version that we develop and test against.
 
 To build the kernel:
 
@@ -221,7 +221,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 
 # 3. Status
 
-`cloud-hypervisor` is under active development. No API or feature stability is guaranteed.
+Cloud Hypervisor is under active development. No API or feature stability is guaranteed.
 
 As of 2020-07-02, the following cloud images are supported:
 * [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (cloudimg)
@@ -240,7 +240,7 @@ Details of the device model can be found in this [documentation](https://github.
 
 ## TODO
 
-We are not tracking the `cloud-hypervisor` TODO list from a specific git tracked file but through
+We are not tracking the Cloud Hypervisor TODO list from a specific git tracked file but through
 [github issues](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new) instead.
 
 # 4. `rust-vmm` project dependency
@@ -249,23 +249,23 @@ In order to satisfy the design goal of having a high-performance, security-focus
 was made to use the [Rust](https://www.rust-lang.org/) programming language.
 The language's strong focus on memory and thread safety makes it an ideal candidate for implementing VMMs
 
-Instead of implementing the VMM components from scratch, `cloud-hypervisor` is importing the [rust-vmm](https://github.com/rust-vmm)
+Instead of implementing the VMM components from scratch, Cloud Hypervisor is importing the [rust-vmm](https://github.com/rust-vmm)
 crates, and sharing code and architecture together with other VMMs like e.g. Amazon's [Firecracker](https://firecracker-microvm.github.io/)
 and Google's [crosvm](https://chromium.googlesource.com/chromiumos/platform/crosvm/).
 
-`cloud-hypervisor` embraces the rust-vmm project goals, which is to be able to share and re-use
-as many virtualization crates as possible. As such, the `cloud-hypervisor` relationship with the rust-vmm
+Cloud Hypervisor embraces the rust-vmm project goals, which is to be able to share and re-use
+as many virtualization crates as possible. As such, the Cloud Hypervisor relationship with the rust-vmm
 project is twofold:
 
 1. It will use as much of the rust-vmm code as possible. Any new rust-vmm crate that's relevant to the project
    goals will be integrated as soon as possible.
-2. As it is likely that the rust-vmm project will lack some of the features that `cloud-hypervisor` needs (e.g. ACPI,
-   VFIO, vhost-user, etc), we will be using the `cloud-hypervisor` VMM to implement and test them, and contribute them
+2. As it is likely that the rust-vmm project will lack some of the features that Cloud Hypervisor needs (e.g. ACPI,
+   VFIO, vhost-user, etc), we will be using the Cloud Hypervisor VMM to implement and test them, and contribute them
    back to the rust-vmm project.
 
 ## Firecracker and crosvm
 
-A large part of the `cloud-hypervisor` code is based on either the Firecracker or the crosvm projects implementations.
+A large part of the Cloud Hypervisor code is based on either the Firecracker or the crosvm projects implementations.
 Both of these are VMMs written in Rust with a focus on safety and security, like Cloud Hypervisor.
 
 However we want to emphasize that the Cloud Hypervisor project is neither a fork nor a reimplementation of any of those
