@@ -240,7 +240,11 @@ fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
 }
 
 fn create_signal_handler_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
-    Ok(or![and![Cond::new(1, ArgLen::DWORD, Eq, TIOCGWINSZ)?],])
+    Ok(or![
+        and![Cond::new(1, ArgLen::DWORD, Eq, TCGETS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, TCSETS)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, TIOCGWINSZ)?],
+    ])
 }
 
 fn signal_handler_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
