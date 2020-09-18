@@ -606,7 +606,7 @@ impl MemoryManager {
                             false,
                             config.shared,
                             config.hugepages,
-                            None,
+                            zone.host_numa_node,
                             &None,
                         )?;
 
