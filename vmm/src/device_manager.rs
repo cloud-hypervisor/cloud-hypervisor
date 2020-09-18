@@ -1647,17 +1647,26 @@ impl DeviceManager {
                 self.start_block_backend(disk_cfg)?
             };
             let vu_cfg = VhostUserConfig {
-                socket,
+                socket: socket.clone(),
                 num_queues: disk_cfg.num_queues,
                 queue_size: disk_cfg.queue_size,
             };
             let vhost_user_block_device = Arc::new(Mutex::new(
-                virtio_devices::vhost_user::Blk::new(
+                match virtio_devices::vhost_user::Blk::new(
                     id.clone(),
                     vu_cfg,
                     self.seccomp_action.clone(),
-                )
-                .map_err(DeviceManagerError::CreateVhostUserBlk)?,
+                ) {
+                    Ok(vub_device) => vub_device,
+                    Err(e) => {
+                        for vub in self.vhost_user_backends.iter_mut() {
+                            if vub._socket_file.path().to_str().unwrap() == socket {
+                                let _ = vub.child.kill();
+                            }
+                        }
+                        return Err(DeviceManagerError::CreateVhostUserBlk(e));
+                    }
+                },
             ));
 
             // Fill the device tree with a new node. In case of restore, we
@@ -1884,18 +1893,27 @@ impl DeviceManager {
                 self.start_net_backend(net_cfg)?
             };
             let vu_cfg = VhostUserConfig {
-                socket,
+                socket: socket.clone(),
                 num_queues: net_cfg.num_queues,
                 queue_size: net_cfg.queue_size,
             };
             let vhost_user_net_device = Arc::new(Mutex::new(
-                virtio_devices::vhost_user::Net::new(
+                match virtio_devices::vhost_user::Net::new(
                     id.clone(),
                     net_cfg.mac,
                     vu_cfg,
                     self.seccomp_action.clone(),
-                )
-                .map_err(DeviceManagerError::CreateVhostUserNet)?,
+                ) {
+                    Ok(vun_device) => vun_device,
+                    Err(e) => {
+                        for vun in self.vhost_user_backends.iter_mut() {
+                            if vun._socket_file.path().to_str().unwrap() == socket {
+                                let _ = vun.child.kill();
+                            }
+                        }
+                        return Err(DeviceManagerError::CreateVhostUserNet(e));
+                    }
+                },
             ));
 
             // Fill the device tree with a new node. In case of restore, we

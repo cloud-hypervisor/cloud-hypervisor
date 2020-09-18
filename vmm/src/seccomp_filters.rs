@@ -318,6 +318,7 @@ fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(SYS_IO_URING_ENTER),
         allow_syscall(SYS_IO_URING_SETUP),
         allow_syscall(SYS_IO_URING_REGISTER),
+        allow_syscall(libc::SYS_kill),
         allow_syscall(libc::SYS_listen),
         allow_syscall(libc::SYS_lseek),
         allow_syscall(libc::SYS_madvise),
