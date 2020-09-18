@@ -206,7 +206,7 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 sudo adduser $USER kvm
 newgrp kvm << EOF
 export RUST_BACKTRACE=1
-time cargo test --no-default-features --features "integration_tests,pci,kvm" "tests::parallel::$@" 
+time cargo test --no-default-features --features "integration_tests,pci,kvm" "tests::parallel::$@" -- --skip test_snapshot_restore
 EOF
 RES=$?
 
