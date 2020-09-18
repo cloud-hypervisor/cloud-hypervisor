@@ -178,8 +178,10 @@ impl vm::Vm for KvmVm {
             .fd
             .create_vcpu(id)
             .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
+        let vmmops = self.vmmops.as_ref().cloned();
         let vcpu = KvmVcpu {
             fd: vc,
+            vmmops,
             #[cfg(target_arch = "x86_64")]
             msrs: self.msrs.clone(),
         };
@@ -500,6 +502,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 /// Vcpu struct for KVM
 pub struct KvmVcpu {
     fd: VcpuFd,
+    vmmops: Option<Arc<Mutex<dyn vm::VmmOps>>>,
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
 }
