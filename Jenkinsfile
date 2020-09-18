@@ -63,16 +63,6 @@ pipeline{
 								checkout scm
 							}
 						}
-						stage ('Build') {
-							steps {
-								sh "scripts/dev_cli.sh build --release"
-							}
-						}
-						stage ('Build for musl') {
-							steps {
-								sh "scripts/dev_cli.sh build --release --libc musl"
-							}
-						}
 						stage ('Run unit tests') {
 							steps {
 								sh "scripts/dev_cli.sh tests --unit"
