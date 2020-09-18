@@ -17,13 +17,14 @@ use crate::cpu;
 use crate::device;
 use crate::hypervisor;
 use crate::vm;
+use crate::vm::VmmOps;
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset__of};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::Address;
 use vmm_sys_util::eventfd::EventFd;
@@ -88,6 +89,7 @@ pub use KvmVmState as VmState;
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
     fd: Arc<VmFd>,
+    vmmops: Option<Arc<Mutex<dyn vm::VmmOps>>>,
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
     state: KvmVmState,
@@ -131,6 +133,7 @@ fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
 /// let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
 /// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// let vm = vm.lock().unwrap();
 /// vm.set/get().unwrap()
 ///
 impl vm::Vm for KvmVm {
@@ -345,6 +348,13 @@ impl vm::Vm for KvmVm {
     fn set_state(&self, _state: &VmState) -> vm::Result<()> {
         Ok(())
     }
+    ///
+    /// Set VmmOps Interface
+    ///
+    fn set_vmmops(&mut self, vmmops: Arc<Mutex<dyn VmmOps>>) -> vm::Result<()> {
+        self.vmmops = Some(vmmops);
+        Ok(())
+    }
 }
 /// Wrapper over KVM system ioctls.
 pub struct KvmHypervisor {
@@ -386,7 +396,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     /// let hypervisor = KvmHypervisor::new().unwrap();
     /// let vm = hypervisor.create_vm().unwrap()
     ///
-    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+    fn create_vm(&self) -> hypervisor::Result<Arc<Mutex<dyn vm::Vm>>> {
         let fd: VmFd;
         loop {
             match self.kvm.create_vm() {
@@ -418,18 +428,19 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 msr_entries[pos].index = *index;
             }
 
-            Ok(Arc::new(KvmVm {
+            Ok(Arc::new(Mutex::new(KvmVm {
                 fd: vm_fd,
+                vmmops: None,
                 msrs,
                 state: VmState {},
-            }))
+            })))
         }
 
         #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
         {
             Ok(Arc::new(Mutex::new(KvmVm {
                 fd: vm_fd,
-                vmmops,
+                vmmops: None,
                 state: VmState {},
             })))
         }
@@ -1057,6 +1068,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
     /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
     /// let vm = hv.create_vm().expect("new VM fd creation failed");
+    /// let vm = vm.lock().unwrap();
     /// vm.enable_split_irq().unwrap();
     /// let vcpu = vm.create_vcpu(0).unwrap();
     /// let state = vcpu.state().unwrap();
@@ -1181,6 +1193,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
     /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
     /// let vm = hv.create_vm().expect("new VM fd creation failed");
+    /// let vm = vm.lock().unwrap();
     /// vm.enable_split_irq().unwrap();
     /// let vcpu = vm.create_vcpu(0).unwrap();
     /// let state = vcpu.state().unwrap();

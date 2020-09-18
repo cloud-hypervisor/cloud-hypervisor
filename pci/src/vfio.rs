@@ -15,7 +15,7 @@ use std::any::Any;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{fmt, io, result};
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::{VfioDevice, VfioError};
@@ -278,7 +278,7 @@ impl VfioPciConfig {
 /// The VMM creates a VfioDevice, then assigns it to a VfioPciDevice,
 /// which then gets added to the PCI bus.
 pub struct VfioPciDevice {
-    vm: Arc<dyn hypervisor::Vm>,
+    vm: Arc<Mutex<dyn hypervisor::Vm>>,
     device: Arc<VfioDevice>,
     vfio_pci_configuration: VfioPciConfig,
     configuration: PciConfiguration,
@@ -290,7 +290,7 @@ pub struct VfioPciDevice {
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
     pub fn new(
-        vm: &Arc<dyn hypervisor::Vm>,
+        vm: &Arc<Mutex<dyn hypervisor::Vm>>,
         device: VfioDevice,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -506,7 +506,11 @@ impl VfioPciDevice {
     /// * `vm` - The VM object. It is used to set the VFIO MMIO regions
     ///          as user memory regions.
     /// * `mem_slot` - The closure to return a memory slot.
-    pub fn map_mmio_regions<F>(&mut self, vm: &Arc<dyn hypervisor::Vm>, mem_slot: F) -> Result<()>
+    pub fn map_mmio_regions<F>(
+        &mut self,
+        vm: &Arc<Mutex<dyn hypervisor::Vm>>,
+        mem_slot: F,
+    ) -> Result<()>
     where
         F: Fn() -> u32,
     {
@@ -578,6 +582,7 @@ impl VfioPciDevice {
     }
 
     pub fn unmap_mmio_regions(&mut self) {
+        let vm = self.vm.lock().unwrap();
         for region in self.mmio_regions.iter() {
             if let (Some(host_addr), Some(mmap_size), Some(mem_slot)) =
                 (region.host_addr, region.mmap_size, region.mem_slot)
@@ -585,7 +590,7 @@ impl VfioPciDevice {
                 let (mmap_offset, _) = self.device.get_region_mmap(region.index);
 
                 // Remove region
-                let r = self.vm.make_user_memory_region(
+                let r = vm.make_user_memory_region(
                     mem_slot,
                     region.start.raw_value() + mmap_offset,
                     0,
@@ -593,7 +598,7 @@ impl VfioPciDevice {
                     false,
                 );
 
-                if let Err(e) = self.vm.set_user_memory_region(r) {
+                if let Err(e) = vm.set_user_memory_region(r) {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
 
@@ -1001,6 +1006,7 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), io::Error> {
+        let vm = self.vm.lock().unwrap();
         for region in self.mmio_regions.iter_mut() {
             if region.start.raw_value() == old_base {
                 region.start = GuestAddress(new_base);
@@ -1010,7 +1016,7 @@ impl PciDevice for VfioPciDevice {
                         let (mmap_offset, mmap_size) = self.device.get_region_mmap(region.index);
 
                         // Remove old region
-                        let old_mem_region = self.vm.make_user_memory_region(
+                        let old_mem_region = vm.make_user_memory_region(
                             mem_slot,
                             old_base + mmap_offset,
                             0,
@@ -1018,12 +1024,11 @@ impl PciDevice for VfioPciDevice {
                             false,
                         );
 
-                        self.vm
-                            .set_user_memory_region(old_mem_region)
+                        vm.set_user_memory_region(old_mem_region)
                             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
                         // Insert new region
-                        let new_mem_region = self.vm.make_user_memory_region(
+                        let new_mem_region = vm.make_user_memory_region(
                             mem_slot,
                             new_base + mmap_offset,
                             mmap_size as u64,
@@ -1031,8 +1036,7 @@ impl PciDevice for VfioPciDevice {
                             false,
                         );
 
-                        self.vm
-                            .set_user_memory_region(new_mem_region)
+                        vm.set_user_memory_region(new_mem_region)
                             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
                     }
                 }

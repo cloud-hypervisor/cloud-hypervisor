@@ -260,7 +260,7 @@ pub struct Vmm {
     reset_evt: EventFd,
     api_evt: EventFd,
     version: String,
-    vm: Option<Vm>,
+    vm: Option<Arc<Mutex<Vm>>>,
     vm_config: Option<Arc<Mutex<VmConfig>>>,
     vmm_path: PathBuf,
     seccomp_action: SeccompAction,
@@ -330,7 +330,7 @@ impl Vmm {
 
         // Now we can boot the VM.
         if let Some(ref mut vm) = self.vm {
-            vm.boot()
+            vm.lock().unwrap().boot()
         } else {
             Err(VmError::VmNotCreated)
         }
@@ -338,7 +338,7 @@ impl Vmm {
 
     fn vm_pause(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            vm.pause().map_err(VmError::Pause)
+            vm.lock().unwrap().pause().map_err(VmError::Pause)
         } else {
             Err(VmError::VmNotRunning)
         }
@@ -346,7 +346,7 @@ impl Vmm {
 
     fn vm_resume(&mut self) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            vm.resume().map_err(VmError::Resume)
+            vm.lock().unwrap().resume().map_err(VmError::Resume)
         } else {
             Err(VmError::VmNotRunning)
         }
@@ -354,10 +354,14 @@ impl Vmm {
 
     fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            vm.snapshot()
+            vm.lock()
+                .unwrap()
+                .snapshot()
                 .map_err(VmError::Snapshot)
                 .and_then(|snapshot| {
-                    vm.send(&snapshot, destination_url)
+                    vm.lock()
+                        .unwrap()
+                        .send(&snapshot, destination_url)
                         .map_err(VmError::SnapshotSend)
                 })
         } else {
@@ -399,15 +403,18 @@ impl Vmm {
 
         // Now we can restore the rest of the VM.
         if let Some(ref mut vm) = self.vm {
-            vm.restore(snapshot).map_err(VmError::Restore)
+            vm.lock()
+                .unwrap()
+                .restore(snapshot)
+                .map_err(VmError::Restore)
         } else {
             Err(VmError::VmNotCreated)
         }
     }
 
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
-        if let Some(ref mut vm) = self.vm.take() {
-            vm.shutdown()
+        if let Some(ref mut vm) = self.vm {
+            vm.lock().unwrap().shutdown()
         } else {
             Err(VmError::VmNotRunning)
         }
@@ -425,7 +432,7 @@ impl Vmm {
 
         // First we stop the current VM and create a new one.
         if let Some(ref mut vm) = self.vm {
-            let config = vm.get_config();
+            let config = vm.lock().unwrap().get_config();
             self.vm_shutdown()?;
 
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
@@ -449,7 +456,7 @@ impl Vmm {
 
         // Then we start the new VM.
         if let Some(ref mut vm) = self.vm {
-            vm.boot()?;
+            vm.lock().unwrap().boot()?;
         } else {
             return Err(VmError::VmNotCreated);
         }
@@ -461,7 +468,7 @@ impl Vmm {
         match &self.vm_config {
             Some(config) => {
                 let state = match &self.vm {
-                    Some(vm) => vm.get_state()?,
+                    Some(vm) => vm.lock().unwrap().get_state()?,
                     None => VmState::Created,
                 };
 
@@ -506,7 +513,11 @@ impl Vmm {
         desired_ram_w_balloon: Option<u64>,
     ) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.resize(desired_vcpus, desired_ram, desired_ram_w_balloon) {
+            if let Err(e) =
+                vm.lock()
+                    .unwrap()
+                    .resize(desired_vcpus, desired_ram, desired_ram_w_balloon)
+            {
                 error!("Error when resizing VM: {:?}", e);
                 Err(e)
             } else {
@@ -519,7 +530,7 @@ impl Vmm {
 
     fn vm_resize_zone(&mut self, id: String, desired_ram: u64) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.resize_zone(id, desired_ram) {
+            if let Err(e) = vm.lock().unwrap().resize_zone(id, desired_ram) {
                 error!("Error when resizing VM: {:?}", e);
                 Err(e)
             } else {
@@ -532,7 +543,7 @@ impl Vmm {
 
     fn vm_add_device(&mut self, device_cfg: DeviceConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_device(device_cfg).map_err(|e| {
+            let info = vm.lock().unwrap().add_device(device_cfg).map_err(|e| {
                 error!("Error when adding new device to the VM: {:?}", e);
                 e
             })?;
@@ -544,7 +555,7 @@ impl Vmm {
 
     fn vm_remove_device(&mut self, id: String) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.remove_device(id) {
+            if let Err(e) = vm.lock().unwrap().remove_device(id) {
                 error!("Error when removing new device to the VM: {:?}", e);
                 Err(e)
             } else {
@@ -557,7 +568,7 @@ impl Vmm {
 
     fn vm_add_disk(&mut self, disk_cfg: DiskConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_disk(disk_cfg).map_err(|e| {
+            let info = vm.lock().unwrap().add_disk(disk_cfg).map_err(|e| {
                 error!("Error when adding new disk to the VM: {:?}", e);
                 e
             })?;
@@ -569,7 +580,7 @@ impl Vmm {
 
     fn vm_add_fs(&mut self, fs_cfg: FsConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_fs(fs_cfg).map_err(|e| {
+            let info = vm.lock().unwrap().add_fs(fs_cfg).map_err(|e| {
                 error!("Error when adding new fs to the VM: {:?}", e);
                 e
             })?;
@@ -581,7 +592,7 @@ impl Vmm {
 
     fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_pmem(pmem_cfg).map_err(|e| {
+            let info = vm.lock().unwrap().add_pmem(pmem_cfg).map_err(|e| {
                 error!("Error when adding new pmem device to the VM: {:?}", e);
                 e
             })?;
@@ -593,7 +604,7 @@ impl Vmm {
 
     fn vm_add_net(&mut self, net_cfg: NetConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_net(net_cfg).map_err(|e| {
+            let info = vm.lock().unwrap().add_net(net_cfg).map_err(|e| {
                 error!("Error when adding new network device to the VM: {:?}", e);
                 e
             })?;
@@ -605,7 +616,7 @@ impl Vmm {
 
     fn vm_add_vsock(&mut self, vsock_cfg: VsockConfig) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_vsock(vsock_cfg).map_err(|e| {
+            let info = vm.lock().unwrap().add_vsock(vsock_cfg).map_err(|e| {
                 error!("Error when adding new vsock device to the VM: {:?}", e);
                 e
             })?;
@@ -617,7 +628,7 @@ impl Vmm {
 
     fn vm_counters(&mut self) -> result::Result<Vec<u8>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            let info = vm.counters().map_err(|e| {
+            let info = vm.lock().unwrap().counters().map_err(|e| {
                 error!("Error when getting counters from the VM: {:?}", e);
                 e
             })?;
@@ -669,8 +680,8 @@ impl Vmm {
                             self.vm_reboot().map_err(Error::VmReboot)?;
                         }
                         EpollDispatch::Stdin => {
-                            if let Some(ref vm) = self.vm {
-                                vm.handle_stdin().map_err(Error::Stdin)?;
+                            if let Some(ref mut vm) = self.vm {
+                                vm.lock().unwrap().handle_stdin().map_err(Error::Stdin)?;
                             }
                         }
                         EpollDispatch::Api => {

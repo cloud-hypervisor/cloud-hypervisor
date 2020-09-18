@@ -309,7 +309,7 @@ pub struct Vm {
     memory_manager: Arc<Mutex<MemoryManager>>,
     #[cfg_attr(not(feature = "kvm"), allow(dead_code))]
     // The hypervisor abstracted virtual machine.
-    vm: Arc<dyn hypervisor::Vm>,
+    vm: Arc<Mutex<dyn hypervisor::Vm>>,
     #[cfg(target_arch = "x86_64")]
     saved_clock: Option<hypervisor::ClockData>,
     #[cfg(feature = "acpi")]
@@ -322,14 +322,14 @@ impl Vm {
     fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        vm: Arc<dyn hypervisor::Vm>,
+        vm: Arc<Mutex<dyn hypervisor::Vm>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         _saved_clock: Option<hypervisor::ClockData>,
-    ) -> Result<Self> {
+    ) -> Result<Arc<Mutex<Self>>> {
         config
             .lock()
             .unwrap()
@@ -378,7 +378,7 @@ impl Vm {
             .transpose()
             .map_err(Error::InitramfsFile)?;
 
-        Ok(Vm {
+        Ok(Arc::new(Mutex::new(Vm {
             kernel,
             initramfs,
             device_manager,
@@ -395,7 +395,7 @@ impl Vm {
             #[cfg(feature = "acpi")]
             numa_nodes,
             seccomp_action: seccomp_action.clone(),
-        })
+        })))
     }
 
     #[cfg(feature = "acpi")]
@@ -470,12 +470,12 @@ impl Vm {
         vmm_path: PathBuf,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
-    ) -> Result<Self> {
+    ) -> Result<Arc<Mutex<Self>>> {
         #[cfg(target_arch = "x86_64")]
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
-        vm.enable_split_irq().unwrap();
+        vm.lock().unwrap().enable_split_irq().unwrap();
         let memory_manager = MemoryManager::new(
             vm.clone(),
             &config.lock().unwrap().memory.clone(),
@@ -503,13 +503,15 @@ impl Vm {
             reset_evt,
             vmm_path,
             seccomp_action,
-            hypervisor,
+            hypervisor.clone(),
             None,
         )?;
 
         // The device manager must create the devices from here as it is part
         // of the regular code path creating everything from scratch.
         new_vm
+            .lock()
+            .unwrap()
             .device_manager
             .lock()
             .unwrap()
@@ -528,16 +530,18 @@ impl Vm {
         prefault: bool,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
-    ) -> Result<Self> {
+    ) -> Result<Arc<Mutex<Self>>> {
         #[cfg(target_arch = "x86_64")]
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
-        vm.enable_split_irq().unwrap();
+        vm.lock().unwrap().enable_split_irq().unwrap();
         let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
         let config = vm_snapshot.config;
         if let Some(state) = vm_snapshot.state {
-            vm.set_state(&state)
+            vm.lock()
+                .unwrap()
+                .set_state(&state)
                 .map_err(|e| Error::Restore(MigratableError::Restore(e.into())))?;
         }
 
@@ -1495,10 +1499,10 @@ impl Pausable for Vm {
 
         #[cfg(target_arch = "x86_64")]
         {
-            let mut clock = self
-                .vm
-                .get_clock()
-                .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {}", e)))?;
+            let mut clock =
+                self.vm.lock().unwrap().get_clock().map_err(|e| {
+                    MigratableError::Pause(anyhow!("Could not get VM clock: {}", e))
+                })?;
             // Reset clock flags.
             clock.flags = 0;
             self.saved_clock = Some(clock);
@@ -1526,7 +1530,7 @@ impl Pausable for Vm {
         #[cfg(target_arch = "x86_64")]
         {
             if let Some(clock) = &self.saved_clock {
-                self.vm.set_clock(clock).map_err(|e| {
+                self.vm.lock().unwrap().set_clock(clock).map_err(|e| {
                     MigratableError::Resume(anyhow!("Could not set VM clock: {}", e))
                 })?;
             }
@@ -1617,6 +1621,8 @@ impl Snapshottable for Vm {
         let mut vm_snapshot = Snapshot::new(VM_SNAPSHOT_ID);
         let vm_state = self
             .vm
+            .lock()
+            .unwrap()
             .state()
             .map_err(|e| MigratableError::Snapshot(e.into()))?;
         let vm_snapshot_data = serde_json::to_vec(&VmSnapshot {
@@ -1981,6 +1987,7 @@ pub fn test_vm() {
 
     let hv = hypervisor::new().unwrap();
     let vm = hv.create_vm().expect("new VM creation failed");
+    let vm = vm.lock().unwrap();
 
     mem.with_regions(|index, region| {
         let mem_region = vm.make_user_memory_region(

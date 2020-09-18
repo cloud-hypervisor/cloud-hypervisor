@@ -465,7 +465,7 @@ struct AddressManager {
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<Bus>,
     mmio_bus: Arc<Bus>,
-    vm: Arc<dyn hypervisor::Vm>,
+    vm: Arc<Mutex<dyn hypervisor::Vm>>,
     #[cfg(feature = "pci_support")]
     device_tree: Arc<Mutex<DeviceTree>>,
 }
@@ -602,10 +602,11 @@ impl DeviceRelocation for AddressManager {
             }
 
             let bar_addr = virtio_pci_dev.config_bar_addr();
+            let vm = self.vm.lock().unwrap();
             if bar_addr == new_base {
                 for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
+                    vm.unregister_ioevent(event, &io_addr).map_err(|e| {
                         io::Error::new(
                             io::ErrorKind::Other,
                             format!("failed to unregister ioevent: {:?}", e),
@@ -614,14 +615,12 @@ impl DeviceRelocation for AddressManager {
                 }
                 for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm
-                        .register_ioevent(event, &io_addr, None)
-                        .map_err(|e| {
-                            io::Error::new(
-                                io::ErrorKind::Other,
-                                format!("failed to register ioevent: {:?}", e),
-                            )
-                        })?;
+                    vm.register_ioevent(event, &io_addr, None).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("failed to register ioevent: {:?}", e),
+                        )
+                    })?;
                 }
             } else {
                 let virtio_dev = virtio_pci_dev.virtio_device();
@@ -629,7 +628,7 @@ impl DeviceRelocation for AddressManager {
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     if shm_regions.addr.raw_value() == old_base {
                         // Remove old region from KVM by passing a size of 0.
-                        let mem_region = self.vm.make_user_memory_region(
+                        let mem_region = vm.make_user_memory_region(
                             shm_regions.mem_slot,
                             old_base,
                             0,
@@ -637,7 +636,7 @@ impl DeviceRelocation for AddressManager {
                             false,
                         );
 
-                        self.vm.set_user_memory_region(mem_region).map_err(|e| {
+                        vm.set_user_memory_region(mem_region).map_err(|e| {
                             io::Error::new(
                                 io::ErrorKind::Other,
                                 format!("failed to set user memory region: {:?}", e),
@@ -645,7 +644,7 @@ impl DeviceRelocation for AddressManager {
                         })?;
 
                         // Create new mapping by inserting new region to KVM.
-                        let mem_region = self.vm.make_user_memory_region(
+                        let mem_region = vm.make_user_memory_region(
                             shm_regions.mem_slot,
                             new_base,
                             shm_regions.len,
@@ -653,7 +652,7 @@ impl DeviceRelocation for AddressManager {
                             false,
                         );
 
-                        self.vm.set_user_memory_region(mem_region).map_err(|e| {
+                        vm.set_user_memory_region(mem_region).map_err(|e| {
                             io::Error::new(
                                 io::ErrorKind::Other,
                                 format!("failed to set user memory regions: {:?}", e),
@@ -821,7 +820,7 @@ pub struct DeviceManager {
 impl DeviceManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        vm: Arc<dyn hypervisor::Vm>,
+        vm: Arc<Mutex<dyn hypervisor::Vm>>,
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
@@ -2773,6 +2772,8 @@ impl DeviceManager {
                 self.passthrough_device = Some(
                     self.address_manager
                         .vm
+                        .lock()
+                        .unwrap()
                         .create_passthrough_device()
                         .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?,
                 );
@@ -2908,11 +2909,10 @@ impl DeviceManager {
         )?;
 
         let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
+        let vm = self.address_manager.vm.lock().unwrap();
         for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
             let io_addr = IoEventAddress::Mmio(addr);
-            self.address_manager
-                .vm
-                .register_ioevent(event, &io_addr, None)
+            vm.register_ioevent(event, &io_addr, None)
                 .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
         }
 
@@ -3036,15 +3036,14 @@ impl DeviceManager {
         }
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
+        let vm = self.address_manager.vm.lock().unwrap();
         let mut mmio_device =
             virtio_devices::transport::MmioDevice::new(id.clone(), memory, virtio_device)
                 .map_err(DeviceManagerError::VirtioDevice)?;
 
         for (i, (event, addr)) in mmio_device.ioeventfds(mmio_base).iter().enumerate() {
             let io_addr = IoEventAddress::Mmio(*addr);
-            self.address_manager
-                .vm
-                .register_ioevent(event, &io_addr, Some(DataMatch::DataMatch32(i as u32)))
+            vm.register_ioevent(event, &io_addr, Some(DataMatch::DataMatch32(i as u32)))
                 .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
         }
 
@@ -3178,6 +3177,8 @@ impl DeviceManager {
             self.passthrough_device = Some(
                 self.address_manager
                     .vm
+                    .lock()
+                    .unwrap()
                     .create_passthrough_device()
                     .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?,
             );
@@ -3278,6 +3279,8 @@ impl DeviceManager {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.address_manager
                         .vm
+                        .lock()
+                        .unwrap()
                         .unregister_ioevent(event, &io_addr)
                         .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
                 }

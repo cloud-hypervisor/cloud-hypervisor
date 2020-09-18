@@ -105,7 +105,7 @@ pub struct MemoryManager {
     next_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
-    pub vm: Arc<dyn hypervisor::Vm>,
+    pub vm: Arc<Mutex<dyn hypervisor::Vm>>,
     hotplug_slots: Vec<HotPlugState>,
     selected_slot: usize,
     mergeable: bool,
@@ -438,7 +438,7 @@ impl MemoryManager {
     }
 
     pub fn new(
-        vm: Arc<dyn hypervisor::Vm>,
+        vm: Arc<Mutex<dyn hypervisor::Vm>>,
         config: &MemoryConfig,
         ext_regions: Option<Vec<MemoryRegion>>,
         prefault: bool,
@@ -720,7 +720,7 @@ impl MemoryManager {
 
     pub fn new_from_snapshot(
         snapshot: &Snapshot,
-        vm: Arc<dyn hypervisor::Vm>,
+        vm: Arc<Mutex<dyn hypervisor::Vm>>,
         config: &MemoryConfig,
         source_url: &str,
         prefault: bool,
@@ -1102,7 +1102,8 @@ impl MemoryManager {
         readonly: bool,
     ) -> Result<u32, Error> {
         let slot = self.allocate_memory_slot();
-        let mem_region = self.vm.make_user_memory_region(
+        let vm = self.vm.lock().unwrap();
+        let mem_region = vm.make_user_memory_region(
             slot,
             guest_phys_addr,
             memory_size,
@@ -1110,8 +1111,7 @@ impl MemoryManager {
             readonly,
         );
 
-        self.vm
-            .set_user_memory_region(mem_region)
+        vm.set_user_memory_region(mem_region)
             .map_err(Error::SetUserMemoryRegion)?;
 
         // Mark the pages as mergeable if explicitly asked for.
@@ -1155,7 +1155,8 @@ impl MemoryManager {
         mergeable: bool,
         slot: u32,
     ) -> Result<(), Error> {
-        let mem_region = self.vm.make_user_memory_region(
+        let vm = self.vm.lock().unwrap();
+        let mem_region = vm.make_user_memory_region(
             slot,
             guest_phys_addr,
             0, /* memory_size -- using 0 removes this slot */
@@ -1163,8 +1164,7 @@ impl MemoryManager {
             false, /* readonly -- don't care */
         );
 
-        self.vm
-            .set_user_memory_region(mem_region)
+        vm.set_user_memory_region(mem_region)
             .map_err(Error::SetUserMemoryRegion)?;
 
         // Mark the pages as unmergeable if there were previously marked as

@@ -38,14 +38,17 @@ impl InterruptRoute {
         })
     }
 
-    pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
+    pub fn enable(&self, vm: &Arc<Mutex<dyn hypervisor::Vm>>) -> Result<()> {
         if !self.registered.load(Ordering::SeqCst) {
-            vm.register_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed registering irq_fd: {}", e),
-                )
-            })?;
+            vm.lock()
+                .unwrap()
+                .register_irqfd(&self.irq_fd, self.gsi)
+                .map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed registering irq_fd: {}", e),
+                    )
+                })?;
 
             // Update internals to track the irq_fd as "registered".
             self.registered.store(true, Ordering::SeqCst);
@@ -54,14 +57,17 @@ impl InterruptRoute {
         Ok(())
     }
 
-    pub fn disable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
+    pub fn disable(&self, vm: &Arc<Mutex<dyn hypervisor::Vm>>) -> Result<()> {
         if self.registered.load(Ordering::SeqCst) {
-            vm.unregister_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed unregistering irq_fd: {}", e),
-                )
-            })?;
+            vm.lock()
+                .unwrap()
+                .unregister_irqfd(&self.irq_fd, self.gsi)
+                .map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed unregistering irq_fd: {}", e),
+                    )
+                })?;
 
             // Update internals to track the irq_fd as "unregistered".
             self.registered.store(false, Ordering::SeqCst);
@@ -77,7 +83,7 @@ pub struct RoutingEntry<E> {
 }
 
 pub struct MsiInterruptGroup<E> {
-    vm: Arc<dyn hypervisor::Vm>,
+    vm: Arc<Mutex<dyn hypervisor::Vm>>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
 }
@@ -88,7 +94,7 @@ pub trait MsiInterruptGroupOps {
 
 pub trait RoutingEntryExt {
     fn make_entry(
-        vm: &Arc<dyn hypervisor::Vm>,
+        vm: &Arc<Mutex<dyn hypervisor::Vm>>,
         gsi: u32,
         config: &InterruptSourceConfig,
     ) -> Result<Box<Self>>;
@@ -96,7 +102,7 @@ pub trait RoutingEntryExt {
 
 impl<E> MsiInterruptGroup<E> {
     fn new(
-        vm: Arc<dyn hypervisor::Vm>,
+        vm: Arc<Mutex<dyn hypervisor::Vm>>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
         irq_routes: HashMap<InterruptIndex, InterruptRoute>,
     ) -> Self {
@@ -249,7 +255,7 @@ pub struct LegacyUserspaceInterruptManager {
 
 pub struct MsiInterruptManager<E> {
     allocator: Arc<Mutex<SystemAllocator>>,
-    vm: Arc<dyn hypervisor::Vm>,
+    vm: Arc<Mutex<dyn hypervisor::Vm>>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
 }
 
@@ -260,7 +266,7 @@ impl LegacyUserspaceInterruptManager {
 }
 
 impl<E> MsiInterruptManager<E> {
-    pub fn new(allocator: Arc<Mutex<SystemAllocator>>, vm: Arc<dyn hypervisor::Vm>) -> Self {
+    pub fn new(allocator: Arc<Mutex<SystemAllocator>>, vm: Arc<Mutex<dyn hypervisor::Vm>>) -> Self {
         // Create a shared list of GSI that can be shared through all PCI
         // devices. This way, we can maintain the full list of used GSI,
         // preventing one device from overriding interrupts setting from
@@ -335,7 +341,7 @@ pub mod kvm {
 
     impl RoutingEntryExt for KvmRoutingEntry {
         fn make_entry(
-            vm: &Arc<dyn hypervisor::Vm>,
+            vm: &Arc<Mutex<dyn hypervisor::Vm>>,
             gsi: u32,
             config: &InterruptSourceConfig,
         ) -> Result<Box<Self>> {
@@ -350,7 +356,11 @@ pub mod kvm {
                 kvm_route.u.msi.address_hi = cfg.high_addr;
                 kvm_route.u.msi.data = cfg.data;
 
-                if vm.check_extension(hypervisor::Cap::MsiDevid) {
+                if vm
+                    .lock()
+                    .unwrap()
+                    .check_extension(hypervisor::Cap::MsiDevid)
+                {
                     kvm_route.flags = KVM_MSI_VALID_DEVID;
                     kvm_route.u.msi.__bindgen_anon_1.devid = cfg.devid;
                 }
@@ -382,12 +392,16 @@ pub mod kvm {
                 entry_vec.push(entry.route);
             }
 
-            self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed setting GSI routing: {}", e),
-                )
-            })
+            self.vm
+                .lock()
+                .unwrap()
+                .set_gsi_routing(&entry_vec)
+                .map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed setting GSI routing: {}", e),
+                    )
+                })
         }
     }
 }

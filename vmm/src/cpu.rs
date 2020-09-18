@@ -275,13 +275,15 @@ impl Vcpu {
     /// * `vm` - The virtual machine this vcpu will get attached to.
     pub fn new(
         id: u8,
-        vm: &Arc<dyn hypervisor::Vm>,
+        vm: &Arc<Mutex<dyn hypervisor::Vm>>,
         #[cfg(target_arch = "x86_64")] io_bus: Arc<Bus>,
         mmio_bus: Arc<Bus>,
         interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
         creation_ts: std::time::Instant,
     ) -> Result<Arc<Mutex<Self>>> {
         let vcpu = vm
+            .lock()
+            .unwrap()
             .create_vcpu(id)
             .map_err(|e| Error::VcpuCreate(e.into()))?;
         // Initially the cpuid per vCPU is the one supported by this VM.
@@ -522,7 +524,7 @@ pub struct CpuManager {
     #[cfg(target_arch = "x86_64")]
     cpuid: CpuId,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    vm: Arc<dyn hypervisor::Vm>,
+    vm: Arc<Mutex<dyn hypervisor::Vm>>,
     vcpus_kill_signalled: Arc<AtomicBool>,
     vcpus_pause_signalled: Arc<AtomicBool>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -654,7 +656,7 @@ impl CpuManager {
         config: &CpusConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
-        vm: Arc<dyn hypervisor::Vm>,
+        vm: Arc<Mutex<dyn hypervisor::Vm>>,
         reset_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
@@ -1532,8 +1534,8 @@ mod tests {
         let vm = hv.create_vm().expect("new VM fd creation failed");
         assert!(hv.check_capability(hypervisor::kvm::Cap::Irqchip));
         // Calling get_lapic will fail if there is no irqchip before hand.
-        assert!(vm.create_irq_chip().is_ok());
-        let vcpu = vm.create_vcpu(0).unwrap();
+        assert!(vm.lock().unwrap().create_irq_chip().is_ok());
+        let vcpu = vm.lock().unwrap().create_vcpu(0).unwrap();
         let klapic_before: LapicState = vcpu.get_lapic().unwrap();
 
         // Compute the value that is expected to represent LVT0 and LVT1.
@@ -1556,7 +1558,7 @@ mod tests {
     fn test_setup_fpu() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.lock().unwrap().create_vcpu(0).unwrap();
         setup_fpu(&vcpu).unwrap();
 
         let expected_fpu: FpuState = FpuState {
@@ -1581,7 +1583,7 @@ mod tests {
 
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.lock().unwrap().create_vcpu(0).unwrap();
         setup_msrs(&vcpu).unwrap();
 
         // This test will check against the last MSR entry configured (the tenth one).
@@ -1607,7 +1609,7 @@ mod tests {
     fn test_setup_regs() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.lock().unwrap().create_vcpu(0).unwrap();
 
         let expected_regs: StandardRegisters = StandardRegisters {
             rflags: 0x0000000000000002u64,
@@ -1635,7 +1637,7 @@ mod tests {
     fn test_setup_sregs() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.lock().unwrap().create_vcpu(0).unwrap();
 
         let mut expected_sregs: SpecialRegisters = vcpu.get_sregs().unwrap();
         let gm = GuestMemoryMmap::from_ranges(&vec![(GuestAddress(0), 0x10000)]).unwrap();

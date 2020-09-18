@@ -12,7 +12,7 @@ use crate::vm::Vm;
 use crate::x86_64::{CpuId, MsrList};
 #[cfg(target_arch = "x86_64")]
 use kvm_ioctls::Cap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 
@@ -77,7 +77,7 @@ pub trait Hypervisor: Send + Sync {
     /// Create a Vm using the underlying hypervisor
     /// Return a hypervisor-agnostic Vm trait object
     ///
-    fn create_vm(&self) -> Result<Arc<dyn Vm>>;
+    fn create_vm(&self) -> Result<Arc<Mutex<dyn Vm>>>;
     ///
     /// Returns the size of the memory mapping required to use the vcpu's structures
     ///
