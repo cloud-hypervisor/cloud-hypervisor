@@ -12,7 +12,9 @@ use acpi_tables::{
     sdt::{GenericAddress, SDT},
 };
 use arch::layout;
+use bitflags::bitflags;
 use std::sync::{Arc, Mutex};
+use vm_memory::GuestRegionMmap;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryMmap, GuestMemoryRegion};
 
 #[repr(packed)]
@@ -52,6 +54,42 @@ struct ProcessorLocalX2ApicAffinity {
     pub flags: u32,
     pub clock_domain: u32,
     _reserved2: u32,
+}
+
+bitflags! {
+    pub struct MemAffinityFlags: u32 {
+        const NOFLAGS = 0;
+        const ENABLE = 0b1;
+        const HOTPLUGGABLE = 0b10;
+        const NON_VOLATILE = 0b100;
+    }
+}
+
+impl MemoryAffinity {
+    fn from_region(
+        region: &Arc<GuestRegionMmap>,
+        proximity_domain: u32,
+        flags: MemAffinityFlags,
+    ) -> Self {
+        let base_addr = region.start_addr().raw_value();
+        let base_addr_lo = (base_addr & 0xffff_ffff) as u32;
+        let base_addr_hi = (base_addr >> 32) as u32;
+        let length = region.len() as u64;
+        let length_lo = (length & 0xffff_ffff) as u32;
+        let length_hi = (length >> 32) as u32;
+
+        MemoryAffinity {
+            type_: 1,
+            length: 40,
+            proximity_domain,
+            base_addr_lo,
+            base_addr_hi,
+            length_lo,
+            length_hi,
+            flags: flags.bits(),
+            ..Default::default()
+        }
+    }
 }
 
 pub fn create_dsdt_table(
@@ -170,31 +208,19 @@ pub fn create_acpi_tables(
             let proximity_domain = *node_id as u32;
 
             for region in node.memory_regions() {
-                let base_addr = region.start_addr().raw_value();
-                let base_addr_lo = (base_addr & 0xffff_ffff) as u32;
-                let base_addr_hi = (base_addr >> 32) as u32;
-                let length = region.len() as u64;
-                let length_lo = (length & 0xffff_ffff) as u32;
-                let length_hi = (length >> 32) as u32;
-
-                // Flags
-                // - Enabled = 1 (bit 0)
-                // - Hot Pluggable = 0 (bit 1)
-                // - NonVolatile = 0 (bit 2)
-                // - Reserved bits 3-31
-                let flags = 1;
-
-                srat.append(MemoryAffinity {
-                    type_: 1,
-                    length: 40,
+                srat.append(MemoryAffinity::from_region(
+                    region,
                     proximity_domain,
-                    base_addr_lo,
-                    base_addr_hi,
-                    length_lo,
-                    length_hi,
-                    flags,
-                    ..Default::default()
-                });
+                    MemAffinityFlags::ENABLE,
+                ))
+            }
+
+            for region in node.hotplug_regions() {
+                srat.append(MemoryAffinity::from_region(
+                    region,
+                    proximity_domain,
+                    MemAffinityFlags::ENABLE | MemAffinityFlags::HOTPLUGGABLE,
+                ))
             }
 
             for cpu in node.cpus() {

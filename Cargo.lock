@@ -1611,6 +1611,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "arch",
+ "bitflags 1.2.1",
  "block_util",
  "clap",
  "credibility",
