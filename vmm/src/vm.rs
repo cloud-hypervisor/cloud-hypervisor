@@ -218,6 +218,7 @@ pub type Result<T> = result::Result<T, Error>;
 #[derive(Clone, Default)]
 pub struct NumaNode {
     memory_regions: Vec<Arc<GuestRegionMmap>>,
+    hotplug_regions: Vec<Arc<GuestRegionMmap>>,
     cpus: Vec<u8>,
     distances: BTreeMap<u32, u8>,
     memory_zones: Vec<String>,
@@ -226,6 +227,10 @@ pub struct NumaNode {
 impl NumaNode {
     pub fn memory_regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
         &self.memory_regions
+    }
+
+    pub fn hotplug_regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
+        &self.hotplug_regions
     }
 
     pub fn cpus(&self) -> &Vec<u8> {
@@ -411,6 +416,9 @@ impl Vm {
                     for memory_zone in memory_zones.iter() {
                         if let Some(mm_zone) = mm_zones.get(memory_zone) {
                             node.memory_regions.extend(mm_zone.regions().clone());
+                            if let Some(virtiomem_zone) = mm_zone.virtio_mem_zone() {
+                                node.hotplug_regions.push(virtiomem_zone.region().clone());
+                            }
                             node.memory_zones.push(memory_zone.clone());
                         } else {
                             error!("Unknown memory zone '{}'", memory_zone);
