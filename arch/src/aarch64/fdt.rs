@@ -99,7 +99,7 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::BuildHash
     initrd: &Option<InitramfsConfig>,
     pci_space_address: &Option<(u64, u64)>,
 ) -> Result<Vec<u8>> {
-    // Alocate stuff necessary for the holding the blob.
+    // Allocate stuff necessary for the holding the blob.
     let mut fdt = vec![0; FDT_MAX_SIZE];
 
     allocate_fdt(&mut fdt)?;
@@ -402,7 +402,7 @@ fn create_gic_node(fdt: &mut Vec<u8>, gic_device: &dyn GICDevice) -> Result<()> 
 
     if gic_device.msi_compatible() {
         append_begin_node(fdt, "msic")?;
-        append_property_string(fdt, "compatible", gic_device.msi_compatiblility())?;
+        append_property_string(fdt, "compatible", gic_device.msi_compatibility())?;
         append_property_null(fdt, "msi-controller")?;
         append_property_u32(fdt, "phandle", MSI_PHANDLE)?;
         let msi_reg_prop = generate_prop64(gic_device.msi_properties());

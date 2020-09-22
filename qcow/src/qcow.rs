@@ -1056,7 +1056,7 @@ impl QcowFile {
             // Free the previously used cluster if one exists. Modified tables are always
             // witten to new clusters so the L1 table can be committed to disk after they
             // are and L1 never points at an invalid table.
-            // The index must be valid from when it was insterted.
+            // The index must be valid from when it was inserted.
             let addr = self.l1_table[l1_index];
             if addr != 0 {
                 self.unref_clusters.push(addr);
@@ -1354,7 +1354,7 @@ impl QcowFile {
     fn sync_caches(&mut self) -> std::io::Result<()> {
         // Write out all dirty L2 tables.
         for (l1_index, l2_table) in self.l2_cache.iter_mut().filter(|(_k, v)| v.dirty()) {
-            // The index must be valid from when we insterted it.
+            // The index must be valid from when we inserted it.
             let addr = self.l1_table[*l1_index];
             if addr != 0 {
                 self.raw_file.write_pointer_table(

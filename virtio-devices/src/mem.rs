@@ -66,7 +66,7 @@ const VIRTIO_MEM_RESP_NACK: u16 = 1;
 // - VIRTIO_MEM_REQ_UNPLUG_ALL
 // VIRTIO_MEM_RESP_BUSY: u16 = 2;
 
-// Error in request (e.g. addresses/alignemnt), applicable for
+// Error in request (e.g. addresses/alignment), applicable for
 // - VIRTIO_MEM_REQ_PLUG
 // - VIRTIO_MEM_REQ_UNPLUG
 // - VIRTIO_MEM_REQ_STATE
@@ -664,7 +664,7 @@ impl EpollHelperHandler for MemEpollHandler {
                         },
                     };
                     if let Err(e) = self.resize.send(r) {
-                        error!("Sending \"resize\" reponse: {:?}", e);
+                        error!("Sending \"resize\" response: {:?}", e);
                         return true;
                     }
                     if signal_error {

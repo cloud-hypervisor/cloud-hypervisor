@@ -210,10 +210,10 @@ fn get_fdt_addr(mem: &GuestMemoryMmap) -> u64 {
 pub fn get_host_cpu_phys_bits() -> u8 {
     // The value returned here is used to determine the physical address space size
     // for a VM (IPA size).
-    // In recent kernel versions, the maxium IPA size supported by the host can be
+    // In recent kernel versions, the maximum IPA size supported by the host can be
     // known by querying cap KVM_CAP_ARM_VM_IPA_SIZE. And the IPA size for a
     // guest can be configured smaller.
-    // But in Cloud-Hypervisor we simply use the maxium value for the VM.
+    // But in Cloud-Hypervisor we simply use the maximum value for the VM.
     // Reference https://lwn.net/Articles/766767/.
     //
     // The correct way to query KVM_CAP_ARM_VM_IPA_SIZE is via rust-vmm/kvm-ioctls,

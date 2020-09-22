@@ -19,7 +19,7 @@ pub enum Error {
     IoError(io::Error),
 }
 
-/// Type of Message Singaled Interrupt
+/// Type of Message Signalled Interrupt
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MsiIrqType {
     /// PCI MSI IRQ numbers.

@@ -70,7 +70,7 @@ const HDROFF_TYPE: usize = 28;
 // Operation ID - one of the VSOCK_OP_* values; e.g.
 // - VSOCK_OP_RW: a data packet;
 // - VSOCK_OP_REQUEST: connection request;
-// - VSOCK_OP_RST: forcefull connection termination;
+// - VSOCK_OP_RST: forceful connection termination;
 // etc (see `super::defs::uapi` for the full list).
 const HDROFF_OP: usize = 30;
 

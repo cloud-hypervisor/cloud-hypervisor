@@ -32,7 +32,7 @@ pub enum Error {
     ParseFsSockMissing,
     /// Cannot have dax=off along with cache_size parameter.
     InvalidCacheSizeWithDaxOff,
-    /// Missing persistant memory file parameter.
+    /// Missing persistent memory file parameter.
     ParsePmemFileMissing,
     /// Missing vsock socket path parameter.
     ParseVsockSockMissing,
@@ -56,7 +56,7 @@ pub enum Error {
     ParseRNG(OptionParserError),
     /// Error parsing filesystem parameters
     ParseFileSystem(OptionParserError),
-    /// Error parsing persistent memorry parameters
+    /// Error parsing persistent memory parameters
     ParsePersistentMemory(OptionParserError),
     /// Failed parsing console
     ParseConsole(OptionParserError),

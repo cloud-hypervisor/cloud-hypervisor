@@ -189,9 +189,9 @@ sudo ip tuntap add vfio-tap3 mode tap
 sudo ip link set vfio-tap3 master vfio-br0
 sudo ip link set vfio-tap3 up
 
-# Create tap interface without multipe queues support for vhost_user_net test.
+# Create tap interface without multiple queues support for vhost_user_net test.
 sudo ip tuntap add name vunet-tap0 mode tap
-# Create tap interface with multipe queues support for vhost_user_net test.
+# Create tap interface with multiple queues support for vhost_user_net test.
 sudo ip tuntap add name vunet-tap1 mode tap multi_queue
 
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"

@@ -49,7 +49,7 @@ pub mod kvm {
             true
         }
 
-        fn msi_compatiblility(&self) -> &str {
+        fn msi_compatibility(&self) -> &str {
             "arm,gic-v3-its"
         }
 

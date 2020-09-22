@@ -88,5 +88,5 @@ Fixes #88
 Signed-off-by: Sebastien Boeuf <sebastien.boeuf@intel.com>
 ```
 
-Then, after the correspoding PR is merged, Github will automatically close that issue when parsing the
+Then, after the corresponding PR is merged, Github will automatically close that issue when parsing the
 [commit message](https://help.github.com/articles/closing-issues-via-commit-messages/).

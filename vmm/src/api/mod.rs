@@ -55,7 +55,7 @@ pub enum ApiError {
     /// API request send error
     RequestSend(SendError<ApiRequest>),
 
-    /// Wrong reponse payload type
+    /// Wrong response payload type
     ResponsePayloadType,
 
     /// API response receive error

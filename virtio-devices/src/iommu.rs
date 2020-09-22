@@ -809,7 +809,7 @@ impl Iommu {
     // virtual IOMMU. This list is translated into a virtio-iommu configuration
     // topology, so that it can be understood by the guest driver.
     //
-    // The topology is overriden everytime this function is being invoked.
+    // The topology is overridden everytime this function is being invoked.
     //
     // This function is dedicated to PCI, which means it will exclusively
     // create VIRTIO_IOMMU_TOPO_PCI_RANGE entries.
