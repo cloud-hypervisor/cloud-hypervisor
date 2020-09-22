@@ -604,8 +604,8 @@ impl MemoryManager {
                             start_addr,
                             hotplug_size as usize,
                             false,
-                            config.shared,
-                            config.hugepages,
+                            zone.shared,
+                            zone.hugepages,
                             zone.host_numa_node,
                             &None,
                         )?;
