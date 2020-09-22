@@ -63,7 +63,7 @@ As per adding CPUs to the guest, after a reboot the VM will be running with the 
 
 ## Memory Hot Plug
 
-Extra memory can be added from a runing Cloud Hypervisor instance. This is controlled by two mechanisms:
+Extra memory can be added from a running Cloud Hypervisor instance. This is controlled by two mechanisms:
 
 1. Allocating some of the guest physical address space for hotplug memory.
 2. Making a HTTP API request to the VMM to ask for a new amount of RAM to be assigned to the VM. In the case of expanding the memory for the VM the new memory will be hotplugged into the running VM, if reducing the size of the memory then change will take effect after the next reboot.

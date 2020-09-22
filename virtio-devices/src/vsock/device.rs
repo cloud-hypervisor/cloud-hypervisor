@@ -19,7 +19,7 @@ use crate::{
 };
 use anyhow::anyhow;
 /// This is the `VirtioDevice` implementation for our vsock device. It handles the virtio-level
-/// device logic: feature negociation, device configuration, and device activation.
+/// device logic: feature negotiation, device configuration, and device activation.
 /// The run-time device logic (i.e. event-driven data handling) is implemented by
 /// `super::epoll_handler::EpollHandler`.
 ///
@@ -272,7 +272,7 @@ where
                 // After the backend has been kicked, it might've freed up some resources, so we
                 // can attempt to send it more data to process.
                 // In particular, if `self.backend.send_pkt()` halted the TX queue processing (by
-                // reurning an error) at some point in the past, now is the time to try walking the
+                // returning an error) at some point in the past, now is the time to try walking the
                 // TX queue again.
                 if let Err(e) = self.process_tx() {
                     error!("Failed to process TX queue: {:?}", e);

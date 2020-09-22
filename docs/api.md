@@ -12,7 +12,7 @@
         * [Reboot a Virtual Machine](#reboot-a-virtual-machine)
         * [Shut a Virtual Machine Down](#shut-a-virtual-machine-down)
     + [Command Line Interface](#command-line-interface)
-    + [REST API and CLI Architecural Relationship](#rest-api-and-cli-architectural-relationship)
+    + [REST API and CLI Architectural Relationship](#rest-api-and-cli-architectural-relationship)
   * [Internal API](#internal-api)
     + [Goals and Design](#goals-and-design)
   * [End to End Example](#end-to-end-example)

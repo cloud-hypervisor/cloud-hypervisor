@@ -120,7 +120,7 @@ pub struct VsockMuxer {
 impl VsockChannel for VsockMuxer {
     /// Deliver a vsock packet to the guest vsock driver.
     ///
-    /// Retuns:
+    /// Returns:
     /// - `Ok(())`: `pkt` has been successfully filled in; or
     /// - `Err(VsockError::NoData)`: there was no available data with which to fill in the
     ///   packet.
@@ -280,13 +280,13 @@ impl VsockEpollListener for VsockMuxer {
     /// Get the epoll events to be polled upstream.
     ///
     /// Since the polled FD is a nested epoll FD, we're only interested in EPOLLIN events (i.e.
-    /// some event occured on one of the FDs registered under our epoll FD).
+    /// some event occurred on one of the FDs registered under our epoll FD).
     ///
     fn get_polled_evset(&self) -> epoll::Events {
         epoll::Events::EPOLLIN
     }
 
-    /// Notify the muxer about a pending event having occured under its nested epoll FD.
+    /// Notify the muxer about a pending event having occurred under its nested epoll FD.
     ///
     fn notify(&mut self, _: epoll::Events) {
         debug!("vsock: muxer received kick");
@@ -376,7 +376,7 @@ impl VsockMuxer {
                 let key_copy = *key;
                 let evset_copy = *evset;
                 // The handling of this event will most probably mutate the state of the
-                // receiving conection. We'll need to check for new pending RX, event set
+                // receiving connection. We'll need to check for new pending RX, event set
                 // mutation, and all that, so we're wrapping the event delivery inside those
                 // checks.
                 self.apply_conn_mutation(key_copy, |conn| {
@@ -608,7 +608,7 @@ impl VsockMuxer {
     ///
     fn allocate_local_port(&mut self) -> u32 {
         // TODO: this doesn't seem very space-efficient.
-        // Mybe rewrite this to limit port range and use a bitmap?
+        // Maybe rewrite this to limit port range and use a bitmap?
         //
 
         loop {
@@ -626,10 +626,10 @@ impl VsockMuxer {
         self.local_port_set.remove(&port);
     }
 
-    /// Handle a new connection request comming from our peer (the guest vsock driver).
+    /// Handle a new connection request coming from our peer (the guest vsock driver).
     ///
     /// This will attempt to connect to a host-side Unix socket, expected to be listening at
-    /// the file system path corresponing to the destination port. If successful, a new
+    /// the file system path corresponding to the destination port. If successful, a new
     /// connection object will be created and added to the connection pool. On failure, a new
     /// RST packet will be scheduled for delivery to the guest.
     ///
@@ -1232,7 +1232,7 @@ mod tests {
             streams.push(listener.accept());
         }
 
-        // The muxer RX queue should now be full (with connection reponses), but still
+        // The muxer RX queue should now be full (with connection responses), but still
         // synchronized.
         assert!(ctx.muxer.rxq.is_synced());
 

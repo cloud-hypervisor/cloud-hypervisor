@@ -763,7 +763,7 @@ pub trait FileSystem {
 
     /// Allocate requested space for file data.
     ///
-    /// If this function returns success, then the file sytem must guarantee that it is possible to
+    /// If this function returns success, then the file system must guarantee that it is possible to
     /// write up to `length` bytes of data starting at `offset` without failing due to a lack of
     /// free space on the disk.
     ///

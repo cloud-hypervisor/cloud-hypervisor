@@ -785,7 +785,7 @@ impl PciDevice for VfioPciDevice {
                 // We need to allocate a guest MMIO address range for that BAR.
                 // In case the BAR is mappable directly, this means it might be
                 // set as user memory region, which expects to deal with 4K
-                // pages. Therefore, the aligment has to be set accordingly.
+                // pages. Therefore, the alignment has to be set accordingly.
                 let bar_alignment = if (bar_id == VFIO_PCI_ROM_REGION_INDEX)
                     || (self.device.get_region_flags(bar_id) & VFIO_REGION_INFO_FLAG_MMAP != 0)
                 {

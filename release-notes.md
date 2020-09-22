@@ -318,7 +318,7 @@ Highlights for `cloud-hypervisor` version 0.7.0 include:
 Further to our effort to support modifying a running guest we now support
 hotplug and unplug of the following virtio backed devices: block, network,
 pmem, virtio-fs and vsock. This functionality is available on the (default) PCI
-based tranport and is exposed through the HTTP API. The `ch-remote` utility
+based transport and is exposed through the HTTP API. The `ch-remote` utility
 provides a CLI for adding or removing these device types after the VM has
 booted. User can use the `id` parameter on the devices to choose names for
 devices to ease their removal.
@@ -434,7 +434,7 @@ When choosing to offload the paravirtualized block and networking I/O to an
 external process (through the `vhost-user` protocol), Cloud Hypervisor now
 automatically spawns its default `vhost-user-blk` and `vhost-user-net` backends
 into their own, separate processes.
-This provides a seamless parvirtualized I/O user experience for those who want
+This provides a seamless paravirtualized I/O user experience for those who want
 to run their guest I/O into separate executions contexts.
 
 ### Command Line Interface
@@ -580,7 +580,7 @@ default Cloud Hypervisor I/O architecture.
 
 ### Guest pause and resume
 
-As an initial requiremnt for enabling live migration, we added support for
+As an initial requirement for enabling live migration, we added support for
 pausing and resuming any VMM components. As an intermediate step towards live
 migration, the upcoming guest snapshotting feature will be based on the pause
 and resume capabilities.

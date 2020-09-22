@@ -250,7 +250,7 @@ const LENGTH_OFFSET_HIGH: u64 = 0xC;
 const STATUS_OFFSET: u64 = 0x14;
 const SELECTION_OFFSET: u64 = 0;
 
-// The MMIO address space size is substracted with the size of a 4k page. This
+// The MMIO address space size is subtracted with the size of a 4k page. This
 // is done on purpose to workaround a Linux bug when the VMM allocates devices
 // at the end of the addressable space.
 fn mmio_address_space_size() -> u64 {

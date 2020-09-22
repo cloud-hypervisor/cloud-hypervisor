@@ -235,7 +235,7 @@ where
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
                     // This shouldn't actually happen (receiving EWOULDBLOCK after EPOLLIN), but
-                    // apparently it does, so we need to handle it greacefully.
+                    // apparently it does, so we need to handle it gracefully.
                     warn!(
                         "vsock: unexpected EWOULDBLOCK while reading from backing stream: \
                          lp={}, pp={}, err={:?}",
@@ -905,7 +905,7 @@ mod tests {
         let mut ctx = CsmTestContext::new(ConnState::PeerInit);
         assert!(ctx.conn.has_pending_rx());
         ctx.recv();
-        // For peer-initiated requests, our connection should always yield a vsock reponse packet,
+        // For peer-initiated requests, our connection should always yield a vsock response packet,
         // in order to establish the connection.
         assert_eq!(ctx.pkt.op(), uapi::VSOCK_OP_RESPONSE);
         assert_eq!(ctx.pkt.src_cid(), LOCAL_CID);
@@ -1165,7 +1165,7 @@ mod tests {
                 .contains(epoll::Events::EPOLLOUT));
             assert_eq!(ctx.conn.tx_buf.len(), data.len());
 
-            // Unlock the write stream and notify the connection it can now write its bufferred
+            // Unlock the write stream and notify the connection it can now write its buffered
             // data.
             ctx.set_stream(TestStream::new());
             ctx.conn.notify(epoll::Events::EPOLLOUT);

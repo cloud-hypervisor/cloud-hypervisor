@@ -36,7 +36,7 @@ pub trait GICDevice {
     }
 
     /// Returns the MSI compatibility property of the device
-    fn msi_compatiblility(&self) -> &str {
+    fn msi_compatibility(&self) -> &str {
         ""
     }
 

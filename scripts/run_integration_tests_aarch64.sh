@@ -173,9 +173,9 @@ if [ $RES -ne 0 ]; then
     exit 1
 fi
 
-# Create tap interface without multipe queues support for vhost_user_net test.
+# Create tap interface without multiple queues support for vhost_user_net test.
 sudo ip tuntap add name vunet-tap0 mode tap
-# Create tap interface with multipe queues support for vhost_user_net test.
+# Create tap interface with multiple queues support for vhost_user_net test.
 sudo ip tuntap add name vunet-tap1 mode tap multi_queue
 
 BUILD_TARGET="aarch64-unknown-linux-${CH_LIBC}"

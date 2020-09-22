@@ -20,7 +20,7 @@ use vm_device::BusDevice;
 // From 0x0 to 0x1C we have following registers:
 const RTCDR: u64 = 0x0; // Data Register.
 const RTCMR: u64 = 0x4; // Match Register.
-const RTCLR: u64 = 0x8; // Load Regiser.
+const RTCLR: u64 = 0x8; // Load Register.
 const RTCCR: u64 = 0xc; // Control Register.
 const RTCIMSC: u64 = 0x10; // Interrupt Mask Set or Clear Register.
 const RTCRIS: u64 = 0x14; // Raw Interrupt Status.

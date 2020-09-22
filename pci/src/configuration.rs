@@ -64,7 +64,7 @@ impl PciClassCode {
     }
 }
 
-/// A PCI sublcass. Each class in `PciClassCode` can specify a unique set of subclasses. This trait
+/// A PCI subclass. Each class in `PciClassCode` can specify a unique set of subclasses. This trait
 /// is implemented by each subclass. It allows use of a trait object to generate configurations.
 pub trait PciSubclass {
     /// Convert this subclass to the value used in the PCI specification.
