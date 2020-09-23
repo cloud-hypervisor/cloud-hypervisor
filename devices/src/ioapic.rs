@@ -201,15 +201,13 @@ impl Ioapic {
             })
             .map_err(Error::CreateInterruptSourceGroup)?;
 
-        interrupt_source_group
-            .enable()
-            .map_err(Error::EnableInterrupt)?;
-
+        // The IOAPIC is created with entries already masked. The guest will be
+        // in charge of unmasking them if/when necessary.
         Ok(Ioapic {
             id,
             id_reg: 0,
             reg_sel: 0,
-            reg_entries: [0; NUM_IOAPIC_PINS],
+            reg_entries: [0x10000; NUM_IOAPIC_PINS],
             used_entries: [false; NUM_IOAPIC_PINS],
             apic_address,
             interrupt_source_group,
