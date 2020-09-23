@@ -7,7 +7,7 @@
 CLI_NAME="Cloud Hypervisor"
 
 CTR_IMAGE_TAG="cloudhypervisor/dev"
-CTR_IMAGE_VERSION="v4"
+CTR_IMAGE_VERSION="latest"
 CTR_IMAGE="${CTR_IMAGE_TAG}:${CTR_IMAGE_VERSION}"
 
 DOCKER_RUNTIME="docker"
