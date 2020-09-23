@@ -180,7 +180,7 @@ pub fn create_acpi_tables(
         base_address: layout::PCI_MMCONFIG_START.0,
         segment: 0,
         start: 0,
-        end: 0xff,
+        end: 0,
         ..Default::default()
     });
 
