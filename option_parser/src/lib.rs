@@ -189,7 +189,7 @@ impl FromStr for IntegerList {
             let items: Vec<&str> = range.split('-').collect();
 
             if items.len() > 2 {
-                return Err(IntegerListParseError::InvalidValue(range.to_string()));
+                return Err(IntegerListParseError::InvalidValue((*range).to_string()));
             }
 
             let start_range = items[0]
@@ -203,7 +203,7 @@ impl FromStr for IntegerList {
                     .parse::<u64>()
                     .map_err(|_| IntegerListParseError::InvalidValue(items[1].to_owned()))?;
                 if start_range >= end_range {
-                    return Err(IntegerListParseError::InvalidValue(range.to_string()));
+                    return Err(IntegerListParseError::InvalidValue((*range).to_string()));
                 }
 
                 for i in start_range..end_range {
@@ -233,7 +233,9 @@ impl FromStr for TupleTwoIntegers {
             let items: Vec<&str> = tuple.split('@').collect();
 
             if items.len() != 2 {
-                return Err(TupleTwoIntegersParseError::InvalidValue(tuple.to_string()));
+                return Err(TupleTwoIntegersParseError::InvalidValue(
+                    (*tuple).to_string(),
+                ));
             }
 
             let item1 = items[0]
