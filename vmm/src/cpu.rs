@@ -60,9 +60,6 @@ const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 #[cfg(target_arch = "x86_64")]
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 
-// Debug I/O port
-#[cfg(target_arch = "x86_64")]
-const DEBUG_IOPORT: u16 = 0x80;
 #[cfg(target_arch = "x86_64")]
 const DEBUG_IOPORT_PREFIX: &str = "Debug I/O port";
 
@@ -254,9 +251,6 @@ pub struct Vcpu {
     // The hypervisor abstracted CPU.
     vcpu: Arc<dyn hypervisor::Vcpu>,
     id: u8,
-    #[cfg(target_arch = "x86_64")]
-    io_bus: Arc<Bus>,
-    mmio_bus: Arc<Bus>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -276,8 +270,6 @@ impl Vcpu {
     pub fn new(
         id: u8,
         vm: &Arc<Mutex<dyn hypervisor::Vm>>,
-        #[cfg(target_arch = "x86_64")] io_bus: Arc<Bus>,
-        mmio_bus: Arc<Bus>,
         interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
         creation_ts: std::time::Instant,
     ) -> Result<Arc<Mutex<Self>>> {
@@ -290,9 +282,6 @@ impl Vcpu {
         Ok(Arc::new(Mutex::new(Vcpu {
             vcpu,
             id,
-            #[cfg(target_arch = "x86_64")]
-            io_bus,
-            mmio_bus,
             interrupt_controller,
             vm_ts: creation_ts,
             #[cfg(target_arch = "aarch64")]
@@ -374,43 +363,6 @@ impl Vcpu {
         match self.vcpu.run() {
             Ok(run) => match run {
                 #[cfg(target_arch = "x86_64")]
-                VmExit::IoIn(addr, data) => {
-                    if let Err(e) = self.io_bus.read(u64::from(addr), data) {
-                        if let vm_device::BusError::MissingAddressRange = e {
-                            warn!("Guest PIO read to unregistered address 0x{:x}", addr);
-                        }
-                    }
-                    Ok(true)
-                }
-                #[cfg(target_arch = "x86_64")]
-                VmExit::IoOut(addr, data) => {
-                    if addr == DEBUG_IOPORT && data.len() == 1 {
-                        self.log_debug_ioport(data[0]);
-                    }
-                    if let Err(e) = self.io_bus.write(u64::from(addr), data) {
-                        if let vm_device::BusError::MissingAddressRange = e {
-                            warn!("Guest PIO write to unregistered address 0x{:x}", addr);
-                        }
-                    }
-                    Ok(true)
-                }
-                VmExit::MmioRead(addr, data) => {
-                    if let Err(e) = self.mmio_bus.read(addr as u64, data) {
-                        if let vm_device::BusError::MissingAddressRange = e {
-                            warn!("Guest MMIO read to unregistered address 0x{:x}", addr);
-                        }
-                    }
-                    Ok(true)
-                }
-                VmExit::MmioWrite(addr, data) => {
-                    if let Err(e) = self.mmio_bus.write(addr as u64, data) {
-                        if let vm_device::BusError::MissingAddressRange = e {
-                            warn!("Guest MMIO write to unregistered address 0x{:x}", addr);
-                        }
-                    }
-                    Ok(true)
-                }
-                #[cfg(target_arch = "x86_64")]
                 VmExit::IoapicEoi(vector) => {
                     if let Some(interrupt_controller) = &self.interrupt_controller {
                         interrupt_controller
@@ -420,7 +372,10 @@ impl Vcpu {
                     }
                     Ok(true)
                 }
-
+                VmExit::LogDebugPort(data) => {
+                    self.log_debug_ioport(data);
+                    Ok(true)
+                }
                 VmExit::Ignore => Ok(true),
                 VmExit::Reset => Ok(false),
                 // No need to handle anything from a KVM HyperV exit
@@ -515,8 +470,6 @@ pub struct CpuManager {
     config: CpusConfig,
     #[cfg(target_arch = "x86_64")]
     io_bus: Arc<Bus>,
-    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    mmio_bus: Arc<Bus>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -680,7 +633,6 @@ impl CpuManager {
             config: config.clone(),
             #[cfg(target_arch = "x86_64")]
             io_bus: device_manager.io_bus().clone(),
-            mmio_bus: device_manager.mmio_bus().clone(),
             interrupt_controller: device_manager.interrupt_controller().clone(),
             vm_memory: guest_memory,
             #[cfg(target_arch = "x86_64")]
@@ -783,15 +735,7 @@ impl CpuManager {
 
         let creation_ts = std::time::Instant::now();
 
-        let vcpu = Vcpu::new(
-            cpu_id,
-            &self.vm,
-            #[cfg(target_arch = "x86_64")]
-            self.io_bus.clone(),
-            self.mmio_bus.clone(),
-            interrupt_controller,
-            creation_ts,
-        )?;
+        let vcpu = Vcpu::new(cpu_id, &self.vm, interrupt_controller, creation_ts)?;
 
         if let Some(snapshot) = snapshot {
             #[cfg(target_arch = "x86_64")]

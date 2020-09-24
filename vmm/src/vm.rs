@@ -2019,19 +2019,17 @@ pub fn test_vm() {
     vcpu.set_regs(&vcpu_regs).expect("set regs failed");
 
     loop {
-        match vcpu.run().expect("run failed") {
-            VmExit::IoOut(addr, data) => {
-                println!(
-                    "IO out -- addr: {:#x} data [{:?}]",
-                    addr,
-                    str::from_utf8(&data).unwrap()
-                );
+        match vcpu.run() {
+            Ok(vmexit) => match vmexit {
+                VmExit::Reset => {
+                    println!("HLT");
+                    break;
+                }
+                r => panic!("unexpected exit reason: {:?}", r),
+            },
+            Err(e) => {
+                println!("{}", e);
             }
-            VmExit::Reset => {
-                println!("HLT");
-                break;
-            }
-            r => panic!("unexpected exit reason: {:?}", r),
         }
     }
 }

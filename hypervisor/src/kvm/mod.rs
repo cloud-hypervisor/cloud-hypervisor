@@ -7,7 +7,6 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
-
 #[cfg(target_arch = "aarch64")]
 pub use crate::aarch64::{
     check_required_kvm_extensions, is_system_register, VcpuInit, VcpuKvmState as CpuState,
@@ -696,9 +695,31 @@ impl cpu::Vcpu for KvmVcpu {
         match self.fd.run() {
             Ok(run) => match run {
                 #[cfg(target_arch = "x86_64")]
-                VcpuExit::IoIn(addr, data) => Ok(cpu::VmExit::IoIn(addr, data)),
+                VcpuExit::IoIn(addr, data) => {
+                    if let Some(ref vmmops) = self.vmmops {
+                        return vmmops
+                            .lock()
+                            .unwrap()
+                            .pio_read(addr.into(), data)
+                            .map(|_| cpu::VmExit::Ignore)
+                            .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));
+                    }
+
+                    Ok(cpu::VmExit::IoIn(addr, data))
+                }
                 #[cfg(target_arch = "x86_64")]
-                VcpuExit::IoOut(addr, data) => Ok(cpu::VmExit::IoOut(addr, data)),
+                VcpuExit::IoOut(addr, data) => {
+                    if let Some(ref vmmops) = self.vmmops {
+                        return vmmops
+                            .lock()
+                            .unwrap()
+                            .pio_write(addr.into(), data)
+                            .map(|_| cpu::VmExit::Ignore)
+                            .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));
+                    }
+
+                    Ok(cpu::VmExit::IoOut(addr, data))
+                }
                 #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoapicEoi(vector) => Ok(cpu::VmExit::IoapicEoi(vector)),
                 #[cfg(target_arch = "x86_64")]
@@ -720,8 +741,30 @@ impl cpu::Vcpu for KvmVcpu {
                     }
                 }
 
-                VcpuExit::MmioRead(addr, data) => Ok(cpu::VmExit::MmioRead(addr, data)),
-                VcpuExit::MmioWrite(addr, data) => Ok(cpu::VmExit::MmioWrite(addr, data)),
+                VcpuExit::MmioRead(addr, data) => {
+                    if let Some(ref vmmops) = self.vmmops {
+                        return vmmops
+                            .lock()
+                            .unwrap()
+                            .mmio_read(addr.into(), data)
+                            .map(|_| cpu::VmExit::Ignore)
+                            .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));
+                    }
+
+                    Ok(cpu::VmExit::MmioRead(addr, data))
+                }
+                VcpuExit::MmioWrite(addr, data) => {
+                    if let Some(ref vmmops) = self.vmmops {
+                        return vmmops
+                            .lock()
+                            .unwrap()
+                            .mmio_write(addr.into(), data)
+                            .map(|_| cpu::VmExit::Ignore)
+                            .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()));
+                    }
+
+                    Ok(cpu::VmExit::MmioWrite(addr, data))
+                }
                 VcpuExit::Hyperv => Ok(cpu::VmExit::Hyperv),
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
