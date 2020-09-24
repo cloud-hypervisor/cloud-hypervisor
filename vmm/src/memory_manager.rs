@@ -52,7 +52,7 @@ const HOTPLUG_COUNT: usize = 8;
 
 // Memory policy constants
 const MPOL_BIND: u32 = 2;
-const MPOL_MF_STRICT: u32 = 1 << 0;
+const MPOL_MF_STRICT: u32 = 1;
 const MPOL_MF_MOVE: u32 = 1 << 1;
 
 #[derive(Default)]
