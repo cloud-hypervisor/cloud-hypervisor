@@ -56,7 +56,7 @@ impl Default for MsixTableEntry {
             msg_addr_lo: 0,
             msg_addr_hi: 0,
             msg_data: 0,
-            vector_ctl: 0,
+            vector_ctl: 0x1,
         }
     }
 }
@@ -97,7 +97,7 @@ impl MsixConfig {
             pba_entries,
             devid,
             interrupt_source_group,
-            masked: false,
+            masked: true,
             enabled: false,
         }
     }
@@ -183,12 +183,6 @@ impl MsixConfig {
                     } else if let Err(e) = self.interrupt_source_group.unmask(idx as InterruptIndex)
                     {
                         error!("Failed unmasking vector: {:?}", e);
-                    }
-                }
-
-                if !old_enabled || old_masked {
-                    if let Err(e) = self.interrupt_source_group.enable() {
-                        error!("Failed enabling irq_fd: {:?}", e);
                     }
                 }
             } else if old_enabled || !old_masked {
