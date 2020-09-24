@@ -183,5 +183,5 @@ pub trait Vm: Send + Sync {
     /// Get the Vm state. Return VM specific data
     fn state(&self) -> Result<VmState>;
     /// Set the VM state
-    fn set_state(&self, state: &VmState) -> Result<()>;
+    fn set_state(&self, state: VmState) -> Result<()>;
 }

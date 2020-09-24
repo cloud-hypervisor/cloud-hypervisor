@@ -342,7 +342,7 @@ impl vm::Vm for KvmVm {
     ///
     /// Set the VM state
     ///
-    fn set_state(&self, _state: &VmState) -> vm::Result<()> {
+    fn set_state(&self, _state: VmState) -> vm::Result<()> {
         Ok(())
     }
 }

@@ -537,7 +537,7 @@ impl Vm {
         let vm_snapshot = get_vm_snapshot(snapshot).map_err(Error::Restore)?;
         let config = vm_snapshot.config;
         if let Some(state) = vm_snapshot.state {
-            vm.set_state(&state)
+            vm.set_state(state)
                 .map_err(|e| Error::Restore(MigratableError::Restore(e.into())))?;
         }
 
