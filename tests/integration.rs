@@ -24,6 +24,7 @@ mod tests {
     use std::io::BufRead;
     use std::io::{Read, Write};
     use std::net::TcpStream;
+    use std::os::unix::io::AsRawFd;
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Stdio};
     use std::string::String;
@@ -89,6 +90,8 @@ mod tests {
     const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom";
 
     const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=ttyS0 console=hvc0 quiet rw";
+
+    const PIPE_SIZE: i32 = 256 << 10;
 
     impl UbuntuDiskConfig {
         fn new(image_name: String) -> Self {
@@ -978,10 +981,26 @@ mod tests {
 
         fn spawn(&mut self) -> io::Result<Child> {
             if self.capture_output {
-                self.command
+                let child = self
+                    .command
                     .stderr(Stdio::piped())
                     .stdout(Stdio::piped())
                     .spawn()
+                    .unwrap();
+
+                let fd = child.stdout.as_ref().unwrap().as_raw_fd();
+                let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+                let fd = child.stderr.as_ref().unwrap().as_raw_fd();
+                let pipesize1 = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+
+                if pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE {
+                    Ok(child)
+                } else {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "resizing pipe w/ 'fnctl' failed!",
+                    ))
+                }
             } else {
                 self.command.spawn()
             }
