@@ -10,7 +10,6 @@ use std::sync::Arc;
 mod gdt;
 pub mod interrupts;
 pub mod layout;
-#[cfg(not(feature = "acpi"))]
 mod mptable;
 pub mod regs;
 use crate::InitramfsConfig;
@@ -141,7 +140,7 @@ unsafe impl ByteValued for BootParamsWrapper {}
 pub enum Error {
     /// Invalid e820 setup params.
     E820Configuration,
-    #[cfg(not(feature = "acpi"))]
+
     /// Error writing MP table to memory.
     MpTableSetup(mptable::Error),
 
@@ -487,11 +486,12 @@ pub fn configure_system(
     boot_prot: BootProtocol,
     sgx_epc_region: Option<SgxEpcRegion>,
 ) -> super::Result<()> {
-    smbios::setup_smbios(guest_mem).map_err(Error::SmbiosSetup)?;
+    let size = smbios::setup_smbios(guest_mem).map_err(Error::SmbiosSetup)?;
 
-    // Note that this puts the mptable at the last 1k of Linux's 640k base RAM
-    #[cfg(not(feature = "acpi"))]
-    mptable::setup_mptable(guest_mem, _num_cpus).map_err(Error::MpTableSetup)?;
+    // Place the MP table after the SMIOS table aligned to 16 bytes
+    let offset = GuestAddress(layout::SMBIOS_START).unchecked_add(size);
+    let offset = GuestAddress((offset.0 + 16) & !0xf);
+    mptable::setup_mptable(offset, guest_mem, _num_cpus).map_err(Error::MpTableSetup)?;
 
     // Check that the RAM is not smaller than the RSDP start address
     if let Some(rsdp_addr) = rsdp_addr {

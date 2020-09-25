@@ -161,7 +161,7 @@ fn write_string(
     Ok(curptr)
 }
 
-pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<()> {
+pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<u64> {
     let physptr = GuestAddress(SMBIOS_START)
         .checked_add(mem::size_of::<Smbios30Entrypoint>() as u64)
         .ok_or(Error::NotEnoughMemory)?;
@@ -224,7 +224,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<()> {
             .map_err(|_| Error::WriteSmbiosEp)?;
     }
 
-    Ok(())
+    Ok(curptr.unchecked_offset_from(physptr))
 }
 
 #[cfg(test)]
