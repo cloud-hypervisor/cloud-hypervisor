@@ -13,8 +13,10 @@ use std::slice;
 use libc::c_char;
 
 use arch_gen::x86::mpspec;
-use layout::{APIC_START, IOAPIC_START, MPTABLE_START};
-use vm_memory::{Address, ByteValued, Bytes, GuestMemory, GuestMemoryError, GuestMemoryMmap};
+use layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
+use vm_memory::{
+    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap,
+};
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `ByteValued`) where:
@@ -121,15 +123,20 @@ fn compute_mp_size(num_cpus: u8) -> usize {
 }
 
 /// Performs setup of the MP table for the given `num_cpus`.
-pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
+pub fn setup_mptable(offset: GuestAddress, mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
     if num_cpus as u32 > MAX_SUPPORTED_CPUS {
         return Err(Error::TooManyCpus);
     }
 
     // Used to keep track of the next base pointer into the MP table.
-    let mut base_mp = MPTABLE_START;
+    let mut base_mp = offset;
 
     let mp_size = compute_mp_size(num_cpus);
+
+    if offset.unchecked_add(mp_size as u64) >= HIGH_RAM_START {
+        warn!("Skipping mptable creation due to insufficient space");
+        return Ok(());
+    }
 
     let mut checksum: u8 = 0;
     let ioapicid: u8 = num_cpus + 1;
@@ -280,6 +287,7 @@ pub fn setup_mptable(mem: &GuestMemoryMmap, num_cpus: u8) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use layout::MPTABLE_START;
     use vm_memory::{GuestAddress, GuestUsize};
 
     fn table_entry_size(type_: u8) -> usize {
@@ -299,7 +307,7 @@ mod tests {
         let mem =
             GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
 
-        setup_mptable(&mem, num_cpus).unwrap();
+        setup_mptable(MPTABLE_START, &mem, num_cpus).unwrap();
     }
 
     #[test]
@@ -308,7 +316,7 @@ mod tests {
         let mem = GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus) - 1)])
             .unwrap();
 
-        assert!(setup_mptable(&mem, num_cpus).is_err());
+        assert!(setup_mptable(MPTABLE_START, &mem, num_cpus).is_err());
     }
 
     #[test]
@@ -317,7 +325,7 @@ mod tests {
         let mem =
             GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
 
-        setup_mptable(&mem, num_cpus).unwrap();
+        setup_mptable(MPTABLE_START, &mem, num_cpus).unwrap();
 
         let mpf_intel: MpfIntelWrapper = mem.read_obj(MPTABLE_START).unwrap();
 
@@ -333,7 +341,7 @@ mod tests {
         let mem =
             GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus))]).unwrap();
 
-        setup_mptable(&mem, num_cpus).unwrap();
+        setup_mptable(MPTABLE_START, &mem, num_cpus).unwrap();
 
         let mpf_intel: MpfIntelWrapper = mem.read_obj(MPTABLE_START).unwrap();
         let mpc_offset = GuestAddress(mpf_intel.0.physptr as GuestUsize);
@@ -367,7 +375,7 @@ mod tests {
         .unwrap();
 
         for i in 0..MAX_SUPPORTED_CPUS as u8 {
-            setup_mptable(&mem, i).unwrap();
+            setup_mptable(MPTABLE_START, &mem, i).unwrap();
 
             let mpf_intel: MpfIntelWrapper = mem.read_obj(MPTABLE_START).unwrap();
             let mpc_offset = GuestAddress(mpf_intel.0.physptr as GuestUsize);
@@ -400,7 +408,7 @@ mod tests {
         let mem =
             GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus as u8))]).unwrap();
 
-        let result = setup_mptable(&mem, cpus as u8);
+        let result = setup_mptable(MPTABLE_START, &mem, cpus as u8);
         assert!(result.is_err());
     }
 }
