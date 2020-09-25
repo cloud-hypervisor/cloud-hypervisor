@@ -43,6 +43,7 @@ pub mod seccomp_filters;
 pub mod transport;
 pub mod vhost_user;
 pub mod vsock;
+pub mod watchdog;
 
 pub use self::balloon::*;
 pub use self::block::*;
@@ -57,6 +58,7 @@ pub use self::net_util::*;
 pub use self::pmem::*;
 pub use self::rng::*;
 pub use self::vsock::*;
+pub use self::watchdog::*;
 use vm_virtio::{queue::*, VirtioDeviceType};
 
 const DEVICE_INIT: u32 = 0x00;
