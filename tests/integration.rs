@@ -2012,6 +2012,7 @@ mod tests {
             .default_disks()
             .args(&["--net", guest1.default_net_string().as_str()])
             .args(&["--serial", "tty", "--console", "off"])
+            .capture_output()
             .spawn()
             .unwrap();
 
