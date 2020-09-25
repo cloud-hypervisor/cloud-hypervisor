@@ -676,10 +676,12 @@ impl cpu::Vcpu for KvmVcpu {
 
                 #[cfg(target_arch = "aarch64")]
                 VcpuExit::SystemEvent(event_type, flags) => {
-                    use kvm_bindings::KVM_SYSTEM_EVENT_SHUTDOWN;
+                    use kvm_bindings::{KVM_SYSTEM_EVENT_RESET, KVM_SYSTEM_EVENT_SHUTDOWN};
                     // On Aarch64, when the VM is shutdown, run() returns
                     // VcpuExit::SystemEvent with reason KVM_SYSTEM_EVENT_SHUTDOWN
-                    if event_type == KVM_SYSTEM_EVENT_SHUTDOWN {
+                    if event_type == KVM_SYSTEM_EVENT_SHUTDOWN
+                        || event_type == KVM_SYSTEM_EVENT_RESET
+                    {
                         Ok(cpu::VmExit::Reset)
                     } else {
                         Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
