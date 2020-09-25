@@ -915,14 +915,15 @@ impl Default for RngConfig {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct BalloonConfig {
     pub size: u64,
+    pub reporting: bool,
 }
 
 impl BalloonConfig {
-    pub const SYNTAX: &'static str = "Balloon parameters \"size=<balloon_size>\"";
+    pub const SYNTAX: &'static str = "Balloon parameters \"size=<balloon_size>,reporting=on|off\"";
 
     pub fn parse(balloon: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("size");
+        parser.add("size").add("reporting");
         parser.parse(balloon).map_err(Error::ParseBalloon)?;
 
         let size = parser
@@ -930,8 +931,13 @@ impl BalloonConfig {
             .map_err(Error::ParseBalloon)?
             .map(|v| v.0)
             .unwrap_or(0);
+        let reporting = parser
+            .convert::<Toggle>("reporting")
+            .map_err(Error::ParseBalloon)?
+            .unwrap_or(Toggle(false))
+            .0;
 
-        Ok(BalloonConfig { size })
+        Ok(BalloonConfig { size, reporting })
     }
 }
 

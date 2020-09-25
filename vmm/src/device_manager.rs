@@ -2457,6 +2457,7 @@ impl DeviceManager {
                 virtio_devices::Balloon::new(
                     id.clone(),
                     balloon_config.size,
+                    balloon_config.reporting,
                     self.seccomp_action.clone(),
                 )
                 .map_err(DeviceManagerError::CreateVirtioBalloon)?,

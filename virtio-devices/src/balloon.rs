@@ -36,6 +36,10 @@ use vm_memory::{
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
+const VIRTIO_BALLOON_F_REPORTING: u32 = 5;
+
+const PAGE_REPORTING_CAPACITY: u16 = 32;
+
 const QUEUE_SIZE: u16 = 128;
 const NUM_QUEUES: usize = 2;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE; NUM_QUEUES];
@@ -46,6 +50,8 @@ const RESIZE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 const INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // New descriptors are pending on the virtio queue.
 const DEFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
+// New descriptors are pending on the virtio queue.
+const REPORTING_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 
 // Size of a PFN in the balloon interface.
 const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
@@ -56,6 +62,8 @@ pub enum Error {
     GuestMemory(GuestMemoryError),
     // Guest gave us a write only descriptor that protocol says to read from.
     UnexpectedWriteOnlyDescriptor,
+    // Guest gave us too few descriptors in a descriptor chain.
+    DescriptorChainTooShort,
     // Guest sent us invalid request.
     InvalidRequest,
     // Madvise fail.
@@ -148,6 +156,7 @@ struct BalloonEpollHandler {
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
     deflate_queue_evt: EventFd,
+    reporting_queue_evt: Option<EventFd>,
     kill_evt: EventFd,
     pause_evt: EventFd,
 }
@@ -168,55 +177,83 @@ impl BalloonEpollHandler {
         let queue_index = match ev_type {
             INFLATE_QUEUE_EVENT => 0,
             DEFLATE_QUEUE_EVENT => 1,
+            REPORTING_QUEUE_EVENT => 2,
             _ => return Err(Error::ProcessQueueWrongEvType(ev_type)),
         };
 
         let mut used_desc_heads = [0; QUEUE_SIZE as usize];
         let mut used_count = 0;
         let mem = self.mem.memory();
-        for avail_desc in self.queues[queue_index].iter(&mem) {
+        for mut avail_desc in self.queues[queue_index].iter(&mem) {
             used_desc_heads[used_count] = avail_desc.index;
             used_count += 1;
 
-            let data_chunk_size = size_of::<u32>();
-
-            // The head contains the request type which MUST be readable.
-            if avail_desc.is_write_only() {
-                error!("The head contains the request type is not right");
-                return Err(Error::UnexpectedWriteOnlyDescriptor);
-            }
-            if avail_desc.len as usize % data_chunk_size != 0 {
-                error!("the request size {} is not right", avail_desc.len);
-                return Err(Error::InvalidRequest);
-            }
-
-            let mut offset = 0u64;
-            while offset < avail_desc.len as u64 {
-                let addr = avail_desc.addr.checked_add(offset).unwrap();
-                let pfn: u32 = mem.read_obj(addr).map_err(Error::GuestMemory)?;
-                offset += data_chunk_size as u64;
-
-                let gpa = (pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT;
-                if let Ok(hva) = mem.get_host_address(GuestAddress(gpa)) {
-                    let advice = match ev_type {
-                        INFLATE_QUEUE_EVENT => libc::MADV_DONTNEED,
-                        DEFLATE_QUEUE_EVENT => libc::MADV_WILLNEED,
-                        _ => return Err(Error::ProcessQueueWrongEvType(ev_type)),
-                    };
-                    // Need unsafe to do syscall madvise
-                    let res = unsafe {
-                        libc::madvise(
-                            hva as *mut libc::c_void,
-                            (1 << VIRTIO_BALLOON_PFN_SHIFT) as libc::size_t,
-                            advice,
-                        )
-                    };
-                    if res != 0 {
-                        return Err(Error::MadviseFail(io::Error::last_os_error()));
+            if ev_type == REPORTING_QUEUE_EVENT {
+                loop {
+                    if let Ok(hva) = mem.get_host_address(avail_desc.addr) {
+                        let res = unsafe {
+                            libc::madvise(
+                                hva as *mut libc::c_void,
+                                avail_desc.len as libc::size_t,
+                                libc::MADV_DONTNEED,
+                            )
+                        };
+                        if res != 0 {
+                            return Err(Error::MadviseFail(io::Error::last_os_error()));
+                        }
+                    } else {
+                        error!("Address {:?} is not available", avail_desc.addr);
+                        return Err(Error::InvalidRequest);
                     }
-                } else {
-                    error!("Address 0x{:x} is not available", gpa);
+
+                    if let Some(desc) = avail_desc.next_descriptor() {
+                        avail_desc = desc;
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                let data_chunk_size = size_of::<u32>();
+
+                // The head contains the inflate and deflate request type which
+                // MUST be readable.
+                if avail_desc.is_write_only() {
+                    error!("The head contains the request type is not right");
+                    return Err(Error::UnexpectedWriteOnlyDescriptor);
+                }
+                if avail_desc.len as usize % data_chunk_size != 0 {
+                    error!("the request size {} is not right", avail_desc.len);
                     return Err(Error::InvalidRequest);
+                }
+
+                let mut offset = 0u64;
+                while offset < avail_desc.len as u64 {
+                    let addr = avail_desc.addr.checked_add(offset).unwrap();
+                    let pfn: u32 = mem.read_obj(addr).map_err(Error::GuestMemory)?;
+                    offset += data_chunk_size as u64;
+
+                    let gpa = (pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT;
+                    if let Ok(hva) = mem.get_host_address(GuestAddress(gpa)) {
+                        let advice = match ev_type {
+                            INFLATE_QUEUE_EVENT => libc::MADV_DONTNEED,
+                            DEFLATE_QUEUE_EVENT => libc::MADV_WILLNEED,
+                            _ => return Err(Error::ProcessQueueWrongEvType(ev_type)),
+                        };
+                        // Need unsafe to do syscall madvise
+                        let res = unsafe {
+                            libc::madvise(
+                                hva as *mut libc::c_void,
+                                (1 << VIRTIO_BALLOON_PFN_SHIFT) as libc::size_t,
+                                advice,
+                            )
+                        };
+                        if res != 0 {
+                            return Err(Error::MadviseFail(io::Error::last_os_error()));
+                        }
+                    } else {
+                        error!("Address 0x{:x} is not available", gpa);
+                        return Err(Error::InvalidRequest);
+                    }
                 }
             }
         }
@@ -240,6 +277,9 @@ impl BalloonEpollHandler {
         helper.add_event(self.resize_receiver.evt.as_raw_fd(), RESIZE_EVENT)?;
         helper.add_event(self.inflate_queue_evt.as_raw_fd(), INFLATE_QUEUE_EVENT)?;
         helper.add_event(self.deflate_queue_evt.as_raw_fd(), DEFLATE_QUEUE_EVENT)?;
+        if let Some(reporting_queue_evt) = &self.reporting_queue_evt {
+            helper.add_event(reporting_queue_evt.as_raw_fd(), REPORTING_QUEUE_EVENT)?;
+        }
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -297,6 +337,20 @@ impl EpollHelperHandler for BalloonEpollHandler {
                     return true;
                 }
             }
+            REPORTING_QUEUE_EVENT => {
+                if let Some(reporting_queue_evt) = &self.reporting_queue_evt {
+                    if let Err(e) = reporting_queue_evt.read() {
+                        error!("Failed to get reporting queue event: {:?}", e);
+                        return true;
+                    } else if let Err(e) = self.process_queue(ev_type) {
+                        error!("Failed to signal used reporting queue: {:?}", e);
+                        return true;
+                    }
+                } else {
+                    error!("Invalid event: Free pages reporting was not configured");
+                    return true;
+                }
+            }
             _ => {
                 error!("Unknown event for virtio-balloon");
                 return true;
@@ -318,18 +372,30 @@ pub struct Balloon {
 
 impl Balloon {
     // Create a new virtio-balloon.
-    pub fn new(id: String, size: u64, seccomp_action: SeccompAction) -> io::Result<Self> {
-        let avail_features = 1u64 << VIRTIO_F_VERSION_1;
+    pub fn new(
+        id: String,
+        size: u64,
+        reporting: bool,
+        seccomp_action: SeccompAction,
+    ) -> io::Result<Self> {
+        let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
         let mut config = VirtioBalloonConfig::default();
         config.num_pages = (size >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
+
+        let mut queue_sizes = QUEUE_SIZES.to_vec();
+
+        if reporting {
+            avail_features |= 1u64 << VIRTIO_BALLOON_F_REPORTING;
+            queue_sizes.push(PAGE_REPORTING_CAPACITY);
+        }
 
         Ok(Balloon {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::TYPE_BALLOON as u32,
                 avail_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
-                queue_sizes: QUEUE_SIZES.to_vec(),
+                queue_sizes,
                 ..Default::default()
             },
             id,
@@ -422,6 +488,13 @@ impl VirtioDevice for Balloon {
                 ActivateError::BadActivate
             })?;
 
+        let inflate_queue_evt = queue_evts.remove(0);
+        let deflate_queue_evt = queue_evts.remove(0);
+        let mut reporting_queue_evt = None;
+        if self.common.feature_acked(VIRTIO_BALLOON_F_REPORTING.into()) {
+            reporting_queue_evt = Some(queue_evts.remove(0));
+        }
+
         let mut handler = BalloonEpollHandler {
             config: self.config.clone(),
             resize_receiver: self.resize.get_receiver().map_err(|e| {
@@ -431,8 +504,9 @@ impl VirtioDevice for Balloon {
             queues,
             mem,
             interrupt_cb,
-            inflate_queue_evt: queue_evts.remove(0),
-            deflate_queue_evt: queue_evts.remove(0),
+            inflate_queue_evt,
+            deflate_queue_evt,
+            reporting_queue_evt,
             kill_evt,
             pause_evt,
         };
