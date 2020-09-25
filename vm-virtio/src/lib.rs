@@ -42,6 +42,7 @@ pub enum VirtioDeviceType {
     TYPE_MEM = 24,
     TYPE_FS = 26,
     TYPE_PMEM = 27,
+    TYPE_WATCHDOG = 35, // Temporary until official number allocated
     TYPE_UNKNOWN = 0xFF,
 }
 
@@ -61,6 +62,7 @@ impl From<u32> for VirtioDeviceType {
             24 => VirtioDeviceType::TYPE_MEM,
             26 => VirtioDeviceType::TYPE_FS,
             27 => VirtioDeviceType::TYPE_PMEM,
+            35 => VirtioDeviceType::TYPE_WATCHDOG,
             _ => VirtioDeviceType::TYPE_UNKNOWN,
         }
     }
@@ -85,6 +87,7 @@ impl fmt::Display for VirtioDeviceType {
             VirtioDeviceType::TYPE_MEM => "mem",
             VirtioDeviceType::TYPE_FS => "fs",
             VirtioDeviceType::TYPE_PMEM => "pmem",
+            VirtioDeviceType::TYPE_WATCHDOG => "watchdog",
             VirtioDeviceType::TYPE_UNKNOWN => "UNKNOWN",
         };
         write!(f, "{}", output)
