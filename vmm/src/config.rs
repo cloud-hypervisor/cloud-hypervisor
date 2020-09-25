@@ -193,6 +193,7 @@ pub struct VmParams<'a> {
     #[cfg(target_arch = "x86_64")]
     pub sgx_epc: Option<Vec<&'a str>>,
     pub numa: Option<Vec<&'a str>>,
+    pub watchdog: bool,
 }
 
 impl<'a> VmParams<'a> {
@@ -218,6 +219,7 @@ impl<'a> VmParams<'a> {
         #[cfg(target_arch = "x86_64")]
         let sgx_epc: Option<Vec<&str>> = args.values_of("sgx-epc").map(|x| x.collect());
         let numa: Option<Vec<&str>> = args.values_of("numa").map(|x| x.collect());
+        let watchdog = args.is_present("watchdog");
 
         VmParams {
             cpus,
@@ -238,6 +240,7 @@ impl<'a> VmParams<'a> {
             #[cfg(target_arch = "x86_64")]
             sgx_epc,
             numa,
+            watchdog,
         }
     }
 }
@@ -1401,6 +1404,8 @@ pub struct VmConfig {
     #[cfg(target_arch = "x86_64")]
     pub sgx_epc: Option<Vec<SgxEpcConfig>>,
     pub numa: Option<Vec<NumaConfig>>,
+    #[serde(default)]
+    pub watchdog: bool,
 }
 
 impl VmConfig {
@@ -1608,6 +1613,7 @@ impl VmConfig {
             #[cfg(target_arch = "x86_64")]
             sgx_epc,
             numa,
+            watchdog: vm_params.watchdog,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -2187,6 +2193,7 @@ mod tests {
             #[cfg(target_arch = "x86_64")]
             sgx_epc: None,
             numa: None,
+            watchdog: false,
         };
 
         assert!(valid_config.validate().is_ok());

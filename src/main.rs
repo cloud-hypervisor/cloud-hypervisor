@@ -237,6 +237,13 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
+            Arg::with_name("watchdog")
+                .long("watchdog")
+                .help("Enable virtio-watchdog")
+                .takes_value(false)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::with_name("v")
                 .short("v")
                 .multiple(true)
@@ -593,6 +600,7 @@ mod unit_tests {
                 #[cfg(target_arch = "x86_64")]
                 sgx_epc: None,
                 numa: None,
+                watchdog: false,
             };
 
             aver_eq!(tb, expected_vm_config, result_vm_config);
