@@ -364,6 +364,8 @@ fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_stat),
         allow_syscall(libc::SYS_statx),
         allow_syscall(libc::SYS_tgkill),
+        allow_syscall(libc::SYS_timerfd_create),
+        allow_syscall(libc::SYS_timerfd_settime),
         allow_syscall(libc::SYS_tkill),
         allow_syscall_if(
             libc::SYS_umask,
@@ -456,6 +458,8 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_stat),
         allow_syscall(libc::SYS_statx),
         allow_syscall(libc::SYS_tgkill),
+        allow_syscall(libc::SYS_timerfd_create),
+        allow_syscall(libc::SYS_timerfd_settime),
         allow_syscall(libc::SYS_tkill),
         allow_syscall(libc::SYS_write),
     ])
