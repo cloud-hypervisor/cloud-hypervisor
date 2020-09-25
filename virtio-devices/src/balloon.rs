@@ -297,7 +297,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                 }
             }
             _ => {
-                error!("Unknown event for virtio-mem");
+                error!("Unknown event for virtio-balloon");
                 return true;
             }
         }
