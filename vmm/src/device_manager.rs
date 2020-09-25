@@ -110,6 +110,7 @@ const NET_DEVICE_NAME_PREFIX: &str = "_net";
 const PMEM_DEVICE_NAME_PREFIX: &str = "_pmem";
 const RNG_DEVICE_NAME: &str = "_rng";
 const VSOCK_DEVICE_NAME_PREFIX: &str = "_vsock";
+const WATCHDOG_DEVICE_NAME: &str = "_watchdog";
 
 const IOMMU_DEVICE_NAME: &str = "_iommu";
 
@@ -165,6 +166,9 @@ pub enum DeviceManagerError {
 
     /// Cannot create virtio-balloon device
     CreateVirtioBalloon(io::Error),
+
+    /// Cannot create virtio-watchdog device
+    CreateVirtioWatchdog(io::Error),
 
     /// Failed parsing disk image format
     DetectImageType(qcow::Error),
@@ -765,8 +769,6 @@ pub struct DeviceManager {
     #[cfg(feature = "acpi")]
     exit_evt: EventFd,
 
-    // Reset event
-    #[cfg(target_arch = "x86_64")]
     reset_evt: EventFd,
 
     #[cfg(target_arch = "aarch64")]
@@ -787,7 +789,7 @@ impl DeviceManager {
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
-        #[cfg_attr(target_arch = "aarch64", allow(unused_variables))] reset_evt: &EventFd,
+        reset_evt: &EventFd,
         vmm_path: PathBuf,
         seccomp_action: SeccompAction,
         #[cfg(feature = "acpi")] numa_nodes: NumaNodes,
@@ -842,7 +844,6 @@ impl DeviceManager {
             device_tree,
             #[cfg(feature = "acpi")]
             exit_evt: _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
-            #[cfg(target_arch = "x86_64")]
             reset_evt: reset_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
             #[cfg(target_arch = "aarch64")]
             id_to_dev_info: HashMap::new(),
@@ -1562,6 +1563,9 @@ impl DeviceManager {
 
         // Add virtio-balloon if required
         devices.append(&mut self.make_virtio_balloon_devices()?);
+
+        // Add virtio-watchdog device
+        devices.append(&mut self.make_virtio_watchdog_devices()?);
 
         Ok(devices)
     }
@@ -2464,6 +2468,39 @@ impl DeviceManager {
                 .unwrap()
                 .insert(id.clone(), device_node!(id, virtio_balloon_device));
         }
+
+        Ok(devices)
+    }
+
+    fn make_virtio_watchdog_devices(
+        &mut self,
+    ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool, String)>> {
+        let mut devices = Vec::new();
+
+        if !self.config.lock().unwrap().watchdog {
+            return Ok(devices);
+        }
+
+        let id = String::from(WATCHDOG_DEVICE_NAME);
+
+        let virtio_watchdog_device = Arc::new(Mutex::new(
+            virtio_devices::Watchdog::new(
+                id.clone(),
+                self.reset_evt.try_clone().unwrap(),
+                self.seccomp_action.clone(),
+            )
+            .map_err(DeviceManagerError::CreateVirtioWatchdog)?,
+        ));
+        devices.push((
+            Arc::clone(&virtio_watchdog_device) as VirtioDeviceArc,
+            false,
+            id.clone(),
+        ));
+
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, virtio_watchdog_device));
 
         Ok(devices)
     }
