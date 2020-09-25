@@ -59,6 +59,8 @@ use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 #[cfg(target_arch = "x86_64")]
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
+#[cfg(target_arch = "x86_64")]
+const MTRR_EDX_BIT: u8 = 12; // Hypervisor ecx bit.
 
 // Debug I/O port
 #[cfg(target_arch = "x86_64")]
@@ -740,6 +742,17 @@ impl CpuManager {
             ebx_bit: None,
             ecx_bit: Some(HYPERVISOR_ECX_BIT),
             edx_bit: None,
+        });
+
+        // Enable MTRR feature
+        cpuid_patches.push(CpuidPatch {
+            function: 1,
+            index: 0,
+            flags_bit: None,
+            eax_bit: None,
+            ebx_bit: None,
+            ecx_bit: None,
+            edx_bit: Some(MTRR_EDX_BIT),
         });
 
         // Supported CPUID
