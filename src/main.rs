@@ -110,7 +110,8 @@ fn create_app<'a, 'b>(
                      \"size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,\
                      hotplug_method=acpi|virtio-mem,\
                      hotplug_size=<hotpluggable_memory_size>,\
-                     hotplugged_size=<hotplugged_memory_size>\"",
+                     hotplugged_size=<hotplugged_memory_size>,\
+                     balloon=on|off\"",
                 )
                 .default_value(&default_memory)
                 .group("vm-config"),
