@@ -324,7 +324,16 @@ fn start_vmm(cmd_arguments: ArgMatches) {
     } else {
         SeccompAction::Trap
     };
-    let hypervisor = hypervisor::new().unwrap();
+    let hypervisor = match hypervisor::new() {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!(
+                "Failed to open hypervisor interface (is /dev/kvm available?): {:?}",
+                e
+            );
+            process::exit(1);
+        }
+    };
     let vmm_thread = match vmm::start_vmm_thread(
         env!("CARGO_PKG_VERSION").to_string(),
         api_socket_path,
