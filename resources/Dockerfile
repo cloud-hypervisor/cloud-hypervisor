@@ -39,6 +39,7 @@ RUN apt-get update \
 	cpio \
 	bsdtar \
 	libfdt-dev \
+	python3-setuptools \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
