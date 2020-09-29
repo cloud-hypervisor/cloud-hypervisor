@@ -19,8 +19,8 @@ use vmm_sys_util::eventfd::EventFd;
 pub type Result<T> = std::io::Result<T>;
 
 struct InterruptRoute {
-    pub gsi: u32,
-    pub irq_fd: EventFd,
+    gsi: u32,
+    irq_fd: EventFd,
     registered: AtomicBool,
 }
 
@@ -68,6 +68,14 @@ impl InterruptRoute {
         }
 
         Ok(())
+    }
+
+    pub fn trigger(&self) -> Result<()> {
+        self.irq_fd.write(1)
+    }
+
+    pub fn notifier(&self) -> Option<&EventFd> {
+        Some(&self.irq_fd)
     }
 }
 
@@ -132,7 +140,7 @@ where
 
     fn trigger(&self, index: InterruptIndex) -> Result<()> {
         if let Some(route) = self.irq_routes.get(&index) {
-            return route.irq_fd.write(1);
+            return route.trigger();
         }
 
         Err(io::Error::new(
@@ -143,7 +151,7 @@ where
 
     fn notifier(&self, index: InterruptIndex) -> Option<&EventFd> {
         if let Some(route) = self.irq_routes.get(&index) {
-            return Some(&route.irq_fd);
+            return route.notifier();
         }
 
         None
