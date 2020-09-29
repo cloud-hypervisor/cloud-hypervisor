@@ -25,6 +25,7 @@ use vm_memory::{
     GuestMemoryMmap, GuestMemoryRegion, GuestUsize,
 };
 mod smbios;
+use std::arch::x86_64;
 
 #[derive(Debug, Copy, Clone)]
 pub enum BootProtocol {
@@ -391,6 +392,22 @@ pub fn configure_vcpu(
                 })
                 .map_err(|_| Error::PopulatingCpuid)?;
         }
+    }
+
+    // Copy CPU identification string
+    for i in 0x8000_0002..=0x8000_0004 {
+        cpuid.retain(|c| c.function != i);
+        let leaf = unsafe { x86_64::__cpuid(i) };
+        cpuid
+            .push(CpuIdEntry {
+                function: i,
+                eax: leaf.eax,
+                ebx: leaf.ebx,
+                ecx: leaf.ecx,
+                edx: leaf.edx,
+                ..Default::default()
+            })
+            .map_err(|_| Error::PopulatingCpuid)?;
     }
 
     fd.set_cpuid2(&cpuid)
@@ -808,7 +825,6 @@ pub fn initramfs_load_addr(
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
-    use std::arch::x86_64;
     unsafe {
         let leaf = x86_64::__cpuid(0x8000_0000);
 
