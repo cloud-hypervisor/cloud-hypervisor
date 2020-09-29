@@ -811,6 +811,11 @@ components:
       properties:
         path:
           type: string
+        iommu:
+          type: boolean
+          default: false
+        id:
+          type: string
 
     VmRemoveDevice:
       type: object
