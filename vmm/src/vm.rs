@@ -1361,6 +1361,11 @@ impl Vm {
             .read_raw(&mut out)
             .map_err(Error::Console)?;
 
+        // Replace "\n" with "\r" to deal with Windows SAC (#1170)
+        if count == 1 && out[0] == 0x0a {
+            out[0] = 0x0d;
+        }
+
         if self
             .device_manager
             .lock()
