@@ -1,7 +1,7 @@
 FROM ubuntu:18.04 as dev
 
 ARG TARGETARCH
-ARG RUST_TOOLCHAIN="1.43.0"
+ARG RUST_TOOLCHAIN="1.46.0"
 ARG CLH_SRC_DIR="/cloud-hypervisor"
 ARG CLH_BUILD_DIR="$CLH_SRC_DIR/build"
 ARG CARGO_REGISTRY_DIR="$CLH_BUILD_DIR/cargo_registry"
@@ -67,14 +67,18 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         && rm -rf /dtc;	fi
 
 # Fix the libssl-dev install
-RUN cp /usr/include/"$(uname -m)"-linux-gnu/openssl/opensslconf.h /usr/include/openssl/
-RUN echo 'export OPENSSL_DIR=/usr/lib/"$(uname -m)"-linux-gnu/' >> $HOME/.bashrc
-RUN echo 'export OPENSSL_LIB_DIR=/usr/lib/"$(uname -m)"-linux-gnu/' >> $HOME/.bashrc
+RUN export ARCH="$(uname -m)" \
+    && cp /usr/include/$ARCH-linux-gnu/openssl/opensslconf.h /usr/include/openssl/
+ENV X86_64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu/
+ENV X86_64_UNKNOWN_LINUX_MUSL_OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu/
+ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu/
+ENV AARCH64_UNKNOWN_LINUX_MUSL_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu/
 ENV OPENSSL_INCLUDE_DIR=/usr/include/
 
 # Install the rust toolchain
-RUN nohup curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "$RUST_TOOLCHAIN" \
-    && rustup target add "$(uname -m)"-unknown-linux-musl --toolchain "$RUST_TOOLCHAIN" \
+RUN export ARCH="$(uname -m)" \
+    && nohup curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "$RUST_TOOLCHAIN" \
+    && rustup target add $ARCH-unknown-linux-musl --toolchain "$RUST_TOOLCHAIN" \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup toolchain add $RUST_TOOLCHAIN-x86_64-unknown-linux-musl; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add rustfmt; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add clippy; fi \
