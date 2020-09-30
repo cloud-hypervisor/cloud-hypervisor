@@ -133,7 +133,8 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("kernel")
                 .long("kernel")
-                .help("Path to kernel image (vmlinux)")
+                .help("Path to loaded kernel. This may be a kernel or firmware that supports a PVH \
+                entry point, a vmlinux ELF file or a Linux bzImage or achitecture equivalent")
                 .takes_value(true)
                 .group("vm-config"),
         )
