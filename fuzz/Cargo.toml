@@ -10,9 +10,11 @@ edition = "2018"
 cargo-fuzz = true
 
 [dependencies]
+kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
 libc = "0.2.72"
 libfuzzer-sys = "0.3"
 qcow = { path = "../qcow" }
+seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.22.0" }
 virtio-devices = { path = "../virtio-devices" }
 vmm-sys-util = ">=0.3.1"
 vm-virtio = { path = "../vm-virtio" }
