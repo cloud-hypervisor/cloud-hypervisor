@@ -1,0 +1,27 @@
+name: Cloud Hypervisor Cargo Fuzz Build
+on: [pull_request, create]
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    name: Cargo Fuzz Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - nightly
+        target:
+          - x86_64-unknown-linux-gnu
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v2
+      - name: Install Rust toolchain (${{ matrix.rust }})
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: ${{ matrix.rust }}
+            target: ${{ matrix.target }}
+            override: true
+      - name: Install Cargo fuzz
+        run: cargo install -f cargo-fuzz
+      - name: Cargo Fuzz Build
+        run: cargo fuzz build
