@@ -314,6 +314,7 @@ pub struct Vm {
     #[cfg(feature = "acpi")]
     numa_nodes: NumaNodes,
     seccomp_action: SeccompAction,
+    exit_evt: EventFd,
 }
 
 impl Vm {
@@ -394,6 +395,7 @@ impl Vm {
             #[cfg(feature = "acpi")]
             numa_nodes,
             seccomp_action: seccomp_action.clone(),
+            exit_evt,
         })
     }
 
@@ -1257,7 +1259,12 @@ impl Vm {
         Ok(self.device_manager.lock().unwrap().counters())
     }
 
-    fn os_signal_handler(signals: Signals, console_input_clone: Arc<Console>, on_tty: bool) {
+    fn os_signal_handler(
+        signals: Signals,
+        console_input_clone: Arc<Console>,
+        on_tty: bool,
+        exit_evt: EventFd,
+    ) {
         for signal in signals.forever() {
             match signal {
                 SIGWINCH => {
@@ -1271,7 +1278,9 @@ impl Vm {
                             .set_canon_mode()
                             .expect("failed to restore terminal mode");
                     }
-                    std::process::exit((signal != SIGTERM) as i32);
+                    if exit_evt.write(1).is_err() {
+                        std::process::exit(1);
+                    }
                 }
                 _ => (),
             }
@@ -1316,7 +1325,7 @@ impl Vm {
             match signals {
                 Ok(signals) => {
                     self.signals = Some(signals.clone());
-
+                    let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
                     let on_tty = self.on_tty;
                     let signal_handler_seccomp_filter =
                         get_seccomp_filter(&self.seccomp_action, Thread::SignalHandler)
@@ -1332,7 +1341,7 @@ impl Vm {
                                     return;
                                 }
 
-                                Vm::os_signal_handler(signals, console, on_tty);
+                                Vm::os_signal_handler(signals, console, on_tty, exit_evt);
                             })
                             .map_err(Error::SignalHandlerSpawn)?,
                     );
@@ -1673,6 +1682,9 @@ impl Snapshottable for Vm {
                                 ))
                             },
                         )?;
+                    let exit_evt = self.exit_evt.try_clone().map_err(|e| {
+                        MigratableError::Restore(anyhow!("Could not clone exit event fd: {:?}", e))
+                    })?;
 
                     self.threads.push(
                         thread::Builder::new()
@@ -1685,7 +1697,7 @@ impl Snapshottable for Vm {
                                     return;
                                 }
 
-                                Vm::os_signal_handler(signals, console, on_tty)
+                                Vm::os_signal_handler(signals, console, on_tty, exit_evt)
                             })
                             .map_err(|e| {
                                 MigratableError::Restore(anyhow!(
