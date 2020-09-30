@@ -446,10 +446,9 @@ fn main() {
     .get_matches();
 
     let log_level = match cmd_arguments.occurrences_of("v") {
-        0 => LevelFilter::Error,
-        1 => LevelFilter::Warn,
-        2 => LevelFilter::Info,
-        3 => LevelFilter::Debug,
+        0 => LevelFilter::Warn,
+        1 => LevelFilter::Info,
+        2 => LevelFilter::Debug,
         _ => LevelFilter::Trace,
     };
 
