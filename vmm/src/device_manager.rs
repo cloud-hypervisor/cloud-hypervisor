@@ -1691,6 +1691,7 @@ impl DeviceManager {
             let socket = if let Some(socket) = disk_cfg.vhost_socket.clone() {
                 socket
             } else {
+                warn!("Self-spawning of vhost-user block backend is deprecated and will be removed in a future release.");
                 self.start_block_backend(disk_cfg)?
             };
             let vu_cfg = VhostUserConfig {
@@ -1937,6 +1938,7 @@ impl DeviceManager {
             let socket = if let Some(socket) = net_cfg.vhost_socket.clone() {
                 socket
             } else {
+                warn!("Self-spawning of vhost-user net backend is deprecated and will be removed in a future release.");
                 self.start_net_backend(net_cfg)?
             };
             let vu_cfg = VhostUserConfig {
