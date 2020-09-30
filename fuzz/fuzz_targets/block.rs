@@ -16,6 +16,7 @@ use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_virtio::Queue;
 use vmm_sys_util::eventfd::EventFd;
+use seccomp::SeccompAction;
 
 const MEM_SIZE: u64 = 256 * 1024 * 1024;
 const DESC_SIZE: u64 = 16; // Bytes in one virtio descriptor.
@@ -92,6 +93,7 @@ fuzz_target!(|bytes| {
         false,
         2,
         256,
+        SeccompAction::Allow,
     )
     .unwrap();
 
