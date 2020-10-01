@@ -427,9 +427,4 @@ if [ $(uname -m) = "x86_64" ]; then
     ensure_latest_ctr
 fi
 
-# Before a public image for AArch64 ready, we build the container if needed.
-if [ $(uname -m) = "aarch64" ]; then
-    cmd_build-container
-fi
-
 $cmd "$@"
