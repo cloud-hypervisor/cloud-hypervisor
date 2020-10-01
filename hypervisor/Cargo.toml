@@ -10,7 +10,7 @@ kvm = []
 [dependencies]
 anyhow = "1.0"
 thiserror = "1.0"
-libc = "0.2.77"
+libc = "0.2.78"
 log = "0.4.11"
 kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch", features = ["with-serde", "fam-wrappers"] }
