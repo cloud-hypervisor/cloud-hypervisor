@@ -7,8 +7,6 @@ use std::result;
 
 #[derive(Debug)]
 pub enum Error {
-    /// Invalid destination mode.
-    InvalidDestinationMode,
     /// Invalid trigger mode.
     InvalidTriggerMode,
     /// Invalid delivery mode.
