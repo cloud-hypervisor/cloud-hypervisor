@@ -15,5 +15,5 @@ qcow = { path = "../qcow" }
 vhost_user_backend = { path = "../vhost_user_backend" }
 vhost_rs = { git = "https://github.com/rust-vmm/vhost", branch = "master", package = "vhost", features = ["vhost-user-slave"] }
 virtio-bindings = "0.1.0"
-vm-memory = "0.2.1"
+vm-memory = "0.3.0"
 vmm-sys-util = ">=0.3.1"

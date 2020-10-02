@@ -42,7 +42,7 @@ vfio-ioctls = { git = "https://github.com/cloud-hypervisor/vfio-ioctls", branch 
 virtio-devices = {path = "../virtio-devices"}
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.2.1", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.3.0", features = ["backend-mmap", "backend-atomic"] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = ">=0.5.0", features = ["with-serde"] }
