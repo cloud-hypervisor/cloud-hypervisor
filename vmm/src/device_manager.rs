@@ -2347,11 +2347,7 @@ impl DeviceManager {
         let mmap_region = MmapRegion::build(
             Some(FileOffset::new(cloned_file, 0)),
             region_size as usize,
-            if pmem_cfg.discard_writes {
-                PROT_READ
-            } else {
-                PROT_READ | PROT_WRITE
-            },
+            PROT_READ | PROT_WRITE,
             MAP_NORESERVE
                 | if pmem_cfg.discard_writes {
                     MAP_PRIVATE
@@ -2371,7 +2367,7 @@ impl DeviceManager {
                 region_size,
                 host_addr,
                 pmem_cfg.mergeable,
-                pmem_cfg.discard_writes,
+                false,
             )
             .map_err(DeviceManagerError::MemoryManager)?;
 
