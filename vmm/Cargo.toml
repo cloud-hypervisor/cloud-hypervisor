@@ -26,7 +26,7 @@ devices = { path = "../devices" }
 epoll = ">=4.0.1"
 hypervisor = { path = "../hypervisor" }
 lazy_static = "1.4.0"
-libc = "0.2.78"
+libc = "0.2.79"
 log = "0.4.11"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "master" }
 net_util = { path = "../net_util" }

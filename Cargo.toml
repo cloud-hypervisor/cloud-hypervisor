@@ -15,7 +15,7 @@ lto = true
 [dependencies]
 clap = { version = "2.33.3", features = ["wrap_help"] }
 hypervisor = { path = "hypervisor" }
-libc = "0.2.78"
+libc = "0.2.79"
 log = { version = "0.4.11", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.22.0" }
