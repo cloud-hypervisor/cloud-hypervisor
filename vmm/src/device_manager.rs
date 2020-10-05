@@ -2703,9 +2703,13 @@ impl DeviceManager {
             })
             .map_err(DeviceManagerError::VfioMapRegion)?;
 
+        let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
+
         self.add_pci_device(
             pci,
-            Arc::new(Mutex::new(vfio_pci_device)),
+            vfio_pci_device.clone(),
+            vfio_pci_device.clone(),
+            vfio_pci_device,
             pci_device_bdf,
             vfio_name.clone(),
         )?;
@@ -2714,34 +2718,31 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
-    fn add_pci_device<T>(
+    fn add_pci_device(
         &mut self,
         pci_bus: &mut PciBus,
-        device: Arc<Mutex<T>>,
+        bus_device: Arc<Mutex<dyn BusDevice>>,
+        pci_device: Arc<Mutex<dyn PciDevice>>,
+        any_device: Arc<dyn Any + Send + Sync>,
         bdf: u32,
         device_id: String,
-    ) -> DeviceManagerResult<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>>
-    where
-        T: BusDevice + PciDevice + Any + Send + Sync,
-    {
-        let bars = device
+    ) -> DeviceManagerResult<Vec<(GuestAddress, GuestUsize, PciBarRegionType)>> {
+        let bars = pci_device
             .lock()
             .unwrap()
             .allocate_bars(&mut self.address_manager.allocator.lock().unwrap())
             .map_err(DeviceManagerError::AllocateBars)?;
 
         pci_bus
-            .add_device(bdf, device.clone())
+            .add_device(bdf, pci_device)
             .map_err(DeviceManagerError::AddPciDevice)?;
 
-        self.pci_devices
-            .insert(bdf, Arc::clone(&device) as Arc<dyn Any + Send + Sync>);
-        self.bus_devices
-            .push(Arc::clone(&device) as Arc<Mutex<dyn BusDevice>>);
+        self.pci_devices.insert(bdf, any_device);
+        self.bus_devices.push(Arc::clone(&bus_device));
 
         pci_bus
             .register_mapping(
-                device,
+                bus_device,
                 #[cfg(target_arch = "x86_64")]
                 self.address_manager.io_bus.as_ref(),
                 self.address_manager.mmio_bus.as_ref(),
@@ -2900,6 +2901,8 @@ impl DeviceManager {
         let virtio_pci_device = Arc::new(Mutex::new(virtio_pci_device));
         let bars = self.add_pci_device(
             pci,
+            virtio_pci_device.clone(),
+            virtio_pci_device.clone(),
             virtio_pci_device.clone(),
             pci_device_bdf,
             virtio_device_id,
