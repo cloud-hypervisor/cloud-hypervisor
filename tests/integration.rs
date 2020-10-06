@@ -4947,6 +4947,35 @@ mod tests {
                 assert!(String::from_utf8_lossy(&cmd_output)
                     .contains("{\"id\":\"_net2\",\"bdf\":\"0000:00:05.0\"}"));
 
+                thread::sleep(std::time::Duration::new(5, 0));
+
+                // 1 network interfaces + default localhost ==> 2 interfaces
+                assert_eq!(
+                    guest
+                        .ssh_command("ip -o link | wc -l")
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    2
+                );
+
+                // Remove network
+                assert!(remote_command(&api_socket, "remove-device", Some("_net2")));
+                thread::sleep(std::time::Duration::new(5, 0));
+
+                // Add network again
+                let (cmd_success, cmd_output) = remote_command_w_output(
+                    &api_socket,
+                    "add-net",
+                    Some(guest.default_net_string().as_str()),
+                );
+                assert!(cmd_success);
+                assert!(String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"_net3\",\"bdf\":\"0000:00:05.0\"}"));
+
+                thread::sleep(std::time::Duration::new(5, 0));
+
                 // 1 network interfaces + default localhost ==> 2 interfaces
                 assert_eq!(
                     guest
