@@ -4688,6 +4688,7 @@ mod tests {
                     0
                 );
 
+                // Now let's add the extra disk.
                 let mut blk_file_path = dirs::home_dir().unwrap();
                 blk_file_path.push("workloads");
                 blk_file_path.push("blk.img");
@@ -4702,7 +4703,7 @@ mod tests {
 
                 thread::sleep(std::time::Duration::new(10, 0));
 
-                // Check that if /dev/vdc exists and the block size is 16M.
+                // Check that /dev/vdc exists and the block size is 16M.
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep vdc | grep -c 16M")
@@ -4712,7 +4713,53 @@ mod tests {
                         .unwrap_or_default(),
                     1
                 );
+                // And check the block device can be read.
+                assert!(guest
+                    .ssh_command("dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                    .is_ok());
 
+                // Let's remove it the extra disk.
+                assert!(remote_command(&api_socket, "remove-device", Some("test0")));
+                thread::sleep(std::time::Duration::new(5, 0));
+                // And check /dev/vdc is not there
+                assert_eq!(
+                    guest
+                        .ssh_command("lsblk | grep vdc | grep -c 16M")
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or(1),
+                    0
+                );
+
+                // And add it back to validate unplug did work correctly.
+                let (cmd_success, cmd_output) = remote_command_w_output(
+                    &api_socket,
+                    "add-disk",
+                    Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+                );
+                assert!(cmd_success);
+                assert!(String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}"));
+
+                thread::sleep(std::time::Duration::new(10, 0));
+
+                // Check that /dev/vdc exists and the block size is 16M.
+                assert_eq!(
+                    guest
+                        .ssh_command("lsblk | grep vdc | grep -c 16M")
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    1
+                );
+                // And check the block device can be read.
+                assert!(guest
+                    .ssh_command("dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                    .is_ok());
+
+                // Reboot the VM.
                 guest.ssh_command("sudo reboot").unwrap_or_default();
 
                 thread::sleep(std::time::Duration::new(20, 0));
