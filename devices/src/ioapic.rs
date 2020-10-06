@@ -214,6 +214,16 @@ impl Ioapic {
         debug!("IOAPIC_W reg 0x{:x}, val 0x{:x}", self.reg_sel, val);
 
         match self.reg_sel as u8 {
+            IOAPIC_REG_VERSION => {
+                if val == 0 {
+                    // Windows writes zero here (see #1791)
+                } else {
+                    error!(
+                        "IOAPIC: invalid write to version register (0x{:x}): 0x{:x}",
+                        self.reg_sel, val
+                    );
+                }
+            }
             IOAPIC_REG_ID => self.id_reg = (val >> 24) & 0xf,
             IOWIN_OFF..=REG_MAX_OFFSET => {
                 let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
@@ -235,7 +245,10 @@ impl Ioapic {
                 // Store the information this IRQ is now being used.
                 self.used_entries[index] = true;
             }
-            _ => error!("IOAPIC: invalid write to register offset"),
+            _ => error!(
+                "IOAPIC: invalid write to register offset 0x{:x}",
+                self.reg_sel
+            ),
         }
     }
 
@@ -254,7 +267,10 @@ impl Ioapic {
                 }
             }
             _ => {
-                error!("IOAPIC: invalid read from register offset");
+                error!(
+                    "IOAPIC: invalid read from register offset 0x{:x}",
+                    self.reg_sel
+                );
                 0
             }
         }
