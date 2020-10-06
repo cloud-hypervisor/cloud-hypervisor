@@ -31,6 +31,9 @@ clap = { version = "2.33.3", features = ["wrap_help"] }
 [patch.crates-io]
 vm-memory = { git = "https://github.com/cloud-hypervisor/vm-memory", branch = "ch" }
 
+[patch.'https://github.com/rust-vmm/vhost']
+vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "ch", package = "vhost", features = ["vhost-user-master", "vhost-user-slave"] }
+
 [dev-dependencies]
 ssh2 = "0.8.2"
 dirs = "3.0.1"
