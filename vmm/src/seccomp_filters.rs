@@ -460,6 +460,10 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_statx),
         allow_syscall(libc::SYS_tgkill),
         allow_syscall(libc::SYS_tkill),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_unlink),
+        #[cfg(target_arch = "aarch64")]
+        allow_syscall(libc::SYS_unlinkat),
         allow_syscall(libc::SYS_write),
     ])
 }
