@@ -21,7 +21,7 @@ use kvm_bindings::{
     KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
 pub use kvm_bindings::{
-    kvm_one_reg as OneRegister, kvm_regs as StandardRegisters, kvm_vcpu_init as VcpuInit, RegList,
+    kvm_one_reg as Register, kvm_regs as StandardRegisters, kvm_vcpu_init as VcpuInit, RegList,
 };
 use serde_derive::{Deserialize, Serialize};
 pub use {kvm_ioctls::Cap, kvm_ioctls::Kvm};

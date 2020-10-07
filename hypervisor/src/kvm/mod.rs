@@ -38,7 +38,7 @@ use x86_64::{
 };
 
 #[cfg(target_arch = "aarch64")]
-use aarch64::{OneRegister, RegList, StandardRegisters};
+use aarch64::{RegList, Register, StandardRegisters};
 
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
@@ -814,19 +814,19 @@ impl cpu::Vcpu for KvmVcpu {
     /// Sets the value of one register for this vCPU.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn set_one_reg(&self, reg_id: u64, data: u64) -> cpu::Result<()> {
+    fn set_reg(&self, reg_id: u64, data: u64) -> cpu::Result<()> {
         self.fd
             .set_one_reg(reg_id, data)
-            .map_err(|e| cpu::HypervisorCpuError::SetOneReg(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))
     }
     ///
     /// Gets the value of one register for this vCPU.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn get_one_reg(&self, reg_id: u64) -> cpu::Result<u64> {
+    fn get_reg(&self, reg_id: u64) -> cpu::Result<u64> {
         self.fd
             .get_one_reg(reg_id)
-            .map_err(|e| cpu::HypervisorCpuError::GetOneReg(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::GetRegister(e.into()))
     }
     ///
     /// Gets a list of the guest registers that are supported for the
@@ -1014,7 +1014,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// Save the state of the system registers.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn system_registers(&self, state: &mut Vec<OneRegister>) -> cpu::Result<()> {
+    fn system_registers(&self, state: &mut Vec<Register>) -> cpu::Result<()> {
         // Call KVM_GET_REG_LIST to get all registers available to the guest. For ArmV8 there are
         // around 500 registers.
         let mut reg_list = RegList::new(512);
@@ -1055,7 +1055,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// Restore the state of the system registers.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn set_system_registers(&self, state: &[OneRegister]) -> cpu::Result<()> {
+    fn set_system_registers(&self, state: &[Register]) -> cpu::Result<()> {
         for reg in state {
             self.fd
                 .set_one_reg(reg.id, reg.addr)
