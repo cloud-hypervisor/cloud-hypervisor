@@ -28,11 +28,15 @@ vmm-sys-util = "0.6.1"
 [build-dependencies]
 clap = { version = "2.33.3", features = ["wrap_help"] }
 
+# List of patched crates
 [patch.crates-io]
 vm-memory = { git = "https://github.com/cloud-hypervisor/vm-memory", branch = "ch" }
-
 [patch.'https://github.com/rust-vmm/vhost']
 vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "ch", package = "vhost", features = ["vhost-user-master", "vhost-user-slave"] }
+[patch.'https://github.com/rust-vmm/kvm-ioctls']
+kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
+[patch.'https://github.com/rust-vmm/kvm-bindings']
+kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch", features = ["with-serde", "fam-wrappers"] }
 
 [dev-dependencies]
 ssh2 = "0.8.2"

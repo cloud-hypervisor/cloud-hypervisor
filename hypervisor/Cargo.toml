@@ -13,8 +13,8 @@ arc-swap = ">=0.4.4"
 thiserror = "1.0"
 libc = "0.2.79"
 log = "0.4.11"
-kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch", features = ["with-serde", "fam-wrappers"] }
+kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
+kvm-bindings = { git = "https://github.com/rust-vmm/kvm-bindings", branch = "master", features = ["with-serde", "fam-wrappers"] }
 serde = {version = ">=1.0.27", features = ["rc"] }
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
