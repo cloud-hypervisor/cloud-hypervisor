@@ -134,6 +134,44 @@ pipeline{
 						}
 					}
 				}
+				stage ('Worker build - Windows guest') {
+					agent { node { label 'bionic-win' } }
+					options {
+						timeout(time: 1, unit: 'HOURS')
+					}
+					stages {
+						stage ('Checkout') {
+							steps {
+								checkout scm
+							}
+						}
+						stage ('Download assets') {
+							steps {
+								sh "mkdir ${env.HOME}/workloads"
+								azureDownload(storageCredentialId: 'ch-image-store',
+											  containerName: 'private-images',
+											  includeFilesPattern: 'OVMF.fd',
+											  downloadType: 'container',
+											  downloadDirLoc: "${env.HOME}/workloads")
+								azureDownload(storageCredentialId: 'ch-image-store',
+											  containerName: 'private-images',
+											  includeFilesPattern: 'windows-server-2019.raw',
+											  downloadType: 'container',
+											  downloadDirLoc: "${env.HOME}/workloads")
+							}
+						}
+						stage ('Run Windows guest integration tests') {
+							steps {
+								sh "scripts/dev_cli.sh tests --integration-windows"
+							}
+						}
+						stage ('Run Windows guest integration tests for musl') {
+							steps {
+								sh "scripts/dev_cli.sh tests --integration-windows --libc musl"
+							}
+						}
+					}
+				}
 			}
 		}
 	}
