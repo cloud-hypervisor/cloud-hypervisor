@@ -11,7 +11,7 @@
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "aarch64")]
-use crate::aarch64::{OneRegister, RegList, StandardRegisters};
+use crate::aarch64::{RegList, Register, StandardRegisters};
 use crate::{CpuState, MpState};
 
 #[cfg(target_arch = "x86_64")]
@@ -139,12 +139,12 @@ pub enum HypervisorCpuError {
     /// Setting one reg error
     ///
     #[error("Failed to init vcpu: {0}")]
-    SetOneReg(#[source] anyhow::Error),
+    SetRegister(#[source] anyhow::Error),
     ///
     /// Getting one reg error
     ///
     #[error("Failed to init vcpu: {0}")]
-    GetOneReg(#[source] anyhow::Error),
+    GetRegister(#[source] anyhow::Error),
     ///
     /// Getting guest clock paused error
     ///
@@ -326,12 +326,12 @@ pub trait Vcpu: Send + Sync {
     /// Sets the value of one register for this vCPU.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn set_one_reg(&self, reg_id: u64, data: u64) -> Result<()>;
+    fn set_reg(&self, reg_id: u64, data: u64) -> Result<()>;
     ///
     /// Sets the value of one register for this vCPU.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn get_one_reg(&self, reg_id: u64) -> Result<u64>;
+    fn get_reg(&self, reg_id: u64) -> Result<u64>;
     ///
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
@@ -352,12 +352,12 @@ pub trait Vcpu: Send + Sync {
     /// Save the state of the system registers.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn system_registers(&self, state: &mut Vec<OneRegister>) -> Result<()>;
+    fn system_registers(&self, state: &mut Vec<Register>) -> Result<()>;
     ///
     /// Restore the state of the system registers.
     ///
     #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-    fn set_system_registers(&self, state: &[OneRegister]) -> Result<()>;
+    fn set_system_registers(&self, state: &[Register]) -> Result<()>;
     ///
     /// Read the MPIDR - Multiprocessor Affinity Register.
     ///

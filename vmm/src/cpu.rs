@@ -1627,7 +1627,7 @@ mod tests {
         assert!(vcpu.set_core_registers(&state).is_ok());
         let off = offset__of!(user_pt_regs, pstate);
         let pstate = vcpu
-            .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
+            .get_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off))
             .expect("Failed to call kvm get one reg");
         assert_eq!(state.regs.pstate, pstate);
     }

@@ -53,7 +53,7 @@ pub fn setup_regs(
 
     // Get the register index of the PSTATE (Processor State) register.
     let pstate = offset__of!(user_pt_regs, pstate) + kreg_off;
-    vcpu.set_one_reg(
+    vcpu.set_reg(
         arm64_core_reg_id!(KVM_REG_SIZE_U64, pstate),
         PSTATE_FAULT_BITS_64,
     )
@@ -63,7 +63,7 @@ pub fn setup_regs(
     if cpu_id == 0 {
         // Setting the PC (Processor Counter) to the current program address (kernel address).
         let pc = offset__of!(user_pt_regs, pc) + kreg_off;
-        vcpu.set_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, pc), boot_ip as u64)
+        vcpu.set_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, pc), boot_ip as u64)
             .map_err(Error::SetCoreRegister)?;
 
         // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
@@ -71,7 +71,7 @@ pub fn setup_regs(
         // not exceed 2 megabytes in size." -> https://www.kernel.org/doc/Documentation/arm64/booting.txt.
         // We are choosing to place it the end of DRAM. See `get_fdt_addr`.
         let regs0 = offset__of!(user_pt_regs, regs) + kreg_off;
-        vcpu.set_one_reg(
+        vcpu.set_reg(
             arm64_core_reg_id!(KVM_REG_SIZE_U64, regs0),
             get_fdt_addr(mem) as u64,
         )
