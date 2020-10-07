@@ -3153,64 +3153,6 @@ mod tests {
 
         #[cfg_attr(not(feature = "mmio"), test)]
         #[cfg(target_arch = "x86_64")]
-        fn test_unprivileged_net() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut focal);
-
-            let host_ip = &guest.network.host_ip;
-
-            std::process::Command::new("bash")
-                .args(&["-c", "sudo ip tuntap add name chtap0 mode tap"])
-                .status()
-                .expect("Expected creating interface to work");
-
-            std::process::Command::new("bash")
-                .args(&["-c", &format!("sudo ip addr add {}/24 dev chtap0", host_ip)])
-                .status()
-                .expect("Expected programming interface to work");
-
-            std::process::Command::new("bash")
-                .args(&["-c", "sudo ip link set dev chtap0 up"])
-                .status()
-                .expect("Expected upping interface to work");
-
-            let mut child =
-                GuestCommand::new_with_binary_name(&guest, "cloud-hypervisor-unprivileged")
-                    .args(&["--cpus", "boot=1"])
-                    .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", guest.fw_path.as_str()])
-                    .default_disks()
-                    .args(&[
-                        "--net",
-                        format!("tap=chtap0,mac={}", guest.network.guest_mac).as_str(),
-                    ])
-                    .capture_output()
-                    .spawn()
-                    .unwrap();
-
-            thread::sleep(std::time::Duration::new(20, 0));
-
-            let r = std::panic::catch_unwind(|| {
-                // 1 network interfaces + default localhost ==> 2 interfaces
-                assert_eq!(
-                    guest
-                        .ssh_command("ip -o link | wc -l")
-                        .unwrap_or_default()
-                        .trim()
-                        .parse::<u32>()
-                        .unwrap_or_default(),
-                    2
-                );
-            });
-
-            let _ = child.kill();
-            let output = child.wait_with_output().unwrap();
-
-            handle_child_output(r, &output);
-        }
-
-        #[cfg_attr(not(feature = "mmio"), test)]
-        #[cfg(target_arch = "x86_64")]
         fn test_serial_off() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);

@@ -133,7 +133,6 @@ update_workloads() {
         cp build/tools/virtiofsd/virtiofsd $VIRTIOFSD || exit 1
         popd
         rm -rf $QEMU_DIR
-        sudo setcap cap_chown,cap_dac_override,cap_dac_read_search,cap_fowner,cap_fsetid,cap_setgid,cap_setuid,cap_mknod,cap_setfcap,cap_sys_admin+epi "virtiofsd" || exit 1
         popd
     fi
 
@@ -191,23 +190,14 @@ strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
 strip target/$BUILD_TARGET/release/ch-remote
 
-# Copy for non-privileged net test
-cp target/$BUILD_TARGET/release/cloud-hypervisor target/$BUILD_TARGET/release/cloud-hypervisor-unprivileged
-
-sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/cloud-hypervisor
-sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/vhost_user_net
-
 # Enable KSM with some reasonable parameters so that it won't take too long
 # for the memory to be merged between two processes.
 sudo bash -c "echo 1000000 > /sys/kernel/mm/ksm/pages_to_scan"
 sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
-sudo adduser $USER kvm
-newgrp kvm << EOF
 export RUST_BACKTRACE=1
 time cargo test --no-default-features --features "integration_tests,pci,kvm" "tests::parallel::$@" -- --skip test_snapshot_restore
-EOF
 RES=$?
 
 if [ $RES -eq 0 ]; then
@@ -217,18 +207,8 @@ if [ $RES -eq 0 ]; then
     strip target/$BUILD_TARGET/release/vhost_user_net
     strip target/$BUILD_TARGET/release/ch-remote
 
-    sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/cloud-hypervisor
-    sudo setcap cap_net_admin+ep target/$BUILD_TARGET/release/vhost_user_net
-
-    # Ensure test binary has the same caps as the cloud-hypervisor one
-    time cargo test --no-run --no-default-features --features "integration_tests,mmio,kvm" || exit 1
-    ls target/debug/deps/cloud_hypervisor-* | xargs -n 1 sudo setcap cap_net_admin+ep
-
-    newgrp kvm << EOF
-export RUST_BACKTRACE=1
-time cargo test --no-default-features --features "integration_tests,mmio,kvm" "tests::parallel::$@"
-EOF
-
+    export RUST_BACKTRACE=1
+    time cargo test --no-default-features --features "integration_tests,mmio,kvm" "tests::parallel::$@"
     RES=$?
 fi
 
