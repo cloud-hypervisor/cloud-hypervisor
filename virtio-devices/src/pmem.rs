@@ -16,7 +16,6 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{VirtioInterrupt, VirtioInterruptType};
 use anyhow::anyhow;
 use seccomp::{SeccompAction, SeccompFilter};
-use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::fmt::{self, Display};
 use std::fs::File;
 use std::io;
@@ -46,31 +45,11 @@ const VIRTIO_PMEM_RESP_TYPE_EIO: u32 = 1;
 // New descriptors are pending on the virtio queue.
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
-#[derive(Copy, Clone, Debug, Default, Deserialize)]
-#[repr(C, packed)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
+#[repr(C)]
 struct VirtioPmemConfig {
     start: u64,
     size: u64,
-}
-
-// We must explicitly implement Serialize since the structure is packed and
-// it's unsafe to borrow from a packed structure. And by default, if we derive
-// Serialize from serde, it will borrow the values from the structure.
-// That's why this implementation copies each field separately before it
-// serializes the entire structure field by field.
-impl Serialize for VirtioPmemConfig {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let start = self.start;
-        let size = self.size;
-
-        let mut virtio_pmem_config = serializer.serialize_struct("VirtioPmemConfig", 16)?;
-        virtio_pmem_config.serialize_field("start", &start)?;
-        virtio_pmem_config.serialize_field("size", &size)?;
-        virtio_pmem_config.end()
-    }
 }
 
 // Safe because it only has data and has no implicit padding.

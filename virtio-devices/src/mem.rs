@@ -159,7 +159,7 @@ struct VirtioMemResp {
 unsafe impl ByteValued for VirtioMemResp {}
 
 // Got from qemu/include/standard-headers/linux/virtio_mem.h
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
 struct VirtioMemConfig {
     // Block size and alignment. Cannot change.
