@@ -28,9 +28,9 @@ jobs:
             target: ${{ matrix.target }}
             override: true
 
-      - name: Debug Build (default features)
+      - name: Debug Check (default features)
         run: |
-          git rev-list origin/master..$GITHUB_SHA | xargs -t -I % sh -c 'git checkout %; cargo build --all --target=${{ matrix.target }}'
+          git rev-list origin/master..$GITHUB_SHA | xargs -t -I % sh -c 'git checkout %; cargo check --all --target=${{ matrix.target }}'
           git checkout $GITHUB_SHA
 
       - name: Build (pci,acpi,kvm)
