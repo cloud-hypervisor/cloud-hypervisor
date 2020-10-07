@@ -36,7 +36,6 @@ use arch::layout;
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 #[cfg(target_arch = "aarch64")]
 use arch::DeviceType;
-#[cfg(feature = "io_uring")]
 use block_util::block_io_uring_is_supported;
 #[cfg(target_arch = "aarch64")]
 use devices::gic;
@@ -1754,61 +1753,32 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::DetectImageType)?;
             let (virtio_device, migratable_device) = match image_type {
                 ImageType::Raw => {
-                    #[cfg(feature = "io_uring")]
-                    {
-                        // Use asynchronous backend relying on io_uring if the
-                        // syscalls are supported.
-                        if block_io_uring_is_supported() {
-                            let dev = Arc::new(Mutex::new(
-                                virtio_devices::BlockIoUring::new(
-                                    id.clone(),
-                                    image,
-                                    disk_cfg
-                                        .path
-                                        .as_ref()
-                                        .ok_or(DeviceManagerError::NoDiskPath)?
-                                        .clone(),
-                                    disk_cfg.readonly,
-                                    disk_cfg.iommu,
-                                    disk_cfg.num_queues,
-                                    disk_cfg.queue_size,
-                                    self.seccomp_action.clone(),
-                                )
-                                .map_err(DeviceManagerError::CreateVirtioBlock)?,
-                            ));
-
-                            (
-                                Arc::clone(&dev) as VirtioDeviceArc,
-                                dev as Arc<Mutex<dyn Migratable>>,
+                    // Use asynchronous backend relying on io_uring if the
+                    // syscalls are supported.
+                    if block_io_uring_is_supported() {
+                        let dev = Arc::new(Mutex::new(
+                            virtio_devices::BlockIoUring::new(
+                                id.clone(),
+                                image,
+                                disk_cfg
+                                    .path
+                                    .as_ref()
+                                    .ok_or(DeviceManagerError::NoDiskPath)?
+                                    .clone(),
+                                disk_cfg.readonly,
+                                disk_cfg.iommu,
+                                disk_cfg.num_queues,
+                                disk_cfg.queue_size,
+                                self.seccomp_action.clone(),
                             )
-                        } else {
-                            let dev = Arc::new(Mutex::new(
-                                virtio_devices::Block::new(
-                                    id.clone(),
-                                    raw_img,
-                                    disk_cfg
-                                        .path
-                                        .as_ref()
-                                        .ok_or(DeviceManagerError::NoDiskPath)?
-                                        .clone(),
-                                    disk_cfg.readonly,
-                                    disk_cfg.iommu,
-                                    disk_cfg.num_queues,
-                                    disk_cfg.queue_size,
-                                    self.seccomp_action.clone(),
-                                )
-                                .map_err(DeviceManagerError::CreateVirtioBlock)?,
-                            ));
+                            .map_err(DeviceManagerError::CreateVirtioBlock)?,
+                        ));
 
-                            (
-                                Arc::clone(&dev) as VirtioDeviceArc,
-                                dev as Arc<Mutex<dyn Migratable>>,
-                            )
-                        }
-                    }
-
-                    #[cfg(not(feature = "io_uring"))]
-                    {
+                        (
+                            Arc::clone(&dev) as VirtioDeviceArc,
+                            dev as Arc<Mutex<dyn Migratable>>,
+                        )
+                    } else {
                         let dev = Arc::new(Mutex::new(
                             virtio_devices::Block::new(
                                 id.clone(),

@@ -14,13 +14,15 @@ extern crate log;
 extern crate serde_derive;
 
 #[cfg(feature = "io_uring")]
-use io_uring::{opcode, squeue, IoUring, Probe};
+use io_uring::Probe;
+use io_uring::{opcode, squeue, IoUring};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 #[cfg(feature = "io_uring")]
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
+use std::os::unix::io::RawFd;
 use std::path::PathBuf;
 use std::result;
 use virtio_bindings::bindings::virtio_blk::*;
@@ -266,7 +268,6 @@ impl Request {
         Ok(len)
     }
 
-    #[cfg(feature = "io_uring")]
     pub fn execute_io_uring(
         &self,
         mem: &GuestMemoryMmap,
@@ -564,4 +565,9 @@ pub fn block_io_uring_is_supported() -> bool {
     }
 
     true
+}
+
+#[cfg(not(feature = "io_uring"))]
+pub fn block_io_uring_is_supported() -> bool {
+    false
 }
