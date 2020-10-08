@@ -5346,6 +5346,66 @@ mod tests {
         }
     }
 
+    mod windows {
+        use crate::tests::*;
+
+        #[test]
+        #[cfg(target_arch = "x86_64")]
+        fn test_windows_guest() {
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut ovmf_path = workload_path.clone();
+            ovmf_path.push("OVMF.fd");
+
+            let mut osdisk_path = workload_path;
+            osdisk_path.push("windows-server-2019.raw");
+
+            let mut child = Command::new(clh_command("cloud-hypervisor"))
+                .args(&["--cpus", "boot=2,kvm_hyperv=on,max_phys_bits=39"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", ovmf_path.to_str().unwrap()])
+                .args(&["--disk", &format!("path={}", osdisk_path.to_str().unwrap())])
+                .args(&["--serial", "tty"])
+                .args(&["--console", "off"])
+                .args(&["--net", "tap="])
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            let fd = child.stdout.as_ref().unwrap().as_raw_fd();
+            let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE * 100) };
+            let fd = child.stderr.as_ref().unwrap().as_raw_fd();
+            let pipesize1 = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE * 100) };
+
+            assert!(pipesize >= PIPE_SIZE * 100 && pipesize1 >= PIPE_SIZE * 100);
+
+            thread::sleep(std::time::Duration::new(40, 0));
+            let auth = PasswordAuth {
+                username: String::from("administrator"),
+                password: String::from("Admin123"),
+            };
+
+            let r = std::panic::catch_unwind(|| {
+                ssh_command_ip_with_auth(
+                    "shutdown /s",
+                    &auth,
+                    "192.168.249.2",
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+                thread::sleep(std::time::Duration::new(40, 0));
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
+    }
+
     mod sgx {
         use crate::tests::*;
 
