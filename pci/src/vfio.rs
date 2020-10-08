@@ -714,20 +714,17 @@ impl PciDevice for VfioPciDevice {
 
             // Is this an IO BAR?
             let io_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
-                match lsb_flag & PCI_CONFIG_IO_BAR {
-                    PCI_CONFIG_IO_BAR => true,
-                    _ => false,
-                }
+                matches!(lsb_flag & PCI_CONFIG_IO_BAR, PCI_CONFIG_IO_BAR)
             } else {
                 false
             };
 
             // Is this a 64-bit BAR?
             let is_64bit_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
-                match lsb_flag & PCI_CONFIG_MEMORY_BAR_64BIT {
-                    PCI_CONFIG_MEMORY_BAR_64BIT => true,
-                    _ => false,
-                }
+                matches!(
+                    lsb_flag & PCI_CONFIG_MEMORY_BAR_64BIT,
+                    PCI_CONFIG_MEMORY_BAR_64BIT
+                )
             } else {
                 false
             };

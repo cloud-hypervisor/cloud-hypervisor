@@ -96,10 +96,10 @@ impl StatusCode {
     }
 
     fn is_server_error(self) -> bool {
-        match self {
-            StatusCode::OK | StatusCode::Continue | StatusCode::NoContent => false,
-            _ => true,
-        }
+        !matches!(
+            self,
+            StatusCode::OK | StatusCode::Continue | StatusCode::NoContent
+        )
     }
 }
 
