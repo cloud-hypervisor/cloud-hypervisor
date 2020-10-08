@@ -1015,8 +1015,7 @@ impl MemoryManager {
 
         let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true);
 
-        if start_addr.checked_add(size.try_into().unwrap()).unwrap() >= self.start_of_device_area()
-        {
+        if start_addr.checked_add(size.try_into().unwrap()).unwrap() > self.start_of_device_area() {
             return Err(Error::InsufficientHotplugRAM);
         }
 
