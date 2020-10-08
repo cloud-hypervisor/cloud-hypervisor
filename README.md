@@ -64,6 +64,23 @@ $ export CLOUDH=$HOME/cloud-hypervisor
 $ mkdir $CLOUDH
 ```
 
+## Install prerequisites
+
+You need to install some prerequisite packages in order to build and test Cloud Hypervisor.
+Here, all the steps are based on Ubuntu, for other Linux distributions please replace the
+package manager and package name.
+
+```shell
+# Install git
+$ sudo apt install git
+# Install rust tool chain
+$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# Install build-essential
+$ sudo apt install build-essential
+# If you want to build statically linked binary please add musl target
+$ rustup target add x86_64-unknown-linux-musl
+```
+
 ## Clone and build
 
 First you need to clone and build the cloud-hypervisor repo:
@@ -77,6 +94,8 @@ $ cargo build --release
 # We need to give the cloud-hypervisor binary the NET_ADMIN capabilities for it to set TAP interfaces up on the host.
 $ sudo setcap cap_net_admin+ep ./target/release/cloud-hypervisor
 
+# If you want to build statically linked binary
+$ cargo build --release --target=x86_64-unknown-linux-musl --all
 $ popd
 ```
 
