@@ -1,28 +1,28 @@
 [![Build Status](https://travis-ci.com/cloud-hypervisor/cloud-hypervisor.svg?branch=master)](https://travis-ci.com/cloud-hypervisor/cloud-hypervisor)
 
 - [1. What is Cloud Hypervisor?](#1-what-is-cloud-hypervisor)
-	- [Objectives](#objectives)
-		- [High Level](#high-level)
-		- [Architectures](#architectures)
-		- [Guest OS](#guest-os)
+  - [Objectives](#objectives)
+    - [High Level](#high-level)
+    - [Architectures](#architectures)
+    - [Guest OS](#guest-os)
 - [2. Getting Started](#2-getting-started)
-	- [Clone and build](#clone-and-build)
-		- [Containerized builds and tests](#containerized-builds-and-tests)
-	- [Run](#run)
-		- [Cloud image](#cloud-image)
-		- [Custom kernel and disk image](#custom-kernel-and-disk-image)
-			- [Building your kernel](#building-your-kernel)
-			- [Disk image](#disk-image)
-			- [Booting the guest VM](#booting-the-guest-vm)
+  - [Clone and build](#clone-and-build)
+    - [Containerized builds and tests](#containerized-builds-and-tests)
+  - [Run](#run)
+    - [Cloud image](#cloud-image)
+    - [Custom kernel and disk image](#custom-kernel-and-disk-image)
+      - [Building your kernel](#building-your-kernel)
+      - [Disk image](#disk-image)
+      - [Booting the guest VM](#booting-the-guest-vm)
 - [3. Status](#3-status)
-	- [Hot Plug](#hot-plug)
-	- [Device Model](#device-model)
-	- [TODO](#todo)
+  - [Hot Plug](#hot-plug)
+  - [Device Model](#device-model)
+  - [TODO](#todo)
 - [4. `rust-vmm` project dependency](#4-rust-vmm-project-dependency)
-	- [Firecracker and crosvm](#firecracker-and-crosvm)
+  - [Firecracker and crosvm](#firecracker-and-crosvm)
 - [5. Community](#5-community)
-	- [Contribute](#contribute)
-	- [Join us](#join-us)
+  - [Contribute](#contribute)
+  - [Join us](#join-us)
 
 # 1. What is Cloud Hypervisor?
 
@@ -36,16 +36,16 @@ Cloud Hypervisor is implemented in [Rust](https://www.rust-lang.org/) and is bas
 
 ### High Level
 
-* KVM based
-* Minimal emulation
-* Low latency
-* Low memory footprint
-* Low complexity
-* High performance
-* Small attack surface
-* 64-bit support only
-* CPU, memory, PCI hotplug
-* Machine to machine migration
+- KVM based
+- Minimal emulation
+- Low latency
+- Low memory footprint
+- Low complexity
+- High performance
+- Small attack surface
+- 64-bit support only
+- CPU, memory, PCI hotplug
+- Machine to machine migration
 
 ### Architectures
 
@@ -53,7 +53,7 @@ Cloud Hypervisor supports the `x86-64` and `AArch64` architecture. There are som
 
 ### Guest OS
 
-Cloud Hypervisor supports `64-bit Linux` with support for *modern* 64-bit Windows guests currently under development.
+Cloud Hypervisor supports `64-bit Linux` with support for _modern_ 64-bit Windows guests currently under development.
 
 # 2. Getting Started
 
@@ -117,7 +117,7 @@ You can run a guest VM by either using an existing cloud image or booting into y
 ### Cloud image
 
 Cloud Hypervisor supports booting disk images containing all needed
-components to run cloud workloads, a.k.a. cloud images.  To do that we rely on
+components to run cloud workloads, a.k.a. cloud images. To do that we rely on
 the [Rust Hypervisor
 Firmware](https://github.com/cloud-hypervisor/rust-hypervisor-firmware) project to provide
 an ELF
@@ -225,8 +225,9 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 Cloud Hypervisor is under active development. No API or feature stability is guaranteed.
 
 As of 2020-07-02, the following cloud images are supported:
-* [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (cloudimg)
-* [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (cloudimg)
+
+- [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (cloudimg)
+- [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (cloudimg)
 
 Direct kernel boot to userspace should work with a rootfs from most distributions.
 
@@ -297,4 +298,3 @@ etc, are all equal and welcome means of contribution. See the [CONTRIBUTING](CON
 
 Get an [invite to our Slack channel](https://join.slack.com/t/cloud-hypervisor/shared_invite/enQtNjY3MTE3MDkwNDQ4LWQ1MTA1ZDVmODkwMWQ1MTRhYzk4ZGNlN2UwNTI3ZmFlODU0OTcwOWZjMTkwZDExYWE3YjFmNzgzY2FmNDAyMjI)
 and [join us on Slack](https://cloud-hypervisor.slack.com/).
-
