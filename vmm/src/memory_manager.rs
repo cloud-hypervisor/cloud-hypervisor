@@ -444,6 +444,7 @@ impl MemoryManager {
         prefault: bool,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         let user_provided_zones = config.size == 0;
+        let mut allow_mem_hotplug: bool = false;
 
         let (ram_size, zones) = if !user_provided_zones {
             if config.zones.is_some() {
@@ -452,6 +453,10 @@ impl MemoryManager {
                     memory size is not 0"
                 );
                 return Err(Error::InvalidMemoryParameters);
+            }
+
+            if config.hotplug_size.is_some() {
+                allow_mem_hotplug = true;
             }
 
             if let Some(hotplugged_size) = config.hotplugged_size {
@@ -576,7 +581,8 @@ impl MemoryManager {
 
         let end_of_device_area = GuestAddress(mmio_address_space_size() - 1);
 
-        let mut start_of_device_area = MemoryManager::start_addr(guest_memory.last_addr(), false);
+        let mut start_of_device_area =
+            MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug);
         let mut virtio_mem_regions: Vec<Arc<GuestRegionMmap>> = Vec::new();
 
         // Update list of memory zones for resize.
@@ -980,17 +986,19 @@ impl MemoryManager {
     //
     // Calculate the start address of an area next to RAM.
     //
-    // If the next area is device space, there is no gap.
-    // If the next area is hotplugged RAM, the start address needs to be aligned
-    // to 128MiB boundary, and a gap of 256MiB need to be set before it.
+    // If memory hotplug is allowed, the start address needs to be aligned
+    // (rounded-up) to 128MiB boundary.
+    // If memory hotplug is not allowed, there is no alignment required.
     // On x86_64, it must also start at the 64bit start.
     #[allow(clippy::let_and_return)]
-    fn start_addr(mem_end: GuestAddress, with_gap: bool) -> GuestAddress {
-        let start_addr = if with_gap {
-            GuestAddress((mem_end.0 + 1 + (256 << 20)) & !((128 << 20) - 1))
+    fn start_addr(mem_end: GuestAddress, allow_mem_hotplug: bool) -> GuestAddress {
+        let mut start_addr = if allow_mem_hotplug {
+            GuestAddress(mem_end.0 | ((128 << 20) - 1))
         } else {
-            mem_end.unchecked_add(1)
+            mem_end
         };
+
+        start_addr = start_addr.unchecked_add(1);
 
         #[cfg(target_arch = "x86_64")]
         if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
