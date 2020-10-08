@@ -1088,10 +1088,7 @@ pub enum ConsoleOutputMode {
 
 impl ConsoleOutputMode {
     pub fn input_enabled(&self) -> bool {
-        match self {
-            ConsoleOutputMode::Tty => true,
-            _ => false,
-        }
+        matches!(self, ConsoleOutputMode::Tty)
     }
 }
 
