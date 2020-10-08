@@ -1029,7 +1029,7 @@ impl cpu::Vcpu for KvmVcpu {
         // we can calculate the id based on the offset in the structure.
 
         reg_list.retain(|regid| *regid != 0);
-        reg_list.as_slice().to_vec().sort();
+        reg_list.as_slice().to_vec().sort_unstable();
 
         reg_list.retain(|regid| is_system_register(*regid));
 
