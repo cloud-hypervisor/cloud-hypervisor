@@ -532,9 +532,20 @@ mod tests {
         cmd.status().expect("Failed to launch ch-remote").success()
     }
 
+    struct PasswordAuth {
+        username: String,
+        password: String,
+    }
+
     const DEFAULT_SSH_RETRIES: u8 = 6;
     const DEFAULT_SSH_TIMEOUT: u8 = 10;
-    fn ssh_command_ip(command: &str, ip: &str, retries: u8, timeout: u8) -> Result<String, Error> {
+    fn ssh_command_ip_with_auth(
+        command: &str,
+        auth: &PasswordAuth,
+        ip: &str,
+        retries: u8,
+        timeout: u8,
+    ) -> Result<String, Error> {
         let mut s = String::new();
 
         let mut counter = 0;
@@ -545,7 +556,7 @@ mod tests {
                 sess.set_tcp_stream(tcp);
                 sess.handshake().map_err(Error::Handshake)?;
 
-                sess.userauth_password("cloud", "cloud123")
+                sess.userauth_password(&auth.username, &auth.password)
                     .map_err(Error::Authentication)?;
                 assert!(sess.authenticated());
 
@@ -570,6 +581,19 @@ mod tests {
             thread::sleep(std::time::Duration::new((timeout * counter).into(), 0));
         }
         Ok(s)
+    }
+
+    fn ssh_command_ip(command: &str, ip: &str, retries: u8, timeout: u8) -> Result<String, Error> {
+        ssh_command_ip_with_auth(
+            command,
+            &PasswordAuth {
+                username: String::from("cloud"),
+                password: String::from("cloud123"),
+            },
+            ip,
+            retries,
+            timeout,
+        )
     }
 
     #[derive(Debug)]
