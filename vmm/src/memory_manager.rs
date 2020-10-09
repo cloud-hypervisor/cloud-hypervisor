@@ -1266,7 +1266,7 @@ impl MemoryManager {
                 }
             }
             HotplugMethod::Acpi => {
-                if desired_ram >= self.current_ram {
+                if desired_ram > self.current_ram {
                     region =
                         Some(self.hotplug_ram_region((desired_ram - self.current_ram) as usize)?);
                     self.current_ram = desired_ram;
