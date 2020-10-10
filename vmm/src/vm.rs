@@ -22,6 +22,8 @@ extern crate signal_hook;
 extern crate vm_allocator;
 extern crate vm_memory;
 
+use crate::api::VmZoneActualSize;
+
 #[cfg(feature = "acpi")]
 use crate::config::NumaConfig;
 use crate::config::{
@@ -30,7 +32,7 @@ use crate::config::{
 };
 use crate::cpu;
 use crate::device_manager::{self, get_win_size, Console, DeviceManager, DeviceManagerError};
-use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, DEFAULT_MEMORY_ZONE};
 use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{
@@ -226,6 +228,9 @@ pub enum Error {
 
     /// Failed setting the VmmOps interface.
     SetVmmOpsInterface(hypervisor::HypervisorVmError),
+
+    /// Failed to get zone actual
+    GetZoneActual(MemoryManagerError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1612,6 +1617,58 @@ impl Vm {
     /// Gets the actual size of the balloon.
     pub fn balloon_size(&self) -> u64 {
         self.device_manager.lock().unwrap().balloon_size()
+    }
+
+    fn virtio_mem_zone_actual(
+        &self,
+        static_size: u64,
+        id: &str,
+        zones_actual_size: &mut std::vec::Vec<VmZoneActualSize>,
+    ) -> Result<u64> {
+        let size = static_size
+            + self
+                .memory_manager
+                .lock()
+                .unwrap()
+                .zone_actual_size(id)
+                .map_err(Error::GetZoneActual)?;
+        zones_actual_size.push(VmZoneActualSize {
+            id: id.to_string(),
+            size,
+        });
+
+        Ok(size)
+    }
+
+    /// Gets the total actual size of the RAM.
+    pub fn total_ram_actual(&self) -> Result<(u64, Option<Vec<VmZoneActualSize>>)> {
+        let memory_config = &self.config.lock().unwrap().memory;
+
+        match memory_config.hotplug_method {
+            HotplugMethod::Acpi => Ok((memory_config.total_size(), None)),
+            HotplugMethod::VirtioMem => {
+                let mut size = 0;
+                let mut zones_actual_size = Vec::new();
+
+                if let Some(zones) = &memory_config.zones {
+                    for zone in zones.iter() {
+                        size += self.virtio_mem_zone_actual(
+                            zone.size,
+                            &zone.id,
+                            &mut zones_actual_size,
+                        )?;
+                    }
+                } else {
+                    size += self.virtio_mem_zone_actual(
+                        memory_config.size,
+                        &DEFAULT_MEMORY_ZONE,
+                        &mut zones_actual_size,
+                    )?;
+                }
+
+                Ok((size, Some(zones_actual_size)))
+            }
+        }
     }
 }
 

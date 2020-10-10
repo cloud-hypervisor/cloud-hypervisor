@@ -256,6 +256,7 @@ impl Request {
 
 pub struct Resize {
     size: Arc<AtomicU64>,
+    actual: Arc<AtomicU64>,
     tx: mpsc::Sender<Result<(), Error>>,
     rx: Option<mpsc::Receiver<Result<(), Error>>>,
     evt: EventFd,
@@ -267,6 +268,7 @@ impl Resize {
 
         Ok(Resize {
             size: Arc::new(AtomicU64::new(0)),
+            actual: Arc::new(AtomicU64::new(0)),
             tx,
             rx: Some(rx),
             evt: EventFd::new(EFD_NONBLOCK)?,
@@ -276,6 +278,7 @@ impl Resize {
     pub fn try_clone(&self) -> Result<Self, Error> {
         Ok(Resize {
             size: self.size.clone(),
+            actual: self.actual.clone(),
             tx: self.tx.clone(),
             rx: None,
             evt: self.evt.try_clone().map_err(Error::EventFdTryCloneFail)?,
@@ -298,6 +301,14 @@ impl Resize {
 
     fn send(&self, r: Result<(), Error>) -> Result<(), mpsc::SendError<Result<(), Error>>> {
         self.tx.send(r)
+    }
+
+    fn set_actual(&self, size: u64) {
+        self.actual.store(size, Ordering::SeqCst);
+    }
+
+    pub fn get_actual(&self) -> u64 {
+        self.actual.load(Ordering::SeqCst)
     }
 }
 
@@ -542,6 +553,7 @@ impl MemEpollHandler {
                             );
                             if resp_type == VIRTIO_MEM_RESP_ACK {
                                 config.plugged_size += size;
+                                self.resize.set_actual(config.plugged_size);
                             }
                             MemEpollHandler::virtio_mem_send_response(
                                 &mem,
@@ -566,6 +578,7 @@ impl MemEpollHandler {
                             );
                             if resp_type == VIRTIO_MEM_RESP_ACK {
                                 config.plugged_size -= size;
+                                self.resize.set_actual(config.plugged_size);
                             }
                             MemEpollHandler::virtio_mem_send_response(
                                 &mem,
@@ -583,6 +596,7 @@ impl MemEpollHandler {
                             );
                             if resp_type == VIRTIO_MEM_RESP_ACK {
                                 config.plugged_size = 0;
+                                self.resize.set_actual(0);
                                 config.usable_region_size = cmp::min(
                                     config.region_size,
                                     config.requested_size + VIRTIO_MEM_USABLE_EXTENT,

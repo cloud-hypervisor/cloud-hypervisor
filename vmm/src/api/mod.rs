@@ -142,10 +142,17 @@ pub enum ApiError {
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
 #[derive(Clone, Deserialize, Serialize)]
+pub struct VmZoneActualSize {
+    pub id: String,
+    pub size: u64,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
 pub struct VmInfo {
     pub config: Arc<Mutex<VmConfig>>,
     pub state: VmState,
     pub memory_actual_size: u64,
+    pub zones_actual_size: Option<Vec<VmZoneActualSize>>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

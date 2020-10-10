@@ -43,7 +43,7 @@ use vm_migration::{
     Transportable,
 };
 
-const DEFAULT_MEMORY_ZONE: &str = "mem0";
+pub const DEFAULT_MEMORY_ZONE: &str = "mem0";
 
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
@@ -1221,6 +1221,20 @@ impl MemoryManager {
         }
 
         error!("Failed resizing virtio-mem region: Unknown memory zone");
+        Err(Error::UnknownMemoryZone)
+    }
+
+    pub fn zone_actual_size(&self, id: &str) -> Result<u64, Error> {
+        if let Some(memory_zone) = self.memory_zones.get(id) {
+            if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
+                return Ok(virtio_mem_zone.resize_handler().get_actual());
+            } else {
+                // If hotplug_size is 0, virtio_mem_zone will not set.
+                return Ok(0);
+            }
+        }
+
+        error!("Failed get zone actual: Unknown memory zone");
         Err(Error::UnknownMemoryZone)
     }
 
