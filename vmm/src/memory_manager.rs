@@ -236,6 +236,9 @@ pub enum Error {
 
     /// Resizing the memory zone failed.
     ResizeZone,
+
+    /// Guest address overflow
+    GuestAddressOverFlow,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -364,7 +367,10 @@ impl MemoryManager {
                 let zone_sub_size = zone.size as usize - zone_offset;
 
                 let file_offset = zone_offset as u64;
-                let region_start = ram_region.0.unchecked_add(ram_region_offset as u64);
+                let region_start = ram_region
+                    .0
+                    .checked_add(ram_region_offset as u64)
+                    .ok_or(Error::GuestAddressOverFlow)?;
                 let region_size = if zone_sub_size <= ram_region_sub_size {
                     if zone_sub_size == ram_region_sub_size {
                         ram_region_consumed = true;
@@ -582,7 +588,7 @@ impl MemoryManager {
         let end_of_device_area = GuestAddress(mmio_address_space_size() - 1);
 
         let mut start_of_device_area =
-            MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug);
+            MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
         let mut virtio_mem_regions: Vec<Arc<GuestRegionMmap>> = Vec::new();
 
         // Update list of memory zones for resize.
@@ -595,7 +601,9 @@ impl MemoryManager {
                     }
 
                     if !user_provided_zones && config.hotplug_method == HotplugMethod::Acpi {
-                        start_of_device_area = start_of_device_area.unchecked_add(hotplug_size);
+                        start_of_device_area = start_of_device_area
+                            .checked_add(hotplug_size)
+                            .ok_or(Error::GuestAddressOverFlow)?;
                     } else {
                         // Alignment must be "natural" i.e. same as size of block
                         let start_addr = GuestAddress(
@@ -625,7 +633,9 @@ impl MemoryManager {
                             hotplugged_size: zone.hotplugged_size.unwrap_or(0),
                         });
 
-                        start_of_device_area = start_addr.unchecked_add(hotplug_size);
+                        start_of_device_area = start_addr
+                            .checked_add(hotplug_size)
+                            .ok_or(Error::GuestAddressOverFlow)?;
                     }
                 }
             } else {
@@ -991,21 +1001,23 @@ impl MemoryManager {
     // If memory hotplug is not allowed, there is no alignment required.
     // On x86_64, it must also start at the 64bit start.
     #[allow(clippy::let_and_return)]
-    fn start_addr(mem_end: GuestAddress, allow_mem_hotplug: bool) -> GuestAddress {
+    fn start_addr(mem_end: GuestAddress, allow_mem_hotplug: bool) -> Result<GuestAddress, Error> {
         let mut start_addr = if allow_mem_hotplug {
             GuestAddress(mem_end.0 | ((128 << 20) - 1))
         } else {
             mem_end
         };
 
-        start_addr = start_addr.unchecked_add(1);
+        start_addr = start_addr
+            .checked_add(1)
+            .ok_or(Error::GuestAddressOverFlow)?;
 
         #[cfg(target_arch = "x86_64")]
         if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
-            return arch::layout::RAM_64BIT_START;
+            return Ok(arch::layout::RAM_64BIT_START);
         }
 
-        start_addr
+        Ok(start_addr)
     }
 
     fn hotplug_ram_region(&mut self, size: usize) -> Result<Arc<GuestRegionMmap>, Error> {
@@ -1021,7 +1033,7 @@ impl MemoryManager {
             return Err(Error::InvalidSize);
         }
 
-        let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true);
+        let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
 
         if start_addr.checked_add(size.try_into().unwrap()).unwrap() > self.start_of_device_area() {
             return Err(Error::InsufficientHotplugRAM);
