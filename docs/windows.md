@@ -19,7 +19,7 @@ The subsequent sections will tell, in detail, how to prepare an appropriate Wind
 
 __Prerequisites__
 
-- QEMU
+- QEMU, version >=5.0.0 is recommended.
 - Windows installation ISO. Obtained through MSDN, Visual Studio subscription, evaluation center, etc. 
 - [VirtIO driver ISO](https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/)
 - Suitable [OVMF](uefi.md) firmware 
@@ -43,7 +43,8 @@ qemu-img create -f qcow2 $IMG_FILE 30G
 
 Begin the Windows installation process under QEMU
 ```shell
-qemu-system-x86_64 -machine q35,accel=kvm \
+qemu-system-x86_64 \
+	-machine q35,accel=kvm \
 	-cpu host \
 	-m 4G \
 	-bios ./$OVMF_DIR/OVMF_CODE.fd \
@@ -79,6 +80,8 @@ It is necessary to always:
 
 - Carry the OVMF firmware in the `--kernel` option
 - Add `kvm_hyperv=on` to the `--cpus` option
+
+In cases where the host processor supports address space > 39 bits, it might be necessary to limit the address space. It can be done by appending the option `max_phys_bits=X` to the `--cpus` parameter, where `X` is the number of bits to be supported. Windows was tested to support at least 39-bit address space.
 
 To daemonize the Cloud Hypervisor process, `nohup` can be used. Some STDIO redirections might need to be done. In a simple case it is sufficient to just redirect all the output to `/dev/null`.
 
@@ -181,6 +184,137 @@ Set-Service -Name sshd -StartupType ‘Automatic’
 
 This allows for SSH login from a remote machine, for example through the `administrator` user: `ssh administrator@192.168.249.2`. For a more detailed OpenSSH guide, please follow the MSDN article from the [links](#links) section.
 
+## Debugging
+
+The Windows guest debugging process relies heavily on QEMU and [socat](http://www.dest-unreach.org/socat/). The procedure requires two Windows VMs:
+
+- A debugger VM running under QEMU.
+- A debuggee, a Windows VM that has been created in the previous steps, running under Cloud Hypervisor or QEMU.
+
+The connection between both guests happens over TCP, whereby on the guest side it is automatically translated to a COM port. Because the VMs are connected through TCP, the debugging infrastructure can be distributed over the network. The serial port, while slowly transferring data, is common enough to support a wide range of cases and tools.
+
+In this excercise, [WinDbg](https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/) is used. Any other debugger of choice with the ability to use serial connection can be used instead. 
+
+### Debugger and Debuggee
+
+#### WinDbg VM
+
+For simplicity, the debugger VM is supposed to be only running under QEMU. It will require VGA and doesn't neccessarily depend on UEFI. As an OS, it can carry any supported Windows OS where the debugger of choice can be installed. The simplest way is to follow the image preparation instructions from the previous chapter, but avoid using the OVMF firmware. It is also not required to use VirtIO drivers, whereby it might be useful in some case. Though, while creating the image file for the debugger VM, be sure to choose a sufficient disk size that counts in the need to save the corresponding debug symbols and sources.
+
+To create the debugger Windows VM, the following command can be used:
+
+```shell
+qemu-system-x86_64 \
+	-machine q35,accel=kvm \
+	-cpu host \
+	-smp 1 \
+	-m 4G \
+	-cdrom ./$WIN_ISO_FILE \
+	-drive file=./$VIRTIO_ISO_FILE,index=0,media=cdrom
+	-drive if=none,id=root,file=./windbg-disk.qcow \
+	-device virtio-blk-pci,drive=root,disable-legacy=on \
+	-device virtio-net-pci,netdev=mynet0,disable-legacy=on \
+	-netdev user,id=mynet0,net=192.168.178.0/24,host=192.168.178.1,dhcpstart=192.168.178.64,hostname=windbg-host \
+	-vga std
+```
+
+A non server Windows OS like Windows 10 can be used to carry the debugging tools in the debugger VM.
+
+#### Debuggee VM
+
+The debuggee VM is the one that we've learned to configure and run in the first section. There might be various reasons to debug. For example, there could be an issue in the Windows guest with an emulated device or an included driver. Or, we might want to develop a custom feature like a kernel driver to be available in the guest.
+
+Note, that there are several ways to debug Windows, not all of them need to be enabled at the same time. For example, if developing a kernel module, the only useful options would be to configure for the serial debugging and enable the kernel debug. In that case, any crash or misbehavior in the boot loader or kernel would be ignored. The commands below must be run as administrator on the debuggee guest VM.
+
+##### Turn On Serial Debugging
+
+This will configure the debugging to be enabled and instruct to use the serial port for it.
+
+```cmd
+bcdedit /dbgsettings serial debugport:1 baudrate:115200
+```
+
+##### Turn On Kernel Debuging
+
+```cmd
+bcdedit /debug on
+```
+
+##### Turn On Boot Loader Debug
+
+```cmd
+bcdedit /bootdebug on
+```
+
+##### Turn on boot manager debug 
+
+```cmd
+bcdedit /set {bootmgr} bootdebug on
+```
+
+##### Disable Recovery Screen On Boot Failure
+
+There could be a situation, where a crash is debugged. In such cases, the guest could be left in an inconsistent state. The default Windows behavior would be to boot into the recovery screen, however in some cases it might be not desired. To make Windows ignore failures and always proceed to booting the OS, use the command below:
+
+```cmd
+bcdedit /set {default} bootstatuspolicy ignoreallfailures
+```
+
+### Debugging Process
+
+#### Invoke the WinDbg VM
+
+```shell
+qemu-system-x86_64 \
+	-machine q35,accel=kvm \
+	-cpu host \
+	-smp 1 \
+	-m 4G \
+	-drive if=none,id=root,file=./windbg-disk.qcow \
+	-device virtio-blk-pci,drive=root,disable-legacy=on \
+	-serial tcp::4445,server,nowait \
+	-device virtio-net-pci,netdev=mynet0,disable-legacy=on \
+	-netdev user,id=mynet0,net=192.168.178.0/24,host=192.168.178.1,dhcpstart=192.168.178.64,hostname=windbg-host \
+	-vga std
+```
+
+Note, this VM has the networking enabled. It is needed, because symbols and sources might need to be fetched from a network location.
+
+Also, notice the `-serial` parameter - that's what does the magic on exposing the serial port to the guest while connecting the debugger VM with a client VM through the network. SAC/EMS needs to be disabled in the debugger VM, as otherwise the COM device might be blocked.
+
+#### Invoke the Debuggee VM
+
+##### Under QEMU
+
+Essentially it would be the command like depicted in the guest preparation sections, with a few modifications:
+```shell
+qemu-system-x86_64 \
+	-machine q35,accel=kvm \
+	-cpu host \
+	-m 4G \
+	-bios ./$OVMF_DIR/OVMF_CODE.fd \
+	-cdrom ./$WIN_ISO_FILE \
+	-drive file=./$VIRTIO_ISO_FILE,index=0,media=cdrom
+	-drive if=none,id=root,file=./$IMG_FILE \
+	-device virtio-blk-pci,drive=root,disable-legacy=on \
+	-device virtio-net-pci,netdev=mynet0,disable-legacy=on \
+	-netdev user,id=mynet0 \
+	-serial tcp:127.0.0.1:4445 \
+	-vga std
+```
+
+It is to see, that `-serial` parameter is used here, to establish the connection with the debugger VM.
+
+To disable HPET, attach `--no-hpet`. To enable hypervisor reference timer, use `-cpu host,hv-time`. These and other options can be used to achieve better [Hyper-V compatibility](https://archive.fosdem.org/2019/schedule/event/vai_enlightening_kvm/attachments/slides/2860/export/events/attachments/vai_enlightening_kvm/slides/2860/vkuznets_fosdem2019_enlightening_kvm.pdf).
+
+##### Cloud Hypervisor
+
+The `socat` tool is used to establish the QEMU compatible behavior. Here as well, the Cloud Hypervisor command used to run the Windows guest is to be used. Put the command into a shell script:
+
+`socat SYSTEM:"./ch-script",openpty,raw,echo=0 TCP:localhost:4445`
+
+The reason to pack the command into the shell script is that the command might contain a comma. When using SYSTEM, the shell command can't contain `,` or `!!`.
+
 ## Links
 
 - [Fedora VirtIO guide for Windows](https://docs.fedoraproject.org/en-US/quick-docs/creating-windows-virtual-machines-using-virtio-drivers/)
@@ -188,4 +322,5 @@ This allows for SSH login from a remote machine, for example through the `admini
 - [VirtIO driver sources](https://github.com/virtio-win/kvm-guest-drivers-windows)
 - [Emergency Management Services](https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2003/cc787940(v=ws.10))
 - [OpenSSH server/client configuration](https://docs.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse)
-
+- [Windows guest debugging under KVM](https://www.linux-kvm.org/page/WindowsGuestDrivers/GuestDebugging)
+- ["ENLIGHTENING" KVM](https://archive.fosdem.org/2019/schedule/event/vai_enlightening_kvm/attachments/slides/2860/export/events/attachments/vai_enlightening_kvm/slides/2860/vkuznets_fosdem2019_enlightening_kvm.pdf)
