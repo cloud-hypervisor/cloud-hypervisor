@@ -2278,6 +2278,40 @@ mod tests {
         }
 
         #[cfg_attr(not(feature = "mmio"), test)]
+        #[cfg(target_arch = "x86_64")]
+        fn test_cpu_physical_bits() {
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+            let max_phys_bits: u8 = 36;
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", &format!("max_phys_bits={}", max_phys_bits)])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .default_disks()
+                .default_net()
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            thread::sleep(std::time::Duration::new(20, 0));
+            let r = std::panic::catch_unwind(|| {
+                assert!(
+                    guest
+                        .ssh_command("lscpu | grep \"Address sizes:\" | cut -f 2 -d \":\" | sed \"s# *##\" | cut -f 1 -d \" \"")
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u8>()
+                        .unwrap_or(max_phys_bits + 1) <= max_phys_bits,
+                );
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
+
+        #[cfg_attr(not(feature = "mmio"), test)]
         fn test_large_vm() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
