@@ -12,7 +12,7 @@ use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::{SgxEpcRegion, SgxEpcSection};
-use arch::{get_host_cpu_phys_bits, layout, RegionType};
+use arch::{layout, RegionType};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 #[cfg(target_arch = "x86_64")]
@@ -256,8 +256,8 @@ const SELECTION_OFFSET: u64 = 0;
 // The MMIO address space size is subtracted with the size of a 4k page. This
 // is done on purpose to workaround a Linux bug when the VMM allocates devices
 // at the end of the addressable space.
-fn mmio_address_space_size() -> u64 {
-    (1 << get_host_cpu_phys_bits()) - 0x1000
+fn mmio_address_space_size(phys_bits: u8) -> u64 {
+    (1 << phys_bits) - 0x1000
 }
 
 impl BusDevice for MemoryManager {
@@ -448,6 +448,7 @@ impl MemoryManager {
         config: &MemoryConfig,
         ext_regions: Option<Vec<MemoryRegion>>,
         prefault: bool,
+        phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         let user_provided_zones = config.size == 0;
         let mut allow_mem_hotplug: bool = false;
@@ -585,7 +586,8 @@ impl MemoryManager {
 
         let boot_guest_memory = guest_memory.clone();
 
-        let end_of_device_area = GuestAddress(mmio_address_space_size() - 1);
+        let mmio_address_space_size = mmio_address_space_size(phys_bits);
+        let end_of_device_area = GuestAddress(mmio_address_space_size - 1);
 
         let mut start_of_device_area =
             MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
@@ -656,7 +658,7 @@ impl MemoryManager {
                 #[cfg(target_arch = "x86_64")]
                 (1 << 16 as GuestUsize),
                 GuestAddress(0),
-                mmio_address_space_size(),
+                mmio_address_space_size,
                 layout::MEM_32BIT_DEVICES_START,
                 layout::MEM_32BIT_DEVICES_SIZE,
                 #[cfg(target_arch = "x86_64")]
@@ -740,6 +742,7 @@ impl MemoryManager {
         config: &MemoryConfig,
         source_url: &str,
         prefault: bool,
+        phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         let url = Url::parse(source_url).unwrap();
         /* url must be valid dir which is verified in recv_vm_snapshot() */
@@ -777,7 +780,7 @@ impl MemoryManager {
                 }
             }
 
-            MemoryManager::new(vm, config, Some(ext_regions), prefault)
+            MemoryManager::new(vm, config, Some(ext_regions), prefault, phys_bits)
         } else {
             Err(Error::Restore(MigratableError::Restore(anyhow!(
                 "Could not find {}-section from snapshot",
