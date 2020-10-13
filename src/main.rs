@@ -97,7 +97,8 @@ fn create_app<'a, 'b>(
                 .long("cpus")
                 .help(
                     "boot=<boot_vcpus>,max=<max_vcpus>,\
-                    topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off",
+                    topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,\
+                    kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>",
                 )
                 .default_value(&default_vcpus)
                 .group("vm-config"),
@@ -133,8 +134,10 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("kernel")
                 .long("kernel")
-                .help("Path to loaded kernel. This may be a kernel or firmware that supports a PVH \
-                entry point, a vmlinux ELF file or a Linux bzImage or achitecture equivalent")
+                .help(
+                    "Path to loaded kernel. This may be a kernel or firmware that supports a PVH \
+                entry point, a vmlinux ELF file or a Linux bzImage or achitecture equivalent",
+                )
                 .takes_value(true)
                 .group("vm-config"),
         )
@@ -545,6 +548,7 @@ mod unit_tests {
                     max_vcpus: 1,
                     topology: None,
                     kvm_hyperv: false,
+                    max_phys_bits: None,
                 },
                 memory: MemoryConfig {
                     size: 536_870_912,
