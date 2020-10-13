@@ -17,6 +17,7 @@ use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::vm::physical_bits;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
@@ -259,12 +260,19 @@ impl Vcpu {
         vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         #[cfg(target_arch = "x86_64")] cpuid: CpuId,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
+        phys_bits: u8,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
             self.init(vm)?;
-            self.mpidr = arch::configure_vcpu(&self.vcpu, self.id, kernel_entry_point, vm_memory)
-                .map_err(Error::VcpuConfiguration)?;
+            self.mpidr = arch::configure_vcpu(
+                &self.vcpu,
+                self.id,
+                kernel_entry_point,
+                vm_memory,
+                phys_bits,
+            )
+            .map_err(Error::VcpuConfiguration)?;
         }
 
         #[cfg(target_arch = "x86_64")]
@@ -275,6 +283,7 @@ impl Vcpu {
             vm_memory,
             cpuid,
             kvm_hyperv,
+            phys_bits,
         )
         .map_err(Error::VcpuConfiguration)?;
 
@@ -703,6 +712,8 @@ impl CpuManager {
         } else {
             let vm_memory = self.vm_memory.clone();
 
+            let phys_bits = physical_bits(self.config.max_phys_bits);
+
             #[cfg(target_arch = "x86_64")]
             vcpu.lock()
                 .unwrap()
@@ -711,13 +722,14 @@ impl CpuManager {
                     &vm_memory,
                     self.cpuid.clone(),
                     self.config.kvm_hyperv,
+                    phys_bits,
                 )
                 .expect("Failed to configure vCPU");
 
             #[cfg(target_arch = "aarch64")]
             vcpu.lock()
                 .unwrap()
-                .configure(&self.vm, entry_point, &vm_memory)
+                .configure(&self.vm, entry_point, &vm_memory, phys_bits)
                 .expect("Failed to configure vCPU");
         }
 

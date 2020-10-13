@@ -433,7 +433,7 @@ impl VmmOps for VmOps {
     }
 }
 
-fn physical_bits(max_phys_bits: Option<u8>) -> u8 {
+pub fn physical_bits(max_phys_bits: Option<u8>) -> u8 {
     let host_phys_bits = get_host_cpu_phys_bits();
     cmp::min(host_phys_bits, max_phys_bits.unwrap_or(host_phys_bits))
 }
