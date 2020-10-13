@@ -38,6 +38,7 @@ use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
 };
 use anyhow::anyhow;
+use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
 use arch::BootProtocol;
 use arch::EntryPoint;
@@ -51,6 +52,7 @@ use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 use linux_loader::loader::KernelLoader;
 use seccomp::{SeccompAction, SeccompFilter};
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
+use std::cmp;
 use std::collections::{BTreeMap, HashMap};
 use std::convert::TryInto;
 use std::ffi::CString;
@@ -431,6 +433,11 @@ impl VmmOps for VmOps {
     }
 }
 
+fn physical_bits(max_phys_bits: Option<u8>) -> u8 {
+    let host_phys_bits = get_host_cpu_phys_bits();
+    cmp::min(host_phys_bits, max_phys_bits.unwrap_or(host_phys_bits))
+}
+
 pub struct Vm {
     kernel: File,
     initramfs: Option<File>,
@@ -629,11 +636,13 @@ impl Vm {
         let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
+        let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
         let memory_manager = MemoryManager::new(
             vm.clone(),
             &config.lock().unwrap().memory.clone(),
             None,
             false,
+            phys_bits,
         )
         .map_err(Error::MemoryManager)?;
 
@@ -697,12 +706,14 @@ impl Vm {
         let memory_manager = if let Some(memory_manager_snapshot) =
             snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
         {
+            let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
             MemoryManager::new_from_snapshot(
                 memory_manager_snapshot,
                 vm.clone(),
                 &config.lock().unwrap().memory.clone(),
                 source_url,
                 prefault,
+                phys_bits,
             )
             .map_err(Error::MemoryManager)?
         } else {
