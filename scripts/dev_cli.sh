@@ -367,11 +367,14 @@ cmd_build-container() {
     mkdir -p $BUILD_DIR
     cp $CLH_DOCKERFILE $BUILD_DIR
 
+    [ $(uname -m) = "aarch64" ] && TARGETARCH="arm64"
+    [ $(uname -m) = "x86_64" ] && TARGETARCH="amd64"
+
     $DOCKER_RUNTIME build \
 	   --target $container_type \
 	   -t $CTR_IMAGE \
 	   -f $BUILD_DIR/Dockerfile \
-	   --build-arg TARGETARCH="$(uname -m)" \
+	   --build-arg TARGETARCH=$TARGETARCH \
 	   $BUILD_DIR
 }
 
