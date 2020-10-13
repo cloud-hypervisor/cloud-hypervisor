@@ -337,6 +337,7 @@ pub fn configure_vcpu(
     vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
     cpuid: CpuId,
     kvm_hyperv: bool,
+    phys_bits: u8,
 ) -> super::Result<()> {
     let mut cpuid = cpuid;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
@@ -408,6 +409,13 @@ pub fn configure_vcpu(
                 ..Default::default()
             })
             .map_err(|_| Error::PopulatingCpuid)?;
+    }
+
+    // Set CPU physical bits
+    for entry in cpuid.as_mut_slice().iter_mut() {
+        if entry.function == 0x8000_0008 {
+            entry.eax = (entry.eax & 0xffff_ff00) | (phys_bits as u32 & 0xff);
+        }
     }
 
     fd.set_cpuid2(&cpuid)
