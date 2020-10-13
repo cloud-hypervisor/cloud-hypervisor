@@ -469,6 +469,8 @@ components:
           type: integer
         topology:
             $ref: '#/components/schemas/CpuTopology'
+        max_phys_bits:
+          type: integer
 
     MemoryZoneConfig:
       required:

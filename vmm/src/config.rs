@@ -320,6 +320,8 @@ pub struct CpusConfig {
     pub topology: Option<CpuTopology>,
     #[serde(default)]
     pub kvm_hyperv: bool,
+    #[serde(default)]
+    pub max_phys_bits: Option<u8>,
 }
 
 impl CpusConfig {
@@ -329,7 +331,8 @@ impl CpusConfig {
             .add("boot")
             .add("max")
             .add("topology")
-            .add("kvm_hyperv");
+            .add("kvm_hyperv")
+            .add("max_phys_bits");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
         let boot_vcpus: u8 = parser
@@ -346,12 +349,16 @@ impl CpusConfig {
             .map_err(Error::ParseCpus)?
             .unwrap_or(Toggle(false))
             .0;
+        let max_phys_bits = parser
+            .convert::<u8>("max_phys_bits")
+            .map_err(Error::ParseCpus)?;
 
         Ok(CpusConfig {
             boot_vcpus,
             max_vcpus,
             topology,
             kvm_hyperv,
+            max_phys_bits,
         })
     }
 }
@@ -363,6 +370,7 @@ impl Default for CpusConfig {
             max_vcpus: DEFAULT_VCPUS,
             topology: None,
             kvm_hyperv: false,
+            max_phys_bits: None,
         }
     }
 }
