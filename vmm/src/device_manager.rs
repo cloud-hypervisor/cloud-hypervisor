@@ -358,6 +358,12 @@ pub enum DeviceManagerError {
 
     /// No support for device passthrough
     NoDevicePassthroughSupport,
+
+    /// Failed to resize virtio-balloon
+    VirtioBalloonResize(virtio_devices::balloon::Error),
+
+    /// Missing virtio-balloon, can't proceed as expected.
+    MissingVirtioBalloon,
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -780,6 +786,9 @@ pub struct DeviceManager {
     // List of guest NUMA nodes.
     #[cfg(feature = "acpi")]
     numa_nodes: NumaNodes,
+
+    // Possible handle to the virtio-balloon device
+    balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
 }
 
 impl DeviceManager {
@@ -850,6 +859,7 @@ impl DeviceManager {
             seccomp_action,
             #[cfg(feature = "acpi")]
             numa_nodes,
+            balloon: None,
         };
 
         #[cfg(feature = "acpi")]
@@ -2440,22 +2450,19 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Vec<(VirtioDeviceArc, bool, String)>> {
         let mut devices = Vec::new();
 
-        if self.config.lock().unwrap().memory.balloon {
+        if let Some(balloon_config) = &self.config.lock().unwrap().balloon {
             let id = String::from(BALLOON_DEVICE_NAME);
 
             let virtio_balloon_device = Arc::new(Mutex::new(
                 virtio_devices::Balloon::new(
                     id.clone(),
-                    self.config.lock().unwrap().memory.balloon_size,
+                    balloon_config.size,
                     self.seccomp_action.clone(),
                 )
                 .map_err(DeviceManagerError::CreateVirtioBalloon)?,
             ));
 
-            self.memory_manager
-                .lock()
-                .unwrap()
-                .set_balloon(virtio_balloon_device.clone());
+            self.balloon = Some(virtio_balloon_device.clone());
 
             devices.push((
                 Arc::clone(&virtio_balloon_device) as VirtioDeviceArc,
@@ -3196,6 +3203,27 @@ impl DeviceManager {
         }
 
         counters
+    }
+
+    pub fn resize_balloon(&mut self, size: u64) -> DeviceManagerResult<()> {
+        if let Some(balloon) = &self.balloon {
+            return balloon
+                .lock()
+                .unwrap()
+                .resize(size)
+                .map_err(DeviceManagerError::VirtioBalloonResize);
+        }
+
+        warn!("No balloon setup: Can't resize the balloon");
+        Err(DeviceManagerError::MissingVirtioBalloon)
+    }
+
+    pub fn balloon_size(&self) -> u64 {
+        if let Some(balloon) = &self.balloon {
+            return balloon.lock().unwrap().get_actual();
+        }
+
+        0
     }
 }
 

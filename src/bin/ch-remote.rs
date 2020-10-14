@@ -226,7 +226,7 @@ fn resize_api_command(
         None
     };
 
-    let desired_ram_w_balloon: Option<u64> = if let Some(balloon) = balloon {
+    let desired_balloon: Option<u64> = if let Some(balloon) = balloon {
         Some(
             balloon
                 .parse::<ByteSized>()
@@ -240,7 +240,7 @@ fn resize_api_command(
     let resize = vmm::api::VmResizeData {
         desired_vcpus,
         desired_ram,
-        desired_ram_w_balloon,
+        desired_balloon,
     };
 
     simple_api_command(
@@ -577,7 +577,7 @@ fn main() {
                 .arg(
                     Arg::with_name("balloon")
                         .long("balloon")
-                        .help("New memory with balloon size in bytes (supports K/M/G suffix)")
+                        .help("New balloon size in bytes (supports K/M/G suffix)")
                         .takes_value(true)
                         .number_of_values(1),
                 ),

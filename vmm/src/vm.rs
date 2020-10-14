@@ -1040,7 +1040,7 @@ impl Vm {
         &mut self,
         desired_vcpus: Option<u8>,
         desired_memory: Option<u64>,
-        desired_ram_w_balloon: Option<u64>,
+        desired_balloon: Option<u64>,
     ) -> Result<()> {
         if let Some(desired_vcpus) = desired_vcpus {
             if self
@@ -1103,15 +1103,18 @@ impl Vm {
             }
         }
 
-        if let Some(desired_ram_w_balloon) = desired_ram_w_balloon {
-            // update the configuration value for the balloon size to ensure
-            // a reboot would use the right value.
-            self.config.lock().unwrap().memory.balloon_size = self
-                .memory_manager
+        if let Some(desired_balloon) = desired_balloon {
+            self.device_manager
                 .lock()
                 .unwrap()
-                .balloon_resize(desired_ram_w_balloon)
-                .map_err(Error::MemoryManager)?;
+                .resize_balloon(desired_balloon)
+                .map_err(Error::DeviceManager)?;
+
+            // Update the configuration value for the balloon size to ensure
+            // a reboot would use the right value.
+            if let Some(balloon_config) = &mut self.config.lock().unwrap().balloon {
+                balloon_config.size = desired_balloon;
+            }
         }
 
         Ok(())
@@ -1607,8 +1610,8 @@ impl Vm {
     }
 
     /// Gets the actual size of the balloon.
-    pub fn get_balloon_actual(&self) -> u64 {
-        self.memory_manager.lock().unwrap().get_balloon_actual()
+    pub fn balloon_size(&self) -> u64 {
+        self.device_manager.lock().unwrap().balloon_size()
     }
 }
 
