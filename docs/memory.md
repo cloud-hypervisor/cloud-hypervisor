@@ -18,14 +18,12 @@ struct MemoryConfig {
     hotplug_method: HotplugMethod,
     hotplug_size: Option<u64>,
     hotplugged_size: Option<u64>,
-    balloon: bool,
-    balloon_size: u64,
     zones: Option<Vec<MemoryZoneConfig>>,
 }
 ```
 
 ```
---memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,balloon=on|off"
+--memory <memory>	Memory parameters "size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,hotplug_method=acpi|virtio-mem,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>"
 ```
 
 ### `size`
@@ -140,20 +138,6 @@ _Example_
 
 ```
 --memory size=1G,hotplug_method=virtio-mem,hotplug_size=1G,hotplugged_size=512M
-```
-
-### `balloon`
-
-Specifies if the `virtio-balloon` device must be activated. This creates a
-dedicated virtio device for managing the balloon in the guest, which allows
-guest to access more or less memory depending on the balloon size.
-
-By default this option is turned off.
-
-_Example_
-
-```
---memory size=1G,balloon=on
 ```
 
 ## Advanced Parameters

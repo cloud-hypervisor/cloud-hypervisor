@@ -111,8 +111,7 @@ fn create_app<'a, 'b>(
                      \"size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,\
                      hotplug_method=acpi|virtio-mem,\
                      hotplug_size=<hotpluggable_memory_size>,\
-                     hotplugged_size=<hotplugged_memory_size>,\
-                     balloon=on|off\"",
+                     hotplugged_size=<hotplugged_memory_size>\"",
                 )
                 .default_value(&default_memory)
                 .group("vm-config"),
@@ -572,8 +571,6 @@ mod unit_tests {
                     hotplugged_size: None,
                     shared: false,
                     hugepages: false,
-                    balloon: false,
-                    balloon_size: 0,
                     zones: None,
                 },
                 kernel: Some(KernelConfig {
