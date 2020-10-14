@@ -500,7 +500,7 @@ mod tests {
         api_socket: &str,
         desired_vcpus: Option<u8>,
         desired_ram: Option<usize>,
-        desired_ram_w_balloon: Option<usize>,
+        desired_balloon: Option<usize>,
     ) -> bool {
         let mut cmd = Command::new(clh_command("ch-remote"));
         cmd.args(&[&format!("--api-socket={}", api_socket), "resize"]);
@@ -513,8 +513,8 @@ mod tests {
             cmd.arg(format!("--memory={}", desired_ram));
         }
 
-        if let Some(desired_ram_w_balloon) = desired_ram_w_balloon {
-            cmd.arg(format!("--balloon={}", desired_ram_w_balloon));
+        if let Some(desired_balloon) = desired_balloon {
+            cmd.arg(format!("--balloon={}", desired_balloon));
         }
 
         cmd.status().expect("Failed to launch ch-remote").success()
@@ -4354,11 +4354,12 @@ mod tests {
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=2,max=4"])
-                .args(&["--memory", "size=512M,hotplug_size=8192M,balloon=on"])
+                .args(&["--memory", "size=512M,hotplug_size=8192M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
+                .args(&["--balloon", "size=0"])
                 .args(&["--api-socket", &api_socket])
                 .capture_output()
                 .spawn()
@@ -4382,9 +4383,9 @@ mod tests {
                 thread::sleep(std::time::Duration::new(10, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
 
-                // Use balloon remove RAM from the VM
-                let desired_ram = 512 << 20;
-                resize_command(&api_socket, None, None, Some(desired_ram));
+                // Use balloon to remove RAM from the VM
+                let desired_balloon = 512 << 20;
+                resize_command(&api_socket, None, None, Some(desired_balloon));
 
                 thread::sleep(std::time::Duration::new(10, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
@@ -4412,8 +4413,8 @@ mod tests {
                 assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
 
                 // Use balloon add RAM to the VM
-                let desired_ram = 1024 << 20;
-                resize_command(&api_socket, None, None, Some(desired_ram));
+                let desired_balloon = 0;
+                resize_command(&api_socket, None, None, Some(desired_balloon));
 
                 thread::sleep(std::time::Duration::new(10, 0));
 
