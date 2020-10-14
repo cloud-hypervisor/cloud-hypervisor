@@ -532,6 +532,7 @@ mod tests {
         cmd.status().expect("Failed to launch ch-remote").success()
     }
 
+    #[derive(Debug)]
     struct PasswordAuth {
         username: String,
         password: String,
@@ -574,6 +575,16 @@ mod tests {
                 Err(e) => {
                     counter += 1;
                     if counter >= retries {
+                        eprintln!(
+                            "\n\n==== Start ssh command output (FAILED) ====\n\n\
+                             command=\"{}\"\n\
+                             auth=\"{:#?}\"\n\
+                             ip=\"{}\"\n\
+                             output=\"{}\"\n\
+                             \n==== End ssh command outout ====\n\n",
+                            command, auth, ip, s
+                        );
+
                         return Err(e);
                     }
                 }
@@ -1004,6 +1015,13 @@ mod tests {
         }
 
         fn spawn(&mut self) -> io::Result<Child> {
+            println!(
+                "\n\n==== Start cloud-hypervisor command-line ====\n\n\
+                 {:?}\n\
+                 \n==== End cloud-hypervisor command-line ====\n\n",
+                self.command
+            );
+
             if self.capture_output {
                 let child = self
                     .command
