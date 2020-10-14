@@ -329,7 +329,7 @@ cmd_tests() {
     fi
 
     if [ "$integration_sgx" = true ] ;  then
-	say "Running integration tests for $target..."
+	say "Running SGX integration tests for $target..."
 	$DOCKER_RUNTIME run \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
@@ -348,7 +348,7 @@ cmd_tests() {
     fi
 
     if [ "$integration_windows" = true ] ;  then
-	say "Running integration tests for $target..."
+	say "Running Windows integration tests for $target..."
 	$DOCKER_RUNTIME run \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
