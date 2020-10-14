@@ -166,14 +166,21 @@ fn virtio_console_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 fn virtio_iommu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_brk),
+        allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
         allow_syscall(libc::SYS_epoll_create1),
         allow_syscall(libc::SYS_epoll_ctl),
         allow_syscall(libc::SYS_epoll_pwait),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_epoll_wait),
+        allow_syscall(libc::SYS_exit),
         allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_mmap),
+        allow_syscall(libc::SYS_mprotect),
+        allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
     ])
 }
