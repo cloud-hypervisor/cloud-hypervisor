@@ -537,12 +537,6 @@ components:
         hugepages:
           type: boolean
           default: false
-        balloon:
-          type: boolean
-          default: false
-        balloon_size:
-          type: integer
-          format: int64
         zones:
           type: array
           items:
@@ -810,8 +804,8 @@ components:
           description: desired memory ram in bytes
           type: integer
           format: int64
-        desired_ram_w_balloon:
-          description: desired ballon size in bytes
+        desired_balloon:
+          description: desired balloon size in bytes
           type: integer
           format: int64
 

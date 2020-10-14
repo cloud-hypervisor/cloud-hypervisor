@@ -418,10 +418,6 @@ pub struct MemoryConfig {
     #[serde(default)]
     pub hugepages: bool,
     #[serde(default)]
-    pub balloon: bool,
-    #[serde(default)]
-    pub balloon_size: u64,
-    #[serde(default)]
     pub zones: Option<Vec<MemoryZoneConfig>>,
 }
 
@@ -436,8 +432,7 @@ impl MemoryConfig {
             .add("hotplug_size")
             .add("hotplugged_size")
             .add("shared")
-            .add("hugepages")
-            .add("balloon");
+            .add("hugepages");
         parser.parse(memory).map_err(Error::ParseMemory)?;
 
         let size = parser
@@ -469,11 +464,6 @@ impl MemoryConfig {
             .0;
         let hugepages = parser
             .convert::<Toggle>("hugepages")
-            .map_err(Error::ParseMemory)?
-            .unwrap_or(Toggle(false))
-            .0;
-        let balloon = parser
-            .convert::<Toggle>("balloon")
             .map_err(Error::ParseMemory)?
             .unwrap_or(Toggle(false))
             .0;
@@ -546,8 +536,6 @@ impl MemoryConfig {
             hotplugged_size,
             shared,
             hugepages,
-            balloon,
-            balloon_size: 0,
             zones,
         })
     }
@@ -581,8 +569,6 @@ impl Default for MemoryConfig {
             hotplugged_size: None,
             shared: false,
             hugepages: false,
-            balloon: false,
-            balloon_size: 0,
             zones: None,
         }
     }
@@ -2194,8 +2180,6 @@ mod tests {
                 hotplugged_size: None,
                 shared: false,
                 hugepages: false,
-                balloon: false,
-                balloon_size: 0,
                 zones: None,
             },
             kernel: Some(KernelConfig {
