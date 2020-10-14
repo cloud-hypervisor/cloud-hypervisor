@@ -117,7 +117,6 @@ pub struct MemoryManager {
     snapshot: Mutex<Option<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
     shared: bool,
     hugepages: bool,
-    balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
     #[cfg(target_arch = "x86_64")]
     sgx_epc_region: Option<SgxEpcRegion>,
     user_provided_zones: bool,
@@ -175,9 +174,6 @@ pub enum Error {
     /// The number of external backing files doesn't match the number of
     /// memory regions.
     InvalidAmountExternalBackingFiles,
-
-    /// Failed to virtio-balloon resize
-    VirtioBalloonResizeFail(virtio_devices::balloon::Error),
 
     /// Invalid SGX EPC section size
     #[cfg(target_arch = "x86_64")]
@@ -688,7 +684,6 @@ impl MemoryManager {
             snapshot: Mutex::new(None),
             shared: config.shared,
             hugepages: config.hugepages,
-            balloon: None,
             #[cfg(target_arch = "x86_64")]
             sgx_epc_region: None,
             user_provided_zones,
@@ -1085,10 +1080,6 @@ impl MemoryManager {
         Ok(region)
     }
 
-    pub fn set_balloon(&mut self, balloon: Arc<Mutex<virtio_devices::Balloon>>) {
-        self.balloon = Some(balloon);
-    }
-
     pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.guest_memory.clone()
     }
@@ -1240,30 +1231,6 @@ impl MemoryManager {
 
         error!("Failed resizing virtio-mem region: Unknown memory zone");
         Err(Error::UnknownMemoryZone)
-    }
-
-    pub fn balloon_resize(&mut self, expected_ram: u64) -> Result<u64, Error> {
-        let mut balloon_size = 0;
-        if let Some(balloon) = &self.balloon {
-            if expected_ram < self.current_ram {
-                balloon_size = self.current_ram - expected_ram;
-            }
-            balloon
-                .lock()
-                .unwrap()
-                .resize(balloon_size)
-                .map_err(Error::VirtioBalloonResizeFail)?;
-        }
-
-        Ok(balloon_size)
-    }
-
-    pub fn get_balloon_actual(&self) -> u64 {
-        if let Some(balloon) = &self.balloon {
-            return balloon.lock().unwrap().get_actual();
-        }
-
-        0
     }
 
     /// In case this function resulted in adding a new memory region to the
