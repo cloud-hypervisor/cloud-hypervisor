@@ -54,6 +54,8 @@ pub enum Error {
     ParseNetwork(OptionParserError),
     /// Error parsing RNG options
     ParseRNG(OptionParserError),
+    /// Error parsing balloon options
+    ParseBalloon(OptionParserError),
     /// Error parsing filesystem parameters
     ParseFileSystem(OptionParserError),
     /// Error parsing persistent memory parameters
@@ -160,6 +162,7 @@ impl fmt::Display for Error {
             ParseNetwork(o) => write!(f, "Error parsing --net: {}", o),
             ParseDisk(o) => write!(f, "Error parsing --disk: {}", o),
             ParseRNG(o) => write!(f, "Error parsing --rng: {}", o),
+            ParseBalloon(o) => write!(f, "Error parsing --balloon: {}", o),
             ParseRestore(o) => write!(f, "Error parsing --restore: {}", o),
             #[cfg(target_arch = "x86_64")]
             ParseSgxEpc(o) => write!(f, "Error parsing --sgx-epc: {}", o),
@@ -184,6 +187,7 @@ pub struct VmParams<'a> {
     pub disks: Option<Vec<&'a str>>,
     pub net: Option<Vec<&'a str>>,
     pub rng: &'a str,
+    pub balloon: Option<&'a str>,
     pub fs: Option<Vec<&'a str>>,
     pub pmem: Option<Vec<&'a str>>,
     pub serial: &'a str,
@@ -212,6 +216,7 @@ impl<'a> VmParams<'a> {
         let disks: Option<Vec<&str>> = args.values_of("disk").map(|x| x.collect());
         let net: Option<Vec<&str>> = args.values_of("net").map(|x| x.collect());
         let console = args.value_of("console").unwrap();
+        let balloon = args.value_of("balloon");
         let fs: Option<Vec<&str>> = args.values_of("fs").map(|x| x.collect());
         let pmem: Option<Vec<&str>> = args.values_of("pmem").map(|x| x.collect());
         let devices: Option<Vec<&str>> = args.values_of("device").map(|x| x.collect());
@@ -231,6 +236,7 @@ impl<'a> VmParams<'a> {
             disks,
             net,
             rng,
+            balloon,
             fs,
             pmem,
             serial,
@@ -921,6 +927,29 @@ impl Default for RngConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BalloonConfig {
+    pub size: u64,
+}
+
+impl BalloonConfig {
+    pub const SYNTAX: &'static str = "Balloon parameters \"size=<balloon_size>\"";
+
+    pub fn parse(balloon: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("size");
+        parser.parse(balloon).map_err(Error::ParseBalloon)?;
+
+        let size = parser
+            .convert::<ByteSized>("size")
+            .map_err(Error::ParseBalloon)?
+            .map(|v| v.0)
+            .unwrap_or(0);
+
+        Ok(BalloonConfig { size })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct FsConfig {
     pub tag: String,
     pub socket: PathBuf,
@@ -1391,6 +1420,7 @@ pub struct VmConfig {
     pub net: Option<Vec<NetConfig>>,
     #[serde(default)]
     pub rng: RngConfig,
+    pub balloon: Option<BalloonConfig>,
     pub fs: Option<Vec<FsConfig>>,
     pub pmem: Option<Vec<PmemConfig>>,
     #[serde(default = "ConsoleConfig::default_serial")]
@@ -1506,6 +1536,11 @@ impl VmConfig {
             iommu = true;
         }
 
+        let mut balloon: Option<BalloonConfig> = None;
+        if let Some(balloon_params) = &vm_params.balloon {
+            balloon = Some(BalloonConfig::parse(balloon_params)?);
+        }
+
         let mut fs: Option<Vec<FsConfig>> = None;
         if let Some(fs_list) = &vm_params.fs {
             let mut fs_config_list = Vec::new();
@@ -1603,6 +1638,7 @@ impl VmConfig {
             disks,
             net,
             rng,
+            balloon,
             fs,
             pmem,
             serial,
@@ -2175,6 +2211,7 @@ mod tests {
                 src: PathBuf::from("/dev/urandom"),
                 iommu: false,
             },
+            balloon: None,
             fs: None,
             pmem: None,
             serial: ConsoleConfig {

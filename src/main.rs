@@ -181,6 +181,13 @@ fn create_app<'a, 'b>(
                 .group("vm-config"),
         )
         .arg(
+            Arg::with_name("balloon")
+                .long("balloon")
+                .help(config::BalloonConfig::SYNTAX)
+                .takes_value(true)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::with_name("fs")
                 .long("fs")
                 .help(config::FsConfig::SYNTAX)
@@ -582,6 +589,7 @@ mod unit_tests {
                     src: PathBuf::from("/dev/urandom"),
                     iommu: false,
                 },
+                balloon: None,
                 fs: None,
                 pmem: None,
                 serial: ConsoleConfig {

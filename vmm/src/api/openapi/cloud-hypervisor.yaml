@@ -410,6 +410,8 @@ components:
             $ref: '#/components/schemas/NetConfig'
         rng:
           $ref: '#/components/schemas/RngConfig'
+        balloon:
+          $ref: '#/components/schemas/BalloonConfig'
         fs:
           type: array
           items:
@@ -646,6 +648,15 @@ components:
         iommu:
           type: boolean
           default: false
+
+    BalloonConfig:
+      required:
+      - size
+      type: object
+      properties:
+        size:
+          type: integer
+          format: int64
 
     FsConfig:
       required:
