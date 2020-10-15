@@ -14,7 +14,6 @@ extern crate arc_swap;
 extern crate epoll;
 #[macro_use]
 extern crate log;
-#[cfg(feature = "pci_support")]
 extern crate pci;
 extern crate serde;
 #[macro_use]
@@ -71,11 +70,6 @@ const VIRTIO_F_VERSION_1: u32 = 32;
 const VIRTIO_F_IOMMU_PLATFORM: u32 = 33;
 const VIRTIO_F_IN_ORDER: u32 = 35;
 
-#[allow(dead_code)]
-const INTERRUPT_STATUS_USED_RING: u32 = 0x1;
-#[allow(dead_code)]
-const INTERRUPT_STATUS_CONFIG_CHANGED: u32 = 0x2;
-#[cfg(feature = "pci_support")]
 const VIRTIO_MSI_NO_VECTOR: u16 = 0xffff;
 
 #[derive(Debug)]

@@ -5,7 +5,7 @@ authors = ["The Cloud Hypervisor Authors"]
 edition = "2018"
 
 [features]
-default = ["pci", "vfio-ioctls", "virtio-devices/pci_support"]
+default = ["pci", "vfio-ioctls"]
 acpi = ["acpi_tables","devices/acpi", "arch/acpi"]
 cmos = ["devices/cmos"]
 fwdebug = ["devices/fwdebug"]
