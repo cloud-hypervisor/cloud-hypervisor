@@ -1357,9 +1357,14 @@ impl Pausable for CpuManager {
             let mut vcpu = vcpu.lock().unwrap();
             vcpu.pause()?;
             #[cfg(target_arch = "x86_64")]
-            vcpu.vcpu.notify_guest_clock_paused().map_err(|e| {
-                MigratableError::Pause(anyhow!("Could not notify guest it has been paused {:?}", e))
-            })?;
+            if !self.config.kvm_hyperv {
+                vcpu.vcpu.notify_guest_clock_paused().map_err(|e| {
+                    MigratableError::Pause(anyhow!(
+                        "Could not notify guest it has been paused {:?}",
+                        e
+                    ))
+                })?;
+            }
         }
 
         Ok(())
