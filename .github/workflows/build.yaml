@@ -33,14 +33,11 @@ jobs:
           git rev-list origin/master..$GITHUB_SHA | xargs -t -I % sh -c 'git checkout %; cargo check --all --target=${{ matrix.target }}'
           git checkout $GITHUB_SHA
 
-      - name: Build (pci,acpi,kvm)
-        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "pci,acpi,kvm"  -- -D warnings
+      - name: Build (acpi,kvm)
+        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "acpi,kvm"  -- -D warnings
 
-      - name: Build (pci,kvm)
-        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "pci,kvm"  -- -D warnings
+      - name: Build (kvm)
+        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "kvm"  -- -D warnings
         
-      - name: Build (mmio,kvm)
-        run: cargo rustc --bin cloud-hypervisor --no-default-features --features "mmio,kvm"  -- -D warnings
-
       - name: Release Build (default features)
         run: cargo build --all --release --target=${{ matrix.target }}

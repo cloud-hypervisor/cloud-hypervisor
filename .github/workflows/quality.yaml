@@ -29,11 +29,8 @@ jobs:
       - name: Clippy (all features)
         run: cargo clippy --all-targets --all-features -- -D warnings
       
-      - name: Clippy (pci,acpi,kvm)
-        run: cargo clippy --all-targets --no-default-features --features "pci,acpi,kvm" -- -D warnings
+      - name: Clippy (acpi,kvm)
+        run: cargo clippy --all-targets --no-default-features --features "acpi,kvm" -- -D warnings
       
-      - name: Clippy (pci,kvm)
-        run: cargo clippy --all-targets --no-default-features --features "pci,kvm" -- -D warnings
-      
-      - name: Clippy (mmio,kvm)
-        run: cargo clippy --all-targets --no-default-features --features "mmio,kvm" -- -D warnings
+      - name: Clippy (kvm)
+        run: cargo clippy --all-targets --no-default-features --features "kvm" -- -D warnings
