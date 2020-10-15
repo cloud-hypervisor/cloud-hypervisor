@@ -232,26 +232,6 @@ if [ $RES -eq 0 ]; then
     RES=$?
 fi
 
-if [ $RES -eq 0 ]; then
-    # virtio-mmio based testing
-    cargo build --all --release --target $BUILD_TARGET --no-default-features --features "mmio,kvm"
-    strip target/$BUILD_TARGET/release/cloud-hypervisor
-    strip target/$BUILD_TARGET/release/vhost_user_net
-    strip target/$BUILD_TARGET/release/ch-remote
-
-    export RUST_BACKTRACE=1
-    time cargo test --features "integration_tests,mmio" "tests::parallel::$@" 
-    RES=$?
-
-    # Run some tests in sequence since the result could be affected by other tests
-    # running in parallel.
-    if [ $RES -eq 0 ]; then
-        export RUST_BACKTRACE=1
-        time cargo test --features "integration_tests,mmio" "tests::sequential::$@" -- --test-threads=1
-        RES=$?
-    fi
-fi
-
 # Tear VFIO test network down
 sudo ip link del vfio-br0
 sudo ip link del vfio-tap0

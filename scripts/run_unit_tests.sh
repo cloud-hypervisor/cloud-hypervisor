@@ -5,7 +5,7 @@ source $HOME/.cargo/env
 BUILD_TARGET=${BUILD_TARGET-x86_64-unknown-linux-gnu}
 cargo_args=("$@")
 [ $(uname -m) = "aarch64" ] && cargo_args+=("--no-default-features")
-[ $(uname -m) = "aarch64" ] && cargo_args+=("--features mmio,kvm")
+[ $(uname -m) = "aarch64" ] && cargo_args+=("--features kvm")
 
 export RUST_BACKTRACE=1
 cargo test --target $BUILD_TARGET --workspace ${cargo_args[@]} || exit 1;

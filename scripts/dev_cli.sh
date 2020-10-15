@@ -210,7 +210,7 @@ cmd_build() {
     [ $build = "release" ] && cargo_args+=("--release")
     cargo_args+=(--target "$target")
     [ $(uname -m) = "aarch64" ] && cargo_args+=("--no-default-features")
-    [ $(uname -m) = "aarch64" ] && cargo_args+=(--features "mmio,kvm")
+    [ $(uname -m) = "aarch64" ] && cargo_args+=(--features "kvm")
 
     rustflags=""
     if [ $(uname -m) = "aarch64" ] && [ $libc = "musl" ] ; then
