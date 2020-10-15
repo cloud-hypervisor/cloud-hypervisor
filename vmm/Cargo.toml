@@ -7,8 +7,6 @@ edition = "2018"
 [features]
 default = []
 acpi = ["acpi_tables","devices/acpi", "arch/acpi"]
-pci_support = ["pci", "vfio-ioctls", "virtio-devices/pci_support"]
-mmio_support = ["virtio-devices/mmio_support"]
 cmos = ["devices/cmos"]
 fwdebug = ["devices/fwdebug"]
 kvm = ["hypervisor/kvm"]
@@ -31,15 +29,15 @@ log = "0.4.11"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "master" }
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
-pci = {path = "../pci", optional = true}
+pci = { path = "../pci" }
 qcow = { path = "../qcow" }
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.22.0" }
 serde = {version = ">=1.0.27", features = ["rc"] }
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
 url = "2.1.1"
-vfio-ioctls = { git = "https://github.com/cloud-hypervisor/vfio-ioctls", branch = "ch", optional = true }
-virtio-devices = {path = "../virtio-devices"}
+vfio-ioctls = { git = "https://github.com/cloud-hypervisor/vfio-ioctls", branch = "ch" }
+virtio-devices = { path = "../virtio-devices", features = ["pci_support"]}
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.3.0", features = ["backend-mmap", "backend-atomic"] }
