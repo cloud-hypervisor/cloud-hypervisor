@@ -1262,27 +1262,22 @@ mod tests {
             // Since virtio-net has 2 queue pairs, its vectors is as follows:
             // 1 virtio-net     with 5 vectors: config, Rx (2), Tx (2)
             // Based on the above, the total vectors should 14.
-            // This is a PCI only feature.
-            #[cfg(not(feature = "mmio"))]
-            {
-                #[cfg(target_arch = "x86_64")]
-                let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
-                #[cfg(target_arch = "aarch64")]
-                let grep_cmd = "grep -c ITS-MSI /proc/interrupts";
-                assert_eq!(
-                    guest
-                        .ssh_command(grep_cmd)
-                        .unwrap_or_default()
-                        .trim()
-                        .parse::<u32>()
-                        .unwrap_or_default(),
-                    10 + (num_queues as u32)
-                );
-            }
+            #[cfg(target_arch = "x86_64")]
+            let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
+            #[cfg(target_arch = "aarch64")]
+            let grep_cmd = "grep -c ITS-MSI /proc/interrupts";
+            assert_eq!(
+                guest
+                    .ssh_command(grep_cmd)
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                10 + (num_queues as u32)
+            );
 
-            // ACPI is not built with mmio, hence we can't test the resize
-            // feature for mmio.
-            #[cfg(all(not(feature = "mmio"), feature = "acpi"))]
+            // ACPI feature is needed.
+            #[cfg(feature = "acpi")]
             {
                 guest
                     .ssh_command(
@@ -1446,9 +1441,8 @@ mod tests {
                 "bar"
             );
 
-            // ACPI is not built with mmio, hence we can't test the resize
-            // feature for mmio.
-            #[cfg(all(not(feature = "mmio"), feature = "acpi"))]
+            // ACPI feature is needed.
+            #[cfg(feature = "acpi")]
             {
                 guest
                     .ssh_command(
@@ -1567,28 +1561,24 @@ mod tests {
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
             if self_spawned {
-                // The reboot is not supported with mmio, so no reason to test it.
-                #[cfg(not(feature = "mmio"))]
-                {
-                    let reboot_count = guest
-                        .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                        .unwrap_or_default()
-                        .trim()
-                        .parse::<u32>()
-                        .unwrap_or(1);
+                let reboot_count = guest
+                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1);
 
-                    assert_eq!(reboot_count, 0);
-                    guest.ssh_command("sudo reboot").unwrap_or_default();
+                assert_eq!(reboot_count, 0);
+                guest.ssh_command("sudo reboot").unwrap_or_default();
 
-                    thread::sleep(std::time::Duration::new(20, 0));
-                    let reboot_count = guest
-                        .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                        .unwrap_or_default()
-                        .trim()
-                        .parse::<u32>()
-                        .unwrap_or_default();
-                    assert_eq!(reboot_count, 1);
-                }
+                thread::sleep(std::time::Duration::new(20, 0));
+                let reboot_count = guest
+                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                    .unwrap_or_default()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default();
+                assert_eq!(reboot_count, 1);
             }
         });
         let _ = child.kill();
@@ -1681,9 +1671,6 @@ mod tests {
                 "ok"
             );
 
-            // Check the cache size is the expected one.
-            // With virtio-mmio the cache doesn't appear in /proc/iomem
-            #[cfg(not(feature = "mmio"))]
             assert_eq!(
                 guest
                     .valid_virtio_fs_cache_size(dax, cache_size)
@@ -1715,11 +1702,8 @@ mod tests {
                 "bar"
             );
 
-            // ACPI is not built with mmio, hence we can't test the resize
-            // feature for mmio.
-            // ACPI is currently x86_64 only, we skip this for AArch64.
-            #[cfg(not(feature = "mmio"))]
-            #[cfg(target_arch = "x86_64")]
+            // ACPI feature is needed.
+            #[cfg(feature = "acpi")]
             {
                 guest
                     .ssh_command(
@@ -1962,7 +1946,6 @@ mod tests {
             // Validate vsock works as expected.
             guest.check_vsock(socket.as_str());
 
-            #[cfg(not(feature = "mmio"))]
             // AArch64 currently does not support reboot, and therefore we
             // skip the reboot test here.
             #[cfg(target_arch = "x86_64")]
@@ -2191,7 +2174,7 @@ mod tests {
     mod parallel {
         use crate::tests::*;
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_simple_launch() {
             let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
@@ -2233,7 +2216,7 @@ mod tests {
             });
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_multi_cpu() {
             let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut bionic);
@@ -2283,25 +2266,25 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_cpu_topology_421() {
             test_cpu_topology(4, 2, 1);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_cpu_topology_142() {
             test_cpu_topology(1, 4, 2);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_cpu_topology_262() {
             test_cpu_topology(2, 6, 2);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_cpu_physical_bits() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -2335,7 +2318,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_large_vm() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -2365,7 +2348,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_huge_memory() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -2395,8 +2378,8 @@ mod tests {
             handle_child_output(r, &output);
         }
 
+        #[test]
         #[cfg(target_arch = "x86_64")]
-        #[cfg_attr(not(feature = "mmio"), test)]
         fn test_user_defined_memory_regions() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -2479,8 +2462,8 @@ mod tests {
             handle_child_output(r, &output);
         }
 
+        #[test]
         #[cfg(target_arch = "x86_64")]
-        #[cfg_attr(not(feature = "mmio"), test)]
         fn test_guest_numa_nodes() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -2560,7 +2543,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_pci_msi() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -2630,7 +2613,6 @@ mod tests {
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
                 assert!(guest.get_entropy().unwrap_or_default() >= 900);
 
-                #[cfg(not(feature = "mmio"))]
                 assert_eq!(
                     guest
                         .ssh_command("grep -c PCI-MSI /proc/interrupts")
@@ -2723,7 +2705,6 @@ mod tests {
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
                 assert!(guest.get_entropy().unwrap_or_default() >= 900);
 
-                #[cfg(not(feature = "mmio"))]
                 assert_eq!(
                     guest
                         .ssh_command("grep -c PCI-MSI /proc/interrupts")
@@ -2770,7 +2751,6 @@ mod tests {
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
                 assert!(guest.get_entropy().unwrap_or_default() >= 900);
 
-                #[cfg(not(feature = "mmio"))]
                 assert_eq!(
                     guest
                         .ssh_command("grep -c PCI-MSI /proc/interrupts")
@@ -2967,7 +2947,7 @@ mod tests {
             test_boot_from_vhost_user_blk(1, false, false, None, true)
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_split_irqchip() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3048,43 +3028,43 @@ mod tests {
             test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon, false)
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_on() {
             test_virtio_fs(true, None, "none", &prepare_virtiofsd, true)
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_off() {
             test_virtio_fs(false, None, "none", &prepare_virtiofsd, true)
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_on_w_vhost_user_fs_daemon() {
             test_virtio_fs(true, None, "none", &prepare_vhost_user_fs_daemon, true)
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_virtio_fs_hotplug_dax_off_w_vhost_user_fs_daemon() {
             test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon, true)
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_virtio_pmem_persist_writes() {
             test_virtio_pmem(false, false)
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_virtio_pmem_discard_writes() {
             test_virtio_pmem(true, false)
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_virtio_pmem_with_size() {
             test_virtio_pmem(true, true)
@@ -3209,7 +3189,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_serial_off() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3258,7 +3238,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_serial_null() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -3305,7 +3285,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_serial_tty() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3355,7 +3335,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_serial_file() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3442,7 +3422,7 @@ mod tests {
             let cmd = format!("echo {} | sudo tee /dev/hvc0", text);
 
             let r = std::panic::catch_unwind(|| {
-                #[cfg(all(not(feature = "mmio"), feature = "acpi"))]
+                #[cfg(feature = "acpi")]
                 assert!(guest
                     .does_device_vendor_pair_match("0x1043", "0x1af4")
                     .unwrap_or_default());
@@ -3461,7 +3441,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_console_file() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3505,7 +3485,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         // The VFIO integration test starts cloud-hypervisor guest with 3 TAP
         // backed networking interfaces, bound through a simple bridge on the host.
@@ -3749,7 +3729,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(feature = "mmio", test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_vmlinux_boot_noacpi() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3787,7 +3767,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_reboot() {
             let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
@@ -3856,7 +3836,7 @@ mod tests {
             });
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_bzimage_reboot() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3924,13 +3904,13 @@ mod tests {
             _test_virtio_vsock(false)
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_virtio_vsock_hotplug() {
             _test_virtio_vsock(true);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         // Start cloud-hypervisor with no VM parameters, only the API server running.
         // From the API: Create a VM, boot it and check that it looks as expected.
         fn test_api_create_boot() {
@@ -3979,7 +3959,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         // Start cloud-hypervisor with no VM parameters, only the API server running.
         // From the API: Create a VM, boot it and check that it looks as expected.
@@ -4059,7 +4039,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         // This test validates that it can find the virtio-iommu device at first.
         // It also verifies that both disks and the network card are attached to
@@ -4103,7 +4083,6 @@ mod tests {
 
             let r = std::panic::catch_unwind(|| {
                 // Verify the virtio-iommu device is present.
-                #[cfg(not(feature = "mmio"))]
                 assert!(guest
                     .does_device_vendor_pair_match("0x1057", "0x1af4")
                     .unwrap_or_default());
@@ -4142,6 +4121,8 @@ mod tests {
             handle_child_output(r, &output);
         }
 
+        #[test]
+        #[cfg(target_arch = "x86_64")]
         // We cannot force the software running in the guest to reprogram the BAR
         // with some different addresses, but we have a reliable way of testing it
         // with a standard Linux kernel.
@@ -4151,8 +4132,6 @@ mod tests {
         // This test creates a dedicated PCI network device to be checked as being
         // properly probed first, then removing it, and adding it again by doing a
         // rescan.
-        #[cfg_attr(not(feature = "mmio"), test)]
-        #[cfg(target_arch = "x86_64")]
         fn test_pci_bar_reprogramming() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -4237,12 +4216,12 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_memory_mergeable_off() {
             test_memory_mergeable(false)
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_cpu_hotplug() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4343,7 +4322,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_memory_hotplug() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4459,8 +4438,8 @@ mod tests {
             handle_child_output(r, &output);
         }
 
+        #[test]
         #[cfg(target_arch = "x86_64")]
-        #[cfg_attr(not(feature = "mmio"), test)]
         fn test_virtio_mem() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -4546,9 +4525,9 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        // Test both vCPU and memory resizing together
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
+        // Test both vCPU and memory resizing together
         fn test_resize() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -4608,7 +4587,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_memory_overhead() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -4649,7 +4628,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_disk_hotplug() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4826,7 +4805,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_pmem_hotplug() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -4956,7 +4935,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_net_hotplug() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -5135,17 +5114,10 @@ mod tests {
                 net_id, guest.network.guest_mac, guest.network.host_ip
             );
 
-            let cloudinit_params = if cfg!(feature = "mmio") {
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-            } else {
-                format!(
-                    "path={},iommu=on",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-            };
+            let cloudinit_params = format!(
+                "path={},iommu=on",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            );
 
             let socket = temp_vsock_path(&guest.tmp_dir);
 
@@ -5199,25 +5171,22 @@ mod tests {
 
                 assert!(guest.ssh_command(&console_cmd).is_ok());
 
-                // Only for PCI, we can check that removing and adding back the
-                // virtio-net device does not break the snapshot/restore support
-                // for virtio-pci. This is an important thing to test as the
-                // hotplug will trigger a PCI BAR reprogramming, which is a good
-                // way of checking if the stored resources are correctly restored.
-                #[cfg(not(feature = "mmio"))]
-                {
-                    // Unplug the virtio-net device
-                    assert!(remote_command(&api_socket, "remove-device", Some(net_id),));
-                    thread::sleep(std::time::Duration::new(10, 0));
+                // We check that removing and adding back the virtio-net device
+                // does not break the snapshot/restore support for virtio-pci.
+                // This is an important thing to test as the hotplug will
+                // trigger a PCI BAR reprogramming, which is a good way of
+                // checking if the stored resources are correctly restored.
+                // Unplug the virtio-net device
+                assert!(remote_command(&api_socket, "remove-device", Some(net_id),));
+                thread::sleep(std::time::Duration::new(10, 0));
 
-                    // Plug the virtio-net device again
-                    assert!(remote_command(
-                        &api_socket,
-                        "add-net",
-                        Some(net_params.as_str()),
-                    ));
-                    thread::sleep(std::time::Duration::new(10, 0));
-                }
+                // Plug the virtio-net device again
+                assert!(remote_command(
+                    &api_socket,
+                    "add-net",
+                    Some(net_params.as_str()),
+                ));
+                thread::sleep(std::time::Duration::new(10, 0));
 
                 // Pause the VM
                 assert!(remote_command(&api_socket, "pause", None));
@@ -5296,7 +5265,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_counters() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -5340,7 +5309,7 @@ mod tests {
     mod sequential {
         use crate::tests::*;
 
-        #[cfg_attr(not(feature = "mmio"), test)]
+        #[test]
         fn test_memory_mergeable_on() {
             test_memory_mergeable(true)
         }
