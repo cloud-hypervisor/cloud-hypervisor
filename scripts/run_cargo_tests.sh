@@ -15,11 +15,9 @@ time cargo rustc --bin cloud-hypervisor -- -D warnings
 time cargo rustc -p vhost_user_net --bin vhost_user_net -- -D warnings
 time cargo test
 time cargo audit
-time cargo clippy --all-targets --no-default-features --features "pci,acpi,kvm" -- -D warnings
-time cargo rustc --bin cloud-hypervisor --no-default-features --features "pci,acpi,kvm"  -- -D warnings
-time cargo clippy --all-targets --no-default-features --features "pci,kvm" -- -D warnings
-time cargo rustc --bin cloud-hypervisor --no-default-features --features "pci,kvm"  -- -D warnings
-time cargo clippy --all-targets --no-default-features --features "mmio,kvm" -- -D warnings
-time cargo rustc --bin cloud-hypervisor --no-default-features --features "mmio,kvm"  -- -D warnings
+time cargo clippy --all-targets --no-default-features --features "acpi,kvm" -- -D warnings
+time cargo rustc --bin cloud-hypervisor --no-default-features --features "acpi,kvm"  -- -D warnings
+time cargo clippy --all-targets --no-default-features --features "kvm" -- -D warnings
+time cargo rustc --bin cloud-hypervisor --no-default-features --features "kvm"  -- -D warnings
 time cargo fmt -- --check
 time cargo build --all --release

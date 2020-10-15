@@ -185,7 +185,7 @@ TARGET_CC="musl-gcc"
 CFLAGS="-I /usr/include/aarch64-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --all --release --no-default-features --features pci,kvm --target $BUILD_TARGET
+cargo build --all --release --no-default-features --features kvm --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
 strip target/$BUILD_TARGET/release/ch-remote
@@ -197,20 +197,8 @@ sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
 export RUST_BACKTRACE=1
-time cargo test --no-default-features --features "integration_tests,pci,kvm" "tests::parallel::$@" -- --skip test_snapshot_restore
+time cargo test --no-default-features --features "integration_tests,kvm" "tests::parallel::$@" -- --skip test_snapshot_restore
 RES=$?
-
-if [ $RES -eq 0 ]; then
-    # virtio-mmio based testing
-    cargo build --release --target $BUILD_TARGET --no-default-features --features "mmio,kvm"
-    strip target/$BUILD_TARGET/release/cloud-hypervisor
-    strip target/$BUILD_TARGET/release/vhost_user_net
-    strip target/$BUILD_TARGET/release/ch-remote
-
-    export RUST_BACKTRACE=1
-    time cargo test --no-default-features --features "integration_tests,mmio,kvm" "tests::parallel::$@"
-    RES=$?
-fi
 
 # Tear vhost_user_net test network down
 sudo ip link del vunet-tap0

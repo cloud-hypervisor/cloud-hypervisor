@@ -19,13 +19,4 @@ export RUST_BACKTRACE=1
 time cargo test --features "integration_tests" "tests::sgx::$@"
 RES=$?
 
-if [ $RES -eq 0 ]; then
-    # virtio-mmio based testing
-    cargo build --all --release --target $BUILD_TARGET --no-default-features --features "mmio,kvm"
-    strip target/$BUILD_TARGET/release/cloud-hypervisor
-
-    time cargo test --features "integration_tests,mmio" "tests::sgx::$@"
-    RES=$?
-fi
-
 exit $RES
