@@ -6,7 +6,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-#[cfg(feature = "pci_support")]
 extern crate pci;
 extern crate vm_allocator;
 extern crate vm_memory;
