@@ -6,8 +6,6 @@ edition = "2018"
 
 [features]
 default = []
-pci_support = ["pci"]
-mmio_support = []
 io_uring = ["block_util/io_uring"]
 
 [dependencies]
@@ -21,7 +19,7 @@ libc = "0.2.79"
 log = "0.4.11"
 net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
-pci = { path = "../pci", optional = true }
+pci = { path = "../pci" }
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.22.0" }
 serde = ">=1.0.27"
 serde_derive = ">=1.0.27"
