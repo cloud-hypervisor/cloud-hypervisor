@@ -2613,16 +2613,29 @@ impl DeviceManager {
             << 3;
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
+
+        // Safe because we know the RawFd is valid.
+        //
+        // This dup() is mandatory to be able to give full ownership of the
+        // file descriptor to the DeviceFd::from_raw_fd() function later in
+        // the code.
+        //
+        // This is particularly needed so that VfioContainer will still have
+        // a valid file descriptor even if DeviceManager, and therefore the
+        // passthrough_device are dropped. In case of Drop, the file descriptor
+        // would be closed, but Linux would still have the duplicated file
+        // descriptor opened from DeviceFd, preventing from unexpected behavior
+        // where the VfioContainer would try to use a closed file descriptor.
+        let dup_device_fd = unsafe { libc::dup(passthrough_device.as_raw_fd()) };
+
         // SAFETY the raw fd conversion here is safe because:
         //   1. This function is only called on KVM, see the feature guard above.
         //   2. When running on KVM, passthrough_device wraps around DeviceFd.
         //   3. The conversion here extracts the raw fd and then turns the raw fd into a DeviceFd
         //      of the same (correct) type.
         let vfio_container = Arc::new(
-            VfioContainer::new(Arc::new(unsafe {
-                DeviceFd::from_raw_fd(passthrough_device.as_raw_fd())
-            }))
-            .map_err(DeviceManagerError::VfioCreate)?,
+            VfioContainer::new(Arc::new(unsafe { DeviceFd::from_raw_fd(dup_device_fd) }))
+                .map_err(DeviceManagerError::VfioCreate)?,
         );
 
         let vfio_device = VfioDevice::new(
