@@ -1449,15 +1449,6 @@ impl VmConfig {
             }
         }
 
-        if cfg!(not(feature = "pci_support")) {
-            if self.iommu {
-                return Err(ValidationError::IommuUnsupported);
-            }
-            if self.devices.is_some() {
-                return Err(ValidationError::VfioUnsupported);
-            }
-        }
-
         if let Some(t) = &self.cpus.topology {
             if t.threads_per_core == 0
                 || t.cores_per_die == 0
