@@ -68,6 +68,7 @@ pub struct VirtioMemZone {
     region: Arc<GuestRegionMmap>,
     resize_handler: virtio_devices::Resize,
     hotplugged_size: u64,
+    has_backing_file: bool,
 }
 
 impl VirtioMemZone {
@@ -79,6 +80,9 @@ impl VirtioMemZone {
     }
     pub fn hotplugged_size(&self) -> u64 {
         self.hotplugged_size
+    }
+    pub fn has_backing_file(&self) -> bool {
+        self.has_backing_file
     }
 }
 
@@ -345,12 +349,13 @@ impl MemoryManager {
         zones: &[MemoryZoneConfig],
         prefault: bool,
         ext_regions: Option<Vec<MemoryRegion>>,
-    ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
+    ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones, u64), Error> {
         let mut zones = zones.to_owned();
         let mut mem_regions = Vec::new();
         let mut zone = zones.remove(0);
         let mut zone_offset = 0;
         let mut memory_zones = HashMap::new();
+        let mut file_offset_tail = 0;
 
         // Add zone id to the list of memory zones.
         memory_zones.insert(zone.id.clone(), MemoryZone::default());
@@ -399,6 +404,11 @@ impl MemoryManager {
                     &ext_regions,
                 )?;
 
+                let current_file_offset_tail = file_offset + region_size as u64;
+                if current_file_offset_tail > file_offset_tail {
+                    file_offset_tail = current_file_offset_tail;
+                }
+
                 // Add region to the list of regions associated with the
                 // current memory zone.
                 if let Some(memory_zone) = memory_zones.get_mut(&zone.id) {
@@ -440,7 +450,7 @@ impl MemoryManager {
             }
         }
 
-        Ok((mem_regions, memory_zones))
+        Ok((mem_regions, memory_zones, file_offset_tail))
     }
 
     pub fn new(
@@ -578,7 +588,7 @@ impl MemoryManager {
             .map(|r| (r.0, r.1))
             .collect();
 
-        let (mem_regions, mut memory_zones) =
+        let (mem_regions, mut memory_zones, mut file_offset_tail) =
             Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, ext_regions)?;
 
         let guest_memory =
@@ -615,8 +625,8 @@ impl MemoryManager {
                         );
 
                         let region = MemoryManager::create_ram_region(
-                            &None,
-                            0,
+                            &zone.file,
+                            file_offset_tail,
                             start_addr,
                             hotplug_size as usize,
                             false,
@@ -625,6 +635,7 @@ impl MemoryManager {
                             zone.host_numa_node,
                             &None,
                         )?;
+                        file_offset_tail += hotplug_size;
 
                         virtio_mem_regions.push(region.clone());
 
@@ -633,6 +644,7 @@ impl MemoryManager {
                             resize_handler: virtio_devices::Resize::new()
                                 .map_err(Error::EventFdFail)?,
                             hotplugged_size: zone.hotplugged_size.unwrap_or(0),
+                            has_backing_file: zone.file.is_some(),
                         });
 
                         start_of_device_area = start_addr

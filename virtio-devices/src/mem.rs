@@ -26,14 +26,14 @@ use seccomp::{SeccompAction, SeccompFilter};
 use std::cmp;
 use std::io;
 use std::mem::size_of;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use vm_memory::{
-    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+    Address, ByteValued, Bytes, FileOffset, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
@@ -303,7 +303,7 @@ impl Resize {
 
 struct MemEpollHandler {
     host_addr: u64,
-    host_fd: Option<RawFd>,
+    host_file_offset: Option<FileOffset>,
     mem_state: Vec<bool>,
     config: Arc<Mutex<VirtioMemConfig>>,
     resize: Resize,
@@ -322,7 +322,7 @@ struct StateChangeRequest<'a> {
     nb_blocks: u16,
     mem_state: &'a mut Vec<bool>,
     host_addr: u64,
-    host_fd: Option<RawFd>,
+    host_file_offset: &'a Option<FileOffset>,
     plug: bool,
 }
 
@@ -396,12 +396,13 @@ impl MemEpollHandler {
         }
 
         if !r.plug {
-            if let Some(fd) = r.host_fd {
+            if let Some(file_offset) = r.host_file_offset {
+                let f_offset = file_offset.start() + offset;
                 let res = unsafe {
                     libc::fallocate64(
-                        fd,
+                        file_offset.file().as_raw_fd(),
                         libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
-                        offset as libc::off64_t,
+                        f_offset as libc::off64_t,
                         r.size as libc::off64_t,
                     )
                 };
@@ -409,17 +410,18 @@ impl MemEpollHandler {
                     error!("fallocate64 get error {}", io::Error::last_os_error());
                     return VIRTIO_MEM_RESP_ERROR;
                 }
-            }
-            let res = unsafe {
-                libc::madvise(
-                    (r.host_addr + offset) as *mut libc::c_void,
-                    r.size as libc::size_t,
-                    libc::MADV_DONTNEED,
-                )
-            };
-            if res != 0 {
-                error!("madvise get error {}", io::Error::last_os_error());
-                return VIRTIO_MEM_RESP_ERROR;
+            } else {
+                let res = unsafe {
+                    libc::madvise(
+                        (r.host_addr + offset) as *mut libc::c_void,
+                        r.size as libc::size_t,
+                        libc::MADV_DONTNEED,
+                    )
+                };
+                if res != 0 {
+                    error!("madvise get error {}", io::Error::last_os_error());
+                    return VIRTIO_MEM_RESP_ERROR;
+                }
             }
         }
 
@@ -432,7 +434,7 @@ impl MemEpollHandler {
         config: VirtioMemConfig,
         mem_state: &mut Vec<bool>,
         host_addr: u64,
-        host_fd: Option<RawFd>,
+        host_file_offset: &Option<FileOffset>,
     ) -> u16 {
         for x in 0..(config.region_size / config.block_size as u64) as usize {
             if mem_state[x] {
@@ -444,7 +446,7 @@ impl MemEpollHandler {
                         nb_blocks: 1,
                         mem_state,
                         host_addr,
-                        host_fd,
+                        host_file_offset,
                         plug: false,
                     });
                 if resp_type != VIRTIO_MEM_RESP_ACK {
@@ -536,7 +538,7 @@ impl MemEpollHandler {
                                     nb_blocks: r.req.nb_blocks,
                                     mem_state: &mut self.mem_state,
                                     host_addr: self.host_addr,
-                                    host_fd: self.host_fd,
+                                    host_file_offset: &self.host_file_offset,
                                     plug: true,
                                 },
                             );
@@ -560,7 +562,7 @@ impl MemEpollHandler {
                                     nb_blocks: r.req.nb_blocks,
                                     mem_state: &mut self.mem_state,
                                     host_addr: self.host_addr,
-                                    host_fd: self.host_fd,
+                                    host_file_offset: &self.host_file_offset,
                                     plug: false,
                                 },
                             );
@@ -579,7 +581,7 @@ impl MemEpollHandler {
                                 *config,
                                 &mut self.mem_state,
                                 self.host_addr,
-                                self.host_fd,
+                                &self.host_file_offset,
                             );
                             if resp_type == VIRTIO_MEM_RESP_ACK {
                                 config.plugged_size = 0;
@@ -698,7 +700,7 @@ pub struct Mem {
     id: String,
     resize: Resize,
     host_addr: u64,
-    host_fd: Option<RawFd>,
+    host_file_offset: Option<FileOffset>,
     config: Arc<Mutex<VirtioMemConfig>>,
     seccomp_action: SeccompAction,
 }
@@ -712,6 +714,7 @@ impl Mem {
         seccomp_action: SeccompAction,
         numa_node_id: Option<u16>,
         initial_size: u64,
+        has_backing_file: bool,
     ) -> io::Result<Mem> {
         let region_len = region.len();
 
@@ -750,11 +753,12 @@ impl Mem {
             config.node_id = node_id;
         }
 
-        let host_fd = if let Some(f_offset) = region.file_offset() {
-            Some(f_offset.file().as_raw_fd())
-        } else {
-            None
-        };
+        let mut host_file_offset = None;
+        if let Some(f_offset) = region.file_offset() {
+            if has_backing_file {
+                host_file_offset = Some(f_offset.clone());
+            }
+        }
 
         Ok(Mem {
             common: VirtioCommon {
@@ -767,7 +771,7 @@ impl Mem {
             id,
             resize,
             host_addr: region.as_ptr() as u64,
-            host_fd,
+            host_file_offset,
             config: Arc::new(Mutex::new(config)),
             seccomp_action,
         })
@@ -836,7 +840,7 @@ impl VirtioDevice for Mem {
         let config = self.config.lock().unwrap();
         let mut handler = MemEpollHandler {
             host_addr: self.host_addr,
-            host_fd: self.host_fd,
+            host_file_offset: self.host_file_offset.clone(),
             mem_state: vec![false; config.region_size as usize / config.block_size as usize],
             config: self.config.clone(),
             resize: self.resize.try_clone().map_err(|e| {
