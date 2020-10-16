@@ -24,6 +24,8 @@ use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
+#[cfg(target_arch = "x86_64")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 #[cfg(target_arch = "x86_64")]
 use vm_memory::Address;
@@ -47,7 +49,9 @@ pub use x86_64::{
 };
 
 #[cfg(target_arch = "x86_64")]
-use kvm_bindings::{kvm_enable_cap, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP};
+use kvm_bindings::{
+    kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
+};
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::NUM_IOAPIC_PINS;
@@ -182,6 +186,8 @@ impl vm::Vm for KvmVm {
             #[cfg(target_arch = "x86_64")]
             msrs: self.msrs.clone(),
             vmmops: self.vmmops.clone(),
+            #[cfg(target_arch = "x86_64")]
+            hyperv_synic: AtomicBool::new(false),
         };
         Ok(Arc::new(vcpu))
     }
@@ -504,6 +510,8 @@ pub struct KvmVcpu {
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
     vmmops: ArcSwapOption<Box<dyn vm::VmmOps>>,
+    #[cfg(target_arch = "x86_64")]
+    hyperv_synic: AtomicBool,
 }
 /// Implementation of Vcpu trait for KVM
 /// Example:
@@ -584,6 +592,10 @@ impl cpu::Vcpu for KvmVcpu {
     /// X86 specific call to enable HyperV SynIC
     ///
     fn enable_hyperv_synic(&self) -> cpu::Result<()> {
+        // Update the information about Hyper-V SynIC being enabled and
+        // emulated as it will influence later which MSRs should be saved.
+        self.hyperv_synic.store(true, Ordering::SeqCst);
+
         let mut cap: kvm_enable_cap = Default::default();
         cap.cap = KVM_CAP_HYPERV_SYNIC;
         self.fd
@@ -1113,6 +1125,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// let state = vcpu.state().unwrap();
     /// ```
     fn state(&self) -> cpu::Result<CpuState> {
+        let cpuid = self.get_cpuid2(kvm_bindings::KVM_MAX_CPUID_ENTRIES)?;
         let mp_state = self.get_mp_state()?;
         let regs = self.get_regs()?;
         let sregs = self.get_sregs()?;
@@ -1127,6 +1140,26 @@ impl cpu::Vcpu for KvmVcpu {
         // by chunks. This is the only way to make sure we try to get as many
         // MSRs as possible, even if some MSRs are not supported.
         let mut msr_entries = self.msrs.clone();
+
+        // Save extra MSRs if the Hyper-V synthetic interrupt controller is
+        // emulated.
+        if self.hyperv_synic.load(Ordering::SeqCst) {
+            let hyperv_synic_msrs = vec![
+                0x40000020, 0x40000021, 0x40000080, 0x40000081, 0x40000082, 0x40000083, 0x40000084,
+                0x40000090, 0x40000091, 0x40000092, 0x40000093, 0x40000094, 0x40000095, 0x40000096,
+                0x40000097, 0x40000098, 0x40000099, 0x4000009a, 0x4000009b, 0x4000009c, 0x4000009d,
+                0x4000009f, 0x400000b0, 0x400000b1, 0x400000b2, 0x400000b3, 0x400000b4, 0x400000b5,
+                0x400000b6, 0x400000b7,
+            ];
+            for index in hyperv_synic_msrs {
+                let msr = kvm_msr_entry {
+                    index,
+                    ..Default::default()
+                };
+                msr_entries.push(msr).unwrap();
+            }
+        }
+
         let expected_num_msrs = msr_entries.as_fam_struct_ref().nmsrs as usize;
         let num_msrs = self.get_msrs(&mut msr_entries)?;
         let msrs = if num_msrs != expected_num_msrs {
@@ -1172,6 +1205,7 @@ impl cpu::Vcpu for KvmVcpu {
         let vcpu_events = self.get_vcpu_events()?;
 
         Ok(CpuState {
+            cpuid,
             msrs,
             vcpu_events,
             regs,
@@ -1238,6 +1272,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// vcpu.set_state(&state).unwrap();
     /// ```
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+        self.set_cpuid2(&state.cpuid)?;
         self.set_mp_state(state.mp_state)?;
         self.set_regs(&state.regs)?;
         self.set_sregs(&state.sregs)?;
