@@ -26,9 +26,9 @@ use anyhow::anyhow;
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::SgxEpcSection;
-use arch::EntryPoint;
 #[cfg(target_arch = "x86_64")]
-use arch::{CpuidPatch, CpuidReg};
+use arch::CpuidPatch;
+use arch::EntryPoint;
 use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
@@ -688,19 +688,6 @@ impl CpuManager {
         let vcpu = Vcpu::new(cpu_id, &self.vm, interrupt_controller)?;
 
         if let Some(snapshot) = snapshot {
-            #[cfg(target_arch = "x86_64")]
-            {
-                let mut cpuid = self.cpuid.clone();
-                CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(cpu_id));
-                CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(cpu_id));
-
-                vcpu.lock()
-                    .unwrap()
-                    .vcpu
-                    .set_cpuid2(&cpuid)
-                    .map_err(|e| Error::SetSupportedCpusFailed(e.into()))?;
-            }
-
             // AArch64 vCPUs should be initialized after created.
             #[cfg(target_arch = "aarch64")]
             vcpu.lock().unwrap().init(&self.vm)?;
