@@ -75,12 +75,8 @@ feature is enabled by default.
 
 ## Virtio devices
 
-For all virtio devices listed below, both `virtio-mmio` and `virtio-pci`
-transport layers are supported, `virtio-pci` being the default.
-
-Both `virtio-mmio` and `virtio-pci` can be compiled out. `virtio-pci` is
-built-in by default, and enabled by default. If both transport layers were
-built at the same time, `virtio-pci` would be the default transport layer.
+For all virtio devices listed below, only `virtio-pci` transport layer is
+supported.
 
 ### virtio-block
 
