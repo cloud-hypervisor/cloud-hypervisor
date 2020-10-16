@@ -16,20 +16,10 @@ sudo apt-get install libfdt-dev
 
 ## Build
 
-For Virtio devices, you can choose MMIO or PCI as transport option.
-
-### MMIO
+Using PCI devices requires GICv3-ITS for MSI messaging. GICv3-ITS is very common in modern servers.
 
 ```bash
-cargo build --no-default-features --features mmio,kvm
-```
-
-### PCI
-
-Using PCI devices requires GICv3-ITS for MSI messaging. GICv3-ITS is very common in modern servers, but your machine happen to be old ones with GICv2(M) (like Raspberry Pi 4) or GICv3 without ITS, MMIO can still work.
-
-```bash
-cargo build --no-default-features --features pci,kvm
+cargo build --no-default-features --features kvm
 ```
 
 ## Image
@@ -51,7 +41,7 @@ To build the development container:
 ./scripts/dev_cli.sh build-container
 ```
 
-To build Cloud-hypervisor in the container: (The default option for Virtio transport is MMIO.)
+To build Cloud-hypervisor in the container:
 
 ```bash
 ./scripts/dev_cli.sh build
@@ -62,7 +52,7 @@ To build Cloud-hypervisor in the container: (The default option for Virtio trans
 Assuming you have built Cloud-hypervisor with the development container, a VM can be started with command:
 
 ```bash
-sudo build/cargo_target/aarch64-unknown-linux-gnu/debug/cloud-hypervisor --kernel kernel.bin --disk path=rootfs.ext4 --cmdline "keep_bootcon console=hvc0 reboot=k panic=1 pci=off root=/dev/vda rw" --cpus boot=4 --memory size=512M --serial file=serial.log --log-file log.log -vvv
+sudo build/cargo_target/aarch64-unknown-linux-gnu/debug/cloud-hypervisor --kernel kernel.bin --disk path=rootfs.ext4 --cmdline "keep_bootcon console=hvc0 reboot=k panic=1 root=/dev/vda rw" --cpus boot=4 --memory size=512M --serial file=serial.log --log-file log.log -vvv
 ```
 
 If the build was done out of the container, replace the binary path with `target/debug/cloud-hypervisor`.
