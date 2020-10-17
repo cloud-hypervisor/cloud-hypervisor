@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod dist_regs;
-pub mod gicv2;
 pub mod gicv3;
 pub mod gicv3_its;
 pub mod icc_regs;
@@ -68,8 +67,6 @@ pub trait GICDevice: Send {
 pub mod kvm {
     use super::GICDevice;
     use super::Result;
-    use crate::aarch64::gic::gicv2::kvm::KvmGICv2;
-    use crate::aarch64::gic::gicv3::kvm::KvmGICv3;
     use crate::aarch64::gic::gicv3_its::kvm::KvmGICv3ITS;
     use crate::layout;
     use hypervisor::kvm::kvm_bindings;
@@ -190,25 +187,11 @@ pub mod kvm {
         }
     }
 
-    /// Create a GIC device.
+    /// Create a GICv3-ITS device.
     ///
-    /// It will try to create by default a GICv3 device. If that fails it will try
-    /// to fall-back to a GICv2 device.
-    pub fn create_gic(
-        vm: &Arc<dyn hypervisor::Vm>,
-        vcpu_count: u64,
-        its_required: bool,
-    ) -> Result<Box<dyn GICDevice>> {
-        if its_required {
-            debug!("GICv3-ITS is required, creating a GICv3-ITS here.");
-            KvmGICv3ITS::new(vm, vcpu_count)
-        } else {
-            debug!("GICv3-ITS is not required, will try GICv3 instead.");
-            KvmGICv3::new(vm, vcpu_count).or_else(|_| {
-                debug!("Failed to create GICv3, will try GICv2 instead.");
-                KvmGICv2::new(vm, vcpu_count)
-            })
-        }
+    pub fn create_gic(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GICDevice>> {
+        debug!("creating a GICv3-ITS");
+        KvmGICv3ITS::new(vm, vcpu_count)
     }
 
     /// Function that saves RDIST pending tables into guest RAM.
