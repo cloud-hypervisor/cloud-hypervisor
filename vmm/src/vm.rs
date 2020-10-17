@@ -1562,7 +1562,7 @@ impl Vm {
         // Creating a GIC device here, as the GIC will not be created when
         // restoring the device manager. Note that currently only the bare GICv3
         // without ITS is supported.
-        let gic_device = create_gic(&self.vm, vcpu_numbers.try_into().unwrap(), false)
+        let gic_device = create_gic(&self.vm, vcpu_numbers.try_into().unwrap())
             .map_err(|e| MigratableError::Restore(anyhow!("Could not create GIC: {:#?}", e)))?;
 
         // Update the GIC entity in device manager
@@ -2029,7 +2029,7 @@ mod tests {
 
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
-        let gic = create_gic(&vm, 1, false).unwrap();
+        let gic = create_gic(&vm, 1).unwrap();
         assert!(create_fdt(
             &mem,
             &CString::new("console=tty0").unwrap(),

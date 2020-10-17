@@ -128,11 +128,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::Bui
     initrd: &Option<super::InitramfsConfig>,
     pci_space_address: &Option<(u64, u64)>,
 ) -> super::Result<Box<dyn GICDevice>> {
-    // If pci_space_address is present, it means PCI devices are used ("pci" feature enabled).
-    // Then GITv3-ITS is required for MSI messaging.
-    // Otherwise ("mmio" feature enabled), any version of GIC is OK.
-    let gic_device = gic::kvm::create_gic(vm, vcpu_count, pci_space_address.is_some())
-        .map_err(Error::SetupGIC)?;
+    let gic_device = gic::kvm::create_gic(vm, vcpu_count).map_err(Error::SetupGIC)?;
 
     fdt::create_fdt(
         guest_mem,
