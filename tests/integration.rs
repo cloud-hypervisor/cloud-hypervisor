@@ -2932,25 +2932,21 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_blk_default() {
             test_vhost_user_blk(2, false, false, Some(&prepare_vubd), false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_blk_self_spawning() {
             test_vhost_user_blk(1, false, false, None, true)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_blk_readonly() {
             test_vhost_user_blk(1, true, false, Some(&prepare_vubd), false)
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_blk_direct() {
             test_vhost_user_blk(1, false, true, Some(&prepare_vubd), false)
         }
