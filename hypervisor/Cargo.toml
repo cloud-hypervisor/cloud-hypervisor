@@ -1,8 +1,9 @@
 [package]
 name = "hypervisor"
 version = "0.1.0"
-authors = ["Muminul Islam <muislam@microsoft.com>"]
+authors = ["Microsoft Authors"]
 edition = "2018"
+license = "Apache-2.0 OR BSD-3-Clause"
 
 [features]
 kvm = []
