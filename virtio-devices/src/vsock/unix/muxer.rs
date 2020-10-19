@@ -972,7 +972,7 @@ mod tests {
     }
     impl LocalListener {
         fn new<P: AsRef<Path> + Clone>(path: P) -> Self {
-            let path_buf = path.clone().as_ref().to_path_buf();
+            let path_buf = path.as_ref().to_path_buf();
             let sock = UnixListener::bind(path).unwrap();
             sock.set_nonblocking(true).unwrap();
             Self {
