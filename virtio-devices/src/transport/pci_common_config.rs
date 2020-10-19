@@ -341,11 +341,11 @@ mod tests {
 
     struct DummyDevice(u32);
     const QUEUE_SIZE: u16 = 256;
-    const QUEUE_SIZES: &'static [u16] = &[QUEUE_SIZE];
+    const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
     const DUMMY_FEATURES: u64 = 0x5555_aaaa;
     impl VirtioDevice for DummyDevice {
         fn device_type(&self) -> u32 {
-            return self.0;
+            self.0
         }
         fn queue_max_sizes(&self) -> &[u16] {
             QUEUE_SIZES
@@ -416,7 +416,7 @@ mod tests {
         // 'queue_select' can be read and written.
         regs.write(0x16, &[0xaa, 0x55], &mut queues, dev.clone());
         let mut read_back = vec![0x00, 0x00];
-        regs.read(0x16, &mut read_back, &mut queues, dev.clone());
+        regs.read(0x16, &mut read_back, &mut queues, dev);
         assert_eq!(read_back[0], 0xaa);
         assert_eq!(read_back[1], 0x55);
     }
