@@ -260,11 +260,8 @@ impl Sandbox {
         // /proc/sys/fs/nr_open is a sysctl file that shows the maximum number
         // of file-handles a process can allocate.
         let path = "/proc/sys/fs/nr_open";
-        let max_str = fs::read_to_string(path).map_err(|e| Error::ReadProc(e))?;
-        let max = max_str
-            .trim()
-            .parse()
-            .map_err(|e| Error::InvalidNrOpen(e))?;
+        let max_str = fs::read_to_string(path).map_err(Error::ReadProc)?;
+        let max = max_str.trim().parse().map_err(Error::InvalidNrOpen)?;
 
         let limit = libc::rlimit {
             rlim_cur: max,
