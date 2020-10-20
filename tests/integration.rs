@@ -91,7 +91,7 @@ mod tests {
 
     const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=ttyS0 console=hvc0 quiet rw";
 
-    const PIPE_SIZE: i32 = 256 << 10;
+    const PIPE_SIZE: i32 = 32 << 20;
 
     impl UbuntuDiskConfig {
         fn new(image_name: String) -> Self {
@@ -1025,6 +1025,7 @@ mod tests {
             if self.capture_output {
                 let child = self
                     .command
+                    .arg("-v")
                     .stderr(Stdio::piped())
                     .stdout(Stdio::piped())
                     .spawn()
@@ -1044,7 +1045,7 @@ mod tests {
                     ))
                 }
             } else {
-                self.command.spawn()
+                self.command.arg("-v").spawn()
             }
         }
 
@@ -5362,11 +5363,11 @@ mod tests {
                 .unwrap();
 
             let fd = child.stdout.as_ref().unwrap().as_raw_fd();
-            let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE * 100) };
+            let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
             let fd = child.stderr.as_ref().unwrap().as_raw_fd();
-            let pipesize1 = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE * 100) };
+            let pipesize1 = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
 
-            assert!(pipesize >= PIPE_SIZE * 100 && pipesize1 >= PIPE_SIZE * 100);
+            assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
 
             thread::sleep(std::time::Duration::new(40, 0));
             let auth = PasswordAuth {
