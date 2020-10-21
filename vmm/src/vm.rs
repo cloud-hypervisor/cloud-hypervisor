@@ -963,7 +963,7 @@ impl Vm {
             .ok_or(Error::MemOverflow)?
             + 1;
 
-        let pci_space = Some((pci_space_start.0, pci_space_size));
+        let pci_space = (pci_space_start.0, pci_space_size);
 
         // Call `configure_system` and pass the GIC devices out, so that
         // we can register the GIC device to the device manager.
@@ -2035,7 +2035,7 @@ mod tests {
             &dev_info,
             &*gic,
             &None,
-            &None,
+            &(0x1_0000_0000, 0x1_0000),
         )
         .is_ok())
     }
