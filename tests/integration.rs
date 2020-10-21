@@ -5504,6 +5504,104 @@ mod tests {
 
             handle_child_output(r, &output);
         }
+
+        #[test]
+        #[cfg(target_arch = "x86_64")]
+        fn test_windows_guest_snapshot_restore() {
+            let tmp_dir = TempDir::new("ch").unwrap();
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut ovmf_path = workload_path.clone();
+            ovmf_path.push("OVMF.fd");
+
+            let mut osdisk_path = workload_path;
+            osdisk_path.push("windows-server-2019.raw");
+
+            let api_socket = temp_api_path(&tmp_dir);
+
+            let mut child = Command::new(clh_command("cloud-hypervisor"))
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=2,kvm_hyperv=on,max_phys_bits=39"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", ovmf_path.to_str().unwrap()])
+                .args(&["--disk", &format!("path={}", osdisk_path.to_str().unwrap())])
+                .args(&["--serial", "tty"])
+                .args(&["--console", "off"])
+                .args(&["--net", "tap="])
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            let fd = child.stdout.as_ref().unwrap().as_raw_fd();
+            let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+            let fd = child.stderr.as_ref().unwrap().as_raw_fd();
+            let pipesize1 = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+
+            assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
+
+            // Wait to make sure Windows boots up
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            let snapshot_dir = temp_snapshot_dir_path(&tmp_dir);
+
+            // Pause the VM
+            assert!(remote_command(&api_socket, "pause", None));
+
+            // Take a snapshot from the VM
+            assert!(remote_command(
+                &api_socket,
+                "snapshot",
+                Some(format!("file://{}", snapshot_dir).as_str()),
+            ));
+
+            // Wait to make sure the snapshot is completed
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            let _ = child.kill();
+            child.wait().unwrap();
+
+            // Restore the VM from the snapshot
+            let mut child = Command::new(clh_command("cloud-hypervisor"))
+                .args(&["--api-socket", &api_socket])
+                .args(&[
+                    "--restore",
+                    format!("source_url=file://{}", snapshot_dir).as_str(),
+                ])
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            // Wait for the VM to be restored
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            let r = std::panic::catch_unwind(|| {
+                // Resume the VM
+                assert!(remote_command(&api_socket, "resume", None));
+
+                let auth = PasswordAuth {
+                    username: String::from("administrator"),
+                    password: String::from("Admin123"),
+                };
+
+                ssh_command_ip_with_auth(
+                    "shutdown /s",
+                    &auth,
+                    "192.168.249.2",
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+            });
+
+            thread::sleep(std::time::Duration::new(20, 0));
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
     }
 
     mod sgx {
