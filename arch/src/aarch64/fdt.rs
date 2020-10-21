@@ -97,7 +97,7 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::BuildHash
     device_info: &HashMap<(DeviceType, String), T, S>,
     gic_device: &dyn GICDevice,
     initrd: &Option<InitramfsConfig>,
-    pci_space_address: &Option<(u64, u64)>,
+    pci_space_address: &(u64, u64),
 ) -> Result<Vec<u8>> {
     // Allocate stuff necessary for the holding the blob.
     let mut fdt = vec![0; FDT_MAX_SIZE];
@@ -126,9 +126,7 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::BuildHash
     create_clock_node(&mut fdt)?;
     create_psci_node(&mut fdt)?;
     create_devices_node(&mut fdt, device_info)?;
-    if let Some((pci_device_base, pci_device_size)) = pci_space_address {
-        create_pci_nodes(&mut fdt, *pci_device_base, *pci_device_size)?;
-    }
+    create_pci_nodes(&mut fdt, pci_space_address.0, pci_space_address.1)?;
 
     // End Header node.
     append_end_node(&mut fdt)?;

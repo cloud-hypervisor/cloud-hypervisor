@@ -126,7 +126,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::Bui
     vcpu_mpidr: Vec<u64>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     initrd: &Option<super::InitramfsConfig>,
-    pci_space_address: &Option<(u64, u64)>,
+    pci_space_address: &(u64, u64),
 ) -> super::Result<Box<dyn GICDevice>> {
     let gic_device = gic::kvm::create_gic(vm, vcpu_count).map_err(Error::SetupGIC)?;
 
