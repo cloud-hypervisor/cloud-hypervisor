@@ -16,7 +16,9 @@ strip target/$BUILD_TARGET/release/cloud-hypervisor
 
 export RUST_BACKTRACE=1
 
-time cargo test --features "integration_tests" "tests::windows::$@"
+# Only run with 1 thread to avoid tests interfering with one another because
+# Windows has a static IP configured
+time cargo test --features "integration_tests" "tests::windows::$@" -- --test-threads=1
 RES=$?
 
 exit $RES
