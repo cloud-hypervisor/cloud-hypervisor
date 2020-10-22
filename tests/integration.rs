@@ -5448,6 +5448,14 @@ mod tests {
     mod windows {
         use crate::tests::*;
 
+        #[cfg(target_arch = "x86_64")]
+        fn windows_auth() -> PasswordAuth {
+            PasswordAuth {
+                username: String::from("administrator"),
+                password: String::from("Admin123"),
+            }
+        }
+
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_windows_guest() {
@@ -5481,11 +5489,7 @@ mod tests {
             assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
 
             thread::sleep(std::time::Duration::new(40, 0));
-            let auth = PasswordAuth {
-                username: String::from("administrator"),
-                password: String::from("Admin123"),
-            };
-
+            let auth = windows_auth();
             let r = std::panic::catch_unwind(|| {
                 ssh_command_ip_with_auth(
                     "shutdown /s",
@@ -5580,10 +5584,7 @@ mod tests {
                 // Resume the VM
                 assert!(remote_command(&api_socket, "resume", None));
 
-                let auth = PasswordAuth {
-                    username: String::from("administrator"),
-                    password: String::from("Admin123"),
-                };
+                let auth = windows_auth();
 
                 ssh_command_ip_with_auth(
                     "shutdown /s",
