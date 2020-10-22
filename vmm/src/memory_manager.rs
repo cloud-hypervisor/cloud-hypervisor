@@ -828,8 +828,8 @@ impl MemoryManager {
 
     #[allow(clippy::too_many_arguments)]
     fn create_ram_region(
-        file: &Option<PathBuf>,
-        mut file_offset: u64,
+        backing_file: &Option<PathBuf>,
+        file_offset: u64,
         start_addr: GuestAddress,
         size: usize,
         prefault: bool,
@@ -838,27 +838,12 @@ impl MemoryManager {
         host_numa_node: Option<u32>,
         ext_regions: &Option<Vec<MemoryRegion>>,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
-        let mut backing_file: Option<PathBuf> = file.clone();
         let mut copy_ext_region_content: Option<PathBuf> = None;
 
         if let Some(ext_regions) = ext_regions {
             for ext_region in ext_regions.iter() {
                 if ext_region.start_addr == start_addr && ext_region.size as usize == size {
-                    if ext_region.backing_file.is_some() {
-                        // If the region is memory mapped as "shared", then we
-                        // don't replace the backing file, but expect to copy
-                        // the content from the external backing file after the
-                        // region has been created.
-                        if shared {
-                            copy_ext_region_content = ext_region.backing_file.clone();
-                        } else {
-                            backing_file = ext_region.backing_file.clone();
-                            // We must override the file offset as in this case
-                            // we're restoring an existing region, which means
-                            // it will fit perfectly the calculated region.
-                            file_offset = 0;
-                        }
-                    }
+                    copy_ext_region_content = ext_region.backing_file.clone();
 
                     // No need to iterate further as we found the external
                     // region matching the current region.
