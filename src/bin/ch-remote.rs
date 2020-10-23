@@ -122,7 +122,7 @@ fn get_status_code(res: &str) -> Result<StatusCode, Error> {
     }
 }
 
-fn parse_http_response(socket: &mut UnixStream) -> Result<Option<String>, Error> {
+fn parse_http_response(socket: &mut dyn Read) -> Result<Option<String>, Error> {
     let mut res = String::new();
     let mut body_offset = None;
     let mut content_length: Option<usize> = None;
@@ -165,8 +165,8 @@ fn parse_http_response(socket: &mut UnixStream) -> Result<Option<String>, Error>
     }
 }
 
-fn simple_api_command(
-    socket: &mut UnixStream,
+fn simple_api_command<T: Read + Write>(
+    socket: &mut T,
     method: &str,
     c: &str,
     request_body: Option<&str>,
