@@ -5569,14 +5569,16 @@ mod tests {
             // Restore the VM from the snapshot
             let mut child = Command::new(clh_command("cloud-hypervisor"))
                 .args(&["--api-socket", &api_socket])
-                .args(&[
-                    "--restore",
-                    format!("source_url=file://{}", snapshot_dir).as_str(),
-                ])
                 .stderr(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
                 .unwrap();
+
+            assert!(remote_command(
+                &api_socket,
+                "restore",
+                Some(format!("source_url=file://{}", snapshot_dir).as_str()),
+            ));
 
             // Wait for the VM to be restored
             thread::sleep(std::time::Duration::new(10, 0));
