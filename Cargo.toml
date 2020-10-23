@@ -13,6 +13,7 @@ homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 lto = true
 
 [dependencies]
+api_client = { path = "api_client" }
 clap = { version = "2.33.3", features = ["wrap_help"] }
 hypervisor = { path = "hypervisor" }
 libc = "0.2.79"
@@ -62,6 +63,7 @@ integration_tests = []
 [workspace]
 members = [
     "acpi_tables",
+    "api_client",
     "arch",
     "arch_gen",
     "block_util",
