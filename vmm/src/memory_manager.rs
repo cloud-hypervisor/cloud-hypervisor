@@ -35,8 +35,8 @@ use vm_device::BusDevice;
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     mmap::MmapRegionError, Address, Bytes, Error as MmapError, GuestAddress, GuestAddressSpace,
-    GuestMemory, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, GuestMemoryRegion,
-    GuestRegionMmap, GuestUsize, MemoryRegionAddress, MmapRegion,
+    GuestMemory, GuestMemoryAtomic, GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryMmap,
+    GuestMemoryRegion, GuestRegionMmap, GuestUsize, MemoryRegionAddress, MmapRegion,
 };
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
@@ -235,6 +235,12 @@ pub enum Error {
 
     /// Guest address overflow
     GuestAddressOverFlow,
+
+    /// Error opening snapshot file
+    SnapshotOpen(io::Error),
+
+    // Error copying snapshot into region
+    SnapshotCopy(GuestMemoryError),
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -921,12 +927,12 @@ impl MemoryManager {
             let mut memory_region_file = OpenOptions::new()
                 .read(true)
                 .open(ext_backing_file)
-                .unwrap();
+                .map_err(Error::SnapshotOpen)?;
 
             // Fill the region with the file content.
             region
-                .read_from(MemoryRegionAddress(0), &mut memory_region_file, size)
-                .unwrap();
+                .read_exact_from(MemoryRegionAddress(0), &mut memory_region_file, size)
+                .map_err(Error::SnapshotCopy)?;
         }
 
         // Apply NUMA policy if needed.
