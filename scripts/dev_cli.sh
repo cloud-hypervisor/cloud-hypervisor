@@ -136,13 +136,32 @@ fix_dir_perms() {
 	--workdir "$CTR_CLH_ROOT_DIR" \
 	   --rm \
 	   --volume /dev:/dev \
-	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	   "$CTR_IMAGE" \
            chown -R "$(id -u):$(id -g)" "$CTR_CLH_ROOT_DIR"
 
     return $1
 }
-
+# Process exported volumes argument, separate the volumes and make docker compatible
+# Sample input: --volumes /a:/a#/b:/b
+# Sample output: --volume /a:/a --volume /b:/b
+#
+process_volumes_args() {
+    if [ -z "$arg_vols" ]; then
+        return
+    fi
+    exported_volumes=""
+    arr_vols=(${arg_vols//#/ })
+    for var in "${arr_vols[@]}"
+    do
+        parts=(${var//:/ })
+        if [[ ! -e "${parts[0]}" ]]; then
+            echo "The volume ${parts[0]} does not exist."
+            exit 1
+        fi
+        exported_volumes="$exported_volumes --volume $var"
+    done
+}
 cmd_help() {
     echo ""
     echo "Cloud Hypervisor $(basename $0)"
@@ -155,6 +174,7 @@ cmd_help() {
     echo "        --debug               Build the debug binaries. This is the default."
     echo "        --release             Build the release binaries."
     echo "        --libc                Select the C library Cloud Hypervisor will be built against. Default is gnu"
+    echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
     echo ""
     echo "    tests [--unit|--cargo|--all] [--libc musl|gnu] [-- [<cargo test args>]]"
     echo "        Run the Cloud Hypervisor tests."
@@ -164,6 +184,7 @@ cmd_help() {
     echo "        --integration-sgx     Run the SGX integration tests."
     echo "        --integration-windows Run the Windows guest integration tests."
     echo "        --libc                Select the C library Cloud Hypervisor will be built against. Default is gnu"
+    echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
     echo "        --all                 Run all tests."
     echo ""
     echo "    build-container [--type]"
@@ -196,6 +217,10 @@ cmd_build() {
                     die "Invalid libc: $1. Valid options are \"musl\" and \"gnu\"."
                 libc="$1"
                 ;;
+            "--volumes")
+                shift
+                arg_vols="$1"
+                ;;
             "--")           { shift; break;         } ;;
             *)
 		die "Unknown build argument: $1. Please use --help for help."
@@ -203,6 +228,7 @@ cmd_build() {
 	esac
 	shift
     done
+    process_volumes_args
 
     target="$(uname -m)-unknown-linux-${libc}"
 
@@ -222,7 +248,7 @@ cmd_build() {
 	   --workdir "$CTR_CLH_ROOT_DIR" \
 	   --rm \
 	   --volume /dev:/dev \
-	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	   --env RUSTFLAGS="$rustflags" \
 	   "$CTR_IMAGE" \
 	   cargo build --all \
@@ -237,7 +263,7 @@ cmd_clean() {
 	   --user "$(id -u):$(id -g)" \
 	   --workdir "$CTR_CLH_ROOT_DIR" \
 	   --rm \
-	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	   "$CTR_IMAGE" \
 	   cargo clean \
 	         --target-dir "$CTR_CLH_CARGO_TARGET" \
@@ -251,6 +277,7 @@ cmd_tests() {
     integration_sgx=false
     integration_windows=false
     libc="gnu"
+    arg_vols=""
 
     while [ $# -gt 0 ]; do
 	case "$1" in
@@ -266,6 +293,10 @@ cmd_tests() {
                     die "Invalid libc: $1. Valid options are \"musl\" and \"gnu\"."
                 libc="$1"
                 ;;
+            "--volumes")
+                shift
+                arg_vols="$1"
+                ;;
 	    "--all")                 { cargo=true; unit=true; integration=true;  } ;;
             "--")                    { shift; break;         } ;;
             *)
@@ -275,6 +306,7 @@ cmd_tests() {
 	shift
     done
 
+    process_volumes_args
     target="$(uname -m)-unknown-linux-${libc}"
     cflags=""
     target_cc=""
@@ -291,7 +323,7 @@ cmd_tests() {
 	       --device /dev/kvm \
 	       --device /dev/net/tun \
 	       --cap-add net_admin \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	       --env BUILD_TARGET="$target" \
 	       --env CFLAGS="$cflags" \
 	       --env TARGET_CC="$target_cc" \
@@ -304,7 +336,7 @@ cmd_tests() {
 	$DOCKER_RUNTIME run \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
 	       --rm \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_cargo_tests.sh || fix_dir_perms $? || exit $?
     fi
@@ -320,7 +352,7 @@ cmd_tests() {
 	       --net="$CTR_CLH_NET" \
 	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
@@ -339,7 +371,7 @@ cmd_tests() {
 	       --net="$CTR_CLH_NET" \
 	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
@@ -412,7 +444,7 @@ cmd_shell() {
 	   --net="$CTR_CLH_NET" \
 	   --tmpfs /tmp:exec \
 	   --volume /dev:/dev \
-	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	   --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	   --env USER="root" \
 	   --entrypoint bash \
