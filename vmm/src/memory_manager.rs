@@ -764,20 +764,20 @@ impl MemoryManager {
                     }
                 };
 
-            // Here we turn the backing file name into a backing file path as
-            // this will be needed when the memory region will be created with
-            // mmap().
-            // We simply ignore the backing files that are None, as they
-            // represent files that have been directly saved by the user, with
+            // Here we turn the content file name into a content file path as
+            // this will be needed to copy the content of the saved memory
+            // region into the newly created memory region.
+            // We simply ignore the content files that are None, as they
+            // represent regions that have been directly saved by the user, with
             // no need for saving into a dedicated external file. For these
             // files, the VmConfig already contains the information on where to
             // find them.
             let mut ext_regions = mem_snapshot.memory_regions;
             for region in ext_regions.iter_mut() {
-                if let Some(backing_file) = &mut region.backing_file {
+                if let Some(content) = &mut region.content {
                     let mut memory_region_path = vm_snapshot_path.clone();
-                    memory_region_path.push(backing_file.clone());
-                    *backing_file = memory_region_path;
+                    memory_region_path.push(content.clone());
+                    *content = memory_region_path;
                 }
             }
 
@@ -844,7 +844,7 @@ impl MemoryManager {
         if let Some(ext_regions) = ext_regions {
             for ext_region in ext_regions.iter() {
                 if ext_region.start_addr == start_addr && ext_region.size as usize == size {
-                    copy_ext_region_content = ext_region.backing_file.clone();
+                    copy_ext_region_content = ext_region.content.clone();
 
                     // No need to iterate further as we found the external
                     // region matching the current region.
@@ -922,11 +922,11 @@ impl MemoryManager {
         .map_err(Error::GuestMemory)?;
 
         // Copy data to the region if needed
-        if let Some(ext_backing_file) = &copy_ext_region_content {
+        if let Some(ext_region_content) = &copy_ext_region_content {
             // Open (read only) the snapshot file for the given region.
             let mut memory_region_file = OpenOptions::new()
                 .read(true)
-                .open(ext_backing_file)
+                .open(ext_region_content)
                 .map_err(Error::SnapshotOpen)?;
 
             // Fill the region with the file content.
@@ -1748,7 +1748,7 @@ pub struct GuestAddressDef(pub u64);
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MemoryRegion {
-    backing_file: Option<PathBuf>,
+    content: Option<PathBuf>,
     #[serde(with = "GuestAddressDef")]
     start_addr: GuestAddress,
     size: GuestUsize,
@@ -1775,7 +1775,7 @@ impl Snapshottable for MemoryManager {
                 return Err(MigratableError::Snapshot(anyhow!("Zero length region")));
             }
 
-            let mut backing_file = Some(PathBuf::from(format!("memory-region-{}", index)));
+            let mut content = Some(PathBuf::from(format!("memory-region-{}", index)));
             if let Some(file_offset) = region.file_offset() {
                 if (region.flags() & libc::MAP_SHARED == libc::MAP_SHARED)
                     && Self::is_hardlink(file_offset.file())
@@ -1789,12 +1789,12 @@ impl Snapshottable for MemoryManager {
                     // the memory content for this specific region, as we can
                     // assume the user will have it saved through the backing
                     // file already.
-                    backing_file = None;
+                    content = None;
                 }
             }
 
             memory_regions.push(MemoryRegion {
-                backing_file,
+                content,
                 start_addr: region.start_addr(),
                 size: region.len(),
             });
@@ -1858,9 +1858,9 @@ impl Transportable for MemoryManager {
 
                 if let Some(guest_memory) = &*self.snapshot.lock().unwrap() {
                     for region in self.snapshot_memory_regions.iter() {
-                        if let Some(backing_file) = &region.backing_file {
+                        if let Some(content) = &region.content {
                             let mut memory_region_path = vm_memory_snapshot_path.clone();
-                            memory_region_path.push(backing_file);
+                            memory_region_path.push(content);
 
                             // Create the snapshot file for the region
                             let mut memory_region_file = OpenOptions::new()
