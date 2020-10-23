@@ -346,7 +346,7 @@ impl MemoryManager {
         ram_regions: &[(GuestAddress, usize)],
         zones: &[MemoryZoneConfig],
         prefault: bool,
-        ext_regions: Option<Vec<MemoryRegion>>,
+        saved_regions: Option<Vec<MemoryRegion>>,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
         let mut zones = zones.to_owned();
         let mut mem_regions = Vec::new();
@@ -398,7 +398,7 @@ impl MemoryManager {
                     zone.shared,
                     zone.hugepages,
                     zone.host_numa_node,
-                    &ext_regions,
+                    &saved_regions,
                 )?;
 
                 // Add region to the list of regions associated with the
@@ -448,7 +448,7 @@ impl MemoryManager {
     pub fn new(
         vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
-        ext_regions: Option<Vec<MemoryRegion>>,
+        saved_regions: Option<Vec<MemoryRegion>>,
         prefault: bool,
         phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
@@ -581,7 +581,7 @@ impl MemoryManager {
             .collect();
 
         let (mem_regions, mut memory_zones) =
-            Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, ext_regions)?;
+            Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, saved_regions)?;
 
         let guest_memory =
             GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
@@ -772,8 +772,8 @@ impl MemoryManager {
             // no need for saving into a dedicated external file. For these
             // files, the VmConfig already contains the information on where to
             // find them.
-            let mut ext_regions = mem_snapshot.memory_regions;
-            for region in ext_regions.iter_mut() {
+            let mut saved_regions = mem_snapshot.memory_regions;
+            for region in saved_regions.iter_mut() {
                 if let Some(content) = &mut region.content {
                     let mut memory_region_path = vm_snapshot_path.clone();
                     memory_region_path.push(content.clone());
@@ -781,7 +781,7 @@ impl MemoryManager {
                 }
             }
 
-            MemoryManager::new(vm, config, Some(ext_regions), prefault, phys_bits)
+            MemoryManager::new(vm, config, Some(saved_regions), prefault, phys_bits)
         } else {
             Err(Error::Restore(MigratableError::Restore(anyhow!(
                 "Could not find {}-section from snapshot",
@@ -837,17 +837,17 @@ impl MemoryManager {
         shared: bool,
         hugepages: bool,
         host_numa_node: Option<u32>,
-        ext_regions: &Option<Vec<MemoryRegion>>,
+        saved_regions: &Option<Vec<MemoryRegion>>,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
-        let mut copy_ext_region_content: Option<PathBuf> = None;
+        let mut saved_region_content: Option<PathBuf> = None;
 
-        if let Some(ext_regions) = ext_regions {
-            for ext_region in ext_regions.iter() {
-                if ext_region.start_addr == start_addr && ext_region.size as usize == size {
-                    copy_ext_region_content = ext_region.content.clone();
+        if let Some(saved_regions) = saved_regions {
+            for saved_region in saved_regions.iter() {
+                if saved_region.start_addr == start_addr && saved_region.size as usize == size {
+                    saved_region_content = saved_region.content.clone();
 
-                    // No need to iterate further as we found the external
-                    // region matching the current region.
+                    // No need to iterate further as we found the saved region
+                    // matching the current region.
                     break;
                 }
             }
@@ -922,11 +922,11 @@ impl MemoryManager {
         .map_err(Error::GuestMemory)?;
 
         // Copy data to the region if needed
-        if let Some(ext_region_content) = &copy_ext_region_content {
+        if let Some(content) = &saved_region_content {
             // Open (read only) the snapshot file for the given region.
             let mut memory_region_file = OpenOptions::new()
                 .read(true)
-                .open(ext_region_content)
+                .open(content)
                 .map_err(Error::SnapshotOpen)?;
 
             // Fill the region with the file content.
