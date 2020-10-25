@@ -12,7 +12,7 @@ kvm = []
 anyhow = "1.0"
 arc-swap = ">=0.4.4"
 thiserror = "1.0"
-libc = "0.2.79"
+libc = "0.2.80"
 log = "0.4.11"
 kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
 kvm-bindings = { git = "https://github.com/rust-vmm/kvm-bindings", branch = "master", features = ["with-serde", "fam-wrappers"] }
