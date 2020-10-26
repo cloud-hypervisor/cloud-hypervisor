@@ -13,13 +13,13 @@ kvm = ["hypervisor/kvm"]
 io_uring = ["virtio-devices/io_uring"]
 
 [dependencies]
-arc-swap = ">=0.4.4"
-bitflags = ">=1.2.1"
-clap = "2.33.3"
 acpi_tables = { path = "../acpi_tables", optional = true }
 anyhow = "1.0"
+arc-swap = ">=0.4.4"
 arch = { path = "../arch" }
+bitflags = ">=1.2.1"
 block_util = { path = "../block_util" }
+clap = "2.33.3"
 devices = { path = "../devices" }
 epoll = ">=4.0.1"
 hypervisor = { path = "../hypervisor" }
@@ -35,6 +35,9 @@ seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v
 serde = {version = ">=1.0.27", features = ["rc"] }
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
+signal-hook = "0.1.16"
+tempfile = "3.1.0"
+thiserror = "1.0"
 url = "2.1.1"
 vfio-ioctls = { git = "https://github.com/cloud-hypervisor/vfio-ioctls", branch = "ch" }
 virtio-devices = { path = "../virtio-devices" }
@@ -44,8 +47,6 @@ vm-memory = { version = "0.3.0", features = ["backend-mmap", "backend-atomic"] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = ">=0.5.0", features = ["with-serde"] }
-signal-hook = "0.1.16"
-tempfile = "3.1.0"
 
 
 [dependencies.linux-loader]
