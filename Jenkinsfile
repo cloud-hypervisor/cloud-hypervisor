@@ -25,7 +25,7 @@ pipeline{
 			failFast true
             parallel {
 				stage ('Worker build') {
-					agent { node { label 'bionic' } }
+					agent { node { label 'groovy' } }
 					options {
 						timeout(time: 1, unit: 'HOURS')
 					}
@@ -82,7 +82,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build (musl)') {
-					agent { node { label 'bionic' } }
+					agent { node { label 'groovy' } }
 					options {
 						timeout(time: 1, unit: 'HOURS')
 					}
@@ -135,7 +135,7 @@ pipeline{
 					}
 				}
 				stage ('Worker build - Windows guest') {
-					agent { node { label 'bionic-win' } }
+					agent { node { label 'groovy-win' } }
 					options {
 						timeout(time: 1, unit: 'HOURS')
 					}
