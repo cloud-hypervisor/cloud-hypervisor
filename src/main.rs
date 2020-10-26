@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+extern crate anyhow;
 extern crate vmm;
 extern crate vmm_sys_util;
 
@@ -13,13 +14,38 @@ use clap::{App, Arg, ArgGroup, ArgMatches};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use seccomp::SeccompAction;
+use std::env;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
-use std::{env, process};
+use thiserror::Error;
 use vhost_user_block::start_block_backend;
 use vhost_user_net::start_net_backend;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
+
+#[derive(Error, Debug)]
+enum Error {
+    #[error("Failed to create API EventFd: {0}")]
+    CreateAPIEventFd(#[source] std::io::Error),
+    #[error("Failed to open hypervisor interface (is /dev/kvm available?): {0}")]
+    CreateHypervisor(#[source] hypervisor::HypervisorError),
+    #[error("Failed to start the VMM thread: {0}")]
+    StartVMMThread(#[source] vmm::Error),
+    #[error("Error parsing config: {0}")]
+    ParsingConfig(vmm::config::Error),
+    #[error("Error creating VM: {0:?}")]
+    VmCreate(vmm::api::ApiError),
+    #[error("Error booting VM: {0:?}")]
+    VmBoot(vmm::api::ApiError),
+    #[error("Error restoring VM: {0:?}")]
+    VmRestore(vmm::api::ApiError),
+    #[error("Error parsing restore: {0}")]
+    ParsingRestore(vmm::config::Error),
+    #[error("Failed to join on VMM thread: {0:?}")]
+    ThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
+    #[error("VMM thread exited with error: {0}")]
+    VmmThread(#[source] vmm::Error),
+}
 
 struct Logger {
     output: Mutex<Box<dyn std::io::Write + Send>>,
@@ -320,13 +346,13 @@ fn create_app<'a, 'b>(
     app
 }
 
-fn start_vmm(cmd_arguments: ArgMatches) {
+fn start_vmm(cmd_arguments: ArgMatches) -> Result<(), Error> {
     let api_socket_path = cmd_arguments
         .value_of("api-socket")
         .expect("Missing argument: api-socket");
 
     let (api_request_sender, api_request_receiver) = channel();
-    let api_evt = EventFd::new(EFD_NONBLOCK).expect("Cannot create API EventFd");
+    let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateAPIEventFd)?;
 
     let http_sender = api_request_sender.clone();
     let seccomp_action = if let Some(seccomp_value) = cmd_arguments.value_of("seccomp") {
@@ -335,24 +361,15 @@ fn start_vmm(cmd_arguments: ArgMatches) {
             "false" => SeccompAction::Allow,
             "log" => SeccompAction::Log,
             _ => {
-                eprintln!("Invalid parameter {} for \"--seccomp\" flag", seccomp_value);
-                process::exit(1);
+                // The user providing an invalid value will be rejected by clap
+                panic!("Invalid parameter {} for \"--seccomp\" flag", seccomp_value);
             }
         }
     } else {
         SeccompAction::Trap
     };
-    let hypervisor = match hypervisor::new() {
-        Ok(h) => h,
-        Err(e) => {
-            eprintln!(
-                "Failed to open hypervisor interface (is /dev/kvm available?): {:?}",
-                e
-            );
-            process::exit(1);
-        }
-    };
-    let vmm_thread = match vmm::start_vmm_thread(
+    let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
+    let vmm_thread = vmm::start_vmm_thread(
         env!("CARGO_PKG_VERSION").to_string(),
         api_socket_path,
         api_evt.try_clone().unwrap(),
@@ -360,25 +377,14 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         api_request_receiver,
         &seccomp_action,
         hypervisor,
-    ) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("Failed spawning the VMM thread {:?}", e);
-            process::exit(1);
-        }
-    };
+    )
+    .map_err(Error::StartVMMThread)?;
 
     // Can't test for "vm-config" group as some have default values. The kernel
     // is the only required option for booting the VM.
     if cmd_arguments.is_present("kernel") {
         let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
-        let vm_config = match config::VmConfig::parse(vm_params) {
-            Ok(config) => config,
-            Err(e) => {
-                eprintln!("{}", e);
-                process::exit(1);
-            }
-        };
+        let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 
         println!(
             "Cloud Hypervisor Guest\n\tAPI server: {}\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: \
@@ -399,36 +405,21 @@ fn start_vmm(cmd_arguments: ArgMatches) {
             api_request_sender,
             Arc::new(Mutex::new(vm_config)),
         )
-        .expect("Could not create the VM");
-        vmm::api::vm_boot(api_evt.try_clone().unwrap(), sender).expect("Could not boot the VM");
+        .map_err(Error::VmCreate)?;
+        vmm::api::vm_boot(api_evt.try_clone().unwrap(), sender).map_err(Error::VmBoot)?;
     } else if let Some(restore_params) = cmd_arguments.value_of("restore") {
         vmm::api::vm_restore(
             api_evt.try_clone().unwrap(),
             api_request_sender,
-            Arc::new(match config::RestoreConfig::parse(restore_params) {
-                Ok(config) => config,
-                Err(e) => {
-                    println!("{}", e);
-                    process::exit(1);
-                }
-            }),
+            Arc::new(config::RestoreConfig::parse(restore_params).map_err(Error::ParsingRestore)?),
         )
-        .expect("Could not restore the VM");
+        .map_err(Error::VmRestore)?;
     }
 
-    match vmm_thread.join() {
-        Ok(res) => match res {
-            Ok(_) => (),
-            Err(e) => {
-                eprintln!("VMM thread failed {:?}", e);
-                process::exit(1);
-            }
-        },
-        Err(e) => {
-            eprintln!("Could not join VMM thread {:?}", e);
-            process::exit(1);
-        }
-    }
+    vmm_thread
+        .join()
+        .map_err(Error::ThreadJoin)?
+        .map_err(Error::VmmThread)
 }
 
 fn main() {
@@ -488,8 +479,9 @@ fn main() {
         start_net_backend(backend_command);
     } else if let Some(backend_command) = cmd_arguments.value_of("block-backend") {
         start_block_backend(backend_command);
-    } else {
-        start_vmm(cmd_arguments);
+    } else if let Err(e) = start_vmm(cmd_arguments) {
+        eprintln!("{}", e);
+        std::process::exit(1);
     }
 }
 
