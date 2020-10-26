@@ -16,6 +16,7 @@ lto = true
 anyhow = "1.0"
 api_client = { path = "api_client" }
 clap = { version = "2.33.3", features = ["wrap_help"] }
+epoll = ">=4.0.1"
 hypervisor = { path = "hypervisor" }
 libc = "0.2.80"
 log = { version = "0.4.11", features = ["std"] }

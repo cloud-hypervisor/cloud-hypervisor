@@ -217,6 +217,7 @@ dependencies = [
  "clap",
  "credibility",
  "dirs",
+ "epoll",
  "hypervisor",
  "lazy_static",
  "libc",
