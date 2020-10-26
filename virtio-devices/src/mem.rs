@@ -21,7 +21,7 @@ use super::{
 
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{VirtioInterrupt, VirtioInterruptType};
-use libc::EFD_NONBLOCK;
+use libc::{EFD_NONBLOCK, EINVAL};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::cmp;
 use std::io;
@@ -313,6 +313,7 @@ struct MemEpollHandler {
     queue_evt: EventFd,
     kill_evt: EventFd,
     pause_evt: EventFd,
+    hugepages: bool,
 }
 
 struct StateChangeRequest<'a> {
@@ -324,6 +325,7 @@ struct StateChangeRequest<'a> {
     host_addr: u64,
     host_fd: Option<RawFd>,
     plug: bool,
+    hugepages: &'a mut bool,
 }
 
 impl MemEpollHandler {
@@ -396,30 +398,46 @@ impl MemEpollHandler {
         }
 
         if !r.plug {
-            if let Some(fd) = r.host_fd {
+            if !*r.hugepages {
                 let res = unsafe {
-                    libc::fallocate64(
-                        fd,
-                        libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
-                        offset as libc::off64_t,
-                        r.size as libc::off64_t,
+                    libc::madvise(
+                        (r.host_addr + offset) as *mut libc::c_void,
+                        r.size as libc::size_t,
+                        libc::MADV_DONTNEED,
                     )
                 };
                 if res != 0 {
-                    error!("fallocate64 get error {}", io::Error::last_os_error());
-                    return VIRTIO_MEM_RESP_ERROR;
+                    let e = io::Error::last_os_error();
+                    let mut errno = 0;
+                    if let Some(raw_os_err) = e.raw_os_error() {
+                        errno = raw_os_err;
+                    }
+                    if errno == EINVAL {
+                        *r.hugepages = true;
+                    } else {
+                        error!("madvise get error {}", e);
+                        return VIRTIO_MEM_RESP_ERROR;
+                    }
                 }
             }
-            let res = unsafe {
-                libc::madvise(
-                    (r.host_addr + offset) as *mut libc::c_void,
-                    r.size as libc::size_t,
-                    libc::MADV_DONTNEED,
-                )
-            };
-            if res != 0 {
-                error!("madvise get error {}", io::Error::last_os_error());
-                return VIRTIO_MEM_RESP_ERROR;
+            if *r.hugepages {
+                if let Some(fd) = r.host_fd {
+                    let res = unsafe {
+                        libc::fallocate64(
+                            fd,
+                            libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+                            offset as libc::off64_t,
+                            r.size as libc::off64_t,
+                        )
+                    };
+                    if res != 0 {
+                        error!("fallocate64 get error {}", io::Error::last_os_error());
+                        return VIRTIO_MEM_RESP_ERROR;
+                    }
+                } else {
+                    error!("memory unplug is not support by host");
+                    return VIRTIO_MEM_RESP_ERROR;
+                }
             }
         }
 
@@ -433,6 +451,7 @@ impl MemEpollHandler {
         mem_state: &mut Vec<bool>,
         host_addr: u64,
         host_fd: Option<RawFd>,
+        hugepages: &mut bool,
     ) -> u16 {
         for x in 0..(config.region_size / config.block_size as u64) as usize {
             if mem_state[x] {
@@ -446,6 +465,7 @@ impl MemEpollHandler {
                         host_addr,
                         host_fd,
                         plug: false,
+                        hugepages,
                     });
                 if resp_type != VIRTIO_MEM_RESP_ACK {
                     return resp_type;
@@ -538,6 +558,7 @@ impl MemEpollHandler {
                                     host_addr: self.host_addr,
                                     host_fd: self.host_fd,
                                     plug: true,
+                                    hugepages: &mut self.hugepages,
                                 },
                             );
                             if resp_type == VIRTIO_MEM_RESP_ACK {
@@ -562,6 +583,7 @@ impl MemEpollHandler {
                                     host_addr: self.host_addr,
                                     host_fd: self.host_fd,
                                     plug: false,
+                                    hugepages: &mut self.hugepages,
                                 },
                             );
                             if resp_type == VIRTIO_MEM_RESP_ACK {
@@ -580,6 +602,7 @@ impl MemEpollHandler {
                                 &mut self.mem_state,
                                 self.host_addr,
                                 self.host_fd,
+                                &mut self.hugepages,
                             );
                             if resp_type == VIRTIO_MEM_RESP_ACK {
                                 config.plugged_size = 0;
@@ -849,6 +872,7 @@ impl VirtioDevice for Mem {
             queue_evt: queue_evts.remove(0),
             kill_evt,
             pause_evt,
+            hugepages: false,
         };
 
         let paused = self.common.paused.clone();
