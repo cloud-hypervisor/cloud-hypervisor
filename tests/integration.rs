@@ -5,8 +5,6 @@
 
 #[cfg(test)]
 #[cfg(feature = "integration_tests")]
-#[cfg(test)]
-#[cfg(feature = "integration_tests")]
 #[macro_use]
 extern crate lazy_static;
 
@@ -23,10 +21,11 @@ mod tests {
     use std::io;
     use std::io::BufRead;
     use std::io::{Read, Write};
-    use std::net::TcpStream;
+    use std::net::{TcpListener, TcpStream};
     use std::os::unix::io::AsRawFd;
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Stdio};
+    use std::str::FromStr;
     use std::string::String;
     use std::sync::Mutex;
     use std::thread;
@@ -47,7 +46,12 @@ mod tests {
         l2_guest_mac1: String,
         l2_guest_mac2: String,
         l2_guest_mac3: String,
+        tcp_listener_port: u16,
     }
+
+    const DEFAULT_TCP_LISTENER_MESSAGE: &str = "booted";
+    const DEFAULT_TCP_LISTENER_PORT: u16 = 8000;
+    const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 40;
 
     struct Guest<'a> {
         tmp_dir: TempDir,
@@ -205,10 +209,28 @@ mod tests {
                 .join("cloud-init")
                 .join("ubuntu");
 
-            vec!["meta-data", "user-data"].iter().for_each(|x| {
+            vec!["meta-data"].iter().for_each(|x| {
                 rate_limited_copy(source_file_dir.join(x), cloud_init_directory.join(x))
                     .expect("Expect copying cloud-init meta-data to succeed");
             });
+
+            let mut user_data_string = String::new();
+            fs::File::open(source_file_dir.join("user-data"))
+                .unwrap()
+                .read_to_string(&mut user_data_string)
+                .expect("Expected reading user-data file in to succeed");
+            user_data_string = user_data_string.replace(
+                "@DEFAULT_TCP_LISTENER_MESSAGE",
+                &DEFAULT_TCP_LISTENER_MESSAGE,
+            );
+            user_data_string = user_data_string.replace("@HOST_IP", &network.host_ip);
+            user_data_string = user_data_string
+                .replace("@TCP_LISTENER_PORT", &network.tcp_listener_port.to_string());
+
+            fs::File::create(cloud_init_directory.join("user-data"))
+                .unwrap()
+                .write_all(&user_data_string.as_bytes())
+                .expect("Expected writing out user-data to succeed");
 
             let mut network_config_string = String::new();
 
@@ -615,6 +637,12 @@ mod tests {
         ChannelSession(ssh2::Error),
         Command(ssh2::Error),
         Parsing(std::num::ParseIntError),
+        EpollWait(std::io::Error),
+        EpollWaitTimeout,
+        ReadToString(std::io::Error),
+        SetReadTimeout(std::io::Error),
+        WrongGuestAddr,
+        WrongGuestMsg,
     }
 
     impl std::error::Error for Error {}
@@ -648,6 +676,7 @@ mod tests {
                 l2_guest_mac1: format!("de:ad:be:ef:12:{:02x}", id),
                 l2_guest_mac2: format!("de:ad:be:ef:34:{:02x}", id),
                 l2_guest_mac3: format!("de:ad:be:ef:56:{:02x}", id),
+                tcp_listener_port: DEFAULT_TCP_LISTENER_PORT + id as u16,
             };
 
             disk_config.prepare_files(&tmp_dir, &network);
@@ -796,6 +825,97 @@ mod tests {
                 .trim()
                 .parse()
                 .map_err(Error::Parsing)?)
+        }
+
+        fn wait_vm_boot(&self) -> Result<(), Error> {
+            let start = std::time::Instant::now();
+            // The 'port' is unique per 'GUEST' and listening to wild-card ip avoids retrying on 'TcpListener::bind()'
+            let listen_addr = format!("0.0.0.0:{}", self.network.tcp_listener_port);
+            let expected_guest_addr = self.network.guest_ip.as_str();
+            let mut s = String::new();
+
+            match (|| -> Result<(), Error> {
+                let listener =
+                    TcpListener::bind(&listen_addr.as_str()).map_err(Error::Connection)?;
+                listener
+                    .set_nonblocking(true)
+                    .expect("Cannot set non-blocking for tcp listener");
+
+                // Reply on epoll w/ timeout to wait for guest connections faithfully
+                let epoll_fd = epoll::create(true).expect("Cannot create epoll fd");
+                epoll::ctl(
+                    epoll_fd,
+                    epoll::ControlOptions::EPOLL_CTL_ADD,
+                    listener.as_raw_fd(),
+                    epoll::Event::new(epoll::Events::EPOLLIN, 0),
+                )
+                .expect("Cannot add 'tcp_listener' event to epoll");
+                let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 1];
+                let num_events = epoll::wait(
+                    epoll_fd,
+                    DEFAULT_TCP_LISTENER_TIMEOUT * 1000 as i32,
+                    &mut events[..],
+                )
+                .map_err(Error::EpollWait)?;
+                if num_events == 0 {
+                    return Err(Error::EpollWaitTimeout);
+                }
+
+                match listener.accept() {
+                    Ok((mut stream, addr)) => {
+                        // Make sure the connection is from the expected 'guest_addr'
+                        if addr.ip() != std::net::IpAddr::from_str(expected_guest_addr).unwrap() {
+                            s = format!(
+                                "Expecting the guest ip '{}' while being connected with ip '{}'",
+                                expected_guest_addr,
+                                addr.ip()
+                            );
+                            return Err(Error::WrongGuestAddr);
+                        }
+
+                        // Make sure the right message is to notify the guest VM is booted
+                        let mut data = String::new();
+                        stream
+                            .set_read_timeout(Some(std::time::Duration::new(
+                                DEFAULT_TCP_LISTENER_TIMEOUT as u64,
+                                0,
+                            )))
+                            .map_err(Error::SetReadTimeout)?;
+                        stream
+                            .read_to_string(&mut data)
+                            .map_err(Error::ReadToString)?;
+                        if data != DEFAULT_TCP_LISTENER_MESSAGE {
+                            s = format!(
+                                "Expecting the guest message '{}' while receiving the message '{}'",
+                                DEFAULT_TCP_LISTENER_MESSAGE, data
+                            );
+                            return Err(Error::WrongGuestMsg);
+                        };
+
+                        Ok(())
+                    }
+                    Err(e) => {
+                        s = "TcpListener::accept() failed".to_string();
+                        Err(Error::Connection(e))
+                    }
+                }
+            })() {
+                Err(e) => {
+                    let duration = start.elapsed();
+                    eprintln!(
+                        "\n\n==== Start 'wait_vm_boot' (FAILED) ====\n\n\
+                         duration =\"{:?}\"\n\
+                         listen_addr=\"{}\"\n\
+                         expected_guest_addr=\"{}\"\n\
+                         message =\"{}\"\n\
+                         \n==== End 'wait_vm_boot' outout ====\n\n",
+                        duration, listen_addr, expected_guest_addr, s,
+                    );
+
+                    Err(e)
+                }
+                Ok(_) => Ok(()),
+            }
         }
 
         fn check_numa_node_cpus(&self, node_id: usize, cpus: Vec<usize>) -> Result<bool, Error> {
@@ -3236,9 +3356,9 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
-
             let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot().unwrap();
+
                 // Test that there is no ttyS0
                 assert_eq!(
                     guest
@@ -3277,9 +3397,9 @@ mod tests {
 
             let mut child = cmd.spawn().unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
-
             let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot().unwrap();
+
                 #[cfg(target_arch = "x86_64")]
                 // Test that there is a ttyS0
                 assert_eq!(
@@ -3328,9 +3448,9 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
-
             let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot().unwrap();
+
                 // Test that there is a ttyS0
                 assert_eq!(
                     guest
@@ -3342,6 +3462,9 @@ mod tests {
                     1
                 );
             });
+
+            // This sleep is needed to wait for the login prompt
+            thread::sleep(std::time::Duration::new(2, 0));
 
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
@@ -3375,9 +3498,9 @@ mod tests {
                 .spawn()
                 .unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
-
             let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot().unwrap();
+
                 // Test that there is a ttyS0
                 assert_eq!(
                     guest
@@ -5305,9 +5428,9 @@ mod tests {
 
             let mut child = cmd.spawn().unwrap();
 
-            thread::sleep(std::time::Duration::new(20, 0));
-
             let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot().unwrap();
+
                 let orig_counters = get_counters(&api_socket);
                 assert!(guest
                     .ssh_command("dd if=/dev/zero of=test count=8 bs=1M")
