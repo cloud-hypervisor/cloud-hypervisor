@@ -346,11 +346,7 @@ fn create_app<'a, 'b>(
     app
 }
 
-fn start_vmm(cmd_arguments: ArgMatches) -> Result<(), Error> {
-    let api_socket_path = cmd_arguments
-        .value_of("api-socket")
-        .expect("Missing argument: api-socket");
-
+fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &str) -> Result<(), Error> {
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateAPIEventFd)?;
 
@@ -479,9 +475,18 @@ fn main() {
         start_net_backend(backend_command);
     } else if let Some(backend_command) = cmd_arguments.value_of("block-backend") {
         start_block_backend(backend_command);
-    } else if let Err(e) = start_vmm(cmd_arguments) {
-        eprintln!("{}", e);
-        std::process::exit(1);
+    } else {
+        let api_socket_path = cmd_arguments
+            .value_of("api-socket")
+            .expect("Missing argument: api-socket")
+            .to_string();
+
+        if let Err(e) = start_vmm(cmd_arguments, &api_socket_path) {
+            eprintln!("{}", e);
+            std::fs::remove_file(api_socket_path).ok();
+            std::process::exit(1);
+        }
+        std::fs::remove_file(api_socket_path).ok();
     }
 }
 
