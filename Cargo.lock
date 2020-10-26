@@ -212,6 +212,7 @@ dependencies = [
 name = "cloud-hypervisor"
 version = "0.10.0"
 dependencies = [
+ "anyhow",
  "api_client",
  "clap",
  "credibility",
@@ -227,6 +228,7 @@ dependencies = [
  "ssh2",
  "tempdir",
  "tempfile",
+ "thiserror",
  "vhost_user_block",
  "vhost_user_net",
  "vmm",
