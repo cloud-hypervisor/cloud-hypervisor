@@ -1649,6 +1649,7 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "tempfile",
+ "thiserror",
  "url",
  "vfio-ioctls",
  "virtio-devices",

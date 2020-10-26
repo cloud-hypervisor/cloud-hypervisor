@@ -39,6 +39,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::{result, thread};
+use thiserror::Error;
 use vm_migration::{Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -57,55 +58,71 @@ pub mod vm;
 mod acpi;
 
 /// Errors associated with VMM management
-#[derive(Debug)]
+#[derive(Debug, Error)]
 #[allow(clippy::large_enum_variant)]
 pub enum Error {
     /// API request receive error
-    ApiRequestRecv(RecvError),
+    #[error("Error receiving API request: {0}")]
+    ApiRequestRecv(#[source] RecvError),
 
     /// API response send error
-    ApiResponseSend(SendError<ApiResponse>),
+    #[error("Error sending API request: {0}")]
+    ApiResponseSend(#[source] SendError<ApiResponse>),
 
     /// Cannot bind to the UNIX domain socket path
-    Bind(io::Error),
+    #[error("Error binding to UNIX domain socket: {0}")]
+    Bind(#[source] io::Error),
 
     /// Cannot clone EventFd.
-    EventFdClone(io::Error),
+    #[error("Error cloning EventFd: {0}")]
+    EventFdClone(#[source] io::Error),
 
     /// Cannot create EventFd.
-    EventFdCreate(io::Error),
+    #[error("Error creating EventFd: {0}")]
+    EventFdCreate(#[source] io::Error),
 
     /// Cannot read from EventFd.
-    EventFdRead(io::Error),
+    #[error("Error reading from EventFd: {0}")]
+    EventFdRead(#[source] io::Error),
 
     /// Cannot create epoll context.
-    Epoll(io::Error),
+    #[error("Error creating epoll context: {0}")]
+    Epoll(#[source] io::Error),
 
     /// Cannot create HTTP thread
-    HttpThreadSpawn(io::Error),
+    #[error("Error spawning HTTP thread: {0}")]
+    HttpThreadSpawn(#[source] io::Error),
 
     /// Cannot handle the VM STDIN stream
+    #[error("Error handling VM stdin: {0:?}")]
     Stdin(VmError),
 
     /// Cannot reboot the VM
+    #[error("Error rebooting VM: {0:?}")]
     VmReboot(VmError),
 
     /// Cannot shut a VM down
+    #[error("Error shutting down VM: {0:?}")]
     VmShutdown(VmError),
 
     /// Cannot create VMM thread
-    VmmThreadSpawn(io::Error),
+    #[error("Error spawning VMM thread {0:?}")]
+    VmmThreadSpawn(#[source] io::Error),
 
     /// Cannot shut the VMM down
+    #[error("Error shutting down VMM: {0:?}")]
     VmmShutdown(VmError),
 
     // Error following "exe" link
-    ExePathReadLink(io::Error),
+    #[error("Error following \"exe\" link: {0}")]
+    ExePathReadLink(#[source] io::Error),
 
     /// Cannot create seccomp filter
+    #[error("Error creating seccomp filter: {0}")]
     CreateSeccompFilter(seccomp::SeccompError),
 
     /// Cannot apply seccomp filter
+    #[error("Error applying seccomp filter: {0}")]
     ApplySeccompFilter(seccomp::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
