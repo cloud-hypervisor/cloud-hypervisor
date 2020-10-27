@@ -127,6 +127,7 @@ fn virtio_blk_io_uring_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_epoll_wait),
         allow_syscall(libc::SYS_exit),
+        allow_syscall(libc::SYS_fsync),
         allow_syscall(libc::SYS_futex),
         allow_syscall(SYS_IO_URING_ENTER),
         allow_syscall(libc::SYS_madvise),
