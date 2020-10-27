@@ -1871,7 +1871,7 @@ impl Transportable for MemoryManager {
                                 .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
                             guest_memory
-                                .write_to(
+                                .write_all_to(
                                     region.start_addr,
                                     &mut memory_region_file,
                                     region.size as usize,
