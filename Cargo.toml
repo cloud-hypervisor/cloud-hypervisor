@@ -50,7 +50,7 @@ serde_json = "1.0.59"
 net_util = { path = "net_util" }
 
 [features]
-default = ["acpi", "cmos", "kvm"]
+default = ["acpi", "cmos", "io_uring", "kvm"]
 acpi = ["vmm/acpi"]
 cmos = ["vmm/cmos"]
 fwdebug = ["vmm/fwdebug"]
