@@ -10,6 +10,8 @@ extern crate serde_derive;
 
 use thiserror::Error;
 
+pub mod protocol;
+
 #[derive(Error, Debug)]
 pub enum MigratableError {
     #[error("Failed to pause migratable component: {0}")]
@@ -29,6 +31,9 @@ pub enum MigratableError {
 
     #[error("Failed to receive migratable component snapshot: {0}")]
     MigrateReceive(#[source] anyhow::Error),
+
+    #[error("Socket error: {0}")]
+    MigrateSocket(#[source] std::io::Error),
 }
 
 /// A Pausable component can be paused and resumed.
