@@ -828,12 +828,16 @@ mod tests {
                 .map_err(Error::Parsing)?)
         }
 
-        fn wait_vm_boot(&self) -> Result<(), Error> {
+        fn wait_vm_boot(&self, custom_timeout: Option<i32>) -> Result<(), Error> {
             let start = std::time::Instant::now();
             // The 'port' is unique per 'GUEST' and listening to wild-card ip avoids retrying on 'TcpListener::bind()'
             let listen_addr = format!("0.0.0.0:{}", self.network.tcp_listener_port);
             let expected_guest_addr = self.network.guest_ip.as_str();
             let mut s = String::new();
+            let timeout = match custom_timeout {
+                Some(t) => t,
+                None => DEFAULT_TCP_LISTENER_TIMEOUT,
+            };
 
             match (|| -> Result<(), Error> {
                 let listener =
@@ -852,12 +856,8 @@ mod tests {
                 )
                 .expect("Cannot add 'tcp_listener' event to epoll");
                 let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 1];
-                let num_events = epoll::wait(
-                    epoll_fd,
-                    DEFAULT_TCP_LISTENER_TIMEOUT * 1000 as i32,
-                    &mut events[..],
-                )
-                .map_err(Error::EpollWait)?;
+                let num_events = epoll::wait(epoll_fd, timeout * 1000 as i32, &mut events[..])
+                    .map_err(Error::EpollWait)?;
                 if num_events == 0 {
                     return Err(Error::EpollWaitTimeout);
                 }
@@ -877,10 +877,7 @@ mod tests {
                         // Make sure the right message is to notify the guest VM is booted
                         let mut data = String::new();
                         stream
-                            .set_read_timeout(Some(std::time::Duration::new(
-                                DEFAULT_TCP_LISTENER_TIMEOUT as u64,
-                                0,
-                            )))
+                            .set_read_timeout(Some(std::time::Duration::new(timeout as u64, 0)))
                             .map_err(Error::SetReadTimeout)?;
                         stream
                             .read_to_string(&mut data)
@@ -905,12 +902,12 @@ mod tests {
                     let duration = start.elapsed();
                     eprintln!(
                         "\n\n==== Start 'wait_vm_boot' (FAILED) ====\n\n\
-                         duration =\"{:?}\"\n\
+                         duration =\"{:?}, timeout = {}s\"\n\
                          listen_addr=\"{}\"\n\
                          expected_guest_addr=\"{}\"\n\
                          message =\"{}\"\n\
                          \n==== End 'wait_vm_boot' outout ====\n\n",
-                        duration, listen_addr, expected_guest_addr, s,
+                        duration, timeout, listen_addr, expected_guest_addr, s,
                     );
 
                     Err(e)
@@ -3358,7 +3355,7 @@ mod tests {
                 .unwrap();
 
             let r = std::panic::catch_unwind(|| {
-                guest.wait_vm_boot().unwrap();
+                guest.wait_vm_boot(None).unwrap();
 
                 // Test that there is no ttyS0
                 assert_eq!(
@@ -3399,7 +3396,7 @@ mod tests {
             let mut child = cmd.spawn().unwrap();
 
             let r = std::panic::catch_unwind(|| {
-                guest.wait_vm_boot().unwrap();
+                guest.wait_vm_boot(None).unwrap();
 
                 #[cfg(target_arch = "x86_64")]
                 // Test that there is a ttyS0
@@ -3450,7 +3447,7 @@ mod tests {
                 .unwrap();
 
             let r = std::panic::catch_unwind(|| {
-                guest.wait_vm_boot().unwrap();
+                guest.wait_vm_boot(None).unwrap();
 
                 // Test that there is a ttyS0
                 assert_eq!(
@@ -3500,7 +3497,7 @@ mod tests {
                 .unwrap();
 
             let r = std::panic::catch_unwind(|| {
-                guest.wait_vm_boot().unwrap();
+                guest.wait_vm_boot(None).unwrap();
 
                 // Test that there is a ttyS0
                 assert_eq!(
@@ -5430,7 +5427,7 @@ mod tests {
             let mut child = cmd.spawn().unwrap();
 
             let r = std::panic::catch_unwind(|| {
-                guest.wait_vm_boot().unwrap();
+                guest.wait_vm_boot(None).unwrap();
 
                 let orig_counters = get_counters(&api_socket);
                 assert!(guest
