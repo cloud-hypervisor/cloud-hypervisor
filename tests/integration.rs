@@ -31,6 +31,7 @@ mod tests {
     use std::thread;
     use tempdir::TempDir;
     use tempfile::NamedTempFile;
+    use wait_timeout::ChildExt;
 
     lazy_static! {
         static ref NEXT_VM_ID: Mutex<u8> = Mutex::new(1);
@@ -3513,9 +3514,9 @@ mod tests {
                 );
 
                 guest.ssh_command("sudo shutdown -h now").unwrap();
-                thread::sleep(std::time::Duration::new(20, 0));
             });
 
+            let _ = child.wait_timeout(std::time::Duration::from_secs(20));
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
             handle_child_output(r, &output);
@@ -3607,8 +3608,8 @@ mod tests {
             thread::sleep(std::time::Duration::new(20, 0));
 
             guest.ssh_command("sudo shutdown -h now").unwrap();
-            thread::sleep(std::time::Duration::new(20, 0));
 
+            let _ = child.wait_timeout(std::time::Duration::from_secs(20));
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
 
@@ -3962,9 +3963,9 @@ mod tests {
                     guest
                         .ssh_command("sudo shutdown -h now")
                         .unwrap_or_default();
-                    thread::sleep(std::time::Duration::new(20, 0));
                 });
 
+                let _ = child.wait_timeout(std::time::Duration::from_secs(40));
                 let _ = child.kill();
                 let output = child.wait_with_output().unwrap();
                 handle_child_output(r, &output);
@@ -4026,9 +4027,9 @@ mod tests {
                 assert_eq!(fd_count_1, fd_count_2);
 
                 guest.ssh_command("sudo shutdown -h now").unwrap();
-                thread::sleep(std::time::Duration::new(20, 0));
             });
 
+            let _ = child.wait_timeout(std::time::Duration::from_secs(20));
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
             handle_child_output(r, &output);
@@ -5623,9 +5624,9 @@ mod tests {
                     DEFAULT_SSH_TIMEOUT,
                 )
                 .unwrap();
-                thread::sleep(std::time::Duration::new(40, 0));
             });
 
+            let _ = child.wait_timeout(std::time::Duration::from_secs(40));
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
 
@@ -5720,7 +5721,7 @@ mod tests {
                 .unwrap();
             });
 
-            thread::sleep(std::time::Duration::new(20, 0));
+            let _ = child.wait_timeout(std::time::Duration::from_secs(20));
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
 
