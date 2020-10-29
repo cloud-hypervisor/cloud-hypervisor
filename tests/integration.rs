@@ -3913,7 +3913,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_reboot() {
             let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -3926,16 +3925,18 @@ mod tests {
             .for_each(|disk_config| {
                 let guest = Guest::new(*disk_config);
 
-                let mut child = GuestCommand::new(&guest)
-                    .args(&["--cpus", "boot=1"])
+                let mut cmd = GuestCommand::new(&guest);
+                cmd.args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
                     .default_raw_disks()
                     .default_net()
-                    .args(&["--serial", "tty", "--console", "off"])
-                    .capture_output()
-                    .spawn()
-                    .unwrap();
+                    .capture_output();
+
+                #[cfg(target_arch = "aarch64")]
+                cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+
+                let mut child = cmd.spawn().unwrap();
 
                 let r = std::panic::catch_unwind(|| {
                     guest.wait_vm_boot(Some(120)).unwrap();
