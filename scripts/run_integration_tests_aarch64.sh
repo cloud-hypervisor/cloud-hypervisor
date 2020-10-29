@@ -126,11 +126,11 @@ update_workloads() {
 
     if [ ! -f "$VIRTIOFSD" ]; then
         pushd $WORKLOADS_DIR
-        git clone --depth 1 "https://gitlab.com/virtio-fs/qemu.git" -b "virtio-fs-dev" $QEMU_DIR
+        git clone --depth 1 "https://gitlab.com/virtio-fs/qemu.git" -b "qemu5.0-virtiofs-dax" $QEMU_DIR
         pushd $QEMU_DIR
         time ./configure --prefix=$PWD --target-list=aarch64-softmmu
-        time make -j `nproc`
-        cp build/tools/virtiofsd/virtiofsd $VIRTIOFSD || exit 1
+        time make virtiofsd -j `nproc`
+        cp virtiofsd $VIRTIOFSD || exit 1
         popd
         rm -rf $QEMU_DIR
         popd
