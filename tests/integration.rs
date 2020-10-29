@@ -5459,7 +5459,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_watchdog() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -5550,19 +5549,22 @@ mod tests {
                     .unwrap_or_default();
                 assert_eq!(boot_count, 3);
 
-                // Now pause the VM and remain offline for 30s
-                assert!(remote_command(&api_socket, "pause", None));
-                thread::sleep(std::time::Duration::new(30, 0));
-                assert!(remote_command(&api_socket, "resume", None));
+                #[cfg(target_arch = "x86_64")]
+                {
+                    // Now pause the VM and remain offline for 30s
+                    assert!(remote_command(&api_socket, "pause", None));
+                    thread::sleep(std::time::Duration::new(30, 0));
+                    assert!(remote_command(&api_socket, "resume", None));
 
-                // Check no reboot
-                let boot_count = guest
-                    .ssh_command("sudo journalctl --list-boots | wc -l")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(boot_count, 3);
+                    // Check no reboot
+                    let boot_count = guest
+                        .ssh_command("sudo journalctl --list-boots | wc -l")
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default();
+                    assert_eq!(boot_count, 3);
+                }
             });
 
             let _ = child.kill();
