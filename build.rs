@@ -9,7 +9,7 @@ extern crate clap;
 use std::process::Command;
 
 fn main() {
-    let mut version = crate_version!().to_string();
+    let mut version = "v".to_owned() + crate_version!();
 
     if let Ok(git_out) = Command::new("git").args(&["describe", "--dirty"]).output() {
         if git_out.status.success() {
