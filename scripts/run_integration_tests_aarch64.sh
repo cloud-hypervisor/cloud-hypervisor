@@ -197,7 +197,7 @@ sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
 export RUST_BACKTRACE=1
-time cargo test --no-default-features --features "integration_tests,kvm" "tests::parallel::$@" -- --skip test_snapshot_restore
+time cargo test --no-default-features --features "integration_tests,kvm" "tests::parallel::$@"
 RES=$?
 
 # Tear vhost_user_net test network down
