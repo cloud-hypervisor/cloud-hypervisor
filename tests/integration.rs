@@ -5247,6 +5247,7 @@ mod tests {
         // through each ssh command. There's no need to perform a dedicated test to
         // verify the migration went well for virtio-net.
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_snapshot_restore() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -5254,10 +5255,7 @@ mod tests {
             workload_path.push("workloads");
 
             let mut kernel_path = workload_path;
-            #[cfg(target_arch = "x86_64")]
             kernel_path.push("bzImage");
-            #[cfg(target_arch = "aarch64")]
-            kernel_path.push("Image");
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
