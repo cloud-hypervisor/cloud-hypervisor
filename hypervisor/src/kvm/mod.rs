@@ -738,10 +738,10 @@ impl cpu::Vcpu for KvmVcpu {
                     use kvm_bindings::{KVM_SYSTEM_EVENT_RESET, KVM_SYSTEM_EVENT_SHUTDOWN};
                     // On Aarch64, when the VM is shutdown, run() returns
                     // VcpuExit::SystemEvent with reason KVM_SYSTEM_EVENT_SHUTDOWN
-                    if event_type == KVM_SYSTEM_EVENT_SHUTDOWN
-                        || event_type == KVM_SYSTEM_EVENT_RESET
-                    {
+                    if event_type == KVM_SYSTEM_EVENT_RESET {
                         Ok(cpu::VmExit::Reset)
+                    } else if event_type == KVM_SYSTEM_EVENT_SHUTDOWN {
+                        Ok(cpu::VmExit::Shutdown)
                     } else {
                         Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                             "Unexpected system event with type 0x{:x}, flags 0x{:x}",

@@ -194,6 +194,7 @@ pub enum VmExit<'a> {
     MmioWrite(u64 /* address */, &'a [u8]),
     Ignore,
     Reset,
+    Shutdown,
     Hyperv,
 }
 
