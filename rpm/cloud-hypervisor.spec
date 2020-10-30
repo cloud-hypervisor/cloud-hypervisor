@@ -1,6 +1,6 @@
 Name:           cloud-hypervisor
 Summary:        Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on top of KVM.
-Version:        0.8.0
+Version:        0.11.0
 Release:        0%{?dist}
 License:        ASL 2.0 or BSD-3-clause
 Group:          Applications/System
@@ -36,13 +36,13 @@ install -D -m755  ./target/x86_64-unknown-linux-gnu/release/cloud-hypervisor %{b
 install -D -m755  ./target/x86_64-unknown-linux-gnu/release/ch-remote %{buildroot}%{_bindir}
 install -d %{buildroot}%{_libdir}
 install -d %{buildroot}%{_libdir}/cloud-hypervisor
-install -D -m755 target/x86_64-unknown-linux-gnu/release/vhost_user_blk %{buildroot}%{_libdir}/cloud-hypervisor
+install -D -m755 target/x86_64-unknown-linux-gnu/release/vhost_user_block %{buildroot}%{_libdir}/cloud-hypervisor
 install -D -m755 target/x86_64-unknown-linux-gnu/release/vhost_user_fs %{buildroot}%{_libdir}/cloud-hypervisor
 install -D -m755 target/x86_64-unknown-linux-gnu/release/vhost_user_net %{buildroot}%{_libdir}/cloud-hypervisor
 
 install -d %{buildroot}%{_libdir}/cloud-hypervisor/static
 install -D -m755 target/x86_64-unknown-linux-musl/release/cloud-hypervisor %{buildroot}%{_libdir}/cloud-hypervisor/static
-install -D -m755 target/x86_64-unknown-linux-musl/release/vhost_user_blk %{buildroot}%{_libdir}/cloud-hypervisor/static
+install -D -m755 target/x86_64-unknown-linux-musl/release/vhost_user_block %{buildroot}%{_libdir}/cloud-hypervisor/static
 install -D -m755 target/x86_64-unknown-linux-musl/release/vhost_user_fs %{buildroot}%{_libdir}/cloud-hypervisor/static
 install -D -m755 target/x86_64-unknown-linux-musl/release/vhost_user_net %{buildroot}%{_libdir}/cloud-hypervisor/static
 install -D -m755 target/x86_64-unknown-linux-musl/release/ch-remote %{buildroot}%{_libdir}/cloud-hypervisor/static
