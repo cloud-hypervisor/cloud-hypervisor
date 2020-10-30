@@ -432,7 +432,8 @@ impl Vmm {
 
     fn vm_reboot(&mut self) -> result::Result<(), VmError> {
         // Without ACPI, a reset is equivalent to a shutdown
-        #[cfg(not(feature = "acpi"))]
+        // On AArch64, before ACPI is supported, we simply jump over this check and continue to reset.
+        #[cfg(all(target_arch = "x86_64", not(feature = "acpi")))]
         {
             if self.vm.is_some() {
                 self.exit_evt.write(1).unwrap();

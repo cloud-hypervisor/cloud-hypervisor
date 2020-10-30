@@ -398,6 +398,7 @@ pub struct CpuManager {
     vm: Arc<dyn hypervisor::Vm>,
     vcpus_kill_signalled: Arc<AtomicBool>,
     vcpus_pause_signalled: Arc<AtomicBool>,
+    exit_evt: EventFd,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     reset_evt: EventFd,
     vcpu_states: Vec<VcpuState>,
@@ -523,11 +524,13 @@ impl VcpuState {
 
 impl CpuManager {
     #[allow(unused_variables)]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &CpusConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
         vm: Arc<dyn hypervisor::Vm>,
+        exit_evt: EventFd,
         reset_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
@@ -557,6 +560,7 @@ impl CpuManager {
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
             vcpu_states,
+            exit_evt,
             reset_evt,
             selected_cpu: 0,
             vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
@@ -723,6 +727,7 @@ impl CpuManager {
     ) -> Result<()> {
         let cpu_id = vcpu.lock().unwrap().id;
         let reset_evt = self.reset_evt.try_clone().unwrap();
+        let exit_evt = self.exit_evt.try_clone().unwrap();
         let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
         let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
 
@@ -808,6 +813,12 @@ impl CpuManager {
                                     debug!("VmExit::Reset");
                                     vcpu_run_interrupted.store(true, Ordering::SeqCst);
                                     reset_evt.write(1).unwrap();
+                                    break;
+                                }
+                                VmExit::Shutdown => {
+                                    debug!("VmExit::Shutdown");
+                                    vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                                    exit_evt.write(1).unwrap();
                                     break;
                                 }
                                 _ => {
