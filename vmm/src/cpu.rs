@@ -34,7 +34,7 @@ use devices::interrupt_controller::InterruptController;
 use hypervisor::kvm::kvm_bindings;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuId;
-use hypervisor::{CpuState, VmExit};
+use hypervisor::{CpuState, HypervisorCpuError, VmExit};
 use seccomp::{SeccompAction, SeccompFilter};
 
 use libc::{c_void, siginfo_t};
@@ -213,8 +213,6 @@ pub struct Vcpu {
     // The hypervisor abstracted CPU.
     vcpu: Arc<dyn hypervisor::Vcpu>,
     id: u8,
-    #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg(target_arch = "aarch64")]
     mpidr: u64,
     saved_state: Option<CpuState>,
@@ -227,11 +225,7 @@ impl Vcpu {
     ///
     /// * `id` - Represents the CPU number between [0, max vcpus).
     /// * `vm` - The virtual machine this vcpu will get attached to.
-    pub fn new(
-        id: u8,
-        vm: &Arc<dyn hypervisor::Vm>,
-        interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
-    ) -> Result<Arc<Mutex<Self>>> {
+    pub fn new(id: u8, vm: &Arc<dyn hypervisor::Vm>) -> Result<Arc<Mutex<Self>>> {
         let vcpu = vm
             .create_vcpu(id)
             .map_err(|e| Error::VcpuCreate(e.into()))?;
@@ -239,7 +233,6 @@ impl Vcpu {
         Ok(Arc::new(Mutex::new(Vcpu {
             vcpu,
             id,
-            interrupt_controller,
             #[cfg(target_arch = "aarch64")]
             mpidr: 0,
             saved_state: None,
@@ -323,28 +316,8 @@ impl Vcpu {
     ///
     /// Note that the state of the VCPU and associated VM must be setup first for this to do
     /// anything useful.
-    pub fn run(&self) -> Result<bool> {
-        match self.vcpu.run() {
-            Ok(run) => match run {
-                #[cfg(target_arch = "x86_64")]
-                VmExit::IoapicEoi(vector) => {
-                    if let Some(interrupt_controller) = &self.interrupt_controller {
-                        interrupt_controller
-                            .lock()
-                            .unwrap()
-                            .end_of_interrupt(vector);
-                    }
-                    Ok(true)
-                }
-                VmExit::Ignore => Ok(true),
-                VmExit::Reset => Ok(false),
-                // No need to handle anything from a KVM HyperV exit
-                VmExit::Hyperv => Ok(true),
-                _ => Err(Error::UnexpectedVmExit),
-            },
-
-            Err(e) => Err(Error::VcpuRun(e.into())),
-        }
+    pub fn run(&self) -> std::result::Result<VmExit, HypervisorCpuError> {
+        self.vcpu.run()
     }
 }
 
@@ -679,13 +652,7 @@ impl CpuManager {
     ) -> Result<Arc<Mutex<Vcpu>>> {
         info!("Creating vCPU: cpu_id = {}", cpu_id);
 
-        let interrupt_controller = if let Some(interrupt_controller) = &self.interrupt_controller {
-            Some(interrupt_controller.clone())
-        } else {
-            None
-        };
-
-        let vcpu = Vcpu::new(cpu_id, &self.vm, interrupt_controller)?;
+        let vcpu = Vcpu::new(cpu_id, &self.vm)?;
 
         if let Some(snapshot) = snapshot {
             // AArch64 vCPUs should be initialized after created.
@@ -770,6 +737,14 @@ impl CpuManager {
         let vcpu_seccomp_filter = get_seccomp_filter(&self.seccomp_action, Thread::Vcpu)
             .map_err(Error::CreateSeccompFilter)?;
 
+        #[cfg(target_arch = "x86_64")]
+        let interrupt_controller_clone =
+            if let Some(interrupt_controller) = &self.interrupt_controller {
+                Some(interrupt_controller.clone())
+            } else {
+                None
+            };
+
         let handle = Some(
             thread::Builder::new()
                 .name(format!("vcpu{}", cpu_id))
@@ -816,14 +791,33 @@ impl CpuManager {
 
                         // vcpu.run() returns false on a triple-fault so trigger a reset
                         match vcpu.lock().unwrap().run() {
+                            Ok(run) => match run {
+                                #[cfg(target_arch = "x86_64")]
+                                VmExit::IoapicEoi(vector) => {
+                                    if let Some(interrupt_controller) = &interrupt_controller_clone
+                                    {
+                                        interrupt_controller
+                                            .lock()
+                                            .unwrap()
+                                            .end_of_interrupt(vector);
+                                    }
+                                }
+                                VmExit::Ignore => {}
+                                VmExit::Hyperv => {}
+                                VmExit::Reset => {
+                                    debug!("VmExit::Reset");
+                                    vcpu_run_interrupted.store(true, Ordering::SeqCst);
+                                    reset_evt.write(1).unwrap();
+                                    break;
+                                }
+                                _ => {
+                                    error!("VCPU generated error: {:?}", Error::UnexpectedVmExit);
+                                    break;
+                                }
+                            },
+
                             Err(e) => {
-                                error!("VCPU generated error: {:?}", e);
-                                break;
-                            }
-                            Ok(true) => {}
-                            Ok(false) => {
-                                vcpu_run_interrupted.store(true, Ordering::SeqCst);
-                                reset_evt.write(1).unwrap();
+                                error!("VCPU generated error: {:?}", Error::VcpuRun(e.into()));
                                 break;
                             }
                         }
