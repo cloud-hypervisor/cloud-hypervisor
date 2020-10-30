@@ -639,7 +639,6 @@ impl Vm {
         let memory_manager = MemoryManager::new(
             vm.clone(),
             &config.lock().unwrap().memory.clone(),
-            None,
             false,
             phys_bits,
         )

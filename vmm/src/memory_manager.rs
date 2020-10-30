@@ -36,7 +36,7 @@ use vm_memory::guest_memory::FileOffset;
 use vm_memory::{
     mmap::MmapRegionError, Address, Bytes, Error as MmapError, GuestAddress, GuestAddressSpace,
     GuestMemory, GuestMemoryAtomic, GuestMemoryError, GuestMemoryLoadGuard, GuestMemoryMmap,
-    GuestMemoryRegion, GuestRegionMmap, GuestUsize, MemoryRegionAddress, MmapRegion,
+    GuestMemoryRegion, GuestRegionMmap, GuestUsize, MmapRegion,
 };
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
@@ -346,7 +346,6 @@ impl MemoryManager {
         ram_regions: &[(GuestAddress, usize)],
         zones: &[MemoryZoneConfig],
         prefault: bool,
-        saved_regions: Option<Vec<MemoryRegion>>,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
         let mut zones = zones.to_owned();
         let mut mem_regions = Vec::new();
@@ -398,7 +397,6 @@ impl MemoryManager {
                     zone.shared,
                     zone.hugepages,
                     zone.host_numa_node,
-                    &saved_regions,
                 )?;
 
                 // Add region to the list of regions associated with the
@@ -445,10 +443,32 @@ impl MemoryManager {
         Ok((mem_regions, memory_zones))
     }
 
+    fn fill_saved_regions(&mut self, saved_regions: Vec<MemoryRegion>) -> Result<(), Error> {
+        for region in saved_regions {
+            if let Some(content) = region.content {
+                // Open (read only) the snapshot file for the given region.
+                let mut memory_region_file = OpenOptions::new()
+                    .read(true)
+                    .open(content)
+                    .map_err(Error::SnapshotOpen)?;
+
+                self.guest_memory
+                    .memory()
+                    .read_exact_from(
+                        region.start_addr,
+                        &mut memory_region_file,
+                        region.size as usize,
+                    )
+                    .map_err(Error::SnapshotCopy)?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn new(
         vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
-        saved_regions: Option<Vec<MemoryRegion>>,
         prefault: bool,
         phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
@@ -581,7 +601,7 @@ impl MemoryManager {
             .collect();
 
         let (mem_regions, mut memory_zones) =
-            Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, saved_regions)?;
+            Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault)?;
 
         let guest_memory =
             GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
@@ -625,7 +645,6 @@ impl MemoryManager {
                             zone.shared,
                             zone.hugepages,
                             zone.host_numa_node,
-                            &None,
                         )?;
 
                         virtio_mem_regions.push(region.clone());
@@ -781,7 +800,9 @@ impl MemoryManager {
                 }
             }
 
-            MemoryManager::new(vm, config, Some(saved_regions), prefault, phys_bits)
+            let mm = MemoryManager::new(vm, config, prefault, phys_bits)?;
+            mm.lock().unwrap().fill_saved_regions(saved_regions)?;
+            Ok(mm)
         } else {
             Err(Error::Restore(MigratableError::Restore(anyhow!(
                 "Could not find {}-section from snapshot",
@@ -837,22 +858,7 @@ impl MemoryManager {
         shared: bool,
         hugepages: bool,
         host_numa_node: Option<u32>,
-        saved_regions: &Option<Vec<MemoryRegion>>,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
-        let mut saved_region_content: Option<PathBuf> = None;
-
-        if let Some(saved_regions) = saved_regions {
-            for saved_region in saved_regions.iter() {
-                if saved_region.start_addr == start_addr && saved_region.size as usize == size {
-                    saved_region_content = saved_region.content.clone();
-
-                    // No need to iterate further as we found the saved region
-                    // matching the current region.
-                    break;
-                }
-            }
-        }
-
         let (f, f_off) = match backing_file {
             Some(ref file) => {
                 if file.is_dir() {
@@ -920,20 +926,6 @@ impl MemoryManager {
             start_addr,
         )
         .map_err(Error::GuestMemory)?;
-
-        // Copy data to the region if needed
-        if let Some(content) = &saved_region_content {
-            // Open (read only) the snapshot file for the given region.
-            let mut memory_region_file = OpenOptions::new()
-                .read(true)
-                .open(content)
-                .map_err(Error::SnapshotOpen)?;
-
-            // Fill the region with the file content.
-            region
-                .read_exact_from(MemoryRegionAddress(0), &mut memory_region_file, size)
-                .map_err(Error::SnapshotCopy)?;
-        }
 
         // Apply NUMA policy if needed.
         if let Some(node) = host_numa_node {
@@ -1038,7 +1030,6 @@ impl MemoryManager {
             self.shared,
             self.hugepages,
             None,
-            &None,
         )?;
 
         // Map it into the guest
