@@ -31,6 +31,7 @@ mod tests {
     use std::thread;
     use tempdir::TempDir;
     use tempfile::NamedTempFile;
+    #[cfg_attr(target_arch = "aarch64", allow(unused_imports))]
     use wait_timeout::ChildExt;
 
     lazy_static! {
@@ -5579,10 +5580,10 @@ mod tests {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
     mod windows {
         use crate::tests::*;
 
-        #[cfg(target_arch = "x86_64")]
         fn windows_auth() -> PasswordAuth {
             PasswordAuth {
                 username: String::from("administrator"),
@@ -5591,7 +5592,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_windows_guest() {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -5643,7 +5643,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_windows_guest_snapshot_restore() {
             let tmp_dir = TempDir::new("ch").unwrap();
             let mut workload_path = dirs::home_dir().unwrap();
@@ -5738,11 +5737,11 @@ mod tests {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
     mod sgx {
         use crate::tests::*;
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_sgx() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_SGX_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
