@@ -44,6 +44,7 @@ use micro_http::Body;
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
+use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
@@ -138,6 +139,12 @@ pub enum ApiError {
 
     /// The vsock device could not be added to the VM.
     VmAddVsock(VmError),
+
+    /// Error starting migration receiever
+    VmReceiveMigration(MigratableError),
+
+    /// Error starting migration sender
+    VmSendMigration(MigratableError),
 }
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
@@ -174,6 +181,18 @@ pub struct VmRemoveDeviceData {
 #[derive(Clone, Deserialize, Serialize, Default)]
 pub struct VmSnapshotConfig {
     /// The snapshot destination URL
+    pub destination_url: String,
+}
+
+#[derive(Clone, Deserialize, Serialize, Default)]
+pub struct VmReceiveMigrationData {
+    /// URL for the reception of migration state
+    pub receiver_url: String,
+}
+
+#[derive(Clone, Deserialize, Serialize, Default)]
+pub struct VmSendMigrationData {
+    /// URL to migrate the VM to
     pub destination_url: String,
 }
 
@@ -275,6 +294,12 @@ pub enum ApiRequest {
 
     /// Restore from a VM snapshot
     VmRestore(Arc<RestoreConfig>, Sender<ApiResponse>),
+
+    /// Incoming migration
+    VmReceiveMigration(Arc<VmReceiveMigrationData>, Sender<ApiResponse>),
+
+    /// Outgoing migration
+    VmSendMigration(Arc<VmSendMigrationData>, Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -352,6 +377,12 @@ pub enum VmAction {
 
     /// Snapshot VM
     Snapshot(Arc<VmSnapshotConfig>),
+
+    /// Incoming migration
+    ReceiveMigration(Arc<VmReceiveMigrationData>),
+
+    /// Outgoing migration
+    SendMigration(Arc<VmSendMigrationData>),
 }
 
 fn vm_action(
@@ -381,6 +412,8 @@ fn vm_action(
         ResizeZone(v) => ApiRequest::VmResizeZone(v, response_sender),
         Restore(v) => ApiRequest::VmRestore(v, response_sender),
         Snapshot(v) => ApiRequest::VmSnapshot(v, response_sender),
+        ReceiveMigration(v) => ApiRequest::VmReceiveMigration(v, response_sender),
+        SendMigration(v) => ApiRequest::VmSendMigration(v, response_sender),
     };
 
     // Send the VM request.
@@ -422,6 +455,22 @@ pub fn vm_resume(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<
 
 pub fn vm_counters(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Counters)
+}
+
+pub fn vm_receive_migration(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VmReceiveMigrationData>,
+) -> ApiResult<Option<Body>> {
+    vm_action(api_evt, api_sender, VmAction::ReceiveMigration(data))
+}
+
+pub fn vm_send_migration(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VmSendMigrationData>,
+) -> ApiResult<Option<Body>> {
+    vm_action(api_evt, api_sender, VmAction::SendMigration(data))
 }
 
 pub fn vm_snapshot(
