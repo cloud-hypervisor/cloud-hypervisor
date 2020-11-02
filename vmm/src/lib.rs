@@ -22,7 +22,10 @@ extern crate vmm_sys_util;
 #[macro_use]
 extern crate credibility;
 
-use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
+use crate::api::{
+    ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmReceiveMigrationData,
+    VmSendMigrationData, VmmPingResponse,
+};
 use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig, VsockConfig,
 };
@@ -39,7 +42,7 @@ use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::{result, thread};
 use thiserror::Error;
-use vm_migration::{Pausable, Snapshottable, Transportable};
+use vm_migration::{MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 pub mod api;
@@ -639,6 +642,25 @@ impl Vmm {
         }
     }
 
+    fn vm_receive_migration(
+        &mut self,
+        receive_data_migration: VmReceiveMigrationData,
+    ) -> result::Result<(), MigratableError> {
+        info!(
+            "Migration Receiver: {}",
+            receive_data_migration.receiver_url
+        );
+        Ok(())
+    }
+
+    fn vm_send_migration(
+        &mut self,
+        send_data_migration: VmSendMigrationData,
+    ) -> result::Result<(), MigratableError> {
+        info!("Migration Sender: {}", send_data_migration.destination_url);
+        Ok(())
+    }
+
     fn control_loop(&mut self, api_receiver: Arc<Receiver<ApiRequest>>) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -876,6 +898,22 @@ impl Vmm {
                                         .map_err(ApiError::VmInfo)
                                         .map(ApiResponsePayload::VmAction);
 
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmReceiveMigration(receive_migration_data, sender) => {
+                                    let response = self
+                                        .vm_receive_migration(
+                                            receive_migration_data.as_ref().clone(),
+                                        )
+                                        .map_err(ApiError::VmReceiveMigration)
+                                        .map(|_| ApiResponsePayload::Empty);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmSendMigration(send_migration_data, sender) => {
+                                    let response = self
+                                        .vm_send_migration(send_migration_data.as_ref().clone())
+                                        .map_err(ApiError::VmSendMigration)
+                                        .map(|_| ApiResponsePayload::Empty);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                             }
