@@ -230,6 +230,32 @@ fn restore_api_command(socket: &mut UnixStream, config: &str) -> Result<(), Erro
     .map_err(Error::ApiClient)
 }
 
+fn receive_migration_api_command(socket: &mut UnixStream, url: &str) -> Result<(), Error> {
+    let receive_migration_data = vmm::api::VmReceiveMigrationData {
+        receiver_url: url.to_owned(),
+    };
+    simple_api_command(
+        socket,
+        "PUT",
+        "receive-migration",
+        Some(&serde_json::to_string(&receive_migration_data).unwrap()),
+    )
+    .map_err(Error::ApiClient)
+}
+
+fn send_migration_api_command(socket: &mut UnixStream, url: &str) -> Result<(), Error> {
+    let send_migration_data = vmm::api::VmSendMigrationData {
+        destination_url: url.to_owned(),
+    };
+    simple_api_command(
+        socket,
+        "PUT",
+        "send-migration",
+        Some(&serde_json::to_string(&send_migration_data).unwrap()),
+    )
+    .map_err(Error::ApiClient)
+}
+
 fn do_command(matches: &ArgMatches) -> Result<(), Error> {
     let mut socket =
         UnixStream::connect(matches.value_of("api-socket").unwrap()).map_err(Error::Connect)?;
@@ -339,6 +365,22 @@ fn do_command(matches: &ArgMatches) -> Result<(), Error> {
                 .subcommand_matches("restore")
                 .unwrap()
                 .value_of("restore_config")
+                .unwrap(),
+        ),
+        Some("send-migration") => send_migration_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("send-migration")
+                .unwrap()
+                .value_of("send_migration_config")
+                .unwrap(),
+        ),
+        Some("receive-migration") => receive_migration_api_command(
+            &mut socket,
+            matches
+                .subcommand_matches("receive-migration")
+                .unwrap()
+                .value_of("receive_migration_config")
                 .unwrap(),
         ),
         Some(c) => simple_api_command(&mut socket, "PUT", c, None).map_err(Error::ApiClient),
@@ -483,6 +525,24 @@ fn main() {
                     Arg::with_name("restore_config")
                         .index(1)
                         .help(vmm::config::RestoreConfig::SYNTAX),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("send-migration")
+                .about("Initiate a VM migration")
+                .arg(
+                    Arg::with_name("send_migration_config")
+                        .index(1)
+                        .help("<destination_url>"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("receive-migration")
+                .about("Receive a VM migration")
+                .arg(
+                    Arg::with_name("receive_migration_config")
+                        .index(1)
+                        .help("<receiver_url>"),
                 ),
         );
 
