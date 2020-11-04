@@ -680,7 +680,7 @@ impl Vm {
         snapshot: &Snapshot,
         exit_evt: EventFd,
         reset_evt: EventFd,
-        source_url: &str,
+        source_url: Option<&str>,
         prefault: bool,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
