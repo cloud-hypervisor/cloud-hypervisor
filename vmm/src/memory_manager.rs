@@ -1348,7 +1348,7 @@ impl MemoryManager {
             let file = OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open("/dev/sgx/virt_epc")
+                .open("/dev/sgx_virt_epc")
                 .map_err(Error::SgxVirtEpcOpen)?;
 
             let prot = PROT_READ | PROT_WRITE;
@@ -1359,7 +1359,7 @@ impl MemoryManager {
 
             // We can't use the vm-memory crate to perform the memory mapping
             // here as it would try to ensure the size of the backing file is
-            // matching the size of the expected mapping. The /dev/sgx/virt_epc
+            // matching the size of the expected mapping. The /dev/sgx_virt_epc
             // device does not work that way, it provides a file descriptor
             // which is not matching the mapping size, as it's a just a way to
             // let KVM know that an EPC section is being created for the guest.
