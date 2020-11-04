@@ -8,7 +8,7 @@ the host kernel. The required Linux and KVM changes can be found in the
 [KVM SGX Tree](https://github.com/intel/kvm-sgx).
 
 Utilizing SGX in the guest requires a kernel/OS with SGX support, e.g. a kernel
-built using the [SGX Linux Development Tree](https://github.com/jsakkine-intel/linux-sgx.git)
+built using the [SGX Linux Development Tree](https://git.kernel.org/pub/scm/linux/kernel/git/jarkko/linux-sgx.git)
 or the [KVM SGX Tree](https://github.com/intel/kvm-sgx). Running KVM SGX as the
 guest kernel allows nested virtualization of SGX.
 
@@ -19,7 +19,7 @@ following [instructions](https://github.com/intel/linux-sgx).
 
 ## Cloud-Hypervisor support
 
-Assuming the host exposes `/dev/sgx/virt_epc`, we can pass SGX enclaves through
+Assuming the host exposes `/dev/sgx_virt_epc`, we can pass SGX enclaves through
 the guest.
 
 In order to use SGX enclaves within a Cloud-Hypervisor VM, we must define one
@@ -42,12 +42,12 @@ Once booted, and assuming your guest kernel contains the patches from the
 have been correctly created under `/dev/sgx`:
 
 ```bash
-ls /dev/sgx
-enclave provision virt_epc
+ls /dev/sgx*
+/dev/sgx_enclave  /dev/sgx_provision  /dev/sgx_virt_epc
 ```
 
 From this point, it is possible to run any SGX application from the guest, as
-it will access `/dev/sgx/enclave` device to create dedicated SGX enclaves.
+it will access `/dev/sgx_enclave` device to create dedicated SGX enclaves.
 
 Note: There is only one contiguous SGX EPC region, which contains all SGX EPC
 sections. This region is exposed through ACPI and marked as reserved through
