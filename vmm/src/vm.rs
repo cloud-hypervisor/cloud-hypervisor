@@ -58,7 +58,7 @@ use std::ffi::CString;
 #[cfg(target_arch = "x86_64")]
 use std::fmt;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::io::{Seek, SeekFrom};
 use std::num::Wrapping;
 use std::ops::Deref;
@@ -67,10 +67,11 @@ use std::{result, str, thread};
 use url::Url;
 use vm_device::Bus;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
-    GuestRegionMmap,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    GuestMemoryMmap, GuestMemoryRegion, GuestRegionMmap,
 };
 use vm_migration::{
+    protocol::{MemoryRange, MemoryRangeTable},
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
 };
@@ -1606,6 +1607,68 @@ impl Vm {
     /// Gets the actual size of the balloon.
     pub fn balloon_size(&self) -> u64 {
         self.device_manager.lock().unwrap().balloon_size()
+    }
+
+    pub fn receive_memory_regions<F>(
+        &mut self,
+        ranges: &MemoryRangeTable,
+        fd: &mut F,
+    ) -> std::result::Result<(), MigratableError>
+    where
+        F: Read,
+    {
+        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+        let mem = guest_memory.memory();
+
+        for range in ranges.regions() {
+            mem.read_exact_from(GuestAddress(range.gpa), fd, range.length as usize)
+                .map_err(|e| {
+                    MigratableError::MigrateReceive(anyhow!(
+                        "Error transferring memory to socket: {}",
+                        e
+                    ))
+                })?;
+        }
+        Ok(())
+    }
+
+    pub fn send_memory_regions<F>(
+        &mut self,
+        ranges: &MemoryRangeTable,
+        fd: &mut F,
+    ) -> std::result::Result<(), MigratableError>
+    where
+        F: Write,
+    {
+        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+        let mem = guest_memory.memory();
+
+        for range in ranges.regions() {
+            mem.write_all_to(GuestAddress(range.gpa), fd, range.length as usize)
+                .map_err(|e| {
+                    MigratableError::MigrateSend(anyhow!(
+                        "Error transferring memory to socket: {}",
+                        e
+                    ))
+                })?;
+        }
+
+        Ok(())
+    }
+
+    pub fn memory_range_table(&self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+        let mut table = MemoryRangeTable::default();
+        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+
+        guest_memory.memory().with_regions_mut(|_, region| {
+            table.push(MemoryRange {
+                gpa: region.start_addr().raw_value(),
+                length: region.len() as u64,
+            });
+            Ok(())
+        })?;
+
+        Ok(table)
     }
 }
 
