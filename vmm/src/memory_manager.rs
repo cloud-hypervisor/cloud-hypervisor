@@ -760,54 +760,60 @@ impl MemoryManager {
         snapshot: &Snapshot,
         vm: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
-        source_url: &str,
+        source_url: Option<&str>,
         prefault: bool,
         phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
-        let url = Url::parse(source_url).unwrap();
-        /* url must be valid dir which is verified in recv_vm_snapshot() */
-        let vm_snapshot_path = url.to_file_path().unwrap();
+        let mm = MemoryManager::new(vm, config, prefault, phys_bits)?;
 
-        if let Some(mem_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", MEMORY_MANAGER_SNAPSHOT_ID))
-        {
-            let mem_snapshot: MemoryManagerSnapshotData =
-                match serde_json::from_slice(&mem_section.snapshot) {
-                    Ok(snapshot) => snapshot,
-                    Err(error) => {
-                        return Err(Error::Restore(MigratableError::Restore(anyhow!(
-                            "Could not deserialize MemoryManager {}",
-                            error
-                        ))))
+        if let Some(source_url) = source_url {
+            let url = Url::parse(source_url).unwrap();
+            /* url must be valid dir which is verified in recv_vm_snapshot() */
+            let vm_snapshot_path = url.to_file_path().unwrap();
+
+            if let Some(mem_section) = snapshot
+                .snapshot_data
+                .get(&format!("{}-section", MEMORY_MANAGER_SNAPSHOT_ID))
+            {
+                let mem_snapshot: MemoryManagerSnapshotData =
+                    match serde_json::from_slice(&mem_section.snapshot) {
+                        Ok(snapshot) => snapshot,
+                        Err(error) => {
+                            return Err(Error::Restore(MigratableError::Restore(anyhow!(
+                                "Could not deserialize MemoryManager {}",
+                                error
+                            ))))
+                        }
+                    };
+
+                // Here we turn the content file name into a content file path as
+                // this will be needed to copy the content of the saved memory
+                // region into the newly created memory region.
+                // We simply ignore the content files that are None, as they
+                // represent regions that have been directly saved by the user, with
+                // no need for saving into a dedicated external file. For these
+                // files, the VmConfig already contains the information on where to
+                // find them.
+                let mut saved_regions = mem_snapshot.memory_regions;
+                for region in saved_regions.iter_mut() {
+                    if let Some(content) = &mut region.content {
+                        let mut memory_region_path = vm_snapshot_path.clone();
+                        memory_region_path.push(content.clone());
+                        *content = memory_region_path;
                     }
-                };
-
-            // Here we turn the content file name into a content file path as
-            // this will be needed to copy the content of the saved memory
-            // region into the newly created memory region.
-            // We simply ignore the content files that are None, as they
-            // represent regions that have been directly saved by the user, with
-            // no need for saving into a dedicated external file. For these
-            // files, the VmConfig already contains the information on where to
-            // find them.
-            let mut saved_regions = mem_snapshot.memory_regions;
-            for region in saved_regions.iter_mut() {
-                if let Some(content) = &mut region.content {
-                    let mut memory_region_path = vm_snapshot_path.clone();
-                    memory_region_path.push(content.clone());
-                    *content = memory_region_path;
                 }
-            }
 
-            let mm = MemoryManager::new(vm, config, prefault, phys_bits)?;
-            mm.lock().unwrap().fill_saved_regions(saved_regions)?;
-            Ok(mm)
+                mm.lock().unwrap().fill_saved_regions(saved_regions)?;
+
+                Ok(mm)
+            } else {
+                Err(Error::Restore(MigratableError::Restore(anyhow!(
+                    "Could not find {}-section from snapshot",
+                    MEMORY_MANAGER_SNAPSHOT_ID
+                ))))
+            }
         } else {
-            Err(Error::Restore(MigratableError::Restore(anyhow!(
-                "Could not find {}-section from snapshot",
-                MEMORY_MANAGER_SNAPSHOT_ID
-            ))))
+            Ok(mm)
         }
     }
 

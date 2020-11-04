@@ -397,7 +397,7 @@ impl Vmm {
             &snapshot,
             exit_evt,
             reset_evt,
-            source_url,
+            Some(source_url),
             restore_cfg.prefault,
             &self.seccomp_action,
             self.hypervisor.clone(),
