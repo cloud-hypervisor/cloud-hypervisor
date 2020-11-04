@@ -106,19 +106,25 @@ update_workloads() {
     }
 
     SRCDIR=$PWD
-    if [ ! -d "$LINUX_CUSTOM_DIR" ]; then
-        pushd $WORKLOADS_DIR
-        time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "virtio-fs-virtio-iommu-5.8-rc4" $LINUX_CUSTOM_DIR
-        cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
-        popd
-    else
+    LINUX_CUSTOM_BRANCH="virtio-fs-virtio-iommu-5.8-rc4"
+
+    # Check whether the local HEAD commit same as the remote HEAD or not. Remove the folder if they are different.
+    if [ -d "$LINUX_CUSTOM_DIR" ]; then
         pushd $LINUX_CUSTOM_DIR
         git fetch
-        git checkout -f "virtio-fs-virtio-iommu-5.8-rc4"
-        cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
+        LINUX_CUSTOM_LOCAL_HEAD=$(git rev-parse HEAD)
+        LINUX_CUSTOM_REMOTE_HEAD=$(git rev-parse remotes/origin/$LINUX_CUSTOM_BRANCH)
         popd
+        if [ "$LINUX_CUSTOM_LOCAL_HEAD" != "$LINUX_CUSTOM_REMOTE_HEAD" ]; then
+            rm -rf "$LINUX_CUSTOM_DIR"
+        fi
     fi
 
+    if [ ! -d "$LINUX_CUSTOM_DIR" ]; then
+        time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b $LINUX_CUSTOM_BRANCH $LINUX_CUSTOM_DIR
+    fi
+
+    cp $SRCDIR/resources/linux-config-aarch64 $LINUX_CUSTOM_DIR/.config
     build_custom_linux_kernel
 
     VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
