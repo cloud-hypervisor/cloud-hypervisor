@@ -1290,7 +1290,6 @@ mod tests {
         tap: Option<&str>,
         num_queues: usize,
         prepare_vhost_user_net_daemon: Option<&PrepareNetDaemon>,
-        self_spawned: bool,
         generate_host_mac: bool,
     ) {
         let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -1308,20 +1307,7 @@ mod tests {
             None
         };
 
-        let (net_params, daemon_child) = if self_spawned {
-            (
-                    format!(
-                        "vhost_user=true,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size=1024{}",
-                        guest.network.guest_mac, guest.network.host_ip, num_queues,
-                        if let Some(host_mac) =host_mac {
-                            format!(",host_mac={}", host_mac)
-                        } else {
-                            "".to_owned()
-                        }
-                    ),
-                    None,
-                )
-        } else {
+        let (net_params, daemon_child) = {
             let prepare_daemon = prepare_vhost_user_net_daemon.unwrap();
             // Start the daemon
             let (daemon_child, vunet_socket_path) =
@@ -1457,7 +1443,6 @@ mod tests {
         readonly: bool,
         direct: bool,
         prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,
-        self_spawned: bool,
     ) {
         let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(&mut focal);
@@ -1468,19 +1453,7 @@ mod tests {
 
         let kernel_path = direct_kernel_boot_path().unwrap();
 
-        let (blk_params, daemon_child) = if self_spawned {
-            let mut blk_file_path = workload_path;
-            blk_file_path.push("blk.img");
-            let blk_file_path = String::from(blk_file_path.to_str().unwrap());
-
-            (
-                format!(
-                    "vhost_user=true,path={},num_queues={},queue_size=128",
-                    blk_file_path, num_queues,
-                ),
-                None,
-            )
-        } else {
+        let (blk_params, daemon_child) = {
             let prepare_daemon = prepare_vhost_user_blk_daemon.unwrap();
             // Start the daemon
             let (daemon_child, vubd_socket_path) =
@@ -1630,7 +1603,6 @@ mod tests {
         readonly: bool,
         direct: bool,
         prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,
-        self_spawned: bool,
     ) {
         let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(&mut focal);
@@ -1645,15 +1617,7 @@ mod tests {
             .disk(DiskType::RawOperatingSystem)
             .unwrap();
 
-        let (blk_boot_params, daemon_child) = if self_spawned {
-            (
-                format!(
-                    "vhost_user=true,path={},num_queues={},queue_size=128",
-                    disk_path, num_queues,
-                ),
-                None,
-            )
-        } else {
+        let (blk_boot_params, daemon_child) = {
             let prepare_daemon = prepare_vhost_user_blk_daemon.unwrap();
             // Start the daemon
             let (daemon_child, vubd_socket_path) = prepare_daemon(
@@ -1698,28 +1662,6 @@ mod tests {
             // Just check the VM booted correctly.
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), num_queues as u32);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-
-            if self_spawned {
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or(1);
-
-                assert_eq!(reboot_count, 0);
-                guest.ssh_command("sudo reboot").unwrap_or_default();
-
-                guest.wait_vm_boot(None).unwrap();
-
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 1);
-            }
         });
         let _ = child.kill();
         let output = child.wait_with_output().unwrap();
@@ -2997,7 +2939,7 @@ mod tests {
 
         #[test]
         fn test_vhost_user_net_default() {
-            test_vhost_user_net(None, 2, Some(&prepare_vhost_user_net_daemon), false, false)
+            test_vhost_user_net(None, 2, Some(&prepare_vhost_user_net_daemon), false)
         }
 
         #[test]
@@ -3006,7 +2948,6 @@ mod tests {
                 Some("mytap0"),
                 2,
                 Some(&prepare_vhost_user_net_daemon),
-                false,
                 false,
             )
         }
@@ -3018,13 +2959,12 @@ mod tests {
                 2,
                 Some(&prepare_vhost_user_net_daemon),
                 false,
-                false,
             )
         }
 
         #[test]
         fn test_vhost_user_net_multiple_queues() {
-            test_vhost_user_net(None, 4, Some(&prepare_vhost_user_net_daemon), false, false)
+            test_vhost_user_net(None, 4, Some(&prepare_vhost_user_net_daemon), false)
         }
 
         #[test]
@@ -3034,60 +2974,37 @@ mod tests {
                 4,
                 Some(&prepare_vhost_user_net_daemon),
                 false,
-                false,
             )
-        }
-
-        #[test]
-        fn test_vhost_user_net_self_spawning() {
-            test_vhost_user_net(None, 4, None, true, false)
-        }
-
-        #[test]
-        fn test_vhost_user_net_self_spawning_host_mac() {
-            test_vhost_user_net(None, 2, None, true, true)
         }
 
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_net_host_mac() {
-            test_vhost_user_net(None, 2, None, true, true)
+            test_vhost_user_net(None, 2, Some(&prepare_vhost_user_net_daemon), true)
         }
 
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_blk_default() {
-            test_vhost_user_blk(2, false, false, Some(&prepare_vubd), false)
-        }
-
-        #[test]
-        #[cfg(target_arch = "x86_64")]
-        fn test_vhost_user_blk_self_spawning() {
-            test_vhost_user_blk(1, false, false, None, true)
+            test_vhost_user_blk(2, false, false, Some(&prepare_vubd))
         }
 
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_blk_readonly() {
-            test_vhost_user_blk(1, true, false, Some(&prepare_vubd), false)
+            test_vhost_user_blk(1, true, false, Some(&prepare_vubd))
         }
 
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_blk_direct() {
-            test_vhost_user_blk(1, false, true, Some(&prepare_vubd), false)
+            test_vhost_user_blk(1, false, true, Some(&prepare_vubd))
         }
 
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_boot_from_vhost_user_blk_default() {
-            test_boot_from_vhost_user_blk(1, false, false, Some(&prepare_vubd), false)
-        }
-
-        #[test]
-        #[cfg(target_arch = "x86_64")]
-        fn test_boot_from_vhost_user_blk_self_spawning() {
-            test_boot_from_vhost_user_blk(1, false, false, None, true)
+            test_boot_from_vhost_user_blk(1, false, false, Some(&prepare_vubd))
         }
 
         #[test]
