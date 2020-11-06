@@ -95,6 +95,8 @@ pub enum ValidationError {
     DiskSocketAndPath,
     /// Using vhost user requires shared memory
     VhostUserRequiresSharedMemory,
+    /// No socket provided for vhost_use
+    VhostUserMissingSocket,
     /// Trying to use IOMMU without PCI
     IommuUnsupported,
     /// Trying to use VFIO without PCI
@@ -121,6 +123,7 @@ impl fmt::Display for ValidationError {
             VhostUserRequiresSharedMemory => {
                 write!(f, "Using vhost-user requires using shared memory")
             }
+            VhostUserMissingSocket => write!(f, "No socket provided when using vhost-user"),
             IommuUnsupported => write!(f, "Using an IOMMU without PCI support is unsupported"),
             VfioUnsupported => write!(f, "Using VFIO without PCI support is unsupported"),
             CpuTopologyZeroPart => write!(f, "No part of the CPU topology can be zero"),
@@ -1453,6 +1456,9 @@ impl VmConfig {
                 if disk.vhost_user && !self.memory.shared {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
                 }
+                if disk.vhost_user && disk.vhost_socket.is_none() {
+                    return Err(ValidationError::VhostUserMissingSocket);
+                }
             }
         }
 
@@ -1788,9 +1794,9 @@ mod tests {
             }
         );
         assert_eq!(
-            DiskConfig::parse("path=/path/to_file,vhost_user=true")?,
+            DiskConfig::parse("vhost_user=true,socket=/tmp/sock")?,
             DiskConfig {
-                path: Some(PathBuf::from("/path/to_file")),
+                vhost_socket: Some(String::from("/tmp/sock")),
                 vhost_user: true,
                 ..Default::default()
             }
@@ -2264,9 +2270,18 @@ mod tests {
         }]);
         assert!(invalid_config.validate().is_err());
 
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            vhost_user: true,
+            vhost_socket: Some("/path/to/sock".to_owned()),
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
+
         let mut still_valid_config = valid_config.clone();
         still_valid_config.disks = Some(vec![DiskConfig {
             vhost_user: true,
+            vhost_socket: Some("/path/to/sock".to_owned()),
             ..Default::default()
         }]);
         still_valid_config.memory.shared = true;
@@ -2282,6 +2297,7 @@ mod tests {
         let mut still_valid_config = valid_config.clone();
         still_valid_config.net = Some(vec![NetConfig {
             vhost_user: true,
+            vhost_socket: Some("/path/to/sock".to_owned()),
             ..Default::default()
         }]);
         still_valid_config.memory.shared = true;
@@ -2293,7 +2309,7 @@ mod tests {
         }]);
         assert!(invalid_config.validate().is_err());
 
-        let mut still_valid_config = valid_config.clone();
+        let mut still_valid_config = valid_config;
         invalid_config.fs = Some(vec![FsConfig {
             ..Default::default()
         }]);

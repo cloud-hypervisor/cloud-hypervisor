@@ -812,14 +812,12 @@ mod unit_tests {
                     "shared=true",
                     "--disk",
                     "vhost_user=true,socket=/tmp/sock1",
-                    "path=/path/to/disk/2",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "disks": [
-                        {"vhost_user":true, "vhost_socket":"/tmp/sock1"},
-                        {"path": "/path/to/disk/2"}
+                        {"vhost_user":true, "vhost_socket":"/tmp/sock1"}
                     ]
                 }"#,
                 true,
@@ -833,14 +831,12 @@ mod unit_tests {
                     "shared=true",
                     "--disk",
                     "vhost_user=true,socket=/tmp/sock1",
-                    "path=/path/to/disk/2",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "disks": [
-                        {"vhost_user":true, "vhost_socket":"/tmp/sock1"},
-                        {"path": "/path/to/disk/2"}
+                        {"vhost_user":true, "vhost_socket":"/tmp/sock1"}
                     ]
                 }"#,
                 true,
