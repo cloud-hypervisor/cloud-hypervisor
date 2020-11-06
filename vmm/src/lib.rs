@@ -35,7 +35,6 @@ use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::fs::File;
 use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::{result, thread};
@@ -240,12 +239,6 @@ pub fn start_vmm_thread(
     let vmm_seccomp_filter =
         get_seccomp_filter(seccomp_action, Thread::Vmm).map_err(Error::CreateSeccompFilter)?;
 
-    // Find the path that the "/proc/<pid>/exe" symlink points to. Must be done before spawning
-    // a thread as Rust does not put the child threads in the same thread group which prevents the
-    // link from being followed as per PTRACE_MODE_READ_FSCREDS (see proc(5) and ptrace(2)). The
-    // alternative is to run always with CAP_SYS_PTRACE but that is not a good idea.
-    let self_path = format!("/proc/{}/exe", std::process::id());
-    let vmm_path = std::fs::read_link(PathBuf::from(self_path)).map_err(Error::ExePathReadLink)?;
     let vmm_seccomp_action = seccomp_action.clone();
     let thread = thread::Builder::new()
         .name("vmm".to_string())
@@ -256,7 +249,6 @@ pub fn start_vmm_thread(
             let mut vmm = Vmm::new(
                 vmm_version.to_string(),
                 api_event,
-                vmm_path,
                 vmm_seccomp_action,
                 hypervisor,
             )?;
@@ -279,7 +271,6 @@ pub struct Vmm {
     version: String,
     vm: Option<Vm>,
     vm_config: Option<Arc<Mutex<VmConfig>>>,
-    vmm_path: PathBuf,
     seccomp_action: SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
 }
@@ -288,7 +279,6 @@ impl Vmm {
     fn new(
         vmm_version: String,
         api_evt: EventFd,
-        vmm_path: PathBuf,
         seccomp_action: SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
@@ -320,7 +310,6 @@ impl Vmm {
             version: vmm_version,
             vm: None,
             vm_config: None,
-            vmm_path,
             seccomp_action,
             hypervisor,
         })
@@ -337,7 +326,6 @@ impl Vmm {
                     Arc::clone(vm_config),
                     exit_evt,
                     reset_evt,
-                    self.vmm_path.clone(),
                     &self.seccomp_action,
                     self.hypervisor.clone(),
                 )?;
@@ -406,7 +394,6 @@ impl Vmm {
             &snapshot,
             exit_evt,
             reset_evt,
-            self.vmm_path.clone(),
             source_url,
             restore_cfg.prefault,
             &self.seccomp_action,
@@ -459,7 +446,6 @@ impl Vmm {
                 config,
                 exit_evt,
                 reset_evt,
-                self.vmm_path.clone(),
                 &self.seccomp_action,
                 self.hypervisor.clone(),
             )?);

@@ -63,10 +63,8 @@ use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(feature = "kvm")]
 use std::os::unix::io::FromRawFd;
-use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Mutex};
-use tempfile::NamedTempFile;
 #[cfg(feature = "kvm")]
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDmaMapping};
 use virtio_devices::transport::VirtioPciDevice;
@@ -733,12 +731,6 @@ pub struct DeviceManager {
     // which prevents cyclic dependencies.
     bus_devices: Vec<Arc<Mutex<dyn BusDevice>>>,
 
-    // The path to the VMM for self spawning
-    vmm_path: PathBuf,
-
-    // Backends that have been spawned
-    vhost_user_backends: Vec<ActivatedBackend>,
-
     // Counter to keep track of the consumed device IDs.
     device_id_cnt: Wrapping<usize>,
 
@@ -799,7 +791,6 @@ impl DeviceManager {
         memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
         reset_evt: &EventFd,
-        vmm_path: PathBuf,
         seccomp_action: SeccompAction,
         #[cfg(feature = "acpi")] numa_nodes: NumaNodes,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
@@ -839,8 +830,6 @@ impl DeviceManager {
             memory_manager,
             virtio_devices: Vec::new(),
             bus_devices: Vec::new(),
-            vmm_path,
-            vhost_user_backends: Vec::new(),
             device_id_cnt: Wrapping(0),
             pci_bus: None,
             msi_interrupt_manager,
@@ -1580,39 +1569,6 @@ impl DeviceManager {
         Ok(devices)
     }
 
-    /// Launch block backend
-    fn start_block_backend(&mut self, disk_cfg: &DiskConfig) -> DeviceManagerResult<String> {
-        let _socket_file = NamedTempFile::new().map_err(DeviceManagerError::CreateSocketFile)?;
-        let socket = _socket_file.path().to_str().unwrap().to_owned();
-
-        let child = std::process::Command::new(&self.vmm_path)
-            .args(&[
-                "--block-backend",
-                &format!(
-                    "path={},socket={},num_queues={},queue_size={}",
-                    disk_cfg
-                        .path
-                        .as_ref()
-                        .ok_or(DeviceManagerError::NoDiskPath)?
-                        .to_str()
-                        .unwrap(),
-                    &socket,
-                    disk_cfg.num_queues,
-                    disk_cfg.queue_size
-                ),
-            ])
-            .spawn()
-            .map_err(DeviceManagerError::SpawnBlockBackend)?;
-
-        // The ActivatedBackend::drop() will automatically reap the child
-        self.vhost_user_backends.push(ActivatedBackend {
-            child,
-            _socket_file,
-        });
-
-        Ok(socket)
-    }
-
     fn make_virtio_block_device(
         &mut self,
         disk_cfg: &mut DiskConfig,
@@ -1626,14 +1582,9 @@ impl DeviceManager {
         };
 
         if disk_cfg.vhost_user {
-            let socket = if let Some(socket) = disk_cfg.vhost_socket.clone() {
-                socket
-            } else {
-                warn!("Self-spawning of vhost-user block backend is deprecated and will be removed in a future release.");
-                self.start_block_backend(disk_cfg)?
-            };
+            let socket = disk_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
-                socket: socket.clone(),
+                socket,
                 num_queues: disk_cfg.num_queues,
                 queue_size: disk_cfg.queue_size,
             };
@@ -1645,11 +1596,6 @@ impl DeviceManager {
                 ) {
                     Ok(vub_device) => vub_device,
                     Err(e) => {
-                        for vub in self.vhost_user_backends.iter_mut() {
-                            if vub._socket_file.path().to_str().unwrap() == socket {
-                                let _ = vub.child.kill();
-                            }
-                        }
                         return Err(DeviceManagerError::CreateVhostUserBlk(e));
                     }
                 },
@@ -1797,40 +1743,6 @@ impl DeviceManager {
         Ok(devices)
     }
 
-    /// Launch network backend
-    fn start_net_backend(&mut self, net_cfg: &NetConfig) -> DeviceManagerResult<String> {
-        let _socket_file = NamedTempFile::new().map_err(DeviceManagerError::CreateSocketFile)?;
-        let socket = _socket_file.path().to_str().unwrap().to_owned();
-
-        let child = std::process::Command::new(&self.vmm_path)
-            .args(&[
-                "--net-backend",
-                &format!(
-                    "ip={},mask={},socket={},num_queues={},queue_size={}{}",
-                    net_cfg.ip,
-                    net_cfg.mask,
-                    &socket,
-                    net_cfg.num_queues,
-                    net_cfg.queue_size,
-                    if let Some(mac) = net_cfg.host_mac {
-                        format!(",host_mac={:}", mac)
-                    } else {
-                        "".to_owned()
-                    }
-                ),
-            ])
-            .spawn()
-            .map_err(DeviceManagerError::SpawnNetBackend)?;
-
-        // The ActivatedBackend::drop() will automatically reap the child
-        self.vhost_user_backends.push(ActivatedBackend {
-            child,
-            _socket_file,
-        });
-
-        Ok(socket)
-    }
-
     fn make_virtio_net_device(
         &mut self,
         net_cfg: &mut NetConfig,
@@ -1844,14 +1756,9 @@ impl DeviceManager {
         };
 
         if net_cfg.vhost_user {
-            let socket = if let Some(socket) = net_cfg.vhost_socket.clone() {
-                socket
-            } else {
-                warn!("Self-spawning of vhost-user net backend is deprecated and will be removed in a future release.");
-                self.start_net_backend(net_cfg)?
-            };
+            let socket = net_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
-                socket: socket.clone(),
+                socket,
                 num_queues: net_cfg.num_queues,
                 queue_size: net_cfg.queue_size,
             };
@@ -1864,11 +1771,6 @@ impl DeviceManager {
                 ) {
                     Ok(vun_device) => vun_device,
                     Err(e) => {
-                        for vun in self.vhost_user_backends.iter_mut() {
-                            if vun._socket_file.path().to_str().unwrap() == socket {
-                                let _ = vun.child.kill();
-                            }
-                        }
                         return Err(DeviceManagerError::CreateVhostUserNet(e));
                     }
                 },
