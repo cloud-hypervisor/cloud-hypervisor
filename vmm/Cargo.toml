@@ -38,7 +38,7 @@ serde_json = ">=1.0.9"
 signal-hook = "0.1.16"
 tempfile = "3.1.0"
 thiserror = "1.0"
-url = "2.1.1"
+url = "2.2.0"
 vfio-ioctls = { git = "https://github.com/cloud-hypervisor/vfio-ioctls", branch = "ch" }
 virtio-devices = { path = "../virtio-devices" }
 vm-allocator = { path = "../vm-allocator" }
