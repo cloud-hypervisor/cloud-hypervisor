@@ -776,6 +776,10 @@ pub struct DeviceManager {
 
     // Possible handle to the virtio-balloon device
     balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
+
+    // Virtio Device activation EventFd to allow the VMM thread to trigger device
+    // activation and thus start the threads from the VMM thread
+    activate_evt: EventFd,
 }
 
 impl DeviceManager {
@@ -788,6 +792,7 @@ impl DeviceManager {
         reset_evt: &EventFd,
         seccomp_action: SeccompAction,
         #[cfg(feature = "acpi")] numa_nodes: NumaNodes,
+        activate_evt: &EventFd,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         let device_tree = Arc::new(Mutex::new(DeviceTree::new()));
 
@@ -844,6 +849,9 @@ impl DeviceManager {
             #[cfg(feature = "acpi")]
             numa_nodes,
             balloon: None,
+            activate_evt: activate_evt
+                .try_clone()
+                .map_err(DeviceManagerError::EventFd)?,
         };
 
         #[cfg(feature = "acpi")]
@@ -2739,6 +2747,9 @@ impl DeviceManager {
             iommu_mapping_cb,
             interrupt_manager,
             pci_device_bdf,
+            self.activate_evt
+                .try_clone()
+                .map_err(DeviceManagerError::EventFd)?,
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 
@@ -2831,6 +2842,18 @@ impl DeviceManager {
             }
         }
 
+        Ok(())
+    }
+
+    pub fn activate_virtio_devices(&self) -> DeviceManagerResult<()> {
+        // Find virtio pci devices and activate any pending ones
+        for (_, any_device) in self.pci_devices.iter() {
+            if let Ok(virtio_pci_device) =
+                Arc::clone(any_device).downcast::<Mutex<VirtioPciDevice>>()
+            {
+                virtio_pci_device.lock().unwrap().maybe_activate();
+            }
+        }
         Ok(())
     }
 
