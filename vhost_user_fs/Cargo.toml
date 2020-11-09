@@ -8,7 +8,7 @@ edition = "2018"
 bitflags = "1.1.0"
 clap = { version = "2.33.3", features=["wrap_help"] }
 epoll = ">=4.0.1"
-futures = { version = "0.3.7", features = ["thread-pool"] }
+futures = { version = "0.3.8", features = ["thread-pool"] }
 libc = "0.2.80"
 log = "0.4.11"
 # Match the version in vmm
