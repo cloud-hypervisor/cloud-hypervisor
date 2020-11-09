@@ -225,6 +225,9 @@ pub enum Error {
 
     /// Failed setting the VmmOps interface.
     SetVmmOpsInterface(hypervisor::HypervisorVmError),
+
+    /// Cannot activate virtio devices
+    ActivateVirtioDevices(device_manager::DeviceManagerError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -469,6 +472,7 @@ impl Vm {
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         _saved_clock: Option<hypervisor::ClockData>,
+        activate_evt: EventFd,
     ) -> Result<Self> {
         config
             .lock()
@@ -490,6 +494,7 @@ impl Vm {
             seccomp_action.clone(),
             #[cfg(feature = "acpi")]
             numa_nodes.clone(),
+            &activate_evt,
         )
         .map_err(Error::DeviceManager)?;
 
@@ -627,6 +632,7 @@ impl Vm {
         reset_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
+        activate_evt: EventFd,
     ) -> Result<Self> {
         #[cfg(target_arch = "x86_64")]
         hypervisor.check_required_extensions().unwrap();
@@ -662,6 +668,7 @@ impl Vm {
             seccomp_action,
             hypervisor,
             None,
+            activate_evt,
         )?;
 
         // The device manager must create the devices from here as it is part
@@ -684,6 +691,7 @@ impl Vm {
         prefault: bool,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
+        activate_evt: EventFd,
     ) -> Result<Self> {
         #[cfg(target_arch = "x86_64")]
         hypervisor.check_required_extensions().unwrap();
@@ -728,6 +736,7 @@ impl Vm {
             vm_snapshot.clock,
             #[cfg(target_arch = "aarch64")]
             None,
+            activate_evt,
         )
     }
 
@@ -1606,6 +1615,14 @@ impl Vm {
     /// Gets the actual size of the balloon.
     pub fn balloon_size(&self) -> u64 {
         self.device_manager.lock().unwrap().balloon_size()
+    }
+
+    pub fn activate_virtio_devices(&self) -> Result<()> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .activate_virtio_devices()
+            .map_err(Error::ActivateVirtioDevices)
     }
 }
 
