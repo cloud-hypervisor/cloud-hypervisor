@@ -390,7 +390,7 @@ cmd_tests() {
 	       --net="$CTR_CLH_NET" \
 	       --mount type=tmpfs,destination=/tmp \
 	       --volume /dev:/dev \
-	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"  $exported_volumes \
 	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
