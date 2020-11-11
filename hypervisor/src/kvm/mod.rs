@@ -70,7 +70,8 @@ use std::mem;
 pub use kvm_bindings;
 pub use kvm_bindings::{
     kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing, kvm_irq_routing_entry,
-    kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
+    kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI, KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY,
+    KVM_MSI_VALID_DEVID,
 };
 pub use kvm_ioctls;
 pub use kvm_ioctls::{Cap, Kvm};
@@ -255,13 +256,19 @@ impl vm::Vm for KvmVm {
         memory_size: u64,
         userspace_addr: u64,
         readonly: bool,
+        log_dirty_pages: bool,
     ) -> MemoryRegion {
         MemoryRegion {
             slot,
             guest_phys_addr,
             memory_size,
             userspace_addr,
-            flags: if readonly { KVM_MEM_READONLY } else { 0 },
+            flags: if readonly { KVM_MEM_READONLY } else { 0 }
+                | if log_dirty_pages {
+                    KVM_MEM_LOG_DIRTY_PAGES
+                } else {
+                    0
+                },
         }
     }
     ///

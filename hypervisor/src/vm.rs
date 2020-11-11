@@ -189,6 +189,7 @@ pub trait Vm: Send + Sync {
         memory_size: u64,
         userspace_addr: u64,
         readonly: bool,
+        log_dirty_pages: bool,
     ) -> MemoryRegion;
     /// Creates/modifies a guest physical memory slot.
     fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> Result<()>;

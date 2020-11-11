@@ -612,6 +612,7 @@ impl DeviceRelocation for AddressManager {
                             0,
                             shm_regions.host_addr,
                             false,
+                            false,
                         );
 
                         self.vm.set_user_memory_region(mem_region).map_err(|e| {
@@ -627,6 +628,7 @@ impl DeviceRelocation for AddressManager {
                             new_base,
                             shm_regions.len,
                             shm_regions.host_addr,
+                            false,
                             false,
                         );
 

@@ -1115,6 +1115,7 @@ impl MemoryManager {
             memory_size,
             userspace_addr,
             readonly,
+            false,
         );
 
         self.vm
@@ -1168,6 +1169,7 @@ impl MemoryManager {
             0, /* memory_size -- using 0 removes this slot */
             userspace_addr,
             false, /* readonly -- don't care */
+            false, /* log dirty */
         );
 
         self.vm

@@ -561,6 +561,7 @@ impl VfioPciDevice {
                     mmap_size as u64,
                     host_addr as u64,
                     false,
+                    false,
                 );
 
                 vm.set_user_memory_region(mem_region)
@@ -589,6 +590,7 @@ impl VfioPciDevice {
                     region.start.raw_value() + mmap_offset,
                     0,
                     host_addr as u64,
+                    false,
                     false,
                 );
 
@@ -1012,6 +1014,7 @@ impl PciDevice for VfioPciDevice {
                             0,
                             host_addr as u64,
                             false,
+                            false,
                         );
 
                         self.vm
@@ -1024,6 +1027,7 @@ impl PciDevice for VfioPciDevice {
                             new_base + mmap_offset,
                             mmap_size as u64,
                             host_addr as u64,
+                            false,
                             false,
                         );
 
