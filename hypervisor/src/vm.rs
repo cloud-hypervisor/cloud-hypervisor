@@ -147,6 +147,11 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to write to IO Bus: {0}")]
     IoBusWrite(#[source] anyhow::Error),
+    ///
+    /// Get dirty log error
+    ///
+    #[error("Failed to get dirty log: {0}")]
+    GetDirtyLog(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -217,6 +222,8 @@ pub trait Vm: Send + Sync {
     fn set_state(&self, state: VmState) -> Result<()>;
     /// Set VmmOps interface
     fn set_vmmops(&self, vmmops: Box<dyn VmmOps>) -> Result<()>;
+    /// Get dirty pages bitmap
+    fn get_dirty_log(&self, slot: u32, memory_size: u64) -> Result<Vec<u64>>;
 }
 
 pub trait VmmOps: Send + Sync {
