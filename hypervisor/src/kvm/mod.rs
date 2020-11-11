@@ -369,6 +369,14 @@ impl vm::Vm for KvmVm {
         self.vmmops.store(Some(Arc::new(vmmops)));
         Ok(())
     }
+    ///
+    /// Get dirty pages bitmap (one bit per page)
+    ///
+    fn get_dirty_log(&self, slot: u32, memory_size: u64) -> vm::Result<Vec<u64>> {
+        self.fd
+            .get_dirty_log(slot, memory_size as usize)
+            .map_err(|e| vm::HypervisorVmError::GetDirtyLog(e.into()))
+    }
 }
 /// Wrapper over KVM system ioctls.
 pub struct KvmHypervisor {
