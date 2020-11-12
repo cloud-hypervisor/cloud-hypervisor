@@ -39,6 +39,7 @@ use vm_memory::{
     GuestMemoryRegion, GuestRegionMmap, GuestUsize, MmapRegion,
 };
 use vm_migration::{
+    protocol::{MemoryRange, MemoryRangeTable},
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
 };
@@ -99,6 +100,12 @@ impl MemoryZone {
 
 pub type MemoryZones = HashMap<String, MemoryZone>;
 
+struct GuestRamMapping {
+    slot: u32,
+    gpa: u64,
+    size: u64,
+}
+
 pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -122,6 +129,11 @@ pub struct MemoryManager {
     user_provided_zones: bool,
     snapshot_memory_regions: Vec<MemoryRegion>,
     memory_zones: MemoryZones,
+
+    // Keep track of calls to create_userspace_mapping() for guest RAM.
+    // This is useful for getting the dirty pages as we need to know the
+    // slots that the mapping is created in.
+    guest_ram_mappings: Vec<GuestRamMapping>,
 }
 
 #[derive(Debug)]
@@ -720,28 +732,44 @@ impl MemoryManager {
             user_provided_zones,
             snapshot_memory_regions: Vec::new(),
             memory_zones,
+            guest_ram_mappings: Vec::new(),
         }));
 
         guest_memory.memory().with_regions(|_, region| {
-            let _ = memory_manager.lock().unwrap().create_userspace_mapping(
+            let mut mm = memory_manager.lock().unwrap();
+            let slot = mm.create_userspace_mapping(
                 region.start_addr().raw_value(),
                 region.len() as u64,
                 region.as_ptr() as u64,
                 config.mergeable,
                 false,
+                true,
             )?;
+            mm.guest_ram_mappings.push(GuestRamMapping {
+                gpa: region.start_addr().raw_value(),
+                size: region.len(),
+                slot,
+            });
+
             Ok(())
         })?;
 
         for region in virtio_mem_regions.drain(..) {
             let mut mm = memory_manager.lock().unwrap();
-            mm.create_userspace_mapping(
+            let slot = mm.create_userspace_mapping(
                 region.start_addr().raw_value(),
                 region.len() as u64,
                 region.as_ptr() as u64,
                 config.mergeable,
                 false,
+                true,
             )?;
+
+            mm.guest_ram_mappings.push(GuestRamMapping {
+                gpa: region.start_addr().raw_value(),
+                size: region.len(),
+                slot,
+            });
             allocator
                 .lock()
                 .unwrap()
@@ -1045,13 +1073,19 @@ impl MemoryManager {
         )?;
 
         // Map it into the guest
-        self.create_userspace_mapping(
+        let slot = self.create_userspace_mapping(
             region.start_addr().0,
             region.len() as u64,
             region.as_ptr() as u64,
             self.mergeable,
             false,
+            true,
         )?;
+        self.guest_ram_mappings.push(GuestRamMapping {
+            gpa: region.start_addr().raw_value(),
+            size: region.len(),
+            slot,
+        });
 
         // Tell the allocator
         self.allocator
@@ -1107,6 +1141,7 @@ impl MemoryManager {
         userspace_addr: u64,
         mergeable: bool,
         readonly: bool,
+        log_dirty: bool,
     ) -> Result<u32, Error> {
         let slot = self.allocate_memory_slot();
         let mem_region = self.vm.make_user_memory_region(
@@ -1115,7 +1150,7 @@ impl MemoryManager {
             memory_size,
             userspace_addr,
             readonly,
-            false,
+            log_dirty,
         );
 
         self.vm
@@ -1340,6 +1375,7 @@ impl MemoryManager {
                 host_addr,
                 false,
                 false,
+                false,
             )?;
 
             sgx_epc_region.push(SgxEpcSection::new(
@@ -1373,6 +1409,83 @@ impl MemoryManager {
 
     pub fn memory_zones(&self) -> &MemoryZones {
         &self.memory_zones
+    }
+
+    // Generate a table for the pages that are dirty. The algorithm is currently
+    // very simple. If any page in a "block" of 64 pages is dirty then that whole
+    // "block" is added to the table. These "blocks" are also collapsed together if
+    // they are contiguous:
+    //
+    // For every block of 64 pages we check to see if there are any dirty pages in it
+    // if there are we increase the size of the current range if there is one, otherwise
+    // create a new range. If there are no dirty pages in the current "block" the range is
+    // closed if there is one and added to the table. After iterating through the dirty
+    // page bitmaps an open range will be closed and added to the table.
+    //
+    // This algorithm is very simple and could be refined to count the number of pages
+    // in the block and instead create smaller ranges covering those pages.
+    pub fn dirty_memory_range_table(
+        &self,
+    ) -> std::result::Result<MemoryRangeTable, MigratableError> {
+        let page_size = 4096; // TODO: Does this need to vary?
+        let mut table = MemoryRangeTable::default();
+        let mut total_pages = 0;
+        for r in &self.guest_ram_mappings {
+            let dirty_bitmap = self.vm.get_dirty_log(r.slot, r.size).map_err(|e| {
+                MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
+            })?;
+
+            let mut entry: Option<MemoryRange> = None;
+            for (i, block) in dirty_bitmap.iter().enumerate() {
+                if *block > 0 {
+                    if let Some(entry) = &mut entry {
+                        entry.length += 64 * page_size;
+                    } else {
+                        entry = Some(MemoryRange {
+                            gpa: r.gpa + (64 * i as u64 * page_size),
+                            length: 64 * page_size,
+                        });
+                    }
+                    total_pages += block.count_ones() as u64;
+                } else if let Some(entry) = entry.take() {
+                    table.push(entry);
+                }
+            }
+            if let Some(entry) = entry.take() {
+                table.push(entry);
+            }
+
+            if table.regions().is_empty() {
+                info!("Dirty Memory Range Table is empty");
+            } else {
+                info!("Dirty Memory Range Table:");
+                let mut total_size = 0;
+                for range in table.regions() {
+                    info!("GPA: {:x} size: {} (KiB)", range.gpa, range.length / 1024);
+                    total_size += range.length;
+                }
+                info!(
+                    "Total pages: {} ({} KiB). Total size: {} KiB. Efficiency: {}%",
+                    total_pages,
+                    total_pages * page_size / 1024,
+                    total_size / 1024,
+                    (total_pages * page_size * 100) / total_size
+                );
+            }
+        }
+        Ok(table)
+    }
+
+    // The dirty log is cleared by the kernel by calling the KVM_GET_DIRTY_LOG ioctl.
+    // Just before we do a bulk copy we want to clear the dirty log so that
+    // pages touched during our bulk copy are tracked.
+    pub fn start_memory_dirty_log(&self) -> std::result::Result<(), MigratableError> {
+        for r in &self.guest_ram_mappings {
+            self.vm.get_dirty_log(r.slot, r.size).map_err(|e| {
+                MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
+            })?;
+        }
+        Ok(())
     }
 }
 
