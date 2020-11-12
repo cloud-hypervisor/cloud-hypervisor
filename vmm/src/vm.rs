@@ -732,6 +732,40 @@ impl Vm {
         )
     }
 
+    pub fn new_from_migration(
+        config: Arc<Mutex<VmConfig>>,
+        exit_evt: EventFd,
+        reset_evt: EventFd,
+        seccomp_action: &SeccompAction,
+        hypervisor: Arc<dyn hypervisor::Hypervisor>,
+    ) -> Result<Self> {
+        #[cfg(target_arch = "x86_64")]
+        hypervisor.check_required_extensions().unwrap();
+        let vm = hypervisor.create_vm().unwrap();
+        #[cfg(target_arch = "x86_64")]
+        vm.enable_split_irq().unwrap();
+        let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+
+        let memory_manager = MemoryManager::new(
+            vm.clone(),
+            &config.lock().unwrap().memory.clone(),
+            false,
+            phys_bits,
+        )
+        .map_err(Error::MemoryManager)?;
+
+        Vm::new_from_memory_manager(
+            config,
+            memory_manager,
+            vm,
+            exit_evt,
+            reset_evt,
+            seccomp_action,
+            hypervisor,
+            None,
+        )
+    }
+
     fn load_initramfs(&mut self, guest_mem: &GuestMemoryMmap) -> Result<arch::InitramfsConfig> {
         let mut initramfs = self.initramfs.as_ref().unwrap();
         let size: usize = initramfs

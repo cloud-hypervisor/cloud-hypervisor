@@ -647,10 +647,53 @@ impl Vmm {
         }
     }
 
+    fn vm_receive_config<T>(
+        &mut self,
+        req: &Request,
+        socket: &mut T,
+    ) -> std::result::Result<Vm, MigratableError>
+    where
+        T: Read + Write,
+    {
+        // Read in config data
+        let mut data = Vec::with_capacity(req.length() as usize);
+        unsafe {
+            data.set_len(req.length() as usize);
+        }
+        socket
+            .read_exact(&mut data)
+            .map_err(MigratableError::MigrateSocket)?;
+        let config: VmConfig = serde_json::from_slice(&data).map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error deserialising config: {}", e))
+        })?;
+
+        let exit_evt = self.exit_evt.try_clone().map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error cloning exit EventFd: {}", e))
+        })?;
+        let reset_evt = self.reset_evt.try_clone().map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error cloning reset EventFd: {}", e))
+        })?;
+        let vm = Vm::new_from_migration(
+            Arc::new(Mutex::new(config)),
+            exit_evt,
+            reset_evt,
+            &self.seccomp_action,
+            self.hypervisor.clone(),
+        )
+        .map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))
+        })?;
+
+        Response::ok().write_to(socket)?;
+
+        Ok(vm)
+    }
+
     fn vm_receive_state<T>(
         &mut self,
         req: &Request,
         socket: &mut T,
+        mut vm: Vm,
     ) -> std::result::Result<(), MigratableError>
     where
         T: Read + Write,
@@ -668,26 +711,6 @@ impl Vmm {
         })?;
 
         // Create VM
-        let vm_snapshot = get_vm_snapshot(&snapshot)?;
-        self.vm_config = Some(Arc::clone(&vm_snapshot.config));
-        let exit_evt = self.exit_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning exit EventFd: {}", e))
-        })?;
-        let reset_evt = self.reset_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning reset EventFd: {}", e))
-        })?;
-        let mut vm = Vm::new_from_snapshot(
-            &snapshot,
-            exit_evt,
-            reset_evt,
-            None,
-            false,
-            &self.seccomp_action,
-            self.hypervisor.clone(),
-        )
-        .map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))
-        })?;
         vm.restore(snapshot).map_err(|e| {
             Response::error().write_to(socket).ok();
             e
@@ -703,6 +726,7 @@ impl Vmm {
         &mut self,
         req: &Request,
         socket: &mut T,
+        vm: &mut Vm,
     ) -> std::result::Result<(), MigratableError>
     where
         T: Read + Write,
@@ -711,14 +735,10 @@ impl Vmm {
         let table = MemoryRangeTable::read_from(socket, req.length())?;
 
         // And then read the memory itself
-        self.vm
-            .as_mut()
-            .unwrap()
-            .receive_memory_regions(&table, socket)
-            .map_err(|e| {
-                Response::error().write_to(socket).ok();
-                e
-            })?;
+        vm.receive_memory_regions(&table, socket).map_err(|e| {
+            Response::error().write_to(socket).ok();
+            e
+        })?;
         Response::ok().write_to(socket)?;
         Ok(())
     }
@@ -759,6 +779,7 @@ impl Vmm {
         };
 
         let mut started = false;
+        let mut vm: Option<Vm> = None;
 
         loop {
             let req = Request::read_from(&mut socket)?;
@@ -770,6 +791,16 @@ impl Vmm {
 
                     Response::ok().write_to(&mut socket)?;
                 }
+                Command::Config => {
+                    info!("Config Command Received");
+
+                    if !started {
+                        warn!("Migration not started yet");
+                        Response::error().write_to(&mut socket)?;
+                        continue;
+                    }
+                    vm = Some(self.vm_receive_config(&req, &mut socket)?);
+                }
                 Command::State => {
                     info!("State Command Received");
 
@@ -778,15 +809,12 @@ impl Vmm {
                         Response::error().write_to(&mut socket)?;
                         continue;
                     }
-
-                    // TODO: Remove this when doing live migration
-                    if self.vm.is_some() {
-                        warn!("State already sent");
+                    if let Some(vm) = vm.take() {
+                        self.vm_receive_state(&req, &mut socket, vm)?;
+                    } else {
+                        warn!("Configuration not sent yet");
                         Response::error().write_to(&mut socket)?;
-                        continue;
                     }
-
-                    self.vm_receive_state(&req, &mut socket)?;
                 }
                 Command::Memory => {
                     info!("Memory Command Received");
@@ -796,8 +824,12 @@ impl Vmm {
                         Response::error().write_to(&mut socket)?;
                         continue;
                     }
-
-                    self.vm_receive_memory(&req, &mut socket)?;
+                    if let Some(ref mut vm) = vm.as_mut() {
+                        self.vm_receive_memory(&req, &mut socket, vm)?;
+                    } else {
+                        warn!("Configuration not sent yet");
+                        Response::error().write_to(&mut socket)?;
+                    }
                 }
                 Command::Complete => {
                     info!("Complete Command Received");
@@ -853,6 +885,39 @@ impl Vmm {
                 )));
             }
 
+            // Send config
+            let config_data = serde_json::to_vec(&vm.get_config()).unwrap();
+            Request::config(config_data.len() as u64).write_to(&mut socket)?;
+            socket
+                .write_all(&config_data)
+                .map_err(MigratableError::MigrateSocket)?;
+            let res = Response::read_from(&mut socket)?;
+            if res.status() != Status::Ok {
+                warn!("Error during config migration");
+                Request::abandon().write_to(&mut socket)?;
+                Response::read_from(&mut socket).ok();
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Error during config migration"
+                )));
+            }
+
+            // Send memory table
+            let table = vm.memory_range_table()?;
+            Request::memory(table.length())
+                .write_to(&mut socket)
+                .unwrap();
+            table.write_to(&mut socket)?;
+            // And then the memory itself
+            vm.send_memory_regions(&table, &mut socket)?;
+            if res.status() != Status::Ok {
+                warn!("Error during memory migration");
+                Request::abandon().write_to(&mut socket)?;
+                Response::read_from(&mut socket).ok();
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Error during memory migration"
+                )));
+            }
+
             // Capture snapshot and send it
             let vm_snapshot = vm.snapshot()?;
             let snapshot_data = serde_json::to_vec(&vm_snapshot).unwrap();
@@ -867,24 +932,6 @@ impl Vmm {
                 Response::read_from(&mut socket).ok();
                 return Err(MigratableError::MigrateSend(anyhow!(
                     "Error during state migration"
-                )));
-            }
-
-            // Send memory table
-            let table = vm.memory_range_table()?;
-            Request::memory(table.length())
-                .write_to(&mut socket)
-                .unwrap();
-            table.write_to(&mut socket)?;
-
-            // And then the memory itself
-            vm.send_memory_regions(&table, &mut socket)?;
-            if res.status() != Status::Ok {
-                warn!("Error during memory migration");
-                Request::abandon().write_to(&mut socket)?;
-                Response::read_from(&mut socket).ok();
-                return Err(MigratableError::MigrateSend(anyhow!(
-                    "Error during memory migration"
                 )));
             }
 
