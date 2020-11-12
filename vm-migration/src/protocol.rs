@@ -10,14 +10,17 @@ use crate::MigratableError;
 // (The establishment is out of scope.)
 // 2: Source -> Dest : send "start command"
 // 3: Dest -> Source : sends "ok response" when read to accept state data
-// 4: Source -> Dest : sends "state command" followed by state data, length
-//                     in command is length of state data
+// 4: Source -> Dest : sends "config command" followed by config data, length
+//                     in command is length of config data
 // 5: Dest -> Source : sends "ok response" when ready to accept memory data
 // 6: Source -> Dest : send "memory command" followed by table of u64 pairs (GPA, size)
 //                     followed by the memory described in those pairs.
 //                     !! length is size of table i.e. 16 * number of ranges !!
 // 7: Dest -> Source : sends "ok response" when ready to accept more memory data
-// 8..(n-2): Repeat steps 6 and 7 until source has no more memory to send
+// 8..(n-4): Repeat steps 6 and 7 until source has no more memory to send
+// (n-3): Source -> Dest : sends "state command" followed by state data, length
+//                     in command is length of config data
+// (n-2): Dest -> Source : sends "ok response"
 // (n-1): Source -> Dest : send "complete command"
 // n: Dest -> Source: sends "ok response"
 
@@ -31,6 +34,7 @@ use std::io::{Read, Write};
 pub enum Command {
     Invalid,
     Start,
+    Config,
     State,
     Memory,
     Complete,
@@ -80,6 +84,10 @@ impl Request {
 
     pub fn state(length: u64) -> Self {
         Self::new(Command::State, length)
+    }
+
+    pub fn config(length: u64) -> Self {
+        Self::new(Command::Config, length)
     }
 
     pub fn memory(length: u64) -> Self {
