@@ -27,7 +27,7 @@ thiserror = "1.0"
 vhost_user_block = { path = "vhost_user_block"}
 vhost_user_net = { path = "vhost_user_net"}
 vmm = { path = "vmm" }
-vmm-sys-util = "0.6.1"
+vmm-sys-util = "0.7.0"
 wait-timeout = "0.2.0"
 
 [build-dependencies]
