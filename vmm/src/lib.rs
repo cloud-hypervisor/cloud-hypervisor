@@ -909,6 +909,7 @@ impl Vmm {
             table.write_to(&mut socket)?;
             // And then the memory itself
             vm.send_memory_regions(&table, &mut socket)?;
+            let res = Response::read_from(&mut socket)?;
             if res.status() != Status::Ok {
                 warn!("Error during memory migration");
                 Request::abandon().write_to(&mut socket)?;
