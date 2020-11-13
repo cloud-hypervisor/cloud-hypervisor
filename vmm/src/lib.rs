@@ -833,7 +833,13 @@ impl Vmm {
                 }
                 Command::Complete => {
                     info!("Complete Command Received");
-                    Response::ok().write_to(&mut socket)?;
+                    if let Some(ref mut vm) = self.vm.as_mut() {
+                        vm.resume()?;
+                        Response::ok().write_to(&mut socket)?;
+                    } else {
+                        warn!("VM not created yet");
+                        Response::error().write_to(&mut socket)?;
+                    }
                     break;
                 }
                 Command::Abandon => {
@@ -846,6 +852,39 @@ impl Vmm {
         }
 
         Ok(())
+    }
+
+    // Returns true if there were dirty pages to send
+    fn vm_maybe_send_dirty_pages<T>(
+        vm: &mut Vm,
+        socket: &mut T,
+    ) -> result::Result<bool, MigratableError>
+    where
+        T: Read + Write,
+    {
+        // Send (dirty) memory table
+        let table = vm.dirty_memory_range_table()?;
+
+        // But if there are no regions go straight to pause
+        if table.regions().is_empty() {
+            return Ok(false);
+        }
+
+        Request::memory(table.length()).write_to(socket).unwrap();
+        table.write_to(socket)?;
+        // And then the memory itself
+        vm.send_memory_regions(&table, socket)?;
+        let res = Response::read_from(socket)?;
+        if res.status() != Status::Ok {
+            warn!("Error during dirty memory migration");
+            Request::abandon().write_to(socket)?;
+            Response::read_from(socket).ok();
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "Error during dirty memory migration"
+            )));
+        }
+
+        Ok(true)
     }
 
     fn vm_send_migration(
@@ -901,6 +940,9 @@ impl Vmm {
                 )));
             }
 
+            // Start logging dirty pages
+            vm.start_memory_dirty_log()?;
+
             // Send memory table
             let table = vm.memory_range_table()?;
             Request::memory(table.length())
@@ -918,6 +960,21 @@ impl Vmm {
                     "Error during memory migration"
                 )));
             }
+
+            // Try at most 5 passes of dirty memory sending
+            const MAX_DIRTY_MIGRATIONS: usize = 5;
+            for i in 0..MAX_DIRTY_MIGRATIONS {
+                info!("Dirty memory migration {} of {}", i, MAX_DIRTY_MIGRATIONS);
+                if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
+                    break;
+                }
+            }
+
+            // Now pause VM
+            vm.pause()?;
+
+            // Send last batch of dirty pages
+            Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
 
             // Capture snapshot and send it
             let vm_snapshot = vm.snapshot()?;
