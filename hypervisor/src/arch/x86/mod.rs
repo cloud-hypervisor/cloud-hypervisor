@@ -11,6 +11,8 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
+pub mod gdt;
+
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
