@@ -9,8 +9,8 @@
 use std::sync::Arc;
 use std::{mem, result};
 
-use super::gdt::{gdt_entry, segment_from_gdt};
 use super::BootProtocol;
+use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::x86_64::{FpuState, SpecialRegisters, StandardRegisters};
 use layout::{
     BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START, PML5_START, PVH_INFO_START,
