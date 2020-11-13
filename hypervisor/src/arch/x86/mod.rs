@@ -30,6 +30,8 @@ pub mod gdt;
 )]
 pub mod msr_index;
 
+pub mod emulator;
+
 // MTRR constants
 pub const MTRR_ENABLE: u64 = 0x800; // IA32_MTRR_DEF_TYPE MSR: E (MTRRs enabled) flag, bit 11
 pub const MTRR_MEM_TYPE_WB: u64 = 0x6;

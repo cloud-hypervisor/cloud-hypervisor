@@ -502,6 +502,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "iced-x86",
  "kvm-bindings",
  "kvm-ioctls",
  "libc",
@@ -513,6 +514,17 @@ dependencies = [
  "thiserror",
  "vm-memory",
  "vmm-sys-util",
+]
+
+[[package]]
+name = "iced-x86"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "248ce8ff0784d2b15f3c3d8b01f529be0e18aa693a2ba7415df76857967c8fc3"
+dependencies = [
+ "lazy_static",
+ "rustc_version",
+ "static_assertions",
 ]
 
 [[package]]
@@ -1127,6 +1139,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcf128d1287d2ea9d80910b5f1120d0b8eede3fbf1abe91c40d39ea7d51e6fda"
 
 [[package]]
+name = "rustc_version"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
+dependencies = [
+ "semver",
+]
+
+[[package]]
 name = "ryu"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1145,6 +1166,21 @@ source = "git+https://github.com/firecracker-microvm/firecracker?tag=v0.22.0#cc5
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "semver"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
+dependencies = [
+ "semver-parser",
+]
+
+[[package]]
+name = "semver-parser"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
@@ -1216,6 +1252,12 @@ dependencies = [
  "libssh2-sys",
  "parking_lot",
 ]
+
+[[package]]
+name = "static_assertions"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f3eb36b47e512f8f1c9e3d10c2c1965bc992bd9cdb024fa581e2194501c83d3"
 
 [[package]]
 name = "strsim"
