@@ -20,4 +20,4 @@ vhost_rs = { git = "https://github.com/rust-vmm/vhost", branch = "master", packa
 vhost_user_backend = { path = "../vhost_user_backend"}
 vm-memory = "0.3.0"
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = "0.6.1"
+vmm-sys-util = "0.7.0"
