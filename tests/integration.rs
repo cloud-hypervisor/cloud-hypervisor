@@ -5523,7 +5523,7 @@ mod tests {
             osdisk_path.push("windows-server-2019.raw");
 
             let mut child = Command::new(clh_command("cloud-hypervisor"))
-                .args(&["--cpus", "boot=2,kvm_hyperv=on,max_phys_bits=39"])
+                .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=4G"])
                 .args(&["--kernel", ovmf_path.to_str().unwrap()])
                 .args(&["--disk", &format!("path={}", osdisk_path.to_str().unwrap())])
@@ -5578,7 +5578,7 @@ mod tests {
 
             let mut child = Command::new(clh_command("cloud-hypervisor"))
                 .args(&["--api-socket", &api_socket])
-                .args(&["--cpus", "boot=2,kvm_hyperv=on,max_phys_bits=39"])
+                .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=4G"])
                 .args(&["--kernel", ovmf_path.to_str().unwrap()])
                 .args(&["--disk", &format!("path={}", osdisk_path.to_str().unwrap())])
