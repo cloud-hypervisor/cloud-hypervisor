@@ -96,7 +96,7 @@ pub struct KvmVm {
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
     state: KvmVmState,
-    vmmops: ArcSwapOption<Box<dyn vm::VmmOps>>,
+    vmmops: Arc<ArcSwapOption<Box<dyn vm::VmmOps>>>,
 }
 
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
@@ -439,7 +439,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 fd: vm_fd,
                 msrs,
                 state: VmState {},
-                vmmops: ArcSwapOption::from(None),
+                vmmops: Arc::new(ArcSwapOption::from(None)),
             }))
         }
 
@@ -448,7 +448,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
                 state: VmState {},
-                vmmops: ArcSwapOption::from(None),
+                vmmops: Arc::new(ArcSwapOption::from(None)),
             }))
         }
     }
@@ -509,7 +509,7 @@ pub struct KvmVcpu {
     fd: VcpuFd,
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
-    vmmops: ArcSwapOption<Box<dyn vm::VmmOps>>,
+    vmmops: Arc<ArcSwapOption<Box<dyn vm::VmmOps>>>,
     #[cfg(target_arch = "x86_64")]
     hyperv_synic: AtomicBool,
 }
