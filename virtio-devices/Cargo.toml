@@ -10,7 +10,7 @@ io_uring = ["block_util/io_uring"]
 
 [dependencies]
 anyhow = "1.0"
-arc-swap = ">=0.4.4"
+arc-swap = ">=1.0.0"
 block_util = { path = "../block_util" }
 byteorder = "1.3.4"
 epoll = ">=4.0.1"
