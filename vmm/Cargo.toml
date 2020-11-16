@@ -15,7 +15,7 @@ io_uring = ["virtio-devices/io_uring"]
 [dependencies]
 acpi_tables = { path = "../acpi_tables", optional = true }
 anyhow = "1.0"
-arc-swap = ">=0.4.4"
+arc-swap = ">=1.0.0"
 arch = { path = "../arch" }
 bitflags = ">=1.2.1"
 block_util = { path = "../block_util" }
