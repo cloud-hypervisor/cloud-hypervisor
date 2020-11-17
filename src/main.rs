@@ -18,8 +18,6 @@ use std::env;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use vhost_user_block::start_block_backend;
-use vhost_user_net::start_net_backend;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -308,22 +306,6 @@ fn create_app<'a, 'b>(
                 .group("vmm-config"),
         )
         .arg(
-            Arg::with_name("net-backend")
-                .long("net-backend")
-                .help(vhost_user_net::SYNTAX)
-                .takes_value(true)
-                .conflicts_with_all(&["block-backend", "kernel"])
-                .min_values(1),
-        )
-        .arg(
-            Arg::with_name("block-backend")
-                .long("block-backend")
-                .help(vhost_user_block::SYNTAX)
-                .takes_value(true)
-                .conflicts_with_all(&["net-backend", "kernel"])
-                .min_values(1),
-        )
-        .arg(
             Arg::with_name("seccomp")
                 .long("seccomp")
                 .takes_value(true)
@@ -471,23 +453,17 @@ fn main() {
     .map(|()| log::set_max_level(log_level))
     .expect("Expected to be able to setup logger");
 
-    if let Some(backend_command) = cmd_arguments.value_of("net-backend") {
-        start_net_backend(backend_command);
-    } else if let Some(backend_command) = cmd_arguments.value_of("block-backend") {
-        start_block_backend(backend_command);
-    } else {
-        let api_socket_path = cmd_arguments
-            .value_of("api-socket")
-            .expect("Missing argument: api-socket")
-            .to_string();
+    let api_socket_path = cmd_arguments
+        .value_of("api-socket")
+        .expect("Missing argument: api-socket")
+        .to_string();
 
-        if let Err(e) = start_vmm(cmd_arguments, &api_socket_path) {
-            eprintln!("{}", e);
-            std::fs::remove_file(api_socket_path).ok();
-            std::process::exit(1);
-        }
+    if let Err(e) = start_vmm(cmd_arguments, &api_socket_path) {
+        eprintln!("{}", e);
         std::fs::remove_file(api_socket_path).ok();
+        std::process::exit(1);
     }
+    std::fs::remove_file(api_socket_path).ok();
 }
 
 #[cfg(test)]

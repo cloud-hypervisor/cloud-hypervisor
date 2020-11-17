@@ -230,8 +230,6 @@ dependencies = [
  "tempdir",
  "tempfile",
  "thiserror",
- "vhost_user_block",
- "vhost_user_net",
  "vmm",
  "vmm-sys-util",
  "wait-timeout",
