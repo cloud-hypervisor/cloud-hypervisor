@@ -386,7 +386,7 @@ mod tests {
         let vubd_socket_path = String::from(tmp_dir.path().join("vub.sock").to_str().unwrap());
 
         // Start the daemon
-        let child = Command::new(clh_command("cloud-hypervisor"))
+        let child = Command::new(clh_command("vhost_user_block"))
             .args(&[
                 "--block-backend",
                 format!(
@@ -461,7 +461,7 @@ mod tests {
             )
         };
 
-        let child = Command::new(clh_command("cloud-hypervisor"))
+        let child = Command::new(clh_command("vhost_user_net"))
             .args(&["--net-backend", net_params.as_str()])
             .spawn()
             .unwrap();
