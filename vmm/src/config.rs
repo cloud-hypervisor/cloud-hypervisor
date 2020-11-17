@@ -622,6 +622,9 @@ pub struct DiskConfig {
     pub poll_queue: bool,
     #[serde(default)]
     pub id: Option<String>,
+    // For testing use only. Not exposed in API.
+    #[serde(default)]
+    pub disable_io_uring: bool,
 }
 
 fn default_diskconfig_num_queues() -> usize {
@@ -649,6 +652,7 @@ impl Default for DiskConfig {
             vhost_socket: None,
             poll_queue: default_diskconfig_poll_queue(),
             id: None,
+            disable_io_uring: false,
         }
     }
 }
@@ -671,7 +675,8 @@ impl DiskConfig {
             .add("vhost_user")
             .add("socket")
             .add("poll_queue")
-            .add("id");
+            .add("id")
+            .add("_disable_io_uring");
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
         let path = parser.get("path").map(PathBuf::from);
@@ -710,6 +715,11 @@ impl DiskConfig {
             .unwrap_or_else(|| Toggle(default_diskconfig_poll_queue()))
             .0;
         let id = parser.get("id");
+        let disable_io_uring = parser
+            .convert::<Toggle>("_disable_io_uring")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         if parser.is_set("poll_queue") && !vhost_user {
             warn!("poll_queue parameter currently only has effect when used vhost_user=true");
@@ -726,6 +736,7 @@ impl DiskConfig {
             vhost_user,
             poll_queue,
             id,
+            disable_io_uring,
         })
     }
 }
