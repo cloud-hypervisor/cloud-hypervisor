@@ -1640,7 +1640,7 @@ impl DeviceManager {
                 ImageType::Raw => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
-                    if block_io_uring_is_supported() {
+                    if block_io_uring_is_supported() && !disk_cfg.disable_io_uring {
                         let dev = Arc::new(Mutex::new(
                             virtio_devices::BlockIoUring::new(
                                 id.clone(),
