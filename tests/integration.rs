@@ -2853,8 +2853,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        #[test]
-        fn test_virtio_blk() {
+        fn _test_virtio_block(disable_io_uring: bool) {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
 
@@ -2884,8 +2883,9 @@ mod tests {
                     )
                     .as_str(),
                     format!(
-                        "path={},readonly=on,direct=on,num_queues=4",
-                        blk_file_path.to_str().unwrap()
+                        "path={},readonly=on,direct=on,num_queues=4,_disable_io_uring={}",
+                        blk_file_path.to_str().unwrap(),
+                        disable_io_uring
                     )
                     .as_str(),
                 ])
@@ -2935,6 +2935,16 @@ mod tests {
             let output = cloud_child.wait_with_output().unwrap();
 
             handle_child_output(r, &output);
+        }
+
+        #[test]
+        fn test_virtio_block() {
+            _test_virtio_block(false)
+        }
+
+        #[test]
+        fn test_virtio_block_disable_io_uring() {
+            _test_virtio_block(false)
         }
 
         #[test]
