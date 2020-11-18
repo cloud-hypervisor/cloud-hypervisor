@@ -1,9 +1,12 @@
 #!/bin/bash
 
 source $HOME/.cargo/env
+source  $(dirname "$0")/test-util.sh
+
+process_common_args "$@"
 
 BUILD_TARGET=${BUILD_TARGET-x86_64-unknown-linux-gnu}
-cargo_args=("$@")
+cargo_args=("")
 [ $(uname -m) = "aarch64" ] && cargo_args+=("--no-default-features")
 [ $(uname -m) = "aarch64" ] && cargo_args+=("--features kvm")
 

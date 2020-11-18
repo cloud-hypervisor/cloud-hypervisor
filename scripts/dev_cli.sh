@@ -175,6 +175,7 @@ cmd_help() {
     echo "        --release             Build the release binaries."
     echo "        --libc                Select the C library Cloud Hypervisor will be built against. Default is gnu"
     echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
+    echo "        --hypervisor          Underlying hypervisor. Options kvm, mshv"
     echo ""
     echo "    tests [--unit|--cargo|--all] [--libc musl|gnu] [-- [<cargo test args>]]"
     echo "        Run the Cloud Hypervisor tests."
@@ -185,6 +186,7 @@ cmd_help() {
     echo "        --integration-windows Run the Windows guest integration tests."
     echo "        --libc                Select the C library Cloud Hypervisor will be built against. Default is gnu"
     echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
+    echo "        --hypervisor          Underlying hypervisor. Options kvm, mshv"
     echo "        --all                 Run all tests."
     echo ""
     echo "    build-container [--type]"
@@ -205,6 +207,8 @@ cmd_help() {
 cmd_build() {
     build="debug"
     libc="gnu"
+    hypervisor="kvm"
+    features_build=""
 
     while [ $# -gt 0 ]; do
 	case "$1" in
@@ -221,6 +225,10 @@ cmd_build() {
                 shift
                 arg_vols="$1"
                 ;;
+            "--hypervisor")
+                shift
+                hypervisor="$1"
+                ;;
             "--")           { shift; break;         } ;;
             *)
 		die "Unknown build argument: $1. Please use --help for help."
@@ -229,6 +237,9 @@ cmd_build() {
 	shift
     done
     process_volumes_args
+    if [[ "$hypervisor" != "kvm" ]]; then
+        die "Hypervisor value must be kvm"
+    fi
 
     target="$(uname -m)-unknown-linux-${libc}"
 
@@ -251,7 +262,7 @@ cmd_build() {
 	   --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	   --env RUSTFLAGS="$rustflags" \
 	   "$CTR_IMAGE" \
-	   cargo build --all \
+	   cargo build --all $features_build \
 	         --target-dir "$CTR_CLH_CARGO_TARGET" \
 	         "${cargo_args[@]}" && say "Binaries placed under $CLH_CARGO_TARGET/$target/$build"
 }
@@ -278,7 +289,8 @@ cmd_tests() {
     integration_windows=false
     libc="gnu"
     arg_vols=""
-
+    hypervisor="kvm"
+    saved_args=("$@")
     while [ $# -gt 0 ]; do
 	case "$1" in
             "-h"|"--help")           { cmd_help; exit 1;     } ;;
@@ -297,6 +309,10 @@ cmd_tests() {
                 shift
                 arg_vols="$1"
                 ;;
+            "--hypervisor")
+                shift
+                hypervisor="$1"
+                ;;
 	    "--all")                 { cargo=true; unit=true; integration=true;  } ;;
             "--")                    { shift; break;         } ;;
             *)
@@ -305,7 +321,9 @@ cmd_tests() {
 	esac
 	shift
     done
-
+    if [[ "$hypervisor" != "kvm" ]]; then
+        die "Hypervisor value must be kvm"
+    fi
     process_volumes_args
     target="$(uname -m)-unknown-linux-${libc}"
     cflags=""
@@ -315,7 +333,7 @@ cmd_tests() {
 	cflags="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
     fi
 
-    if [ "$unit" = true ] ;  then
+    if [[ "$unit" = true && $hypervisor = "kvm" ]] ;  then
 	say "Running unit tests for $target..."
 	$DOCKER_RUNTIME run \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
@@ -328,7 +346,7 @@ cmd_tests() {
 	       --env CFLAGS="$cflags" \
 	       --env TARGET_CC="$target_cc" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
+	       ./scripts/run_unit_tests.sh "${saved_args[@]}" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$cargo" = true ] ;  then
@@ -338,7 +356,7 @@ cmd_tests() {
 	       --rm \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_cargo_tests.sh || fix_dir_perms $? || exit $?
+	       ./scripts/run_cargo_tests.sh "${saved_args[@]}"  || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration" = true ] ;  then
@@ -357,7 +375,7 @@ cmd_tests() {
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_integration_tests_$(uname -m).sh "$@" || fix_dir_perms $? || exit $?
+	       ./scripts/run_integration_tests_$(uname -m).sh "${saved_args[@]}" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_sgx" = true ] ;  then
@@ -376,7 +394,7 @@ cmd_tests() {
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_integration_tests_sgx.sh "$@" || fix_dir_perms $? || exit $?
+	       ./scripts/run_integration_tests_sgx.sh "${saved_args[@]}" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_windows" = true ] ;  then
@@ -395,7 +413,7 @@ cmd_tests() {
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_integration_tests_windows.sh "$@" || fix_dir_perms $? || exit $?
+	       ./scripts/run_integration_tests_windows.sh "${saved_args[@]}" || fix_dir_perms $? || exit $?
     fi
     fix_dir_perms $?
 }
