@@ -2411,6 +2411,8 @@ mod tests {
             cmd.args(&["--cpus", "boot=48"])
                 .args(&["--memory", "size=5120M"])
                 .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--serial", "tty"])
+                .args(&["--console", "off"])
                 .capture_output()
                 .default_disks()
                 .default_net();
