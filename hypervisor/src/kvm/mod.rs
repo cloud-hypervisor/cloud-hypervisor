@@ -19,7 +19,6 @@ use crate::hypervisor;
 use crate::vm::{self, VmmOps};
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset__of};
-use arc_swap::ArcSwapOption;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -97,7 +96,6 @@ pub struct KvmVm {
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
     state: KvmVmState,
-    vmmops: Arc<ArcSwapOption<Box<dyn vm::VmmOps>>>,
 }
 
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
@@ -177,7 +175,11 @@ impl vm::Vm for KvmVm {
     ///
     /// Creates a VcpuFd object from a vcpu RawFd.
     ///
-    fn create_vcpu(&self, id: u8) -> vm::Result<Arc<dyn cpu::Vcpu>> {
+    fn create_vcpu(
+        &self,
+        id: u8,
+        vmmops: Option<Arc<Box<dyn VmmOps>>>,
+    ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
         let vc = self
             .fd
             .create_vcpu(id)
@@ -186,7 +188,7 @@ impl vm::Vm for KvmVm {
             fd: vc,
             #[cfg(target_arch = "x86_64")]
             msrs: self.msrs.clone(),
-            vmmops: self.vmmops.clone(),
+            vmmops,
             #[cfg(target_arch = "x86_64")]
             hyperv_synic: AtomicBool::new(false),
         };
@@ -363,13 +365,6 @@ impl vm::Vm for KvmVm {
     }
 
     ///
-    /// Set the VmmOps interface
-    ///
-    fn set_vmmops(&self, vmmops: Box<dyn VmmOps>) -> vm::Result<()> {
-        self.vmmops.store(Some(Arc::new(vmmops)));
-        Ok(())
-    }
-    ///
     /// Get dirty pages bitmap (one bit per page)
     ///
     fn get_dirty_log(&self, slot: u32, memory_size: u64) -> vm::Result<Vec<u64>> {
@@ -454,7 +449,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 fd: vm_fd,
                 msrs,
                 state: VmState {},
-                vmmops: Arc::new(ArcSwapOption::from(None)),
             }))
         }
 
@@ -463,7 +457,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
                 state: VmState {},
-                vmmops: Arc::new(ArcSwapOption::from(None)),
             }))
         }
     }
@@ -524,7 +517,7 @@ pub struct KvmVcpu {
     fd: VcpuFd,
     #[cfg(target_arch = "x86_64")]
     msrs: MsrEntries,
-    vmmops: Arc<ArcSwapOption<Box<dyn vm::VmmOps>>>,
+    vmmops: Option<Arc<Box<dyn vm::VmmOps>>>,
     #[cfg(target_arch = "x86_64")]
     hyperv_synic: AtomicBool,
 }
@@ -535,7 +528,7 @@ pub struct KvmVcpu {
 /// let kvm = hypervisor::kvm::KvmHypervisor::new().unwrap();
 /// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
-/// let vcpu = vm.create_vcpu(0).unwrap();
+/// let vcpu = vm.create_vcpu(0, None).unwrap();
 /// vcpu.get/set().unwrap()
 ///
 impl cpu::Vcpu for KvmVcpu {
@@ -723,7 +716,7 @@ impl cpu::Vcpu for KvmVcpu {
             Ok(run) => match run {
                 #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoIn(addr, data) => {
-                    if let Some(vmmops) = self.vmmops.load_full() {
+                    if let Some(vmmops) = &self.vmmops {
                         return vmmops
                             .pio_read(addr.into(), data)
                             .map(|_| cpu::VmExit::Ignore)
@@ -734,7 +727,7 @@ impl cpu::Vcpu for KvmVcpu {
                 }
                 #[cfg(target_arch = "x86_64")]
                 VcpuExit::IoOut(addr, data) => {
-                    if let Some(vmmops) = self.vmmops.load_full() {
+                    if let Some(vmmops) = &self.vmmops {
                         return vmmops
                             .pio_write(addr.into(), data)
                             .map(|_| cpu::VmExit::Ignore)
@@ -767,7 +760,7 @@ impl cpu::Vcpu for KvmVcpu {
                 }
 
                 VcpuExit::MmioRead(addr, data) => {
-                    if let Some(vmmops) = self.vmmops.load_full() {
+                    if let Some(vmmops) = &self.vmmops {
                         return vmmops
                             .mmio_read(addr, data)
                             .map(|_| cpu::VmExit::Ignore)
@@ -777,7 +770,7 @@ impl cpu::Vcpu for KvmVcpu {
                     Ok(cpu::VmExit::MmioRead(addr, data))
                 }
                 VcpuExit::MmioWrite(addr, data) => {
-                    if let Some(vmmops) = self.vmmops.load_full() {
+                    if let Some(vmmops) = &self.vmmops {
                         return vmmops
                             .mmio_write(addr, data)
                             .map(|_| cpu::VmExit::Ignore)
@@ -1136,7 +1129,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
     /// let vm = hv.create_vm().expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
-    /// let vcpu = vm.create_vcpu(0).unwrap();
+    /// let vcpu = vm.create_vcpu(0, None).unwrap();
     /// let state = vcpu.state().unwrap();
     /// ```
     fn state(&self) -> cpu::Result<CpuState> {
@@ -1282,7 +1275,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
     /// let vm = hv.create_vm().expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
-    /// let vcpu = vm.create_vcpu(0).unwrap();
+    /// let vcpu = vm.create_vcpu(0, None).unwrap();
     /// let state = vcpu.state().unwrap();
     /// vcpu.set_state(&state).unwrap();
     /// ```

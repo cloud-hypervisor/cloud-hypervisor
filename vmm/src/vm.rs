@@ -500,15 +500,14 @@ impl Vm {
         let mmio_bus = Arc::clone(device_manager.lock().unwrap().mmio_bus());
         // Create the VmOps structure, which implements the VmmOps trait.
         // And send it to the hypervisor.
-        let vm_ops = Box::new(VmOps {
+        let vm_ops: Arc<Box<dyn VmmOps>> = Arc::new(Box::new(VmOps {
             memory,
             #[cfg(target_arch = "x86_64")]
             io_bus,
             mmio_bus,
             #[cfg(target_arch = "x86_64")]
             timestamp: std::time::Instant::now(),
-        });
-        vm.set_vmmops(vm_ops).map_err(Error::SetVmmOpsInterface)?;
+        }));
 
         let exit_evt_clone = exit_evt.try_clone().map_err(Error::EventFdClone)?;
         let cpu_manager = cpu::CpuManager::new(
@@ -520,6 +519,7 @@ impl Vm {
             reset_evt,
             hypervisor,
             seccomp_action.clone(),
+            vm_ops,
         )
         .map_err(Error::CpuManager)?;
 
@@ -2187,7 +2187,7 @@ pub fn test_vm() {
     mem.write_slice(&code, load_addr)
         .expect("Writing code to memory failed");
 
-    let vcpu = vm.create_vcpu(0).expect("new Vcpu failed");
+    let vcpu = vm.create_vcpu(0, None).expect("new Vcpu failed");
 
     let mut vcpu_sregs = vcpu.get_sregs().expect("get sregs failed");
     vcpu_sregs.cs.base = 0;

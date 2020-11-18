@@ -34,10 +34,9 @@ use devices::interrupt_controller::InterruptController;
 use hypervisor::kvm::kvm_bindings;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuId;
-use hypervisor::{CpuState, HypervisorCpuError, VmExit};
-use seccomp::{SeccompAction, SeccompFilter};
-
+use hypervisor::{vm::VmmOps, CpuState, HypervisorCpuError, VmExit};
 use libc::{c_void, siginfo_t};
+use seccomp::{SeccompAction, SeccompFilter};
 use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -225,9 +224,14 @@ impl Vcpu {
     ///
     /// * `id` - Represents the CPU number between [0, max vcpus).
     /// * `vm` - The virtual machine this vcpu will get attached to.
-    pub fn new(id: u8, vm: &Arc<dyn hypervisor::Vm>) -> Result<Arc<Mutex<Self>>> {
+    /// * `vmmops` - Optional object for exit handling.
+    pub fn new(
+        id: u8,
+        vm: &Arc<dyn hypervisor::Vm>,
+        vmmops: Option<Arc<Box<dyn VmmOps>>>,
+    ) -> Result<Arc<Mutex<Self>>> {
         let vcpu = vm
-            .create_vcpu(id)
+            .create_vcpu(id, vmmops)
             .map_err(|e| Error::VcpuCreate(e.into()))?;
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Arc::new(Mutex::new(Vcpu {
@@ -405,6 +409,7 @@ pub struct CpuManager {
     selected_cpu: u8,
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
     seccomp_action: SeccompAction,
+    vmmops: Arc<Box<dyn VmmOps>>,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -534,6 +539,7 @@ impl CpuManager {
         reset_evt: EventFd,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
+        vmmops: Arc<Box<dyn VmmOps>>,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let guest_memory = memory_manager.lock().unwrap().guest_memory();
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
@@ -565,6 +571,7 @@ impl CpuManager {
             selected_cpu: 0,
             vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
             seccomp_action,
+            vmmops,
         }));
 
         #[cfg(target_arch = "x86_64")]
@@ -656,7 +663,7 @@ impl CpuManager {
     ) -> Result<Arc<Mutex<Vcpu>>> {
         info!("Creating vCPU: cpu_id = {}", cpu_id);
 
-        let vcpu = Vcpu::new(cpu_id, &self.vm)?;
+        let vcpu = Vcpu::new(cpu_id, &self.vm, Some(self.vmmops.clone()))?;
 
         if let Some(snapshot) = snapshot {
             // AArch64 vCPUs should be initialized after created.
@@ -1429,7 +1436,7 @@ mod tests {
         assert!(hv.check_capability(hypervisor::kvm::Cap::Irqchip));
         // Calling get_lapic will fail if there is no irqchip before hand.
         assert!(vm.create_irq_chip().is_ok());
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.create_vcpu(0, None).unwrap();
         let klapic_before: LapicState = vcpu.get_lapic().unwrap();
 
         // Compute the value that is expected to represent LVT0 and LVT1.
@@ -1452,7 +1459,7 @@ mod tests {
     fn test_setup_fpu() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.create_vcpu(0, None).unwrap();
         setup_fpu(&vcpu).unwrap();
 
         let expected_fpu: FpuState = FpuState {
@@ -1477,7 +1484,7 @@ mod tests {
 
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.create_vcpu(0, None).unwrap();
         setup_msrs(&vcpu).unwrap();
 
         // This test will check against the last MSR entry configured (the tenth one).
@@ -1503,7 +1510,7 @@ mod tests {
     fn test_setup_regs() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.create_vcpu(0, None).unwrap();
 
         let expected_regs: StandardRegisters = StandardRegisters {
             rflags: 0x0000000000000002u64,
@@ -1531,7 +1538,7 @@ mod tests {
     fn test_setup_sregs() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.create_vcpu(0, None).unwrap();
 
         let mut expected_sregs: SpecialRegisters = vcpu.get_sregs().unwrap();
         let gm = GuestMemoryMmap::from_ranges(&vec![(GuestAddress(0), 0x10000)]).unwrap();
@@ -1562,7 +1569,7 @@ mod tests {
     fn test_setup_regs() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.create_vcpu(0, None).unwrap();
         let mut regions = Vec::new();
         regions.push((
             GuestAddress(layout::RAM_64BIT_START),
@@ -1585,7 +1592,7 @@ mod tests {
     fn test_read_mpidr() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.create_vcpu(0, None).unwrap();
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
 
@@ -1609,7 +1616,7 @@ mod tests {
     fn test_save_restore_core_regs() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.create_vcpu(0, None).unwrap();
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
 
@@ -1645,7 +1652,7 @@ mod tests {
     fn test_save_restore_system_regs() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.create_vcpu(0, None).unwrap();
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
 
@@ -1686,7 +1693,7 @@ mod tests {
     fn test_get_set_mpstate() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
-        let vcpu = vm.create_vcpu(0).unwrap();
+        let vcpu = vm.create_vcpu(0, None).unwrap();
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
 
