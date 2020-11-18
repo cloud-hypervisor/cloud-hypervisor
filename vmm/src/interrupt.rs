@@ -415,7 +415,7 @@ mod tests {
     fn test_get_set_dist_regs() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
-        let _ = vm.create_vcpu(0).unwrap();
+        let _ = vm.create_vcpu(0, None).unwrap();
         let gic = create_gic(&vm, 1).expect("Cannot create gic");
 
         let res = get_dist_regs(gic.device());
@@ -431,7 +431,7 @@ mod tests {
     fn test_get_set_redist_regs() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
-        let _ = vm.create_vcpu(0).unwrap();
+        let _ = vm.create_vcpu(0, None).unwrap();
         let gic = create_gic(&vm, 1).expect("Cannot create gic");
 
         let mut gicr_typer = Vec::new();
@@ -449,7 +449,7 @@ mod tests {
     fn test_get_set_icc_regs() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
-        let _ = vm.create_vcpu(0).unwrap();
+        let _ = vm.create_vcpu(0, None).unwrap();
         let gic = create_gic(&vm, 1).expect("Cannot create gic");
 
         let mut gicr_typer = Vec::new();
@@ -467,7 +467,7 @@ mod tests {
     fn test_save_pending_tables() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
-        let _ = vm.create_vcpu(0).unwrap();
+        let _ = vm.create_vcpu(0, None).unwrap();
         let gic = create_gic(&vm, 1).expect("Cannot create gic");
 
         assert!(save_pending_tables(gic.device()).is_ok());
