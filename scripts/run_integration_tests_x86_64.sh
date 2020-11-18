@@ -2,11 +2,19 @@
 set -x
 
 source $HOME/.cargo/env
+source $(dirname "$0")/test-util.sh
 
 export BUILD_TARGET=${BUILD_TARGET-x86_64-unknown-linux-gnu}
 
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
+
+
+process_common_args "$@"
+
+# For now these values are deafult for kvm
+features_build=""
+features_test="--features integration_tests"
 
 cp scripts/sha1sums-x86_64 $WORKLOADS_DIR
 
@@ -215,7 +223,7 @@ TARGET_CC="musl-gcc"
 CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --all --release --target $BUILD_TARGET
+cargo build --all  --release $features_build --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
 strip target/$BUILD_TARGET/release/ch-remote
@@ -235,14 +243,14 @@ echo 4096 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 export RUST_BACKTRACE=1
-time cargo test --features "integration_tests" "tests::parallel::$@"
+time cargo test $features_test "tests::parallel::"
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
     export RUST_BACKTRACE=1
-    time cargo test --features "integration_tests" "tests::sequential::$@" -- --test-threads=1
+    time cargo test $features_test "tests::sequential::" -- --test-threads=1
     RES=$?
 fi
 

@@ -3,6 +3,9 @@ set -e
 set -x
 
 source $HOME/.cargo/env
+source $(dirname "$0")/test-util.sh
+
+process_common_args "$@"
 
 # Install cargo components
 time rustup component add clippy
