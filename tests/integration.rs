@@ -5467,7 +5467,7 @@ mod tests {
                 guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
 
                 // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
-                thread::sleep(std::time::Duration::new(50, 0));
+                guest.wait_vm_boot(Some(50)).unwrap();
 
                 // Check that watchdog triggered reboot
                 let boot_count = guest
