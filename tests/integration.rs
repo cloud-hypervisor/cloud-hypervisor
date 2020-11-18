@@ -1798,7 +1798,7 @@ mod tests {
                 let desired_ram = 1024 << 20;
                 resize_command(&api_socket, None, Some(desired_ram), None);
 
-                thread::sleep(std::time::Duration::new(10, 0));
+                thread::sleep(std::time::Duration::new(30, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
 
                 // After the resize, check again that file1 exists and its
