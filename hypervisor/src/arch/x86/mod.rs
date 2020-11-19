@@ -38,3 +38,28 @@ pub const MTRR_MEM_TYPE_WB: u64 = 0x6;
 
 // IOAPIC pins
 pub const NUM_IOAPIC_PINS: usize = 24;
+
+// X86 Exceptions
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub enum Exception {
+    DE = 1,  // Divide Error
+    DB = 2,  // Debug Exception
+    BP = 3,  // Breakpoint
+    OF = 4,  // Overflow
+    BR = 5,  // BOUND Range Exceeded
+    UD = 6,  // Invalid/Undefined Opcode
+    NM = 7,  // No Math Coprocessor
+    DF = 8,  // Double Fault
+    TS = 10, // Invalid TSS
+    NP = 11, // Segment Not Present
+    SS = 12, // Stack Segment Fault
+    GP = 13, // General Protection
+    PF = 14, // Page Fault
+    MF = 16, // Math Fault
+    AC = 17, // Alignment Check
+    MC = 18, // Machine Check
+    XM = 19, // SIMD Floating-Point Exception
+    VE = 20, // Virtualization Exception
+    CP = 21, // Control Protection Exception
+}
