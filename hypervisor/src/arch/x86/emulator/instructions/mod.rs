@@ -77,3 +77,9 @@ impl<T: CpuStateManager> Default for InstructionMap<T> {
         Self::new()
     }
 }
+
+macro_rules! insn_add {
+    ($insn_map:ident, $mnemonic:ident, $code:ident) => {
+        $insn_map.add_insn(Code::$code, Box::new($mnemonic::$code {}));
+    };
+}
