@@ -6,9 +6,12 @@
 
 extern crate iced_x86;
 
-use crate::arch::emulator::PlatformError;
+use crate::arch::emulator::{EmulationError, EmulationResult, PlatformEmulator, PlatformError};
+use crate::arch::x86::emulator::instructions::*;
+use crate::arch::x86::Exception;
 use crate::x86_64::{SegmentRegister, SpecialRegisters, StandardRegisters};
 use iced_x86::*;
+use std::sync::{Arc, Mutex};
 
 mod instructions;
 
@@ -342,5 +345,75 @@ impl CpuStateManager for EmulatorCpuState {
 
     fn set_flags(&mut self, flags: u64) {
         self.regs.rflags = flags;
+    }
+}
+
+pub struct Emulator<T: CpuStateManager> {
+    platform: Arc<Mutex<dyn PlatformEmulator<CpuState = T>>>,
+    insn_map: InstructionMap<T>,
+}
+
+impl<T: CpuStateManager> Emulator<T> {
+    pub fn new(platform: Arc<Mutex<dyn PlatformEmulator<CpuState = T>>>) -> Emulator<T> {
+        let mut insn_map = InstructionMap::<T>::new();
+
+        Emulator {
+            platform: Arc::clone(&platform),
+            insn_map,
+        }
+    }
+
+    fn emulate_insn_stream(
+        &mut self,
+        cpu_id: usize,
+        insn_stream: &[u8],
+        num_insn: Option<usize>,
+    ) -> EmulationResult<T, Exception> {
+        let mut state = self
+            .platform
+            .lock()
+            .unwrap()
+            .cpu_state(cpu_id)
+            .map_err(EmulationError::PlatformEmulationError)?;
+        let mut decoder = Decoder::new(64, insn_stream, DecoderOptions::NONE);
+        decoder.set_ip(state.ip());
+
+        for (index, insn) in &mut decoder.iter().enumerate() {
+            self.insn_map
+                .instructions
+                .get(&insn.code())
+                .ok_or_else(|| {
+                    EmulationError::UnsupportedInstruction(anyhow!("{:?}", insn.mnemonic()))
+                })?
+                .emulate(&insn, &mut state, Arc::clone(&self.platform))?;
+
+            if let Some(num_insn) = num_insn {
+                if index + 1 >= num_insn {
+                    // Exit the decoding loop, do not decode the next instruction.
+                    break;
+                }
+            }
+        }
+
+        state.set_ip(decoder.ip());
+        Ok(state)
+    }
+
+    /// Emulate all instructions from the instructions stream.
+    pub fn emulate(&mut self, cpu_id: usize, insn_stream: &[u8]) -> EmulationResult<T, Exception> {
+        self.emulate_insn_stream(cpu_id, insn_stream, None)
+    }
+
+    /// Only emulate the first instruction from the stream.
+    ///
+    /// This is useful for cases where we get readahead instruction stream
+    /// but implicitly must only emulate the first instruction, and then return
+    /// to the guest.
+    pub fn emulate_first_insn(
+        &mut self,
+        cpu_id: usize,
+        insn_stream: &[u8],
+    ) -> EmulationResult<T, Exception> {
+        self.emulate_insn_stream(cpu_id, insn_stream, Some(1))
     }
 }
