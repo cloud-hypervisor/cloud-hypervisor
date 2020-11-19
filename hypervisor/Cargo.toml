@@ -30,3 +30,6 @@ features = ["elf", "bzimage"]
 version = "1.9.1"
 default-features = false
 features = ["std", "decoder", "op_code_info", "instr_info"]
+
+[dev-dependencies]
+env_logger = "0.8.2"
