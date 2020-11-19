@@ -10,6 +10,8 @@ use crate::arch::emulator::PlatformError;
 use crate::x86_64::{SegmentRegister, SpecialRegisters, StandardRegisters};
 use iced_x86::*;
 
+mod instructions;
+
 /// CpuStateManager manages an x86 CPU state.
 ///
 /// Instruction emulation handlers get a mutable reference to
