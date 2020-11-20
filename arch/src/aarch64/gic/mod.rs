@@ -174,6 +174,7 @@ pub mod kvm {
         }
 
         /// Method to initialize the GIC device
+        #[allow(clippy::new_ret_no_self)]
         fn new(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GICDevice>> {
             let vgic_fd = Self::init_device(vm)?;
 
