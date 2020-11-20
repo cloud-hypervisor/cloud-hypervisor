@@ -77,15 +77,15 @@ pub fn setup_vhost_user_vring(
                 queue.desc_table,
                 actual_size * std::mem::size_of::<Descriptor>(),
             )
-            .ok_or_else(|| Error::DescriptorTableAddress)? as u64,
+            .ok_or(Error::DescriptorTableAddress)? as u64,
             // The used ring is {flags: u16; idx: u16; virtq_used_elem [{id: u16, len: u16}; actual_size]},
             // i.e. 4 + (4 + 4) * actual_size.
             used_ring_addr: get_host_address_range(mem, queue.used_ring, 4 + actual_size * 8)
-                .ok_or_else(|| Error::UsedAddress)? as u64,
+                .ok_or(Error::UsedAddress)? as u64,
             // The used ring is {flags: u16; idx: u16; elem [u16; actual_size]},
             // i.e. 4 + (2) * actual_size.
             avail_ring_addr: get_host_address_range(mem, queue.avail_ring, 4 + actual_size * 2)
-                .ok_or_else(|| Error::AvailAddress)? as u64,
+                .ok_or(Error::AvailAddress)? as u64,
             log_addr: None,
         };
 
