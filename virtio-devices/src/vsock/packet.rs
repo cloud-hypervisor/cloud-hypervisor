@@ -118,7 +118,7 @@ impl VsockPacket {
 
         let mut pkt = Self {
             hdr: get_host_address_range(head.mem, head.addr, VSOCK_PKT_HDR_SIZE)
-                .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
+                .ok_or(VsockError::GuestMemory)? as *mut u8,
             buf: None,
             buf_size: 0,
         };
@@ -151,7 +151,7 @@ impl VsockPacket {
         pkt.buf_size = buf_desc.len as usize;
         pkt.buf = Some(
             get_host_address_range(buf_desc.mem, buf_desc.addr, pkt.buf_size)
-                .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
+                .ok_or(VsockError::GuestMemory)? as *mut u8,
         );
 
         Ok(pkt)
@@ -183,10 +183,10 @@ impl VsockPacket {
 
         Ok(Self {
             hdr: get_host_address_range(head.mem, head.addr, VSOCK_PKT_HDR_SIZE)
-                .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
+                .ok_or(VsockError::GuestMemory)? as *mut u8,
             buf: Some(
                 get_host_address_range(buf_desc.mem, buf_desc.addr, buf_size)
-                    .ok_or_else(|| VsockError::GuestMemory)? as *mut u8,
+                    .ok_or(VsockError::GuestMemory)? as *mut u8,
             ),
             buf_size,
         })

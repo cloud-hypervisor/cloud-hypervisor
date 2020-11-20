@@ -570,7 +570,7 @@ impl PciConfiguration {
         let end_addr = config
             .addr
             .checked_add(config.size - 1)
-            .ok_or_else(|| Error::BarAddressInvalid(config.addr, config.size))?;
+            .ok_or(Error::BarAddressInvalid(config.addr, config.size))?;
         match config.region_type {
             PciBarRegionType::Memory32BitRegion | PciBarRegionType::IORegion => {
                 if end_addr > u64::from(u32::max_value()) {
@@ -642,7 +642,7 @@ impl PciConfiguration {
         let end_addr = config
             .addr
             .checked_add(config.size - 1)
-            .ok_or_else(|| Error::RomBarAddressInvalid(config.addr, config.size))?;
+            .ok_or(Error::RomBarAddressInvalid(config.addr, config.size))?;
 
         if end_addr > u64::from(u32::max_value()) {
             return Err(Error::RomBarAddressInvalid(config.addr, config.size));
@@ -698,7 +698,7 @@ impl PciConfiguration {
         };
         let end_offset = cap_offset
             .checked_add(total_len)
-            .ok_or_else(|| Error::CapabilitySpaceFull(total_len))?;
+            .ok_or(Error::CapabilitySpaceFull(total_len))?;
         if end_offset > CAPABILITY_MAX_OFFSET {
             return Err(Error::CapabilitySpaceFull(total_len));
         }
