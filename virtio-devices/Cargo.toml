@@ -30,7 +30,7 @@ vhost_rs = { git = "https://github.com/rust-vmm/vhost", branch = "master", packa
 virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.3.0", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.4.0", features = ["backend-mmap", "backend-atomic"] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"

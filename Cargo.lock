@@ -230,6 +230,7 @@ dependencies = [
  "tempdir",
  "tempfile",
  "thiserror",
+ "vm-memory",
  "vmm",
  "vmm-sys-util",
  "wait-timeout",
@@ -1609,8 +1610,9 @@ dependencies = [
 
 [[package]]
 name = "vm-memory"
-version = "0.3.0"
-source = "git+https://github.com/cloud-hypervisor/vm-memory?branch=ch#66f0c8422ae2f2994676becfe3e0d95ef90bf104"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45b5b0a6f371f8147143b1adb95edddafc9cb9e40adaf94edb6f93a1d04b0330"
 dependencies = [
  "arc-swap",
  "libc",

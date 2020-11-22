@@ -10,6 +10,6 @@ thiserror = "1.0"
 serde = {version = ">=1.0.27", features = ["rc"] }
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
-vm-memory = { version = "0.3.0", features = ["backend-mmap"] }
+vm-memory = { version = "0.4.0", features = ["backend-mmap"] }
 vmm-sys-util = ">=0.3.1"
 

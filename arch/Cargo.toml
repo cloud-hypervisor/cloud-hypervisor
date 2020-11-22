@@ -16,7 +16,7 @@ log = "0.4.11"
 serde = {version = ">=1.0.27", features = ["rc"] }
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
-vm-memory = { version = "0.3.0", features = ["backend-mmap"] }
+vm-memory = { version = "0.4.0", features = ["backend-mmap"] }
 vm-migration = { path = "../vm-migration" }
 acpi_tables = { path = "../acpi_tables", optional = true }
 arch_gen = { path = "../arch_gen" }
