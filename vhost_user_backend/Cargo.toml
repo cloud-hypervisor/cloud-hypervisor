@@ -12,7 +12,7 @@ epoll = ">=4.0.1"
 libc = "0.2.80"
 log = "0.4.11"
 virtio-bindings = "0.1.0"
-vm-memory = "0.3.0"
+vm-memory = "0.4.0"
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
 vhost_rs = { git = "https://github.com/rust-vmm/vhost", branch = "master", package = "vhost", features = ["vhost-user-slave"] }
