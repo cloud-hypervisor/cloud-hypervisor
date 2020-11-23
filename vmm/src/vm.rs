@@ -50,7 +50,7 @@ use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 use linux_loader::loader::KernelLoader;
 use seccomp::{SeccompAction, SeccompFilter};
-use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
+use signal_hook::{iterator::backend::Handle, iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 use std::cmp;
 use std::collections::{BTreeMap, HashMap};
 use std::convert::TryInto;
@@ -444,7 +444,7 @@ pub struct Vm {
     device_manager: Arc<Mutex<DeviceManager>>,
     config: Arc<Mutex<VmConfig>>,
     on_tty: bool,
-    signals: Option<Signals>,
+    signals: Option<Handle>,
     state: RwLock<VmState>,
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     memory_manager: Arc<Mutex<MemoryManager>>,
@@ -1468,7 +1468,7 @@ impl Vm {
             let signals = Signals::new(&[SIGWINCH, SIGINT, SIGTERM]);
             match signals {
                 Ok(signals) => {
-                    self.signals = Some(signals.clone());
+                    self.signals = Some(signals.handle());
                     let exit_evt = self.exit_evt.try_clone().map_err(Error::EventFdClone)?;
                     let on_tty = self.on_tty;
                     let signal_handler_seccomp_filter =
@@ -1894,7 +1894,7 @@ impl Snapshottable for Vm {
             let signals = Signals::new(&[SIGWINCH, SIGINT, SIGTERM]);
             match signals {
                 Ok(signals) => {
-                    self.signals = Some(signals.clone());
+                    self.signals = Some(signals.handle());
 
                     let on_tty = self.on_tty;
                     let signal_handler_seccomp_filter =
