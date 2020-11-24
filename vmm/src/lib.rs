@@ -757,10 +757,10 @@ impl Vmm {
 
         let mut socket = match url.scheme() {
             "unix" => {
-                let listener = UnixListener::bind(url.to_file_path().map_err(|_| {
+                let path = url.to_file_path().map_err(|_| {
                     MigratableError::MigrateReceive(anyhow!("Error extracting path from URL"))
-                })?)
-                .map_err(|e| {
+                })?;
+                let listener = UnixListener::bind(&path).map_err(|e| {
                     MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {}", e))
                 })?;
                 let (socket, _addr) = listener.accept().map_err(|e| {
@@ -768,6 +768,9 @@ impl Vmm {
                         "Error accepting on UNIX socket: {}",
                         e
                     ))
+                })?;
+                std::fs::remove_file(&path).map_err(|e| {
+                    MigratableError::MigrateReceive(anyhow!("Error unlinking UNIX socket: {}", e))
                 })?;
                 socket
             }
