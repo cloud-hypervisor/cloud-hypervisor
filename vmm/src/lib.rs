@@ -673,8 +673,9 @@ impl Vmm {
         let reset_evt = self.reset_evt.try_clone().map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error cloning reset EventFd: {}", e))
         })?;
+        self.vm_config = Some(Arc::new(Mutex::new(config)));
         let vm = Vm::new_from_migration(
-            Arc::new(Mutex::new(config)),
+            self.vm_config.clone().unwrap(),
             exit_evt,
             reset_evt,
             &self.seccomp_action,
@@ -848,6 +849,7 @@ impl Vmm {
                 Command::Abandon => {
                     info!("Abandon Command Received");
                     self.vm = None;
+                    self.vm_config = None;
                     Response::ok().write_to(&mut socket).ok();
                     break;
                 }
