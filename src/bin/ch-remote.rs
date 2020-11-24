@@ -38,7 +38,7 @@ impl fmt::Display for Error {
         use Error::*;
         match self {
             ApiClient(e) => e.fmt(f),
-            Connect(e) => write!(f, "Error openning HTTP socket: {}", e),
+            Connect(e) => write!(f, "Error opening HTTP socket: {}", e),
             InvalidCPUCount(e) => write!(f, "Error parsing CPU count: {}", e),
             InvalidMemorySize(e) => write!(f, "Error parsing memory size: {:?}", e),
             InvalidBalloonSize(e) => write!(f, "Error parsing balloon size: {:?}", e),
