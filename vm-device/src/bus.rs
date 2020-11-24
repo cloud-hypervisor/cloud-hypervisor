@@ -112,7 +112,7 @@ impl Bus {
             .range(..=BusRange { base: addr, len: 1 })
             .rev()
             .next()?;
-        Some((*range, dev.upgrade().unwrap().clone()))
+        dev.upgrade().map(|d| (*range, d.clone()))
     }
 
     #[allow(clippy::type_complexity)]
