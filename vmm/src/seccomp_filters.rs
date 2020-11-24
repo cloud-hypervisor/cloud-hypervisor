@@ -101,6 +101,7 @@ const KVM_ENABLE_CAP: u64 = 0x4068_aea3;
 const KVM_SET_REGS: u64 = 0x4090_ae82;
 const KVM_GET_MP_STATE: u64 = 0x8004_ae98;
 const KVM_GET_DEVICE_ATTR: u64 = 0x4018_aee2;
+const KVM_GET_DIRTY_LOG: u64 = 0x4010_ae42;
 const KVM_GET_VCPU_EVENTS: u64 = 0x8040_ae9f;
 const KVM_GET_ONE_REG: u64 = 0x4010_aeab;
 const KVM_GET_REGS: u64 = 0x8090_ae81;
@@ -126,6 +127,7 @@ fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_ENABLE_CAP)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_API_VERSION,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_DEVICE_ATTR,)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_DIRTY_LOG)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_MP_STATE)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_ONE_REG)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_GET_REGS)?],
