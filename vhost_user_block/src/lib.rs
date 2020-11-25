@@ -455,7 +455,7 @@ impl VhostUserBlkBackendConfig {
         let poll_queue = parser
             .convert::<Toggle>("poll_queue")
             .map_err(Error::FailedConfigParse)?
-            .unwrap_or_else(|| Toggle(true))
+            .unwrap_or(Toggle(true))
             .0;
         let queue_size = parser
             .convert("queue_size")
