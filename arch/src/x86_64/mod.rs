@@ -991,7 +991,7 @@ mod tests {
     #[test]
     fn test_system_configuration() {
         let no_vcpus = 4;
-        let gm = GuestMemoryMmap::from_ranges(&vec![(GuestAddress(0), 0x10000)]).unwrap();
+        let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         let config_err = configure_system(
             &gm,
             GuestAddress(0),
