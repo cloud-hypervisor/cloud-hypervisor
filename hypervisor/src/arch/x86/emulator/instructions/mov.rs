@@ -18,7 +18,6 @@ use crate::arch::emulator::{EmulationError, PlatformEmulator};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::Exception;
 use std::mem;
-use std::sync::{Arc, Mutex};
 
 macro_rules! mov_rm_r {
     ($bound:ty) => {
@@ -26,7 +25,7 @@ macro_rules! mov_rm_r {
             &self,
             insn: &Instruction,
             state: &mut T,
-            platform: Arc<Mutex<dyn PlatformEmulator<CpuState = T>>>,
+            platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
             let src_reg_value = state
                 .read_reg(insn.op1_register())
@@ -42,8 +41,6 @@ macro_rules! mov_rm_r {
                 OpKind::Memory => {
                     let src_reg_value_type: $bound = src_reg_value as $bound;
                     platform
-                        .lock()
-                        .unwrap()
                         .write_memory(addr, &src_reg_value_type.to_le_bytes())
                         .map_err(EmulationError::PlatformEmulationError)?
                 }
@@ -64,7 +61,7 @@ macro_rules! mov_rm_imm {
             &self,
             insn: &Instruction,
             state: &mut T,
-            platform: Arc<Mutex<dyn PlatformEmulator<CpuState = T>>>,
+            platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
             let imm = imm_op!($type, insn);
             let addr = memory_operand_address(insn, state)
@@ -75,8 +72,6 @@ macro_rules! mov_rm_imm {
                     .write_reg(insn.op0_register(), imm as u64)
                     .map_err(EmulationError::PlatformEmulationError)?,
                 OpKind::Memory => platform
-                    .lock()
-                    .unwrap()
                     .write_memory(addr, &imm.to_le_bytes())
                     .map_err(EmulationError::PlatformEmulationError)?,
                 k => return Err(EmulationError::InvalidOperand(anyhow!("{:?}", k))),
@@ -95,7 +90,7 @@ macro_rules! mov_r_rm {
             &self,
             insn: &Instruction,
             state: &mut T,
-            platform: Arc<Mutex<dyn PlatformEmulator<CpuState = T>>>,
+            platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
             let src_value: $bound = match insn.op1_kind() {
                 OpKind::Register => state
@@ -107,8 +102,6 @@ macro_rules! mov_r_rm {
                         .map_err(EmulationError::PlatformEmulationError)?;
                     let mut memory: [u8; mem::size_of::<$bound>()] = [0; mem::size_of::<$bound>()];
                     platform
-                        .lock()
-                        .unwrap()
                         .read_memory(target_address, &mut memory)
                         .map_err(EmulationError::PlatformEmulationError)?;
                     <$bound>::from_le_bytes(memory)
@@ -134,7 +127,7 @@ macro_rules! mov_r_imm {
             &self,
             insn: &Instruction,
             state: &mut T,
-            _platform: Arc<Mutex<dyn PlatformEmulator<CpuState = T>>>,
+            _platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
             state
                 .write_reg(insn.op0_register(), imm_op!($type, insn) as u64)
@@ -261,6 +254,7 @@ mod tests {
     use crate::arch::x86::gdt::{gdt_entry, segment_from_gdt};
     use crate::arch::x86::Exception;
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
     #[derive(Debug, Clone)]
     struct MockVMM {
@@ -340,7 +334,7 @@ mod tests {
         regs: HashMap<Register, u64>,
         memory: Option<(u64, &[u8])>,
         num_insn: Option<usize>,
-    ) -> Arc<Mutex<MockVMM>> {
+    ) -> MockVMM {
         let _ = env_logger::try_init();
         let cs_reg = segment_from_gdt(gdt_entry(0xc09b, 0, 0xffffffff), 1);
         let ds_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 2);
@@ -352,11 +346,11 @@ mod tests {
             initial_state.write_reg(reg, value).unwrap();
         }
 
-        let vmm = Arc::new(Mutex::new(MockVMM::new(initial_state)));
+        let mut vmm = MockVMM::new(initial_state);
         if let Some(mem) = memory {
-            vmm.lock().unwrap().write_memory(mem.0, &mem.1).unwrap();
+            vmm.write_memory(mem.0, &mem.1).unwrap();
         }
-        let mut emulator = Emulator::new(vmm.clone());
+        let mut emulator = Emulator::new(&mut vmm);
 
         let new_state = emulator
             .emulate_insn_stream(cpu_id, &insn, num_insn)
@@ -365,10 +359,7 @@ mod tests {
             assert_eq!(ip + insn.len() as u64, new_state.ip());
         }
 
-        vmm.lock()
-            .unwrap()
-            .set_cpu_state(cpu_id, new_state)
-            .unwrap();
+        vmm.set_cpu_state(cpu_id, new_state).unwrap();
 
         vmm
     }
@@ -379,7 +370,7 @@ mod tests {
         insn: &[u8],
         regs: HashMap<Register, u64>,
         memory: Option<(u64, &[u8])>,
-    ) -> Arc<Mutex<MockVMM>> {
+    ) -> MockVMM {
         _init_and_run(cpu_id, ip, insn, regs, memory, None)
     }
 
@@ -393,8 +384,6 @@ mod tests {
         let vmm = init_and_run(cpu_id, ip, &insn, hashmap![Register::RBX => rbx], None);
 
         let rax: u64 = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::RAX)
@@ -414,8 +403,6 @@ mod tests {
         let vmm = init_and_run(cpu_id, ip, &insn, hashmap![], None);
 
         let rax: u64 = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::RAX)
@@ -443,8 +430,6 @@ mod tests {
         );
 
         rax = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::RAX)
@@ -464,8 +449,6 @@ mod tests {
         let vmm = init_and_run(cpu_id, ip, &insn, hashmap![], None);
 
         let al = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::AL)
@@ -485,8 +468,6 @@ mod tests {
         let vmm = init_and_run(cpu_id, ip, &insn, hashmap![], None);
 
         let eax = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::EAX)
@@ -506,8 +487,6 @@ mod tests {
         let vmm = init_and_run(cpu_id, ip, &insn, hashmap![], None);
 
         let rax: u64 = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::RAX)
@@ -534,7 +513,7 @@ mod tests {
         );
 
         let mut memory: [u8; 1] = [0; 1];
-        vmm.lock().unwrap().read_memory(rax, &mut memory).unwrap();
+        vmm.read_memory(rax, &mut memory).unwrap();
 
         assert_eq!(u8::from_le_bytes(memory), dh);
 
@@ -558,7 +537,7 @@ mod tests {
         );
 
         let mut memory: [u8; 4] = [0; 4];
-        vmm.lock().unwrap().read_memory(rax, &mut memory).unwrap();
+        vmm.read_memory(rax, &mut memory).unwrap();
 
         assert_eq!(u32::from_le_bytes(memory), esi);
 
@@ -583,10 +562,7 @@ mod tests {
         );
 
         let mut memory: [u8; 4] = [0; 4];
-        vmm.lock()
-            .unwrap()
-            .read_memory(rax + displacement, &mut memory)
-            .unwrap();
+        vmm.read_memory(rax + displacement, &mut memory).unwrap();
 
         assert_eq!(u32::from_le_bytes(memory), edi);
 
@@ -612,8 +588,6 @@ mod tests {
         );
 
         let new_eax = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::EAX)
@@ -642,8 +616,6 @@ mod tests {
         );
 
         let new_al = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::AL)
@@ -677,8 +649,6 @@ mod tests {
         );
 
         let rbx: u64 = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::RBX)
@@ -713,14 +683,9 @@ mod tests {
             Some(1),
         );
 
-        assert_eq!(
-            ip + 7 as u64,
-            vmm.lock().unwrap().cpu_state(cpu_id).unwrap().ip()
-        );
+        assert_eq!(ip + 7 as u64, vmm.cpu_state(cpu_id).unwrap().ip());
 
         let new_rax: u64 = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::RAX)
@@ -757,14 +722,9 @@ mod tests {
             Some(2),
         );
 
-        assert_eq!(
-            ip + 7 + 4 as u64,
-            vmm.lock().unwrap().cpu_state(cpu_id).unwrap().ip()
-        );
+        assert_eq!(ip + 7 + 4 as u64, vmm.cpu_state(cpu_id).unwrap().ip());
 
         let rbx: u64 = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::RBX)
@@ -773,8 +733,6 @@ mod tests {
 
         // Check that rax is still at 0x100
         let new_rax: u64 = vmm
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .unwrap()
             .read_reg(Register::RAX)
