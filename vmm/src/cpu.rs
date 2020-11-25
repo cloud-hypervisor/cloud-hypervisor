@@ -1541,7 +1541,7 @@ mod tests {
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
         let mut expected_sregs: SpecialRegisters = vcpu.get_sregs().unwrap();
-        let gm = GuestMemoryMmap::from_ranges(&vec![(GuestAddress(0), 0x10000)]).unwrap();
+        let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
         configure_segments_and_sregs(&gm, &mut expected_sregs, BootProtocol::LinuxBoot).unwrap();
         setup_page_tables(&gm, &mut expected_sregs).unwrap();
 
