@@ -130,18 +130,18 @@ impl CpuStateManager for EmulatorCpuState {
             Register::RDX | Register::EDX | Register::DX | Register::DL | Register::DH => {
                 self.regs.rdx
             }
-            Register::RSP | Register::ESP => self.regs.rsp,
-            Register::RBP | Register::EBP => self.regs.rbp,
-            Register::RSI | Register::ESI => self.regs.rsi,
+            Register::RSP | Register::ESP | Register::SP => self.regs.rsp,
+            Register::RBP | Register::EBP | Register::BP => self.regs.rbp,
+            Register::RSI | Register::ESI | Register::SI | Register::SIL => self.regs.rsi,
             Register::RDI | Register::EDI | Register::DI | Register::DIL => self.regs.rdi,
-            Register::R8 | Register::R8D => self.regs.r8,
-            Register::R9 | Register::R9D => self.regs.r9,
-            Register::R10 | Register::R10D => self.regs.r10,
-            Register::R11 | Register::R11D => self.regs.r11,
-            Register::R12 | Register::R12D => self.regs.r12,
-            Register::R13 | Register::R13D => self.regs.r13,
-            Register::R14 | Register::R14D => self.regs.r14,
-            Register::R15 | Register::R15D => self.regs.r15,
+            Register::R8 | Register::R8D | Register::R8W | Register::R8L => self.regs.r8,
+            Register::R9 | Register::R9D | Register::R9W | Register::R9L => self.regs.r9,
+            Register::R10 | Register::R10D | Register::R10W | Register::R10L => self.regs.r10,
+            Register::R11 | Register::R11D | Register::R11W | Register::R11L => self.regs.r11,
+            Register::R12 | Register::R12D | Register::R12W | Register::R12L => self.regs.r12,
+            Register::R13 | Register::R13D | Register::R13W | Register::R13L => self.regs.r13,
+            Register::R14 | Register::R14D | Register::R14W | Register::R14L => self.regs.r14,
+            Register::R15 | Register::R15D | Register::R15W | Register::R15L => self.regs.r15,
             Register::CR0 => self.sregs.cr0,
             Register::CR2 => self.sregs.cr2,
             Register::CR3 => self.sregs.cr3,
@@ -228,40 +228,40 @@ impl CpuStateManager for EmulatorCpuState {
             Register::RDX | Register::EDX | Register::DX | Register::DL | Register::DH => {
                 set_reg!(self.regs.rdx, mask, reg_value);
             }
-            Register::RSP | Register::ESP => {
+            Register::RSP | Register::ESP | Register::SP => {
                 set_reg!(self.regs.rsp, mask, reg_value)
             }
-            Register::RBP | Register::EBP => {
+            Register::RBP | Register::EBP | Register::BP => {
                 set_reg!(self.regs.rbp, mask, reg_value)
             }
-            Register::RSI | Register::ESI => {
+            Register::RSI | Register::ESI | Register::SI | Register::SIL => {
                 set_reg!(self.regs.rsi, mask, reg_value)
             }
             Register::RDI | Register::EDI | Register::DI | Register::DIL => {
                 set_reg!(self.regs.rdi, mask, reg_value)
             }
-            Register::R8 | Register::R8D => {
+            Register::R8 | Register::R8D | Register::R8W | Register::R8L => {
                 set_reg!(self.regs.r8, mask, reg_value)
             }
-            Register::R9 | Register::R9D => {
+            Register::R9 | Register::R9D | Register::R9W | Register::R9L => {
                 set_reg!(self.regs.r9, mask, reg_value)
             }
-            Register::R10 | Register::R10D => {
+            Register::R10 | Register::R10D | Register::R10W | Register::R10L => {
                 set_reg!(self.regs.r10, mask, reg_value)
             }
-            Register::R11 | Register::R11D => {
+            Register::R11 | Register::R11D | Register::R11W | Register::R11L => {
                 set_reg!(self.regs.r11, mask, reg_value)
             }
-            Register::R12 | Register::R12D => {
+            Register::R12 | Register::R12D | Register::R12W | Register::R12L => {
                 set_reg!(self.regs.r12, mask, reg_value)
             }
-            Register::R13 | Register::R13D => {
+            Register::R13 | Register::R13D | Register::R13W | Register::R13L => {
                 set_reg!(self.regs.r13, mask, reg_value)
             }
-            Register::R14 | Register::R14D => {
+            Register::R14 | Register::R14D | Register::R14W | Register::R14L => {
                 set_reg!(self.regs.r14, mask, reg_value)
             }
-            Register::R15 | Register::R15D => {
+            Register::R15 | Register::R15D | Register::R15W | Register::R15L => {
                 set_reg!(self.regs.r15, mask, reg_value)
             }
             Register::CR0 => set_reg!(self.sregs.cr0, mask, reg_value),
