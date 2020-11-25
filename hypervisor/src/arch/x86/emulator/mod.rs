@@ -11,7 +11,6 @@ use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::Exception;
 use crate::x86_64::{SegmentRegister, SpecialRegisters, StandardRegisters};
 use iced_x86::*;
-use std::sync::{Arc, Mutex};
 
 #[macro_use]
 mod instructions;
@@ -349,13 +348,13 @@ impl CpuStateManager for EmulatorCpuState {
     }
 }
 
-pub struct Emulator<T: CpuStateManager> {
-    platform: Arc<Mutex<dyn PlatformEmulator<CpuState = T>>>,
+pub struct Emulator<'a, T: CpuStateManager> {
+    platform: &'a mut dyn PlatformEmulator<CpuState = T>,
     insn_map: InstructionMap<T>,
 }
 
-impl<T: CpuStateManager> Emulator<T> {
-    pub fn new(platform: Arc<Mutex<dyn PlatformEmulator<CpuState = T>>>) -> Emulator<T> {
+impl<'a, T: CpuStateManager> Emulator<'a, T> {
+    pub fn new(platform: &mut dyn PlatformEmulator<CpuState = T>) -> Emulator<T> {
         let mut insn_map = InstructionMap::<T>::new();
 
         // MOV
@@ -376,10 +375,7 @@ impl<T: CpuStateManager> Emulator<T> {
         insn_add!(insn_map, mov, Mov_rm64_imm32);
         insn_add!(insn_map, mov, Mov_rm64_r64);
 
-        Emulator {
-            platform: Arc::clone(&platform),
-            insn_map,
-        }
+        Emulator { platform, insn_map }
     }
 
     fn emulate_insn_stream(
@@ -390,8 +386,6 @@ impl<T: CpuStateManager> Emulator<T> {
     ) -> EmulationResult<T, Exception> {
         let mut state = self
             .platform
-            .lock()
-            .unwrap()
             .cpu_state(cpu_id)
             .map_err(EmulationError::PlatformEmulationError)?;
         let mut decoder = Decoder::new(64, insn_stream, DecoderOptions::NONE);
@@ -404,7 +398,7 @@ impl<T: CpuStateManager> Emulator<T> {
                 .ok_or_else(|| {
                     EmulationError::UnsupportedInstruction(anyhow!("{:?}", insn.mnemonic()))
                 })?
-                .emulate(&insn, &mut state, Arc::clone(&self.platform))?;
+                .emulate(&insn, &mut state, self.platform)?;
 
             if let Some(num_insn) = num_insn {
                 if index + 1 >= num_insn {

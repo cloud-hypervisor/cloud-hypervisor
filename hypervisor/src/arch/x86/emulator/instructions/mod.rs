@@ -11,7 +11,6 @@ use crate::arch::x86::emulator::CpuStateManager;
 use crate::arch::x86::Exception;
 use iced_x86::*;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
 pub mod mov;
 
@@ -48,7 +47,7 @@ pub trait InstructionHandler<T: CpuStateManager> {
         &self,
         insn: &Instruction,
         state: &mut T,
-        platform: Arc<Mutex<dyn PlatformEmulator<CpuState = T>>>,
+        platform: &mut dyn PlatformEmulator<CpuState = T>,
     ) -> Result<(), EmulationError<Exception>>;
 }
 
