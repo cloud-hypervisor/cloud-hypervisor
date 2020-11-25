@@ -282,10 +282,11 @@ mod tests {
         assert!(bus.insert(dummy.clone(), 0x0, 0x20).is_err());
         assert!(bus.insert(dummy.clone(), 0x20, 0x05).is_ok());
         assert!(bus.insert(dummy.clone(), 0x25, 0x05).is_ok());
-        assert!(bus.insert(dummy.clone(), 0x0, 0x10).is_ok());
+        assert!(bus.insert(dummy, 0x0, 0x10).is_ok());
     }
 
     #[test]
+    #[allow(clippy::redundant_clone)]
     fn bus_read_write() {
         let bus = Bus::new();
         let dummy = Arc::new(Mutex::new(DummyDevice));
@@ -297,12 +298,13 @@ mod tests {
         assert!(bus.read(0x16, &mut [0, 0, 0, 0]).is_ok());
         assert!(bus.write(0x16, &[0, 0, 0, 0]).is_ok());
         assert!(bus.read(0x20, &mut [0, 0, 0, 0]).is_err());
-        assert!(bus.write(0x20, &mut [0, 0, 0, 0]).is_err());
+        assert!(bus.write(0x20, &[0, 0, 0, 0]).is_err());
         assert!(bus.read(0x06, &mut [0, 0, 0, 0]).is_err());
-        assert!(bus.write(0x06, &mut [0, 0, 0, 0]).is_err());
+        assert!(bus.write(0x06, &[0, 0, 0, 0]).is_err());
     }
 
     #[test]
+    #[allow(clippy::redundant_clone)]
     fn bus_read_write_values() {
         let bus = Bus::new();
         let dummy = Arc::new(Mutex::new(ConstantDevice));
@@ -318,6 +320,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::redundant_clone)]
     fn busrange_cmp() {
         let range = BusRange { base: 0x10, len: 2 };
         assert_eq!(range, BusRange { base: 0x10, len: 3 });
@@ -332,7 +335,7 @@ mod tests {
         let mut data = [1, 2, 3, 4];
         let device = Arc::new(Mutex::new(DummyDevice));
         assert!(bus.insert(device.clone(), 0x10, 0x10).is_ok());
-        assert!(bus.write(0x10, &mut data).is_ok());
+        assert!(bus.write(0x10, &data).is_ok());
         assert!(bus.read(0x10, &mut data).is_ok());
         assert_eq!(data, [1, 2, 3, 4]);
     }
