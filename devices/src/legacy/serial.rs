@@ -394,13 +394,13 @@ mod tests {
             Box::new(serial_out.clone()),
         );
 
-        serial.write(0, DATA as u64, &['x' as u8, 'y' as u8]);
-        serial.write(0, DATA as u64, &['a' as u8]);
-        serial.write(0, DATA as u64, &['b' as u8]);
-        serial.write(0, DATA as u64, &['c' as u8]);
+        serial.write(0, DATA as u64, &[b'x', b'y']);
+        serial.write(0, DATA as u64, &[b'a']);
+        serial.write(0, DATA as u64, &[b'b']);
+        serial.write(0, DATA as u64, &[b'c']);
         assert_eq!(
             serial_out.buf.lock().unwrap().as_slice(),
-            &['a' as u8, 'b' as u8, 'c' as u8]
+            &[b'a', b'b', b'c']
         );
     }
 
@@ -411,16 +411,14 @@ mod tests {
         let mut serial = Serial::new_out(
             String::from(SERIAL_NAME),
             Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
-            Box::new(serial_out.clone()),
+            Box::new(serial_out),
         );
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
         // counter doesn't change (for 0 it blocks)
         assert!(intr_evt.write(1).is_ok());
         serial.write(0, IER as u64, &[IER_RECV_BIT]);
-        serial
-            .queue_input_bytes(&['a' as u8, 'b' as u8, 'c' as u8])
-            .unwrap();
+        serial.queue_input_bytes(&[b'a', b'b', b'c']).unwrap();
 
         assert_eq!(intr_evt.read().unwrap(), 2);
 
@@ -433,11 +431,11 @@ mod tests {
         serial.read(0, LSR as u64, &mut data[..]);
         assert_ne!(data[0] & LSR_DATA_BIT, 0);
         serial.read(0, DATA as u64, &mut data[..]);
-        assert_eq!(data[0], 'a' as u8);
+        assert_eq!(data[0], b'a');
         serial.read(0, DATA as u64, &mut data[..]);
-        assert_eq!(data[0], 'b' as u8);
+        assert_eq!(data[0], b'b');
         serial.read(0, DATA as u64, &mut data[..]);
-        assert_eq!(data[0], 'c' as u8);
+        assert_eq!(data[0], b'c');
 
         // check if reading from the largest u8 offset returns 0
         serial.read(0, 0xff, &mut data[..]);
@@ -456,7 +454,7 @@ mod tests {
         // counter doesn't change (for 0 it blocks)
         assert!(intr_evt.write(1).is_ok());
         serial.write(0, IER as u64, &[IER_THR_BIT]);
-        serial.write(0, DATA as u64, &['a' as u8]);
+        serial.write(0, DATA as u64, &[b'a']);
 
         assert_eq!(intr_evt.read().unwrap(), 2);
         let mut data = [0u8];
@@ -496,9 +494,9 @@ mod tests {
         );
 
         serial.write(0, MCR as u64, &[MCR_LOOP_BIT as u8]);
-        serial.write(0, DATA as u64, &['a' as u8]);
-        serial.write(0, DATA as u64, &['b' as u8]);
-        serial.write(0, DATA as u64, &['c' as u8]);
+        serial.write(0, DATA as u64, &[b'a']);
+        serial.write(0, DATA as u64, &[b'b']);
+        serial.write(0, DATA as u64, &[b'c']);
 
         let mut data = [0u8];
         serial.read(0, MSR as u64, &mut data[..]);
@@ -506,11 +504,11 @@ mod tests {
         serial.read(0, MCR as u64, &mut data[..]);
         assert_eq!(data[0], MCR_LOOP_BIT as u8);
         serial.read(0, DATA as u64, &mut data[..]);
-        assert_eq!(data[0], 'a' as u8);
+        assert_eq!(data[0], b'a');
         serial.read(0, DATA as u64, &mut data[..]);
-        assert_eq!(data[0], 'b' as u8);
+        assert_eq!(data[0], b'b');
         serial.read(0, DATA as u64, &mut data[..]);
-        assert_eq!(data[0], 'c' as u8);
+        assert_eq!(data[0], b'c');
     }
 
     #[test]
