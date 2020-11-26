@@ -63,3 +63,5 @@ pub enum Exception {
     VE = 20, // Virtualization Exception
     CP = 21, // Control Protection Exception
 }
+
+pub mod regs;

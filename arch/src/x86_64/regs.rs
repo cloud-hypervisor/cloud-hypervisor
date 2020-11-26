@@ -11,6 +11,7 @@ use std::{mem, result};
 
 use super::BootProtocol;
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
+use hypervisor::arch::x86::regs::*;
 use hypervisor::x86_64::{FpuState, SpecialRegisters, StandardRegisters};
 use layout::{
     BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START, PML5_START, PVH_INFO_START,
@@ -134,14 +135,6 @@ pub fn setup_sregs(
 
 const BOOT_GDT_MAX: usize = 4;
 
-const EFER_LMA: u64 = 0x400;
-const EFER_LME: u64 = 0x100;
-
-const X86_CR0_PE: u64 = 0x1;
-const X86_CR0_PG: u64 = 0x80000000;
-const X86_CR4_PAE: u64 = 0x20;
-const X86_CR4_LA57: u64 = 0x1000;
-
 fn write_gdt_table(table: &[u64], guest_mem: &GuestMemoryMmap) -> Result<()> {
     let boot_gdt_addr = BOOT_GDT_START;
     for (index, entry) in table.iter().enumerate() {
@@ -209,12 +202,12 @@ pub fn configure_segments_and_sregs(
 
     match boot_prot {
         BootProtocol::PvhBoot => {
-            sregs.cr0 = X86_CR0_PE;
+            sregs.cr0 = CR0_PE;
             sregs.cr4 = 0;
         }
         BootProtocol::LinuxBoot => {
             /* 64-bit protected mode */
-            sregs.cr0 |= X86_CR0_PE;
+            sregs.cr0 |= CR0_PE;
             sregs.efer |= EFER_LME | EFER_LMA;
         }
     }
@@ -230,7 +223,7 @@ pub fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut SpecialRegisters) ->
             .map_err(Error::WritePML5Address)?;
 
         sregs.cr3 = PML5_START.raw_value();
-        sregs.cr4 |= X86_CR4_LA57;
+        sregs.cr4 |= CR4_LA57;
     } else {
         sregs.cr3 = PML4_START.raw_value();
     }
@@ -250,8 +243,8 @@ pub fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut SpecialRegisters) ->
             .map_err(Error::WritePDEAddress)?;
     }
 
-    sregs.cr4 |= X86_CR4_PAE;
-    sregs.cr0 |= X86_CR0_PG;
+    sregs.cr4 |= CR4_PAE;
+    sregs.cr0 |= CR0_PG;
 
     Ok(())
 }
@@ -301,7 +294,7 @@ mod tests {
         assert_eq!(0, sregs.tr.base);
         assert_eq!(0xffffffff, sregs.tr.limit);
         assert_eq!(0, sregs.tr.avl);
-        assert_eq!(X86_CR0_PE, sregs.cr0);
+        assert_eq!(CR0_PE, sregs.cr0);
         assert_eq!(EFER_LME | EFER_LMA, sregs.efer);
 
         configure_segments_and_sregs(&gm, &mut sregs, BootProtocol::PvhBoot).unwrap();
@@ -331,7 +324,7 @@ mod tests {
         assert_eq!(0x67, sregs.tr.limit);
         assert_eq!(0xb, sregs.tr.type_);
         assert_eq!(0, sregs.tr.avl);
-        assert_eq!(X86_CR0_PE, sregs.cr0);
+        assert_eq!(CR0_PE, sregs.cr0);
         assert_eq!(0, sregs.cr4);
     }
 
@@ -358,7 +351,7 @@ mod tests {
         } else {
             assert_eq!(PML4_START.raw_value(), sregs.cr3);
         }
-        assert_eq!(X86_CR4_PAE, sregs.cr4);
-        assert_eq!(X86_CR0_PG, sregs.cr0);
+        assert_eq!(CR4_PAE, sregs.cr4);
+        assert_eq!(CR0_PG, sregs.cr0);
     }
 }
