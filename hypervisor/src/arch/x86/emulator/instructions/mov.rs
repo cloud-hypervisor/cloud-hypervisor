@@ -249,9 +249,6 @@ impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm64_r64 {
 #[cfg(test)]
 mod tests {
     #![allow(unused_mut)]
-
-    extern crate env_logger;
-
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
 
