@@ -30,8 +30,6 @@ macro_rules! mov_rm_r {
             let src_reg_value = state
                 .read_reg(insn.op1_register())
                 .map_err(EmulationError::PlatformEmulationError)?;
-            let addr = memory_operand_address(insn, state)
-                .map_err(EmulationError::PlatformEmulationError)?;
 
             match insn.op0_kind() {
                 OpKind::Register => state
@@ -39,7 +37,10 @@ macro_rules! mov_rm_r {
                     .map_err(EmulationError::PlatformEmulationError)?,
 
                 OpKind::Memory => {
+                    let addr = memory_operand_address(insn, state)
+                        .map_err(EmulationError::PlatformEmulationError)?;
                     let src_reg_value_type: $bound = src_reg_value as $bound;
+
                     platform
                         .write_memory(addr, &src_reg_value_type.to_le_bytes())
                         .map_err(EmulationError::PlatformEmulationError)?
@@ -64,16 +65,19 @@ macro_rules! mov_rm_imm {
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
             let imm = imm_op!($type, insn);
-            let addr = memory_operand_address(insn, state)
-                .map_err(EmulationError::PlatformEmulationError)?;
 
             match insn.op0_kind() {
                 OpKind::Register => state
                     .write_reg(insn.op0_register(), imm as u64)
                     .map_err(EmulationError::PlatformEmulationError)?,
-                OpKind::Memory => platform
-                    .write_memory(addr, &imm.to_le_bytes())
-                    .map_err(EmulationError::PlatformEmulationError)?,
+                OpKind::Memory => {
+                    let addr = memory_operand_address(insn, state)
+                        .map_err(EmulationError::PlatformEmulationError)?;
+
+                    platform
+                        .write_memory(addr, &imm.to_le_bytes())
+                        .map_err(EmulationError::PlatformEmulationError)?
+                }
                 k => return Err(EmulationError::InvalidOperand(anyhow!("{:?}", k))),
             }
 
