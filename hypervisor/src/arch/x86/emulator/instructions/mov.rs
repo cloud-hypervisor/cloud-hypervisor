@@ -37,7 +37,7 @@ macro_rules! mov_rm_r {
                     .map_err(EmulationError::PlatformEmulationError)?,
 
                 OpKind::Memory => {
-                    let addr = memory_operand_address(insn, state)
+                    let addr = memory_operand_address(insn, state, true)
                         .map_err(EmulationError::PlatformEmulationError)?;
                     let src_reg_value_type: $bound = src_reg_value as $bound;
 
@@ -71,7 +71,7 @@ macro_rules! mov_rm_imm {
                     .write_reg(insn.op0_register(), imm as u64)
                     .map_err(EmulationError::PlatformEmulationError)?,
                 OpKind::Memory => {
-                    let addr = memory_operand_address(insn, state)
+                    let addr = memory_operand_address(insn, state, true)
                         .map_err(EmulationError::PlatformEmulationError)?;
 
                     platform
@@ -102,7 +102,7 @@ macro_rules! mov_r_rm {
                     .map_err(EmulationError::PlatformEmulationError)?
                     as $bound,
                 OpKind::Memory => {
-                    let target_address = memory_operand_address(insn, state)
+                    let target_address = memory_operand_address(insn, state, false)
                         .map_err(EmulationError::PlatformEmulationError)?;
                     let mut memory: [u8; mem::size_of::<$bound>()] = [0; mem::size_of::<$bound>()];
                     platform

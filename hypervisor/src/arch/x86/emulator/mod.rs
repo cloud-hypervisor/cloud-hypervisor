@@ -9,7 +9,8 @@ extern crate iced_x86;
 use crate::arch::emulator::{EmulationError, EmulationResult, PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::*;
-use crate::arch::x86::Exception;
+use crate::arch::x86::*;
+use crate::arch::x86::{Exception, SegmentRegisterOps};
 use crate::x86_64::{SegmentRegister, SpecialRegisters, StandardRegisters};
 use iced_x86::*;
 
@@ -111,6 +112,84 @@ pub trait CpuStateManager: Clone {
 
     /// Get the CPU mode.
     fn mode(&self) -> Result<CpuMode, PlatformError>;
+
+    /// Translate a logical (segmented) address into a linear (virtual) one.
+    ///
+    /// # Arguments
+    ///
+    /// * `segment` - Which segment to use for linearization
+    /// * `logical_addr` - The logical address to be translated
+    fn linearize(
+        &self,
+        segment: Register,
+        logical_addr: u64,
+        write: bool,
+    ) -> Result<u64, PlatformError> {
+        let segment_register = self.read_segment(segment)?;
+        let mode = self.mode()?;
+
+        match mode {
+            CpuMode::Long => {
+                // TODO Check that we got a canonical address.
+                Ok(logical_addr
+                    .checked_add(segment_register.base)
+                    .ok_or_else(|| {
+                        PlatformError::InvalidAddress(anyhow!(
+                            "Logical address {:#x} can not be linearized with segment {:#x?}",
+                            logical_addr,
+                            segment_register
+                        ))
+                    })?)
+            }
+
+            CpuMode::Protected | CpuMode::Real => {
+                let segment_type = segment_register.segment_type();
+
+                // Must not write to a read-only segment.
+                if segment_type_ro(segment_type) && write {
+                    return Err(PlatformError::InvalidAddress(anyhow!(
+                        "Can not write to a read-only segment"
+                    )));
+                }
+
+                let logical_addr = logical_addr & 0xffff_ffffu64;
+                let mut segment_limit: u32 = if segment_register.granularity() != 0 {
+                    (segment_register.limit << 12) | 0xfff
+                } else {
+                    segment_register.limit
+                };
+
+                // Expand-down segment
+                if segment_type_expand_down(segment_type) {
+                    if logical_addr >= segment_limit.into() {
+                        return Err(PlatformError::InvalidAddress(anyhow!(
+                            "{:#x} is off limits {:#x} (expand down)",
+                            logical_addr,
+                            segment_limit
+                        )));
+                    }
+
+                    if segment_register.db() != 0 {
+                        segment_limit = 0xffffffff
+                    } else {
+                        segment_limit = 0xffff
+                    }
+                }
+
+                if logical_addr > segment_limit.into() {
+                    return Err(PlatformError::InvalidAddress(anyhow!(
+                        "{:#x} is off limits {:#x}",
+                        logical_addr,
+                        segment_limit
+                    )));
+                }
+
+                Ok(logical_addr + segment_register.base)
+            }
+
+            _ => Err(PlatformError::UnsupportedCpuMode(anyhow!("{:?}", mode))),
+        }
+    }
 }
 
 const REGISTER_MASK_64: u64 = 0xffff_ffff_ffff_ffffu64;

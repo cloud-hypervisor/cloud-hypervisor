@@ -18,12 +18,9 @@ pub mod mov;
 fn memory_operand_address<T: CpuStateManager>(
     insn: &Instruction,
     state: &T,
+    write: bool,
 ) -> Result<u64, PlatformError> {
     let mut address: u64 = 0;
-
-    // Get the DS or override segment base first
-    let segment_base = state.read_segment(insn.memory_segment())?.base;
-    address += segment_base;
 
     if insn.memory_base() != iced_x86::Register::None {
         let base: u64 = state.read_reg(insn.memory_base())?;
@@ -39,7 +36,8 @@ fn memory_operand_address<T: CpuStateManager>(
 
     address += insn.memory_displacement() as u64;
 
-    Ok(address)
+    // Translate to a linear address.
+    state.linearize(insn.memory_segment(), address, write)
 }
 
 pub trait InstructionHandler<T: CpuStateManager> {

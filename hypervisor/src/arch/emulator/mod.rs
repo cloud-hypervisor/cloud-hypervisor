@@ -26,6 +26,9 @@ impl<T: Debug> Display for Exception<T> {
 
 #[derive(Error, Debug)]
 pub enum PlatformError {
+    #[error("Invalid address: {0}")]
+    InvalidAddress(#[source] anyhow::Error),
+
     #[error("Invalid register: {0}")]
     InvalidRegister(#[source] anyhow::Error),
 
@@ -46,6 +49,9 @@ pub enum PlatformError {
 
     #[error("Unmapped virtual address: {0}")]
     UnmappedGVA(#[source] anyhow::Error),
+
+    #[error("Unsupported CPU Mode: {0}")]
+    UnsupportedCpuMode(#[source] anyhow::Error),
 }
 
 #[derive(Error, Debug)]
