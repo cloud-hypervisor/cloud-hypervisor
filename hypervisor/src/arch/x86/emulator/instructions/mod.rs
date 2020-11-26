@@ -52,7 +52,7 @@ pub trait InstructionHandler<T: CpuStateManager> {
 }
 
 pub struct InstructionMap<T: CpuStateManager> {
-    pub instructions: HashMap<Code, Box<Box<dyn InstructionHandler<T> + Sync + Send>>>,
+    pub instructions: HashMap<Code, Box<dyn InstructionHandler<T> + Sync + Send>>,
 }
 
 impl<T: CpuStateManager> InstructionMap<T> {
@@ -67,7 +67,7 @@ impl<T: CpuStateManager> InstructionMap<T> {
         insn: Code,
         insn_handler: Box<dyn InstructionHandler<T> + Sync + Send>,
     ) {
-        self.instructions.insert(insn, Box::new(insn_handler));
+        self.instructions.insert(insn, insn_handler);
     }
 }
 
