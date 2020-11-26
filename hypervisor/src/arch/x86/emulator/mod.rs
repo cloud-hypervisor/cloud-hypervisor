@@ -513,9 +513,15 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
             .cpu_state(cpu_id)
             .map_err(EmulationError::PlatformEmulationError)?;
         let mut decoder = Decoder::new(64, insn_stream, DecoderOptions::NONE);
+        let mut insn = Instruction::default();
+        let mut num_insn_emulated: usize = 0;
+
         decoder.set_ip(state.ip());
 
-        for (index, insn) in &mut decoder.iter().enumerate() {
+        while decoder.can_decode() {
+            decoder.decode_out(&mut insn);
+
+            // Emulate the decoded instruction
             self.insn_map
                 .instructions
                 .get(&insn.code())
@@ -524,8 +530,10 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
                 })?
                 .emulate(&insn, &mut state, self.platform)?;
 
+            num_insn_emulated += 1;
+
             if let Some(num_insn) = num_insn {
-                if index + 1 >= num_insn {
+                if num_insn_emulated >= num_insn {
                     // Exit the decoding loop, do not decode the next instruction.
                     break;
                 }
