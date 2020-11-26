@@ -71,6 +71,9 @@ pub enum EmulationError<T: Debug> {
     #[error("Instruction Exception: {0}")]
     InstructionException(Exception<T>),
 
+    #[error("Instruction fetching error: {0}")]
+    InstructionFetchingError(#[source] anyhow::Error),
+
     #[error("Platform emulation error: {0}")]
     PlatformEmulationError(PlatformError),
 }
@@ -126,6 +129,14 @@ pub trait PlatformEmulator: Send + Sync {
     /// * `gva` - Guest virtual address to translate.
     ///
     fn gva_to_gpa(&self, gva: u64) -> Result<u64, PlatformError>;
+
+    /// Fetch instruction bytes from memory.
+    ///
+    /// # Arguments
+    ///
+    /// * `ip` - Instruction pointer virtual address to start fetching instructions from.
+    ///
+    fn fetch(&self, ip: u64, instruction_bytes: &mut [u8]) -> Result<(), PlatformError>;
 }
 
 pub type EmulationResult<S, E> = std::result::Result<S, EmulationError<E>>;

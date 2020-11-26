@@ -515,11 +515,48 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
         let mut decoder = Decoder::new(64, insn_stream, DecoderOptions::NONE);
         let mut insn = Instruction::default();
         let mut num_insn_emulated: usize = 0;
+        let mut fetched_insn_stream: [u8; 16] = [0; 16];
+        let mut last_decoded_ip: u64 = state.ip();
+        let mut stop_emulation: bool = false;
 
         decoder.set_ip(state.ip());
 
-        while decoder.can_decode() {
+        while decoder.can_decode() && !stop_emulation {
             decoder.decode_out(&mut insn);
+
+            if decoder.last_error() == DecoderError::NoMoreBytes {
+                // The decoder is missing some bytes to decode the current
+                // instruction, for example because the instruction stream
+                // crosses a page boundary.
+                // We fetch 16 more bytes from the instruction segment,
+                // decode and emulate the failing instruction and terminate
+                // the emulation loop.
+                debug!(
+                    "Fetching {} bytes from {:#x}",
+                    fetched_insn_stream.len(),
+                    last_decoded_ip
+                );
+
+                // fetched_insn_stream is 16 bytes long, enough to contain
+                // any complete x86 instruction.
+                self.platform
+                    .fetch(last_decoded_ip, &mut fetched_insn_stream)
+                    .map_err(EmulationError::PlatformEmulationError)?;
+
+                debug!("Fetched {:x?}", fetched_insn_stream);
+
+                // Once we have the new stream, we must create a new decoder
+                // and emulate one last instruction from the last decoded IP.
+                decoder = Decoder::new(64, &fetched_insn_stream, DecoderOptions::NONE);
+                decoder.decode_out(&mut insn);
+                if decoder.last_error() != DecoderError::None {
+                    return Err(EmulationError::InstructionFetchingError(anyhow!(
+                        "{:#x?}", insn
+                    )));
+                }
+
+                stop_emulation = true;
+            }
 
             // Emulate the decoded instruction
             self.insn_map
@@ -530,12 +567,13 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
                 })?
                 .emulate(&insn, &mut state, self.platform)?;
 
+            last_decoded_ip = decoder.ip();
             num_insn_emulated += 1;
 
             if let Some(num_insn) = num_insn {
                 if num_insn_emulated >= num_insn {
                     // Exit the decoding loop, do not decode the next instruction.
-                    break;
+                    stop_emulation = true;
                 }
             }
         }
@@ -601,7 +639,7 @@ mod mock_vmm {
             }
 
             let mut vmm = MockVMM {
-                memory: vec![0; 4096],
+                memory: vec![0; 8192],
                 state: Arc::new(Mutex::new(initial_state)),
             };
 
@@ -673,5 +711,101 @@ mod mock_vmm {
         fn gva_to_gpa(&self, gva: u64) -> Result<u64, PlatformError> {
             Ok(gva)
         }
+
+        fn fetch(&self, ip: u64, instruction_bytes: &mut [u8]) -> Result<(), PlatformError> {
+            let rip = self
+                .state
+                .lock()
+                .unwrap()
+                .linearize(Register::CS, ip, false)?;
+            self.read_memory(rip, instruction_bytes)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(unused_mut)]
+    use super::*;
+    use crate::arch::x86::emulator::mock_vmm::*;
+
+    macro_rules! hashmap {
+        ($( $key: expr => $val: expr ),*) => {{
+            let mut map = ::std::collections::HashMap::new();
+            $( map.insert($key, $val); )*
+                map
+        }}
+    }
+
+    #[test]
+    // Emulate truncated instruction stream, which should cause a fetch.
+    //
+    // mov rax, 0x1000
+    // Test with a first instruction truncated.
+    fn test_fetch_first_instruction() -> MockResult {
+        let ip: u64 = 0x1000;
+        let cpu_id = 0;
+        let memory = [
+            // Code at IP
+            0x48, 0xc7, 0xc0, 0x00, 0x10, 0x00, 0x00, // mov rax, 0x1000
+            0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
+            // Padding
+            0x00, 0x00, 0x00, 0x00, 0x00, // Padding is all zeroes
+            // Data at IP + 0x10 (0x1234567812345678 in LE)
+            0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12,
+        ];
+        let insn = [
+            // First instruction is truncated
+            0x48, 0xc7, 0xc0, 0x00, // mov rax, 0x1000 -- Missing bytes: 0x00, 0x10, 0x00, 0x00,
+        ];
+
+        let mut vmm = MockVMM::new(ip, hashmap![], Some((ip, &memory)));
+        vmm.emulate_insn(cpu_id, &insn, Some(2));
+
+        let rax: u64 = vmm
+            .cpu_state(cpu_id)
+            .unwrap()
+            .read_reg(Register::RAX)
+            .unwrap();
+        assert_eq!(rax, ip);
+
+        Ok(())
+    }
+
+    #[test]
+    // Emulate truncated instruction stream, which should cause a fetch.
+    //
+    // mov rax, 0x1000
+    // mov rbx, qword ptr [rax+10h]
+    // Test with a 2nd instruction truncated.
+    fn test_fetch_second_instruction() -> MockResult {
+        let target_rax: u64 = 0x1234567812345678;
+        let ip: u64 = 0x1000;
+        let cpu_id = 0;
+        let memory = [
+            // Code at IP
+            0x48, 0xc7, 0xc0, 0x00, 0x10, 0x00, 0x00, // mov rax, 0x1000
+            0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
+            // Padding
+            0x00, 0x00, 0x00, 0x00, 0x00, // Padding is all zeroes
+            // Data at IP + 0x10 (0x1234567812345678 in LE)
+            0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12,
+        ];
+        let insn = [
+            0x48, 0xc7, 0xc0, 0x00, 0x10, 0x00, 0x00, // mov rax, 0x1000
+            0x48, 0x8b, // Truncated mov rbx, qword ptr [rax+10h] -- missing [0x58, 0x10]
+        ];
+
+        let mut vmm = MockVMM::new(ip, hashmap![], Some((ip, &memory)));
+        vmm.emulate_insn(cpu_id, &insn, Some(2));
+
+        let rbx: u64 = vmm
+            .cpu_state(cpu_id)
+            .unwrap()
+            .read_reg(Register::RBX)
+            .unwrap();
+        assert_eq!(rbx, target_rax);
+
+        Ok(())
     }
 }
