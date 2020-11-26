@@ -10,7 +10,7 @@
 
 use vm_memory::GuestAddress;
 
-use crate::arch::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
+use crate::arch::x86::{msr_index, SegmentRegisterOps, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde_derive::{Deserialize, Serialize};
 
@@ -27,6 +27,71 @@ pub use {
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
     kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX as CPUID_FLAG_VALID_INDEX,
 };
+
+impl SegmentRegisterOps for SegmentRegister {
+    fn segment_type(&self) -> u8 {
+        self.type_
+    }
+    fn set_segment_type(&mut self, val: u8) {
+        self.type_ = val;
+    }
+
+    fn dpl(&self) -> u8 {
+        self.dpl
+    }
+
+    fn set_dpl(&mut self, val: u8) {
+        self.dpl = val;
+    }
+
+    fn present(&self) -> u8 {
+        self.present
+    }
+
+    fn set_present(&mut self, val: u8) {
+        self.present = val;
+    }
+
+    fn long(&self) -> u8 {
+        self.l
+    }
+
+    fn set_long(&mut self, val: u8) {
+        self.l = val;
+    }
+
+    fn avl(&self) -> u8 {
+        self.avl
+    }
+
+    fn set_avl(&mut self, val: u8) {
+        self.avl = val;
+    }
+
+    fn desc_type(&self) -> u8 {
+        self.s
+    }
+
+    fn set_desc_type(&mut self, val: u8) {
+        self.s = val;
+    }
+
+    fn granularity(&self) -> u8 {
+        self.g
+    }
+
+    fn set_granularity(&mut self, val: u8) {
+        self.g = val;
+    }
+
+    fn db(&self) -> u8 {
+        self.db
+    }
+
+    fn set_db(&mut self, val: u8) {
+        self.db = val;
+    }
+}
 
 pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
 

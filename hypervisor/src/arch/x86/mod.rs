@@ -65,3 +65,60 @@ pub enum Exception {
 }
 
 pub mod regs;
+
+// Abstracted segment register ops.
+// Each x86 hypervisor should implement those.
+pub trait SegmentRegisterOps {
+    // Segment type
+    fn segment_type(&self) -> u8;
+    fn set_segment_type(&mut self, val: u8);
+
+    // Descriptor Privilege Level (DPL)
+    fn dpl(&self) -> u8;
+    fn set_dpl(&mut self, val: u8);
+
+    // Granularity
+    fn granularity(&self) -> u8;
+    fn set_granularity(&mut self, val: u8);
+
+    // Memory Presence
+    fn present(&self) -> u8;
+    fn set_present(&mut self, val: u8);
+
+    // Long mode
+    fn long(&self) -> u8;
+    fn set_long(&mut self, val: u8);
+
+    // Available for system use (AVL)
+    fn avl(&self) -> u8;
+    fn set_avl(&mut self, val: u8);
+
+    // Descriptor type (System or code/data)
+    fn desc_type(&self) -> u8;
+    fn set_desc_type(&mut self, val: u8);
+
+    // D/B
+    fn db(&self) -> u8;
+    fn set_db(&mut self, val: u8);
+}
+
+// Code segment
+pub const CODE_SEGMENT_TYPE: u8 = 0x8;
+
+// Read/Write or Read/Exec segment
+pub const RWRX_SEGMENT_TYPE: u8 = 0x2;
+
+// Expand down segment
+pub const EXPAND_DOWN_SEGMENT_TYPE: u8 = 0x4;
+
+pub fn segment_type_code(t: u8) -> bool {
+    t & CODE_SEGMENT_TYPE != 0
+}
+
+pub fn segment_type_ro(t: u8) -> bool {
+    t & !RWRX_SEGMENT_TYPE == 0
+}
+
+pub fn segment_type_expand_down(t: u8) -> bool {
+    !segment_type_code(t) && (t & EXPAND_DOWN_SEGMENT_TYPE != 0)
+}
