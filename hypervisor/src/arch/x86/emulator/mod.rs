@@ -8,12 +8,32 @@ extern crate iced_x86;
 
 use crate::arch::emulator::{EmulationError, EmulationResult, PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::instructions::*;
+use crate::arch::x86::regs::*;
 use crate::arch::x86::Exception;
 use crate::x86_64::{SegmentRegister, SpecialRegisters, StandardRegisters};
 use iced_x86::*;
 
 #[macro_use]
 mod instructions;
+
+/// x86 CPU modes
+#[derive(Debug, PartialEq)]
+pub enum CpuMode {
+    /// Real mode
+    Real,
+
+    /// Virtual 8086 mode
+    Virtual8086,
+
+    /// 16-bit protected mode
+    Protected16,
+
+    /// 32-bit protected mode
+    Protected,
+
+    /// 64-bit mode, a.k.a. long mode
+    Long,
+}
 
 /// CpuStateManager manages an x86 CPU state.
 ///
@@ -88,6 +108,9 @@ pub trait CpuStateManager: Clone {
     ///
     /// * `flags` - The CPU flags
     fn set_flags(&mut self, flags: u64);
+
+    /// Get the CPU mode.
+    fn mode(&self) -> Result<CpuMode, PlatformError>;
 }
 
 const REGISTER_MASK_64: u64 = 0xffff_ffff_ffff_ffffu64;
@@ -345,6 +368,28 @@ impl CpuStateManager for EmulatorCpuState {
 
     fn set_flags(&mut self, flags: u64) {
         self.regs.rflags = flags;
+    }
+
+    fn mode(&self) -> Result<CpuMode, PlatformError> {
+        let efer = self.efer();
+        let cr0 = self.read_reg(Register::CR0)?;
+        let mut mode = CpuMode::Real;
+
+        if (cr0 & CR0_PE) == CR0_PE {
+            mode = CpuMode::Protected;
+        }
+
+        if (efer & EFER_LMA) == EFER_LMA {
+            if mode != CpuMode::Protected {
+                return Err(PlatformError::InvalidState(anyhow!(
+                    "Protection must be enabled in long mode"
+                )));
+            }
+
+            mode = CpuMode::Long;
+        }
+
+        Ok(mode)
     }
 }
 

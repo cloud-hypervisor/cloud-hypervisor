@@ -29,6 +29,9 @@ pub enum PlatformError {
     #[error("Invalid register: {0}")]
     InvalidRegister(#[source] anyhow::Error),
 
+    #[error("Invalid state: {0}")]
+    InvalidState(#[source] anyhow::Error),
+
     #[error("Memory read failure: {0}")]
     MemoryReadFailure(#[source] anyhow::Error),
 
