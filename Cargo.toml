@@ -77,7 +77,6 @@ members = [
     "qcow",
     "vhost_user_backend",
     "vhost_user_block",
-    "vhost_user_fs",
     "vhost_user_net",
     "virtio-devices",
     "vmm",
