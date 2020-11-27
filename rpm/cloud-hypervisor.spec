@@ -37,13 +37,11 @@ install -D -m755  ./target/x86_64-unknown-linux-gnu/release/ch-remote %{buildroo
 install -d %{buildroot}%{_libdir}
 install -d %{buildroot}%{_libdir}/cloud-hypervisor
 install -D -m755 target/x86_64-unknown-linux-gnu/release/vhost_user_block %{buildroot}%{_libdir}/cloud-hypervisor
-install -D -m755 target/x86_64-unknown-linux-gnu/release/vhost_user_fs %{buildroot}%{_libdir}/cloud-hypervisor
 install -D -m755 target/x86_64-unknown-linux-gnu/release/vhost_user_net %{buildroot}%{_libdir}/cloud-hypervisor
 
 install -d %{buildroot}%{_libdir}/cloud-hypervisor/static
 install -D -m755 target/x86_64-unknown-linux-musl/release/cloud-hypervisor %{buildroot}%{_libdir}/cloud-hypervisor/static
 install -D -m755 target/x86_64-unknown-linux-musl/release/vhost_user_block %{buildroot}%{_libdir}/cloud-hypervisor/static
-install -D -m755 target/x86_64-unknown-linux-musl/release/vhost_user_fs %{buildroot}%{_libdir}/cloud-hypervisor/static
 install -D -m755 target/x86_64-unknown-linux-musl/release/vhost_user_net %{buildroot}%{_libdir}/cloud-hypervisor/static
 install -D -m755 target/x86_64-unknown-linux-musl/release/ch-remote %{buildroot}%{_libdir}/cloud-hypervisor/static
 
@@ -87,8 +85,6 @@ setcap cap_net_admin+ep %{_bindir}/cloud-hypervisor
 setcap cap_net_admin+ep %{_libdir}/cloud-hypervisor/vhost_user_net
 setcap cap_net_admin+ep %{_libdir}/cloud-hypervisor/static/cloud-hypervisor
 setcap cap_net_admin+ep %{_libdir}/cloud-hypervisor/static/vhost_user_net
-setcap cap_chown,cap_dac_override,cap_dac_read_search,cap_fowner,cap_fsetid,cap_setgid,cap_setuid,cap_mknod,cap_setfcap,cap_sys_admin+epi %{_libdir}/cloud-hypervisor/vhost_user_fs
-setcap cap_chown,cap_dac_override,cap_dac_read_search,cap_fowner,cap_fsetid,cap_setgid,cap_setuid,cap_mknod,cap_setfcap,cap_sys_admin+epi %{_libdir}/cloud-hypervisor/static/vhost_user_fs
 
 
 %changelog
