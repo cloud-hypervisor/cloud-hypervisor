@@ -270,7 +270,8 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x48, 0x89, 0xd8];
-        let vmm = init_and_run(cpu_id, ip, &insn, hashmap![Register::RBX => rbx], None);
+        let mut vmm = MockVMM::new(ip, hashmap![Register::RBX => rbx], None);
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         let rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -289,7 +290,8 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x48, 0xb8, 0x44, 0x33, 0x22, 0x11, 0x44, 0x33, 0x22, 0x11];
-        let vmm = init_and_run(cpu_id, ip, &insn, hashmap![], None);
+        let mut vmm = MockVMM::new(ip, hashmap![], None);
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         let rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -310,13 +312,12 @@ mod tests {
         let cpu_id = 0;
         let memory: [u8; 8] = target_rax.to_le_bytes();
         let insn = [0x48, 0x8b, 0x04, 0x00];
-        let vmm = init_and_run(
-            cpu_id,
+        let mut vmm = MockVMM::new(
             ip,
-            &insn,
             hashmap![Register::RAX => rax],
             Some((rax + rax, &memory)),
         );
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         rax = vmm
             .cpu_state(cpu_id)
@@ -335,7 +336,8 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0xb0, 0x11];
-        let vmm = init_and_run(cpu_id, ip, &insn, hashmap![], None);
+        let mut vmm = MockVMM::new(ip, hashmap![], None);
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         let al = vmm
             .cpu_state(cpu_id)
@@ -354,7 +356,8 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0xb8, 0x11, 0x00, 0x00, 0x00];
-        let vmm = init_and_run(cpu_id, ip, &insn, hashmap![], None);
+        let mut vmm = MockVMM::new(ip, hashmap![], None);
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         let eax = vmm
             .cpu_state(cpu_id)
@@ -373,7 +376,8 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x48, 0xc7, 0xc0, 0x44, 0x33, 0x22, 0x11];
-        let vmm = init_and_run(cpu_id, ip, &insn, hashmap![], None);
+        let mut vmm = MockVMM::new(ip, hashmap![], None);
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         let rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -393,13 +397,12 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x88, 0x30];
-        let vmm = init_and_run(
-            cpu_id,
+        let mut vmm = MockVMM::new(
             ip,
-            &insn,
             hashmap![Register::RAX => rax, Register::DH => dh.into()],
             None,
         );
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         let mut memory: [u8; 1] = [0; 1];
         vmm.read_memory(rax, &mut memory).unwrap();
@@ -417,13 +420,12 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x89, 0x30];
-        let vmm = init_and_run(
-            cpu_id,
+        let mut vmm = MockVMM::new(
             ip,
-            &insn,
             hashmap![Register::RAX => rax, Register::ESI => esi.into()],
             None,
         );
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         let mut memory: [u8; 4] = [0; 4];
         vmm.read_memory(rax, &mut memory).unwrap();
@@ -442,13 +444,12 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x89, 0x3c, 0x05, 0x01, 0x00, 0x00, 0x00];
-        let vmm = init_and_run(
-            cpu_id,
+        let mut vmm = MockVMM::new(
             ip,
-            &insn,
             hashmap![Register::RAX => rax, Register::EDI => edi.into()],
             None,
         );
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         let mut memory: [u8; 4] = [0; 4];
         vmm.read_memory(rax + displacement, &mut memory).unwrap();
@@ -468,13 +469,12 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x8b, 0x40, 0x10];
-        let vmm = init_and_run(
-            cpu_id,
+        let mut vmm = MockVMM::new(
             ip,
-            &insn,
             hashmap![Register::RAX => rax],
             Some((rax + displacement, &memory)),
         );
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         let new_eax = vmm
             .cpu_state(cpu_id)
@@ -496,13 +496,12 @@ mod tests {
         let cpu_id = 0;
         let insn = [0x8a, 0x40, 0x10];
         let memory: [u8; 1] = al.to_le_bytes();
-        let vmm = init_and_run(
-            cpu_id,
+        let mut vmm = MockVMM::new(
             ip,
-            &insn,
             hashmap![Register::RAX => rax],
             Some((rax + displacement, &memory)),
         );
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         let new_al = vmm
             .cpu_state(cpu_id)
@@ -528,14 +527,8 @@ mod tests {
             0x48, 0xc7, 0xc0, 0x00, 0x01, 0x00, 0x00, // mov rax, 0x100
             0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
         ];
-
-        let vmm = init_and_run(
-            cpu_id,
-            ip,
-            &insn,
-            hashmap![],
-            Some((rax + displacement, &memory)),
-        );
+        let mut vmm = MockVMM::new(ip, hashmap![], Some((rax + displacement, &memory)));
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         let rbx: u64 = vmm
             .cpu_state(cpu_id)
@@ -562,15 +555,9 @@ mod tests {
             0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
         ];
 
+        let mut vmm = MockVMM::new(ip, hashmap![], Some((rax + displacement, &memory)));
         // Only run the first instruction.
-        let vmm = _init_and_run(
-            cpu_id,
-            ip,
-            &insn,
-            hashmap![],
-            Some((rax + displacement, &memory)),
-            Some(1),
-        );
+        vmm.emulate_insn(cpu_id, &insn, Some(1));
 
         assert_eq!(ip + 7 as u64, vmm.cpu_state(cpu_id).unwrap().ip());
 
@@ -601,15 +588,9 @@ mod tests {
             0x48, 0xc7, 0xc0, 0x00, 0x02, 0x00, 0x00, // mov rax, 0x200
         ];
 
-        // Only run the first instruction.
-        let vmm = _init_and_run(
-            cpu_id,
-            ip,
-            &insn,
-            hashmap![],
-            Some((rax + displacement, &memory)),
-            Some(2),
-        );
+        let mut vmm = MockVMM::new(ip, hashmap![], Some((rax + displacement, &memory)));
+        // Run the 2 first instructions.
+        vmm.emulate_insn(cpu_id, &insn, Some(2));
 
         assert_eq!(ip + 7 + 4 as u64, vmm.cpu_state(cpu_id).unwrap().ip());
 
