@@ -456,11 +456,46 @@ mod mock_vmm {
     pub type MockResult = Result<(), EmulationError<Exception>>;
 
     impl MockVMM {
-        pub fn new(state: CpuState) -> MockVMM {
-            MockVMM {
-                memory: vec![0; 4096],
-                state: Arc::new(Mutex::new(state)),
+        pub fn new(ip: u64, regs: HashMap<Register, u64>, memory: Option<(u64, &[u8])>) -> MockVMM {
+            let _ = env_logger::try_init();
+            let cs_reg = segment_from_gdt(gdt_entry(0xc09b, 0, 0xffffffff), 1);
+            let ds_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 2);
+            let mut initial_state = CpuState::default();
+            initial_state.set_ip(ip);
+            initial_state.write_segment(Register::CS, cs_reg).unwrap();
+            initial_state.write_segment(Register::DS, ds_reg).unwrap();
+            for (reg, value) in regs {
+                initial_state.write_reg(reg, value).unwrap();
             }
+
+            let mut vmm = MockVMM {
+                memory: vec![0; 4096],
+                state: Arc::new(Mutex::new(initial_state)),
+            };
+
+            if let Some(mem) = memory {
+                vmm.write_memory(mem.0, &mem.1).unwrap();
+            }
+
+            vmm
+        }
+
+        pub fn emulate_insn(&mut self, cpu_id: usize, insn: &[u8], num_insn: Option<usize>) {
+            let ip = self.cpu_state(cpu_id).unwrap().ip();
+            let mut emulator = Emulator::new(self);
+
+            let new_state = emulator
+                .emulate_insn_stream(cpu_id, &insn, num_insn)
+                .unwrap();
+            if num_insn.is_none() {
+                assert_eq!(ip + insn.len() as u64, new_state.ip());
+            }
+
+            self.set_cpu_state(cpu_id, new_state).unwrap();
+        }
+
+        pub fn emulate_first_insn(&mut self, cpu_id: usize, insn: &[u8]) {
+            self.emulate_insn(cpu_id, insn, None)
         }
     }
 
@@ -506,52 +541,5 @@ mod mock_vmm {
         fn gva_to_gpa(&self, gva: u64) -> Result<u64, PlatformError> {
             Ok(gva)
         }
-    }
-
-    pub fn _init_and_run(
-        cpu_id: usize,
-        ip: u64,
-        insn: &[u8],
-        regs: HashMap<Register, u64>,
-        memory: Option<(u64, &[u8])>,
-        num_insn: Option<usize>,
-    ) -> MockVMM {
-        let _ = env_logger::try_init();
-        let cs_reg = segment_from_gdt(gdt_entry(0xc09b, 0, 0xffffffff), 1);
-        let ds_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 2);
-        let mut initial_state = CpuState::default();
-        initial_state.set_ip(ip);
-        initial_state.write_segment(Register::CS, cs_reg).unwrap();
-        initial_state.write_segment(Register::DS, ds_reg).unwrap();
-        for (reg, value) in regs {
-            initial_state.write_reg(reg, value).unwrap();
-        }
-
-        let mut vmm = MockVMM::new(initial_state);
-        if let Some(mem) = memory {
-            vmm.write_memory(mem.0, &mem.1).unwrap();
-        }
-        let mut emulator = Emulator::new(&mut vmm);
-
-        let new_state = emulator
-            .emulate_insn_stream(cpu_id, &insn, num_insn)
-            .unwrap();
-        if num_insn.is_none() {
-            assert_eq!(ip + insn.len() as u64, new_state.ip());
-        }
-
-        vmm.set_cpu_state(cpu_id, new_state).unwrap();
-
-        vmm
-    }
-
-    pub fn init_and_run(
-        cpu_id: usize,
-        ip: u64,
-        insn: &[u8],
-        regs: HashMap<Register, u64>,
-        memory: Option<(u64, &[u8])>,
-    ) -> MockVMM {
-        _init_and_run(cpu_id, ip, insn, regs, memory, None)
     }
 }
