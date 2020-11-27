@@ -26,9 +26,6 @@ pipeline{
             parallel {
 				stage ('Worker build') {
 					agent { node { label 'groovy' } }
-					options {
-						timeout(time: 1, unit: 'HOURS')
-					}
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -46,6 +43,9 @@ pipeline{
 							}
 						}
 						stage ('Run integration tests') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
 							steps {
 								sh "scripts/dev_cli.sh tests --integration"
 							}
@@ -54,9 +54,6 @@ pipeline{
 				}
 				stage ('AArch64 worker build') {
 					agent { node { label 'bionic-arm64' } }
-					options {
-						timeout(time: 1, unit: 'HOURS')
-					}
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -69,6 +66,9 @@ pipeline{
 							}
 						}
 						stage ('Run integration tests') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
 							steps {
 								sh "scripts/dev_cli.sh tests --integration"
 							}
@@ -83,9 +83,6 @@ pipeline{
 				}
 				stage ('Worker build (musl)') {
 					agent { node { label 'groovy' } }
-					options {
-						timeout(time: 1, unit: 'HOURS')
-					}
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -98,6 +95,9 @@ pipeline{
 							}
 						}
 						stage ('Run integration tests for musl') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
 							steps {
 								sh "scripts/dev_cli.sh tests --integration --libc musl"
 							}
@@ -106,9 +106,6 @@ pipeline{
 				}
 				stage ('Worker build SGX') {
 					agent { node { label 'bionic-sgx' } }
-					options {
-						timeout(time: 1, unit: 'HOURS')
-					}
 					when { branch 'master' }
 					stages {
 						stage ('Checkout') {
@@ -117,11 +114,17 @@ pipeline{
 							}
 						}
 						stage ('Run SGX integration tests') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
 							steps {
 								sh "scripts/dev_cli.sh tests --integration-sgx"
 							}
 						}
 						stage ('Run SGX integration tests for musl') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
 							steps {
 								sh "scripts/dev_cli.sh tests --integration-sgx --libc musl"
 							}
@@ -136,9 +139,6 @@ pipeline{
 				}
 				stage ('Worker build - Windows guest') {
 					agent { node { label 'groovy-win' } }
-					options {
-						timeout(time: 1, unit: 'HOURS')
-					}
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -161,11 +161,17 @@ pipeline{
 							}
 						}
 						stage ('Run Windows guest integration tests') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
 							steps {
 								sh "scripts/dev_cli.sh tests --integration-windows"
 							}
 						}
 						stage ('Run Windows guest integration tests for musl') {
+							options {
+								timeout(time: 1, unit: 'HOURS')
+							}
 							steps {
 								sh "scripts/dev_cli.sh tests --integration-windows --libc musl"
 							}
