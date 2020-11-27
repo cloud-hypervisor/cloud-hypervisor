@@ -665,7 +665,7 @@ mod mock_vmm {
         }
 
         pub fn emulate_first_insn(&mut self, cpu_id: usize, insn: &[u8]) {
-            self.emulate_insn(cpu_id, insn, None)
+            self.emulate_insn(cpu_id, insn, Some(1))
         }
     }
 

@@ -525,7 +525,7 @@ mod tests {
             0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
         ];
         let mut vmm = MockVMM::new(ip, hashmap![], Some((rax + displacement, &memory)));
-        vmm.emulate_first_insn(cpu_id, &insn);
+        vmm.emulate_insn(cpu_id, &insn, Some(2));
 
         let rbx: u64 = vmm
             .cpu_state(cpu_id)
@@ -554,7 +554,7 @@ mod tests {
 
         let mut vmm = MockVMM::new(ip, hashmap![], Some((rax + displacement, &memory)));
         // Only run the first instruction.
-        vmm.emulate_insn(cpu_id, &insn, Some(1));
+        vmm.emulate_first_insn(cpu_id, &insn);
 
         assert_eq!(ip + 7 as u64, vmm.cpu_state(cpu_id).unwrap().ip());
 
