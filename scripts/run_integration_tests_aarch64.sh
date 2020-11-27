@@ -142,6 +142,19 @@ update_workloads() {
         popd
     fi
 
+    VIRTIOFSD_RS="$WORKLOADS_DIR/virtiofsd-rs"
+    VIRTIOFSD_RS_DIR="virtiofsd_rs_build"
+    if [ ! -f "$VIRTIOFSD_RS" ]; then
+        pushd $WORKLOADS_DIR
+        git clone --depth 1 "https://gitlab.com/virtio-fs/virtiofsd-rs.git" $VIRTIOFSD_RS_DIR
+        pushd $VIRTIOFSD_RS_DIR
+        time cargo build --release
+        cp target/release/virtiofsd-rs $VIRTIOFSD_RS || exit 1
+        popd
+        rm -rf $VIRTIOFSD_RS_DIR
+        popd
+    fi
+
     BLK_IMAGE="$WORKLOADS_DIR/blk.img"
     MNT_DIR="mount_image"
     if [ ! -f "$BLK_IMAGE" ]; then

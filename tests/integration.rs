@@ -349,16 +349,23 @@ mod tests {
         (child, virtiofsd_socket_path)
     }
 
-    fn prepare_vhost_user_fs_daemon(
+    fn prepare_virtofsd_rs_daemon(
         tmp_dir: &TempDir,
         shared_dir: &str,
         _cache: &str,
     ) -> (std::process::Child, String) {
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
+
+        let mut virtiofsd_path = workload_path;
+        virtiofsd_path.push("virtiofsd-rs");
+        let virtiofsd_path = String::from(virtiofsd_path.to_str().unwrap());
+
         let virtiofsd_socket_path =
             String::from(tmp_dir.path().join("virtiofs.sock").to_str().unwrap());
 
         // Start the daemon
-        let child = Command::new(clh_command("vhost_user_fs"))
+        let child = Command::new(virtiofsd_path.as_str())
             .args(&["--shared-dir", shared_dir])
             .args(&["--socket", virtiofsd_socket_path.as_str()])
             .spawn()
@@ -3080,24 +3087,24 @@ mod tests {
         }
 
         #[test]
-        fn test_virtio_fs_dax_on_default_cache_size_w_vhost_user_fs_daemon() {
-            test_virtio_fs(true, None, "none", &prepare_vhost_user_fs_daemon, false)
+        fn test_virtio_fs_dax_on_default_cache_size_w_virtiofsd_rs_daemon() {
+            test_virtio_fs(true, None, "none", &prepare_virtofsd_rs_daemon, false)
         }
 
         #[test]
-        fn test_virtio_fs_dax_on_cache_size_1_gib_w_vhost_user_fs_daemon() {
+        fn test_virtio_fs_dax_on_cache_size_1_gib_w_virtiofsd_rs_daemon() {
             test_virtio_fs(
                 true,
                 Some(0x4000_0000),
                 "none",
-                &prepare_vhost_user_fs_daemon,
+                &prepare_virtofsd_rs_daemon,
                 false,
             )
         }
 
         #[test]
-        fn test_virtio_fs_dax_off_w_vhost_user_fs_daemon() {
-            test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon, false)
+        fn test_virtio_fs_dax_off_w_virtiofsd_rs_daemon() {
+            test_virtio_fs(false, None, "none", &prepare_virtofsd_rs_daemon, false)
         }
 
         #[test]
@@ -3114,14 +3121,14 @@ mod tests {
 
         #[test]
         #[cfg(target_arch = "x86_64")]
-        fn test_virtio_fs_hotplug_dax_on_w_vhost_user_fs_daemon() {
-            test_virtio_fs(true, None, "none", &prepare_vhost_user_fs_daemon, true)
+        fn test_virtio_fs_hotplug_dax_on_w_virtiofsd_rs_daemon() {
+            test_virtio_fs(true, None, "none", &prepare_virtofsd_rs_daemon, true)
         }
 
         #[test]
         #[cfg(target_arch = "x86_64")]
-        fn test_virtio_fs_hotplug_dax_off_w_vhost_user_fs_daemon() {
-            test_virtio_fs(false, None, "none", &prepare_vhost_user_fs_daemon, true)
+        fn test_virtio_fs_hotplug_dax_off_w_virtiofsd_rs_daemon() {
+            test_virtio_fs(false, None, "none", &prepare_virtofsd_rs_daemon, true)
         }
 
         #[test]
