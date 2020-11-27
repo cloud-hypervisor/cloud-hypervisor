@@ -430,3 +430,128 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
         self.emulate_insn_stream(cpu_id, insn_stream, Some(1))
     }
 }
+
+#[cfg(test)]
+mod mock_vmm {
+    #![allow(unused_mut)]
+
+    extern crate env_logger;
+
+    use super::*;
+    use crate::arch::emulator::{EmulationError, PlatformEmulator};
+    use crate::arch::x86::emulator::{Emulator, EmulatorCpuState as CpuState};
+    use crate::arch::x86::gdt::{gdt_entry, segment_from_gdt};
+    use crate::arch::x86::Exception;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug, Clone)]
+    pub struct MockVMM {
+        memory: Vec<u8>,
+        state: Arc<Mutex<CpuState>>,
+    }
+
+    unsafe impl Sync for MockVMM {}
+
+    pub type MockResult = Result<(), EmulationError<Exception>>;
+
+    impl MockVMM {
+        pub fn new(state: CpuState) -> MockVMM {
+            MockVMM {
+                memory: vec![0; 4096],
+                state: Arc::new(Mutex::new(state)),
+            }
+        }
+    }
+
+    impl PlatformEmulator for MockVMM {
+        type CpuState = CpuState;
+
+        fn read_memory(&self, gva: u64, data: &mut [u8]) -> Result<(), PlatformError> {
+            debug!(
+                "Memory read {} bytes from [{:#x} -> {:#x}]",
+                data.len(),
+                gva,
+                gva
+            );
+            data.copy_from_slice(&self.memory[gva as usize..gva as usize + data.len()]);
+            Ok(())
+        }
+
+        fn write_memory(&mut self, gva: u64, data: &[u8]) -> Result<(), PlatformError> {
+            debug!(
+                "Memory write {} bytes at [{:#x} -> {:#x}]",
+                data.len(),
+                gva,
+                gva
+            );
+            self.memory[gva as usize..gva as usize + data.len()].copy_from_slice(data);
+
+            Ok(())
+        }
+
+        fn cpu_state(&self, _cpu_id: usize) -> Result<CpuState, PlatformError> {
+            Ok(self.state.lock().unwrap().clone())
+        }
+
+        fn set_cpu_state(
+            &self,
+            _cpu_id: usize,
+            state: Self::CpuState,
+        ) -> Result<(), PlatformError> {
+            *self.state.lock().unwrap() = state;
+            Ok(())
+        }
+
+        fn gva_to_gpa(&self, gva: u64) -> Result<u64, PlatformError> {
+            Ok(gva)
+        }
+    }
+
+    pub fn _init_and_run(
+        cpu_id: usize,
+        ip: u64,
+        insn: &[u8],
+        regs: HashMap<Register, u64>,
+        memory: Option<(u64, &[u8])>,
+        num_insn: Option<usize>,
+    ) -> MockVMM {
+        let _ = env_logger::try_init();
+        let cs_reg = segment_from_gdt(gdt_entry(0xc09b, 0, 0xffffffff), 1);
+        let ds_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 2);
+        let mut initial_state = CpuState::default();
+        initial_state.set_ip(ip);
+        initial_state.write_segment(Register::CS, cs_reg).unwrap();
+        initial_state.write_segment(Register::DS, ds_reg).unwrap();
+        for (reg, value) in regs {
+            initial_state.write_reg(reg, value).unwrap();
+        }
+
+        let mut vmm = MockVMM::new(initial_state);
+        if let Some(mem) = memory {
+            vmm.write_memory(mem.0, &mem.1).unwrap();
+        }
+        let mut emulator = Emulator::new(&mut vmm);
+
+        let new_state = emulator
+            .emulate_insn_stream(cpu_id, &insn, num_insn)
+            .unwrap();
+        if num_insn.is_none() {
+            assert_eq!(ip + insn.len() as u64, new_state.ip());
+        }
+
+        vmm.set_cpu_state(cpu_id, new_state).unwrap();
+
+        vmm
+    }
+
+    pub fn init_and_run(
+        cpu_id: usize,
+        ip: u64,
+        insn: &[u8],
+        regs: HashMap<Register, u64>,
+        memory: Option<(u64, &[u8])>,
+    ) -> MockVMM {
+        _init_and_run(cpu_id, ip, insn, regs, memory, None)
+    }
+}
