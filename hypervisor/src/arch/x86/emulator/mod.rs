@@ -650,21 +650,26 @@ mod mock_vmm {
             vmm
         }
 
-        pub fn emulate_insn(&mut self, cpu_id: usize, insn: &[u8], num_insn: Option<usize>) {
+        pub fn emulate_insn(
+            &mut self,
+            cpu_id: usize,
+            insn: &[u8],
+            num_insn: Option<usize>,
+        ) -> MockResult {
             let ip = self.cpu_state(cpu_id).unwrap().ip();
             let mut emulator = Emulator::new(self);
 
-            let new_state = emulator
-                .emulate_insn_stream(cpu_id, &insn, num_insn)
-                .unwrap();
+            let new_state = emulator.emulate_insn_stream(cpu_id, &insn, num_insn)?;
             if num_insn.is_none() {
                 assert_eq!(ip + insn.len() as u64, new_state.ip());
             }
 
             self.set_cpu_state(cpu_id, new_state).unwrap();
+
+            Ok(())
         }
 
-        pub fn emulate_first_insn(&mut self, cpu_id: usize, insn: &[u8]) {
+        pub fn emulate_first_insn(&mut self, cpu_id: usize, insn: &[u8]) -> MockResult {
             self.emulate_insn(cpu_id, insn, Some(1))
         }
     }
@@ -760,7 +765,7 @@ mod tests {
         ];
 
         let mut vmm = MockVMM::new(ip, hashmap![], Some((ip, &memory)));
-        vmm.emulate_insn(cpu_id, &insn, Some(2));
+        assert!(vmm.emulate_insn(cpu_id, &insn, Some(2)).is_ok());
 
         let rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -797,7 +802,7 @@ mod tests {
         ];
 
         let mut vmm = MockVMM::new(ip, hashmap![], Some((ip, &memory)));
-        vmm.emulate_insn(cpu_id, &insn, Some(2));
+        assert!(vmm.emulate_insn(cpu_id, &insn, Some(2)).is_ok());
 
         let rbx: u64 = vmm
             .cpu_state(cpu_id)
@@ -805,6 +810,31 @@ mod tests {
             .read_reg(Register::RBX)
             .unwrap();
         assert_eq!(rbx, target_rax);
+
+        Ok(())
+    }
+
+    #[test]
+    // Emulate truncated instruction stream, which should cause a fetch.
+    //
+    // mov rax, 0x1000
+    // Test with a first instruction truncated and a bad fetched instruction.
+    // Verify that the instruction emulation returns an error.
+    fn test_fetch_bad_insn() -> MockResult {
+        let ip: u64 = 0x1000;
+        let cpu_id = 0;
+        let memory = [
+            // Code at IP
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff,
+        ];
+        let insn = [
+            // First instruction is truncated
+            0x48, 0xc7, 0xc0, 0x00, // mov rax, 0x1000 -- Missing bytes: 0x00, 0x10, 0x00, 0x00,
+        ];
+
+        let mut vmm = MockVMM::new(ip, hashmap![], Some((ip, &memory)));
+        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_err());
 
         Ok(())
     }
