@@ -164,6 +164,18 @@ macro_rules! imm_op {
     (u32tou64, $insn:ident) => {
         $insn.immediate32to64()
     };
+
+    (u8tou16, $insn:ident) => {
+        $insn.immediate8to16()
+    };
+
+    (u8tou32, $insn:ident) => {
+        $insn.immediate8to32()
+    };
+
+    (u8tou64, $insn:ident) => {
+        $insn.immediate8to64()
+    };
 }
 
 pub struct Mov_r8_rm8 {}
