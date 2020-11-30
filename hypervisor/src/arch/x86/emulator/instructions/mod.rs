@@ -114,3 +114,16 @@ macro_rules! insn_add {
         $insn_map.add_insn(Code::$code, Box::new($mnemonic::$code {}));
     };
 }
+
+macro_rules! insn_format {
+    ($insn:ident) => {{
+        let mut output = String::new();
+        let mut formatter = FastFormatter::new();
+        formatter
+            .options_mut()
+            .set_space_after_operand_separator(true);
+        formatter.format(&$insn, &mut output);
+
+        output
+    }};
+}

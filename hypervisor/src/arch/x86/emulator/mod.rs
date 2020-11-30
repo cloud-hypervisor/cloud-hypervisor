@@ -12,6 +12,7 @@ use crate::arch::x86::regs::*;
 use crate::arch::x86::*;
 use crate::arch::x86::{Exception, SegmentRegisterOps};
 use crate::x86_64::{SegmentRegister, SpecialRegisters, StandardRegisters};
+use anyhow::Context;
 use iced_x86::*;
 
 #[macro_use]
@@ -551,7 +552,8 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
                 decoder.decode_out(&mut insn);
                 if decoder.last_error() != DecoderError::None {
                     return Err(EmulationError::InstructionFetchingError(anyhow!(
-                        "{:#x?}", insn
+                        "{:#x?}",
+                        insn_format!(insn)
                     )));
                 }
 
@@ -563,9 +565,15 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
                 .instructions
                 .get(&insn.code())
                 .ok_or_else(|| {
-                    EmulationError::UnsupportedInstruction(anyhow!("{:?}", insn.mnemonic()))
+                    EmulationError::UnsupportedInstruction(anyhow!(
+                        "{:#x?} {:?} {:?}",
+                        insn_format!(insn),
+                        insn.mnemonic(),
+                        insn.code()
+                    ))
                 })?
-                .emulate(&insn, &mut state, self.platform)?;
+                .emulate(&insn, &mut state, self.platform)
+                .context(anyhow!("Failed to emulate {:#x?}", insn_format!(insn)))?;
 
             last_decoded_ip = decoder.ip();
             num_insn_emulated += 1;
