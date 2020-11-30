@@ -513,7 +513,6 @@ name = "hypervisor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arc-swap",
  "env_logger",
  "iced-x86",
  "kvm-bindings",
