@@ -221,9 +221,9 @@ impl Interrupt {
 }
 
 #[derive(Copy, Clone)]
-struct MmioRegion {
-    start: GuestAddress,
-    length: GuestUsize,
+pub struct MmioRegion {
+    pub start: GuestAddress,
+    pub length: GuestUsize,
     type_: PciBarRegionType,
     index: u32,
     mem_slot: Option<u32>,
@@ -614,6 +614,10 @@ impl VfioPciDevice {
         self.device
             .extend_dma_map(new_region)
             .map_err(VfioPciError::UpdateMemory)
+    }
+
+    pub fn mmio_regions(&self) -> Vec<MmioRegion> {
+        self.mmio_regions.clone()
     }
 }
 
