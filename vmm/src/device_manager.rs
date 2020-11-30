@@ -2539,6 +2539,15 @@ impl DeviceManager {
             })
             .map_err(DeviceManagerError::VfioMapRegion)?;
 
+        let mut node = device_node!(vfio_name);
+
+        for region in vfio_pci_device.mmio_regions() {
+            node.resources.push(Resource::MmioAddressRange {
+                base: region.start.0,
+                size: region.length as u64,
+            });
+        }
+
         let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
 
         self.add_pci_device(
@@ -2549,6 +2558,10 @@ impl DeviceManager {
             pci_device_bdf,
             vfio_name.clone(),
         )?;
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(vfio_name.clone(), node);
 
         Ok((pci_device_bdf, vfio_name))
     }
