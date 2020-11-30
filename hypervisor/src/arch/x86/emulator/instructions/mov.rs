@@ -144,40 +144,6 @@ macro_rules! mov_r_imm {
     };
 }
 
-macro_rules! imm_op {
-    (u8, $insn:ident) => {
-        $insn.immediate8()
-    };
-
-    (u16, $insn:ident) => {
-        $insn.immediate16()
-    };
-
-    (u32, $insn:ident) => {
-        $insn.immediate32()
-    };
-
-    (u64, $insn:ident) => {
-        $insn.immediate64()
-    };
-
-    (u32tou64, $insn:ident) => {
-        $insn.immediate32to64()
-    };
-
-    (u8tou16, $insn:ident) => {
-        $insn.immediate8to16()
-    };
-
-    (u8tou32, $insn:ident) => {
-        $insn.immediate8to32()
-    };
-
-    (u8tou64, $insn:ident) => {
-        $insn.immediate8to64()
-    };
-}
-
 pub struct Mov_r8_rm8 {}
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_r8_rm8 {
     mov_r_rm!(u8);
