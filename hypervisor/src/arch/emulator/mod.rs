@@ -76,6 +76,9 @@ pub enum EmulationError<T: Debug> {
 
     #[error("Platform emulation error: {0}")]
     PlatformEmulationError(PlatformError),
+
+    #[error(transparent)]
+    EmulationError(#[from] anyhow::Error),
 }
 
 /// The PlatformEmulator trait emulates a guest platform.
