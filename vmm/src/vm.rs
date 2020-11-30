@@ -30,6 +30,7 @@ use crate::config::{
 };
 use crate::cpu;
 use crate::device_manager::{self, get_win_size, Console, DeviceManager, DeviceManagerError};
+use crate::device_tree::DeviceTree;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -1716,6 +1717,10 @@ impl Vm {
             .lock()
             .unwrap()
             .dirty_memory_range_table()
+    }
+
+    pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
+        self.device_manager.lock().unwrap().device_tree()
     }
 }
 

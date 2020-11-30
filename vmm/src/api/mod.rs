@@ -39,6 +39,7 @@ pub mod http_endpoint;
 use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, VmConfig, VsockConfig,
 };
+use crate::device_tree::DeviceTree;
 use crate::vm::{Error as VmError, VmState};
 use micro_http::Body;
 use std::io;
@@ -153,6 +154,7 @@ pub struct VmInfo {
     pub config: Arc<Mutex<VmConfig>>,
     pub state: VmState,
     pub memory_actual_size: u64,
+    pub device_tree: Option<Arc<Mutex<DeviceTree>>>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
