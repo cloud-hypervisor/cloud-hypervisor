@@ -3134,6 +3134,10 @@ impl DeviceManager {
 
         0
     }
+
+    pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
+        self.device_tree.clone()
+    }
 }
 
 #[cfg(feature = "acpi")]

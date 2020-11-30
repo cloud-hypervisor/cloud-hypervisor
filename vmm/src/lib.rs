@@ -484,10 +484,13 @@ impl Vmm {
                     memory_actual_size -= vm.balloon_size();
                 }
 
+                let device_tree = self.vm.as_ref().map(|vm| vm.device_tree());
+
                 Ok(VmInfo {
                     config,
                     state,
                     memory_actual_size,
+                    device_tree,
                 })
             }
             None => Err(VmError::VmNotCreated),
