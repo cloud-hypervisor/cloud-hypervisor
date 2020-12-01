@@ -448,7 +448,7 @@ impl VirtioPciDevice {
     fn state(&self) -> VirtioPciDeviceState {
         VirtioPciDeviceState {
             device_activated: self.device_activated,
-            interrupt_status: self.interrupt_status.load(Ordering::SeqCst),
+            interrupt_status: self.interrupt_status.load(Ordering::Acquire),
             queues: self.queues.clone(),
         }
     }
@@ -456,7 +456,7 @@ impl VirtioPciDevice {
     fn set_state(&mut self, state: &VirtioPciDeviceState) -> std::result::Result<(), Error> {
         self.device_activated = state.device_activated;
         self.interrupt_status
-            .store(state.interrupt_status, Ordering::SeqCst);
+            .store(state.interrupt_status, Ordering::Release);
 
         // Update virtqueues indexes for both available and used rings.
         if let Some(mem) = self.memory.as_ref() {
@@ -685,7 +685,7 @@ impl VirtioInterrupt for VirtioInterruptMsix {
         queue: Option<&Queue>,
     ) -> std::result::Result<(), std::io::Error> {
         let vector = match int_type {
-            VirtioInterruptType::Config => self.config_vector.load(Ordering::SeqCst),
+            VirtioInterruptType::Config => self.config_vector.load(Ordering::Acquire),
             VirtioInterruptType::Queue => {
                 if let Some(q) = queue {
                     q.vector
@@ -717,7 +717,7 @@ impl VirtioInterrupt for VirtioInterruptMsix {
 
     fn notifier(&self, int_type: &VirtioInterruptType, queue: Option<&Queue>) -> Option<&EventFd> {
         let vector = match int_type {
-            VirtioInterruptType::Config => self.config_vector.load(Ordering::SeqCst),
+            VirtioInterruptType::Config => self.config_vector.load(Ordering::Acquire),
             VirtioInterruptType::Queue => {
                 if let Some(q) = queue {
                     q.vector
@@ -891,7 +891,7 @@ impl PciDevice for VirtioPciDevice {
             o if ISR_CONFIG_BAR_OFFSET <= o && o < ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE => {
                 if let Some(v) = data.get_mut(0) {
                     // Reading this register resets it to 0.
-                    *v = self.interrupt_status.swap(0, Ordering::SeqCst) as u8;
+                    *v = self.interrupt_status.swap(0, Ordering::AcqRel) as u8;
                 }
             }
             o if DEVICE_CONFIG_BAR_OFFSET <= o
@@ -936,7 +936,7 @@ impl PciDevice for VirtioPciDevice {
             o if ISR_CONFIG_BAR_OFFSET <= o && o < ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE => {
                 if let Some(v) = data.get(0) {
                     self.interrupt_status
-                        .fetch_and(!(*v as usize), Ordering::SeqCst);
+                        .fetch_and(!(*v as usize), Ordering::AcqRel);
                 }
             }
             o if DEVICE_CONFIG_BAR_OFFSET <= o

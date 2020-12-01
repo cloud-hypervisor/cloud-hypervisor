@@ -64,7 +64,7 @@ impl VirtioPciCommonConfig {
             device_feature_select: self.device_feature_select,
             driver_feature_select: self.driver_feature_select,
             queue_select: self.queue_select,
-            msix_config: self.msix_config.load(Ordering::SeqCst),
+            msix_config: self.msix_config.load(Ordering::Acquire),
         }
     }
 
@@ -74,7 +74,7 @@ impl VirtioPciCommonConfig {
         self.device_feature_select = state.device_feature_select;
         self.driver_feature_select = state.driver_feature_select;
         self.queue_select = state.queue_select;
-        self.msix_config.store(state.msix_config, Ordering::SeqCst);
+        self.msix_config.store(state.msix_config, Ordering::Release);
     }
 
     pub fn read(
@@ -153,7 +153,7 @@ impl VirtioPciCommonConfig {
     fn read_common_config_word(&self, offset: u64, queues: &[Queue]) -> u16 {
         debug!("read_common_config_word: offset 0x{:x}", offset);
         match offset {
-            0x10 => self.msix_config.load(Ordering::SeqCst),
+            0x10 => self.msix_config.load(Ordering::Acquire),
             0x12 => queues.len() as u16, // num_queues
             0x16 => self.queue_select,
             0x18 => self.with_queue(queues, |q| q.size).unwrap_or(0),
@@ -176,7 +176,7 @@ impl VirtioPciCommonConfig {
     fn write_common_config_word(&mut self, offset: u64, value: u16, queues: &mut Vec<Queue>) {
         debug!("write_common_config_word: offset 0x{:x}", offset);
         match offset {
-            0x10 => self.msix_config.store(value, Ordering::SeqCst),
+            0x10 => self.msix_config.store(value, Ordering::Release),
             0x16 => self.queue_select = value,
             0x18 => self.with_queue_mut(queues, |q| q.size = value),
             0x1a => self.with_queue_mut(queues, |q| q.vector = value),

@@ -132,7 +132,7 @@ impl VhostUserBlkThread {
             match Request::parse(&head, mem) {
                 Ok(mut request) => {
                     debug!("element is a valid request");
-                    request.set_writeback(self.writeback.load(Ordering::SeqCst));
+                    request.set_writeback(self.writeback.load(Ordering::Acquire));
                     let status = match request.execute(
                         &mut self.disk_image.lock().unwrap().deref_mut(),
                         self.disk_nsectors,
@@ -273,7 +273,7 @@ impl VhostUserBlkBackend {
                 "writethrough"
             }
         );
-        self.writeback.store(writeback, Ordering::SeqCst);
+        self.writeback.store(writeback, Ordering::Release);
     }
 }
 

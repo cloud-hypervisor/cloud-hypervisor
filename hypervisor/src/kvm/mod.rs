@@ -602,7 +602,7 @@ impl cpu::Vcpu for KvmVcpu {
     fn enable_hyperv_synic(&self) -> cpu::Result<()> {
         // Update the information about Hyper-V SynIC being enabled and
         // emulated as it will influence later which MSRs should be saved.
-        self.hyperv_synic.store(true, Ordering::SeqCst);
+        self.hyperv_synic.store(true, Ordering::Release);
 
         let mut cap: kvm_enable_cap = Default::default();
         cap.cap = KVM_CAP_HYPERV_SYNIC;
@@ -1151,7 +1151,7 @@ impl cpu::Vcpu for KvmVcpu {
 
         // Save extra MSRs if the Hyper-V synthetic interrupt controller is
         // emulated.
-        if self.hyperv_synic.load(Ordering::SeqCst) {
+        if self.hyperv_synic.load(Ordering::Acquire) {
             let hyperv_synic_msrs = vec![
                 0x40000020, 0x40000021, 0x40000080, 0x40000081, 0x40000082, 0x40000083, 0x40000084,
                 0x40000090, 0x40000091, 0x40000092, 0x40000093, 0x40000094, 0x40000095, 0x40000096,

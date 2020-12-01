@@ -39,7 +39,7 @@ impl InterruptRoute {
     }
 
     pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
-        if !self.registered.load(Ordering::SeqCst) {
+        if !self.registered.load(Ordering::Acquire) {
             vm.register_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::Other,
@@ -48,14 +48,14 @@ impl InterruptRoute {
             })?;
 
             // Update internals to track the irq_fd as "registered".
-            self.registered.store(true, Ordering::SeqCst);
+            self.registered.store(true, Ordering::Release);
         }
 
         Ok(())
     }
 
     pub fn disable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
-        if self.registered.load(Ordering::SeqCst) {
+        if self.registered.load(Ordering::Acquire) {
             vm.unregister_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::Other,
@@ -64,7 +64,7 @@ impl InterruptRoute {
             })?;
 
             // Update internals to track the irq_fd as "unregistered".
-            self.registered.store(false, Ordering::SeqCst);
+            self.registered.store(false, Ordering::Release);
         }
 
         Ok(())

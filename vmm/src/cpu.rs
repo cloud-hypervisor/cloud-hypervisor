@@ -785,6 +785,11 @@ impl CpuManager {
                         // We enter a loop because park() could spuriously
                         // return. We will then park() again unless the
                         // pause boolean has been toggled.
+
+                        // Need to use Ordering::SeqCst as we have multiple
+                        // loads and stores to different atomics and we need
+                        // to see them in a consistent order in all threads
+
                         if vcpu_pause_signalled.load(Ordering::SeqCst) {
                             vcpu_run_interrupted.store(true, Ordering::SeqCst);
                             while vcpu_pause_signalled.load(Ordering::SeqCst) {

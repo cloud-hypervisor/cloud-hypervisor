@@ -108,7 +108,7 @@ impl<T: DiskFile> BlockEpollHandler<T> {
             let len;
             match Request::parse(&avail_desc, &mem) {
                 Ok(mut request) => {
-                    request.set_writeback(self.writeback.load(Ordering::SeqCst));
+                    request.set_writeback(self.writeback.load(Ordering::Acquire));
 
                     let mut disk_image_locked = self.disk_image.lock().unwrap();
                     let mut disk_image = disk_image_locked.deref_mut();
@@ -387,7 +387,7 @@ impl<T: DiskFile> Block<T> {
                 "writethrough"
             }
         );
-        self.writeback.store(writeback, Ordering::SeqCst);
+        self.writeback.store(writeback, Ordering::Release);
     }
 }
 
