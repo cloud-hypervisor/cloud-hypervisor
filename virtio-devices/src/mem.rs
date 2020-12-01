@@ -284,7 +284,7 @@ impl Resize {
 
     pub fn work(&self, size: u64) -> Result<(), Error> {
         if let Some(rx) = &self.rx {
-            self.size.store(size, Ordering::SeqCst);
+            self.size.store(size, Ordering::Release);
             self.evt.write(1).map_err(Error::EventFdWriteFail)?;
             rx.recv().map_err(Error::MpscRecvFail)?
         } else {
@@ -293,7 +293,7 @@ impl Resize {
     }
 
     fn get_size(&self) -> u64 {
-        self.size.load(Ordering::SeqCst)
+        self.size.load(Ordering::Acquire)
     }
 
     fn send(&self, r: Result<(), Error>) -> Result<(), mpsc::SendError<Result<(), Error>>> {

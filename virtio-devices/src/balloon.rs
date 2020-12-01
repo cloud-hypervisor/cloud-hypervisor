@@ -98,7 +98,7 @@ struct VirtioBalloonResizeReceiver {
 
 impl VirtioBalloonResizeReceiver {
     fn get_size(&self) -> u64 {
-        self.size.load(Ordering::SeqCst)
+        self.size.load(Ordering::Acquire)
     }
 
     fn send(&self, r: Result<(), Error>) -> Result<(), mpsc::SendError<Result<(), Error>>> {
@@ -134,7 +134,7 @@ impl VirtioBalloonResize {
     }
 
     pub fn work(&self, size: u64) -> Result<(), Error> {
-        self.size.store(size, Ordering::SeqCst);
+        self.size.store(size, Ordering::Release);
         self.evt.write(1).map_err(Error::EventFdWriteFail)?;
         self.rx.recv().map_err(Error::MpscRecvFail)?
     }

@@ -270,7 +270,7 @@ impl ConsoleInput {
     pub fn update_console_size(&self, cols: u16, rows: u16) {
         if self
             .acked_features
-            .fetch_and(1u64 << VIRTIO_CONSOLE_F_SIZE, Ordering::SeqCst)
+            .fetch_and(1u64 << VIRTIO_CONSOLE_F_SIZE, Ordering::AcqRel)
             != 0
         {
             self.config.lock().unwrap().update_console_size(cols, rows);

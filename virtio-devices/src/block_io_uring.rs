@@ -116,7 +116,7 @@ impl BlockIoUringEpollHandler {
 
         for avail_desc in queue.iter(&mem) {
             let mut request = Request::parse(&avail_desc, &mem).map_err(Error::RequestParsing)?;
-            request.set_writeback(self.writeback.load(Ordering::SeqCst));
+            request.set_writeback(self.writeback.load(Ordering::Acquire));
             if request
                 .execute_io_uring(
                     &mem,
@@ -428,7 +428,7 @@ impl BlockIoUring {
                 "writethrough"
             }
         );
-        self.writeback.store(writeback, Ordering::SeqCst);
+        self.writeback.store(writeback, Ordering::Release);
     }
 }
 
