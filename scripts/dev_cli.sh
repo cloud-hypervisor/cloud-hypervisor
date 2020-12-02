@@ -212,9 +212,9 @@ cmd_build() {
 
     while [ $# -gt 0 ]; do
 	case "$1" in
-            "-h"|"--help")  { cmd_help; exit 1;     } ;;
-            "--debug")      { build="debug";      } ;;
-            "--release")    { build="release";    } ;;
+            "-h"|"--help")  { cmd_help; exit 1; } ;;
+            "--debug")      { build="debug"; } ;;
+            "--release")    { build="release"; } ;;
             "--libc")
                 shift
                 [[ "$1" =~ ^(musl|gnu)$ ]] || \
@@ -229,7 +229,7 @@ cmd_build() {
                 shift
                 hypervisor="$1"
                 ;;
-            "--")           { shift; break;         } ;;
+            "--")           { shift; break; } ;;
             *)
 		die "Unknown build argument: $1. Please use --help for help."
 		;;
@@ -290,15 +290,14 @@ cmd_tests() {
     libc="gnu"
     arg_vols=""
     hypervisor="kvm"
-    saved_args=("$@")
     while [ $# -gt 0 ]; do
 	case "$1" in
-            "-h"|"--help")           { cmd_help; exit 1;     } ;;
-            "--unit")                { unit=true;      } ;;
-            "--cargo")               { cargo=true;    } ;;
-            "--integration")         { integration=true;    } ;;
-            "--integration-sgx")     { integration_sgx=true;    } ;;
-            "--integration-windows") { integration_windows=true;    } ;;
+            "-h"|"--help")           { cmd_help; exit 1; } ;;
+            "--unit")                { unit=true; } ;;
+            "--cargo")               { cargo=true; } ;;
+            "--integration")         { integration=true; } ;;
+            "--integration-sgx")     { integration_sgx=true; } ;;
+            "--integration-windows") { integration_windows=true; } ;;
             "--libc")
                 shift
                 [[ "$1" =~ ^(musl|gnu)$ ]] || \
@@ -313,8 +312,8 @@ cmd_tests() {
                 shift
                 hypervisor="$1"
                 ;;
-	    "--all")                 { cargo=true; unit=true; integration=true;  } ;;
-            "--")                    { shift; break;         } ;;
+	    "--all")                 { cargo=true; unit=true; integration=true; } ;;
+            "--")                    { shift; break; } ;;
             *)
 		die "Unknown tests argument: $1. Please use --help for help."
 		;;
@@ -324,6 +323,8 @@ cmd_tests() {
     if [[ "$hypervisor" != "kvm" ]]; then
         die "Hypervisor value must be kvm"
     fi
+    set -- "$@" '--hypervisor' $hypervisor
+
     process_volumes_args
     target="$(uname -m)-unknown-linux-${libc}"
     cflags=""
@@ -346,7 +347,7 @@ cmd_tests() {
 	       --env CFLAGS="$cflags" \
 	       --env TARGET_CC="$target_cc" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_unit_tests.sh "${saved_args[@]}" || fix_dir_perms $? || exit $?
+	       ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$cargo" = true ] ;  then
@@ -356,7 +357,7 @@ cmd_tests() {
 	       --rm \
 	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_cargo_tests.sh "${saved_args[@]}"  || fix_dir_perms $? || exit $?
+	       ./scripts/run_cargo_tests.sh "$@"  || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration" = true ] ;  then
@@ -375,7 +376,7 @@ cmd_tests() {
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_integration_tests_$(uname -m).sh "${saved_args[@]}" || fix_dir_perms $? || exit $?
+	       ./scripts/run_integration_tests_$(uname -m).sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_sgx" = true ] ;  then
@@ -394,7 +395,7 @@ cmd_tests() {
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_integration_tests_sgx.sh "${saved_args[@]}" || fix_dir_perms $? || exit $?
+	       ./scripts/run_integration_tests_sgx.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_windows" = true ] ;  then
@@ -413,7 +414,7 @@ cmd_tests() {
 	       --env USER="root" \
 	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
-	       ./scripts/run_integration_tests_windows.sh "${saved_args[@]}" || fix_dir_perms $? || exit $?
+	       ./scripts/run_integration_tests_windows.sh "$@" || fix_dir_perms $? || exit $?
     fi
     fix_dir_perms $?
 }
@@ -423,9 +424,9 @@ cmd_build-container() {
 
     while [ $# -gt 0 ]; do
 	case "$1" in
-            "-h"|"--help")  { cmd_help; exit 1;     } ;;
+            "-h"|"--help")  { cmd_help; exit 1; } ;;
             "--dev")        { container_type="dev"; } ;;
-            "--")           { shift; break;         } ;;
+            "--")           { shift; break; } ;;
             *)
 		die "Unknown build-container argument: $1. Please use --help for help."
 		;;
@@ -475,8 +476,8 @@ cmd_shell() {
 #
 while [ $# -gt 0 ]; do
     case "$1" in
-        -h|--help)              { cmd_help; exit 1;     } ;;
-        -y|--unattended)        { OPT_UNATTENDED=true;  } ;;
+        -h|--help)              { cmd_help; exit 1; } ;;
+        -y|--unattended)        { OPT_UNATTENDED=true; } ;;
         -*)
             die "Unknown arg: $1. Please use \`$0 help\` for help."
             ;;
