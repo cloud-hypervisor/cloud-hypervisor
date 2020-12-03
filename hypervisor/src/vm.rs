@@ -15,8 +15,12 @@ use crate::device::Device;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::ClockData;
 #[cfg(feature = "kvm")]
+use crate::CreateDevice;
+#[cfg(feature = "mshv")]
+use crate::HvState as VmState;
+#[cfg(feature = "kvm")]
 use crate::KvmVmState as VmState;
-use crate::{CreateDevice, IoEventAddress, IrqRoutingEntry, MemoryRegion};
+use crate::{IoEventAddress, IrqRoutingEntry, MemoryRegion};
 #[cfg(feature = "kvm")]
 use kvm_ioctls::Cap;
 use std::sync::Arc;
@@ -26,6 +30,7 @@ use vmm_sys_util::eventfd::EventFd;
 ///
 /// I/O events data matches (32 or 64 bits).
 ///
+#[derive(Debug)]
 pub enum DataMatch {
     DataMatch32(u32),
     DataMatch64(u64),
@@ -119,7 +124,6 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to create passthrough device: {0}")]
     CreatePassthroughDevice(#[source] anyhow::Error),
-    ///
     /// Write to Guest memory
     ///
     #[error("Failed to write to guest memory: {0}")]
