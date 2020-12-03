@@ -144,82 +144,82 @@ macro_rules! mov_r_imm {
     };
 }
 
-pub struct Mov_r8_rm8 {}
+pub struct Mov_r8_rm8;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_r8_rm8 {
     mov_r_rm!(u8);
 }
 
-pub struct Mov_r8_imm8 {}
+pub struct Mov_r8_imm8;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_r8_imm8 {
     mov_r_imm!(u8);
 }
 
-pub struct Mov_r16_rm16 {}
+pub struct Mov_r16_rm16;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_r16_rm16 {
     mov_r_rm!(u16);
 }
 
-pub struct Mov_r16_imm16 {}
+pub struct Mov_r16_imm16;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_r16_imm16 {
     mov_r_imm!(u16);
 }
 
-pub struct Mov_r32_rm32 {}
+pub struct Mov_r32_rm32;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_r32_rm32 {
     mov_r_rm!(u32);
 }
 
-pub struct Mov_r32_imm32 {}
+pub struct Mov_r32_imm32;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_r32_imm32 {
     mov_r_imm!(u32);
 }
 
-pub struct Mov_r64_rm64 {}
+pub struct Mov_r64_rm64;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_r64_rm64 {
     mov_r_rm!(u64);
 }
 
-pub struct Mov_r64_imm64 {}
+pub struct Mov_r64_imm64;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_r64_imm64 {
     mov_r_imm!(u64);
 }
 
-pub struct Mov_rm8_imm8 {}
+pub struct Mov_rm8_imm8;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm8_imm8 {
     mov_rm_imm!(u8);
 }
 
-pub struct Mov_rm8_r8 {}
+pub struct Mov_rm8_r8;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm8_r8 {
     mov_rm_r!(u8);
 }
 
-pub struct Mov_rm16_imm16 {}
+pub struct Mov_rm16_imm16;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm16_imm16 {
     mov_rm_imm!(u16);
 }
 
-pub struct Mov_rm16_r16 {}
+pub struct Mov_rm16_r16;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm16_r16 {
     mov_rm_r!(u16);
 }
 
-pub struct Mov_rm32_imm32 {}
+pub struct Mov_rm32_imm32;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm32_imm32 {
     mov_rm_imm!(u32);
 }
 
-pub struct Mov_rm32_r32 {}
+pub struct Mov_rm32_r32;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm32_r32 {
     mov_rm_r!(u32);
 }
 
-pub struct Mov_rm64_imm32 {}
+pub struct Mov_rm64_imm32;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm64_imm32 {
     mov_rm_imm!(u32tou64);
 }
 
-pub struct Mov_rm64_r64 {}
+pub struct Mov_rm64_r64;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm64_r64 {
     mov_rm_r!(u64);
 }
