@@ -9,7 +9,9 @@
 //
 use crate::vm::Vm;
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::{CpuId, MsrList};
+use crate::x86_64::CpuId;
+#[cfg(target_arch = "x86_64")]
+use crate::x86_64::MsrList;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use kvm_ioctls::Cap;
 use std::sync::Arc;
@@ -20,6 +22,11 @@ use thiserror::Error;
 ///
 ///
 pub enum HypervisorError {
+    ///
+    /// hypervisor creation error
+    ///
+    #[error("Failed to create the hypervisor: {0}")]
+    HypervisorCreate(#[source] anyhow::Error),
     ///
     /// Vm creation failure
     ///
@@ -103,6 +110,7 @@ pub trait Hypervisor: Send + Sync {
     /// Get the supported CpuID
     ///
     fn get_cpuid(&self) -> Result<CpuId>;
+    #[cfg(not(feature = "mshv"))]
     ///
     /// Check particular extensions if any
     ///

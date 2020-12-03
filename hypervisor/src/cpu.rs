@@ -12,13 +12,17 @@
 use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::{RegList, Register, StandardRegisters};
-use crate::{CpuState, MpState};
-
+#[cfg(target_arch = "x86_64")]
+use crate::x86_64::{CpuId, LapicState};
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{
-    CpuId, ExtendedControlRegisters, FpuState, LapicState, MsrEntries, SpecialRegisters,
-    StandardRegisters, VcpuEvents, Xsave,
+    ExtendedControlRegisters, FpuState, MsrEntries, SpecialRegisters, StandardRegisters, VcpuEvents,
 };
+use crate::CpuState;
+#[cfg(feature = "kvm")]
+use crate::MpState;
+#[cfg(target_arch = "x86_64")]
+use crate::Xsave;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -151,6 +155,20 @@ pub enum HypervisorCpuError {
     #[error("Failed to notify guest its clock was paused: {0}")]
     NotifyGuestClockPaused(#[source] anyhow::Error),
     ///
+    /// Setting debug register error
+    ///
+    #[error("Failed to set debug registers: {0}")]
+    SetDebugRegs(#[source] anyhow::Error),
+    ///
+    /// Getting debug register error
+    ///
+    #[error("Failed to get debug registers: {0}")]
+    GetDebugRegs(#[source] anyhow::Error),
+    ///
+    /// Write to Guest Mem
+    ///
+    #[error("Failed to write to Guest Mem at: {0}")]
+    GuestMemWrite(#[source] anyhow::Error),
     /// Enabling HyperV SynIC error
     ///
     #[error("Failed to enable HyperV SynIC")]
