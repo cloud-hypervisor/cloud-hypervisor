@@ -424,6 +424,8 @@ dependencies = [
  "libc",
  "linux-loader",
  "log 0.4.11",
+ "mshv-bindings",
+ "mshv-ioctls",
  "serde",
  "serde_derive",
  "serde_json",
@@ -610,6 +612,28 @@ checksum = "0f2d26ec3309788e423cfbf68ad1800f061638098d76a83681af979dc4eda19d"
 dependencies = [
  "adler",
  "autocfg",
+]
+
+[[package]]
+name = "mshv-bindings"
+version = "0.1.0"
+source = "git+https://github.com/cloud-hypervisor/mshv?branch=master#2ded6daf97976aa27c1aca47964672c201a7d17d"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_derive",
+ "vmm-sys-util",
+ "zerocopy",
+]
+
+[[package]]
+name = "mshv-ioctls"
+version = "0.1.0"
+source = "git+https://github.com/cloud-hypervisor/mshv?branch=master#2ded6daf97976aa27c1aca47964672c201a7d17d"
+dependencies = [
+ "libc",
+ "mshv-bindings",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -1645,3 +1669,24 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "zerocopy"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6580539ad917b7c026220c4b3f2c08d52ce54d6ce0dc491e66002e35388fab46"
+dependencies = [
+ "byteorder",
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d498dbd1fd7beb83c86709ae1c33ca50942889473473d287d56ce4770a18edfb"
+dependencies = [
+ "proc-macro2",
+ "syn",
+ "synstructure",
+]

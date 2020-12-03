@@ -16,6 +16,10 @@ libc = "0.2.81"
 log = "0.4.11"
 kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch", features = ["with-serde", "fam-wrappers"] }
+
+mshv-bindings = {git = "https://github.com/cloud-hypervisor/mshv", branch = "master", features = ["with-serde", "fam-wrappers"] }
+mshv-ioctls = { git = "https://github.com/cloud-hypervisor/mshv", branch = "master" }
+
 serde = {version = ">=1.0.27", features = ["rc"] }
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
