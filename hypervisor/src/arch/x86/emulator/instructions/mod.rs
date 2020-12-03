@@ -11,6 +11,7 @@ use crate::arch::x86::emulator::CpuStateManager;
 use crate::arch::x86::Exception;
 use iced_x86::*;
 
+pub mod cmp;
 pub mod mov;
 
 fn get_op<T: CpuStateManager>(
