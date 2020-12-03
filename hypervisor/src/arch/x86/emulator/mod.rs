@@ -482,7 +482,7 @@ macro_rules! gen_handler_match {
     ($value: ident, $( ($module:ident, $code:ident) ),* ) => {
         match $value {
             $(
-                Code::$code => Some(Box::new($module::$code {})),
+                Code::$code => Some(Box::new($module::$code)),
             )*
             _ => None,
         }
