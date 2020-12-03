@@ -497,6 +497,12 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
     fn get_handler(code: Code) -> Option<Box<dyn InstructionHandler<T>>> {
         let handler: Option<Box<dyn InstructionHandler<T>>> = gen_handler_match!(
             code,
+            // CMP
+            (cmp, Cmp_rm32_r32),
+            (cmp, Cmp_rm8_r8),
+            (cmp, Cmp_rm32_imm8),
+            (cmp, Cmp_rm64_r64),
+            // MOV
             (mov, Mov_r8_rm8),
             (mov, Mov_r8_imm8),
             (mov, Mov_r16_imm16),
