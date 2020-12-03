@@ -7,6 +7,7 @@ license = "Apache-2.0 OR BSD-3-Clause"
 
 [features]
 kvm = []
+mshv = []
 
 [dependencies]
 anyhow = "1.0"

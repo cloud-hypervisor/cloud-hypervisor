@@ -52,6 +52,7 @@ acpi = ["vmm/acpi"]
 cmos = ["vmm/cmos"]
 fwdebug = ["vmm/fwdebug"]
 kvm = ["vmm/kvm"]
+mshv = ["vmm/mshv"]
 io_uring = ["vmm/io_uring"]
 
 # Integration tests require a special environment to run in
