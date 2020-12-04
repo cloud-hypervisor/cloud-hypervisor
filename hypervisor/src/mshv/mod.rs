@@ -513,7 +513,134 @@ impl cpu::Vcpu for MshvVcpu {
         Ok(())
     }
     fn run(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
-        Ok(cpu::VmExit::Ignore)
+        // Safe because this is just only done during initialization.
+        // TODO don't zero it everytime we enter this function.
+        let hv_message: hv_message = unsafe { std::mem::zeroed() };
+        match self.fd.run(hv_message) {
+            Ok(x) => match x.header.message_type {
+                hv_message_type_HVMSG_X64_HALT => {
+                    debug!("HALT");
+                    Ok(cpu::VmExit::Reset)
+                }
+                hv_message_type_HVMSG_UNRECOVERABLE_EXCEPTION => {
+                    warn!("TRIPLE FAULT");
+                    Ok(cpu::VmExit::Shutdown)
+                }
+                hv_message_type_HVMSG_X64_IO_PORT_INTERCEPT => {
+                    let info = x.to_ioport_info().unwrap();
+                    let access_info = info.access_info;
+                    if unsafe { access_info.__bindgen_anon_1.string_op() } == 1 {
+                        panic!("String IN/OUT not supported");
+                    }
+                    if unsafe { access_info.__bindgen_anon_1.rep_prefix() } == 1 {
+                        panic!("Rep IN/OUT not supported");
+                    }
+                    let len = unsafe { access_info.__bindgen_anon_1.access_size() } as usize;
+                    let is_write = info.header.intercept_access_type == 1;
+                    let port = info.port_number;
+                    let mut data: [u8; 4] = [0; 4];
+                    let mut ret_rax = info.rax;
+
+                    if is_write {
+                        let data = (info.rax as u32).to_le_bytes();
+                        if let Some(vmmops) = &self.vmmops {
+                            vmmops
+                                .pio_write(port.into(), &data[0..len])
+                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+                        }
+                    } else {
+                        if let Some(vmmops) = &self.vmmops {
+                            vmmops
+                                .pio_read(port.into(), &mut data[0..len])
+                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+                        }
+
+                        let v = u32::from_le_bytes(data);
+                        /* Preserve high bits in EAX but clear out high bits in RAX */
+                        let mask = 0xffffffff >> (32 - len * 8);
+                        let eax = (info.rax as u32 & !mask) | (v & mask);
+                        ret_rax = eax as u64;
+                    }
+
+                    let insn_len = info.header.instruction_length() as u64;
+
+                    /* Advance RIP and update RAX */
+                    let arr_reg_name_value = [
+                        (
+                            hv_register_name::HV_X64_REGISTER_RIP,
+                            info.header.rip + insn_len,
+                        ),
+                        (hv_register_name::HV_X64_REGISTER_RAX, ret_rax),
+                    ];
+                    set_registers_64!(self.fd, arr_reg_name_value)
+                        .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                    Ok(cpu::VmExit::Ignore)
+                }
+                hv_message_type_HVMSG_UNMAPPED_GPA => {
+                    let info = x.to_memory_info().unwrap();
+                    let insn_len = info.instruction_byte_count as usize;
+                    assert!(insn_len > 0 && insn_len <= 16);
+
+                    let mut context = MshvEmulatorContext {
+                        vcpu: self,
+                        tlb: SoftTLB::new(),
+                    };
+
+                    // Add the GVA <-> GPA mapping.
+                    context
+                        .tlb
+                        .add_mapping(info.guest_virtual_address, info.guest_physical_address)
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
+                    // Create a new emulator.
+                    let mut emul = Emulator::new(&mut context);
+
+                    // Emulate the trapped instruction, and only the first one.
+                    let new_state = emul
+                        .emulate_first_insn(self.vp_index as usize, &info.instruction_bytes)
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
+                    // Set CPU state back.
+                    context
+                        .set_cpu_state(self.vp_index as usize, new_state)
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
+                    Ok(cpu::VmExit::Ignore)
+                }
+                hv_message_type_HVMSG_X64_CPUID_INTERCEPT => {
+                    let info = x.to_cpuid_info().unwrap();
+                    debug!("cpuid eax: {:x}", info.rax);
+                    Ok(cpu::VmExit::Ignore)
+                }
+                hv_message_type_HVMSG_X64_MSR_INTERCEPT => {
+                    let info = x.to_msr_info().unwrap();
+                    if info.header.intercept_access_type == 0 as u8 {
+                        debug!("msr read: {:x}", info.msr_number);
+                    } else {
+                        debug!("msr write: {:x}", info.msr_number);
+                    }
+                    Ok(cpu::VmExit::Ignore)
+                }
+                hv_message_type_HVMSG_X64_EXCEPTION_INTERCEPT => {
+                    //TODO: Handler for VMCALL here.
+                    let info = x.to_exception_info().unwrap();
+                    debug!("Exception Info {:?}", info.exception_vector);
+                    Ok(cpu::VmExit::Ignore)
+                }
+                exit => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                    "Unhandled VCPU exit {:?}",
+                    exit
+                ))),
+            },
+
+            Err(e) => match e.errno() {
+                libc::EAGAIN | libc::EINTR => Ok(cpu::VmExit::Ignore),
+                _ => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                    "VCPU error {:?}",
+                    e
+                ))),
+            },
+        }
     }
     #[cfg(target_arch = "x86_64")]
     ///
