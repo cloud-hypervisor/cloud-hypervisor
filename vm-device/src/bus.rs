@@ -231,13 +231,13 @@ impl Bus {
     /// Writes `data` to the device that owns the range containing `addr`.
     ///
     /// Returns true on success, otherwise `data` is untouched.
-    pub fn write(&self, addr: u64, data: &[u8]) -> Result<()> {
+    pub fn write(&self, addr: u64, data: &[u8]) -> Result<Option<Arc<Barrier>>> {
         if let Some((base, offset, dev)) = self.resolve(addr) {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
-            dev.lock()
+            Ok(dev
+                .lock()
                 .expect("Failed to acquire device lock")
-                .write(base, offset, data);
-            Ok(())
+                .write(base, offset, data))
         } else {
             Err(Error::MissingAddressRange)
         }
