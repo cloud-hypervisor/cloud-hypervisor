@@ -108,7 +108,11 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
         let vm_fd = Arc::new(fd);
 
-        Ok(Arc::new(MshvVm { fd: vm_fd, msrs }))
+        Ok(Arc::new(MshvVm {
+            fd: vm_fd,
+            msrs,
+            hv_state: hv_state_init(),
+        }))
     }
     ///
     /// Get the supported CpuID
@@ -133,6 +137,7 @@ pub struct MshvVcpu {
     vp_index: u8,
     cpuid: CpuId,
     msrs: MsrEntries,
+    hv_state: Arc<RwLock<HvState>>, // Mshv State
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -327,11 +332,19 @@ impl cpu::Vcpu for MshvVcpu {
         unimplemented!();
     }
 }
+
 /// Wrapper over Mshv VM ioctls.
 pub struct MshvVm {
     fd: Arc<VmFd>,
     msrs: MsrEntries,
+    // Hypervisor State
+    hv_state: Arc<RwLock<HvState>>,
 }
+
+fn hv_state_init() -> Arc<RwLock<HvState>> {
+    Arc::new(RwLock::new(HvState { hypercall_page: 0 }))
+}
+
 ///
 /// Implementation of Vm trait for Mshv
 /// Example:
@@ -386,6 +399,7 @@ impl vm::Vm for MshvVm {
             vp_index: id,
             cpuid: CpuId::new(1 as usize),
             msrs: self.msrs.clone(),
+            hv_state: self.hv_state.clone(),
         };
         Ok(Arc::new(vcpu))
     }
@@ -449,12 +463,13 @@ impl vm::Vm for MshvVm {
     /// Get the Vm state. Return VM specific data
     ///
     fn state(&self) -> vm::Result<VmState> {
-        unimplemented!();
+        Ok(*self.hv_state.read().unwrap())
     }
     ///
     /// Set the VM state
     ///
     fn set_state(&self, state: VmState) -> vm::Result<()> {
+        self.hv_state.write().unwrap().hypercall_page = state.hypercall_page;
         Ok(())
     }
     ///
