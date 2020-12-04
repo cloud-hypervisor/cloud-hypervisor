@@ -692,11 +692,51 @@ impl cpu::Vcpu for MshvVcpu {
             .set_xsave(*xsave)
             .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
     }
+    ///
+    /// Set CPU state
+    ///
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+        self.set_msrs(&state.msrs)?;
+        self.set_vcpu_events(&state.vcpu_events)?;
+        self.set_regs(&state.regs)?;
+        self.set_sregs(&state.sregs)?;
+        self.set_fpu(&state.fpu)?;
+        self.set_xcrs(&state.xcrs)?;
+        self.set_lapic(&state.lapic)?;
+        self.set_xsave(&state.xsave)?;
+        self.fd
+            .set_debug_regs(&state.dbg)
+            .map_err(|e| cpu::HypervisorCpuError::SetDebugRegs(e.into()))?;
         Ok(())
     }
+    ///
+    /// Get CPU State
+    ///
     fn state(&self) -> cpu::Result<CpuState> {
-        unimplemented!();
+        let regs = self.get_regs()?;
+        let sregs = self.get_sregs()?;
+        let xcrs = self.get_xcrs()?;
+        let fpu = self.get_fpu()?;
+        let vcpu_events = self.get_vcpu_events()?;
+        let mut msrs = self.msrs.clone();
+        self.get_msrs(&mut msrs)?;
+        let lapic = self.get_lapic()?;
+        let xsave = self.get_xsave()?;
+        let dbg = self
+            .fd
+            .get_debug_regs()
+            .map_err(|e| cpu::HypervisorCpuError::GetDebugRegs(e.into()))?;
+        Ok(CpuState {
+            msrs,
+            vcpu_events,
+            regs,
+            sregs,
+            fpu,
+            xcrs,
+            lapic,
+            dbg,
+            xsave,
+        })
     }
 }
 
