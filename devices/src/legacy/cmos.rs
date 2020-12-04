@@ -5,6 +5,7 @@
 use libc::{clock_gettime, gmtime_r, time_t, timespec, tm, CLOCK_REALTIME};
 use std::cmp::min;
 use std::mem;
+use std::sync::{Arc, Barrier};
 use vm_device::BusDevice;
 
 const INDEX_MASK: u8 = 0x7f;
@@ -44,16 +45,17 @@ impl Cmos {
 }
 
 impl BusDevice for Cmos {
-    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() != 1 {
-            return;
+            return None;
         }
 
         match offset {
             INDEX_OFFSET => self.index = data[0] & INDEX_MASK,
             DATA_OFFSET => self.data[self.index as usize] = data[0],
             o => panic!("bad write offset on CMOS device: {}", o),
-        }
+        };
+        None
     }
 
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {

@@ -7,7 +7,7 @@
 
 use anyhow::anyhow;
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::{io, result};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
@@ -275,12 +275,14 @@ impl BusDevice for Serial {
         };
     }
 
-    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() != 1 {
-            return;
+            return None;
         }
 
-        if let Err(_e) = self.handle_write(offset as u8, data[0]) {}
+        self.handle_write(offset as u8, data[0]).ok();
+
+        None
     }
 }
 
