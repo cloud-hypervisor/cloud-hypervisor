@@ -12,10 +12,12 @@
 use crate::aarch64::VcpuInit;
 use crate::cpu::Vcpu;
 use crate::device::Device;
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::ClockData;
+#[cfg(feature = "kvm")]
 use crate::KvmVmState as VmState;
 use crate::{CreateDevice, IoEventAddress, IrqRoutingEntry, MemoryRegion};
+#[cfg(feature = "kvm")]
 use kvm_ioctls::Cap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -198,6 +200,7 @@ pub trait Vm: Send + Sync {
     ) -> MemoryRegion;
     /// Creates/modifies a guest physical memory slot.
     fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> Result<()>;
+    #[cfg(feature = "kvm")]
     /// Creates an emulated device in the kernel.
     fn create_device(&self, device: &mut CreateDevice) -> Result<Arc<dyn Device>>;
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
@@ -207,11 +210,12 @@ pub trait Vm: Send + Sync {
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> Result<()>;
     /// Retrieve guest clock.
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     fn get_clock(&self) -> Result<ClockData>;
     /// Set guest clock.
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     fn set_clock(&self, data: &ClockData) -> Result<()>;
+    #[cfg(feature = "kvm")]
     /// Checks if a particular `Cap` is available.
     fn check_extension(&self, c: Cap) -> bool;
     /// Create a device that is used for passthrough

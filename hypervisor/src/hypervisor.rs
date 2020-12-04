@@ -10,7 +10,7 @@
 use crate::vm::Vm;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{CpuId, MsrList};
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use kvm_ioctls::Cap;
 use std::sync::Arc;
 
@@ -78,19 +78,22 @@ pub trait Hypervisor: Send + Sync {
     /// Return a hypervisor-agnostic Vm trait object
     ///
     fn create_vm(&self) -> Result<Arc<dyn Vm>>;
+    #[cfg(feature = "kvm")]
     ///
     /// Returns the size of the memory mapping required to use the vcpu's structures
     ///
     fn get_vcpu_mmap_size(&self) -> Result<usize>;
+    #[cfg(feature = "kvm")]
     ///
     /// Gets the recommended maximum number of VCPUs per VM.
     ///
     fn get_max_vcpus(&self) -> Result<usize>;
+    #[cfg(feature = "kvm")]
     ///
     /// Gets the recommended number of VCPUs per VM.
     ///
     fn get_nr_vcpus(&self) -> Result<usize>;
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     ///
     /// Checks if a particular `Cap` is available.
     ///

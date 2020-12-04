@@ -453,7 +453,7 @@ pub struct Vm {
     #[cfg_attr(not(feature = "kvm"), allow(dead_code))]
     // The hypervisor abstracted virtual machine.
     vm: Arc<dyn hypervisor::Vm>,
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     saved_clock: Option<hypervisor::ClockData>,
     #[cfg(feature = "acpi")]
     numa_nodes: NumaNodes,
@@ -471,7 +471,7 @@ impl Vm {
         reset_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
-        _saved_clock: Option<hypervisor::ClockData>,
+        #[cfg(feature = "kvm")] _saved_clock: Option<hypervisor::ClockData>,
     ) -> Result<Self> {
         config
             .lock()
@@ -550,7 +550,7 @@ impl Vm {
             cpu_manager,
             memory_manager,
             vm,
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             saved_clock: _saved_clock,
             #[cfg(feature = "acpi")]
             numa_nodes,
@@ -631,7 +631,7 @@ impl Vm {
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
@@ -664,6 +664,7 @@ impl Vm {
             reset_evt,
             seccomp_action,
             hypervisor,
+            #[cfg(feature = "kvm")]
             None,
         )?;
 
@@ -688,7 +689,7 @@ impl Vm {
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
@@ -727,9 +728,7 @@ impl Vm {
             reset_evt,
             seccomp_action,
             hypervisor,
-            #[cfg(target_arch = "x86_64")]
-            vm_snapshot.clock,
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(feature = "kvm")]
             None,
         )
     }
@@ -741,7 +740,7 @@ impl Vm {
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor.check_required_extensions().unwrap();
         let vm = hypervisor.create_vm().unwrap();
         #[cfg(target_arch = "x86_64")]
@@ -764,6 +763,7 @@ impl Vm {
             reset_evt,
             seccomp_action,
             hypervisor,
+            #[cfg(feature = "kvm")]
             None,
         )
     }
@@ -1737,7 +1737,7 @@ impl Pausable for Vm {
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {:?}", e)))?;
 
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         {
             let mut clock = self
                 .vm
@@ -1767,7 +1767,7 @@ impl Pausable for Vm {
             .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {:?}", e)))?;
 
         self.cpu_manager.lock().unwrap().resume()?;
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         {
             if let Some(clock) = &self.saved_clock {
                 self.vm.set_clock(clock).map_err(|e| {
@@ -1787,7 +1787,7 @@ impl Pausable for Vm {
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
     pub config: Arc<Mutex<VmConfig>>,
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     pub clock: Option<hypervisor::ClockData>,
     pub state: Option<hypervisor::VmState>,
 }
@@ -1813,7 +1813,7 @@ impl Snapshottable for Vm {
             .map_err(|e| MigratableError::Snapshot(e.into()))?;
         let vm_snapshot_data = serde_json::to_vec(&VmSnapshot {
             config: self.get_config(),
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             clock: self.saved_clock,
             state: Some(vm_state),
         })
@@ -2016,7 +2016,7 @@ impl Transportable for Vm {
 }
 impl Migratable for Vm {}
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
 mod tests {
     use super::*;

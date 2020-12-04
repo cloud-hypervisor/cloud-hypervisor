@@ -325,6 +325,7 @@ where
     }
 }
 
+#[cfg(feature = "kvm")]
 pub mod kvm {
     use super::*;
     use hypervisor::kvm::KVM_MSI_VALID_DEVID;

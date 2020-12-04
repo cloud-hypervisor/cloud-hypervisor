@@ -28,6 +28,7 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate thiserror;
 
+#[cfg(feature = "kvm")]
 /// KVM implementation module
 pub mod kvm;
 
@@ -49,6 +50,7 @@ mod device;
 pub use crate::hypervisor::{Hypervisor, HypervisorError};
 pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
 pub use device::{Device, HypervisorDeviceError};
+#[cfg(feature = "kvm")]
 pub use kvm::*;
 pub use vm::{DataMatch, HypervisorVmError, Vm};
 
