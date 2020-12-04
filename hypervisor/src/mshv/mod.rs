@@ -112,6 +112,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             fd: vm_fd,
             msrs,
             hv_state: hv_state_init(),
+            vmmops: None,
         }))
     }
     ///
@@ -138,6 +139,7 @@ pub struct MshvVcpu {
     cpuid: CpuId,
     msrs: MsrEntries,
     hv_state: Arc<RwLock<HvState>>, // Mshv State
+    vmmops: Option<Arc<Box<dyn vm::VmmOps>>>,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -339,6 +341,7 @@ pub struct MshvVm {
     msrs: MsrEntries,
     // Hypervisor State
     hv_state: Arc<RwLock<HvState>>,
+    vmmops: Option<Arc<Box<dyn vm::VmmOps>>>,
 }
 
 fn hv_state_init() -> Arc<RwLock<HvState>> {
@@ -400,6 +403,7 @@ impl vm::Vm for MshvVm {
             cpuid: CpuId::new(1 as usize),
             msrs: self.msrs.clone(),
             hv_state: self.hv_state.clone(),
+            vmmops,
         };
         Ok(Arc::new(vcpu))
     }
