@@ -43,7 +43,7 @@ use devices::{
     interrupt_controller, interrupt_controller::InterruptController, legacy::Serial,
     HotPlugNotificationFlags,
 };
-use hypervisor::kvm_ioctls;
+#[cfg(feature = "kvm")]
 use hypervisor::kvm_ioctls::*;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::CpuState;
@@ -181,7 +181,7 @@ pub enum DeviceManagerError {
     AllocateIrq,
 
     /// Cannot configure the IRQ.
-    Irq(kvm_ioctls::Error),
+    Irq(vmm_sys_util::errno::Error),
 
     /// Cannot allocate PCI BARs
     AllocateBars(pci::PciDeviceError),

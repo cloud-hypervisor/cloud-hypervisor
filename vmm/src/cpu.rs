@@ -1360,7 +1360,7 @@ impl Pausable for CpuManager {
         for vcpu in self.vcpus.iter() {
             let mut vcpu = vcpu.lock().unwrap();
             vcpu.pause()?;
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             if !self.config.kvm_hyperv {
                 vcpu.vcpu.notify_guest_clock_paused().map_err(|e| {
                     MigratableError::Pause(anyhow!(
@@ -1424,7 +1424,7 @@ impl Snapshottable for CpuManager {
 impl Transportable for CpuManager {}
 impl Migratable for CpuManager {}
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
 mod tests {
 

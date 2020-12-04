@@ -272,10 +272,12 @@ pub trait Vcpu: Send + Sync {
     /// Setup the model-specific registers (MSR) for this vCPU.
     ///
     fn set_msrs(&self, msrs: &MsrEntries) -> Result<usize>;
+    #[cfg(feature = "kvm")]
     ///
     /// Returns the vcpu's current "multiprocessing state".
     ///
     fn get_mp_state(&self) -> Result<MpState>;
+    #[cfg(feature = "kvm")]
     ///
     /// Sets the vcpu's current "multiprocessing state".
     ///
@@ -312,7 +314,7 @@ pub trait Vcpu: Send + Sync {
     /// of the vcpu.
     ///
     fn set_vcpu_events(&self, events: &VcpuEvents) -> Result<()>;
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     ///
     /// Let the guest know that it has been paused, which prevents from
     /// potential soft lockups when being resumed.
