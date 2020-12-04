@@ -1,4 +1,3 @@
-
 [package]
 name = "cloud-hypervisor-fuzz"
 version = "0.0.0"
@@ -10,7 +9,6 @@ edition = "2018"
 cargo-fuzz = true
 
 [dependencies]
-kvm-ioctls = { git = "https://github.com/rust-vmm/kvm-ioctls", branch = "master" }
 libc = "0.2.72"
 libfuzzer-sys = "0.3"
 qcow = { path = "../qcow" }
@@ -22,11 +20,6 @@ vm-memory = "0.4.0"
 
 [dependencies.cloud-hypervisor]
 path = ".."
-
-[patch.'https://github.com/rust-vmm/kvm-ioctls']
-kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
-[patch.'https://github.com/rust-vmm/kvm-bindings']
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch", features = ["with-serde", "fam-wrappers"] }
 
 # Prevent this from interfering with workspaces
 [workspace]
