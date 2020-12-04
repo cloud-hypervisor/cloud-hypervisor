@@ -5,6 +5,7 @@
 use crate::configuration::{self, PciBarRegionType};
 use std::any::Any;
 use std::fmt::{self, Display};
+use std::sync::{Arc, Barrier};
 use std::{self, io, result};
 use vm_allocator::SystemAllocator;
 use vm_device::BusDevice;
@@ -63,7 +64,12 @@ pub trait PciDevice: BusDevice {
     /// Sets a register in the configuration space.
     /// * `reg_idx` - The index of the config register to modify.
     /// * `offset` - Offset in to the register.
-    fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]);
+    fn write_config_register(
+        &mut self,
+        reg_idx: usize,
+        offset: u64,
+        data: &[u8],
+    ) -> Option<Arc<Barrier>>;
     /// Gets a register from the configuration space.
     /// * `reg_idx` - The index of the config register to read.
     fn read_config_register(&mut self, reg_idx: usize) -> u32;
@@ -82,7 +88,9 @@ pub trait PciDevice: BusDevice {
     /// Writes to a BAR region mapped in to the device.
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - The data to write.
-    fn write_bar(&mut self, _base: u64, _offset: u64, _data: &[u8]) {}
+    fn write_bar(&mut self, _base: u64, _offset: u64, _data: &[u8]) -> Option<Arc<Barrier>> {
+        None
+    }
     /// Relocates the BAR to a different address in guest address space.
     fn move_bar(&mut self, _old_base: u64, _new_base: u64) -> result::Result<(), io::Error> {
         Ok(())

@@ -653,9 +653,7 @@ impl BusDevice for VfioPciDevice {
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        self.write_bar(base, offset, data);
-
-        None
+        self.write_bar(base, offset, data)
     }
 }
 
@@ -885,7 +883,12 @@ impl PciDevice for VfioPciDevice {
         Ok(())
     }
 
-    fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
+    fn write_config_register(
+        &mut self,
+        reg_idx: usize,
+        offset: u64,
+        data: &[u8],
+    ) -> Option<Arc<Barrier>> {
         // When the guest wants to write to a BAR, we trap it into
         // our local configuration space. We're not reprogramming
         // VFIO device.
@@ -895,9 +898,9 @@ impl PciDevice for VfioPciDevice {
             // We keep our local cache updated with the BARs.
             // We'll read it back from there when the guest is asking
             // for BARs (see read_config_register()).
-            return self
-                .configuration
+            self.configuration
                 .write_config_register(reg_idx, offset, data);
+            return None;
         }
 
         let reg = (reg_idx * PCI_CONFIG_REGISTER_SIZE) as u64;
@@ -933,6 +936,8 @@ impl PciDevice for VfioPciDevice {
         // to the device region to update the MSI Enable bit.
         self.device
             .region_write(VFIO_PCI_CONFIG_REGION_INDEX, data, reg + offset);
+
+        None
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
@@ -990,7 +995,7 @@ impl PciDevice for VfioPciDevice {
         }
     }
 
-    fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) {
+    fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         let addr = base + offset;
         if let Some(region) = self.find_region(addr) {
             let offset = addr - region.start.raw_value();
@@ -1002,6 +1007,8 @@ impl PciDevice for VfioPciDevice {
                 self.device.region_write(region.index, data, offset);
             }
         }
+
+        None
     }
 
     fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), io::Error> {
