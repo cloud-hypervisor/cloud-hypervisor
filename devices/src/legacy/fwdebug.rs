@@ -7,6 +7,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+use std::sync::{Arc, Barrier};
 use vm_device::BusDevice;
 
 /// Provides firmware debug output via I/O port controls
@@ -30,11 +31,13 @@ impl BusDevice for FwDebugDevice {
         }
     }
 
-    fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) {
+    fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() == 1 {
             print!("{}", data[0] as char);
         } else {
             error!("Invalid write size on debug port: {}", data.len())
         }
+
+        None
     }
 }

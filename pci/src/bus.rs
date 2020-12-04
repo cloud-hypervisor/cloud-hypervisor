@@ -10,7 +10,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use vm_device::{Bus, BusDevice};
 use vm_memory::{Address, GuestAddress, GuestUsize};
 
@@ -312,13 +312,15 @@ impl BusDevice for PciConfigIo {
         }
     }
 
-    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         // `offset` is relative to 0xcf8
         match offset {
             o @ 0..=3 => self.set_config_address(o, data),
             o @ 4..=7 => self.config_space_write(o - 4, data),
             _ => (),
         };
+
+        None
     }
 }
 
@@ -407,11 +409,13 @@ impl BusDevice for PciConfigMmio {
         }
     }
 
-    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if offset > u64::from(u32::max_value()) {
-            return;
+            return None;
         }
-        self.config_space_write(offset as u32, offset % 4, data)
+        self.config_space_write(offset as u32, offset % 4, data);
+
+        None
     }
 }
 

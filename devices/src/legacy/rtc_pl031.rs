@@ -9,7 +9,7 @@
 //! a real-time clock input.
 //!
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::time::Instant;
 use std::{io, result};
 use vm_device::interrupt::InterruptSourceGroup;
@@ -371,7 +371,7 @@ impl BusDevice for RTC {
         }
     }
 
-    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() <= 4 {
             let v = read_le_u32(&data[..]);
             if let Err(e) = self.handle_write(offset, v) {
@@ -384,6 +384,8 @@ impl BusDevice for RTC {
                 data.len()
             );
         }
+
+        None
     }
 }
 

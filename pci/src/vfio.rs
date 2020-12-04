@@ -15,7 +15,7 @@ use std::any::Any;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::{fmt, io, result};
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::{VfioDevice, VfioError};
@@ -652,8 +652,10 @@ impl BusDevice for VfioPciDevice {
         self.read_bar(base, offset, data)
     }
 
-    fn write(&mut self, base: u64, offset: u64, data: &[u8]) {
-        self.write_bar(base, offset, data)
+    fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+        self.write_bar(base, offset, data);
+
+        None
     }
 }
 
