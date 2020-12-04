@@ -418,6 +418,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "env_logger",
+ "epoll",
  "iced-x86",
  "kvm-bindings",
  "kvm-ioctls",

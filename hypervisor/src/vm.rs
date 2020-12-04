@@ -158,6 +158,11 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to get dirty log: {0}")]
     GetDirtyLog(#[source] anyhow::Error),
+    ///
+    /// Assert virtual interrupt error
+    ///
+    #[error("Failed to assert virtual Interrupt: {0}")]
+    AsserttVirtualInterrupt(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
