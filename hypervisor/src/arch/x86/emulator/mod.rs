@@ -639,7 +639,6 @@ mod mock_vmm {
     use crate::arch::x86::emulator::{Emulator, EmulatorCpuState as CpuState};
     use crate::arch::x86::gdt::{gdt_entry, segment_from_gdt};
     use crate::arch::x86::Exception;
-    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
     #[derive(Debug, Clone)]
@@ -653,7 +652,7 @@ mod mock_vmm {
     pub type MockResult = Result<(), EmulationError<Exception>>;
 
     impl MockVMM {
-        pub fn new(ip: u64, regs: HashMap<Register, u64>, memory: Option<(u64, &[u8])>) -> MockVMM {
+        pub fn new(ip: u64, regs: Vec<(Register, u64)>, memory: Option<(u64, &[u8])>) -> MockVMM {
             let _ = env_logger::try_init();
             let cs_reg = segment_from_gdt(gdt_entry(0xc09b, 0, 0xffffffff), 1);
             let ds_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 2);
@@ -761,14 +760,6 @@ mod tests {
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
 
-    macro_rules! hashmap {
-        ($( $key: expr => $val: expr ),*) => {{
-            let mut map = ::std::collections::HashMap::new();
-            $( map.insert($key, $val); )*
-                map
-        }}
-    }
-
     #[test]
     // Emulate truncated instruction stream, which should cause a fetch.
     //
@@ -791,7 +782,7 @@ mod tests {
             0x48, 0xc7, 0xc0, 0x00, // mov rax, 0x1000 -- Missing bytes: 0x00, 0x10, 0x00, 0x00,
         ];
 
-        let mut vmm = MockVMM::new(ip, hashmap![], Some((ip, &memory)));
+        let mut vmm = MockVMM::new(ip, vec![], Some((ip, &memory)));
         assert!(vmm.emulate_insn(cpu_id, &insn, Some(2)).is_ok());
 
         let rax: u64 = vmm
@@ -828,7 +819,7 @@ mod tests {
             0x48, 0x8b, // Truncated mov rbx, qword ptr [rax+10h] -- missing [0x58, 0x10]
         ];
 
-        let mut vmm = MockVMM::new(ip, hashmap![], Some((ip, &memory)));
+        let mut vmm = MockVMM::new(ip, vec![], Some((ip, &memory)));
         assert!(vmm.emulate_insn(cpu_id, &insn, Some(2)).is_ok());
 
         let rbx: u64 = vmm
@@ -860,7 +851,7 @@ mod tests {
             0x48, 0xc7, 0xc0, 0x00, // mov rax, 0x1000 -- Missing bytes: 0x00, 0x10, 0x00, 0x00,
         ];
 
-        let mut vmm = MockVMM::new(ip, hashmap![], Some((ip, &memory)));
+        let mut vmm = MockVMM::new(ip, vec![], Some((ip, &memory)));
         assert!(vmm.emulate_first_insn(cpu_id, &insn).is_err());
 
         Ok(())

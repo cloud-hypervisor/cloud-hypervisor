@@ -241,14 +241,6 @@ mod tests {
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
 
-    macro_rules! hashmap {
-        ($( $key: expr => $val: expr ),*) => {{
-            let mut map = ::std::collections::HashMap::new();
-            $( map.insert($key, $val); )*
-                map
-        }}
-    }
-
     #[test]
     // cmp ah,al
     fn test_cmp_rm8_r8_1() -> MockResult {
@@ -256,7 +248,7 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x38, 0xc4]; // cmp ah,al
-        let mut vmm = MockVMM::new(ip, hashmap![Register::RAX => rax], None);
+        let mut vmm = MockVMM::new(ip, vec![(Register::RAX, rax)], None);
         assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
@@ -272,7 +264,7 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x83, 0xf8, 0x64]; // cmp eax,100
-        let mut vmm = MockVMM::new(ip, hashmap![Register::RAX => rax], None);
+        let mut vmm = MockVMM::new(ip, vec![(Register::RAX, rax)], None);
         assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
@@ -288,7 +280,7 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x83, 0xf8, 0xff]; // cmp eax,-1
-        let mut vmm = MockVMM::new(ip, hashmap![Register::RAX => rax], None);
+        let mut vmm = MockVMM::new(ip, vec![(Register::RAX, rax)], None);
         assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
@@ -305,11 +297,7 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x48, 0x39, 0xd8, 0x00, 0xc3]; // cmp rax,rbx + two bytes garbage
-        let mut vmm = MockVMM::new(
-            ip,
-            hashmap![Register::RAX => rax, Register::RBX => rbx],
-            None,
-        );
+        let mut vmm = MockVMM::new(ip, vec![(Register::RAX, rax), (Register::RBX, rbx)], None);
         assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
@@ -336,7 +324,7 @@ mod tests {
             let insn = [0x48, 0x39, 0xd8]; // cmp rax,rbx
             let mut vmm = MockVMM::new(
                 0x1000,
-                hashmap![Register::RAX => rax, Register::RBX => rbx],
+                vec![(Register::RAX, rax), (Register::RBX, rbx)],
                 None,
             );
             assert!(vmm.emulate_first_insn(0, &insn).is_ok());
@@ -366,7 +354,7 @@ mod tests {
             let insn = [0x39, 0xd8]; // cmp eax,ebx
             let mut vmm = MockVMM::new(
                 0x1000,
-                hashmap![Register::RAX => rax, Register::RBX => rbx],
+                vec![(Register::RAX, rax), (Register::RBX, rbx)],
                 None,
             );
             assert!(vmm.emulate_first_insn(0, &insn).is_ok());
