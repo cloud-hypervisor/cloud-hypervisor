@@ -17,7 +17,6 @@ extern crate iced_x86;
 use crate::arch::emulator::{EmulationError, PlatformEmulator};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::Exception;
-use std::mem;
 
 macro_rules! mov_rm_r {
     ($bound:ty) => {
@@ -27,27 +26,18 @@ macro_rules! mov_rm_r {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let src_reg_value = state
-                .read_reg(insn.op1_register())
+            let src_reg_value = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
-            match insn.op0_kind() {
-                OpKind::Register => state
-                    .write_reg(insn.op0_register(), src_reg_value)
-                    .map_err(EmulationError::PlatformEmulationError)?,
-
-                OpKind::Memory => {
-                    let addr = memory_operand_address(insn, state, true)
-                        .map_err(EmulationError::PlatformEmulationError)?;
-                    let src_reg_value_type: $bound = src_reg_value as $bound;
-
-                    platform
-                        .write_memory(addr, &src_reg_value_type.to_le_bytes())
-                        .map_err(EmulationError::PlatformEmulationError)?
-                }
-
-                k => return Err(EmulationError::InvalidOperand(anyhow!("{:?}", k))),
-            }
+            set_op(
+                &insn,
+                0,
+                std::mem::size_of::<$bound>(),
+                state,
+                platform,
+                src_reg_value,
+            )
+            .map_err(EmulationError::PlatformEmulationError)?;
 
             state.set_ip(insn.ip());
 
@@ -57,29 +47,25 @@ macro_rules! mov_rm_r {
 }
 
 macro_rules! mov_rm_imm {
-    ($type:tt) => {
+    ($bound:ty) => {
         fn emulate(
             &self,
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let imm = imm_op!($type, insn);
+            let imm = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
+                .map_err(EmulationError::PlatformEmulationError)?;
 
-            match insn.op0_kind() {
-                OpKind::Register => state
-                    .write_reg(insn.op0_register(), imm as u64)
-                    .map_err(EmulationError::PlatformEmulationError)?,
-                OpKind::Memory => {
-                    let addr = memory_operand_address(insn, state, true)
-                        .map_err(EmulationError::PlatformEmulationError)?;
-
-                    platform
-                        .write_memory(addr, &imm.to_le_bytes())
-                        .map_err(EmulationError::PlatformEmulationError)?
-                }
-                k => return Err(EmulationError::InvalidOperand(anyhow!("{:?}", k))),
-            }
+            set_op(
+                &insn,
+                0,
+                std::mem::size_of::<$bound>(),
+                state,
+                platform,
+                imm,
+            )
+            .map_err(EmulationError::PlatformEmulationError)?;
 
             state.set_ip(insn.ip());
 
@@ -96,27 +82,18 @@ macro_rules! mov_r_rm {
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let src_value: $bound = match insn.op1_kind() {
-                OpKind::Register => state
-                    .read_reg(insn.op1_register())
-                    .map_err(EmulationError::PlatformEmulationError)?
-                    as $bound,
-                OpKind::Memory => {
-                    let target_address = memory_operand_address(insn, state, false)
-                        .map_err(EmulationError::PlatformEmulationError)?;
-                    let mut memory: [u8; mem::size_of::<$bound>()] = [0; mem::size_of::<$bound>()];
-                    platform
-                        .read_memory(target_address, &mut memory)
-                        .map_err(EmulationError::PlatformEmulationError)?;
-                    <$bound>::from_le_bytes(memory)
-                }
-
-                k => return Err(EmulationError::InvalidOperand(anyhow!("{:?}", k))),
-            };
-
-            state
-                .write_reg(insn.op0_register(), src_value as u64)
+            let src_value = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
+
+            set_op(
+                &insn,
+                0,
+                std::mem::size_of::<$bound>(),
+                state,
+                platform,
+                src_value,
+            )
+            .map_err(EmulationError::PlatformEmulationError)?;
 
             state.set_ip(insn.ip());
 
@@ -126,16 +103,25 @@ macro_rules! mov_r_rm {
 }
 
 macro_rules! mov_r_imm {
-    ($type:tt) => {
+    ($bound:ty) => {
         fn emulate(
             &self,
             insn: &Instruction,
             state: &mut T,
-            _platform: &mut dyn PlatformEmulator<CpuState = T>,
+            platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            state
-                .write_reg(insn.op0_register(), imm_op!($type, insn) as u64)
+            let imm = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
+
+            set_op(
+                &insn,
+                0,
+                std::mem::size_of::<$bound>(),
+                state,
+                platform,
+                imm,
+            )
+            .map_err(EmulationError::PlatformEmulationError)?;
 
             state.set_ip(insn.ip());
 
@@ -216,7 +202,7 @@ impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm32_r32 {
 
 pub struct Mov_rm64_imm32;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm64_imm32 {
-    mov_rm_imm!(u32tou64);
+    mov_rm_imm!(u32);
 }
 
 pub struct Mov_rm64_r64;
