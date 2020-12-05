@@ -11,40 +11,6 @@ use crate::arch::x86::emulator::CpuStateManager;
 use crate::arch::x86::Exception;
 use iced_x86::*;
 
-macro_rules! imm_op {
-    (u8, $insn:ident) => {
-        $insn.immediate8()
-    };
-
-    (u16, $insn:ident) => {
-        $insn.immediate16()
-    };
-
-    (u32, $insn:ident) => {
-        $insn.immediate32()
-    };
-
-    (u64, $insn:ident) => {
-        $insn.immediate64()
-    };
-
-    (u32tou64, $insn:ident) => {
-        $insn.immediate32to64()
-    };
-
-    (u8tou16, $insn:ident) => {
-        $insn.immediate8to16()
-    };
-
-    (u8tou32, $insn:ident) => {
-        $insn.immediate8to32()
-    };
-
-    (u8tou64, $insn:ident) => {
-        $insn.immediate8to64()
-    };
-}
-
 pub mod mov;
 
 fn get_op<T: CpuStateManager>(
