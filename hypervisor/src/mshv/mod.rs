@@ -12,3 +12,22 @@
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
+
+#[derive(Copy, Clone, Debug)]
+pub struct MshvIrqRoutingMsi {
+    pub address_lo: u32,
+    pub address_hi: u32,
+    pub data: u32,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum MshvIrqRouting {
+    Msi(MshvIrqRoutingMsi),
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct MshvIrqRoutingEntry {
+    pub gsi: u32,
+    pub route: MshvIrqRouting,
+}
+pub type IrqRoutingEntry = MshvIrqRoutingEntry;
