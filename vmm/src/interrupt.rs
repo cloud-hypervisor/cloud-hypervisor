@@ -396,6 +396,69 @@ pub mod kvm {
     }
 }
 
+#[cfg(feature = "mshv")]
+pub mod mshv {
+    use super::*;
+    use hypervisor::mshv::*;
+
+    type MshvMsiInterruptGroup = MsiInterruptGroup<MshvIrqRoutingEntry>;
+    type MshvRoutingEntry = RoutingEntry<MshvIrqRoutingEntry>;
+    pub type MshvMsiInterruptManager = MsiInterruptManager<MshvIrqRoutingEntry>;
+
+    impl RoutingEntryExt for MshvRoutingEntry {
+        fn make_entry(
+            _vm: &Arc<dyn hypervisor::Vm>,
+            gsi: u32,
+            config: &InterruptSourceConfig,
+        ) -> Result<Box<Self>> {
+            if let InterruptSourceConfig::MsiIrq(cfg) = &config {
+                let route = MshvIrqRoutingEntry {
+                    gsi,
+                    route: MshvIrqRouting::Msi(MshvIrqRoutingMsi {
+                        address_lo: cfg.low_addr,
+                        address_hi: cfg.high_addr,
+                        data: cfg.data,
+                    }),
+                };
+                let entry = MshvRoutingEntry {
+                    route,
+                    masked: false,
+                };
+
+                return Ok(Box::new(entry));
+            }
+
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Interrupt config type not supported",
+            ))
+        }
+    }
+
+    impl MsiInterruptGroupOps<MshvIrqRoutingEntry> for MshvMsiInterruptGroup {
+        fn set_gsi_routes(
+            &self,
+            routes: &HashMap<u32, RoutingEntry<MshvIrqRoutingEntry>>,
+        ) -> Result<()> {
+            let mut entry_vec: Vec<MshvIrqRoutingEntry> = Vec::new();
+            for (_, entry) in routes.iter() {
+                if entry.masked {
+                    continue;
+                }
+
+                entry_vec.push(entry.route);
+            }
+
+            self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed setting GSI routing: {}", e),
+                )
+            })
+        }
+    }
+}
+
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {

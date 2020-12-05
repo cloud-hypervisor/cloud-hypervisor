@@ -15,6 +15,8 @@ use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig, Vsock
 use crate::device_tree::{DeviceNode, DeviceTree};
 #[cfg(feature = "kvm")]
 use crate::interrupt::kvm::KvmMsiInterruptManager as MsiInterruptManager;
+#[cfg(feature = "mshv")]
+use crate::interrupt::mshv::MshvMsiInterruptManager as MsiInterruptManager;
 use crate::interrupt::LegacyUserspaceInterruptManager;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 #[cfg(feature = "acpi")]
@@ -47,6 +49,8 @@ use devices::{
 use hypervisor::kvm_ioctls::*;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::CpuState;
+#[cfg(feature = "mshv")]
+use hypervisor::IoEventAddress;
 use libc::TIOCGWINSZ;
 use libc::{MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE};
 use pci::{
