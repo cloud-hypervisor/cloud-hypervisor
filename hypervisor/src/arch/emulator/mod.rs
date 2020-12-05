@@ -52,6 +52,9 @@ pub enum PlatformError {
 
     #[error("Unsupported CPU Mode: {0}")]
     UnsupportedCpuMode(#[source] anyhow::Error),
+
+    #[error("Invalid instruction operand: {0}")]
+    InvalidOperand(#[source] anyhow::Error),
 }
 
 #[derive(Error, Debug)]

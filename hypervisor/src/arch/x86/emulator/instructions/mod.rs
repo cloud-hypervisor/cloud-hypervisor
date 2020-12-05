@@ -47,6 +47,89 @@ macro_rules! imm_op {
 
 pub mod mov;
 
+fn get_op<T: CpuStateManager>(
+    insn: &Instruction,
+    op_index: u32,
+    op_size: usize,
+    state: &mut T,
+    platform: &mut dyn PlatformEmulator<CpuState = T>,
+) -> Result<u64, PlatformError> {
+    if insn.op_count() < op_index + 1 {
+        return Err(PlatformError::InvalidOperand(anyhow!(
+            "Invalid operand {:?}",
+            op_index
+        )));
+    }
+
+    match op_size {
+        1 | 2 | 4 | 8 => {}
+        _ => {
+            return Err(PlatformError::InvalidOperand(anyhow!(
+                "Invalid operand size {:?}",
+                op_size
+            )))
+        }
+    }
+
+    let value = match insn.op_kind(op_index) {
+        OpKind::Register => state.read_reg(insn.op_register(op_index))?,
+        OpKind::Memory => {
+            let addr = memory_operand_address(insn, state, false)?;
+            let mut memory: [u8; 8] = [0; 8];
+            platform.read_memory(addr, &mut memory[0..op_size])?;
+            <u64>::from_le_bytes(memory)
+        }
+        OpKind::Immediate8 => insn.immediate8() as u64,
+        OpKind::Immediate8to16 => insn.immediate8to16() as u64,
+        OpKind::Immediate8to32 => insn.immediate8to32() as u64,
+        OpKind::Immediate8to64 => insn.immediate8to64() as u64,
+        OpKind::Immediate16 => insn.immediate16() as u64,
+        OpKind::Immediate32 => insn.immediate32() as u64,
+        OpKind::Immediate32to64 => insn.immediate32to64() as u64,
+        OpKind::Immediate64 => insn.immediate64() as u64,
+        k => return Err(PlatformError::InvalidOperand(anyhow!("{:?}", k))),
+    };
+
+    Ok(value)
+}
+
+fn set_op<T: CpuStateManager>(
+    insn: &Instruction,
+    op_index: u32,
+    op_size: usize,
+    state: &mut T,
+    platform: &mut dyn PlatformEmulator<CpuState = T>,
+    value: u64,
+) -> Result<(), PlatformError> {
+    if insn.op_count() < op_index + 1 {
+        return Err(PlatformError::InvalidOperand(anyhow!(
+            "Invalid operand {:?}",
+            op_index
+        )));
+    }
+
+    match op_size {
+        1 | 2 | 4 | 8 => {}
+        _ => {
+            return Err(PlatformError::InvalidOperand(anyhow!(
+                "Invalid operand size {:?}",
+                op_size
+            )))
+        }
+    }
+
+    match insn.op_kind(op_index) {
+        OpKind::Register => state.write_reg(insn.op_register(op_index), value)?,
+        OpKind::Memory => {
+            let addr = memory_operand_address(insn, state, true)?;
+            platform.write_memory(addr, &value.to_le_bytes()[..op_size])?;
+        }
+        k => return Err(PlatformError::InvalidOperand(anyhow!("{:?}", k))),
+    };
+
+    Ok(())
+}
+
 // Returns the linear a.k.a. virtual address for a memory operand.
 fn memory_operand_address<T: CpuStateManager>(
     insn: &Instruction,
