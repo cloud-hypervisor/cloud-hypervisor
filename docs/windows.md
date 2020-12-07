@@ -282,6 +282,17 @@ Note, this VM has the networking enabled. It is needed, because symbols and sour
 
 Also, notice the `-serial` parameter - that's what does the magic on exposing the serial port to the guest while connecting the debugger VM with a client VM through the network. SAC/EMS needs to be disabled in the debugger VM, as otherwise the COM device might be blocked.
 
+Hereafter, WinDbg can be started using a command below:
+
+```cmd
+set _NT_DEBUG_PORT=com1
+set _NT_DEBUG_BAUD_RATE=115200
+
+windbg -v -d -k
+```
+
+Once started, WinDbg will wait for an incoming connection which is going to be initialized by the debuggee VM started in the next section.
+
 #### Invoke the Debuggee VM
 
 ##### Under QEMU
