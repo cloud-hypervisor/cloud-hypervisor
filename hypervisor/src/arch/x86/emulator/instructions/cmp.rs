@@ -14,23 +14,10 @@ extern crate iced_x86;
 
 use crate::arch::emulator::{EmulationError, PlatformEmulator};
 use crate::arch::x86::emulator::instructions::*;
+use crate::arch::x86::regs::*;
 use crate::arch::x86::Exception;
 
 // CMP affects OF, SF, ZF, AF, PF and CF
-const CF_SHIFT: usize = 0;
-const PF_SHIFT: usize = 2;
-const AF_SHIFT: usize = 4;
-const ZF_SHIFT: usize = 6;
-const SF_SHIFT: usize = 7;
-const OF_SHIFT: usize = 11;
-
-const CF: u64 = 1 << CF_SHIFT;
-const PF: u64 = 1 << PF_SHIFT;
-const AF: u64 = 1 << AF_SHIFT;
-const ZF: u64 = 1 << ZF_SHIFT;
-const SF: u64 = 1 << SF_SHIFT;
-const OF: u64 = 1 << OF_SHIFT;
-
 const FLAGS_MASK: u64 = CF | PF | AF | ZF | SF | OF;
 
 // TODO: Switch to inline asm when that's stable. Executing CMP (or any arthimetic instructions)
