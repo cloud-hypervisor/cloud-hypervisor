@@ -11,7 +11,7 @@ libc = "0.2.81"
 log = "0.4.11"
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
-vhost_user_backend = { path = "../vhost_user_backend" }
+vhost-user-backend = { git = "https://github.com/rust-vmm/vhost-user-backend", branch = "master" }
 vhost_rs = { git = "https://github.com/rust-vmm/vhost", branch = "master", package = "vhost", features = ["vhost-user-slave"] }
 virtio-bindings = "0.1.0"
 vm-memory = "0.4.0"

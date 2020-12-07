@@ -164,7 +164,7 @@ dependencies = [
  "serde_json",
  "virtio-bindings",
  "vm-memory",
- "vm-virtio",
+ "vm-virtio 0.1.0",
  "vmm-sys-util",
 ]
 
@@ -659,7 +659,7 @@ dependencies = [
  "serde_json",
  "virtio-bindings",
  "vm-memory",
- "vm-virtio",
+ "vm-virtio 0.1.0",
  "vmm-sys-util",
 ]
 
@@ -1410,7 +1410,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.1.0"
-source = "git+https://github.com/cloud-hypervisor/vhost?branch=ch#6fc980bf5083d67586ab91d6a965c3a593c33a78"
+source = "git+https://github.com/rust-vmm/vhost?branch=master#d257479a40b42895b9adab11befa5385bbee0698"
 dependencies = [
  "bitflags 1.2.1",
  "libc",
@@ -1418,8 +1418,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "vhost_user_backend"
+name = "vhost-user-backend"
 version = "0.1.0"
+source = "git+https://github.com/rust-vmm/vhost-user-backend?branch=master#3c97ba57a85e6d504c3513ce2037ba8505419408"
 dependencies = [
  "epoll",
  "libc",
@@ -1427,7 +1428,7 @@ dependencies = [
  "vhost",
  "virtio-bindings",
  "vm-memory",
- "vm-virtio",
+ "vm-virtio 0.1.0 (git+https://github.com/rust-vmm/vm-virtio)",
  "vmm-sys-util",
 ]
 
@@ -1443,7 +1444,7 @@ dependencies = [
  "option_parser",
  "qcow",
  "vhost",
- "vhost_user_backend",
+ "vhost-user-backend",
  "virtio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -1460,7 +1461,7 @@ dependencies = [
  "net_util",
  "option_parser",
  "vhost",
- "vhost_user_backend",
+ "vhost-user-backend",
  "virtio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -1499,7 +1500,7 @@ dependencies = [
  "vm-device",
  "vm-memory",
  "vm-migration",
- "vm-virtio",
+ "vm-virtio 0.1.0",
  "vmm-sys-util",
 ]
 
@@ -1560,6 +1561,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vm-virtio"
+version = "0.1.0"
+source = "git+https://github.com/rust-vmm/vm-virtio#ddc45056d5af2d26b5786ac17a5ee0706f03d53c"
+dependencies = [
+ "byteorder",
+ "libc",
+ "log 0.4.11",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vmm"
 version = "0.1.0"
 dependencies = [
@@ -1597,7 +1610,7 @@ dependencies = [
  "vm-device",
  "vm-memory",
  "vm-migration",
- "vm-virtio",
+ "vm-virtio 0.1.0",
  "vmm-sys-util",
 ]
 

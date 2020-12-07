@@ -32,10 +32,6 @@ vm-memory = "0.4.0"
 [build-dependencies]
 clap = { version = "2.33.3", features = ["wrap_help"] }
 
-# List of patched crates
-[patch.'https://github.com/rust-vmm/vhost']
-vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "ch", package = "vhost", features = ["vhost-user-master", "vhost-user-slave"] }
-
 [dev-dependencies]
 ssh2 = "0.9.0"
 dirs = "3.0.1"
@@ -74,7 +70,6 @@ members = [
     "option_parser",
     "pci",
     "qcow",
-    "vhost_user_backend",
     "vhost_user_block",
     "vhost_user_net",
     "virtio-devices",
