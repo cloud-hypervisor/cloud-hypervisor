@@ -95,7 +95,7 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom";
 
-    const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=ttyS0 console=hvc0 quiet rw";
+    const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=hvc0 quiet rw";
 
     const PIPE_SIZE: i32 = 32 << 20;
 
@@ -3295,12 +3295,7 @@ mod tests {
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .default_disks()
                 .default_net()
-                .args(&[
-                    "--cmdline",
-                    DIRECT_KERNEL_BOOT_CMDLINE
-                        .replace("console=ttyS0 ", "")
-                        .as_str(),
-                ])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .args(&["--serial", "off"])
                 .capture_output()
                 .spawn()
@@ -3389,7 +3384,12 @@ mod tests {
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .args(&[
+                    "--cmdline",
+                    DIRECT_KERNEL_BOOT_CMDLINE
+                        .replace("console=hvc0 ", "console=ttyS0")
+                        .as_str(),
+                ])
                 .default_disks()
                 .default_net()
                 .args(&["--serial", "tty"])
