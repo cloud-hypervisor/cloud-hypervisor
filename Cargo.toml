@@ -48,6 +48,8 @@ net_util = { path = "net_util" }
 
 [features]
 default = ["acpi", "cmos", "io_uring", "kvm"]
+# Common features for all hypervisors
+common = ["acpi", "cmos", "fwdebug", "io_uring"]
 acpi = ["vmm/acpi"]
 cmos = ["vmm/cmos"]
 fwdebug = ["vmm/fwdebug"]

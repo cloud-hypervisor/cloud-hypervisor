@@ -18,19 +18,28 @@ jobs:
       - name: Install Rust toolchain (${{ matrix.rust }})
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: ${{ matrix.rust }}
-            target: ${{ matrix.target }}
-            override: true
-            components: rustfmt, clippy
-      
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          override: true
+          components: rustfmt, clippy
+
       - name: Formatting (rustfmt)
         run: cargo fmt -- --check
 
-      - name: Clippy (all features)
-        run: cargo clippy --all --all-targets --all-features --tests -- -D warnings
-      
+      - name: Clippy (all features,kvm)
+        run: cargo clippy --all --all-targets --no-default-features --tests --features "common,kvm" -- -D warnings
+
+      - name: Clippy (all features,mshv)
+        run: cargo clippy --all --all-targets --no-default-features --tests --features "common,mshv" -- -D warnings
+
       - name: Clippy (acpi,kvm)
         run: cargo clippy --all --all-targets --no-default-features --tests --features "acpi,kvm" -- -D warnings
-      
+
       - name: Clippy (kvm)
         run: cargo clippy --all --all-targets --no-default-features --tests --features "kvm" -- -D warnings
+
+      - name: Clippy (acpi,mshv)
+        run: cargo clippy --all --all-targets --no-default-features --tests --features "acpi,mshv" -- -D warnings
+
+      - name: Clippy (mshv)
+        run: cargo clippy --all --all-targets --no-default-features --tests --features "mshv" -- -D warnings
