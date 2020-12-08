@@ -9,7 +9,7 @@ default = []
 
 [dependencies]
 epoll = ">=4.0.1"
-libc = "0.2.80"
+libc = "0.2.81"
 log = "0.4.11"
 virtio-bindings = "0.1.0"
 vm-memory = "0.4.0"

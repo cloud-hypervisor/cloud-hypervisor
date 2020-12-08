@@ -10,7 +10,7 @@ io_uring = []
 
 [dependencies]
 io-uring = ">=0.4.0"
-libc = "0.2.80"
+libc = "0.2.81"
 log = "0.4.11"
 serde = ">=1.0.27"
 serde_derive = ">=1.0.27"
