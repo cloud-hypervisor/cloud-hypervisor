@@ -1250,7 +1250,11 @@ mod tests {
                 ),
             ])
             .args(&["--memory", "size=512M"])
-            .args(&["--kernel", guest.fw_path.as_str()])
+            .args(&[
+                "--kernel",
+                direct_kernel_boot_path().unwrap().to_str().unwrap(),
+            ])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .capture_output()
@@ -1729,9 +1733,9 @@ mod tests {
             .args(&["--cpus", "boot=1"])
             .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
             .args(&["--kernel", kernel_path.to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(&["--api-socket", &api_socket]);
 
         let fs_params = format!(
@@ -2324,13 +2328,14 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .default_raw_disks()
                 .default_net();
-
-            #[cfg(target_arch = "aarch64")]
-            cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
 
             let mut child = cmd.spawn().unwrap();
 
@@ -2394,7 +2399,11 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", &format!("max_phys_bits={}", max_phys_bits)])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
                 .capture_output()
@@ -2427,16 +2436,16 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=48"])
                 .args(&["--memory", "size=5120M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
                 .capture_output()
                 .default_disks()
                 .default_net();
-
-            // Now AArch64 can only boot from direct kernel, command-line is needed.
-            #[cfg(target_arch = "aarch64")]
-            cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
 
             let mut child = cmd.spawn().unwrap();
 
@@ -2459,14 +2468,14 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=128G"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .default_disks()
                 .default_net();
-
-            // Now AArch64 can only boot from direct kernel, command-line is needed.
-            #[cfg(target_arch = "aarch64")]
-            cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
 
             let mut child = cmd.spawn().unwrap();
 
@@ -2654,13 +2663,14 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .default_disks()
                 .default_net();
-
-            #[cfg(target_arch = "aarch64")]
-            cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
 
             let mut child = cmd.spawn().unwrap();
 
@@ -2703,9 +2713,9 @@ mod tests {
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -2757,9 +2767,9 @@ mod tests {
                     .args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", kernel_path.to_str().unwrap()])
+                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .default_disks()
                     .default_net()
-                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .args(&["--seccomp", "false"])
                     .capture_output()
                     .spawn()
@@ -2795,9 +2805,9 @@ mod tests {
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -2841,9 +2851,9 @@ mod tests {
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -3045,7 +3055,11 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
                 .capture_output()
@@ -3293,9 +3307,9 @@ mod tests {
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .args(&["--serial", "off"])
                 .capture_output()
                 .spawn()
@@ -3329,16 +3343,21 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&[
+                    "--cmdline",
+                    DIRECT_KERNEL_BOOT_CMDLINE
+                        .replace("console=hvc0 ", "console=ttyS0")
+                        .as_str(),
+                ])
                 .default_disks()
                 .default_net()
                 .args(&["--serial", "null"])
                 .args(&["--console", "off"])
                 .capture_output();
-
-            // Now AArch64 can only boot from direct kernel, command-line is needed.
-            #[cfg(target_arch = "aarch64")]
-            cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
 
             let mut child = cmd.spawn().unwrap();
 
@@ -3437,7 +3456,16 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&[
+                    "--cmdline",
+                    DIRECT_KERNEL_BOOT_CMDLINE
+                        .replace("console=hvc0 ", "console=ttyS0")
+                        .as_str(),
+                ])
                 .default_disks()
                 .default_net()
                 .args(&[
@@ -3543,7 +3571,11 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
                 .args(&[
@@ -3835,12 +3867,12 @@ mod tests {
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .default_disks()
-                .default_net()
                 .args(&[
                     "--cmdline",
                     format!("{} acpi=off", DIRECT_KERNEL_BOOT_CMDLINE).as_str(),
                 ])
+                .default_disks()
+                .default_net()
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -3875,13 +3907,14 @@ mod tests {
                 let mut cmd = GuestCommand::new(&guest);
                 cmd.args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
-                    .args(&["--kernel", guest.fw_path.as_str()])
+                    .args(&[
+                        "--kernel",
+                        direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                    ])
+                    .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .default_raw_disks()
                     .default_net()
                     .capture_output();
-
-                #[cfg(target_arch = "aarch64")]
-                cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
 
                 let mut child = cmd.spawn().unwrap();
 
@@ -3945,9 +3978,9 @@ mod tests {
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -4155,6 +4188,7 @@ mod tests {
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .args(&[
                     "--disk",
                     format!(
@@ -4169,7 +4203,6 @@ mod tests {
                     .as_str(),
                 ])
                 .args(&["--net", guest.default_net_string_w_iommu().as_str()])
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -4233,7 +4266,11 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .args(&[
                     "--net",
@@ -4701,8 +4738,8 @@ mod tests {
                     format!("size={}K", guest_memory_size_kb).as_str(),
                 ])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .default_disks()
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .default_disks()
                 .capture_output()
                 .spawn()
                 .unwrap();
@@ -5373,14 +5410,15 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .args(&["--net", guest.default_net_string().as_str()])
                 .args(&["--api-socket", &api_socket])
                 .capture_output();
-
-            #[cfg(target_arch = "aarch64")]
-            cmd.args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
 
             let mut child = cmd.spawn().unwrap();
 
@@ -5775,9 +5813,9 @@ mod tests {
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .args(&["--sgx-epc", "size=64M"])
                 .capture_output()
                 .spawn()
