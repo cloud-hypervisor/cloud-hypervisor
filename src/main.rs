@@ -25,7 +25,14 @@ use vmm_sys_util::eventfd::EventFd;
 enum Error {
     #[error("Failed to create API EventFd: {0}")]
     CreateAPIEventFd(#[source] std::io::Error),
-    #[error("Failed to open hypervisor interface (is /dev/kvm available?): {0}")]
+    #[cfg_attr(
+        feature = "kvm",
+        error("Failed to open hypervisor interface (is /dev/kvm available?): {0}")
+    )]
+    #[cfg_attr(
+        feature = "mshv",
+        error("Failed to open hypervisor interface (is /dev/mshv available?): {0}")
+    )]
     CreateHypervisor(#[source] hypervisor::HypervisorError),
     #[error("Failed to start the VMM thread: {0}")]
     StartVMMThread(#[source] vmm::Error),
