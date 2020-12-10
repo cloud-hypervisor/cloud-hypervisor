@@ -8,11 +8,10 @@
 //
 //
 
-use vm_memory::GuestAddress;
-
 use crate::arch::x86::{msr_index, SegmentRegisterOps, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde_derive::{Deserialize, Serialize};
+use vm_memory::GuestAddress;
 
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
@@ -94,25 +93,6 @@ impl SegmentRegisterOps for SegmentRegister {
 }
 
 pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
-
-macro_rules! msr {
-    ($msr:expr) => {
-        MsrEntry {
-            index: $msr,
-            data: 0x0,
-            ..Default::default()
-        }
-    };
-}
-macro_rules! msr_data {
-    ($msr:expr, $data:expr) => {
-        MsrEntry {
-            index: $msr,
-            data: $data,
-            ..Default::default()
-        }
-    };
-}
 
 pub fn boot_msr_entries() -> MsrEntries {
     MsrEntries::from_entries(&[

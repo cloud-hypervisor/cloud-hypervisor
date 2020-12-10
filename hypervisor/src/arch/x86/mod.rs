@@ -122,3 +122,23 @@ pub fn segment_type_ro(t: u8) -> bool {
 pub fn segment_type_expand_down(t: u8) -> bool {
     !segment_type_code(t) && (t & EXPAND_DOWN_SEGMENT_TYPE != 0)
 }
+#[macro_export]
+macro_rules! msr {
+    ($msr:expr) => {
+        MsrEntry {
+            index: $msr,
+            data: 0x0,
+            ..Default::default()
+        }
+    };
+}
+#[macro_export]
+macro_rules! msr_data {
+    ($msr:expr, $data:expr) => {
+        MsrEntry {
+            index: $msr,
+            data: $data,
+            ..Default::default()
+        }
+    };
+}
