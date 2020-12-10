@@ -322,17 +322,52 @@ impl cpu::Vcpu for MshvVcpu {
                 hv_message_type_HVMSG_X64_IO_PORT_INTERCEPT => {
                     let info = x.to_ioport_info().unwrap();
                     let access_info = info.access_info;
+                    let len = unsafe { access_info.__bindgen_anon_1.access_size() } as usize;
+                    let is_write = info.header.intercept_access_type == 1;
+                    let port = info.port_number;
+                    let mut data: [u8; 4] = [0; 4];
+                    let mut ret_rax = info.rax;
+
+                    /*
+                     * XXX: Ignore QEMU fw_cfg (0x5xx) and debug console (0x402) ports.
+                     *
+                     * Cloud Hypervisor doesn't support fw_cfg at the moment. It does support 0x402
+                     * under the "fwdebug" feature flag. But that feature is not enabled by default
+                     * and is considered legacy.
+                     *
+                     * OVMF unconditionally pokes these IO ports with string IO.
+                     *
+                     * Instead of trying to implement string IO support now which does not do much
+                     * now, skip those ports explicitly to avoid panicking.
+                     *
+                     * Proper string IO support can be added once we gain the ability to translate
+                     * guest virtual addresses to guest physical addresses on MSHV.
+                     */
+                    match port {
+                        0x402 | 0x510 | 0x511 | 0x514 => {
+                            let insn_len = info.header.instruction_length() as u64;
+
+                            /* Advance RIP and update RAX */
+                            let arr_reg_name_value = [
+                                (
+                                    hv_register_name::HV_X64_REGISTER_RIP,
+                                    info.header.rip + insn_len,
+                                ),
+                                (hv_register_name::HV_X64_REGISTER_RAX, ret_rax),
+                            ];
+                            set_registers_64!(self.fd, arr_reg_name_value)
+                                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                            return Ok(cpu::VmExit::Ignore);
+                        }
+                        _ => {}
+                    }
+
                     if unsafe { access_info.__bindgen_anon_1.string_op() } == 1 {
                         panic!("String IN/OUT not supported");
                     }
                     if unsafe { access_info.__bindgen_anon_1.rep_prefix() } == 1 {
                         panic!("Rep IN/OUT not supported");
                     }
-                    let len = unsafe { access_info.__bindgen_anon_1.access_size() } as usize;
-                    let is_write = info.header.intercept_access_type == 1;
-                    let port = info.port_number;
-                    let mut data: [u8; 4] = [0; 4];
-                    let mut ret_rax = info.rax;
 
                     if is_write {
                         let data = (info.rax as u32).to_le_bytes();
