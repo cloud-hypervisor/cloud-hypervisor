@@ -1,3 +1,9 @@
+- [v0.12.0](#v0120)
+    - [ARM64 enhancements](#arm64-enhancements)
+    - [Removal of `vhost-user-net` and `vhost-user-block` self spawning](#removal-of-vhost-user-net-and-vhost-user-block-self-spawning)
+    - [Migration of `vhost-user-fs` backend](#migration-of-vhost-user-fs-backend)
+    - [Enhanced "info" API](#enhanced-info-api)
+    - [Contributors](#contributors)
 - [v0.11.0](#v0110)
     - [`io_uring` support by default for `virtio-block`](#io_uring-support-by-default-for-virtio-block)
     - [Windows Guest Support](#windows-guest-support)
@@ -10,14 +16,14 @@
     - [New `--balloon` Parameter Added](#new---balloon-parameter-added)
     - [Experimental `virtio-watchdog` Support](#experimental-virtio-watchdog-support)
     - [Notable Bug Fixes](#notable-bug-fixes)
-    - [Contributors](#contributors)
+    - [Contributors](#contributors-1)
 - [v0.10.0](#v0100)
     - [`virtio-block` Support for Multiple Descriptors](#virtio-block-support-for-multiple-descriptors)
     - [Memory Zones](#memory-zones)
     - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements)
     - [Preliminary KVM HyperV Emulation Control](#preliminary-kvm-hyperv-emulation-control)
     - [Notable Bug Fixes](#notable-bug-fixes-1)
-    - [Contributors](#contributors-1)
+    - [Contributors](#contributors-2)
 - [v0.9.0](#v090)
     - [`io_uring` Based Block Device Support](#io_uring-based-block-device-support)
     - [Block and Network Device Statistics](#block-and-network-device-statistics)
@@ -31,7 +37,7 @@
     - [Intel SGX Support](#intel-sgx-support)
     - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements-1)
     - [Notable Bug Fixes](#notable-bug-fixes-2)
-    - [Contributors](#contributors-2)
+    - [Contributors](#contributors-3)
 - [v0.8.0](#v080)
     - [Experimental Snapshot and Restore Support](#experimental-snapshot-and-restore-support)
     - [Experimental ARM64 Support](#experimental-arm64-support)
@@ -40,7 +46,7 @@
     - [`vhost_user_fs` Improvements](#vhost_user_fs-improvements)
     - [Notable Bug Fixes](#notable-bug-fixes-3)
     - [Command Line and API Changes](#command-line-and-api-changes)
-    - [Contributors](#contributors-3)
+    - [Contributors](#contributors-4)
 - [v0.7.0](#v070)
     - [Block, Network, Persistent Memory (PMEM), VirtioFS and Vsock hotplug](#block-network-persistent-memory-pmem-virtiofs-and-vsock-hotplug)
     - [Alternative `libc` Support](#alternative-libc-support)
@@ -50,14 +56,14 @@
     - [`Seccomp` Sandboxing](#seccomp-sandboxing)
     - [Updated Distribution Support](#updated-distribution-support)
     - [Command Line and API Changes](#command-line-and-api-changes-1)
-    - [Contributors](#contributors-4)
+    - [Contributors](#contributors-5)
 - [v0.6.0](#v060)
     - [Directly Assigned Devices Hotplug](#directly-assigned-devices-hotplug)
     - [Shared Filesystem Improvements](#shared-filesystem-improvements)
     - [Block and Networking IO Self Offloading](#block-and-networking-io-self-offloading)
     - [Command Line Interface](#command-line-interface)
     - [PVH Boot](#pvh-boot)
-    - [Contributors](#contributors-5)
+    - [Contributors](#contributors-6)
 - [v0.5.1](#v051)
 - [v0.5.0](#v050)
     - [Virtual Machine Dynamic Resizing](#virtual-machine-dynamic-resizing)
@@ -65,7 +71,7 @@
     - [New Interrupt Management Framework](#new-interrupt-management-framework)
     - [Development Tools](#development-tools)
     - [Kata Containers Integration](#kata-containers-integration)
-    - [Contributors](#contributors-6)
+    - [Contributors](#contributors-7)
 - [v0.4.0](#v040)
     - [Dynamic virtual CPUs addition](#dynamic-virtual-cpus-addition)
     - [Programmatic firmware tables generation](#programmatic-firmware-tables-generation)
@@ -74,7 +80,7 @@
     - [Userspace IOAPIC by default](#userspace-ioapic-by-default)
     - [PCI BAR reprogramming](#pci-bar-reprogramming)
     - [New `cloud-hypervisor` organization](#new-cloud-hypervisor-organization)
-    - [Contributors](#contributors-7)
+    - [Contributors](#contributors-8)
 - [v0.3.0](#v030)
     - [Block device offloading](#block-device-offloading)
     - [Network device backend](#network-device-backend)
@@ -100,6 +106,47 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v0.12.0
+
+This release has been tracked through the [0.12.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/15).
+
+Highlights for `cloud-hypervisor` version 0.12.0 include:
+
+### ARM64 enhancements
+
+The use of `--watchdog` is now fully supported as is the ability to reboot the
+VM from within the guest when running Cloud Hypervisor on an ARM64 system.
+
+### Removal of `vhost-user-net` and `vhost-user-block` self spawning
+
+In order to use `vhost-user-net` or `vhost-user-block` backends the user is now
+responsible for starting the backend and providing the socket for the VMM to
+use. This functionality was deprecated in the last release and how now been
+removed.
+
+### Migration of `vhost-user-fs` backend
+
+The `vhost-user-fs` backend is no longer included in Cloud Hypervisor and it is
+instead hosted in [it's own
+repository](https://gitlab.com/virtio-fs/virtiofsd-rs)
+
+### Enhanced "info" API
+
+The `vm.info` HTTP API endpoint has been extended to include the details of the
+devices used by the VM including any VFIO devices used.
+
+### Contributors
+
+Many thanks to everyone who has contributed to our 0.12.0 release:
+
+* Anatol Belski <anbelski@linux.microsoft.com>
+* Julio Montes <julio.montes@intel.com>
+* Michael Zhao <michael.zhao@arm.com>
+* Muminul Islam <muislam@microsoft.com>
+* Rob Bradford <robert.bradford@intel.com>
+* Samuel Ortiz <sameo@linux.intel.com>
+* Wei Liu <liuwe@microsoft.com>
 
 # v0.11.0
 
