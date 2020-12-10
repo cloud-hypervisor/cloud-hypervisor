@@ -864,10 +864,20 @@ mod tests {
                 )
                 .expect("Cannot add 'tcp_listener' event to epoll");
                 let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 1];
-                let num_events = epoll::wait(epoll_fd, timeout * 1000 as i32, &mut events[..])
-                    .map_err(Error::EpollWait)?;
-                if num_events == 0 {
-                    return Err(Error::EpollWaitTimeout);
+                loop {
+                    let num_events =
+                        match epoll::wait(epoll_fd, timeout * 1000 as i32, &mut events[..]) {
+                            Ok(num_events) => Ok(num_events),
+                            Err(e) => match e.raw_os_error() {
+                                Some(libc::EAGAIN) | Some(libc::EINTR) => continue,
+                                _ => Err(e),
+                            },
+                        }
+                        .map_err(Error::EpollWait)?;
+                    if num_events == 0 {
+                        return Err(Error::EpollWaitTimeout);
+                    }
+                    break;
                 }
 
                 match listener.accept() {
