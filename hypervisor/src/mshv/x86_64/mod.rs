@@ -42,14 +42,6 @@ pub struct IrqRouting {}
 pub enum VcpuExit {}
 pub struct MpState {}
 
-#[derive(Eq, PartialEq, Hash, Clone, Debug, Copy)]
-pub enum IoEventAddress {
-    /// Representation of an programmable I/O address.
-    Pio(u64),
-    /// Representation of an memory mapped I/O address.
-    Mmio(u64),
-}
-
 impl SegmentRegisterOps for SegmentRegister {
     fn segment_type(&self) -> u8 {
         self.type_
