@@ -3,13 +3,7 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(unused_macros)]
-#![allow(non_upper_case_globals)]
-
-use crate::arch::emulator::{EmulationError, PlatformEmulator, PlatformError};
+use crate::arch::emulator::{PlatformEmulator, PlatformError};
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::emulator::{Emulator, EmulatorCpuState};
 use crate::cpu;
@@ -25,7 +19,6 @@ use vm::DataMatch;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 use crate::device;
-use std::convert::TryInto;
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::VcpuMshvState as CpuState;
@@ -358,16 +351,9 @@ impl SoftTLB {
         // TODO Check if we could fallback to e.g. an hypercall for doing
         // the translation for us.
     }
-
-    // FLush the TLB, all mappings are removed.
-    fn flush(&mut self) -> Result<(), PlatformError> {
-        self.addr_map.clear();
-
-        Ok(())
-    }
 }
-
 #[allow(clippy::type_complexity)]
+#[allow(dead_code)]
 /// Vcpu struct for Microsoft Hypervisor
 pub struct MshvVcpu {
     fd: VcpuFd,
@@ -512,6 +498,7 @@ impl cpu::Vcpu for MshvVcpu {
         /* We always have SynIC enabled on MSHV */
         Ok(())
     }
+    #[allow(non_upper_case_globals)]
     fn run(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         // Safe because this is just only done during initialization.
         // TODO don't zero it everytime we enter this function.
@@ -646,14 +633,14 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// X86 specific call to setup the CPUID registers.
     ///
-    fn set_cpuid2(&self, cpuid: &CpuId) -> cpu::Result<()> {
+    fn set_cpuid2(&self, _cpuid: &CpuId) -> cpu::Result<()> {
         Ok(())
     }
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call to retrieve the CPUID registers.
     ///
-    fn get_cpuid2(&self, num_entries: usize) -> cpu::Result<CpuId> {
+    fn get_cpuid2(&self, _num_entries: usize) -> cpu::Result<CpuId> {
         Ok(self.cpuid.clone())
     }
     #[cfg(target_arch = "x86_64")]
@@ -846,12 +833,13 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
         self.tlb.translate(gva)
     }
 
-    fn fetch(&self, ip: u64, instruction_bytes: &mut [u8]) -> Result<(), PlatformError> {
+    fn fetch(&self, _ip: u64, _instruction_bytes: &mut [u8]) -> Result<(), PlatformError> {
         Err(PlatformError::MemoryReadFailure(anyhow!("unimplemented")))
     }
 }
 
 #[allow(clippy::type_complexity)]
+#[allow(dead_code)]
 /// Wrapper over Mshv VM ioctls.
 pub struct MshvVm {
     fd: Arc<VmFd>,
@@ -887,7 +875,7 @@ impl vm::Vm for MshvVm {
     ///
     /// Sets the address of the three-page region in the VM's address space.
     ///
-    fn set_tss_address(&self, offset: usize) -> vm::Result<()> {
+    fn set_tss_address(&self, _offset: usize) -> vm::Result<()> {
         Ok(())
     }
     ///
@@ -1003,7 +991,7 @@ impl vm::Vm for MshvVm {
         memory_size: u64,
         userspace_addr: u64,
         readonly: bool,
-        log_dirty_pages: bool,
+        _log_dirty_pages: bool,
     ) -> MemoryRegion {
         let mut flags = HV_MAP_GPA_READABLE | HV_MAP_GPA_EXECUTABLE;
         if !readonly {
@@ -1052,7 +1040,7 @@ impl vm::Vm for MshvVm {
     ///
     /// Get dirty pages bitmap (one bit per page)
     ///
-    fn get_dirty_log(&self, slot: u32, memory_size: u64) -> vm::Result<Vec<u64>> {
+    fn get_dirty_log(&self, _slot: u32, _memory_size: u64) -> vm::Result<Vec<u64>> {
         Err(vm::HypervisorVmError::GetDirtyLog(anyhow!(
             "get_dirty_log not implemented"
         )))

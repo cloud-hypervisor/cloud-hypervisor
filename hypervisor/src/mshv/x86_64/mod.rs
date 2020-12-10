@@ -8,7 +8,7 @@
 //
 //
 
-use crate::arch::x86::{msr_index, SegmentRegisterOps, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
+use crate::arch::x86::{msr_index, SegmentRegisterOps};
 use serde_derive::{Deserialize, Serialize};
 ///
 /// Export generically-named wrappers of mshv_bindings for Unix-based platforms
@@ -54,15 +54,6 @@ macro_rules! msr {
         MsrEntry {
             index: $msr,
             data: 0x0,
-            ..Default::default()
-        }
-    };
-}
-macro_rules! msr_data {
-    ($msr:expr, $data:expr) => {
-        MsrEntry {
-            index: $msr,
-            data: $data,
             ..Default::default()
         }
     };
