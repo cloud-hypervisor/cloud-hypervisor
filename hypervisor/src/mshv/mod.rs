@@ -14,7 +14,8 @@ use crate::cpu::Vcpu;
 use crate::hypervisor;
 use crate::vm::{self, VmmOps};
 pub use mshv_bindings::*;
-use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, VcpuFd, VmFd};
+pub use mshv_ioctls::IoEventAddress;
+use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
 use std::sync::Arc;
 use vm::DataMatch;
@@ -28,7 +29,6 @@ pub use x86_64::VcpuMshvState as CpuState;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
 
-// Wei: for emulating ioeventfd
 use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::sync::RwLock;
@@ -101,13 +101,11 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
         let vm_fd = Arc::new(fd);
 
-        let ioeventfds = Arc::new(RwLock::new(HashMap::new()));
         let gsi_routes = Arc::new(RwLock::new(HashMap::new()));
 
         Ok(Arc::new(MshvVm {
             fd: vm_fd,
             msrs,
-            ioeventfds,
             gsi_routes,
             hv_state: hv_state_init(),
             vmmops: None,
@@ -170,7 +168,6 @@ pub struct MshvVcpu {
     vp_index: u8,
     cpuid: CpuId,
     msrs: MsrEntries,
-    ioeventfds: Arc<RwLock<HashMap<IoEventAddress, (Option<DataMatch>, EventFd)>>>,
     gsi_routes: Arc<RwLock<HashMap<u32, MshvIrqRoutingEntry>>>,
     hv_state: Arc<RwLock<HvState>>, // Mshv State
     vmmops: Option<Arc<Box<dyn vm::VmmOps>>>,
@@ -573,19 +570,6 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
             gpa
         );
 
-        if let Some((datamatch, efd)) = self
-            .vcpu
-            .ioeventfds
-            .read()
-            .unwrap()
-            .get(&IoEventAddress::Mmio(gpa))
-        {
-            debug!("ioevent {:x} {:x?} {}", gpa, datamatch, efd.as_raw_fd());
-
-            /* TODO: use datamatch to provide the correct semantics */
-            efd.write(1).unwrap();
-        }
-
         if let Some(vmmops) = &self.vcpu.vmmops {
             vmmops
                 .mmio_write(gpa, data)
@@ -654,8 +638,6 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
 pub struct MshvVm {
     fd: Arc<VmFd>,
     msrs: MsrEntries,
-    // Emulate ioeventfd
-    ioeventfds: Arc<RwLock<HashMap<IoEventAddress, (Option<DataMatch>, EventFd)>>>,
     // GSI routing information
     gsi_routes: Arc<RwLock<HashMap<u32, MshvIrqRoutingEntry>>>,
     // Hypervisor State
@@ -743,7 +725,6 @@ impl vm::Vm for MshvVm {
             vp_index: id,
             cpuid: CpuId::new(1),
             msrs: self.msrs.clone(),
-            ioeventfds: self.ioeventfds.clone(),
             gsi_routes: self.gsi_routes.clone(),
             hv_state: self.hv_state.clone(),
             vmmops,
@@ -760,26 +741,36 @@ impl vm::Vm for MshvVm {
         addr: &IoEventAddress,
         datamatch: Option<DataMatch>,
     ) -> vm::Result<()> {
-        let dup_fd = fd.try_clone().unwrap();
-
         debug!(
             "register_ioevent fd {} addr {:x?} datamatch {:?}",
             fd.as_raw_fd(),
             addr,
             datamatch
         );
-
-        self.ioeventfds
-            .write()
-            .unwrap()
-            .insert(*addr, (datamatch, dup_fd));
-        Ok(())
+        if let Some(dm) = datamatch {
+            match dm {
+                vm::DataMatch::DataMatch32(mshv_dm32) => self
+                    .fd
+                    .register_ioevent(fd, addr, mshv_dm32)
+                    .map_err(|e| vm::HypervisorVmError::RegisterIoEvent(e.into())),
+                vm::DataMatch::DataMatch64(mshv_dm64) => self
+                    .fd
+                    .register_ioevent(fd, addr, mshv_dm64)
+                    .map_err(|e| vm::HypervisorVmError::RegisterIoEvent(e.into())),
+            }
+        } else {
+            self.fd
+                .register_ioevent(fd, addr, NoDatamatch)
+                .map_err(|e| vm::HypervisorVmError::RegisterIoEvent(e.into()))
+        }
     }
     /// Unregister an event from a certain address it has been previously registered to.
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> vm::Result<()> {
         debug!("unregister_ioevent fd {} addr {:x?}", fd.as_raw_fd(), addr);
-        self.ioeventfds.write().unwrap().remove(addr).unwrap();
-        Ok(())
+
+        self.fd
+            .unregister_ioevent(fd, addr, NoDatamatch)
+            .map_err(|e| vm::HypervisorVmError::UnregisterIoEvent(e.into()))
     }
 
     /// Creates/modifies a guest physical memory slot.
