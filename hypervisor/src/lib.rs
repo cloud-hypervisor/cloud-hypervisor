@@ -28,6 +28,10 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate thiserror;
 
+/// Architecture specific definitions
+#[macro_use]
+pub mod arch;
+
 #[cfg(feature = "kvm")]
 /// KVM implementation module
 pub mod kvm;
@@ -41,9 +45,6 @@ pub mod hypervisor;
 
 /// Vm related module
 pub mod vm;
-
-/// Architecture specific definitions
-pub mod arch;
 
 /// CPU related module
 mod cpu;

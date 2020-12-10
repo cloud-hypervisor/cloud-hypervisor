@@ -49,15 +49,6 @@ pub enum IoEventAddress {
     /// Representation of an memory mapped I/O address.
     Mmio(u64),
 }
-macro_rules! msr {
-    ($msr:expr) => {
-        MsrEntry {
-            index: $msr,
-            data: 0x0,
-            ..Default::default()
-        }
-    };
-}
 
 impl SegmentRegisterOps for SegmentRegister {
     fn segment_type(&self) -> u8 {
