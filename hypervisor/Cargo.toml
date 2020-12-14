@@ -7,7 +7,7 @@ license = "Apache-2.0 OR BSD-3-Clause"
 
 [features]
 kvm = []
-mshv = []
+mshv = ["iced-x86"]
 
 [dependencies]
 anyhow = "1.0"
@@ -33,6 +33,7 @@ features = ["elf", "bzimage"]
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
 version = "1.9.1"
+optional = true
 default-features = false
 features = ["std", "decoder", "op_code_info", "instr_info", "fast_fmt"]
 

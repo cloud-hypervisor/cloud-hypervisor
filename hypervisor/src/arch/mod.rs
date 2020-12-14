@@ -11,6 +11,7 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
+#[cfg(feature = "mshv")]
 pub mod emulator;
 
 #[cfg(target_arch = "x86_64")]

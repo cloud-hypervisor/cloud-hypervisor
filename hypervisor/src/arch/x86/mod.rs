@@ -30,6 +30,7 @@ pub mod gdt;
 )]
 pub mod msr_index;
 
+#[cfg(feature = "mshv")]
 pub mod emulator;
 
 // MTRR constants
