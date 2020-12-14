@@ -38,8 +38,14 @@ fn get_op<T: CpuStateManager>(
         }
     }
 
-    let value = match insn.op_kind(op_index) {
-        OpKind::Register => state.read_reg(insn.op_register(op_index))?,
+    let value = match insn
+        .try_op_kind(op_index)
+        .map_err(|e| PlatformError::InvalidOperand(e.into()))?
+    {
+        OpKind::Register => state.read_reg(
+            insn.try_op_register(op_index)
+                .map_err(|e| PlatformError::InvalidOperand(e.into()))?,
+        )?,
         OpKind::Memory => {
             let addr = memory_operand_address(insn, state, false)?;
             let mut memory: [u8; 8] = [0; 8];
@@ -85,8 +91,15 @@ fn set_op<T: CpuStateManager>(
         }
     }
 
-    match insn.op_kind(op_index) {
-        OpKind::Register => state.write_reg(insn.op_register(op_index), value)?,
+    match insn
+        .try_op_kind(op_index)
+        .map_err(|e| PlatformError::InvalidOperand(e.into()))?
+    {
+        OpKind::Register => state.write_reg(
+            insn.try_op_register(op_index)
+                .map_err(|e| PlatformError::InvalidOperand(e.into()))?,
+            value,
+        )?,
         OpKind::Memory => {
             let addr = memory_operand_address(insn, state, true)?;
             platform.write_memory(addr, &value.to_le_bytes()[..op_size])?;
