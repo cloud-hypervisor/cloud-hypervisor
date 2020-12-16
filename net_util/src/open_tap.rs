@@ -82,7 +82,7 @@ pub fn open_tap(
         let tap: Tap;
         if i == 0 {
             tap = match if_name {
-                Some(name) => Tap::open_named(name, num_rx_q).map_err(Error::TapOpen)?,
+                Some(name) => Tap::open_named(name, num_rx_q, None).map_err(Error::TapOpen)?,
                 None => Tap::new(num_rx_q).map_err(Error::TapOpen)?,
             };
             if let Some(ip) = ip_addr {
@@ -104,7 +104,7 @@ pub fn open_tap(
 
             ifname = String::from_utf8(tap.get_if_name()).unwrap();
         } else {
-            tap = Tap::open_named(ifname.as_str(), num_rx_q).map_err(Error::TapOpen)?;
+            tap = Tap::open_named(ifname.as_str(), num_rx_q, None).map_err(Error::TapOpen)?;
             tap.set_offload(flag).map_err(Error::TapSetOffload)?;
 
             tap.set_vnet_hdr_size(vnet_hdr_size)
