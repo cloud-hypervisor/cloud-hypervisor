@@ -83,7 +83,7 @@ fn build_terminated_if_name(if_name: &str) -> Result<Vec<u8>> {
 }
 
 impl Tap {
-    pub fn open_named(if_name: &str, num_queue_pairs: usize) -> Result<Tap> {
+    pub fn open_named(if_name: &str, num_queue_pairs: usize, flags: Option<i32>) -> Result<Tap> {
         let terminated_if_name = build_terminated_if_name(if_name)?;
 
         let fd = unsafe {
@@ -91,7 +91,7 @@ impl Tap {
             // string and verify the result.
             libc::open(
                 b"/dev/net/tun\0".as_ptr() as *const c_char,
-                libc::O_RDWR | libc::O_NONBLOCK | libc::O_CLOEXEC,
+                flags.unwrap_or(libc::O_RDWR | libc::O_NONBLOCK | libc::O_CLOEXEC),
             )
         };
         if fd < 0 {
@@ -150,7 +150,7 @@ impl Tap {
 
     /// Create a new tap interface.
     pub fn new(num_queue_pairs: usize) -> Result<Tap> {
-        Self::open_named("vmtap%d", num_queue_pairs)
+        Self::open_named("vmtap%d", num_queue_pairs, None)
     }
 
     /// Set the host-side IP address for the tap interface.
