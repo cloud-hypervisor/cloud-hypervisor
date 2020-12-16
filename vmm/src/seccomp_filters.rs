@@ -51,6 +51,7 @@ const FIOCLEX: u64 = 0x5451;
 const FIONBIO: u64 = 0x5421;
 
 // See include/uapi/linux/if_tun.h in the kernel code.
+const TUNGETIFF: u64 = 0x8004_54d2;
 const TUNSETIFF: u64 = 0x4004_54ca;
 const TUNSETOFFLOAD: u64 = 0x4004_54d0;
 const TUNSETVNETHDRSZ: u64 = 0x4004_54d8;
@@ -155,6 +156,7 @@ fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, TCGETS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TIOCGWINSZ)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TUNGETFEATURES)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, TUNGETIFF)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TUNSETIFF)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TUNSETOFFLOAD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TUNSETVNETHDRSZ)?],
