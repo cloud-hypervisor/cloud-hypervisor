@@ -5518,6 +5518,77 @@ mod tests {
 
             handle_child_output(r, &output);
         }
+
+        #[test]
+        fn test_tap_from_fd() {
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+
+            std::process::Command::new("bash")
+                .args(&["-c", "sudo ip tuntap add name chtap0 mode tap"])
+                .status()
+                .expect("Expected creating interface to work");
+
+            std::process::Command::new("bash")
+                .args(&[
+                    "-c",
+                    &format!("sudo ip addr add {}/24 dev chtap0", guest.network.host_ip),
+                ])
+                .status()
+                .expect("Expected programming interface to work");
+
+            std::process::Command::new("bash")
+                .args(&["-c", "sudo ip link set dev chtap0 up"])
+                .status()
+                .expect("Expected upping interface to work");
+
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let kernel_path = direct_kernel_boot_path().unwrap();
+
+            let tap = net_util::Tap::open_named("chtap0", 1, Some(libc::O_RDWR | libc::O_NONBLOCK))
+                .expect("Expect to be able to open tap");
+            let tap_fd = tap.as_raw_fd();
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .default_disks()
+                .args(&[
+                    "--net",
+                    &format!("fd={},mac={}", tap_fd, guest.network.guest_mac),
+                ])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot(None).unwrap();
+
+                assert_eq!(
+                    guest
+                        .ssh_command("ip -o link | wc -l")
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    2
+                );
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            std::process::Command::new("bash")
+                .args(&["-c", "sudo ip tuntap del mode tap name chtap0"])
+                .status()
+                .expect("Expected upping interface to work");
+
+            handle_child_output(r, &output);
+        }
     }
 
     mod sequential {
