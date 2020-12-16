@@ -764,6 +764,8 @@ pub struct NetConfig {
     pub vhost_socket: Option<String>,
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub fd: Option<i32>,
 }
 
 fn default_netconfig_tap() -> Option<String> {
@@ -804,13 +806,14 @@ impl Default for NetConfig {
             vhost_user: false,
             vhost_socket: None,
             id: None,
+            fd: None,
         }
     }
 }
 
 impl NetConfig {
     pub const SYNTAX: &'static str = "Network parameters \
-    \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,iommu=on|off,\
+    \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,fd=<fd>,iommu=on|off,\
     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,id=<device_id>\"";
 
@@ -828,7 +831,8 @@ impl NetConfig {
             .add("num_queues")
             .add("vhost_user")
             .add("socket")
-            .add("id");
+            .add("id")
+            .add("fd");
         parser.parse(net).map_err(Error::ParseNetwork)?;
 
         let tap = parser.get("tap");
@@ -865,6 +869,7 @@ impl NetConfig {
             .0;
         let vhost_socket = parser.get("socket");
         let id = parser.get("id");
+        let fd = parser.convert("fd").map_err(Error::ParseNetwork)?;
         let config = NetConfig {
             tap,
             ip,
@@ -877,6 +882,7 @@ impl NetConfig {
             vhost_user,
             vhost_socket,
             id,
+            fd,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -1938,6 +1944,15 @@ mod tests {
                 num_queues: 4,
                 queue_size: 1024,
                 iommu: true,
+                ..Default::default()
+            }
+        );
+
+        assert_eq!(
+            NetConfig::parse("mac=de:ad:be:ef:12:34,fd=3")?,
+            NetConfig {
+                mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
+                fd: Some(3),
                 ..Default::default()
             }
         );
