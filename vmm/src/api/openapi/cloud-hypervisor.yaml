@@ -652,6 +652,9 @@ components:
           type: string
         id:
           type: string
+        fd:
+          type: integer
+          format: int32
 
     RngConfig:
       required:
