@@ -18,13 +18,13 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
 use net_util::{
-    open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
+    open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio,
 };
 use seccomp::{SeccompAction, SeccompFilter};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::num::Wrapping;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
@@ -50,6 +50,9 @@ pub const RX_TAP_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 pub enum Error {
     /// Failed to open taps.
     OpenTap(OpenTapError),
+
+    // Using existing tap
+    TapError(TapError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -288,6 +291,26 @@ impl Net {
             guest_mac,
             iommu,
             num_queues,
+            queue_size,
+            seccomp_action,
+        )
+    }
+
+    pub fn from_tap_fd(
+        id: String,
+        fd: RawFd,
+        guest_mac: Option<MacAddr>,
+        iommu: bool,
+        queue_size: u16,
+        seccomp_action: SeccompAction,
+    ) -> Result<Self> {
+        let tap = Tap::from_tap_fd(fd).map_err(Error::TapError)?;
+        Self::new_with_tap(
+            id,
+            vec![tap],
+            guest_mac,
+            iommu,
+            2,
             queue_size,
             seccomp_action,
         )
