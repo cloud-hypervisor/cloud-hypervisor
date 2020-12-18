@@ -1054,8 +1054,9 @@ mod tests {
             dax: bool,
             cache_size: Option<u64>,
         ) -> Result<bool, Error> {
+            // SHM region is called different things depending on kernel
             let shm_region = self
-                .ssh_command("sudo grep virtio-pci-shm /proc/iomem")?
+                .ssh_command("sudo grep 'virtio[0-9]\\|virtio-pci-shm' /proc/iomem")?
                 .trim()
                 .to_string();
 
