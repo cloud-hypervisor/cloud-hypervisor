@@ -26,4 +26,4 @@ git = "https://github.com/rust-vmm/linux-loader"
 features = ["elf", "bzimage"]
 
 [dev-dependencies]
-rand = "0.7.3"
+rand = "0.8.0"
