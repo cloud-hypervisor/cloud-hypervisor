@@ -71,8 +71,6 @@ macro_rules! cmp_rm_r {
 
             state.set_flags((state.flags() & !FLAGS_MASK) | cpazso);
 
-            state.set_ip(insn.ip());
-
             Ok(())
         }
     };
@@ -95,8 +93,6 @@ macro_rules! cmp_r_rm {
 
             state.set_flags((state.flags() & !FLAGS_MASK) | cpazso);
 
-            state.set_ip(insn.ip());
-
             Ok(())
         }
     };
@@ -118,8 +114,6 @@ macro_rules! cmp_rm_imm {
             let cpazso = calc_rflags_cpazso(op0_value, op1_value, std::mem::size_of::<$bound>());
 
             state.set_flags((state.flags() & !FLAGS_MASK) | cpazso);
-
-            state.set_ip(insn.ip());
 
             Ok(())
         }
