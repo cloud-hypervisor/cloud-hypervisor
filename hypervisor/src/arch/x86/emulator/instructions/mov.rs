@@ -39,8 +39,6 @@ macro_rules! mov_rm_r {
             )
             .map_err(EmulationError::PlatformEmulationError)?;
 
-            state.set_ip(insn.ip());
-
             Ok(())
         }
     };
@@ -66,8 +64,6 @@ macro_rules! mov_rm_imm {
                 imm,
             )
             .map_err(EmulationError::PlatformEmulationError)?;
-
-            state.set_ip(insn.ip());
 
             Ok(())
         }
@@ -101,8 +97,6 @@ macro_rules! movzx {
             )
             .map_err(EmulationError::PlatformEmulationError)?;
 
-            state.set_ip(insn.ip());
-
             Ok(())
         }
     };
@@ -135,8 +129,6 @@ macro_rules! mov_r_imm {
                 imm,
             )
             .map_err(EmulationError::PlatformEmulationError)?;
-
-            state.set_ip(insn.ip());
 
             Ok(())
         }
