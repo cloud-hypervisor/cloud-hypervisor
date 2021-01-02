@@ -43,7 +43,7 @@ use vm_memory::{Bytes, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 
 const SECTOR_SHIFT: u8 = 9;
-const SECTOR_SIZE: u64 = (0x01 as u64) << SECTOR_SHIFT;
+const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 const BLK_SIZE: u32 = 512;
 // Current (2020) enterprise SSDs have a latency lower than 30us.
 // Polling for 50us should be enough to cover for the device latency
