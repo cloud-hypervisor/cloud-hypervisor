@@ -314,8 +314,10 @@ impl vm::Vm for KvmVm {
         // Create split irqchip
         // Only the local APIC is emulated in kernel, both PICs and IOAPIC
         // are not.
-        let mut cap: kvm_enable_cap = Default::default();
-        cap.cap = KVM_CAP_SPLIT_IRQCHIP;
+        let mut cap = kvm_enable_cap {
+            cap: KVM_CAP_SPLIT_IRQCHIP,
+            ..Default::default()
+        };
         cap.args[0] = NUM_IOAPIC_PINS as u64;
         self.fd
             .enable_cap(&cap)
@@ -604,8 +606,10 @@ impl cpu::Vcpu for KvmVcpu {
         // emulated as it will influence later which MSRs should be saved.
         self.hyperv_synic.store(true, Ordering::Release);
 
-        let mut cap: kvm_enable_cap = Default::default();
-        cap.cap = KVM_CAP_HYPERV_SYNIC;
+        let cap = kvm_enable_cap {
+            cap: KVM_CAP_HYPERV_SYNIC,
+            ..Default::default()
+        };
         self.fd
             .enable_cap(&cap)
             .map_err(|e| cpu::HypervisorCpuError::EnableHyperVSynIC(e.into()))
