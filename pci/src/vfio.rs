@@ -892,7 +892,7 @@ impl PciDevice for VfioPciDevice {
         // When the guest wants to write to a BAR, we trap it into
         // our local configuration space. We're not reprogramming
         // VFIO device.
-        if (reg_idx >= PCI_CONFIG_BAR0_INDEX && reg_idx < PCI_CONFIG_BAR0_INDEX + BAR_NUMS)
+        if (PCI_CONFIG_BAR0_INDEX..PCI_CONFIG_BAR0_INDEX + BAR_NUMS).contains(&reg_idx)
             || reg_idx == PCI_ROM_EXP_BAR_INDEX
         {
             // We keep our local cache updated with the BARs.
@@ -945,7 +945,7 @@ impl PciDevice for VfioPciDevice {
         // from our local configuration space. We want the guest to
         // use that and not the VFIO device BARs as it does not map
         // with the guest address space.
-        if (reg_idx >= PCI_CONFIG_BAR0_INDEX && reg_idx < PCI_CONFIG_BAR0_INDEX + BAR_NUMS)
+        if (PCI_CONFIG_BAR0_INDEX..PCI_CONFIG_BAR0_INDEX + BAR_NUMS).contains(&reg_idx)
             || reg_idx == PCI_ROM_EXP_BAR_INDEX
         {
             return self.configuration.read_reg(reg_idx);
