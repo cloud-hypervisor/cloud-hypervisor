@@ -128,7 +128,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
                     libc::PROT_NONE,
                     libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_FIXED,
                     -1,
-                    0 as libc::off_t,
+                    0,
                 )
             };
             if ret == libc::MAP_FAILED {

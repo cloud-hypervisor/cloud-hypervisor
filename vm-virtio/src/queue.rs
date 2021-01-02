@@ -1051,7 +1051,7 @@ pub mod tests {
         assert!(c.is_indirect());
 
         // create an indirect table with 4 chained descriptors
-        let mut indirect_table = Vec::with_capacity(4 as usize);
+        let mut indirect_table = Vec::with_capacity(4);
         for j in 0..4 {
             let desc = VirtqDesc::new(GuestAddress(0x1000 + (j * 16)), m);
             desc.set(0x1000, 0x1000, VIRTQ_DESC_F_NEXT, (j + 1) as u16);

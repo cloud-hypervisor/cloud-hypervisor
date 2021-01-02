@@ -699,7 +699,7 @@ impl MemoryManager {
                 },
                 #[cfg(target_arch = "x86_64")]
                 {
-                    1 << 16 as GuestUsize
+                    1 << 16
                 },
                 GuestAddress(0),
                 mmio_address_space_size,
@@ -1370,7 +1370,7 @@ impl MemoryManager {
                     prot,
                     flags,
                     file.as_raw_fd(),
-                    0 as libc::off_t,
+                    0,
                 )
             } as u64;
 

@@ -508,7 +508,7 @@ mod tests {
         // Only run the first instruction.
         assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
 
-        assert_eq!(ip + 7 as u64, vmm.cpu_state(cpu_id).unwrap().ip());
+        assert_eq!(ip + 7, vmm.cpu_state(cpu_id).unwrap().ip());
 
         let new_rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -541,7 +541,7 @@ mod tests {
         // Run the 2 first instructions.
         assert!(vmm.emulate_insn(cpu_id, &insn, Some(2)).is_ok());
 
-        assert_eq!(ip + 7 + 4 as u64, vmm.cpu_state(cpu_id).unwrap().ip());
+        assert_eq!(ip + 7 + 4, vmm.cpu_state(cpu_id).unwrap().ip());
 
         let rbx: u64 = vmm
             .cpu_state(cpu_id)

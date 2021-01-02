@@ -193,7 +193,7 @@ impl Ioapic {
     ) -> Result<Ioapic> {
         let interrupt_source_group = interrupt_manager
             .create_group(MsiIrqGroupConfig {
-                base: 0 as InterruptIndex,
+                base: 0,
                 count: NUM_IOAPIC_PINS as InterruptIndex,
             })
             .map_err(Error::CreateInterruptSourceGroup)?;
