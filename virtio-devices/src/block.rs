@@ -41,7 +41,7 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 
 const SECTOR_SHIFT: u8 = 9;
-pub const SECTOR_SIZE: u64 = (0x01 as u64) << SECTOR_SHIFT;
+pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 
 // New descriptors are pending on the virtio queue.
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;

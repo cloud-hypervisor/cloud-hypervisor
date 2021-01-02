@@ -32,7 +32,7 @@ use vm_virtio::DescriptorChain;
 use vmm_sys_util::eventfd::EventFd;
 
 const SECTOR_SHIFT: u8 = 9;
-pub const SECTOR_SIZE: u64 = (0x01 as u64) << SECTOR_SHIFT;
+pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 
 #[derive(Debug)]
 pub enum Error {
