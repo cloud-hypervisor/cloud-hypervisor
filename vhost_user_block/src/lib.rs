@@ -218,16 +218,17 @@ impl VhostUserBlkBackend {
         };
 
         let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap() as u64) / SECTOR_SIZE;
-        let mut config = VirtioBlockConfig::default();
-
-        config.capacity = nsectors;
-        config.blk_size = BLK_SIZE;
-        config.size_max = 65535;
-        config.seg_max = 128 - 2;
-        config.min_io_size = 1;
-        config.opt_io_size = 1;
-        config.num_queues = num_queues as u16;
-        config.writeback = 1;
+        let config = VirtioBlockConfig {
+            capacity: nsectors,
+            blk_size: BLK_SIZE,
+            size_max: 65535,
+            seg_max: 128 - 2,
+            min_io_size: 1,
+            opt_io_size: 1,
+            num_queues: num_queues as u16,
+            writeback: 1,
+            ..Default::default()
+        };
 
         let mut queues_per_thread = Vec::new();
         let mut threads = Vec::new();
