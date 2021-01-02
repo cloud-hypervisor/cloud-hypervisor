@@ -481,7 +481,7 @@ impl PciConfiguration {
     pub fn write_reg(&mut self, reg_idx: usize, value: u32) {
         let mut mask = self.writable_bits[reg_idx];
 
-        if reg_idx >= BAR0_REG && reg_idx < BAR0_REG + NUM_BAR_REGS {
+        if (BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) {
             // Handle very specific case where the BAR is being written with
             // all 1's to retrieve the BAR size during next BAR reading.
             if value == 0xffff_ffff {
@@ -768,7 +768,7 @@ impl PciConfiguration {
         let value = LittleEndian::read_u32(data);
 
         let mask = self.writable_bits[reg_idx];
-        if reg_idx >= BAR0_REG && reg_idx < BAR0_REG + NUM_BAR_REGS {
+        if (BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) {
             let bar_idx = reg_idx - 4;
             if (value & mask) != (self.bars[bar_idx].addr & mask) {
                 // Handle special case where the address being written is
