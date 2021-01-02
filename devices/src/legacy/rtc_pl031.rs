@@ -339,7 +339,7 @@ impl BusDevice for RTC {
         let v;
         let mut read_ok = true;
 
-        if offset < AMBA_ID_HIGH && offset >= AMBA_ID_LOW {
+        if (AMBA_ID_LOW..AMBA_ID_HIGH).contains(&offset) {
             let index = ((offset - AMBA_ID_LOW) >> 2) as usize;
             v = u32::from(PL031_ID[index]);
         } else {
