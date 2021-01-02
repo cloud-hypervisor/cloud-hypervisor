@@ -974,7 +974,7 @@ mod tests {
 
     #[test]
     fn regions_lt_4gb() {
-        let regions = arch_memory_regions(1 << 29 as GuestUsize);
+        let regions = arch_memory_regions(1 << 29);
         assert_eq!(3, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(1usize << 29, regions[0].1);
@@ -982,7 +982,7 @@ mod tests {
 
     #[test]
     fn regions_gt_4gb() {
-        let regions = arch_memory_regions((1 << 32 as GuestUsize) + 0x8000);
+        let regions = arch_memory_regions((1 << 32) + 0x8000);
         assert_eq!(4, regions.len());
         assert_eq!(GuestAddress(0), regions[0].0);
         assert_eq!(GuestAddress(1 << 32), regions[1].0);

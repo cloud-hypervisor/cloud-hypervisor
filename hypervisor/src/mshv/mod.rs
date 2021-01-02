@@ -307,7 +307,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     /// Get the supported CpuID
     ///
     fn get_cpuid(&self) -> hypervisor::Result<CpuId> {
-        Ok(CpuId::new(1 as usize))
+        Ok(CpuId::new(1))
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -601,7 +601,7 @@ impl cpu::Vcpu for MshvVcpu {
                 }
                 hv_message_type_HVMSG_X64_MSR_INTERCEPT => {
                     let info = x.to_msr_info().unwrap();
-                    if info.header.intercept_access_type == 0 as u8 {
+                    if info.header.intercept_access_type == 0 {
                         debug!("msr read: {:x}", info.msr_number);
                     } else {
                         debug!("msr write: {:x}", info.msr_number);
@@ -935,7 +935,7 @@ impl vm::Vm for MshvVm {
         let vcpu = MshvVcpu {
             fd: vcpu_fd,
             vp_index: id,
-            cpuid: CpuId::new(1 as usize),
+            cpuid: CpuId::new(1),
             msrs: self.msrs.clone(),
             ioeventfds: self.ioeventfds.clone(),
             gsi_routes: self.gsi_routes.clone(),

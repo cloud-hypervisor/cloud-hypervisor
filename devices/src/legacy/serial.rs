@@ -474,13 +474,13 @@ mod tests {
             Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
         );
 
-        serial.write(0, LCR as u64, &[LCR_DLAB_BIT as u8]);
-        serial.write(0, DLAB_LOW as u64, &[0x12 as u8]);
-        serial.write(0, DLAB_HIGH as u64, &[0x34 as u8]);
+        serial.write(0, LCR as u64, &[LCR_DLAB_BIT]);
+        serial.write(0, DLAB_LOW as u64, &[0x12]);
+        serial.write(0, DLAB_HIGH as u64, &[0x34]);
 
         let mut data = [0u8];
         serial.read(0, LCR as u64, &mut data[..]);
-        assert_eq!(data[0], LCR_DLAB_BIT as u8);
+        assert_eq!(data[0], LCR_DLAB_BIT);
         serial.read(0, DLAB_LOW as u64, &mut data[..]);
         assert_eq!(data[0], 0x12);
         serial.read(0, DLAB_HIGH as u64, &mut data[..]);
@@ -495,16 +495,16 @@ mod tests {
             Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
         );
 
-        serial.write(0, MCR as u64, &[MCR_LOOP_BIT as u8]);
+        serial.write(0, MCR as u64, &[MCR_LOOP_BIT]);
         serial.write(0, DATA as u64, &[b'a']);
         serial.write(0, DATA as u64, &[b'b']);
         serial.write(0, DATA as u64, &[b'c']);
 
         let mut data = [0u8];
         serial.read(0, MSR as u64, &mut data[..]);
-        assert_eq!(data[0], DEFAULT_MODEM_STATUS as u8);
+        assert_eq!(data[0], DEFAULT_MODEM_STATUS);
         serial.read(0, MCR as u64, &mut data[..]);
-        assert_eq!(data[0], MCR_LOOP_BIT as u8);
+        assert_eq!(data[0], MCR_LOOP_BIT);
         serial.read(0, DATA as u64, &mut data[..]);
         assert_eq!(data[0], b'a');
         serial.read(0, DATA as u64, &mut data[..]);
@@ -521,10 +521,10 @@ mod tests {
             Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
         );
 
-        serial.write(0, SCR as u64, &[0x12 as u8]);
+        serial.write(0, SCR as u64, &[0x12]);
 
         let mut data = [0u8];
         serial.read(0, SCR as u64, &mut data[..]);
-        assert_eq!(data[0], 0x12 as u8);
+        assert_eq!(data[0], 0x12);
     }
 }
