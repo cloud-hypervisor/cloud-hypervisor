@@ -65,9 +65,12 @@ impl MacAddr {
 
     // An error can only occur if the slice length is different from MAC_ADDR_LEN.
     #[inline]
-    pub fn from_bytes(src: &[u8]) -> Result<MacAddr, ()> {
+    pub fn from_bytes(src: &[u8]) -> Result<MacAddr, io::Error> {
         if src.len() != MAC_ADDR_LEN {
-            return Err(());
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("invalid length of slice: {} vs {}", src.len(), MAC_ADDR_LEN),
+            ));
         }
         Ok(MacAddr::from_bytes_unchecked(src))
     }
