@@ -31,7 +31,7 @@ pub enum Error {
     NetUtil(NetUtilError),
     InvalidIfname,
     /// Error parsing MAC data
-    MacParsing(()),
+    MacParsing(IoError),
 }
 
 pub type Result<T> = ::std::result::Result<T, Error>;
