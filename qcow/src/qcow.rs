@@ -409,7 +409,7 @@ impl QcowFile {
         }
 
         let cluster_bits: u32 = header.cluster_bits;
-        if cluster_bits < MIN_CLUSTER_BITS || cluster_bits > MAX_CLUSTER_BITS {
+        if !(MIN_CLUSTER_BITS..=MAX_CLUSTER_BITS).contains(&cluster_bits) {
             return Err(Error::InvalidClusterSize);
         }
         let cluster_size = 0x01u64 << cluster_bits;
