@@ -170,14 +170,16 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<u64> {
 
     {
         handle += 1;
-        let mut smbios_biosinfo = SmbiosBiosInfo::default();
-        smbios_biosinfo.typ = BIOS_INFORMATION;
-        smbios_biosinfo.length = mem::size_of::<SmbiosBiosInfo>() as u8;
-        smbios_biosinfo.handle = handle;
-        smbios_biosinfo.vendor = 1; // First string written in this section
-        smbios_biosinfo.version = 2; // Second string written in this section
-        smbios_biosinfo.characteristics = PCI_SUPPORTED;
-        smbios_biosinfo.characteristics_ext2 = IS_VIRTUAL_MACHINE;
+        let smbios_biosinfo = SmbiosBiosInfo {
+            typ: BIOS_INFORMATION,
+            length: mem::size_of::<SmbiosBiosInfo>() as u8,
+            handle,
+            vendor: 1,  // First string written in this section
+            version: 2, // Second string written in this section
+            characteristics: PCI_SUPPORTED,
+            characteristics_ext2: IS_VIRTUAL_MACHINE,
+            ..Default::default()
+        };
         curptr = write_and_incr(mem, smbios_biosinfo, curptr)?;
         curptr = write_string(mem, "cloud-hypervisor", curptr)?;
         curptr = write_string(mem, "0", curptr)?;
@@ -186,12 +188,14 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<u64> {
 
     {
         handle += 1;
-        let mut smbios_sysinfo = SmbiosSysInfo::default();
-        smbios_sysinfo.typ = SYSTEM_INFORMATION;
-        smbios_sysinfo.length = mem::size_of::<SmbiosSysInfo>() as u8;
-        smbios_sysinfo.handle = handle;
-        smbios_sysinfo.manufacturer = 1; // First string written in this section
-        smbios_sysinfo.product_name = 2; // Second string written in this section
+        let smbios_sysinfo = SmbiosSysInfo {
+            typ: SYSTEM_INFORMATION,
+            length: mem::size_of::<SmbiosSysInfo>() as u8,
+            handle,
+            manufacturer: 1, // First string written in this section
+            product_name: 2, // Second string written in this section
+            ..Default::default()
+        };
         curptr = write_and_incr(mem, smbios_sysinfo, curptr)?;
         curptr = write_string(mem, "Cloud Hypervisor", curptr)?;
         curptr = write_string(mem, "cloud-hypervisor", curptr)?;
@@ -200,25 +204,29 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<u64> {
 
     {
         handle += 1;
-        let mut smbios_sysinfo = SmbiosSysInfo::default();
-        smbios_sysinfo.typ = END_OF_TABLE;
-        smbios_sysinfo.length = mem::size_of::<SmbiosSysInfo>() as u8;
-        smbios_sysinfo.handle = handle;
+        let smbios_sysinfo = SmbiosSysInfo {
+            typ: END_OF_TABLE,
+            length: mem::size_of::<SmbiosSysInfo>() as u8,
+            handle,
+            ..Default::default()
+        };
         curptr = write_and_incr(mem, smbios_sysinfo, curptr)?;
         curptr = write_and_incr(mem, 0 as u8, curptr)?;
     }
 
     {
-        let mut smbios_ep = Smbios30Entrypoint::default();
-        smbios_ep.signature = *SM3_MAGIC_IDENT;
-        smbios_ep.length = mem::size_of::<Smbios30Entrypoint>() as u8;
-        // SMBIOS rev 3.2.0
-        smbios_ep.majorver = 0x03;
-        smbios_ep.minorver = 0x02;
-        smbios_ep.docrev = 0x00;
-        smbios_ep.revision = 0x01; // SMBIOS 3.0
-        smbios_ep.max_size = curptr.unchecked_offset_from(physptr) as u32;
-        smbios_ep.physptr = physptr.0;
+        let mut smbios_ep = Smbios30Entrypoint {
+            signature: *SM3_MAGIC_IDENT,
+            length: mem::size_of::<Smbios30Entrypoint>() as u8,
+            // SMBIOS rev 3.2.0
+            majorver: 0x03,
+            minorver: 0x02,
+            docrev: 0x00,
+            revision: 0x01, // SMBIOS 3.0
+            max_size: curptr.unchecked_offset_from(physptr) as u32,
+            physptr: physptr.0,
+            ..Default::default()
+        };
         smbios_ep.checksum = compute_checksum(&smbios_ep);
         mem.write_obj(smbios_ep, GuestAddress(SMBIOS_START))
             .map_err(|_| Error::WriteSmbiosEp)?;
