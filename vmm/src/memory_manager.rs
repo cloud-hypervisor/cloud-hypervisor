@@ -694,9 +694,13 @@ impl MemoryManager {
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
                 #[cfg(target_arch = "x86_64")]
-                GuestAddress(0),
+                {
+                    GuestAddress(0)
+                },
                 #[cfg(target_arch = "x86_64")]
-                (1 << 16 as GuestUsize),
+                {
+                    1 << 16 as GuestUsize
+                },
                 GuestAddress(0),
                 mmio_address_space_size,
                 layout::MEM_32BIT_DEVICES_START,
