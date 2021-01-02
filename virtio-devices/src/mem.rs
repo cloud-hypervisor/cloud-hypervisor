@@ -489,12 +489,14 @@ impl MemEpollHandler {
     fn virtio_mem_send_response(
         mem: &GuestMemoryMmap,
         resp_type: u16,
-        resp_state: u16,
+        state: u16,
         status_addr: GuestAddress,
     ) -> u32 {
-        let mut resp = VirtioMemResp::default();
-        resp.resp_type = resp_type;
-        resp.state.state = resp_state;
+        let resp = VirtioMemResp {
+            resp_type,
+            state: VirtioMemRespState { state },
+            ..Default::default()
+        };
         match mem.write_obj(resp, status_addr) {
             Ok(_) => size_of::<VirtioMemResp>() as u32,
             Err(e) => {
