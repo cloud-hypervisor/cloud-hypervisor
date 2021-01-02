@@ -321,8 +321,10 @@ impl Balloon {
     pub fn new(id: String, size: u64, seccomp_action: SeccompAction) -> io::Result<Self> {
         let avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
-        let mut config = VirtioBalloonConfig::default();
-        config.num_pages = (size >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
+        let config = VirtioBalloonConfig {
+            num_pages: (size >> VIRTIO_BALLOON_PFN_SHIFT) as u32,
+            ..Default::default()
+        };
 
         Ok(Balloon {
             common: VirtioCommon {
