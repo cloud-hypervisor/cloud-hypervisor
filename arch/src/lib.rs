@@ -162,6 +162,6 @@ impl DeviceInfoForFDT for MMIODeviceInfo {
         self.irq
     }
     fn length(&self) -> u64 {
-        4096 as u64
+        4096
     }
 }
