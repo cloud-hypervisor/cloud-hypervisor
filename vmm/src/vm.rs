@@ -51,7 +51,11 @@ use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 use linux_loader::loader::KernelLoader;
 use seccomp::{SeccompAction, SeccompFilter};
-use signal_hook::{iterator::backend::Handle, iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
+use signal_hook::{
+    consts::{SIGINT, SIGTERM, SIGWINCH},
+    iterator::backend::Handle,
+    iterator::Signals,
+};
 use std::cmp;
 use std::collections::{BTreeMap, HashMap};
 use std::convert::TryInto;
@@ -1433,7 +1437,7 @@ impl Vm {
     }
 
     fn os_signal_handler(
-        signals: Signals,
+        mut signals: Signals,
         console_input_clone: Arc<Console>,
         on_tty: bool,
         exit_evt: EventFd,
