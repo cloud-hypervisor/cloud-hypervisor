@@ -1234,12 +1234,13 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     #[cfg(target_arch = "aarch64")]
     fn state(&self) -> cpu::Result<CpuState> {
-        let mut state = CpuState::default();
-        // Get this vCPUs multiprocessing state.
-        state.mp_state = self.get_mp_state()?;
+        let mut state = CpuState {
+            mp_state: self.get_mp_state()?,
+            mpidr: self.read_mpidr()?,
+            ..Default::default()
+        };
         self.core_registers(&mut state.core_regs)?;
         self.system_registers(&mut state.sys_regs)?;
-        state.mpidr = self.read_mpidr()?;
 
         Ok(state)
     }
