@@ -409,6 +409,7 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_accept4),
         allow_syscall(libc::SYS_brk),
+        allow_syscall(libc::SYS_clock_gettime),
         allow_syscall(libc::SYS_clock_nanosleep),
         allow_syscall(libc::SYS_clone),
         allow_syscall(libc::SYS_close),
