@@ -157,7 +157,7 @@ fn write_string(
     for c in val.as_bytes().iter() {
         curptr = write_and_incr(mem, *c, curptr)?;
     }
-    curptr = write_and_incr(mem, 0 as u8, curptr)?;
+    curptr = write_and_incr(mem, 0u8, curptr)?;
     Ok(curptr)
 }
 
@@ -183,7 +183,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<u64> {
         curptr = write_and_incr(mem, smbios_biosinfo, curptr)?;
         curptr = write_string(mem, "cloud-hypervisor", curptr)?;
         curptr = write_string(mem, "0", curptr)?;
-        curptr = write_and_incr(mem, 0 as u8, curptr)?;
+        curptr = write_and_incr(mem, 0u8, curptr)?;
     }
 
     {
@@ -199,7 +199,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<u64> {
         curptr = write_and_incr(mem, smbios_sysinfo, curptr)?;
         curptr = write_string(mem, "Cloud Hypervisor", curptr)?;
         curptr = write_string(mem, "cloud-hypervisor", curptr)?;
-        curptr = write_and_incr(mem, 0 as u8, curptr)?;
+        curptr = write_and_incr(mem, 0u8, curptr)?;
     }
 
     {
@@ -211,7 +211,7 @@ pub fn setup_smbios(mem: &GuestMemoryMmap) -> Result<u64> {
             ..Default::default()
         };
         curptr = write_and_incr(mem, smbios_sysinfo, curptr)?;
-        curptr = write_and_incr(mem, 0 as u8, curptr)?;
+        curptr = write_and_incr(mem, 0u8, curptr)?;
     }
 
     {
