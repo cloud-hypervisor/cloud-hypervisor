@@ -595,9 +595,20 @@ mod tests {
                 let mut channel = sess.channel_session().map_err(Error::ChannelSession)?;
                 channel.exec(command).map_err(Error::Command)?;
 
+                loop {
+                    match channel.read_to_string(&mut s) {
+                        Ok(_) => Ok(()),
+                        Err(e) => match e.raw_os_error() {
+                            Some(libc::EAGAIN) | Some(libc::EINTR) => continue,
+                            _ => Err(e),
+                        },
+                    }
+                    .map_err(Error::ReadToString)?;
+                    break;
+                }
+
                 // Intentionally ignore these results here as their failure
                 // does not precipitate a repeat
-                let _ = channel.read_to_string(&mut s);
                 let _ = channel.close();
                 let _ = channel.wait_close();
                 Ok(())
@@ -897,9 +908,17 @@ mod tests {
                         stream
                             .set_read_timeout(Some(std::time::Duration::new(timeout as u64, 0)))
                             .map_err(Error::SetReadTimeout)?;
-                        stream
-                            .read_to_string(&mut data)
+                        loop {
+                            match stream.read_to_string(&mut data) {
+                                Ok(_) => Ok(()),
+                                Err(e) => match e.raw_os_error() {
+                                    Some(libc::EAGAIN) | Some(libc::EINTR) => continue,
+                                    _ => Err(e),
+                                },
+                            }
                             .map_err(Error::ReadToString)?;
+                            break;
+                        }
                         if data != DEFAULT_TCP_LISTENER_MESSAGE {
                             s = format!(
                                 "Expecting the guest message '{}' while receiving the message '{}'",
