@@ -707,7 +707,7 @@ impl Queue {
 
         if let Some(old_idx) = self.signalled_used {
             if let Some(used_event) = self.get_used_event(&mem) {
-                info!(
+                debug!(
                     "used_event = {:?} used_idx = {:?} old_idx = {:?}",
                     used_event, used_idx, old_idx
                 );
@@ -718,7 +718,7 @@ impl Queue {
         }
 
         self.signalled_used = Some(used_idx);
-        info!("Needs notification: {:?}", notify);
+        debug!("Needs notification: {:?}", notify);
         notify
     }
 }
