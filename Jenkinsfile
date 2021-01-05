@@ -168,14 +168,6 @@ pipeline{
 								sh "scripts/dev_cli.sh tests --integration-windows"
 							}
 						}
-						stage ('Run Windows guest integration tests for musl') {
-							options {
-								timeout(time: 1, unit: 'HOURS')
-							}
-							steps {
-								sh "scripts/dev_cli.sh tests --integration-windows --libc musl"
-							}
-						}
 					}
 				}
 			}
