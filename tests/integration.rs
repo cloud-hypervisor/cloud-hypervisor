@@ -5411,7 +5411,9 @@ mod tests {
             handle_child_output(r, &output);
         }
 
+        // Temporarily limited to x86_64 - see #2103
         #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_watchdog() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
