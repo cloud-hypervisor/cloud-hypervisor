@@ -47,7 +47,7 @@ serde_json = "1.0.61"
 net_util = { path = "net_util" }
 
 [features]
-default = ["acpi", "cmos", "io_uring", "kvm"]
+default = ["acpi", "cmos", "kvm"]
 # Common features for all hypervisors
 common = ["acpi", "cmos", "fwdebug", "io_uring"]
 acpi = ["vmm/acpi"]
