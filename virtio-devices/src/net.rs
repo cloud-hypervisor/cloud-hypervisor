@@ -94,9 +94,9 @@ impl NetEpollHandler {
             || !self.driver_awake
         {
             self.signal_used_queue(&self.queue_pair[0])?;
-            info!("Signalling RX queue");
+            debug!("Signalling RX queue");
         } else {
-            info!("Not signalling RX queue");
+            debug!("Not signalling RX queue");
         }
 
         Ok(())
@@ -114,9 +114,9 @@ impl NetEpollHandler {
             || !self.driver_awake
         {
             self.signal_used_queue(&self.queue_pair[1])?;
-            info!("Signalling TX queue");
+            debug!("Signalling TX queue");
         } else {
-            info!("Not signalling TX queue");
+            debug!("Not signalling TX queue");
         }
         Ok(())
     }
@@ -129,9 +129,9 @@ impl NetEpollHandler {
             || !self.driver_awake
         {
             self.signal_used_queue(&self.queue_pair[0])?;
-            info!("Signalling RX queue");
+            debug!("Signalling RX queue");
         } else {
-            info!("Not signalling RX queue");
+            debug!("Not signalling RX queue");
         }
         Ok(())
     }
