@@ -97,7 +97,8 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210106-1.qcow2";
 
-    const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=hvc0 rw";
+    const DIRECT_KERNEL_BOOT_CMDLINE: &str =
+        "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
 
     const PIPE_SIZE: i32 = 32 << 20;
 
