@@ -26,7 +26,7 @@ use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::result;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use url::Url;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
@@ -314,7 +314,7 @@ impl BusDevice for MemoryManager {
         }
     }
 
-    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
         match offset {
             SELECTION_OFFSET => {
                 self.selected_slot = usize::from(data[0]);
@@ -340,8 +340,7 @@ impl BusDevice for MemoryManager {
                     offset
                 );
             }
-        };
-        None
+        }
     }
 }
 

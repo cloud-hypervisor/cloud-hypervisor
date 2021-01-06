@@ -13,7 +13,7 @@ use super::interrupt_controller::{Error, InterruptController};
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::result;
-use std::sync::{Arc, Barrier};
+use std::sync::Arc;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
     MsiIrqGroupConfig, MsiIrqSourceConfig,
@@ -167,7 +167,7 @@ impl BusDevice for Ioapic {
         LittleEndian::write_u32(data, value);
     }
 
-    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
         assert!(data.len() == 4);
 
         debug!("IOAPIC_W @ offset 0x{:x}", offset);
@@ -181,7 +181,6 @@ impl BusDevice for Ioapic {
                 error!("IOAPIC: failed writing at offset {}", offset);
             }
         }
-        None
     }
 }
 

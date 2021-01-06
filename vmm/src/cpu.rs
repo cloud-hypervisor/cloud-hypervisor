@@ -446,7 +446,7 @@ impl BusDevice for CpuManager {
         }
     }
 
-    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
         match offset {
             CPU_SELECTION_OFFSET => {
                 self.selected_cpu = data[0];
@@ -478,7 +478,6 @@ impl BusDevice for CpuManager {
                 );
             }
         }
-        None
     }
 }
 

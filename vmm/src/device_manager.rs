@@ -68,7 +68,7 @@ use std::os::unix::fs::OpenOptionsExt;
 #[cfg(feature = "kvm")]
 use std::os::unix::io::FromRawFd;
 use std::result;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 #[cfg(feature = "kvm")]
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDmaMapping};
 use virtio_devices::transport::VirtioPciDevice;
@@ -3563,7 +3563,7 @@ impl BusDevice for DeviceManager {
         )
     }
 
-    fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+    fn write(&mut self, base: u64, offset: u64, data: &[u8]) {
         match offset {
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
@@ -3589,9 +3589,7 @@ impl BusDevice for DeviceManager {
         debug!(
             "PCI_HP_REG_W: base 0x{:x}, offset 0x{:x}, data {:?}",
             base, offset, data
-        );
-
-        None
+        )
     }
 }
 

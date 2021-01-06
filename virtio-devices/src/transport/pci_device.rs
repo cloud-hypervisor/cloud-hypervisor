@@ -31,7 +31,7 @@ use std::io::Write;
 use std::num::Wrapping;
 use std::result;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -1018,9 +1018,8 @@ impl BusDevice for VirtioPciDevice {
         self.read_bar(base, offset, data)
     }
 
-    fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        self.write_bar(base, offset, data);
-        None
+    fn write(&mut self, base: u64, offset: u64, data: &[u8]) {
+        self.write_bar(base, offset, data)
     }
 }
 

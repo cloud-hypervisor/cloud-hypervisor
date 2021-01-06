@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use std::sync::{Arc, Barrier};
-use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
+
+use vm_device::BusDevice;
 
 /// A i8042 PS/2 controller that emulates just enough to shutdown the machine.
 pub struct I8042Device {
@@ -32,14 +32,12 @@ impl BusDevice for I8042Device {
         }
     }
 
-    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
         if data.len() == 1 && data[0] == 0xfe && offset == 3 {
             debug!("i8042 reset signalled");
             if let Err(e) = self.reset_evt.write(1) {
                 error!("Error triggering i8042 reset event: {}", e);
             }
         }
-
-        None
     }
 }

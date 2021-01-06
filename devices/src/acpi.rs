@@ -4,7 +4,7 @@
 //
 
 use acpi_tables::{aml, aml::Aml};
-use std::sync::{Arc, Barrier};
+use std::sync::Arc;
 use std::time::Instant;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
@@ -36,7 +36,7 @@ impl BusDevice for AcpiShutdownDevice {
         }
     }
 
-    fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+    fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) {
         if data[0] == 1 {
             debug!("ACPI Reboot signalled");
             if let Err(e) = self.reset_evt.write(1) {
@@ -54,7 +54,6 @@ impl BusDevice for AcpiShutdownDevice {
                 error!("Error triggering ACPI shutdown event: {}", e);
             }
         }
-        None
     }
 }
 

@@ -9,7 +9,7 @@
 
 use std::cmp::{Ord, Ordering, PartialEq, PartialOrd};
 use std::collections::btree_map::BTreeMap;
-use std::sync::{Arc, Barrier, Mutex, RwLock, Weak};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::{convert, error, fmt, io, result};
 
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
@@ -21,9 +21,7 @@ pub trait BusDevice: Send {
     /// Reads at `offset` from this device
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {}
     /// Writes at `offset` into this device
-    fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        None
-    }
+    fn write(&mut self, base: u64, offset: u64, data: &[u8]) {}
     /// Triggers the `irq_mask` interrupt on this device
     fn interrupt(&self, irq_mask: u32) {}
 }
@@ -259,12 +257,10 @@ mod tests {
             }
         }
 
-        fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+        fn write(&mut self, _base: u64, offset: u64, data: &[u8]) {
             for (i, v) in data.iter().enumerate() {
                 assert_eq!(*v, (offset as u8) + (i as u8))
             }
-
-            None
         }
     }
 
