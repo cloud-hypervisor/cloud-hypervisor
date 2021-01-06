@@ -85,7 +85,7 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64.raw";
     #[cfg(target_arch = "x86_64")]
-    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom.raw";
+    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210106-1.raw";
     #[cfg(target_arch = "x86_64")]
     const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx.raw";
     #[cfg(target_arch = "aarch64")]
@@ -95,7 +95,7 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom.qcow2";
     #[cfg(target_arch = "x86_64")]
-    const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom.qcow2";
+    const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210106-1.qcow2";
 
     const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=hvc0 rw";
 
