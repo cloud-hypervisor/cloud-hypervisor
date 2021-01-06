@@ -92,6 +92,10 @@ mod tests {
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64.raw";
     #[cfg(target_arch = "aarch64")]
     const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom.raw";
+    #[cfg(target_arch = "aarch64")]
+    const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom.qcow2";
+    #[cfg(target_arch = "x86_64")]
+    const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom.qcow2";
 
     const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=hvc0 rw";
 
@@ -2815,8 +2819,8 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        fn _test_virtio_block(disable_io_uring: bool) {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        fn _test_virtio_block(image_name: &str, disable_io_uring: bool) {
+            let mut focal = UbuntuDiskConfig::new(image_name.to_string());
             let guest = Guest::new(&mut focal);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -2901,12 +2905,17 @@ mod tests {
 
         #[test]
         fn test_virtio_block() {
-            _test_virtio_block(false)
+            _test_virtio_block(FOCAL_IMAGE_NAME, false)
         }
 
         #[test]
         fn test_virtio_block_disable_io_uring() {
-            _test_virtio_block(false)
+            _test_virtio_block(FOCAL_IMAGE_NAME, false)
+        }
+
+        #[test]
+        fn test_virtio_block_qcow2() {
+            _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false)
         }
 
         #[test]
