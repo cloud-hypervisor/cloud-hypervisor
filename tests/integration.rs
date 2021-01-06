@@ -87,7 +87,7 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64";
     #[cfg(target_arch = "x86_64")]
-    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom";
+    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210106-1";
     #[cfg(target_arch = "x86_64")]
     const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx";
     #[cfg(target_arch = "aarch64")]
