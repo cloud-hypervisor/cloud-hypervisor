@@ -53,7 +53,7 @@ mod tests {
 
     const DEFAULT_TCP_LISTENER_MESSAGE: &str = "booted";
     const DEFAULT_TCP_LISTENER_PORT: u16 = 8000;
-    const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 80;
+    const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 40;
 
     struct Guest<'a> {
         tmp_dir: TempDir,
