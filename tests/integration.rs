@@ -95,7 +95,8 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom";
 
-    const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=hvc0 rw";
+    const DIRECT_KERNEL_BOOT_CMDLINE: &str =
+        "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
 
     const PIPE_SIZE: i32 = 32 << 20;
 
