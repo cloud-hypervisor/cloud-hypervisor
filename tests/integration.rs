@@ -2910,7 +2910,7 @@ mod tests {
 
         #[test]
         fn test_virtio_block_disable_io_uring() {
-            _test_virtio_block(FOCAL_IMAGE_NAME, false)
+            _test_virtio_block(FOCAL_IMAGE_NAME, true)
         }
 
         #[test]
