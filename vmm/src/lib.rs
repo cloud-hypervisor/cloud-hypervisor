@@ -131,10 +131,6 @@ pub enum Error {
     /// Cannot apply seccomp filter
     #[error("Error applying seccomp filter: {0}")]
     ApplySeccompFilter(seccomp::Error),
-
-    /// Error activating virtio devices
-    #[error("Error activating virtio devices: {0:?}")]
-    ActivateVirtioDevices(VmError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -144,7 +140,6 @@ pub enum EpollDispatch {
     Reset,
     Stdin,
     Api,
-    ActivateVirtioDevices,
 }
 
 pub struct EpollContext {
@@ -286,7 +281,6 @@ pub struct Vmm {
     vm_config: Option<Arc<Mutex<VmConfig>>>,
     seccomp_action: SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
-    activate_evt: EventFd,
 }
 
 impl Vmm {
@@ -299,7 +293,6 @@ impl Vmm {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
-        let activate_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
 
         if unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0 {
             epoll.add_stdin().map_err(Error::Epoll)?;
@@ -311,10 +304,6 @@ impl Vmm {
 
         epoll
             .add_event(&reset_evt, EpollDispatch::Reset)
-            .map_err(Error::Epoll)?;
-
-        epoll
-            .add_event(&activate_evt, EpollDispatch::ActivateVirtioDevices)
             .map_err(Error::Epoll)?;
 
         epoll
@@ -331,7 +320,6 @@ impl Vmm {
             vm_config: None,
             seccomp_action,
             hypervisor,
-            activate_evt,
         })
     }
 
@@ -340,10 +328,6 @@ impl Vmm {
         if self.vm.is_none() {
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
             let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-            let activate_evt = self
-                .activate_evt
-                .try_clone()
-                .map_err(VmError::EventFdClone)?;
 
             if let Some(ref vm_config) = self.vm_config {
                 let vm = Vm::new(
@@ -352,7 +336,6 @@ impl Vmm {
                     reset_evt,
                     &self.seccomp_action,
                     self.hypervisor.clone(),
-                    activate_evt,
                 )?;
                 self.vm = Some(vm);
             }
@@ -414,10 +397,6 @@ impl Vmm {
 
         let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
         let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-        let activate_evt = self
-            .activate_evt
-            .try_clone()
-            .map_err(VmError::EventFdClone)?;
 
         let vm = Vm::new_from_snapshot(
             &snapshot,
@@ -427,7 +406,6 @@ impl Vmm {
             restore_cfg.prefault,
             &self.seccomp_action,
             self.hypervisor.clone(),
-            activate_evt,
         )?;
         self.vm = Some(vm);
 
@@ -465,10 +443,6 @@ impl Vmm {
 
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
             let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-            let activate_evt = self
-                .activate_evt
-                .try_clone()
-                .map_err(VmError::EventFdClone)?;
 
             // The Linux kernel fires off an i8042 reset after doing the ACPI reset so there may be
             // an event sitting in the shared reset_evt. Without doing this we get very early reboots
@@ -482,7 +456,6 @@ impl Vmm {
                 reset_evt,
                 &self.seccomp_action,
                 self.hypervisor.clone(),
-                activate_evt,
             )?);
         }
 
@@ -703,10 +676,6 @@ impl Vmm {
         let reset_evt = self.reset_evt.try_clone().map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error cloning reset EventFd: {}", e))
         })?;
-        let activate_evt = self.activate_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning activate EventFd: {}", e))
-        })?;
-
         self.vm_config = Some(Arc::new(Mutex::new(config)));
         let vm = Vm::new_from_migration(
             self.vm_config.clone().unwrap(),
@@ -714,7 +683,6 @@ impl Vmm {
             reset_evt,
             &self.seccomp_action,
             self.hypervisor.clone(),
-            activate_evt,
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))
@@ -1096,13 +1064,6 @@ impl Vmm {
                             if let Some(ref vm) = self.vm {
                                 vm.handle_stdin().map_err(Error::Stdin)?;
                             }
-                        }
-                        EpollDispatch::ActivateVirtioDevices => {
-                            if let Some(ref vm) = self.vm {
-                                vm.activate_virtio_devices()
-                                    .map_err(Error::ActivateVirtioDevices)?;
-                            }
-                            self.activate_evt.read().map_err(Error::EventFdRead)?;
                         }
                         EpollDispatch::Api => {
                             // Consume the event.

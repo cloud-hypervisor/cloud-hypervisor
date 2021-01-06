@@ -31,7 +31,7 @@ use std::io::Write;
 use std::num::Wrapping;
 use std::result;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
-use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -292,7 +292,7 @@ pub struct VirtioPciDevice {
 
     // Virtio device reference and status
     device: Arc<Mutex<dyn VirtioDevice>>,
-    device_activated: Arc<AtomicBool>,
+    device_activated: bool,
 
     // PCI interrupts.
     interrupt_status: Arc<AtomicUsize>,
@@ -323,17 +323,10 @@ pub struct VirtioPciDevice {
 
     // Details of bar regions to free
     bar_regions: Vec<(GuestAddress, GuestUsize, PciBarRegionType)>,
-
-    // EventFd to signal on to request activation
-    activate_evt: EventFd,
-
-    // Barrier that is used to wait on for activation
-    activate_barrier: Arc<Barrier>,
 }
 
 impl VirtioPciDevice {
     /// Constructs a new PCI transport for the given virtio device.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -342,7 +335,6 @@ impl VirtioPciDevice {
         iommu_mapping_cb: Option<Arc<VirtioIommuRemapping>>,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         pci_device_bdf: u32,
-        activate_evt: EventFd,
     ) -> Result<Self> {
         let device_clone = device.clone();
         let locked_device = device_clone.lock().unwrap();
@@ -428,7 +420,7 @@ impl VirtioPciDevice {
             msix_config,
             msix_num,
             device,
-            device_activated: Arc::new(AtomicBool::new(false)),
+            device_activated: false,
             interrupt_status: Arc::new(AtomicUsize::new(0)),
             virtio_interrupt: None,
             queues,
@@ -440,8 +432,6 @@ impl VirtioPciDevice {
             interrupt_source_group,
             cap_pci_cfg_info: VirtioPciCfgCapInfo::default(),
             bar_regions: vec![],
-            activate_evt,
-            activate_barrier: Arc::new(Barrier::new(2)),
         };
 
         if let Some(msix_config) = &virtio_pci_device.msix_config {
@@ -457,15 +447,14 @@ impl VirtioPciDevice {
 
     fn state(&self) -> VirtioPciDeviceState {
         VirtioPciDeviceState {
-            device_activated: self.device_activated.load(Ordering::Acquire),
+            device_activated: self.device_activated,
             interrupt_status: self.interrupt_status.load(Ordering::Acquire),
             queues: self.queues.clone(),
         }
     }
 
     fn set_state(&mut self, state: &VirtioPciDeviceState) -> std::result::Result<(), Error> {
-        self.device_activated
-            .store(state.device_activated, Ordering::Release);
+        self.device_activated = state.device_activated;
         self.interrupt_status
             .store(state.interrupt_status, Ordering::Release);
 
@@ -667,19 +656,14 @@ impl VirtioPciDevice {
                             self.queue_evts.split_off(0),
                         )
                         .expect("Failed to activate device");
-                    self.device_activated.store(true, Ordering::SeqCst);
-                    info!("Waiting for barrier");
-                    self.activate_barrier.wait();
-                    info!("Barrier released");
+                    self.device_activated = true;
                 }
             }
         }
     }
 
     fn needs_activation(&self) -> bool {
-        !self.device_activated.load(Ordering::SeqCst)
-            && self.is_driver_ready()
-            && self.are_queues_valid()
+        !self.device_activated && self.is_driver_ready() && self.are_queues_valid()
     }
 }
 
@@ -1017,20 +1001,17 @@ impl PciDevice for VirtioPciDevice {
         };
 
         // Try and activate the device if the driver status has changed
-        if self.needs_activation() {
-            self.activate_evt.write(1).ok();
-            return Some(self.activate_barrier.clone());
-        }
+        self.maybe_activate();
 
         // Device has been reset by the driver
-        if self.device_activated.load(Ordering::SeqCst) && self.is_driver_init() {
+        if self.device_activated && self.is_driver_init() {
             let mut device = self.device.lock().unwrap();
             if let Some((virtio_interrupt, mut queue_evts)) = device.reset() {
                 // Upon reset the device returns its interrupt EventFD and it's queue EventFDs
                 self.virtio_interrupt = Some(virtio_interrupt);
                 self.queue_evts.append(&mut queue_evts);
 
-                self.device_activated.store(false, Ordering::SeqCst);
+                self.device_activated = false;
 
                 // Reset queue readiness (changes queue_enable), queue sizes
                 // and selected_queue as per spec for reset
@@ -1147,10 +1128,7 @@ impl Snapshottable for VirtioPciDevice {
             // Then we can activate the device, as we know at this point that
             // the virtqueues are in the right state and the device is ready
             // to be activated, which will spawn each virtio worker thread.
-            if self.device_activated.load(Ordering::SeqCst)
-                && self.is_driver_ready()
-                && self.are_queues_valid()
-            {
+            if self.device_activated && self.is_driver_ready() && self.are_queues_valid() {
                 if let Some(virtio_interrupt) = self.virtio_interrupt.take() {
                     if self.memory.is_some() {
                         let mem = self.memory.as_ref().unwrap().clone();

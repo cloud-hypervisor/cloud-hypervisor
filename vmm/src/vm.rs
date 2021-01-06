@@ -231,9 +231,6 @@ pub enum Error {
 
     /// Failed setting the VmmOps interface.
     SetVmmOpsInterface(hypervisor::HypervisorVmError),
-
-    /// Cannot activate virtio devices
-    ActivateVirtioDevices(device_manager::DeviceManagerError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -495,7 +492,6 @@ impl Vm {
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         #[cfg(feature = "kvm")] _saved_clock: Option<hypervisor::ClockData>,
-        activate_evt: EventFd,
     ) -> Result<Self> {
         config
             .lock()
@@ -517,7 +513,6 @@ impl Vm {
             seccomp_action.clone(),
             #[cfg(feature = "acpi")]
             numa_nodes.clone(),
-            &activate_evt,
         )
         .map_err(Error::DeviceManager)?;
 
@@ -655,7 +650,6 @@ impl Vm {
         reset_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
-        activate_evt: EventFd,
     ) -> Result<Self> {
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor.check_required_extensions().unwrap();
@@ -692,7 +686,6 @@ impl Vm {
             hypervisor,
             #[cfg(feature = "kvm")]
             None,
-            activate_evt,
         )?;
 
         // The device manager must create the devices from here as it is part
@@ -715,7 +708,6 @@ impl Vm {
         prefault: bool,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
-        activate_evt: EventFd,
     ) -> Result<Self> {
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor.check_required_extensions().unwrap();
@@ -758,7 +750,6 @@ impl Vm {
             hypervisor,
             #[cfg(feature = "kvm")]
             None,
-            activate_evt,
         )
     }
 
@@ -768,7 +759,6 @@ impl Vm {
         reset_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
-        activate_evt: EventFd,
     ) -> Result<Self> {
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor.check_required_extensions().unwrap();
@@ -795,7 +785,6 @@ impl Vm {
             hypervisor,
             #[cfg(feature = "kvm")]
             None,
-            activate_evt,
         )
     }
 
@@ -1753,14 +1742,6 @@ impl Vm {
 
     pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
         self.device_manager.lock().unwrap().device_tree()
-    }
-
-    pub fn activate_virtio_devices(&self) -> Result<()> {
-        self.device_manager
-            .lock()
-            .unwrap()
-            .activate_virtio_devices()
-            .map_err(Error::ActivateVirtioDevices)
     }
 }
 
