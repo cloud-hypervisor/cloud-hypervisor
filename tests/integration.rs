@@ -67,7 +67,6 @@ mod tests {
 
     enum DiskType {
         OperatingSystem,
-        RawOperatingSystem,
         CloudInit,
     }
 
@@ -79,21 +78,20 @@ mod tests {
 
     struct UbuntuDiskConfig {
         osdisk_path: String,
-        osdisk_raw_path: String,
         cloudinit_path: String,
         image_name: String,
     }
 
     #[cfg(target_arch = "x86_64")]
-    const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64";
+    const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64.raw";
     #[cfg(target_arch = "x86_64")]
-    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom";
+    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom.raw";
     #[cfg(target_arch = "x86_64")]
-    const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx";
+    const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx.raw";
     #[cfg(target_arch = "aarch64")]
-    const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64";
+    const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64.raw";
     #[cfg(target_arch = "aarch64")]
-    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom";
+    const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom.raw";
 
     const DIRECT_KERNEL_BOOT_CMDLINE: &str = "root=/dev/vda1 console=hvc0 rw";
 
@@ -104,7 +102,6 @@ mod tests {
             UbuntuDiskConfig {
                 image_name,
                 osdisk_path: String::new(),
-                osdisk_raw_path: String::new(),
                 cloudinit_path: String::new(),
             }
         }
@@ -288,34 +285,22 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let image_name = format!("{}.qcow2", self.image_name);
-            let raw_image_name = format!("{}.raw", self.image_name);
-
-            let mut osdisk_base_path = workload_path.clone();
-            osdisk_base_path.push(&image_name);
-
-            let mut osdisk_raw_base_path = workload_path;
-            osdisk_raw_base_path.push(&raw_image_name);
+            let mut osdisk_base_path = workload_path;
+            osdisk_base_path.push(&self.image_name);
 
             let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
-            let osdisk_raw_path =
-                String::from(tmp_dir.path().join("osdisk_raw.img").to_str().unwrap());
             let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
 
             rate_limited_copy(osdisk_base_path, &osdisk_path)
                 .expect("copying of OS source disk image failed");
-            rate_limited_copy(osdisk_raw_base_path, &osdisk_raw_path)
-                .expect("copying of OS source disk raw image failed");
 
             self.cloudinit_path = cloudinit_path;
             self.osdisk_path = osdisk_path;
-            self.osdisk_raw_path = osdisk_raw_path;
         }
 
         fn disk(&self, disk_type: DiskType) -> Option<String> {
             match disk_type {
                 DiskType::OperatingSystem => Some(self.osdisk_path.clone()),
-                DiskType::RawOperatingSystem => Some(self.osdisk_raw_path.clone()),
                 DiskType::CloudInit => Some(self.cloudinit_path.clone()),
             }
         }
@@ -1216,25 +1201,6 @@ mod tests {
             ])
         }
 
-        fn default_raw_disks(&mut self) -> &mut Self {
-            self.args(&[
-                "--disk",
-                format!(
-                    "path={}",
-                    self.guest
-                        .disk_config
-                        .disk(DiskType::RawOperatingSystem)
-                        .unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    self.guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
-            ])
-        }
-
         fn default_net(&mut self) -> &mut Self {
             self.args(&["--net", self.guest.default_net_string().as_str()])
         }
@@ -1630,10 +1596,7 @@ mod tests {
 
         let kernel_path = direct_kernel_boot_path().unwrap();
 
-        let disk_path = guest
-            .disk_config
-            .disk(DiskType::RawOperatingSystem)
-            .unwrap();
+        let disk_path = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
 
         let (blk_boot_params, daemon_child) = {
             let prepare_daemon = prepare_vhost_user_blk_daemon.unwrap();
@@ -2267,7 +2230,7 @@ mod tests {
                     .args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
                     .args(&["--kernel", guest.fw_path.as_str()])
-                    .default_raw_disks()
+                    .default_disks()
                     .default_net()
                     .args(&["--serial", "tty", "--console", "off"])
                     .capture_output()
@@ -2304,7 +2267,7 @@ mod tests {
                 ])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
-                .default_raw_disks()
+                .default_disks()
                 .default_net();
 
             let mut child = cmd.spawn().unwrap();
@@ -3169,18 +3132,10 @@ mod tests {
                     "--pmem",
                     format!(
                         "file={},size={}",
-                        guest
-                            .disk_config
-                            .disk(DiskType::RawOperatingSystem)
-                            .unwrap(),
-                        fs::metadata(
-                            &guest
-                                .disk_config
-                                .disk(DiskType::RawOperatingSystem)
-                                .unwrap()
-                        )
-                        .unwrap()
-                        .len()
+                        guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
+                        fs::metadata(&guest.disk_config.disk(DiskType::OperatingSystem).unwrap())
+                            .unwrap()
+                            .len()
                     )
                     .as_str(),
                 ])
@@ -3882,7 +3837,7 @@ mod tests {
                         direct_kernel_boot_path().unwrap().to_str().unwrap(),
                     ])
                     .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                    .default_raw_disks()
+                    .default_disks()
                     .default_net()
                     .capture_output();
 
