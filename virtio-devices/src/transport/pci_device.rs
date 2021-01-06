@@ -641,30 +641,6 @@ impl VirtioPciDevice {
     pub fn virtio_device(&self) -> Arc<Mutex<dyn VirtioDevice>> {
         self.device.clone()
     }
-
-    pub fn maybe_activate(&mut self) {
-        if self.needs_activation() {
-            if let Some(virtio_interrupt) = self.virtio_interrupt.take() {
-                if self.memory.is_some() {
-                    let mem = self.memory.as_ref().unwrap().clone();
-                    let mut device = self.device.lock().unwrap();
-                    device
-                        .activate(
-                            mem,
-                            virtio_interrupt,
-                            self.queues.clone(),
-                            self.queue_evts.split_off(0),
-                        )
-                        .expect("Failed to activate device");
-                    self.device_activated = true;
-                }
-            }
-        }
-    }
-
-    fn needs_activation(&self) -> bool {
-        !self.device_activated && self.is_driver_ready() && self.are_queues_valid()
-    }
 }
 
 impl VirtioTransport for VirtioPciDevice {
@@ -1000,8 +976,23 @@ impl PciDevice for VirtioPciDevice {
             _ => (),
         };
 
-        // Try and activate the device if the driver status has changed
-        self.maybe_activate();
+        if !self.device_activated && self.is_driver_ready() && self.are_queues_valid() {
+            if let Some(virtio_interrupt) = self.virtio_interrupt.take() {
+                if self.memory.is_some() {
+                    let mem = self.memory.as_ref().unwrap().clone();
+                    let mut device = self.device.lock().unwrap();
+                    device
+                        .activate(
+                            mem,
+                            virtio_interrupt,
+                            self.queues.clone(),
+                            self.queue_evts.split_off(0),
+                        )
+                        .expect("Failed to activate device");
+                    self.device_activated = true;
+                }
+            }
+        }
 
         // Device has been reset by the driver
         if self.device_activated && self.is_driver_init() {
