@@ -617,19 +617,18 @@ impl VirtioPciDevice {
         }
     }
 
-    fn write_cap_pci_cfg(&mut self, offset: usize, data: &[u8]) -> Option<Arc<Barrier>> {
+    fn write_cap_pci_cfg(&mut self, offset: usize, data: &[u8]) {
         let cap_slice = self.cap_pci_cfg_info.cap.as_mut_slice();
         let data_len = data.len();
         let cap_len = cap_slice.len();
         if offset + data_len > cap_len {
             error!("Failed to write cap_pci_cfg to config space");
-            return None;
+            return;
         }
 
         if offset < std::mem::size_of::<VirtioPciCap>() {
             let (_, right) = cap_slice.split_at_mut(offset);
             right[..data_len].copy_from_slice(&data[..]);
-            None
         } else {
             // Safe since we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
             let bar_offset: u32 =
@@ -734,12 +733,7 @@ impl VirtioInterrupt for VirtioInterruptMsix {
 }
 
 impl PciDevice for VirtioPciDevice {
-    fn write_config_register(
-        &mut self,
-        reg_idx: usize,
-        offset: u64,
-        data: &[u8],
-    ) -> Option<Arc<Barrier>> {
+    fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
         // Handle the special case where the capability VIRTIO_PCI_CAP_PCI_CFG
         // is accessed. This capability has a special meaning as it allows the
         // guest to access other capabilities without mapping the PCI BAR.
@@ -749,11 +743,10 @@ impl PciDevice for VirtioPciDevice {
                 <= self.cap_pci_cfg_info.offset + self.cap_pci_cfg_info.cap.bytes().len()
         {
             let offset = base + offset as usize - self.cap_pci_cfg_info.offset;
-            self.write_cap_pci_cfg(offset, data)
+            self.write_cap_pci_cfg(offset, data);
         } else {
             self.configuration
                 .write_config_register(reg_idx, offset, data);
-            None
         }
     }
 
@@ -932,7 +925,7 @@ impl PciDevice for VirtioPciDevice {
         }
     }
 
-    fn write_bar(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+    fn write_bar(&mut self, _base: u64, offset: u64, data: &[u8]) {
         match offset {
             o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => self.common_config.write(
                 o - COMMON_CONFIG_BAR_OFFSET,
@@ -1013,8 +1006,6 @@ impl PciDevice for VirtioPciDevice {
                 self.common_config.driver_status = crate::DEVICE_FAILED as u8;
             }
         }
-
-        None
     }
 
     fn as_any(&mut self) -> &mut dyn Any {
@@ -1028,7 +1019,8 @@ impl BusDevice for VirtioPciDevice {
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        self.write_bar(base, offset, data)
+        self.write_bar(base, offset, data);
+        None
     }
 }
 

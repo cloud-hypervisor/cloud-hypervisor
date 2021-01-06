@@ -71,14 +71,8 @@ impl PciRoot {
 impl BusDevice for PciRoot {}
 
 impl PciDevice for PciRoot {
-    fn write_config_register(
-        &mut self,
-        reg_idx: usize,
-        offset: u64,
-        data: &[u8],
-    ) -> Option<Arc<Barrier>> {
+    fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
         self.config.write_config_register(reg_idx, offset, data);
-        None
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
@@ -231,14 +225,14 @@ impl PciConfigIo {
             })
     }
 
-    pub fn config_space_write(&mut self, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+    pub fn config_space_write(&mut self, offset: u64, data: &[u8]) {
         if offset as usize + data.len() > 4 {
-            return None;
+            return;
         }
 
         let enabled = (self.config_address & 0x8000_0000) != 0;
         if !enabled {
-            return None;
+            return;
         }
 
         let (bus, device, _function, register) =
@@ -246,7 +240,7 @@ impl PciConfigIo {
 
         // Only support one bus.
         if bus != 0 {
-            return None;
+            return;
         }
 
         let pci_bus = self.pci_bus.lock().unwrap();
@@ -271,9 +265,7 @@ impl PciConfigIo {
             }
 
             // Update the register value
-            device.write_config_register(register, offset, data)
-        } else {
-            None
+            device.write_config_register(register, offset, data);
         }
     }
 
@@ -323,13 +315,12 @@ impl BusDevice for PciConfigIo {
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         // `offset` is relative to 0xcf8
         match offset {
-            o @ 0..=3 => {
-                self.set_config_address(o, data);
-                None
-            }
+            o @ 0..=3 => self.set_config_address(o, data),
             o @ 4..=7 => self.config_space_write(o - 4, data),
-            _ => None,
-        }
+            _ => (),
+        };
+
+        None
     }
 }
 
