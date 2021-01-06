@@ -81,15 +81,23 @@ apt update
 apt install fio iperf iperf3 socat
 ```
 
-### Remove snapd
+### Remove counterproductive packages
+
+* snapd:
 
 This prevents snapd from trying to mount squashfs filesystem when the kernel
 might not support it. This might be the case when the image is used with direct
 kernel boot. This step is specific to Ubuntu distributions.
 
+* pollinate:
+
+Remove this package which can fail and lead to the SSH daemon failing to start.
+See #2113 for details.
+
 ```bash
-apt remove --purge snapd
+apt remove --purge snapd pollinate
 ```
+
 
 ### Cleanup the image
 
@@ -108,15 +116,18 @@ umount /mnt
 Renaming is important to identify this is a modified image.
 
 ```bash
-mv focal-server-cloudimg-amd64.raw focal-server-cloudimg-amd64-custom.raw
+mv focal-server-cloudimg-amd64.raw focal-server-cloudimg-amd64-custom-$(date "+%Y%m%d")-0.raw
 ```
+
+The `-0` is the revision and is only necessary to change if multiple images are
+updated on the same day.
 
 ### Create QCOW2 from RAW
 
 Last step is to create the QCOW2 image back from the modified image.
 
 ```bash
-qemu-img convert -p -f raw -O qcow2 focal-server-cloudimg-amd64-custom.raw focal-server-cloudimg-amd64-custom.qcow2
+qemu-img convert -p -f raw -O qcow2 focal-server-cloudimg-amd64-custom-$(date "+%Y%m%d")-0.raw focal-server-cloudimg-amd64-custom-$(date "+%Y%m%d")-0.qcow2
 ```
 
 ## Switch CI to use the new image
@@ -134,3 +145,5 @@ Last step is about updating the integration tests to work with this new image.
 The key point is to identify where the Linux filesystem partition is located,
 as we might need to update the direct kernel boot command line, replacing
 `/dev/vda1` with the appropriate partition number.
+
+Update all references to the previous image name to the new one.
