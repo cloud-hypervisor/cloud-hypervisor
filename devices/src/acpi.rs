@@ -93,6 +93,8 @@ impl BusDevice for AcpiGEDDevice {
         data[0] = self.notification_type.bits();
         self.notification_type = HotPlugNotificationFlags::NO_DEVICES_CHANGED;
     }
+
+    fn write(&mut self, _base: u64, _offset: u64, _data: &[u8]) {}
 }
 
 #[cfg(feature = "acpi")]
@@ -181,4 +183,6 @@ impl BusDevice for AcpiPMTimerDevice {
 
         data.copy_from_slice(&counter.to_le_bytes());
     }
+
+    fn write(&mut self, _base: u64, _offset: u64, _data: &[u8]) {}
 }
