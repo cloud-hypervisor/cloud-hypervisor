@@ -404,19 +404,11 @@ impl VmmOps for VmOps {
     }
 
     fn mmio_write(&self, addr: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
-        match self.mmio_bus.write(addr, data) {
-            Err(e) => {
-                if let vm_device::BusError::MissingAddressRange = e {
-                    warn!("Guest MMIO write to unregistered address 0x{:x}", addr);
-                }
+        if let Err(e) = self.mmio_bus.write(addr, data) {
+            if let vm_device::BusError::MissingAddressRange = e {
+                warn!("Guest MMIO write to unregistered address 0x{:x}", addr);
             }
-            Ok(Some(barrier)) => {
-                info!("Waiting for barrier");
-                barrier.wait();
-                info!("Barrier released");
-            }
-            _ => {}
-        };
+        }
         Ok(())
     }
 
@@ -437,19 +429,11 @@ impl VmmOps for VmOps {
             return Ok(());
         }
 
-        match self.io_bus.write(addr, data) {
-            Err(e) => {
-                if let vm_device::BusError::MissingAddressRange = e {
-                    warn!("Guest PIO write to unregistered address 0x{:x}", addr);
-                }
+        if let Err(e) = self.io_bus.write(addr, data) {
+            if let vm_device::BusError::MissingAddressRange = e {
+                warn!("Guest PIO write to unregistered address 0x{:x}", addr);
             }
-            Ok(Some(barrier)) => {
-                info!("Waiting for barrier");
-                barrier.wait();
-                info!("Barrier released");
-            }
-            _ => {}
-        };
+        }
         Ok(())
     }
 }
