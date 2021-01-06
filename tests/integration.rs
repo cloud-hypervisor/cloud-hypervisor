@@ -612,8 +612,9 @@ mod tests {
                              auth=\"{:#?}\"\n\
                              ip=\"{}\"\n\
                              output=\"{}\"\n\
+                             error=\"{}\"\n\
                              \n==== End ssh command outout ====\n\n",
-                            command, auth, ip, s
+                            command, auth, ip, s, e
                         );
 
                         return Err(e);
@@ -866,7 +867,7 @@ mod tests {
                 let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 1];
                 loop {
                     let num_events =
-                        match epoll::wait(epoll_fd, timeout * 1000 as i32, &mut events[..]) {
+                        match epoll::wait(epoll_fd, timeout * 1000_i32, &mut events[..]) {
                             Ok(num_events) => Ok(num_events),
                             Err(e) => match e.raw_os_error() {
                                 Some(libc::EAGAIN) | Some(libc::EINTR) => continue,
@@ -923,9 +924,10 @@ mod tests {
                          duration =\"{:?}, timeout = {}s\"\n\
                          listen_addr=\"{}\"\n\
                          expected_guest_addr=\"{}\"\n\
-                         message =\"{}\"\n\
+                         message=\"{}\"\n\
+                         error=\"{}\"\n\
                          \n==== End 'wait_vm_boot' outout ====\n\n",
-                        duration, timeout, listen_addr, expected_guest_addr, s,
+                        duration, timeout, listen_addr, expected_guest_addr, s, e
                     );
 
                     Err(e)
@@ -1271,7 +1273,7 @@ mod tests {
             assert_eq!(
                 guest
                     .ssh_command("lscpu | grep \"per core\" | cut -f 2 -d \":\" | sed \"s# *##\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u8>()
                     .unwrap_or(0),
@@ -1281,7 +1283,7 @@ mod tests {
             assert_eq!(
                 guest
                     .ssh_command("lscpu | grep \"per socket\" | cut -f 2 -d \":\" | sed \"s# *##\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u8>()
                     .unwrap_or(0),
@@ -1291,7 +1293,7 @@ mod tests {
             assert_eq!(
                 guest
                     .ssh_command("lscpu | grep \"Socket\" | cut -f 2 -d \":\" | sed \"s# *##\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u8>()
                     .unwrap_or(0),
@@ -1393,7 +1395,7 @@ mod tests {
             assert_eq!(
                 guest
                     .ssh_command("ip -o link | wc -l")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
@@ -1416,7 +1418,7 @@ mod tests {
             assert_eq!(
                 guest
                     .ssh_command(grep_cmd)
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
@@ -1430,7 +1432,7 @@ mod tests {
                     .ssh_command(
                         "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
                     )
-                    .unwrap_or_default();
+                    .unwrap();
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
@@ -1522,7 +1524,7 @@ mod tests {
             assert_eq!(
                 guest
                     .ssh_command("lsblk | grep vdc | grep -c 16M")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
@@ -1533,7 +1535,7 @@ mod tests {
             assert_eq!(
                 guest
                     .ssh_command("lsblk | grep vdc | awk '{print $5}'")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
@@ -1545,7 +1547,7 @@ mod tests {
             assert_eq!(
                 guest
                     .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
@@ -1568,10 +1570,7 @@ mod tests {
             // Check the content of the block device. The file "foo" should
             // contain "bar".
             assert_eq!(
-                guest
-                    .ssh_command("cat mount_image/foo")
-                    .unwrap_or_default()
-                    .trim(),
+                guest.ssh_command("cat mount_image/foo").unwrap().trim(),
                 "bar"
             );
 
@@ -1582,7 +1581,7 @@ mod tests {
                     .ssh_command(
                         "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
                     )
-                    .unwrap_or_default();
+                    .unwrap();
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
@@ -1595,10 +1594,7 @@ mod tests {
                 // Check again the content of the block device after the resize
                 // has been performed.
                 assert_eq!(
-                    guest
-                        .ssh_command("cat mount_image/foo")
-                        .unwrap_or_default()
-                        .trim(),
+                    guest.ssh_command("cat mount_image/foo").unwrap().trim(),
                     "bar"
                 );
             }
@@ -1771,10 +1767,7 @@ mod tests {
                  echo ok",
                 dax_mount_param
             );
-            assert_eq!(
-                guest.ssh_command(&mount_cmd).unwrap_or_default().trim(),
-                "ok"
-            );
+            assert_eq!(guest.ssh_command(&mount_cmd).unwrap().trim(), "ok");
 
             assert_eq!(
                 guest
@@ -1784,26 +1777,17 @@ mod tests {
             );
             // Check file1 exists and its content is "foo"
             assert_eq!(
-                guest
-                    .ssh_command("cat mount_dir/file1")
-                    .unwrap_or_default()
-                    .trim(),
+                guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
                 "foo"
             );
             // Check file2 does not exist
             assert_ne!(
-                guest
-                    .ssh_command("ls mount_dir/file2")
-                    .unwrap_or_default()
-                    .trim(),
+                guest.ssh_command("ls mount_dir/file2").unwrap().trim(),
                 "mount_dir/file2"
             );
             // Check file3 exists and its content is "bar"
             assert_eq!(
-                guest
-                    .ssh_command("cat mount_dir/file3")
-                    .unwrap_or_default()
-                    .trim(),
+                guest.ssh_command("cat mount_dir/file3").unwrap().trim(),
                 "bar"
             );
 
@@ -1814,7 +1798,7 @@ mod tests {
                     .ssh_command(
                         "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
                     )
-                    .unwrap_or_default();
+                    .unwrap();
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
@@ -1826,10 +1810,7 @@ mod tests {
                 // After the resize, check again that file1 exists and its
                 // content is "foo".
                 assert_eq!(
-                    guest
-                        .ssh_command("cat mount_dir/file1")
-                        .unwrap_or_default()
-                        .trim(),
+                    guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
                     "foo"
                 );
             }
@@ -1839,7 +1820,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("sudo umount mount_dir && echo ok")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim(),
                     "ok"
                 );
@@ -1876,16 +1857,10 @@ mod tests {
                      echo ok",
                     dax_mount_param
                 );
-                assert_eq!(
-                    guest.ssh_command(&mount_cmd).unwrap_or_default().trim(),
-                    "ok"
-                );
+                assert_eq!(guest.ssh_command(&mount_cmd).unwrap().trim(), "ok");
                 // Check file1 exists and its content is "foo"
                 assert_eq!(
-                    guest
-                        .ssh_command("cat mount_dir/file1")
-                        .unwrap_or_default()
-                        .trim(),
+                    guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
                     "foo"
                 );
             });
@@ -1956,10 +1931,7 @@ mod tests {
 
             // Check for the presence of /dev/pmem0
             assert_eq!(
-                guest
-                    .ssh_command("ls /dev/pmem0")
-                    .unwrap_or_default()
-                    .trim(),
+                guest.ssh_command("ls /dev/pmem0").unwrap().trim(),
                 "/dev/pmem0"
             );
 
@@ -1976,17 +1948,14 @@ mod tests {
             guest.wait_vm_boot(None).unwrap();
             let reboot_count = guest
                 .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                .unwrap_or_default()
+                .unwrap()
                 .trim()
                 .parse::<u32>()
                 .unwrap_or_default();
             assert_eq!(reboot_count, 1);
             assert_eq!(guest.ssh_command("sudo mount /dev/pmem0 /mnt").unwrap(), "");
             assert_eq!(
-                guest
-                    .ssh_command("sudo cat /mnt/test")
-                    .unwrap_or_default()
-                    .trim(),
+                guest.ssh_command("sudo cat /mnt/test").unwrap().trim(),
                 if discard_writes { "" } else { "test123" }
             );
         });
@@ -2058,18 +2027,18 @@ mod tests {
             {
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or(1);
 
                 assert_eq!(reboot_count, 0);
-                guest.ssh_command("sudo reboot").unwrap_or_default();
+                guest.ssh_command("sudo reboot").unwrap();
 
                 guest.wait_vm_boot(None).unwrap();
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -2351,7 +2320,7 @@ mod tests {
                         .ssh_command(
                             r#"dmesg | grep "smpboot: Allowing" | sed "s/\[\ *[0-9.]*\] //""#
                         )
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim(),
                     "smpboot: Allowing 4 CPUs, 2 hotplug CPUs"
                 );
@@ -2361,7 +2330,7 @@ mod tests {
                         .ssh_command(
                             r#"dmesg | grep "smp: Brought up" | sed "s/\[\ *[0-9.]*\] //""#
                         )
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim(),
                     "smp: Brought up 1 node, 2 CPUs"
                 );
@@ -2417,7 +2386,7 @@ mod tests {
                 assert!(
                     guest
                         .ssh_command("lscpu | grep \"Address sizes:\" | cut -f 2 -d \":\" | sed \"s# *##\" | cut -f 1 -d \" \"")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u8>()
                         .unwrap_or(max_phys_bits + 1) <= max_phys_bits,
@@ -2532,7 +2501,7 @@ mod tests {
                     .ssh_command(
                         "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
                     )
-                    .unwrap_or_default();
+                    .unwrap();
 
                 resize_zone_command(&api_socket, "mem0", "3G");
                 thread::sleep(std::time::Duration::new(5, 0));
@@ -2551,7 +2520,7 @@ mod tests {
                 guest.wait_vm_boot(None).unwrap();
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -2636,7 +2605,7 @@ mod tests {
                     .ssh_command(
                         "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
                     )
-                    .unwrap_or_default();
+                    .unwrap();
 
                 // Resize every memory zone and check each associated NUMA node
                 // has been assigned the right amount of memory.
@@ -2686,7 +2655,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command(grep_cmd)
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -2731,7 +2700,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("grep -c PCI-MSI /proc/interrupts")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -2823,7 +2792,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("grep -c PCI-MSI /proc/interrupts")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -2869,7 +2838,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("grep -c PCI-MSI /proc/interrupts")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -2931,7 +2900,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep vdc | grep -c 16M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -2942,7 +2911,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep vdc | awk '{print $5}'")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -2953,7 +2922,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -3073,7 +3042,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'timer'")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or(1),
@@ -3082,7 +3051,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'cascade'")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or(1),
@@ -3279,7 +3248,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("ip -o link | wc -l")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -3323,7 +3292,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or(1),
@@ -3370,7 +3339,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -3425,7 +3394,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -3484,7 +3453,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -3728,7 +3697,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command_l2_1("grep -c VFIOTAG /proc/cmdline")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -3740,7 +3709,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command_l2_2("grep -c VFIOTAG /proc/cmdline")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -3751,7 +3720,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -3786,7 +3755,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command_l2_3("grep -c VFIOTAG /proc/cmdline")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -3799,7 +3768,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -3823,7 +3792,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command_l2_1("ls /sys/bus/pci/devices | wc -l")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -3924,20 +3893,20 @@ mod tests {
 
                     let reboot_count = guest
                         .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or(1);
                     let fd_count_1 = get_fd_count(child.id());
 
                     assert_eq!(reboot_count, 0);
-                    guest.ssh_command("sudo reboot").unwrap_or_default();
+                    guest.ssh_command("sudo reboot").unwrap();
 
                     guest.wait_vm_boot(Some(120)).unwrap();
 
                     let reboot_count = guest
                         .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default();
@@ -3945,9 +3914,7 @@ mod tests {
                     assert_eq!(reboot_count, 1);
                     assert_eq!(fd_count_1, fd_count_2);
 
-                    guest
-                        .ssh_command("sudo shutdown -h now")
-                        .unwrap_or_default();
+                    guest.ssh_command("sudo shutdown -h now").unwrap();
                 });
 
                 let _ = child.wait_timeout(std::time::Duration::from_secs(40));
@@ -3991,7 +3958,7 @@ mod tests {
 
                 let reboot_count = guest
                     .ssh_command("journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or(1);
@@ -4004,7 +3971,7 @@ mod tests {
 
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -4290,7 +4257,7 @@ mod tests {
                     assert_eq!(
                         guest
                             .ssh_command("ip -o link | wc -l")
-                            .unwrap_or_default()
+                            .unwrap()
                             .trim()
                             .parse::<u32>()
                             .unwrap_or_default(),
@@ -4310,7 +4277,7 @@ mod tests {
                     assert_eq!(
                         guest
                             .ssh_command("ip -o link | wc -l")
-                            .unwrap_or_default()
+                            .unwrap()
                             .trim()
                             .parse::<u32>()
                             .unwrap_or_default(),
@@ -4326,7 +4293,7 @@ mod tests {
                     assert_eq!(
                         guest
                             .ssh_command("ip -o link | wc -l")
-                            .unwrap_or_default()
+                            .unwrap()
                             .trim()
                             .parse::<u32>()
                             .unwrap_or_default(),
@@ -4400,18 +4367,18 @@ mod tests {
 
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or(1);
 
                 assert_eq!(reboot_count, 0);
-                guest.ssh_command("sudo reboot").unwrap_or_default();
+                guest.ssh_command("sudo reboot").unwrap();
 
                 guest.wait_vm_boot(None).unwrap();
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -4488,7 +4455,7 @@ mod tests {
                     .ssh_command(
                         "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
                     )
-                    .unwrap_or_default();
+                    .unwrap();
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
@@ -4507,18 +4474,18 @@ mod tests {
 
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or(1);
 
                 assert_eq!(reboot_count, 0);
-                guest.ssh_command("sudo reboot").unwrap_or_default();
+                guest.ssh_command("sudo reboot").unwrap();
 
                 guest.wait_vm_boot(None).unwrap();
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -4538,7 +4505,7 @@ mod tests {
                     .ssh_command(
                         "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
                     )
-                    .unwrap_or_default();
+                    .unwrap();
 
                 // Add RAM to the VM
                 let desired_ram = 2048 << 20;
@@ -4551,12 +4518,12 @@ mod tests {
                 let desired_ram = 1024 << 20;
                 resize_command(&api_socket, None, Some(desired_ram), None);
 
-                guest.ssh_command("sudo reboot").unwrap_or_default();
+                guest.ssh_command("sudo reboot").unwrap();
 
                 guest.wait_vm_boot(None).unwrap();
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -4607,7 +4574,7 @@ mod tests {
                     .ssh_command(
                         "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
                     )
-                    .unwrap_or_default();
+                    .unwrap();
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
@@ -4635,7 +4602,7 @@ mod tests {
                 guest.wait_vm_boot(None).unwrap();
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -4693,7 +4660,7 @@ mod tests {
                     .ssh_command(
                         "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
                     )
-                    .unwrap_or_default();
+                    .unwrap();
 
                 // Resize the VM
                 let desired_vcpus = 4;
@@ -4794,7 +4761,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep vdc | grep -c 16M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or(1),
@@ -4820,7 +4787,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep vdc | grep -c 16M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -4838,7 +4805,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep vdc | grep -c 16M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or(1),
@@ -4861,7 +4828,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep vdc | grep -c 16M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -4873,13 +4840,13 @@ mod tests {
                     .is_ok());
 
                 // Reboot the VM.
-                guest.ssh_command("sudo reboot").unwrap_or_default();
+                guest.ssh_command("sudo reboot").unwrap();
 
                 guest.wait_vm_boot(None).unwrap();
 
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -4889,7 +4856,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep vdc | grep -c 16M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -4904,20 +4871,20 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep vdc | grep -c 16M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or(1),
                     0
                 );
 
-                guest.ssh_command("sudo reboot").unwrap_or_default();
+                guest.ssh_command("sudo reboot").unwrap();
 
                 guest.wait_vm_boot(None).unwrap();
 
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -4927,7 +4894,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep vdc | grep -c 16M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or(1),
@@ -4973,7 +4940,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep -c pmem0")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or(1),
@@ -4998,20 +4965,20 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep pmem0 | grep -c 128M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
                     1
                 );
 
-                guest.ssh_command("sudo reboot").unwrap_or_default();
+                guest.ssh_command("sudo reboot").unwrap();
 
                 guest.wait_vm_boot(None).unwrap();
 
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -5021,7 +4988,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep pmem0 | grep -c 128M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -5036,20 +5003,20 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep pmem0 | grep -c 128M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or(1),
                     0
                 );
 
-                guest.ssh_command("sudo reboot").unwrap_or_default();
+                guest.ssh_command("sudo reboot").unwrap();
 
                 guest.wait_vm_boot(None).unwrap();
 
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -5059,7 +5026,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("lsblk | grep pmem0 | grep -c 128M")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or(1),
@@ -5117,7 +5084,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("ip -o link | wc -l")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -5144,20 +5111,20 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("ip -o link | wc -l")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
                     2
                 );
 
-                guest.ssh_command("sudo reboot").unwrap_or_default();
+                guest.ssh_command("sudo reboot").unwrap();
 
                 guest.wait_vm_boot(None).unwrap();
 
                 let reboot_count = guest
                     .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -5168,7 +5135,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("ip -o link | wc -l")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -5487,7 +5454,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("sudo journalctl | grep -c -- \"Watchdog started\"")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -5499,7 +5466,7 @@ mod tests {
 
                 let boot_count = guest
                     .ssh_command("sudo journalctl --list-boots | wc -l")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -5510,7 +5477,7 @@ mod tests {
                 // Check no reboot
                 let boot_count = guest
                     .ssh_command("sudo journalctl --list-boots | wc -l")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -5528,7 +5495,7 @@ mod tests {
                 // Check that watchdog triggered reboot
                 let boot_count = guest
                     .ssh_command("sudo journalctl --list-boots | wc -l")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default();
@@ -5544,7 +5511,7 @@ mod tests {
                     // Check no reboot
                     let boot_count = guest
                         .ssh_command("sudo journalctl --list-boots | wc -l")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default();
@@ -5610,7 +5577,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("ip -o link | wc -l")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim()
                         .parse::<u32>()
                         .unwrap_or_default(),
@@ -5832,7 +5799,7 @@ mod tests {
                 assert_eq!(
                     guest
                         .ssh_command("cpuid -l 0x12 -s 2 | grep 'section size' | cut -d '=' -f 2")
-                        .unwrap_or_default()
+                        .unwrap()
                         .trim(),
                     "0x0000000004000000"
                 );
@@ -5841,7 +5808,7 @@ mod tests {
                 // successfully.
                 assert!(guest
                     .ssh_command("cd /linux-sgx/SampleCode/LocalAttestation/bin/ && sudo ./app")
-                    .unwrap_or_default()
+                    .unwrap()
                     .trim()
                     .contains(
                         "succeed to load enclaves.\nsucceed to \
