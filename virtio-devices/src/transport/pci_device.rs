@@ -30,8 +30,8 @@ use std::cmp;
 use std::io::Write;
 use std::num::Wrapping;
 use std::result;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
+use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -668,9 +668,9 @@ impl VirtioPciDevice {
                         )
                         .expect("Failed to activate device");
                     self.device_activated.store(true, Ordering::SeqCst);
-                    info!("{}: Waiting for barrier", self.id);
+                    info!("Waiting for barrier");
                     self.activate_barrier.wait();
-                    info!("{}: Barrier released", self.id);
+                    info!("Barrier released");
                 }
             }
         }
@@ -1018,7 +1018,6 @@ impl PciDevice for VirtioPciDevice {
 
         // Try and activate the device if the driver status has changed
         if self.needs_activation() {
-            info!("{}: Needs activation; returning barrier", self.id);
             self.activate_evt.write(1).ok();
             return Some(self.activate_barrier.clone());
         }
