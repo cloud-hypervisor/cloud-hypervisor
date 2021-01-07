@@ -5597,7 +5597,7 @@ mod tests {
 
             assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
 
-            thread::sleep(std::time::Duration::new(40, 0));
+            thread::sleep(std::time::Duration::new(60, 0));
             let auth = windows_auth();
             let r = std::panic::catch_unwind(|| {
                 ssh_command_ip_with_auth(
@@ -5610,7 +5610,7 @@ mod tests {
                 .unwrap();
             });
 
-            let _ = child.wait_timeout(std::time::Duration::from_secs(40));
+            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
 
@@ -5655,7 +5655,7 @@ mod tests {
             assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
 
             // Wait to make sure Windows boots up
-            thread::sleep(std::time::Duration::new(20, 0));
+            thread::sleep(std::time::Duration::new(60, 0));
 
             let snapshot_dir = temp_snapshot_dir_path(&tmp_dir);
 
@@ -5670,7 +5670,7 @@ mod tests {
             ));
 
             // Wait to make sure the snapshot is completed
-            thread::sleep(std::time::Duration::new(20, 0));
+            thread::sleep(std::time::Duration::new(30, 0));
 
             let _ = child.kill();
             child.wait().unwrap();
@@ -5688,7 +5688,7 @@ mod tests {
                 .unwrap();
 
             // Wait for the VM to be restored
-            thread::sleep(std::time::Duration::new(10, 0));
+            thread::sleep(std::time::Duration::new(20, 0));
 
             let r = std::panic::catch_unwind(|| {
                 // Resume the VM
@@ -5706,7 +5706,7 @@ mod tests {
                 .unwrap();
             });
 
-            let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
 
