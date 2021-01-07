@@ -641,7 +641,6 @@ mod tests {
         ReadToString(std::io::Error),
         SetReadTimeout(std::io::Error),
         WrongGuestAddr,
-        WrongGuestMsg,
     }
 
     impl std::error::Error for Error {}
@@ -871,7 +870,7 @@ mod tests {
                 }
 
                 match listener.accept() {
-                    Ok((mut stream, addr)) => {
+                    Ok((_, addr)) => {
                         // Make sure the connection is from the expected 'guest_addr'
                         if addr.ip() != std::net::IpAddr::from_str(expected_guest_addr).unwrap() {
                             s = format!(
@@ -881,22 +880,6 @@ mod tests {
                             );
                             return Err(Error::WrongGuestAddr);
                         }
-
-                        // Make sure the right message is to notify the guest VM is booted
-                        let mut data = String::new();
-                        stream
-                            .set_read_timeout(Some(std::time::Duration::new(timeout as u64, 0)))
-                            .map_err(Error::SetReadTimeout)?;
-                        stream
-                            .read_to_string(&mut data)
-                            .map_err(Error::ReadToString)?;
-                        if data != DEFAULT_TCP_LISTENER_MESSAGE {
-                            s = format!(
-                                "Expecting the guest message '{}' while receiving the message '{}'",
-                                DEFAULT_TCP_LISTENER_MESSAGE, data
-                            );
-                            return Err(Error::WrongGuestMsg);
-                        };
 
                         Ok(())
                     }
