@@ -1099,10 +1099,14 @@ impl Vmm {
                         }
                         EpollDispatch::ActivateVirtioDevices => {
                             if let Some(ref vm) = self.vm {
+                                let count = self.activate_evt.read().map_err(Error::EventFdRead)?;
+                                info!(
+                                    "Trying to activate pending virtio devices: count = {}",
+                                    count
+                                );
                                 vm.activate_virtio_devices()
                                     .map_err(Error::ActivateVirtioDevices)?;
                             }
-                            self.activate_evt.read().map_err(Error::EventFdRead)?;
                         }
                         EpollDispatch::Api => {
                             // Consume the event.

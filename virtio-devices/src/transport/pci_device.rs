@@ -673,6 +673,8 @@ impl VirtioPciDevice {
                     info!("{}: Barrier released", self.id);
                 }
             }
+        } else {
+            info!("{}: Device does not need activation", self.id)
         }
     }
 
@@ -1018,8 +1020,12 @@ impl PciDevice for VirtioPciDevice {
 
         // Try and activate the device if the driver status has changed
         if self.needs_activation() {
-            info!("{}: Needs activation; returning barrier", self.id);
+            info!(
+                "{}: Needs activation; writing to activate event fd",
+                self.id
+            );
             self.activate_evt.write(1).ok();
+            info!("{}: Needs activation; returning barrier", self.id);
             return Some(self.activate_barrier.clone());
         }
 
