@@ -5615,9 +5615,7 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        // See #2126
         #[test]
-        #[ignore]
         fn test_windows_guest_snapshot_restore() {
             let tmp_dir = TempDir::new("ch").unwrap();
             let mut workload_path = dirs::home_dir().unwrap();
