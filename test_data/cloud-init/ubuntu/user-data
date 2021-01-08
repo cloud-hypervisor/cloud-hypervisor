@@ -56,6 +56,8 @@ write_files:
         [Service]
         Type=simple
         ExecStart=/usr/bin/cloud-hypervisor-notify-booted.sh
+        Restart=on-failure
+        RestartSec=2
 
         [Install]
         WantedBy=multi-user.target
@@ -65,5 +67,6 @@ write_files:
     permissions: 0755
     content: |
         #!/bin/bash
+        set -e
 
         echo -n "@DEFAULT_TCP_LISTENER_MESSAGE" | nc -w0 @HOST_IP @TCP_LISTENER_PORT
