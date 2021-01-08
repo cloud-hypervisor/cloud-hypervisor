@@ -22,8 +22,7 @@ pipeline{
 			}
 		}
 		stage ('Build') {
-			failFast true
-            parallel {
+            		parallel {
 				stage ('Worker build') {
 					agent { node { label 'groovy' } }
 					stages {
