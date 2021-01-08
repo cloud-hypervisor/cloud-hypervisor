@@ -144,6 +144,21 @@ pipeline{
 								checkout scm
 							}
 						}
+						stage ('Download assets') {
+							steps {
+								sh "mkdir ${env.HOME}/workloads"
+								azureDownload(storageCredentialId: 'ch-image-store',
+											  containerName: 'private-images',
+											  includeFilesPattern: 'OVMF.fd',
+											  downloadType: 'container',
+											  downloadDirLoc: "${env.HOME}/workloads")
+								azureDownload(storageCredentialId: 'ch-image-store',
+											  containerName: 'private-images',
+											  includeFilesPattern: 'windows-server-2019.raw',
+											  downloadType: 'container',
+											  downloadDirLoc: "${env.HOME}/workloads")
+							}
+						}
 						stage ('Run Windows guest integration tests') {
 							options {
 								timeout(time: 1, unit: 'HOURS')
