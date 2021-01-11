@@ -392,34 +392,34 @@ impl VmOps {
 }
 
 impl VmmOps for VmOps {
-    fn guest_mem_write(&self, buf: &[u8], gpa: u64) -> hypervisor::vm::Result<usize> {
+    fn guest_mem_write(&self, gpa: u64, buf: &[u8]) -> hypervisor::vm::Result<usize> {
         self.memory
             .memory()
             .write(buf, GuestAddress(gpa))
             .map_err(|e| HypervisorVmError::GuestMemWrite(e.into()))
     }
 
-    fn guest_mem_read(&self, buf: &mut [u8], gpa: u64) -> hypervisor::vm::Result<usize> {
+    fn guest_mem_read(&self, gpa: u64, buf: &mut [u8]) -> hypervisor::vm::Result<usize> {
         self.memory
             .memory()
             .read(buf, GuestAddress(gpa))
             .map_err(|e| HypervisorVmError::GuestMemRead(e.into()))
     }
 
-    fn mmio_read(&self, addr: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
-        if let Err(e) = self.mmio_bus.read(addr, data) {
+    fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
+        if let Err(e) = self.mmio_bus.read(gpa, data) {
             if let vm_device::BusError::MissingAddressRange = e {
-                warn!("Guest MMIO read to unregistered address 0x{:x}", addr);
+                warn!("Guest MMIO read to unregistered address 0x{:x}", gpa);
             }
         }
         Ok(())
     }
 
-    fn mmio_write(&self, addr: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
-        match self.mmio_bus.write(addr, data) {
+    fn mmio_write(&self, gpa: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
+        match self.mmio_bus.write(gpa, data) {
             Err(e) => {
                 if let vm_device::BusError::MissingAddressRange = e {
-                    warn!("Guest MMIO write to unregistered address 0x{:x}", addr);
+                    warn!("Guest MMIO write to unregistered address 0x{:x}", gpa);
                 }
             }
             Ok(Some(barrier)) => {
@@ -433,26 +433,26 @@ impl VmmOps for VmOps {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn pio_read(&self, addr: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
-        if let Err(e) = self.io_bus.read(addr, data) {
+    fn pio_read(&self, port: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
+        if let Err(e) = self.io_bus.read(port, data) {
             if let vm_device::BusError::MissingAddressRange = e {
-                warn!("Guest PIO read to unregistered address 0x{:x}", addr);
+                warn!("Guest PIO read to unregistered address 0x{:x}", port);
             }
         }
         Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn pio_write(&self, addr: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
-        if addr == DEBUG_IOPORT as u64 && data.len() == 1 {
+    fn pio_write(&self, port: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
+        if port == DEBUG_IOPORT as u64 && data.len() == 1 {
             self.log_debug_ioport(data[0]);
             return Ok(());
         }
 
-        match self.io_bus.write(addr, data) {
+        match self.io_bus.write(port, data) {
             Err(e) => {
                 if let vm_device::BusError::MissingAddressRange = e {
-                    warn!("Guest PIO write to unregistered address 0x{:x}", addr);
+                    warn!("Guest PIO write to unregistered address 0x{:x}", port);
                 }
             }
             Ok(Some(barrier)) => {
