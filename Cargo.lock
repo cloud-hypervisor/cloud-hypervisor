@@ -226,6 +226,7 @@ dependencies = [
  "option_parser",
  "seccomp",
  "serde_json",
+ "signal-hook",
  "ssh2",
  "tempdir",
  "tempfile",

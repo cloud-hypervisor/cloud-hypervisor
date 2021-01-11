@@ -23,11 +23,12 @@ log = { version = "0.4.13", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.22.0" }
 serde_json = "1.0.61"
+signal-hook = "0.3.3"
 thiserror = "1.0"
 vmm = { path = "vmm" }
 vmm-sys-util = "0.7.0"
-wait-timeout = "0.2.0"
 vm-memory = "0.4.0"
+wait-timeout = "0.2.0"
 
 [build-dependencies]
 clap = { version = "2.33.3", features = ["wrap_help"] }
