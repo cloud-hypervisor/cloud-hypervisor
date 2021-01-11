@@ -2222,7 +2222,7 @@ mod tests {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[test]
 pub fn test_vm() {
     use hypervisor::VmExit;

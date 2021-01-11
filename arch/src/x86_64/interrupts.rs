@@ -82,6 +82,7 @@ pub fn set_lint(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
 }
 
 #[cfg(test)]
+#[cfg(feature = "kvm")]
 mod tests {
 
     extern crate rand;
