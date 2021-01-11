@@ -9,7 +9,7 @@ block_util = { path = "../block_util" }
 clap = { version = "2.33.3", features=["wrap_help"] }
 epoll = ">=4.0.1"
 libc = "0.2.81"
-log = "0.4.11"
+log = "0.4.13"
 option_parser = { path = "../option_parser" }
 qcow = { path = "../qcow" }
 vhost_user_backend = { path = "../vhost_user_backend" }

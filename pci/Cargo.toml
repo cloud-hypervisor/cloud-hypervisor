@@ -11,7 +11,7 @@ hypervisor = { path = "../hypervisor" }
 vfio-ioctls = { git = "https://github.com/cloud-hypervisor/vfio-ioctls", branch = "ch" }
 vmm-sys-util = ">=0.3.1"
 libc = "0.2.81"
-log = "0.4.11"
+log = "0.4.13"
 serde = {version = ">=1.0.27", features = ["rc"] }
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
