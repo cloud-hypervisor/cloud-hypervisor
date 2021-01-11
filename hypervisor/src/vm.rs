@@ -238,12 +238,12 @@ pub trait Vm: Send + Sync {
 }
 
 pub trait VmmOps: Send + Sync {
-    fn guest_mem_write(&self, buf: &[u8], gpa: u64) -> Result<usize>;
-    fn guest_mem_read(&self, buf: &mut [u8], gpa: u64) -> Result<usize>;
-    fn mmio_read(&self, addr: u64, data: &mut [u8]) -> Result<()>;
-    fn mmio_write(&self, addr: u64, data: &[u8]) -> Result<()>;
+    fn guest_mem_write(&self, gpa: u64, buf: &[u8]) -> Result<usize>;
+    fn guest_mem_read(&self, gpa: u64, buf: &mut [u8]) -> Result<usize>;
+    fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> Result<()>;
+    fn mmio_write(&self, gpa: u64, data: &[u8]) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
-    fn pio_read(&self, addr: u64, data: &mut [u8]) -> Result<()>;
+    fn pio_read(&self, port: u64, data: &mut [u8]) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
-    fn pio_write(&self, addr: u64, data: &[u8]) -> Result<()>;
+    fn pio_write(&self, port: u64, data: &[u8]) -> Result<()>;
 }
