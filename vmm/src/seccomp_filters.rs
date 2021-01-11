@@ -447,6 +447,8 @@ fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_mprotect),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_nanosleep),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_open),
         allow_syscall(libc::SYS_openat),
         #[cfg(target_arch = "aarch64")]
         allow_syscall(libc::SYS_newfstatat),
