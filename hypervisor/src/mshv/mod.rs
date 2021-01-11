@@ -586,9 +586,11 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
         );
 
         if let Some(vmmops) = &self.vcpu.vmmops {
-            vmmops
-                .mmio_read(gpa, data)
-                .map_err(|e| PlatformError::MemoryReadFailure(e.into()))?;
+            if vmmops.guest_mem_read(gpa, data).is_err() {
+                vmmops
+                    .mmio_read(gpa, data)
+                    .map_err(|e| PlatformError::MemoryReadFailure(e.into()))?;
+            }
         }
 
         Ok(())
@@ -604,9 +606,11 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
         );
 
         if let Some(vmmops) = &self.vcpu.vmmops {
-            vmmops
-                .mmio_write(gpa, data)
-                .map_err(|e| PlatformError::MemoryWriteFailure(e.into()))?;
+            if vmmops.guest_mem_write(gpa, data).is_err() {
+                vmmops
+                    .mmio_write(gpa, data)
+                    .map_err(|e| PlatformError::MemoryWriteFailure(e.into()))?;
+            }
         }
 
         Ok(())
