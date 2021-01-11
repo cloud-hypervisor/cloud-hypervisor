@@ -127,10 +127,10 @@ struct VirtioIommuTopoPciRange {
     reserved: u8,
     length: u16,
     endpoint_start: u32,
-    segment: u16,
+    segment_start: u16,
+    segment_end: u16,
     bdf_start: u16,
     bdf_end: u16,
-    padding: u16,
 }
 
 unsafe impl ByteValued for VirtioIommuTopoPciRange {}
@@ -831,7 +831,8 @@ impl Iommu {
                 type_: VIRTIO_IOMMU_TOPO_PCI_RANGE,
                 length: size_of::<VirtioIommuTopoPciRange>() as u16,
                 endpoint_start: dev_id,
-                segment,
+                segment_start: segment,
+                segment_end: segment,
                 bdf_start: dev_id as u16,
                 bdf_end: dev_id as u16,
                 ..Default::default()
