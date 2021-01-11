@@ -28,8 +28,7 @@ CTR_CLH_CARGO_TARGET="${CTR_CLH_CARGO_BUILT_DIR}/cargo_target"
 CTR_CLH_INTEGRATION_WORKLOADS="/root/workloads"
 
 # Container networking option
-CTR_CLH_NET="host"
-[ $(uname -m) = "aarch64" ] && CTR_CLH_NET="bridge"
+CTR_CLH_NET="bridge"
 
 # Cargo paths
 # Full path to the cargo registry dir on the host. This appears on the host
