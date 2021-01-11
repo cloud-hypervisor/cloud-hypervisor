@@ -3538,7 +3538,7 @@ mod tests {
         // it is being added to the L2 VM through hotplugging mechanism.
         fn test_vfio() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let guest = Guest::new_from_ip_range(&mut focal, "172.17", 0);
+            let guest = Guest::new_from_ip_range(&mut focal, "172.18", 0);
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
