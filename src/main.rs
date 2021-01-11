@@ -4,6 +4,7 @@
 //
 
 extern crate anyhow;
+extern crate signal_hook;
 extern crate vmm;
 extern crate vmm_sys_util;
 
@@ -14,9 +15,14 @@ use clap::{App, Arg, ArgGroup, ArgMatches};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
 use seccomp::SeccompAction;
+use signal_hook::{
+    consts::SIGSYS,
+    iterator::{exfiltrator::WithRawSiginfo, SignalsInfo},
+};
 use std::env;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use thiserror::Error;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
@@ -355,6 +361,31 @@ fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &str) -> Result<(), Err
     } else {
         SeccompAction::Trap
     };
+
+    // See https://github.com/rust-lang/libc/issues/716 why we can't get the details from siginfo_t
+    if seccomp_action == SeccompAction::Trap {
+        thread::Builder::new()
+            .name("seccomp_signal_handler".to_string())
+            .spawn(move || {
+                for si in SignalsInfo::<WithRawSiginfo>::new(&[SIGSYS])
+                    .unwrap()
+                    .forever()
+                {
+                    /* SYS_SECCOMP */
+                    if si.si_code == 1 {
+                        eprint!(
+                            "\n==== seccomp violation ====\n\
+                            Try running with `strace -ff` to identify the cause and open an issue: \
+                            https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new\n"
+                        );
+
+                        signal_hook::low_level::emulate_default_handler(SIGSYS).unwrap();
+                    }
+                }
+            })
+            .unwrap();
+    }
+
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
     let vmm_thread = vmm::start_vmm_thread(
         env!("CARGO_PKG_VERSION").to_string(),
