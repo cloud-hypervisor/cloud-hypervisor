@@ -355,7 +355,7 @@ cmd_tests() {
 	cflags="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
     fi
 
-    if [[ "$unit" = true && $hypervisor = "kvm" ]] ;  then
+    if [[ "$unit" = true  ]] ;  then
 	say "Running unit tests for $target..."
 	$DOCKER_RUNTIME run \
 	       --workdir "$CTR_CLH_ROOT_DIR" \
