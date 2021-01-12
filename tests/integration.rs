@@ -117,6 +117,9 @@ mod tests {
     struct WindowsDiskConfig {
         image_name: String,
         osdisk_path: String,
+        loopback_device: String,
+        windows_snapshot_cow: String,
+        windows_snapshot: String,
     }
 
     impl WindowsDiskConfig {
@@ -124,7 +127,34 @@ mod tests {
             WindowsDiskConfig {
                 image_name,
                 osdisk_path: String::new(),
+                loopback_device: String::new(),
+                windows_snapshot_cow: String::new(),
+                windows_snapshot: String::new(),
             }
+        }
+    }
+
+    impl Drop for WindowsDiskConfig {
+        fn drop(&mut self) {
+            // dmsetup remove windows-snapshot-1
+            std::process::Command::new("dmsetup")
+                .arg("remove")
+                .arg(self.windows_snapshot.as_str())
+                .output()
+                .expect("Expect removing Windows snapshot with 'dmsetup' to succeed");
+
+            // dmsetup remove windows-snapshot-cow-1
+            std::process::Command::new("dmsetup")
+                .arg("remove")
+                .arg(self.windows_snapshot_cow.as_str())
+                .output()
+                .expect("Expect removing Windows snapshot CoW with 'dmsetup' to succeed");
+
+            // losetup -d <loopback_device>
+            std::process::Command::new("losetup")
+                .args(&["-d", self.loopback_device.as_str()])
+                .output()
+                .expect("Expect removing loopback device to succeed");
         }
     }
 
@@ -336,15 +366,89 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut osdisk_base_path = workload_path;
-            osdisk_base_path.push(&self.image_name);
+            let mut osdisk_path = workload_path;
+            osdisk_path.push(&self.image_name);
 
-            let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
+            let osdisk_blk_size = fs::metadata(osdisk_path)
+                .expect("Expect retrieving Windows image metadata")
+                .len()
+                >> 9;
 
-            rate_limited_copy(osdisk_base_path, &osdisk_path)
-                .expect("copying of OS source disk image failed");
+            let snapshot_cow_path =
+                String::from(tmp_dir.path().join("snapshot_cow").to_str().unwrap());
 
-            self.osdisk_path = osdisk_path;
+            // Create and truncate CoW file for device mapper
+            let cow_file_size: u64 = 1 << 30;
+            let cow_file_blk_size = cow_file_size >> 9;
+            let cow_file = std::fs::File::create(snapshot_cow_path.as_str())
+                .expect("Expect creating CoW image to succeed");
+            cow_file
+                .set_len(cow_file_size)
+                .expect("Expect truncating CoW image to succeed");
+
+            // losetup --find --show /tmp/snapshot_cow
+            let loopback_device = std::process::Command::new("losetup")
+                .arg("--find")
+                .arg("--show")
+                .arg(snapshot_cow_path.as_str())
+                .output()
+                .expect("Expect creating loopback device from snapshot CoW image to succeed");
+
+            self.loopback_device = String::from_utf8_lossy(&loopback_device.stdout)
+                .trim()
+                .to_string();
+
+            let random_extension = tmp_dir.path().file_name().unwrap();
+            let windows_snapshot_cow = format!(
+                "windows-snapshot-cow-{}",
+                random_extension.to_str().unwrap()
+            );
+
+            // dmsetup create windows-snapshot-cow-1 --table '0 2097152 linear /dev/loop1 0'
+            std::process::Command::new("dmsetup")
+                .arg("create")
+                .arg(windows_snapshot_cow.as_str())
+                .args(&[
+                    "--table",
+                    format!("0 {} linear {} 0", cow_file_blk_size, self.loopback_device).as_str(),
+                ])
+                .output()
+                .expect("Expect creating Windows snapshot CoW with 'dmsetup' to succeed");
+
+            let windows_snapshot =
+                format!("windows-snapshot-{}", random_extension.to_str().unwrap());
+
+            // dmsetup mknodes
+            std::process::Command::new("dmsetup")
+                .arg("mknodes")
+                .output()
+                .expect("Expect device mapper nodes to be ready");
+
+            // dmsetup create windows-snapshot-1 --table '0 41943040 snapshot /dev/mapper/windows-base /dev/mapper/windows-snapshot-cow-1 P 8'
+            std::process::Command::new("dmsetup")
+                .arg("create")
+                .arg(windows_snapshot.as_str())
+                .args(&[
+                    "--table",
+                    format!(
+                        "0 {} snapshot /dev/mapper/windows-base /dev/mapper/{} P 8",
+                        osdisk_blk_size,
+                        windows_snapshot_cow.as_str()
+                    )
+                    .as_str(),
+                ])
+                .output()
+                .expect("Expect creating Windows snapshot with 'dmsetup' to succeed");
+
+            // dmsetup mknodes
+            std::process::Command::new("dmsetup")
+                .arg("mknodes")
+                .output()
+                .expect("Expect device mapper nodes to be ready");
+
+            self.osdisk_path = format!("/dev/mapper/{}", windows_snapshot);
+            self.windows_snapshot_cow = windows_snapshot_cow.clone();
+            self.windows_snapshot = windows_snapshot.clone();
         }
 
         fn disk(&self, disk_type: DiskType) -> Option<String> {
