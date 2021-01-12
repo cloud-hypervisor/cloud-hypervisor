@@ -96,6 +96,8 @@ mod tests {
     const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom.qcow2";
     #[cfg(target_arch = "x86_64")]
     const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210106-1.qcow2";
+    #[cfg(target_arch = "x86_64")]
+    const WINDOWS_IMAGE_NAME: &str = "windows-server-2019.raw";
 
     const DIRECT_KERNEL_BOOT_CMDLINE: &str =
         "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
@@ -108,6 +110,20 @@ mod tests {
                 image_name,
                 osdisk_path: String::new(),
                 cloudinit_path: String::new(),
+            }
+        }
+    }
+
+    struct WindowsDiskConfig {
+        image_name: String,
+        osdisk_path: String,
+    }
+
+    impl WindowsDiskConfig {
+        fn new(image_name: String) -> Self {
+            WindowsDiskConfig {
+                image_name,
+                osdisk_path: String::new(),
             }
         }
     }
@@ -307,6 +323,34 @@ mod tests {
             match disk_type {
                 DiskType::OperatingSystem => Some(self.osdisk_path.clone()),
                 DiskType::CloudInit => Some(self.cloudinit_path.clone()),
+            }
+        }
+    }
+
+    impl DiskConfig for WindowsDiskConfig {
+        fn prepare_cloudinit(&self, _tmp_dir: &TempDir, _network: &GuestNetworkConfig) -> String {
+            String::new()
+        }
+
+        fn prepare_files(&mut self, tmp_dir: &TempDir, _network: &GuestNetworkConfig) {
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut osdisk_base_path = workload_path;
+            osdisk_base_path.push(&self.image_name);
+
+            let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
+
+            rate_limited_copy(osdisk_base_path, &osdisk_path)
+                .expect("copying of OS source disk image failed");
+
+            self.osdisk_path = osdisk_path;
+        }
+
+        fn disk(&self, disk_type: DiskType) -> Option<String> {
+            match disk_type {
+                DiskType::OperatingSystem => Some(self.osdisk_path.clone()),
+                DiskType::CloudInit => None,
             }
         }
     }
@@ -1171,22 +1215,36 @@ mod tests {
         }
 
         fn default_disks(&mut self) -> &mut Self {
-            self.args(&[
-                "--disk",
-                format!(
-                    "path={}",
-                    self.guest
-                        .disk_config
-                        .disk(DiskType::OperatingSystem)
-                        .unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    self.guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
-            ])
+            if self.guest.disk_config.disk(DiskType::CloudInit).is_some() {
+                self.args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        self.guest
+                            .disk_config
+                            .disk(DiskType::OperatingSystem)
+                            .unwrap()
+                    )
+                    .as_str(),
+                    format!(
+                        "path={}",
+                        self.guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                    )
+                    .as_str(),
+                ])
+            } else {
+                self.args(&[
+                    "--disk",
+                    format!(
+                        "path={}",
+                        self.guest
+                            .disk_config
+                            .disk(DiskType::OperatingSystem)
+                            .unwrap()
+                    )
+                    .as_str(),
+                ])
+            }
         }
 
         fn default_net(&mut self) -> &mut Self {
@@ -5567,6 +5625,9 @@ mod tests {
 
         #[test]
         fn test_windows_guest() {
+            let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut windows);
+
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
@@ -5576,16 +5637,15 @@ mod tests {
             let mut osdisk_path = workload_path;
             osdisk_path.push("windows-server-2019.raw");
 
-            let mut child = Command::new(clh_command("cloud-hypervisor"))
+            let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=4G"])
                 .args(&["--kernel", ovmf_path.to_str().unwrap()])
-                .args(&["--disk", &format!("path={}", osdisk_path.to_str().unwrap())])
+                .default_disks()
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
                 .args(&["--net", "tap="])
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
+                .capture_output()
                 .spawn()
                 .unwrap();
 
@@ -5618,6 +5678,9 @@ mod tests {
 
         #[test]
         fn test_windows_guest_snapshot_restore() {
+            let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut windows);
+
             let tmp_dir = TempDir::new("ch").unwrap();
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -5630,17 +5693,16 @@ mod tests {
 
             let api_socket = temp_api_path(&tmp_dir);
 
-            let mut child = Command::new(clh_command("cloud-hypervisor"))
+            let mut child = GuestCommand::new(&guest)
                 .args(&["--api-socket", &api_socket])
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
                 .args(&["--memory", "size=4G"])
                 .args(&["--kernel", ovmf_path.to_str().unwrap()])
-                .args(&["--disk", &format!("path={}", osdisk_path.to_str().unwrap())])
+                .default_disks()
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
                 .args(&["--net", "tap="])
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
+                .capture_output()
                 .spawn()
                 .unwrap();
 
@@ -5673,14 +5735,13 @@ mod tests {
             child.wait().unwrap();
 
             // Restore the VM from the snapshot
-            let mut child = Command::new(clh_command("cloud-hypervisor"))
+            let mut child = GuestCommand::new(&guest)
                 .args(&["--api-socket", &api_socket])
                 .args(&[
                     "--restore",
                     format!("source_url=file://{}", snapshot_dir).as_str(),
                 ])
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
+                .capture_output()
                 .spawn()
                 .unwrap();
 
