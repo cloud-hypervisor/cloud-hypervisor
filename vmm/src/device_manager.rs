@@ -43,7 +43,7 @@ use devices::gic;
 use devices::ioapic;
 use devices::{
     interrupt_controller, interrupt_controller::InterruptController, legacy::Serial,
-    HotPlugNotificationFlags,
+    AcpiNotificationFlags,
 };
 #[cfg(feature = "kvm")]
 use hypervisor::kvm_ioctls::*;
@@ -2871,7 +2871,7 @@ impl DeviceManager {
 
     pub fn notify_hotplug(
         &self,
-        _notification_type: HotPlugNotificationFlags,
+        _notification_type: AcpiNotificationFlags,
     ) -> DeviceManagerResult<()> {
         #[cfg(feature = "acpi")]
         return self

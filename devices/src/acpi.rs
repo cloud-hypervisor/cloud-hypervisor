@@ -9,7 +9,7 @@ use std::time::Instant;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
-use HotPlugNotificationFlags;
+use AcpiNotificationFlags;
 
 /// A device for handling ACPI shutdown and reboot
 pub struct AcpiShutdownDevice {
@@ -61,7 +61,7 @@ impl BusDevice for AcpiShutdownDevice {
 /// A device for handling ACPI GED event generation
 pub struct AcpiGEDDevice {
     interrupt: Arc<Box<dyn InterruptSourceGroup>>,
-    notification_type: HotPlugNotificationFlags,
+    notification_type: AcpiNotificationFlags,
     ged_irq: u32,
 }
 
@@ -69,14 +69,14 @@ impl AcpiGEDDevice {
     pub fn new(interrupt: Arc<Box<dyn InterruptSourceGroup>>, ged_irq: u32) -> AcpiGEDDevice {
         AcpiGEDDevice {
             interrupt,
-            notification_type: HotPlugNotificationFlags::NO_DEVICES_CHANGED,
+            notification_type: AcpiNotificationFlags::NO_DEVICES_CHANGED,
             ged_irq,
         }
     }
 
     pub fn notify(
         &mut self,
-        notification_type: HotPlugNotificationFlags,
+        notification_type: AcpiNotificationFlags,
     ) -> Result<(), std::io::Error> {
         self.notification_type |= notification_type;
         self.interrupt.trigger(0)
@@ -92,7 +92,7 @@ impl BusDevice for AcpiGEDDevice {
     // Spec has all fields as zero
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         data[0] = self.notification_type.bits();
-        self.notification_type = HotPlugNotificationFlags::NO_DEVICES_CHANGED;
+        self.notification_type = AcpiNotificationFlags::NO_DEVICES_CHANGED;
     }
 }
 

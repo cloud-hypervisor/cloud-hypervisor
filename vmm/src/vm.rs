@@ -42,7 +42,7 @@ use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
 use arch::BootProtocol;
 use arch::EntryPoint;
-use devices::HotPlugNotificationFlags;
+use devices::AcpiNotificationFlags;
 use hypervisor::vm::{HypervisorVmError, VmmOps};
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
@@ -1115,7 +1115,7 @@ impl Vm {
                 self.device_manager
                     .lock()
                     .unwrap()
-                    .notify_hotplug(HotPlugNotificationFlags::CPU_DEVICES_CHANGED)
+                    .notify_hotplug(AcpiNotificationFlags::CPU_DEVICES_CHANGED)
                     .map_err(Error::DeviceManager)?;
             }
             self.config.lock().unwrap().cpus.boot_vcpus = desired_vcpus;
@@ -1143,7 +1143,7 @@ impl Vm {
                         self.device_manager
                             .lock()
                             .unwrap()
-                            .notify_hotplug(HotPlugNotificationFlags::MEMORY_DEVICES_CHANGED)
+                            .notify_hotplug(AcpiNotificationFlags::MEMORY_DEVICES_CHANGED)
                             .map_err(Error::DeviceManager)?;
                     }
                     HotplugMethod::VirtioMem => {}
@@ -1240,7 +1240,7 @@ impl Vm {
         self.device_manager
             .lock()
             .unwrap()
-            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
             .map_err(Error::DeviceManager)?;
 
         Ok(pci_device_info)
@@ -1287,7 +1287,7 @@ impl Vm {
         self.device_manager
             .lock()
             .unwrap()
-            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
             .map_err(Error::DeviceManager)?;
         Ok(())
     }
@@ -1314,7 +1314,7 @@ impl Vm {
         self.device_manager
             .lock()
             .unwrap()
-            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
             .map_err(Error::DeviceManager)?;
 
         Ok(pci_device_info)
@@ -1342,7 +1342,7 @@ impl Vm {
         self.device_manager
             .lock()
             .unwrap()
-            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
             .map_err(Error::DeviceManager)?;
 
         Ok(pci_device_info)
@@ -1370,7 +1370,7 @@ impl Vm {
         self.device_manager
             .lock()
             .unwrap()
-            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
             .map_err(Error::DeviceManager)?;
 
         Ok(pci_device_info)
@@ -1398,7 +1398,7 @@ impl Vm {
         self.device_manager
             .lock()
             .unwrap()
-            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
             .map_err(Error::DeviceManager)?;
 
         Ok(pci_device_info)
@@ -1426,7 +1426,7 @@ impl Vm {
         self.device_manager
             .lock()
             .unwrap()
-            .notify_hotplug(HotPlugNotificationFlags::PCI_DEVICES_CHANGED)
+            .notify_hotplug(AcpiNotificationFlags::PCI_DEVICES_CHANGED)
             .map_err(Error::DeviceManager)?;
 
         Ok(pci_device_info)
