@@ -2576,6 +2576,38 @@ mod tests {
 
         #[test]
         #[cfg(target_arch = "x86_64")]
+        fn test_power_button() {
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+            let mut cmd = GuestCommand::new(&guest);
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            cmd.args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .capture_output()
+                .default_disks()
+                .default_net()
+                .args(&["--api-socket", &api_socket]);
+
+            let child = cmd.spawn().unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot(None).unwrap();
+                assert!(remote_command(&api_socket, "power-button", None));
+            });
+
+            let output = child.wait_with_output().unwrap();
+            assert!(output.status.success());
+            handle_child_output(r, &output);
+        }
+
+        #[test]
+        #[cfg(target_arch = "x86_64")]
         fn test_user_defined_memory_regions() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
