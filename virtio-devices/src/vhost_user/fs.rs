@@ -475,7 +475,7 @@ impl VirtioDevice for Fs {
             get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostFs)
                 .map_err(ActivateError::CreateSeccompFilter)?;
         thread::Builder::new()
-            .name("vhost_fs".to_string())
+            .name(self.id.clone())
             .spawn(move || {
                 if let Err(e) = SeccompFilter::apply(virtio_vhost_fs_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);

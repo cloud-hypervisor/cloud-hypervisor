@@ -216,7 +216,7 @@ impl VirtioDevice for Blk {
         .map_err(ActivateError::VhostUserBlkSetup)?;
 
         let mut epoll_threads = Vec::new();
-        for _ in 0..vu_interrupt_list.len() {
+        for i in 0..vu_interrupt_list.len() {
             let mut interrupt_list_sub: Vec<(Option<EventFd>, Queue)> = Vec::with_capacity(1);
             interrupt_list_sub.push(vu_interrupt_list.remove(0));
 
@@ -255,7 +255,7 @@ impl VirtioDevice for Blk {
                 get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostBlk)
                     .map_err(ActivateError::CreateSeccompFilter)?;
             thread::Builder::new()
-                .name("vhost_blk".to_string())
+                .name(format!("{}_q{}", self.id.clone(), i))
                 .spawn(move || {
                     if let Err(e) = SeccompFilter::apply(virtio_vhost_blk_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);

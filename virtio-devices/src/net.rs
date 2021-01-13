@@ -421,7 +421,7 @@ impl VirtioDevice for Net {
                     get_seccomp_filter(&self.seccomp_action, Thread::VirtioNetCtl)
                         .map_err(ActivateError::CreateSeccompFilter)?;
                 thread::Builder::new()
-                    .name("virtio_net_ctl".to_string())
+                    .name(format!("{}_ctrl", self.id))
                     .spawn(move || {
                         if let Err(e) = SeccompFilter::apply(virtio_net_ctl_seccomp_filter) {
                             error!("Error applying seccomp filter: {:?}", e);
@@ -439,7 +439,7 @@ impl VirtioDevice for Net {
             let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
 
             let mut epoll_threads = Vec::new();
-            for _ in 0..taps.len() {
+            for i in 0..taps.len() {
                 let rx = RxVirtio::new();
                 let tx = TxVirtio::new();
                 let rx_tap_listening = false;
@@ -501,7 +501,7 @@ impl VirtioDevice for Net {
                     get_seccomp_filter(&self.seccomp_action, Thread::VirtioNet)
                         .map_err(ActivateError::CreateSeccompFilter)?;
                 thread::Builder::new()
-                    .name("virtio_net".to_string())
+                    .name(format!("{}_qp{}", self.id.clone(), i))
                     .spawn(move || {
                         if let Err(e) = SeccompFilter::apply(virtio_net_seccomp_filter) {
                             error!("Error applying seccomp filter: {:?}", e);
