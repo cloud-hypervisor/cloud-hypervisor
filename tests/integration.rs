@@ -150,25 +150,11 @@ mod tests {
 
     impl Drop for WindowsDiskConfig {
         fn drop(&mut self) {
-            // dmsetup remove windows-snapshot-1
-            std::process::Command::new("dmsetup")
-                .arg("remove")
-                .arg(self.windows_snapshot.as_str())
-                .output()
-                .expect("Expect removing Windows snapshot with 'dmsetup' to succeed");
-
-            // dmsetup remove windows-snapshot-cow-1
-            std::process::Command::new("dmsetup")
-                .arg("remove")
-                .arg(self.windows_snapshot_cow.as_str())
-                .output()
-                .expect("Expect removing Windows snapshot CoW with 'dmsetup' to succeed");
-
-            // losetup -d <loopback_device>
-            std::process::Command::new("losetup")
-                .args(&["-d", self.loopback_device.as_str()])
-                .output()
-                .expect("Expect removing loopback device to succeed");
+            release_image_snapshot(
+                self.windows_snapshot.as_str(),
+                self.windows_snapshot_cow.as_str(),
+                self.loopback_device.as_str(),
+            );
         }
     }
 
@@ -388,81 +374,13 @@ mod tests {
                 .len()
                 >> 9;
 
-            let snapshot_cow_path =
-                String::from(tmp_dir.path().join("snapshot_cow").to_str().unwrap());
+            let (loopback_device, windows_snapshot_cow, windows_snapshot) =
+                prepare_files_common(tmp_dir, "windows", osdisk_blk_size);
 
-            // Create and truncate CoW file for device mapper
-            let cow_file_size: u64 = 1 << 30;
-            let cow_file_blk_size = cow_file_size >> 9;
-            let cow_file = std::fs::File::create(snapshot_cow_path.as_str())
-                .expect("Expect creating CoW image to succeed");
-            cow_file
-                .set_len(cow_file_size)
-                .expect("Expect truncating CoW image to succeed");
-
-            // losetup --find --show /tmp/snapshot_cow
-            let loopback_device = std::process::Command::new("losetup")
-                .arg("--find")
-                .arg("--show")
-                .arg(snapshot_cow_path.as_str())
-                .output()
-                .expect("Expect creating loopback device from snapshot CoW image to succeed");
-
-            self.loopback_device = String::from_utf8_lossy(&loopback_device.stdout)
-                .trim()
-                .to_string();
-
-            let random_extension = tmp_dir.path().file_name().unwrap();
-            let windows_snapshot_cow = format!(
-                "windows-snapshot-cow-{}",
-                random_extension.to_str().unwrap()
-            );
-
-            // dmsetup create windows-snapshot-cow-1 --table '0 2097152 linear /dev/loop1 0'
-            std::process::Command::new("dmsetup")
-                .arg("create")
-                .arg(windows_snapshot_cow.as_str())
-                .args(&[
-                    "--table",
-                    format!("0 {} linear {} 0", cow_file_blk_size, self.loopback_device).as_str(),
-                ])
-                .output()
-                .expect("Expect creating Windows snapshot CoW with 'dmsetup' to succeed");
-
-            let windows_snapshot =
-                format!("windows-snapshot-{}", random_extension.to_str().unwrap());
-
-            // dmsetup mknodes
-            std::process::Command::new("dmsetup")
-                .arg("mknodes")
-                .output()
-                .expect("Expect device mapper nodes to be ready");
-
-            // dmsetup create windows-snapshot-1 --table '0 41943040 snapshot /dev/mapper/windows-base /dev/mapper/windows-snapshot-cow-1 P 8'
-            std::process::Command::new("dmsetup")
-                .arg("create")
-                .arg(windows_snapshot.as_str())
-                .args(&[
-                    "--table",
-                    format!(
-                        "0 {} snapshot /dev/mapper/windows-base /dev/mapper/{} P 8",
-                        osdisk_blk_size,
-                        windows_snapshot_cow.as_str()
-                    )
-                    .as_str(),
-                ])
-                .output()
-                .expect("Expect creating Windows snapshot with 'dmsetup' to succeed");
-
-            // dmsetup mknodes
-            std::process::Command::new("dmsetup")
-                .arg("mknodes")
-                .output()
-                .expect("Expect device mapper nodes to be ready");
-
+            self.loopback_device = loopback_device;
             self.osdisk_path = format!("/dev/mapper/{}", windows_snapshot);
-            self.windows_snapshot_cow = windows_snapshot_cow.clone();
-            self.windows_snapshot = windows_snapshot.clone();
+            self.windows_snapshot_cow = windows_snapshot_cow;
+            self.windows_snapshot = windows_snapshot;
         }
 
         fn disk(&self, disk_type: DiskType) -> Option<String> {
@@ -471,6 +389,114 @@ mod tests {
                 DiskType::CloudInit => None,
             }
         }
+    }
+
+    fn prepare_files_common(
+        tmp_dir: &TempDir,
+        image_prefix: &str,
+        osdisk_blk_size: u64,
+    ) -> (String, String, String) {
+        let snapshot_cow_path = String::from(tmp_dir.path().join("snapshot_cow").to_str().unwrap());
+
+        // Create and truncate CoW file for device mapper
+        let cow_file_size: u64 = 1 << 30;
+        let cow_file_blk_size = cow_file_size >> 9;
+        let cow_file = std::fs::File::create(snapshot_cow_path.as_str())
+            .expect("Expect creating CoW image to succeed");
+        cow_file
+            .set_len(cow_file_size)
+            .expect("Expect truncating CoW image to succeed");
+
+        // losetup --find --show /tmp/snapshot_cow
+        let loopback_device = std::process::Command::new("losetup")
+            .arg("--find")
+            .arg("--show")
+            .arg(snapshot_cow_path.as_str())
+            .output()
+            .expect("Expect creating loopback device from snapshot CoW image to succeed");
+
+        let loopback_device = String::from_utf8_lossy(&loopback_device.stdout)
+            .trim()
+            .to_string();
+
+        let tmp_suffix = tmp_dir.path().file_name().unwrap();
+        let image_snapshot_cow = format!(
+            "{}-snapshot-cow-{}",
+            image_prefix,
+            tmp_suffix.to_str().unwrap()
+        );
+
+        // dmsetup create image-snapshot-cow-1 --table '0 2097152 linear /dev/loop1 0'
+        std::process::Command::new("dmsetup")
+            .arg("create")
+            .arg(image_snapshot_cow.as_str())
+            .args(&[
+                "--table",
+                format!("0 {} linear {} 0", cow_file_blk_size, loopback_device).as_str(),
+            ])
+            .output()
+            .expect("Expect creating image snapshot CoW with 'dmsetup' to succeed");
+
+        let image_snapshot = format!("{}-snapshot-{}", image_prefix, tmp_suffix.to_str().unwrap());
+
+        dmsetup_mknodes();
+
+        // dmsetup create image-snapshot-1 --table '0 41943040 snapshot /dev/mapper/image-base /dev/mapper/image-snapshot-cow-1 P 8'
+        std::process::Command::new("dmsetup")
+            .arg("create")
+            .arg(image_snapshot.as_str())
+            .args(&[
+                "--table",
+                format!(
+                    "0 {} snapshot /dev/mapper/{}-base /dev/mapper/{} P 8",
+                    osdisk_blk_size,
+                    image_prefix,
+                    image_snapshot_cow.as_str()
+                )
+                .as_str(),
+            ])
+            .output()
+            .expect("Expect creating image snapshot with 'dmsetup' to succeed");
+
+        dmsetup_mknodes();
+
+        (loopback_device, image_snapshot_cow, image_snapshot)
+    }
+
+    fn release_image_snapshot(
+        image_snapshot: &str,
+        image_snapshot_cow: &str,
+        loopback_device: &str,
+    ) {
+        // dmsetup remove image-snapshot-1
+        std::process::Command::new("dmsetup")
+            .arg("remove")
+            .arg(image_snapshot)
+            .output()
+            .expect("Expect removing image snapshot with 'dmsetup' to succeed");
+
+        dmsetup_mknodes();
+
+        // dmsetup remove image-snapshot-cow-1
+        std::process::Command::new("dmsetup")
+            .arg("remove")
+            .arg(image_snapshot_cow)
+            .output()
+            .expect("Expect removing image snapshot CoW with 'dmsetup' to succeed");
+
+        // losetup -d <loopback_device>
+        std::process::Command::new("losetup")
+            .args(&["-d", loopback_device])
+            .output()
+            .expect("Expect removing loopback device to succeed");
+    }
+
+    fn dmsetup_mknodes() {
+        // dmsetup mknodes
+        std::process::Command::new("dmsetup")
+            .arg("mknodes")
+            .output()
+            .expect("Expect device mapper nodes to be ready");
     }
 
     fn prepare_virtiofsd(
