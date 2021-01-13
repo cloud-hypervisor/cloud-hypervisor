@@ -106,6 +106,9 @@ pub enum HttpError {
 
     /// Error setting up migration sender
     VmSendMigration(ApiError),
+
+    /// Error activating power button
+    VmPowerButton(ApiError),
 }
 
 impl From<serde_json::Error> for HttpError {
@@ -210,6 +213,7 @@ lazy_static! {
         r.routes.insert(endpoint!("/vm.delete"), Box::new(VmActionHandler::new(VmAction::Delete)));
         r.routes.insert(endpoint!("/vm.info"), Box::new(VmInfo {}));
         r.routes.insert(endpoint!("/vm.pause"), Box::new(VmActionHandler::new(VmAction::Pause)));
+        r.routes.insert(endpoint!("/vm.power-button"), Box::new(VmActionHandler::new(VmAction::PowerButton)));
         r.routes.insert(endpoint!("/vm.reboot"), Box::new(VmActionHandler::new(VmAction::Reboot)));
         r.routes.insert(endpoint!("/vm.receive-migration"), Box::new(VmActionHandler::new(VmAction::ReceiveMigration(Arc::default()))));
         r.routes.insert(endpoint!("/vm.remove-device"), Box::new(VmActionHandler::new(VmAction::RemoveDevice(Arc::default()))));

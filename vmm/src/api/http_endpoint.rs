@@ -6,9 +6,10 @@
 use crate::api::http::{error_response, EndpointHandler, HttpError};
 use crate::api::{
     vm_add_device, vm_add_disk, vm_add_fs, vm_add_net, vm_add_pmem, vm_add_vsock, vm_boot,
-    vm_counters, vm_create, vm_delete, vm_info, vm_pause, vm_reboot, vm_receive_migration,
-    vm_remove_device, vm_resize, vm_resize_zone, vm_restore, vm_resume, vm_send_migration,
-    vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown, ApiRequest, VmAction, VmConfig,
+    vm_counters, vm_create, vm_delete, vm_info, vm_pause, vm_power_button, vm_reboot,
+    vm_receive_migration, vm_remove_device, vm_resize, vm_resize_zone, vm_restore, vm_resume,
+    vm_send_migration, vm_shutdown, vm_snapshot, vmm_ping, vmm_shutdown, ApiRequest, VmAction,
+    VmConfig,
 };
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use std::sync::mpsc::Sender;
@@ -177,6 +178,9 @@ impl EndpointHandler for VmActionHandler {
                 Reboot => vm_reboot(api_notifier, api_sender).map_err(HttpError::VmReboot),
                 Pause => vm_pause(api_notifier, api_sender).map_err(HttpError::VmPause),
                 Resume => vm_resume(api_notifier, api_sender).map_err(HttpError::VmResume),
+                PowerButton => {
+                    vm_power_button(api_notifier, api_sender).map_err(HttpError::VmPowerButton)
+                }
                 _ => Err(HttpError::BadRequest),
             }
         }

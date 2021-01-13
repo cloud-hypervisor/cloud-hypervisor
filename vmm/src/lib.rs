@@ -677,6 +677,14 @@ impl Vmm {
         }
     }
 
+    fn vm_power_button(&mut self) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            vm.power_button()
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn vm_receive_config<T>(
         &mut self,
         req: &Request,
@@ -1315,6 +1323,14 @@ impl Vmm {
                                         .vm_send_migration(send_migration_data.as_ref().clone())
                                         .map_err(ApiError::VmSendMigration)
                                         .map(|_| ApiResponsePayload::Empty);
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmPowerButton(sender) => {
+                                    let response = self
+                                        .vm_power_button()
+                                        .map_err(ApiError::VmPowerButton)
+                                        .map(|_| ApiResponsePayload::Empty);
+
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                             }
