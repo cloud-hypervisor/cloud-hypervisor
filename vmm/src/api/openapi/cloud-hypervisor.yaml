@@ -134,6 +134,18 @@ paths:
         405:
           description: The VM instance could not reboot because it is not booted.
 
+  /vm.power-button:
+    put:
+      summary: Trigger a power button in the VM
+      operationId: power-buttonVM
+      responses:
+        204:
+          description: Power button successfully triggered in the VM
+        404:
+          description: The button could not be triggered because it is not created yet
+        405:
+          description: The button could not be triggered because it is not booted.
+
   /vm.resize:
     put:
       summary: Resize the VM
