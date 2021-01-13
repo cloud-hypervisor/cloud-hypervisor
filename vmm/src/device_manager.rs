@@ -366,6 +366,9 @@ pub enum DeviceManagerError {
 
     /// Missing virtio-balloon, can't proceed as expected.
     MissingVirtioBalloon,
+
+    /// Failed to do power button notification
+    PowerButtonNotification(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -3176,6 +3179,18 @@ impl DeviceManager {
 
     pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
         self.device_tree.clone()
+    }
+
+    #[cfg(feature = "acpi")]
+    pub fn notify_power_button(&self) -> DeviceManagerResult<()> {
+        return self
+            .ged_notification_device
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .notify(AcpiNotificationFlags::POWER_BUTTON_CHANGED)
+            .map_err(DeviceManagerError::PowerButtonNotification);
     }
 }
 
