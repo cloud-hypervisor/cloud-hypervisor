@@ -3426,6 +3426,15 @@ impl Aml for DeviceManager {
         let s5_sleep_data =
             aml::Name::new("_S5_".into(), &aml::Package::new(vec![&5u8])).to_aml_bytes();
 
+        let power_button_dsdt_data = aml::Device::new(
+            "_SB_.PWRB".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C0C")),
+                &aml::Name::new("_UID".into(), &aml::ZERO),
+            ],
+        )
+        .to_aml_bytes();
+
         let ged_data = self
             .ged_notification_device
             .as_ref()
@@ -3440,6 +3449,7 @@ impl Aml for DeviceManager {
             bytes.extend_from_slice(com1_dsdt_data.as_slice());
         }
         bytes.extend_from_slice(s5_sleep_data.as_slice());
+        bytes.extend_from_slice(power_button_dsdt_data.as_slice());
         bytes.extend_from_slice(ged_data.as_slice());
         bytes
     }
