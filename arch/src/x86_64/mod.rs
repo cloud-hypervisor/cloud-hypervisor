@@ -394,6 +394,60 @@ pub fn configure_vcpu(
         }
     }
 
+    // Copy the TLB/Cache/Prefetch information (CPUID leaf 0x2)
+    cpuid.retain(|c| c.function != 0x2);
+    let leaf = unsafe { x86_64::__cpuid(0x2) };
+    cpuid
+        .push(CpuIdEntry {
+            function: 0x2,
+            eax: leaf.eax,
+            ebx: leaf.ebx,
+            ecx: leaf.ecx,
+            edx: leaf.edx,
+            flags: CPUID_FLAG_VALID_INDEX,
+            ..Default::default()
+        })
+        .map_err(|_| Error::PopulatingCpuid)?;
+
+    // Copy the Deterministic Cache Parameter information (CPUID leaf 0x4)
+    cpuid.retain(|c| c.function != 0x4);
+    let mut subleaf_idx: u32 = 0;
+    loop {
+        // Iterate all sub-leaves for CPUID leave 0x04
+        let leaf = unsafe { std::arch::x86_64::__cpuid_count(0x4, subleaf_idx) };
+
+        // Check if the current sub-leaf contains 'null' Cache Type Field (bits 04-00)
+        if (leaf.eax & 0xf) == 0 {
+            // Set the terminating sub-leaf (w/ 'null' cache type field)
+            cpuid
+                .push(CpuIdEntry {
+                    function: 0x4,
+                    index: subleaf_idx,
+                    eax: 0,
+                    flags: CPUID_FLAG_VALID_INDEX,
+                    ..Default::default()
+                })
+                .map_err(|_| Error::PopulatingCpuid)?;
+
+            break;
+        }
+
+        cpuid
+            .push(CpuIdEntry {
+                function: 0x4,
+                index: subleaf_idx,
+                eax: leaf.eax,
+                ebx: leaf.ebx,
+                ecx: leaf.ecx,
+                edx: leaf.edx,
+                flags: CPUID_FLAG_VALID_INDEX,
+                ..Default::default()
+            })
+            .map_err(|_| Error::PopulatingCpuid)?;
+
+        subleaf_idx += 1;
+    }
+
     // Copy CPU identification string
     for i in 0x8000_0002..=0x8000_0004 {
         cpuid.retain(|c| c.function != i);
@@ -409,6 +463,21 @@ pub fn configure_vcpu(
             })
             .map_err(|_| Error::PopulatingCpuid)?;
     }
+
+    // Copy additional cache related information  (CPUID leaf 0x8000_0006)
+    cpuid.retain(|c| c.function != 0x8000_0006);
+    let leaf = unsafe { x86_64::__cpuid(0x8000_0006) };
+    cpuid
+        .push(CpuIdEntry {
+            function: 0x8000_0006,
+            eax: leaf.eax,
+            ebx: leaf.ebx,
+            ecx: leaf.ecx,
+            edx: leaf.edx,
+            flags: CPUID_FLAG_VALID_INDEX,
+            ..Default::default()
+        })
+        .map_err(|_| Error::PopulatingCpuid)?;
 
     // Set CPU physical bits
     for entry in cpuid.as_mut_slice().iter_mut() {
