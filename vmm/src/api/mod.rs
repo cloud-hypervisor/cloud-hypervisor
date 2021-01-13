@@ -146,6 +146,9 @@ pub enum ApiError {
 
     /// Error starting migration sender
     VmSendMigration(MigratableError),
+
+    /// Error triggering power button
+    VmPowerButton(VmError),
 }
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
@@ -302,6 +305,9 @@ pub enum ApiRequest {
 
     /// Outgoing migration
     VmSendMigration(Arc<VmSendMigrationData>, Sender<ApiResponse>),
+
+    // Trigger power button
+    VmPowerButton(Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -385,6 +391,9 @@ pub enum VmAction {
 
     /// Outgoing migration
     SendMigration(Arc<VmSendMigrationData>),
+
+    /// Power Button for clean shutdown
+    PowerButton,
 }
 
 fn vm_action(
@@ -416,6 +425,7 @@ fn vm_action(
         Snapshot(v) => ApiRequest::VmSnapshot(v, response_sender),
         ReceiveMigration(v) => ApiRequest::VmReceiveMigration(v, response_sender),
         SendMigration(v) => ApiRequest::VmSendMigration(v, response_sender),
+        PowerButton => ApiRequest::VmPowerButton(response_sender),
     };
 
     // Send the VM request.
@@ -457,6 +467,13 @@ pub fn vm_resume(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<
 
 pub fn vm_counters(api_evt: EventFd, api_sender: Sender<ApiRequest>) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::Counters)
+}
+
+pub fn vm_power_button(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+) -> ApiResult<Option<Body>> {
+    vm_action(api_evt, api_sender, VmAction::PowerButton)
 }
 
 pub fn vm_receive_migration(
