@@ -82,6 +82,13 @@ mod tests {
         image_name: String,
     }
 
+    enum UbuntuImageType {
+        Bionic,
+        Focal,
+        FocalQcow,
+        FocalSgx,
+    }
+
     #[cfg(target_arch = "x86_64")]
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-amd64.raw";
     #[cfg(target_arch = "x86_64")]
@@ -105,7 +112,14 @@ mod tests {
     const PIPE_SIZE: i32 = 32 << 20;
 
     impl UbuntuDiskConfig {
-        fn new(image_name: String) -> Self {
+        fn new(image_type: UbuntuImageType) -> Self {
+            let image_name = match image_type {
+                UbuntuImageType::Bionic => BIONIC_IMAGE_NAME.to_string(),
+                UbuntuImageType::Focal => FOCAL_IMAGE_NAME.to_string(),
+                UbuntuImageType::FocalQcow => FOCAL_IMAGE_NAME_QCOW2.to_string(),
+                UbuntuImageType::FocalSgx => FOCAL_SGX_IMAGE_NAME.to_string(),
+            };
+
             UbuntuDiskConfig {
                 image_name,
                 osdisk_path: String::new(),
@@ -1357,7 +1371,7 @@ mod tests {
     }
 
     fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8) {
-        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
         let guest = Guest::new(&mut focal);
         let total_vcpus = threads_per_core * cores_per_package * packages;
         let mut child = GuestCommand::new(&guest)
@@ -1432,7 +1446,7 @@ mod tests {
         prepare_vhost_user_net_daemon: Option<&PrepareNetDaemon>,
         generate_host_mac: bool,
     ) {
-        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
         let guest = Guest::new(&mut focal);
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -1584,7 +1598,7 @@ mod tests {
         direct: bool,
         prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,
     ) {
-        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
         let guest = Guest::new(&mut focal);
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -1738,7 +1752,7 @@ mod tests {
         direct: bool,
         prepare_vhost_user_blk_daemon: Option<&PrepareBlkDaemon>,
     ) {
-        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
         let guest = Guest::new(&mut focal);
 
         let mut workload_path = dirs::home_dir().unwrap();
@@ -1813,7 +1827,7 @@ mod tests {
         prepare_daemon: &dyn Fn(&TempDir, &str, &str) -> (std::process::Child, String),
         hotplug: bool,
     ) {
-        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
         let guest = Guest::new(&mut focal);
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -1998,7 +2012,7 @@ mod tests {
     }
 
     fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
-        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
         let guest = Guest::new(&mut focal);
 
         let mut workload_path = dirs::home_dir().unwrap();
@@ -2084,7 +2098,7 @@ mod tests {
     }
 
     fn _test_virtio_vsock(hotplug: bool) {
-        let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
         let guest = Guest::new(&mut focal);
 
         let mut workload_path = dirs::home_dir().unwrap();
@@ -2195,8 +2209,8 @@ mod tests {
             "mergeable=off"
         };
 
-        let mut focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let mut focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut focal1 = UbuntuDiskConfig::new(UbuntuImageType::Focal);
+        let mut focal2 = UbuntuDiskConfig::new(UbuntuImageType::Focal);
 
         let guest1 = Guest::new(&mut focal1 as &mut dyn DiskConfig);
 
@@ -2365,8 +2379,8 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_simple_launch() {
-            let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut bionic = UbuntuDiskConfig::new(UbuntuImageType::Bionic);
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
 
             vec![
                 &mut bionic as &mut dyn DiskConfig,
@@ -2406,7 +2420,7 @@ mod tests {
 
         #[test]
         fn test_multi_cpu() {
-            let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
+            let mut bionic = UbuntuDiskConfig::new(UbuntuImageType::Bionic);
             let guest = Guest::new(&mut bionic);
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=2,max=4"])
@@ -2476,7 +2490,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_cpu_physical_bits() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let max_phys_bits: u8 = 36;
             let mut child = GuestCommand::new(&guest)
@@ -2514,7 +2528,7 @@ mod tests {
 
         #[test]
         fn test_large_vm() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=48"])
@@ -2546,7 +2560,7 @@ mod tests {
 
         #[test]
         fn test_huge_memory() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
@@ -2577,7 +2591,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_power_button() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut cmd = GuestCommand::new(&guest);
             let api_socket = temp_api_path(&guest.tmp_dir);
@@ -2609,7 +2623,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_user_defined_memory_regions() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -2693,7 +2707,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_guest_numa_nodes() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -2773,7 +2787,7 @@ mod tests {
 
         #[test]
         fn test_pci_msi() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
@@ -2817,7 +2831,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_vmlinux_boot() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -2862,8 +2876,8 @@ mod tests {
         #[test]
         #[cfg(target_arch = "aarch64")]
         fn test_aarch64_pe_boot() {
-            let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut bionic = UbuntuDiskConfig::new(UbuntuImageType::Bionic);
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
 
             vec![
                 &mut bionic as &mut dyn DiskConfig,
@@ -2908,7 +2922,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_pvh_boot() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -2954,7 +2968,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_bzimage_boot() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -2997,8 +3011,8 @@ mod tests {
             handle_child_output(r, &output);
         }
 
-        fn _test_virtio_block(image_name: &str, disable_io_uring: bool) {
-            let mut focal = UbuntuDiskConfig::new(image_name.to_string());
+        fn _test_virtio_block(image_type: UbuntuImageType, disable_io_uring: bool) {
+            let mut focal = UbuntuDiskConfig::new(image_type);
             let guest = Guest::new(&mut focal);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -3083,17 +3097,17 @@ mod tests {
 
         #[test]
         fn test_virtio_block() {
-            _test_virtio_block(FOCAL_IMAGE_NAME, false)
+            _test_virtio_block(UbuntuImageType::Focal, false)
         }
 
         #[test]
         fn test_virtio_block_disable_io_uring() {
-            _test_virtio_block(FOCAL_IMAGE_NAME, true)
+            _test_virtio_block(UbuntuImageType::Focal, true)
         }
 
         #[test]
         fn test_virtio_block_qcow2() {
-            _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false)
+            _test_virtio_block(UbuntuImageType::FocalQcow, false)
         }
 
         #[test]
@@ -3169,7 +3183,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_split_irqchip() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
 
             let mut child = GuestCommand::new(&guest)
@@ -3295,7 +3309,7 @@ mod tests {
 
         #[test]
         fn test_boot_from_virtio_pmem() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -3352,7 +3366,7 @@ mod tests {
 
         #[test]
         fn test_multiple_network_interfaces() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -3407,7 +3421,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_serial_off() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -3450,7 +3464,7 @@ mod tests {
 
         #[test]
         fn test_serial_null() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
@@ -3503,7 +3517,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_serial_tty() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -3561,7 +3575,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_serial_file() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
 
             let serial_path = guest.tmp_dir.path().join("/tmp/serial-output");
@@ -3627,7 +3641,7 @@ mod tests {
 
         #[test]
         fn test_virtio_console() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -3676,7 +3690,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_console_file() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
 
             let console_path = guest.tmp_dir.path().join("/tmp/console-output");
@@ -3732,7 +3746,7 @@ mod tests {
         // The third device is added to validate that hotplug works correctly since
         // it is being added to the L2 VM through hotplugging mechanism.
         fn test_vfio() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new_from_ip_range(&mut focal, "172.18", 0);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -3968,7 +3982,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_vmlinux_boot_noacpi() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -4005,8 +4019,8 @@ mod tests {
 
         #[test]
         fn test_reboot() {
-            let mut bionic = UbuntuDiskConfig::new(BIONIC_IMAGE_NAME.to_string());
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut bionic = UbuntuDiskConfig::new(UbuntuImageType::Bionic);
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
 
             vec![
                 &mut bionic as &mut dyn DiskConfig,
@@ -4076,7 +4090,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_bzimage_reboot() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -4152,7 +4166,7 @@ mod tests {
         // Start cloud-hypervisor with no VM parameters, only the API server running.
         // From the API: Create a VM, boot it and check that it looks as expected.
         fn test_api_create_boot() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -4204,7 +4218,7 @@ mod tests {
         // Then we pause the VM, check that it's no longer available.
         // Finally we resume the VM and check that it's available.
         fn test_api_pause_resume() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -4286,7 +4300,7 @@ mod tests {
         // interface attached to the virtual IOMMU since this is the one used to
         // send all commands through SSH.
         fn test_virtio_iommu() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -4371,7 +4385,7 @@ mod tests {
         // properly probed first, then removing it, and adding it again by doing a
         // rescan.
         fn test_pci_bar_reprogramming() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
@@ -4466,7 +4480,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_cpu_hotplug() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
@@ -4567,7 +4581,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_memory_hotplug() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
@@ -4684,7 +4698,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_virtio_mem() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
@@ -4772,7 +4786,7 @@ mod tests {
         #[cfg(target_arch = "x86_64")]
         // Test both vCPU and memory resizing together
         fn test_resize() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
             let mut workload_path = dirs::home_dir().unwrap();
@@ -4832,7 +4846,7 @@ mod tests {
 
         #[test]
         fn test_memory_overhead() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -4874,7 +4888,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_disk_hotplug() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -5053,7 +5067,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_pmem_hotplug() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -5185,7 +5199,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_net_hotplug() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
 
             let mut workload_path = dirs::home_dir().unwrap();
@@ -5293,7 +5307,7 @@ mod tests {
 
         #[test]
         fn test_initramfs() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -5344,7 +5358,7 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_snapshot_restore() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -5513,7 +5527,7 @@ mod tests {
 
         #[test]
         fn test_counters() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -5554,7 +5568,7 @@ mod tests {
 
         #[test]
         fn test_watchdog() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -5669,7 +5683,7 @@ mod tests {
 
         #[test]
         fn test_tap_from_fd() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
             let guest = Guest::new(&mut focal);
 
             std::process::Command::new("bash")
@@ -5914,7 +5928,7 @@ mod tests {
 
         #[test]
         fn test_sgx() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_SGX_IMAGE_NAME.to_string());
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::FocalSgx);
             let guest = Guest::new(&mut focal);
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
