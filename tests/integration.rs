@@ -23,7 +23,7 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::os::unix::io::AsRawFd;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::process::{Child, Command, Stdio};
     use std::str::FromStr;
     use std::string::String;
@@ -77,15 +77,21 @@ mod tests {
     }
 
     struct UbuntuDiskConfig {
+        image_type: UbuntuImageType,
         osdisk_path: String,
         cloudinit_path: String,
         image_name: String,
+        loopback_device: String,
+        image_snapshot_cow: String,
+        image_snapshot: String,
     }
 
     enum UbuntuImageType {
         Bionic,
         Focal,
         FocalQcow,
+        FocalRawFile,
+        #[cfg(target_arch = "x86_64")]
         FocalSgx,
     }
 
@@ -115,16 +121,44 @@ mod tests {
         fn new(image_type: UbuntuImageType) -> Self {
             let image_name = match image_type {
                 UbuntuImageType::Bionic => BIONIC_IMAGE_NAME.to_string(),
-                UbuntuImageType::Focal => FOCAL_IMAGE_NAME.to_string(),
+                UbuntuImageType::Focal | UbuntuImageType::FocalRawFile => {
+                    FOCAL_IMAGE_NAME.to_string()
+                }
                 UbuntuImageType::FocalQcow => FOCAL_IMAGE_NAME_QCOW2.to_string(),
+                #[cfg(target_arch = "x86_64")]
                 UbuntuImageType::FocalSgx => FOCAL_SGX_IMAGE_NAME.to_string(),
             };
 
             UbuntuDiskConfig {
+                image_type,
                 image_name,
                 osdisk_path: String::new(),
                 cloudinit_path: String::new(),
+                loopback_device: String::new(),
+                image_snapshot_cow: String::new(),
+                image_snapshot: String::new(),
             }
+        }
+
+        fn image_prefix(&self) -> &str {
+            match self.image_type {
+                UbuntuImageType::Bionic => "bionic",
+                UbuntuImageType::Focal => "focal",
+                UbuntuImageType::FocalQcow => "focal-qcow",
+                UbuntuImageType::FocalRawFile => "focal-raw-file",
+                #[cfg(target_arch = "x86_64")]
+                UbuntuImageType::FocalSgx => "focal-sgx",
+            }
+        }
+    }
+
+    impl Drop for UbuntuDiskConfig {
+        fn drop(&mut self) {
+            release_image_snapshot(
+                self.image_snapshot.as_str(),
+                self.image_snapshot_cow.as_str(),
+                self.loopback_device.as_str(),
+            );
         }
     }
 
@@ -196,46 +230,6 @@ mod tests {
         panic!("Test failed")
     }
 
-    fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<u64> {
-        for i in 0..10 {
-            let free_bytes = unsafe {
-                let mut stats = std::mem::MaybeUninit::zeroed();
-                let fs_name = std::ffi::CString::new("/tmp").unwrap();
-                libc::statvfs(fs_name.as_ptr(), stats.as_mut_ptr());
-
-                let free_blocks = stats.assume_init().f_bfree;
-                let block_size = stats.assume_init().f_bsize;
-
-                free_blocks * block_size
-            };
-
-            // Make sure there is at least 6 GiB of space
-            if free_bytes < 6 << 30 {
-                eprintln!(
-                    "Not enough space on disk ({}). Attempt {} of 10. Sleeping.",
-                    free_bytes, i
-                );
-                thread::sleep(std::time::Duration::new(60, 0));
-                continue;
-            }
-
-            match fs::copy(&from, &to) {
-                Err(e) => {
-                    if let Some(errno) = e.raw_os_error() {
-                        if errno == libc::ENOSPC {
-                            eprintln!("Copy returned ENOSPC. Attempt {} of 10. Sleeping.", i);
-                            thread::sleep(std::time::Duration::new(60, 0));
-                            continue;
-                        }
-                    }
-                    return Err(e);
-                }
-                Ok(i) => return Ok(i),
-            }
-        }
-        Err(io::Error::last_os_error())
-    }
-
     fn clh_command(cmd: &str) -> String {
         env::var("BUILD_TARGET").map_or(
             format!("target/x86_64-unknown-linux-gnu/release/{}", cmd),
@@ -260,7 +254,7 @@ mod tests {
                 .join("ubuntu");
 
             vec!["meta-data"].iter().for_each(|x| {
-                rate_limited_copy(source_file_dir.join(x), cloud_init_directory.join(x))
+                fs::copy(source_file_dir.join(x), cloud_init_directory.join(x))
                     .expect("Expect copying cloud-init meta-data to succeed");
             });
 
@@ -336,17 +330,41 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut osdisk_base_path = workload_path;
-            osdisk_base_path.push(&self.image_name);
+            match self.image_type {
+                UbuntuImageType::FocalQcow | UbuntuImageType::FocalRawFile => {
+                    let mut osdisk_base_path = workload_path;
+                    osdisk_base_path.push(&self.image_name);
 
-            let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
+                    let osdisk_path =
+                        String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
+
+                    fs::copy(osdisk_base_path, &osdisk_path)
+                        .expect("copying of OS source disk image failed");
+
+                    self.osdisk_path = osdisk_path;
+                }
+                _ => {
+                    let mut osdisk_path = workload_path;
+                    osdisk_path.push(&self.image_name);
+
+                    let osdisk_blk_size = fs::metadata(&osdisk_path)
+                        .expect("Expect retrieving OS image metadata")
+                        .len()
+                        >> 9;
+
+                    let (loopback_device, image_snapshot_cow, image_snapshot) =
+                        prepare_files_common(tmp_dir, self.image_prefix(), osdisk_blk_size);
+
+                    self.loopback_device = loopback_device;
+                    self.osdisk_path = format!("/dev/mapper/{}", image_snapshot);
+                    self.image_snapshot_cow = image_snapshot_cow;
+                    self.image_snapshot = image_snapshot;
+                }
+            }
+
             let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
 
-            rate_limited_copy(osdisk_base_path, &osdisk_path)
-                .expect("copying of OS source disk image failed");
-
             self.cloudinit_path = cloudinit_path;
-            self.osdisk_path = osdisk_path;
         }
 
         fn disk(&self, disk_type: DiskType) -> Option<String> {
@@ -3335,10 +3353,8 @@ mod tests {
 
         #[test]
         fn test_boot_from_virtio_pmem() {
-            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::Focal);
+            let mut focal = UbuntuDiskConfig::new(UbuntuImageType::FocalRawFile);
             let guest = Guest::new(&mut focal);
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
 
             let kernel_path = direct_kernel_boot_path().unwrap();
 
@@ -3789,7 +3805,7 @@ mod tests {
 
             // We copy our cloudinit into the vfio mount point, for the nested
             // cloud-hypervisor guest to use.
-            rate_limited_copy(
+            fs::copy(
                 &guest.disk_config.disk(DiskType::CloudInit).unwrap(),
                 &cloud_init_vfio_base_path,
             )

@@ -209,6 +209,21 @@ TARGET_CC="musl-gcc"
 CFLAGS="-I /usr/include/aarch64-linux-musl/ -idirafter /usr/include/"
 fi
 
+# Use device mapper to create a snapshot of the Ubuntu Bionic image
+bionic_img_blk_size=$(du -b -B 512 /root/workloads/bionic-server-cloudimg-arm64.raw | awk '{print $1;}')
+bionic_loop_device=$(losetup --find --show --read-only /root/workloads/bionic-server-cloudimg-arm64.raw)
+dmsetup create bionic-base --table "0 $bionic_img_blk_size linear $bionic_loop_device 0"
+dmsetup mknodes
+dmsetup create bionic-snapshot-base --table "0 $bionic_img_blk_size snapshot-origin /dev/mapper/bionic-base"
+dmsetup mknodes
+# Use device mapper to create a snapshot of the Ubuntu Focal image
+focal_img_blk_size=$(du -b -B 512 /root/workloads/focal-server-cloudimg-arm64-custom.raw | awk '{print $1;}')
+focal_loop_device=$(losetup --find --show --read-only /root/workloads/focal-server-cloudimg-arm64-custom.raw)
+dmsetup create focal-base --table "0 $focal_img_blk_size linear $focal_loop_device 0"
+dmsetup mknodes
+dmsetup create focal-snapshot-base --table "0 $focal_img_blk_size snapshot-origin /dev/mapper/focal-base"
+dmsetup mknodes
+
 cargo build --all --release  $features_build --target $BUILD_TARGET
 strip target/$BUILD_TARGET/release/cloud-hypervisor
 strip target/$BUILD_TARGET/release/vhost_user_net
@@ -223,6 +238,16 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 export RUST_BACKTRACE=1
 time cargo test $features_test "tests::parallel::"
 RES=$?
+
+# Cleanup device mapper images
+dmsetup remove -f focal-snapshot-base
+dmsetup mknodes
+dmsetup remove -f focal-base
+losetup -d $focal_loop_device
+dmsetup remove -f bionic-snapshot-base
+dmsetup mknodes
+dmsetup remove -f bionic-base
+losetup -d $bionic_loop_device
 
 # Tear vhost_user_net test network down
 sudo ip link del vunet-tap0
