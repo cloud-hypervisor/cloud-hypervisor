@@ -35,7 +35,9 @@ export RUST_BACKTRACE=1
 time cargo test $features_test "tests::windows::" -- --test-threads=1
 RES=$?
 
-dmsetup remove_all -f
-losetup -D
+dmsetup remove -f windows-snapshot-base
+dmsetup mknodes
+dmsetup remove -f windows-base
+losetup -d $loop_device
 
 exit $RES
