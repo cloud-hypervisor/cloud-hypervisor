@@ -234,6 +234,12 @@ pub enum Error {
 
     /// Cannot activate virtio devices
     ActivateVirtioDevices(device_manager::DeviceManagerError),
+
+    /// Power button not supported
+    PowerButtonNotSupported,
+
+    /// Error triggering power button
+    PowerButton(device_manager::DeviceManagerError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1761,6 +1767,18 @@ impl Vm {
             .unwrap()
             .activate_virtio_devices()
             .map_err(Error::ActivateVirtioDevices)
+    }
+
+    pub fn power_button(&self) -> Result<()> {
+        #[cfg(feature = "acpi")]
+        return self
+            .device_manager
+            .lock()
+            .unwrap()
+            .notify_power_button()
+            .map_err(Error::PowerButton);
+        #[cfg(not(feature = "acpi"))]
+        Err(Error::PowerButtonNotSupported)
     }
 }
 
