@@ -470,7 +470,7 @@ impl VirtioDevice for Console {
             get_seccomp_filter(&self.seccomp_action, Thread::VirtioConsole)
                 .map_err(ActivateError::CreateSeccompFilter)?;
         thread::Builder::new()
-            .name("virtio_console".to_string())
+            .name(self.id.clone())
             .spawn(move || {
                 if let Err(e) = SeccompFilter::apply(virtio_console_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);

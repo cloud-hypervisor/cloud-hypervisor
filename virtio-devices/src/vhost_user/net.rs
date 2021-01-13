@@ -244,7 +244,7 @@ impl VirtioDevice for Net {
                 get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostNetCtl)
                     .map_err(ActivateError::CreateSeccompFilter)?;
             thread::Builder::new()
-                .name("vhost_net_ctl".to_string())
+                .name(format!("{}_ctrl", self.id))
                 .spawn(move || {
                     if let Err(e) = SeccompFilter::apply(virtio_vhost_net_ctl_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);
@@ -270,7 +270,7 @@ impl VirtioDevice for Net {
         .map_err(ActivateError::VhostUserNetSetup)?;
 
         let mut epoll_threads = Vec::new();
-        for _ in 0..vu_interrupt_list.len() / 2 {
+        for i in 0..vu_interrupt_list.len() / 2 {
             let mut interrupt_list_sub: Vec<(Option<EventFd>, Queue)> = Vec::with_capacity(2);
             interrupt_list_sub.push(vu_interrupt_list.remove(0));
             interrupt_list_sub.push(vu_interrupt_list.remove(0));
@@ -310,7 +310,7 @@ impl VirtioDevice for Net {
                 get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostNet)
                     .map_err(ActivateError::CreateSeccompFilter)?;
             thread::Builder::new()
-                .name("vhost_net".to_string())
+                .name(format!("{}_qp{}", self.id.clone(), i))
                 .spawn(move || {
                     if let Err(e) = SeccompFilter::apply(virtio_vhost_net_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);

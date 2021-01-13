@@ -561,7 +561,7 @@ impl VirtioDevice for BlockIoUring {
                     .map_err(ActivateError::CreateSeccompFilter)?;
 
             thread::Builder::new()
-                .name("virtio_blk_io_uring".to_string())
+                .name(format!("{}_q{}", self.id.clone(), i))
                 .spawn(move || {
                     if let Err(e) = SeccompFilter::apply(virtio_blk_io_uring_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);

@@ -339,7 +339,7 @@ impl VirtioDevice for Watchdog {
             get_seccomp_filter(&self.seccomp_action, Thread::VirtioWatchdog)
                 .map_err(ActivateError::CreateSeccompFilter)?;
         thread::Builder::new()
-            .name("virtio_watchdog".to_string())
+            .name(self.id.clone())
             .spawn(move || {
                 if let Err(e) = SeccompFilter::apply(virtio_watchdog_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);

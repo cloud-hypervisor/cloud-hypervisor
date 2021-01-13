@@ -446,7 +446,7 @@ impl VirtioDevice for Balloon {
             get_seccomp_filter(&self.seccomp_action, Thread::VirtioBalloon)
                 .map_err(ActivateError::CreateSeccompFilter)?;
         thread::Builder::new()
-            .name("virtio_balloon".to_string())
+            .name(self.id.clone())
             .spawn(move || {
                 if let Err(e) = SeccompFilter::apply(virtio_balloon_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);

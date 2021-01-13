@@ -444,7 +444,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         self.update_writeback();
 
         let mut epoll_threads = Vec::new();
-        for _ in 0..self.common.queue_sizes.len() {
+        for i in 0..self.common.queue_sizes.len() {
             let queue_evt = queue_evts.remove(0);
             let kill_evt = self
                 .common
@@ -492,7 +492,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                     .map_err(ActivateError::CreateSeccompFilter)?;
 
             thread::Builder::new()
-                .name("virtio_blk".to_string())
+                .name(format!("{}_q{}", self.id.clone(), i))
                 .spawn(move || {
                     if let Err(e) = SeccompFilter::apply(virtio_blk_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);

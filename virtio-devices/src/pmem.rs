@@ -413,7 +413,7 @@ impl VirtioDevice for Pmem {
                 get_seccomp_filter(&self.seccomp_action, Thread::VirtioPmem)
                     .map_err(ActivateError::CreateSeccompFilter)?;
             thread::Builder::new()
-                .name("virtio_pmem".to_string())
+                .name(self.id.clone())
                 .spawn(move || {
                     if let Err(e) = SeccompFilter::apply(virtio_pmem_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);

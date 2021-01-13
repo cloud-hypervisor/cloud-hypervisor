@@ -934,7 +934,7 @@ impl VirtioDevice for Iommu {
             get_seccomp_filter(&self.seccomp_action, Thread::VirtioIommu)
                 .map_err(ActivateError::CreateSeccompFilter)?;
         thread::Builder::new()
-            .name("virtio_iommu".to_string())
+            .name(self.id.clone())
             .spawn(move || {
                 if let Err(e) = SeccompFilter::apply(virtio_iommu_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);

@@ -860,7 +860,7 @@ impl VirtioDevice for Mem {
         let virtio_mem_seccomp_filter = get_seccomp_filter(&self.seccomp_action, Thread::VirtioMem)
             .map_err(ActivateError::CreateSeccompFilter)?;
         thread::Builder::new()
-            .name("virtio_mem".to_string())
+            .name(self.id.clone())
             .spawn(move || {
                 if let Err(e) = SeccompFilter::apply(virtio_mem_seccomp_filter) {
                     error!("Error applying seccomp filter: {:?}", e);
