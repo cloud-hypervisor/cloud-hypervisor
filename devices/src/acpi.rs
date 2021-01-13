@@ -142,6 +142,14 @@ impl Aml for AcpiGEDDevice {
                             &aml::Equal::new(&aml::Local(1), &4usize),
                             vec![&aml::MethodCall::new("\\_SB_.PCI0.PCNT".into(), vec![])],
                         ),
+                        &aml::And::new(&aml::Local(1), &aml::Local(0), &8usize),
+                        &aml::If::new(
+                            &aml::Equal::new(&aml::Local(1), &8usize),
+                            vec![&aml::Notify::new(
+                                &aml::Path::new("\\_SB_.PWRB"),
+                                &0x80usize,
+                            )],
+                        ),
                     ],
                 ),
             ],
