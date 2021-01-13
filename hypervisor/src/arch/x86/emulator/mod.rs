@@ -662,10 +662,12 @@ mod mock_vmm {
             let _ = env_logger::try_init();
             let cs_reg = segment_from_gdt(gdt_entry(0xc09b, 0, 0xffffffff), 1);
             let ds_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 2);
+            let es_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 3);
             let mut initial_state = CpuState::default();
             initial_state.set_ip(ip);
             initial_state.write_segment(Register::CS, cs_reg).unwrap();
             initial_state.write_segment(Register::DS, ds_reg).unwrap();
+            initial_state.write_segment(Register::ES, es_reg).unwrap();
             for (reg, value) in regs {
                 initial_state.write_reg(reg, value).unwrap();
             }
