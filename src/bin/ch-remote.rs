@@ -464,6 +464,7 @@ fn main() {
         .subcommand(SubCommand::with_name("counters").about("Counters from the VM"))
         .subcommand(SubCommand::with_name("pause").about("Pause the VM"))
         .subcommand(SubCommand::with_name("reboot").about("Reboot the VM"))
+        .subcommand(SubCommand::with_name("power-button").about("Trigger a power button in the VM"))
         .subcommand(
             SubCommand::with_name("resize")
                 .about("Resize the VM")
