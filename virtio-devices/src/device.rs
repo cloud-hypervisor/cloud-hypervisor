@@ -299,6 +299,14 @@ impl VirtioCommon {
             let _ = kill_evt.write(1);
         }
 
+        if let Some(mut threads) = self.epoll_threads.take() {
+            for t in threads.drain(..) {
+                if let Err(e) = t.join() {
+                    error!("Error joining thread: {:?}", e);
+                }
+            }
+        }
+
         // Return the interrupt and queue EventFDs
         Some((
             self.interrupt_cb.take().unwrap(),
