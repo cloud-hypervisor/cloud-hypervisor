@@ -104,6 +104,10 @@ pub enum Error {
     #[error("Error handling VM stdin: {0:?}")]
     Stdin(VmError),
 
+    /// Cannot handle the VM pty stream
+    #[error("Error handling VM pty: {0:?}")]
+    Pty(VmError),
+
     /// Cannot reboot the VM
     #[error("Error rebooting VM: {0:?}")]
     VmReboot(VmError),
@@ -145,6 +149,7 @@ pub enum EpollDispatch {
     Stdin,
     Api,
     ActivateVirtioDevices,
+    Pty,
 }
 
 pub struct EpollContext {
@@ -354,6 +359,16 @@ impl Vmm {
                     self.hypervisor.clone(),
                     activate_evt,
                 )?;
+                if let Some(ref serial_pty) = vm.serial_pty() {
+                    self.epoll
+                        .add_event(serial_pty, EpollDispatch::Pty)
+                        .map_err(VmError::EventfdError)?;
+                };
+                if let Some(ref console_pty) = vm.console_pty() {
+                    self.epoll
+                        .add_event(console_pty, EpollDispatch::Pty)
+                        .map_err(VmError::EventfdError)?;
+                };
                 self.vm = Some(vm);
             }
         }
@@ -1114,6 +1129,11 @@ impl Vmm {
                                 );
                                 vm.activate_virtio_devices()
                                     .map_err(Error::ActivateVirtioDevices)?;
+                            }
+                        }
+                        EpollDispatch::Pty => {
+                            if let Some(ref vm) = self.vm {
+                                vm.handle_pty().map_err(Error::Pty)?;
                             }
                         }
                         EpollDispatch::Api => {

@@ -758,7 +758,7 @@ components:
           type: string
         mode:
           type: string
-          enum: [Off, Tty, File, Null]
+          enum: [Off, Pty, Tty, File, Null]
         iommu:
           type: boolean
           default: false

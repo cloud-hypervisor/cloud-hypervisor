@@ -47,6 +47,8 @@ const SYS_IO_URING_REGISTER: i64 = 427;
 const TCGETS: u64 = 0x5401;
 const TCSETS: u64 = 0x5402;
 const TIOCGWINSZ: u64 = 0x5413;
+const TIOCSPTLCK: u64 = 0x4004_5431;
+const TIOCGTPEER: u64 = 0x5441;
 const FIOCLEX: u64 = 0x5451;
 const FIONBIO: u64 = 0x5421;
 
@@ -155,6 +157,8 @@ fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, TCSETS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TCGETS)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TIOCGWINSZ)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, TIOCSPTLCK)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, TIOCGTPEER)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TUNGETFEATURES)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TUNGETIFF)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, TUNSETIFF)?],
