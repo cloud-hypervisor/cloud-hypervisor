@@ -130,6 +130,9 @@ pub enum Error {
     /// Write to the console failed.
     Console(vmm_sys_util::errno::Error),
 
+    /// Write to the pty console failed.
+    PtyConsole(io::Error),
+
     /// Cannot setup terminal in raw mode.
     SetTerminalRaw(vmm_sys_util::errno::Error),
 
@@ -1073,6 +1076,14 @@ impl Vm {
         Ok(())
     }
 
+    pub fn serial_pty(&self) -> Option<File> {
+        self.device_manager.lock().unwrap().serial_pty()
+    }
+
+    pub fn console_pty(&self) -> Option<File> {
+        self.device_manager.lock().unwrap().console_pty()
+    }
+
     pub fn shutdown(&mut self) -> Result<()> {
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         let new_state = VmState::Shutdown;
@@ -1553,6 +1564,33 @@ impl Vm {
 
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         *state = new_state;
+
+        Ok(())
+    }
+
+    pub fn handle_pty(&self) -> Result<()> {
+        // Could be a little dangerous, picks up a lock on device_manager
+        // and goes into a blocking read. If the epoll loops starts to be
+        // services by multiple threads likely need to revist this.
+        let dm = self.device_manager.lock().unwrap();
+        let mut out = [0u8; 64];
+        if let Some(mut pty) = dm.serial_pty() {
+            let count = pty.read(&mut out).map_err(Error::PtyConsole)?;
+            let console = dm.console();
+            if console.input_enabled() {
+                console
+                    .queue_input_bytes_serial(&out[..count])
+                    .map_err(Error::Console)?;
+            }
+        };
+        let count = match dm.console_pty() {
+            Some(mut pty) => pty.read(&mut out).map_err(Error::PtyConsole)?,
+            None => return Ok(()),
+        };
+        let console = dm.console();
+        if console.input_enabled() {
+            console.queue_input_bytes_console(&out[..count])
+        }
 
         Ok(())
     }

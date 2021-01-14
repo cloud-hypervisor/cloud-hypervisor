@@ -1170,6 +1170,7 @@ impl PmemConfig {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum ConsoleOutputMode {
     Off,
+    Pty,
     Tty,
     File,
     Null,
@@ -1177,7 +1178,7 @@ pub enum ConsoleOutputMode {
 
 impl ConsoleOutputMode {
     pub fn input_enabled(&self) -> bool {
-        matches!(self, ConsoleOutputMode::Tty)
+        matches!(self, ConsoleOutputMode::Tty | ConsoleOutputMode::Pty)
     }
 }
 
@@ -1199,6 +1200,7 @@ impl ConsoleConfig {
         let mut parser = OptionParser::new();
         parser
             .add_valueless("off")
+            .add_valueless("pty")
             .add_valueless("tty")
             .add_valueless("null")
             .add("file")
@@ -1209,6 +1211,8 @@ impl ConsoleConfig {
         let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
 
         if parser.is_set("off") {
+        } else if parser.is_set("pty") {
+            mode = ConsoleOutputMode::Pty
         } else if parser.is_set("tty") {
             mode = ConsoleOutputMode::Tty
         } else if parser.is_set("null") {
@@ -2152,6 +2156,14 @@ mod tests {
             ConsoleConfig::parse("off")?,
             ConsoleConfig {
                 mode: ConsoleOutputMode::Off,
+                iommu: false,
+                file: None,
+            }
+        );
+        assert_eq!(
+            ConsoleConfig::parse("pty")?,
+            ConsoleConfig {
+                mode: ConsoleOutputMode::Pty,
                 iommu: false,
                 file: None,
             }

@@ -27,7 +27,8 @@ mod tests {
     use std::process::{Child, Command, Stdio};
     use std::str::FromStr;
     use std::string::String;
-    use std::sync::Mutex;
+    use std::sync::mpsc::Receiver;
+    use std::sync::{mpsc, Mutex};
     use std::thread;
     use tempdir::TempDir;
     use tempfile::NamedTempFile;
@@ -2363,6 +2364,37 @@ mod tests {
         }
     }
 
+    fn pty_read(mut pty: std::fs::File) -> Receiver<String> {
+        let (tx, rx) = mpsc::channel::<String>();
+        thread::spawn(move || loop {
+            thread::sleep(std::time::Duration::new(1, 0));
+            let mut buf = [0; 512];
+            match pty.read(&mut buf) {
+                Ok(_) => {
+                    let output = std::str::from_utf8(&buf).unwrap().to_string();
+                    match tx.send(output) {
+                        Ok(_) => (),
+                        Err(_) => break,
+                    }
+                }
+                Err(_) => break,
+            }
+        });
+        rx
+    }
+
+    fn get_pty_path(api_socket: &str, pty_type: &str) -> PathBuf {
+        let (cmd_success, cmd_output) = remote_command_w_output(&api_socket, "info", None);
+        assert!(cmd_success);
+        let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
+        assert_eq!("Pty", info["config"][pty_type]["mode"]);
+        PathBuf::from(
+            info["config"][pty_type]["file"]
+                .as_str()
+                .expect("Missing pty path"),
+        )
+    }
+
     mod parallel {
         use crate::tests::*;
 
@@ -3651,6 +3683,94 @@ mod tests {
                 assert!(buf.contains("cloud login:"));
             });
 
+            handle_child_output(r, &output);
+        }
+
+        #[test]
+        #[cfg(target_arch = "x86_64")]
+        fn test_pty_interaction() {
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+            let api_socket = temp_api_path(&guest.tmp_dir);
+            let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned() + " console=ttyS0";
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&[
+                    "--kernel",
+                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                ])
+                .args(&["--cmdline", &cmdline])
+                .default_disks()
+                .default_net()
+                .args(&["--serial", "null"])
+                .args(&["--console", "pty"])
+                .args(&["--api-socket", &api_socket])
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot(None).unwrap();
+                // Get pty fd for console
+                let console_path = get_pty_path(&api_socket, "console");
+                // TODO: Get serial pty test working
+                let mut cf = std::fs::OpenOptions::new()
+                    .write(true)
+                    .read(true)
+                    .open(console_path)
+                    .unwrap();
+
+                // Some dumb sleeps but we don't want to write
+                // before the console is up and we don't want
+                // to try and write the next line before the
+                // login process is ready.
+                thread::sleep(std::time::Duration::new(5, 0));
+                assert_eq!(cf.write(b"cloud\n").unwrap(), 6);
+                thread::sleep(std::time::Duration::new(2, 0));
+                assert_eq!(cf.write(b"cloud123\n").unwrap(), 9);
+                thread::sleep(std::time::Duration::new(2, 0));
+                assert_eq!(cf.write(b"echo test_pty_console\n").unwrap(), 22);
+                thread::sleep(std::time::Duration::new(2, 0));
+
+                // read pty and ensure they have a login shell
+                // some fairly hacky workarounds to avoid looping
+                // forever in case the channel is blocked getting output
+                let ptyc = pty_read(cf);
+                let mut empty = 0;
+                let mut prev = String::new();
+                loop {
+                    thread::sleep(std::time::Duration::new(2, 0));
+                    match ptyc.try_recv() {
+                        Ok(line) => {
+                            empty = 0;
+                            prev = prev + &line;
+                            if prev.contains("test_pty_console") {
+                                break;
+                            }
+                        }
+                        Err(mpsc::TryRecvError::Empty) => {
+                            empty += 1;
+                            if empty > 5 {
+                                panic!("No login on pty");
+                            }
+                        }
+                        _ => panic!("No login on pty"),
+                    }
+                }
+
+                guest.ssh_command("sudo shutdown -h now").unwrap();
+            });
+
+            let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+
+            let r = std::panic::catch_unwind(|| {
+                // Check that the cloud-hypervisor binary actually terminated
+                assert_eq!(output.status.success(), true);
+            });
             handle_child_output(r, &output);
         }
 

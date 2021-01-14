@@ -57,8 +57,10 @@ use hypervisor::kvm_ioctls::*;
 use hypervisor::CpuState;
 #[cfg(feature = "mshv")]
 use hypervisor::IoEventAddress;
-use libc::TIOCGWINSZ;
-use libc::{MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE};
+use libc::{
+    isatty, tcgetattr, tcsetattr, termios, ECHO, ICANON, ISIG, MAP_NORESERVE, MAP_PRIVATE,
+    MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW, TIOCGWINSZ,
+};
 use pci::{
     DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
     VfioPciDevice,
@@ -66,12 +68,14 @@ use pci::{
 use seccomp::SeccompAction;
 use std::any::Any;
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
+use std::convert::TryInto;
+use std::fs::{read_link, File, OpenOptions};
 use std::io::{self, sink, stdout, Seek, SeekFrom};
+use std::mem::zeroed;
 use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
-#[cfg(feature = "kvm")]
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 #[cfg(feature = "kvm")]
@@ -227,6 +231,18 @@ pub enum DeviceManagerError {
 
     /// Error creating console output file
     ConsoleOutputFileOpen(io::Error),
+
+    /// Error creating serial pty
+    SerialPtyOpen(io::Error),
+
+    /// Error creating console pty
+    ConsolePtyOpen(io::Error),
+
+    /// Error setting pty raw mode
+    SetPtyRaw(vmm_sys_util::errno::Error),
+
+    /// Error getting pty peer
+    GetPtyPeer(vmm_sys_util::errno::Error),
 
     /// Cannot create a VFIO device
     VfioCreate(vfio_ioctls::VfioError),
@@ -406,6 +422,56 @@ pub fn get_win_size() -> (u16, u16) {
     (ws.cols, ws.rows)
 }
 
+const TIOCSPTLCK: libc::c_int = 0x4004_5431;
+const TIOCGTPEER: libc::c_int = 0x5441;
+
+pub fn create_pty() -> io::Result<(File, File, PathBuf)> {
+    // Try to use /dev/pts/ptmx first then fall back to /dev/ptmx
+    // This is done to try and use the devpts filesystem that
+    // could be available for use in the process's namespace first.
+    // Ideally these are all the same file though but different
+    // kernels could have things setup differently.
+    // See https://www.kernel.org/doc/Documentation/filesystems/devpts.txt
+    // for further details.
+    let main = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOCTTY)
+        .open("/dev/pts/ptmx")
+    {
+        Ok(f) => f,
+        _ => OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NOCTTY)
+            .open("/dev/ptmx")?,
+    };
+    let mut unlock: libc::c_ulong = 0;
+    unsafe {
+        libc::ioctl(
+            main.as_raw_fd(),
+            TIOCSPTLCK.try_into().unwrap(),
+            &mut unlock,
+        )
+    };
+
+    let sub_fd = unsafe {
+        libc::ioctl(
+            main.as_raw_fd(),
+            TIOCGTPEER.try_into().unwrap(),
+            libc::O_NOCTTY | libc::O_RDWR,
+        )
+    };
+    if sub_fd == -1 {
+        return vmm_sys_util::errno::errno_result().map_err(|e| e.into());
+    }
+
+    let proc_path = PathBuf::from(format!("/proc/self/fd/{}", sub_fd));
+    let path = read_link(proc_path)?;
+
+    Ok((main, unsafe { File::from_raw_fd(sub_fd) }, path))
+}
+
 enum ConsoleInput {
     Serial,
     VirtioConsole,
@@ -422,28 +488,37 @@ impl Console {
     pub fn queue_input_bytes(&self, out: &[u8]) -> vmm_sys_util::errno::Result<()> {
         match self.input {
             Some(ConsoleInput::Serial) => {
-                if self.serial.is_some() {
-                    self.serial
-                        .as_ref()
-                        .unwrap()
-                        .lock()
-                        .expect("Failed to process stdin event due to poisoned lock")
-                        .queue_input_bytes(out)?;
-                }
+                self.queue_input_bytes_serial(out)?;
             }
 
             Some(ConsoleInput::VirtioConsole) => {
-                if self.virtio_console_input.is_some() {
-                    self.virtio_console_input
-                        .as_ref()
-                        .unwrap()
-                        .queue_input_bytes(out);
-                }
+                self.queue_input_bytes_console(out);
             }
             None => {}
         }
 
         Ok(())
+    }
+
+    pub fn queue_input_bytes_serial(&self, out: &[u8]) -> vmm_sys_util::errno::Result<()> {
+        if self.serial.is_some() {
+            self.serial
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .queue_input_bytes(out)?;
+        }
+        Ok(())
+    }
+
+    pub fn queue_input_bytes_console(&self, out: &[u8]) {
+        if self.virtio_console_input.is_some() {
+            self.virtio_console_input
+                .as_ref()
+                .unwrap()
+                .queue_input_bytes(out);
+        }
     }
 
     pub fn update_console_size(&self, cols: u16, rows: u16) {
@@ -712,6 +787,12 @@ pub struct DeviceManager {
     // Console abstraction
     console: Arc<Console>,
 
+    // console PTY
+    console_pty: Option<Arc<Mutex<(File, File)>>>,
+
+    // serial PTY
+    serial_pty: Option<Arc<Mutex<(File, File)>>>,
+
     // Interrupt controller
     #[cfg(target_arch = "x86_64")]
     interrupt_controller: Option<Arc<Mutex<ioapic::Ioapic>>>,
@@ -881,6 +962,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::EventFd)?,
             #[cfg(feature = "acpi")]
             acpi_address,
+            serial_pty: None,
+            console_pty: None,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -896,6 +979,18 @@ impl DeviceManager {
             .map_err(DeviceManagerError::BusError)?;
 
         Ok(device_manager)
+    }
+
+    pub fn serial_pty(&self) -> Option<File> {
+        self.serial_pty
+            .as_ref()
+            .map(|pty| pty.lock().unwrap().0.try_clone().unwrap())
+    }
+
+    pub fn console_pty(&self) -> Option<File> {
+        self.console_pty
+            .as_ref()
+            .map(|pty| pty.lock().unwrap().0.try_clone().unwrap())
     }
 
     pub fn create_devices(&mut self) -> DeviceManagerResult<()> {
@@ -1488,6 +1583,37 @@ impl DeviceManager {
         Ok(serial)
     }
 
+    fn modify_mode<F: FnOnce(&mut termios)>(
+        &self,
+        fd: RawFd,
+        f: F,
+    ) -> vmm_sys_util::errno::Result<()> {
+        // Safe because we check the return value of isatty.
+        if unsafe { isatty(fd) } != 1 {
+            return Ok(());
+        }
+
+        // The following pair are safe because termios gets totally overwritten by tcgetattr and we
+        // check the return result.
+        let mut termios: termios = unsafe { zeroed() };
+        let ret = unsafe { tcgetattr(fd, &mut termios as *mut _) };
+        if ret < 0 {
+            return vmm_sys_util::errno::errno_result();
+        }
+        f(&mut termios);
+        // Safe because the syscall will only read the extent of termios and we check the return result.
+        let ret = unsafe { tcsetattr(fd, TCSANOW, &termios as *const _) };
+        if ret < 0 {
+            return vmm_sys_util::errno::errno_result();
+        }
+
+        Ok(())
+    }
+
+    fn set_raw_mode(&self, f: &mut File) -> vmm_sys_util::errno::Result<()> {
+        self.modify_mode(f.as_raw_fd(), |t| t.c_lflag &= !(ICANON | ECHO | ISIG))
+    }
+
     fn add_console_device(
         &mut self,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
@@ -1499,6 +1625,18 @@ impl DeviceManager {
                 File::create(serial_config.file.as_ref().unwrap())
                     .map_err(DeviceManagerError::SerialOutputFileOpen)?,
             )),
+            ConsoleOutputMode::Pty => {
+                let (main, mut sub, path) =
+                    create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
+                self.set_raw_mode(&mut sub)
+                    .map_err(DeviceManagerError::SetPtyRaw)?;
+                self.serial_pty = Some(Arc::new(Mutex::new((
+                    main.try_clone().unwrap(),
+                    sub.try_clone().unwrap(),
+                ))));
+                self.config.lock().unwrap().serial.file = Some(path);
+                Some(Box::new(main.try_clone().unwrap()))
+            }
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
             ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
         };
@@ -1515,6 +1653,18 @@ impl DeviceManager {
                 File::create(console_config.file.as_ref().unwrap())
                     .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
             )),
+            ConsoleOutputMode::Pty => {
+                let (main, mut sub, path) =
+                    create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
+                self.set_raw_mode(&mut sub)
+                    .map_err(DeviceManagerError::SetPtyRaw)?;
+                self.console_pty = Some(Arc::new(Mutex::new((
+                    main.try_clone().unwrap(),
+                    sub.try_clone().unwrap(),
+                ))));
+                self.config.lock().unwrap().console.file = Some(path);
+                Some(Box::new(main.try_clone().unwrap()))
+            }
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
             ConsoleOutputMode::Null => Some(Box::new(sink())),
             ConsoleOutputMode::Off => None,
