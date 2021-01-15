@@ -223,16 +223,19 @@ TARGET_CC="musl-gcc"
 CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
+mkdir /tmp/images
 # Use device mapper to create a snapshot of the Ubuntu Bionic image
-bionic_img_blk_size=$(du -b -B 512 /root/workloads/bionic-server-cloudimg-amd64.raw | awk '{print $1;}')
-bionic_loop_device=$(losetup --find --show --read-only /root/workloads/bionic-server-cloudimg-amd64.raw)
+cp /root/workloads/bionic-server-cloudimg-amd64.raw /tmp/images/
+bionic_img_blk_size=$(du -b -B 512 /tmp/images/bionic-server-cloudimg-amd64.raw | awk '{print $1;}')
+bionic_loop_device=$(losetup --find --show --read-only /tmp/images/bionic-server-cloudimg-amd64.raw)
 dmsetup create bionic-base --table "0 $bionic_img_blk_size linear $bionic_loop_device 0"
 dmsetup mknodes
 dmsetup create bionic-snapshot-base --table "0 $bionic_img_blk_size snapshot-origin /dev/mapper/bionic-base"
 dmsetup mknodes
 # Use device mapper to create a snapshot of the Ubuntu Focal image
-focal_img_blk_size=$(du -b -B 512 /root/workloads/focal-server-cloudimg-amd64-custom-20210106-1.raw | awk '{print $1;}')
-focal_loop_device=$(losetup --find --show --read-only /root/workloads/focal-server-cloudimg-amd64-custom-20210106-1.raw)
+cp /root/workloads/focal-server-cloudimg-amd64-custom-20210106-1.raw /tmp/images/
+focal_img_blk_size=$(du -b -B 512 /tmp/images/focal-server-cloudimg-amd64-custom-20210106-1.raw | awk '{print $1;}')
+focal_loop_device=$(losetup --find --show --read-only /tmp/images/focal-server-cloudimg-amd64-custom-20210106-1.raw)
 dmsetup create focal-base --table "0 $focal_img_blk_size linear $focal_loop_device 0"
 dmsetup mknodes
 dmsetup create focal-snapshot-base --table "0 $focal_img_blk_size snapshot-origin /dev/mapper/focal-base"

@@ -5,7 +5,7 @@ source $HOME/.cargo/env
 source $(dirname "$0")/test-util.sh
 
 process_common_args "$@"
-# For now these values are deafult for kvm
+# For now these values are default for kvm
 features_build=""
 features_test="--features integration_tests"
 
