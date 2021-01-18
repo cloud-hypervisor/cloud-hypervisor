@@ -14,7 +14,7 @@ extern crate vmm_sys_util;
 use super::VirtioPciCommonConfig;
 use crate::transport::VirtioTransport;
 use crate::{
-    Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
+    ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
     DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
     DEVICE_INIT, VIRTIO_MSI_NO_VECTOR,
 };
@@ -515,14 +515,6 @@ impl VirtioPciDevice {
         self.common_config.driver_status == DEVICE_INIT as u8
     }
 
-    fn are_queues_valid(&self) -> bool {
-        if let Some(mem) = self.memory.as_ref() {
-            self.queues.iter().all(|q| q.is_valid(&mem.memory()))
-        } else {
-            false
-        }
-    }
-
     // This function is used by the caller to provide the expected base address
     // for the virtio-pci configuration BAR.
     pub fn set_config_bar_addr(&mut self, bar_addr: u64) {
@@ -653,35 +645,40 @@ impl VirtioPciDevice {
         self.device.clone()
     }
 
+    fn activate(&mut self) -> ActivateResult {
+        if let Some(virtio_interrupt) = self.virtio_interrupt.take() {
+            if self.memory.is_some() {
+                let mem = self.memory.as_ref().unwrap().clone();
+                let mut device = self.device.lock().unwrap();
+                let mut queue_evts = Vec::new();
+                let mut queues = self.queues.clone();
+                queues.retain(|q| q.ready);
+                for (i, queue) in queues.iter().enumerate() {
+                    queue_evts.push(self.queue_evts[i].try_clone().unwrap());
+                    if !queue.is_valid(&mem.memory()) {
+                        error!("Queue {} is not valid", i);
+                    }
+                }
+                return device.activate(mem, virtio_interrupt, queues, queue_evts);
+            }
+        }
+        Ok(())
+    }
+
     pub fn maybe_activate(&mut self) {
         if self.needs_activation() {
-            if let Some(virtio_interrupt) = self.virtio_interrupt.take() {
-                if self.memory.is_some() {
-                    let mem = self.memory.as_ref().unwrap().clone();
-                    let mut device = self.device.lock().unwrap();
-                    let mut queue_evts = Vec::new();
-                    let queues = self.queues.clone();
-                    for i in 0..queues.len() {
-                        queue_evts.push(self.queue_evts[i].try_clone().unwrap());
-                    }
-                    device
-                        .activate(mem, virtio_interrupt, queues, queue_evts)
-                        .expect("Failed to activate device");
-                    self.device_activated.store(true, Ordering::SeqCst);
-                    info!("{}: Waiting for barrier", self.id);
-                    self.activate_barrier.wait();
-                    info!("{}: Barrier released", self.id);
-                }
-            }
+            self.activate().expect("Failed to activate device");
+            self.device_activated.store(true, Ordering::SeqCst);
+            info!("{}: Waiting for barrier", self.id);
+            self.activate_barrier.wait();
+            info!("{}: Barrier released", self.id);
         } else {
             info!("{}: Device does not need activation", self.id)
         }
     }
 
     fn needs_activation(&self) -> bool {
-        !self.device_activated.load(Ordering::SeqCst)
-            && self.is_driver_ready()
-            && self.are_queues_valid()
+        !self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready()
     }
 }
 
@@ -1152,29 +1149,10 @@ impl Snapshottable for VirtioPciDevice {
             // Then we can activate the device, as we know at this point that
             // the virtqueues are in the right state and the device is ready
             // to be activated, which will spawn each virtio worker thread.
-            if self.device_activated.load(Ordering::SeqCst)
-                && self.is_driver_ready()
-                && self.are_queues_valid()
-            {
-                if let Some(virtio_interrupt) = self.virtio_interrupt.take() {
-                    if self.memory.is_some() {
-                        let mem = self.memory.as_ref().unwrap().clone();
-                        let mut device = self.device.lock().unwrap();
-                        let mut queue_evts = Vec::new();
-                        let queues = self.queues.clone();
-                        for i in 0..queues.len() {
-                            queue_evts.push(self.queue_evts[i].try_clone().unwrap());
-                        }
-                        device
-                            .activate(mem, virtio_interrupt, queues, queue_evts)
-                            .map_err(|e| {
-                                MigratableError::Restore(anyhow!(
-                                    "Failed activating the device: {:?}",
-                                    e
-                                ))
-                            })?;
-                    }
-                }
+            if self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready() {
+                self.activate().map_err(|e| {
+                    MigratableError::Restore(anyhow!("Failed activating the device: {:?}", e))
+                })?;
             }
 
             return Ok(());

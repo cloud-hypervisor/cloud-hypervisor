@@ -250,10 +250,10 @@ impl VirtioCommon {
         queue_evts: &[EventFd],
         interrupt_cb: &Arc<dyn VirtioInterrupt>,
     ) -> ActivateResult {
-        if queues.len() != self.queue_sizes.len() || queue_evts.len() != self.queue_sizes.len() {
+        if queues.len() != queue_evts.len() {
             error!(
-                "Cannot perform activate. Expected {} queue(s), got {}",
-                self.queue_sizes.len(),
+                "Cannot activate: length mismatch: queue_evts={} queues={}",
+                queue_evts.len(),
                 queues.len()
             );
             return Err(ActivateError::BadActivate);
