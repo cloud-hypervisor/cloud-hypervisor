@@ -659,13 +659,13 @@ impl VirtioPciDevice {
                 if self.memory.is_some() {
                     let mem = self.memory.as_ref().unwrap().clone();
                     let mut device = self.device.lock().unwrap();
+                    let mut queue_evts = Vec::new();
+                    let queues = self.queues.clone();
+                    for i in 0..queues.len() {
+                        queue_evts.push(self.queue_evts[i].try_clone().unwrap());
+                    }
                     device
-                        .activate(
-                            mem,
-                            virtio_interrupt,
-                            self.queues.clone(),
-                            self.queue_evts.split_off(0),
-                        )
+                        .activate(mem, virtio_interrupt, queues, queue_evts)
                         .expect("Failed to activate device");
                     self.device_activated.store(true, Ordering::SeqCst);
                     info!("{}: Waiting for barrier", self.id);
@@ -1032,11 +1032,9 @@ impl PciDevice for VirtioPciDevice {
         // Device has been reset by the driver
         if self.device_activated.load(Ordering::SeqCst) && self.is_driver_init() {
             let mut device = self.device.lock().unwrap();
-            if let Some((virtio_interrupt, mut queue_evts)) = device.reset() {
-                // Upon reset the device returns its interrupt EventFD and it's queue EventFDs
+            if let Some(virtio_interrupt) = device.reset() {
+                // Upon reset the device returns its interrupt EventFD
                 self.virtio_interrupt = Some(virtio_interrupt);
-                self.queue_evts.append(&mut queue_evts);
-
                 self.device_activated.store(false, Ordering::SeqCst);
 
                 // Reset queue readiness (changes queue_enable), queue sizes
@@ -1162,13 +1160,13 @@ impl Snapshottable for VirtioPciDevice {
                     if self.memory.is_some() {
                         let mem = self.memory.as_ref().unwrap().clone();
                         let mut device = self.device.lock().unwrap();
+                        let mut queue_evts = Vec::new();
+                        let queues = self.queues.clone();
+                        for i in 0..queues.len() {
+                            queue_evts.push(self.queue_evts[i].try_clone().unwrap());
+                        }
                         device
-                            .activate(
-                                mem,
-                                virtio_interrupt,
-                                self.queues.clone(),
-                                self.queue_evts.split_off(0),
-                            )
+                            .activate(mem, virtio_interrupt, queues, queue_evts)
                             .map_err(|e| {
                                 MigratableError::Restore(anyhow!(
                                     "Failed activating the device: {:?}",

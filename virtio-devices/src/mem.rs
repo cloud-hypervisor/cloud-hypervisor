@@ -878,7 +878,7 @@ impl VirtioDevice for Mem {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
         self.common.reset()
     }
 }
