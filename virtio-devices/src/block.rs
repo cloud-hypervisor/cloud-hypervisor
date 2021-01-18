@@ -444,8 +444,9 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
         self.update_writeback();
 
         let mut epoll_threads = Vec::new();
-        for i in 0..self.common.queue_sizes.len() {
+        for i in 0..queues.len() {
             let queue_evt = queue_evts.remove(0);
+            let queue = queues.remove(0);
             let kill_evt = self
                 .common
                 .kill_evt
@@ -467,7 +468,7 @@ impl<T: 'static + DiskFile + Send> VirtioDevice for Block<T> {
                     ActivateError::BadActivate
                 })?;
             let mut handler = BlockEpollHandler {
-                queue: queues.remove(0),
+                queue,
                 mem: mem.clone(),
                 disk_image: self.disk_image.clone(),
                 disk_nsectors: self.disk_nsectors,

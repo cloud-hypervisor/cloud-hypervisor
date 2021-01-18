@@ -493,9 +493,10 @@ impl VirtioDevice for BlockIoUring {
         self.update_writeback();
 
         let mut epoll_threads = Vec::new();
-        for i in 0..self.common.queue_sizes.len() {
-            let queue_size = self.common.queue_sizes[i] as usize;
+        for i in 0..queues.len() {
             let queue_evt = queue_evts.remove(0);
+            let queue = queues.remove(0);
+            let queue_size = queue.size;
             let io_uring = IoUring::new(queue_size as u32).map_err(|e| {
                 error!("failed to create io_uring instance: {}", e);
                 ActivateError::BadActivate
@@ -522,7 +523,7 @@ impl VirtioDevice for BlockIoUring {
                 })?;
 
             let mut handler = BlockIoUringEpollHandler {
-                queue: queues.remove(0),
+                queue,
                 mem: mem.clone(),
                 disk_image_fd: self.disk_image.as_raw_fd(),
                 disk_nsectors: self.disk_nsectors,
@@ -538,7 +539,7 @@ impl VirtioDevice for BlockIoUring {
                     error!("failed to create io_uring eventfd: {}", e);
                     ActivateError::BadActivate
                 })?,
-                request_list: HashMap::with_capacity(queue_size),
+                request_list: HashMap::with_capacity(queue_size.into()),
             };
 
             let paused = self.common.paused.clone();
