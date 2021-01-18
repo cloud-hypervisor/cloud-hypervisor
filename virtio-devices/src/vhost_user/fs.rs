@@ -494,7 +494,7 @@ impl VirtioDevice for Fs {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<(Arc<dyn VirtioInterrupt>, Vec<EventFd>)> {
+    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
         // We first must resume the virtio thread if it was paused.
         if self.common.pause_evt.take().is_some() {
             self.common.resume().ok()?;
@@ -510,11 +510,8 @@ impl VirtioDevice for Fs {
             let _ = kill_evt.write(1);
         }
 
-        // Return the interrupt and queue EventFDs
-        Some((
-            self.common.interrupt_cb.take().unwrap(),
-            self.common.queue_evts.take().unwrap(),
-        ))
+        // Return the interrupt
+        Some(self.common.interrupt_cb.take().unwrap())
     }
 
     fn shutdown(&mut self) {
