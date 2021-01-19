@@ -135,6 +135,7 @@ impl Blk {
                 avail_features,
                 acked_features,
                 paused_sync: Some(Arc::new(Barrier::new(vu_cfg.num_queues + 1))),
+                min_queues: 1,
                 ..Default::default()
             },
             id,

@@ -764,6 +764,7 @@ impl Mem {
                 avail_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes: QUEUE_SIZES.to_vec(),
+                min_queues: 1,
                 ..Default::default()
             },
             id,

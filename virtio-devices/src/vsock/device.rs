@@ -337,6 +337,7 @@ where
                 avail_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes: QUEUE_SIZES.to_vec(),
+                min_queues: NUM_QUEUES as u16,
                 ..Default::default()
             },
             id,

@@ -304,6 +304,7 @@ impl Pmem {
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 avail_features,
+                min_queues: 1,
                 ..Default::default()
             },
             id,

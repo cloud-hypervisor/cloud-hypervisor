@@ -352,6 +352,7 @@ impl Fs {
                 acked_features,
                 queue_sizes: vec![queue_size; num_queues],
                 paused_sync: Some(Arc::new(Barrier::new(2))),
+                min_queues: NUM_QUEUE_OFFSET as u16,
                 ..Default::default()
             },
             id,

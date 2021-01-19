@@ -224,6 +224,7 @@ pub struct VirtioCommon {
     pub epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     pub queue_sizes: Vec<u16>,
     pub device_type: u32,
+    pub min_queues: u16,
 }
 
 impl VirtioCommon {
@@ -255,6 +256,15 @@ impl VirtioCommon {
                 "Cannot activate: length mismatch: queue_evts={} queues={}",
                 queue_evts.len(),
                 queues.len()
+            );
+            return Err(ActivateError::BadActivate);
+        }
+
+        if queues.len() < self.min_queues.into() {
+            error!(
+                "Number of enabled queues lower tham min: {} vs {}",
+                queues.len(),
+                self.min_queues
             );
             return Err(ActivateError::BadActivate);
         }
