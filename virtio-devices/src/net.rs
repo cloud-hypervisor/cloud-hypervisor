@@ -256,6 +256,7 @@ impl Net {
                 avail_features,
                 queue_sizes: vec![queue_size; queue_num],
                 paused_sync: Some(Arc::new(Barrier::new((num_queues / 2) + 1))),
+                min_queues: 2,
                 ..Default::default()
             },
             id,

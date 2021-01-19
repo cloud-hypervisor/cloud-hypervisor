@@ -144,6 +144,7 @@ impl Net {
                 avail_features,
                 acked_features,
                 paused_sync: Some(Arc::new(Barrier::new((vu_cfg.num_queues / 2) + 1))),
+                min_queues: 2,
                 ..Default::default()
             },
             vhost_user_net,

@@ -337,6 +337,7 @@ impl<T: DiskFile> Block<T> {
                 avail_features,
                 paused_sync: Some(Arc::new(Barrier::new(num_queues + 1))),
                 queue_sizes: vec![queue_size; num_queues],
+                min_queues: 1,
                 ..Default::default()
             },
             id,
