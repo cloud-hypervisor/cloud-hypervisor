@@ -607,8 +607,8 @@ impl Queue {
             None => warn!("Can't update avail_event"),
         }
 
-        // This fence ensures the guest sees the value we've just written.
-        fence(Ordering::Release);
+        // This fence ensures both guest and us see the correct value (avail idx and avail event)
+        fence(Ordering::SeqCst);
     }
 
     /// Return the value present in the used_event field of the avail ring.
