@@ -1184,12 +1184,12 @@ impl DeviceManager {
         reset_evt: EventFd,
         exit_evt: EventFd,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGEDDevice>>>> {
-        let acpi_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
+        let shutdown_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
             exit_evt, reset_evt,
         )));
 
         self.bus_devices
-            .push(Arc::clone(&acpi_device) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&shutdown_device) as Arc<Mutex<dyn BusDevice>>);
 
         self.address_manager
             .allocator
@@ -1200,7 +1200,7 @@ impl DeviceManager {
 
         self.address_manager
             .io_bus
-            .insert(acpi_device, 0x3c0, 0x4)
+            .insert(shutdown_device, 0x3c0, 0x4)
             .map_err(DeviceManagerError::BusError)?;
 
         let ged_irq = self
