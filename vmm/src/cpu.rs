@@ -42,7 +42,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 use vm_device::BusDevice;
-#[cfg(target_arch = "x86_64")]
+#[cfg(feature = "acpi")]
 use vm_memory::GuestAddress;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 use vm_migration::{
@@ -59,6 +59,9 @@ const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 #[cfg(target_arch = "x86_64")]
 const MTRR_EDX_BIT: u8 = 12; // Hypervisor ecx bit.
+
+#[cfg(feature = "acpi")]
+pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
 
 #[derive(Debug)]
 pub enum Error {
@@ -97,9 +100,6 @@ pub enum Error {
 
     /// Cannot add legacy device to Bus.
     BusError(vm_device::BusError),
-
-    /// Failed to allocate IO port
-    AllocateIOPort,
 
     /// Asking for more vCPUs that we can have
     DesiredVCPUCountExceedsMax,
@@ -172,6 +172,9 @@ pub enum Error {
 
     /// Error because an unexpected VmExit type was received.
     UnexpectedVmExit,
+
+    /// Failed to allocate MMIO address
+    AllocateMMIOAddress,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -410,6 +413,8 @@ pub struct CpuManager {
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
     seccomp_action: SeccompAction,
     vmmops: Arc<Box<dyn VmmOps>>,
+    #[cfg(feature = "acpi")]
+    acpi_address: GuestAddress,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -426,6 +431,8 @@ impl BusDevice for CpuManager {
             CPU_STATUS_OFFSET => {
                 if self.selected_cpu < self.present_vcpus() {
                     let state = &self.vcpu_states[usize::from(self.selected_cpu)];
+                    // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
+                    data.copy_from_slice(&[0; 8][0..data.len()]);
                     if state.active() {
                         data[0] |= 1 << CPU_ENABLE_FLAG;
                     }
@@ -557,6 +564,13 @@ impl CpuManager {
         let cpuid = CpuManager::patch_cpuid(hypervisor, &config.topology, sgx_epc_sections)?;
 
         let device_manager = device_manager.lock().unwrap();
+        #[cfg(feature = "acpi")]
+        let acpi_address = device_manager
+            .allocator()
+            .lock()
+            .unwrap()
+            .allocate_mmio_addresses(None, CPU_MANAGER_ACPI_SIZE as u64, None)
+            .ok_or(Error::AllocateMMIOAddress)?;
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             config: config.clone(),
             interrupt_controller: device_manager.interrupt_controller().clone(),
@@ -573,20 +587,18 @@ impl CpuManager {
             vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
             seccomp_action,
             vmmops,
+            #[cfg(feature = "acpi")]
+            acpi_address,
         }));
 
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(feature = "acpi")]
         device_manager
-            .allocator()
-            .lock()
-            .unwrap()
-            .allocate_io_addresses(Some(GuestAddress(0x0cd8)), 0x8, None)
-            .ok_or(Error::AllocateIOPort)?;
-
-        #[cfg(target_arch = "x86_64")]
-        device_manager
-            .io_bus()
-            .insert(cpu_manager.clone(), 0x0cd8, 0xc)
+            .mmio_bus()
+            .insert(
+                cpu_manager.clone(),
+                acpi_address.0,
+                CPU_MANAGER_ACPI_SIZE as u64,
+            )
             .map_err(Error::BusError)?;
 
         Ok(cpu_manager)
@@ -1281,15 +1293,22 @@ impl Aml for CpuManager {
                     &aml::Name::new("_UID".into(), &"CPU Hotplug Controller"),
                     // Mutex to protect concurrent access as we write to choose CPU and then read back status
                     &aml::Mutex::new("CPLK".into(), 0),
-                    // I/O port for CPU controller
                     &aml::Name::new(
                         "_CRS".into(),
-                        &aml::ResourceTemplate::new(vec![&aml::IO::new(
-                            0x0cd8, 0x0cd8, 0x01, 0x0c,
+                        &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
+                            aml::AddressSpaceCachable::NotCacheable,
+                            true,
+                            self.acpi_address.0 as u64,
+                            self.acpi_address.0 + CPU_MANAGER_ACPI_SIZE as u64 - 1,
                         )]),
                     ),
-                    // OpRegion and Fields map I/O port into individual field values
-                    &aml::OpRegion::new("PRST".into(), aml::OpRegionSpace::SystemIO, 0x0cd8, 0x0c),
+                    // OpRegion and Fields map MMIO range into individual field values
+                    &aml::OpRegion::new(
+                        "PRST".into(),
+                        aml::OpRegionSpace::SystemMemory,
+                        self.acpi_address.0 as usize,
+                        CPU_MANAGER_ACPI_SIZE,
+                    ),
                     &aml::Field::new(
                         "PRST".into(),
                         aml::FieldAccessType::Byte,
@@ -1434,6 +1453,7 @@ mod tests {
     use arch::x86_64::regs::*;
     use arch::x86_64::BootProtocol;
     use hypervisor::x86_64::{FpuState, LapicState, SpecialRegisters, StandardRegisters};
+    use vm_memory::GuestAddress;
 
     #[test]
     fn test_setlint() {
