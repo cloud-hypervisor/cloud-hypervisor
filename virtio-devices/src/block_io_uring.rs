@@ -16,15 +16,15 @@ use super::{
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
-use block_util::{build_disk_image_id, Request, RequestType, VirtioBlockConfig};
-use io_uring::IoUring;
-use libc::EFD_NONBLOCK;
+use block_util::{
+    async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_disk_image_id, Request,
+    RequestType, VirtioBlockConfig,
+};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{self, Seek, SeekFrom};
+use std::io;
 use std::num::Wrapping;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -47,7 +47,7 @@ pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 // New descriptors are pending on the virtio queue.
 const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 // New completed tasks are pending on the completion ring.
-const IO_URING_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
+const COMPLETION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 
 #[derive(Debug)]
 pub enum Error {
@@ -77,6 +77,8 @@ pub enum Error {
     MissingEntryRequestList,
     /// The asynchronous request returned with failure.
     AsyncRequestFailure,
+    /// Failed synchronizing the file
+    Fsync(AsyncIoError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -92,7 +94,7 @@ pub struct BlockCounters {
 struct BlockIoUringEpollHandler {
     queue: Queue,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    disk_image_fd: RawFd,
+    disk_image: Box<dyn AsyncIo>,
     disk_nsectors: u64,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     disk_image_id: Vec<u8>,
@@ -101,8 +103,6 @@ struct BlockIoUringEpollHandler {
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
     queue_evt: EventFd,
-    io_uring: IoUring,
-    io_uring_evt: EventFd,
     request_list: HashMap<u16, Request>,
 }
 
@@ -117,12 +117,12 @@ impl BlockIoUringEpollHandler {
         for avail_desc in queue.iter(&mem) {
             let mut request = Request::parse(&avail_desc, &mem).map_err(Error::RequestParsing)?;
             request.set_writeback(self.writeback.load(Ordering::Acquire));
+
             if request
-                .execute_io_uring(
+                .execute_async(
                     &mem,
-                    &mut self.io_uring,
                     self.disk_nsectors,
-                    self.disk_image_fd,
+                    self.disk_image.as_mut(),
                     &self.disk_image_id,
                     avail_desc.index as u64,
                 )
@@ -159,10 +159,9 @@ impl BlockIoUringEpollHandler {
         let mut read_ops = Wrapping(0);
         let mut write_ops = Wrapping(0);
 
-        let cq = self.io_uring.completion();
-        for cq_entry in cq.available() {
-            let result = cq_entry.result();
-            let desc_index = cq_entry.user_data() as u16;
+        let completion_list = self.disk_image.complete();
+        for (user_data, result) in completion_list {
+            let desc_index = user_data as u16;
             let request = self
                 .request_list
                 .remove(&desc_index)
@@ -178,7 +177,7 @@ impl BlockIoUringEpollHandler {
                     }
                     RequestType::Out => {
                         if !request.writeback {
-                            unsafe { libc::fsync(self.disk_image_fd) };
+                            self.disk_image.fsync(None).map_err(Error::Fsync)?;
                         }
                         for (_, data_len) in &request.data_descriptors {
                             write_bytes += Wrapping(*data_len as u64);
@@ -201,7 +200,7 @@ impl BlockIoUringEpollHandler {
             // checked that the status_addr was valid.
             mem.write_obj(status, request.status_addr).unwrap();
 
-            used_desc_heads.push((desc_index, len));
+            used_desc_heads.push((desc_index as u16, len));
             used_count += 1;
         }
 
@@ -242,7 +241,7 @@ impl BlockIoUringEpollHandler {
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
-        helper.add_event(self.io_uring_evt.as_raw_fd(), IO_URING_EVENT)?;
+        helper.add_event(self.disk_image.notifier().as_raw_fd(), COMPLETION_EVENT)?;
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -274,8 +273,8 @@ impl EpollHelperHandler for BlockIoUringEpollHandler {
                     }
                 }
             }
-            IO_URING_EVENT => {
-                if let Err(e) = self.io_uring_evt.read() {
+            COMPLETION_EVENT => {
+                if let Err(e) = self.disk_image.notifier().read() {
                     error!("Failed to get queue event: {:?}", e);
                     return true;
                 }
@@ -308,7 +307,7 @@ impl EpollHelperHandler for BlockIoUringEpollHandler {
 pub struct BlockIoUring {
     common: VirtioCommon,
     id: String,
-    disk_image: File,
+    disk_image: Box<dyn DiskFile>,
     disk_path: PathBuf,
     disk_nsectors: u64,
     config: VirtioBlockConfig,
@@ -331,7 +330,7 @@ impl BlockIoUring {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
-        mut disk_image: File,
+        mut disk_image: Box<dyn DiskFile>,
         disk_path: PathBuf,
         is_disk_read_only: bool,
         iommu: bool,
@@ -339,7 +338,12 @@ impl BlockIoUring {
         queue_size: u16,
         seccomp_action: SeccompAction,
     ) -> io::Result<Self> {
-        let disk_size = disk_image.seek(SeekFrom::End(0))? as u64;
+        let disk_size = disk_image.size().map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed getting disk size: {}", e),
+            )
+        })?;
         if disk_size % SECTOR_SIZE != 0 {
             warn!(
                 "Disk size {} is not a multiple of sector size {}; \
@@ -498,10 +502,6 @@ impl VirtioDevice for BlockIoUring {
             let queue_evt = queue_evts.remove(0);
             let queue = queues.remove(0);
             let queue_size = queue.size;
-            let io_uring = IoUring::new(queue_size as u32).map_err(|e| {
-                error!("failed to create io_uring instance: {}", e);
-                ActivateError::BadActivate
-            })?;
             let kill_evt = self
                 .common
                 .kill_evt
@@ -526,7 +526,13 @@ impl VirtioDevice for BlockIoUring {
             let mut handler = BlockIoUringEpollHandler {
                 queue,
                 mem: mem.clone(),
-                disk_image_fd: self.disk_image.as_raw_fd(),
+                disk_image: self
+                    .disk_image
+                    .new_async_io(queue_size as u32)
+                    .map_err(|e| {
+                        error!("failed to create new AsyncIo: {}", e);
+                        ActivateError::BadActivate
+                    })?,
                 disk_nsectors: self.disk_nsectors,
                 interrupt_cb: interrupt_cb.clone(),
                 disk_image_id: disk_image_id.clone(),
@@ -535,27 +541,11 @@ impl VirtioDevice for BlockIoUring {
                 writeback: self.writeback.clone(),
                 counters: self.counters.clone(),
                 queue_evt,
-                io_uring,
-                io_uring_evt: EventFd::new(EFD_NONBLOCK).map_err(|e| {
-                    error!("failed to create io_uring eventfd: {}", e);
-                    ActivateError::BadActivate
-                })?,
                 request_list: HashMap::with_capacity(queue_size.into()),
             };
 
             let paused = self.common.paused.clone();
             let paused_sync = self.common.paused_sync.clone();
-
-            // Register the io_uring eventfd that will notify the epoll loop
-            // when something in the completion queue is ready.
-            handler
-                .io_uring
-                .submitter()
-                .register_eventfd(handler.io_uring_evt.as_raw_fd())
-                .map_err(|e| {
-                    error!("failed to register eventfd for io_uring: {}", e);
-                    ActivateError::BadActivate
-                })?;
 
             // Retrieve seccomp filter for virtio_blk_io_uring thread
             let virtio_blk_io_uring_seccomp_filter =
