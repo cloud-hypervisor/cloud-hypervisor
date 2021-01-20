@@ -18,6 +18,8 @@ use crate::interrupt::kvm::KvmMsiInterruptManager as MsiInterruptManager;
 #[cfg(feature = "mshv")]
 use crate::interrupt::mshv::MshvMsiInterruptManager as MsiInterruptManager;
 use crate::interrupt::LegacyUserspaceInterruptManager;
+#[cfg(feature = "acpi")]
+use crate::memory_manager::MEMORY_MANAGER_ACPI_SIZE;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 #[cfg(feature = "acpi")]
 use crate::vm::NumaNodes;
@@ -897,22 +899,17 @@ impl DeviceManager {
         )));
 
         #[cfg(feature = "acpi")]
-        self.address_manager
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_io_addresses(Some(GuestAddress(0x0a00)), 0x18, None)
-            .ok_or(DeviceManagerError::AllocateIOPort)?;
-
-        #[cfg(feature = "acpi")]
-        self.address_manager
-            .io_bus
-            .insert(
-                Arc::clone(&self.memory_manager) as Arc<Mutex<dyn BusDevice>>,
-                0xa00,
-                0x18,
-            )
-            .map_err(DeviceManagerError::BusError)?;
+        {
+            let memory_manager_acpi_address = self.memory_manager.lock().unwrap().acpi_address;
+            self.address_manager
+                .mmio_bus
+                .insert(
+                    Arc::clone(&self.memory_manager) as Arc<Mutex<dyn BusDevice>>,
+                    memory_manager_acpi_address.0,
+                    MEMORY_MANAGER_ACPI_SIZE as u64,
+                )
+                .map_err(DeviceManagerError::BusError)?;
+        }
 
         #[cfg(target_arch = "x86_64")]
         self.add_legacy_devices(

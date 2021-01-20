@@ -44,6 +44,9 @@ use vm_migration::{
     Transportable,
 };
 
+#[cfg(feature = "acpi")]
+pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
+
 const DEFAULT_MEMORY_ZONE: &str = "mem0";
 
 #[cfg(target_arch = "x86_64")]
@@ -134,6 +137,9 @@ pub struct MemoryManager {
     // This is useful for getting the dirty pages as we need to know the
     // slots that the mapping is created in.
     guest_ram_mappings: Vec<GuestRamMapping>,
+
+    #[cfg(feature = "acpi")]
+    pub acpi_address: GuestAddress,
 }
 
 #[derive(Debug)]
@@ -253,6 +259,9 @@ pub enum Error {
 
     // Error copying snapshot into region
     SnapshotCopy(GuestMemoryError),
+
+    /// Failed to allocate MMIO address
+    AllocateMMIOAddress,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -294,6 +303,8 @@ impl BusDevice for MemoryManager {
                     data.copy_from_slice(&state.length.to_le_bytes()[4..]);
                 }
                 STATUS_OFFSET => {
+                    // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
+                    data.copy_from_slice(&[0; 8][0..data.len()]);
                     if state.active {
                         data[0] |= 1 << ENABLE_FLAG;
                     }
@@ -714,6 +725,13 @@ impl MemoryManager {
             .ok_or(Error::CreateSystemAllocator)?,
         ));
 
+        #[cfg(feature = "acpi")]
+        let acpi_address = allocator
+            .lock()
+            .unwrap()
+            .allocate_mmio_addresses(None, MEMORY_MANAGER_ACPI_SIZE as u64, None)
+            .ok_or(Error::AllocateMMIOAddress)?;
+
         let memory_manager = Arc::new(Mutex::new(MemoryManager {
             boot_guest_memory,
             guest_memory: guest_memory.clone(),
@@ -738,6 +756,8 @@ impl MemoryManager {
             snapshot_memory_regions: Vec::new(),
             memory_zones,
             guest_ram_mappings: Vec::new(),
+            #[cfg(feature = "acpi")]
+            acpi_address,
         }));
 
         guest_memory.memory().with_regions(|_, region| {
@@ -1763,15 +1783,22 @@ impl Aml for MemoryManager {
                     &aml::Name::new("_UID".into(), &"Memory Hotplug Controller"),
                     // Mutex to protect concurrent access as we write to choose slot and then read back status
                     &aml::Mutex::new("MLCK".into(), 0),
-                    // I/O port for memory controller
                     &aml::Name::new(
                         "_CRS".into(),
-                        &aml::ResourceTemplate::new(vec![&aml::IO::new(
-                            0x0a00, 0x0a00, 0x01, 0x18,
+                        &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
+                            aml::AddressSpaceCachable::NotCacheable,
+                            true,
+                            self.acpi_address.0 as u64,
+                            self.acpi_address.0 + MEMORY_MANAGER_ACPI_SIZE as u64 - 1,
                         )]),
                     ),
-                    // OpRegion and Fields map I/O port into individual field values
-                    &aml::OpRegion::new("MHPR".into(), aml::OpRegionSpace::SystemIO, 0xa00, 0x18),
+                    // OpRegion and Fields map MMIO range into individual field values
+                    &aml::OpRegion::new(
+                        "MHPR".into(),
+                        aml::OpRegionSpace::SystemMemory,
+                        self.acpi_address.0 as usize,
+                        MEMORY_MANAGER_ACPI_SIZE,
+                    ),
                     &aml::Field::new(
                         "MHPR".into(),
                         aml::FieldAccessType::DWord,
