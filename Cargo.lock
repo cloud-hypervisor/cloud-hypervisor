@@ -162,6 +162,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "thiserror",
  "virtio-bindings",
  "vm-memory",
  "vm-virtio",
