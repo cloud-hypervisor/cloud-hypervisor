@@ -244,6 +244,9 @@ pub enum DeviceManagerError {
     /// Failed to allocate IO port
     AllocateIOPort,
 
+    /// Failed to allocate MMIO address
+    AllocateMMIOAddress,
+
     // Failed to make hotplug notification
     HotPlugNotification(io::Error),
 
@@ -1210,32 +1213,33 @@ impl DeviceManager {
             .unwrap()
             .allocate_irq()
             .unwrap();
-
         let interrupt_group = interrupt_manager
             .create_group(LegacyIrqGroupConfig {
                 irq: ged_irq as InterruptIndex,
             })
             .map_err(DeviceManagerError::CreateInterruptGroup)?;
-
-        let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(
-            interrupt_group,
-            ged_irq,
-        )));
-
-        self.bus_devices
-            .push(Arc::clone(&ged_device) as Arc<Mutex<dyn BusDevice>>);
-
-        self.address_manager
+        let ged_address = self
+            .address_manager
             .allocator
             .lock()
             .unwrap()
-            .allocate_io_addresses(Some(GuestAddress(0xb000)), 0x1, None)
-            .ok_or(DeviceManagerError::AllocateIOPort)?;
-
+            .allocate_mmio_addresses(None, devices::acpi::GED_DEVICE_ACPI_SIZE as u64, None)
+            .ok_or(DeviceManagerError::AllocateMMIOAddress)?;
+        let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(
+            interrupt_group,
+            ged_irq,
+            ged_address,
+        )));
         self.address_manager
-            .io_bus
-            .insert(ged_device.clone(), 0xb000, 0x1)
+            .mmio_bus
+            .insert(
+                ged_device.clone(),
+                ged_address.0,
+                devices::acpi::GED_DEVICE_ACPI_SIZE as u64,
+            )
             .map_err(DeviceManagerError::BusError)?;
+        self.bus_devices
+            .push(Arc::clone(&ged_device) as Arc<Mutex<dyn BusDevice>>);
 
         let pm_timer_device = Arc::new(Mutex::new(devices::AcpiPMTimerDevice::new()));
 

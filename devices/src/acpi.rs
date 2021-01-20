@@ -8,8 +8,11 @@ use std::sync::{Arc, Barrier};
 use std::time::Instant;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
+use vm_memory::GuestAddress;
 use vmm_sys_util::eventfd::EventFd;
 use AcpiNotificationFlags;
+
+pub const GED_DEVICE_ACPI_SIZE: usize = 0x1;
 
 /// A device for handling ACPI shutdown and reboot
 pub struct AcpiShutdownDevice {
@@ -63,14 +66,20 @@ pub struct AcpiGEDDevice {
     interrupt: Arc<Box<dyn InterruptSourceGroup>>,
     notification_type: AcpiNotificationFlags,
     ged_irq: u32,
+    address: GuestAddress,
 }
 
 impl AcpiGEDDevice {
-    pub fn new(interrupt: Arc<Box<dyn InterruptSourceGroup>>, ged_irq: u32) -> AcpiGEDDevice {
+    pub fn new(
+        interrupt: Arc<Box<dyn InterruptSourceGroup>>,
+        ged_irq: u32,
+        address: GuestAddress,
+    ) -> AcpiGEDDevice {
         AcpiGEDDevice {
             interrupt,
             notification_type: AcpiNotificationFlags::NO_DEVICES_CHANGED,
             ged_irq,
+            address,
         }
     }
 
@@ -114,7 +123,12 @@ impl Aml for AcpiGEDDevice {
                         self.ged_irq,
                     )]),
                 ),
-                &aml::OpRegion::new("GDST".into(), aml::OpRegionSpace::SystemIO, 0xb000, 0x1),
+                &aml::OpRegion::new(
+                    "GDST".into(),
+                    aml::OpRegionSpace::SystemMemory,
+                    self.address.0 as usize,
+                    GED_DEVICE_ACPI_SIZE,
+                ),
                 &aml::Field::new(
                     "GDST".into(),
                     aml::FieldAccessType::Byte,

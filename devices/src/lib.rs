@@ -26,7 +26,7 @@ extern crate serde_derive;
 extern crate serde_json;
 
 #[cfg(feature = "acpi")]
-mod acpi;
+pub mod acpi;
 #[cfg(target_arch = "aarch64")]
 pub mod gic;
 pub mod interrupt_controller;
