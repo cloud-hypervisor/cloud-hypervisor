@@ -36,7 +36,10 @@ use arch::layout;
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 #[cfg(target_arch = "aarch64")]
 use arch::DeviceType;
-use block_util::{async_io::DiskFile, block_io_uring_is_supported, raw_async::RawFileDisk};
+use block_util::{
+    async_io::DiskFile, block_io_uring_is_supported, raw_async::RawFileDisk,
+    raw_sync::RawFileDiskSync,
+};
 #[cfg(target_arch = "aarch64")]
 use devices::gic;
 #[cfg(target_arch = "x86_64")]
@@ -1646,54 +1649,34 @@ impl DeviceManager {
                 ImageType::Raw => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
-                    if block_io_uring_is_supported() && !disk_cfg.disable_io_uring {
-                        let image = Box::new(RawFileDisk::new(image)) as Box<dyn DiskFile>;
-                        let dev = Arc::new(Mutex::new(
-                            virtio_devices::BlockIoUring::new(
-                                id.clone(),
-                                image,
-                                disk_cfg
-                                    .path
-                                    .as_ref()
-                                    .ok_or(DeviceManagerError::NoDiskPath)?
-                                    .clone(),
-                                disk_cfg.readonly,
-                                disk_cfg.iommu,
-                                disk_cfg.num_queues,
-                                disk_cfg.queue_size,
-                                self.seccomp_action.clone(),
-                            )
-                            .map_err(DeviceManagerError::CreateVirtioBlock)?,
-                        ));
-
-                        (
-                            Arc::clone(&dev) as VirtioDeviceArc,
-                            dev as Arc<Mutex<dyn Migratable>>,
-                        )
+                    let image = if block_io_uring_is_supported() && !disk_cfg.disable_io_uring {
+                        Box::new(RawFileDisk::new(image)) as Box<dyn DiskFile>
                     } else {
-                        let dev = Arc::new(Mutex::new(
-                            virtio_devices::Block::new(
-                                id.clone(),
-                                raw_img,
-                                disk_cfg
-                                    .path
-                                    .as_ref()
-                                    .ok_or(DeviceManagerError::NoDiskPath)?
-                                    .clone(),
-                                disk_cfg.readonly,
-                                disk_cfg.iommu,
-                                disk_cfg.num_queues,
-                                disk_cfg.queue_size,
-                                self.seccomp_action.clone(),
-                            )
-                            .map_err(DeviceManagerError::CreateVirtioBlock)?,
-                        ));
+                        Box::new(RawFileDiskSync::new(image, disk_cfg.direct)) as Box<dyn DiskFile>
+                    };
 
-                        (
-                            Arc::clone(&dev) as VirtioDeviceArc,
-                            dev as Arc<Mutex<dyn Migratable>>,
+                    let dev = Arc::new(Mutex::new(
+                        virtio_devices::BlockIoUring::new(
+                            id.clone(),
+                            image,
+                            disk_cfg
+                                .path
+                                .as_ref()
+                                .ok_or(DeviceManagerError::NoDiskPath)?
+                                .clone(),
+                            disk_cfg.readonly,
+                            disk_cfg.iommu,
+                            disk_cfg.num_queues,
+                            disk_cfg.queue_size,
+                            self.seccomp_action.clone(),
                         )
-                    }
+                        .map_err(DeviceManagerError::CreateVirtioBlock)?,
+                    ));
+
+                    (
+                        Arc::clone(&dev) as VirtioDeviceArc,
+                        dev as Arc<Mutex<dyn Migratable>>,
+                    )
                 }
                 ImageType::Qcow2 => {
                     let qcow_img =

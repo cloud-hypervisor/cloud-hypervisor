@@ -159,6 +159,7 @@ dependencies = [
  "io-uring",
  "libc",
  "log 0.4.13",
+ "qcow",
  "serde",
  "serde_derive",
  "serde_json",
