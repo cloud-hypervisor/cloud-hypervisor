@@ -379,6 +379,9 @@ pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
 type VirtioDeviceArc = Arc<Mutex<dyn virtio_devices::VirtioDevice>>;
 
+#[cfg(feature = "acpi")]
+const DEVICE_MANAGER_ACPI_SIZE: usize = 0x10;
+
 pub fn get_win_size() -> (u16, u16) {
     #[repr(C)]
     #[derive(Default)]
@@ -788,6 +791,9 @@ pub struct DeviceManager {
     // Virtio Device activation EventFd to allow the VMM thread to trigger device
     // activation and thus start the threads from the VMM thread
     activate_evt: EventFd,
+
+    #[cfg(feature = "acpi")]
+    acpi_address: GuestAddress,
 }
 
 impl DeviceManager {
@@ -825,6 +831,13 @@ impl DeviceManager {
                 vm,
             ));
 
+        #[cfg(feature = "acpi")]
+        let acpi_address = address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_mmio_addresses(None, DEVICE_MANAGER_ACPI_SIZE as u64, None)
+            .ok_or(DeviceManagerError::AllocateIOPort)?;
         let device_manager = DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
@@ -860,25 +873,19 @@ impl DeviceManager {
             activate_evt: activate_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
+            #[cfg(feature = "acpi")]
+            acpi_address,
         };
-
-        #[cfg(feature = "acpi")]
-        address_manager
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_io_addresses(Some(GuestAddress(0xae00)), 0x10, None)
-            .ok_or(DeviceManagerError::AllocateIOPort)?;
 
         let device_manager = Arc::new(Mutex::new(device_manager));
 
         #[cfg(feature = "acpi")]
         address_manager
-            .io_bus
+            .mmio_bus
             .insert(
                 Arc::clone(&device_manager) as Arc<Mutex<dyn BusDevice>>,
-                0xae00,
-                0x10,
+                acpi_address.0,
+                DEVICE_MANAGER_ACPI_SIZE as u64,
             )
             .map_err(DeviceManagerError::BusError)?;
 
@@ -3315,15 +3322,22 @@ impl Aml for DeviceManager {
                     &aml::Name::new("_STA".into(), &0x0bu8),
                     &aml::Name::new("_UID".into(), &"PCI Hotplug Controller"),
                     &aml::Mutex::new("BLCK".into(), 0),
-                    // I/O port for PCI hotplug controller
                     &aml::Name::new(
                         "_CRS".into(),
-                        &aml::ResourceTemplate::new(vec![&aml::IO::new(
-                            0xae00, 0xae00, 0x01, 0x10,
+                        &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
+                            aml::AddressSpaceCachable::NotCacheable,
+                            true,
+                            self.acpi_address.0 as u64,
+                            self.acpi_address.0 + DEVICE_MANAGER_ACPI_SIZE as u64 - 1,
                         )]),
                     ),
-                    // OpRegion and Fields map I/O port into individual field values
-                    &aml::OpRegion::new("PCST".into(), aml::OpRegionSpace::SystemIO, 0xae00, 0x10),
+                    // OpRegion and Fields map MMIO range into individual field values
+                    &aml::OpRegion::new(
+                        "PCST".into(),
+                        aml::OpRegionSpace::SystemMemory,
+                        self.acpi_address.0 as usize,
+                        DEVICE_MANAGER_ACPI_SIZE,
+                    ),
                     &aml::Field::new(
                         "PCST".into(),
                         aml::FieldAccessType::DWord,
