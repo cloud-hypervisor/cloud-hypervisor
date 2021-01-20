@@ -13,6 +13,8 @@ extern crate log;
 #[macro_use]
 extern crate serde_derive;
 
+pub mod async_io;
+
 #[cfg(feature = "io_uring")]
 use io_uring::Probe;
 use io_uring::{opcode, squeue, IoUring};
