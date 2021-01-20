@@ -391,7 +391,6 @@ fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 
 fn create_vcpu_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
     Ok(or![
-        and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_CHECK_EXTENSION,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IOEVENTFD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IRQFD,)?],
@@ -407,71 +406,28 @@ fn create_vcpu_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
 
 fn vcpu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
-        allow_syscall(libc::SYS_accept4),
         allow_syscall(libc::SYS_brk),
-        allow_syscall(libc::SYS_clock_gettime),
-        allow_syscall(libc::SYS_clock_nanosleep),
-        allow_syscall(libc::SYS_clone),
         allow_syscall(libc::SYS_close),
-        allow_syscall(libc::SYS_dup),
-        allow_syscall(libc::SYS_epoll_create1),
-        allow_syscall(libc::SYS_epoll_ctl),
-        allow_syscall(libc::SYS_epoll_pwait),
-        #[cfg(target_arch = "x86_64")]
-        allow_syscall(libc::SYS_epoll_wait),
-        allow_syscall(libc::SYS_eventfd2),
         allow_syscall(libc::SYS_exit),
-        allow_syscall(libc::SYS_fallocate),
-        allow_syscall(libc::SYS_fcntl),
-        allow_syscall(libc::SYS_fdatasync),
-        allow_syscall(libc::SYS_fstat),
-        allow_syscall(libc::SYS_fsync),
-        #[cfg(target_arch = "x86_64")]
-        allow_syscall(libc::SYS_ftruncate),
-        #[cfg(target_arch = "aarch64")]
-        // The definition of libc::SYS_ftruncate is missing on AArch64.
-        // Use a hard-code number instead.
-        allow_syscall(46),
-        #[cfg(target_arch = "aarch64")]
-        allow_syscall(libc::SYS_faccessat),
         allow_syscall(libc::SYS_futex),
         allow_syscall(libc::SYS_getpid),
-        allow_syscall(libc::SYS_getrandom),
         allow_syscall_if(libc::SYS_ioctl, create_vcpu_ioctl_seccomp_rule()?),
-        allow_syscall(SYS_IO_URING_ENTER),
-        allow_syscall(SYS_IO_URING_SETUP),
-        allow_syscall(SYS_IO_URING_REGISTER),
-        allow_syscall(libc::SYS_lseek),
         allow_syscall(libc::SYS_madvise),
-        allow_syscall(libc::SYS_mmap),
         allow_syscall(libc::SYS_mprotect),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_nanosleep),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_open),
         allow_syscall(libc::SYS_openat),
-        #[cfg(target_arch = "aarch64")]
-        allow_syscall(libc::SYS_newfstatat),
-        allow_syscall(libc::SYS_prctl),
         allow_syscall(libc::SYS_pread64),
         allow_syscall(libc::SYS_pwrite64),
-        allow_syscall(libc::SYS_read),
-        allow_syscall(libc::SYS_recvfrom),
         allow_syscall(libc::SYS_recvmsg),
         allow_syscall(libc::SYS_rt_sigaction),
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_rt_sigreturn),
-        allow_syscall(libc::SYS_sched_getaffinity),
         allow_syscall(libc::SYS_sendmsg),
-        allow_syscall(libc::SYS_set_robust_list),
         allow_syscall(libc::SYS_sigaltstack),
-        allow_syscall(libc::SYS_socketpair),
-        #[cfg(target_arch = "x86_64")]
-        allow_syscall(libc::SYS_stat),
-        allow_syscall(libc::SYS_statx),
         allow_syscall(libc::SYS_tgkill),
-        allow_syscall(libc::SYS_timerfd_create),
-        allow_syscall(libc::SYS_timerfd_settime),
         allow_syscall(libc::SYS_tkill),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_unlink),
