@@ -14,6 +14,7 @@ extern crate log;
 extern crate serde_derive;
 
 pub mod async_io;
+pub mod raw_async;
 
 #[cfg(feature = "io_uring")]
 use io_uring::Probe;
