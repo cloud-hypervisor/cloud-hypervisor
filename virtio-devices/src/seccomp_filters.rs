@@ -130,6 +130,7 @@ fn virtio_blk_io_uring_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_fsync),
         allow_syscall(libc::SYS_futex),
         allow_syscall(SYS_IO_URING_ENTER),
+        allow_syscall(libc::SYS_lseek),
         allow_syscall(libc::SYS_madvise),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_read),

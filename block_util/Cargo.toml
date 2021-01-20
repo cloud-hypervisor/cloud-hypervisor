@@ -12,6 +12,7 @@ io_uring = []
 io-uring = ">=0.4.0"
 libc = "0.2.82"
 log = "0.4.13"
+qcow = { path = "../qcow" }
 serde = ">=1.0.27"
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"

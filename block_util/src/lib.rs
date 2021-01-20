@@ -15,6 +15,7 @@ extern crate serde_derive;
 
 pub mod async_io;
 pub mod raw_async;
+pub mod raw_sync;
 
 use crate::async_io::{AsyncIo, AsyncIoError};
 #[cfg(feature = "io_uring")]
