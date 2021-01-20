@@ -16,16 +16,15 @@ extern crate serde_derive;
 pub mod async_io;
 pub mod raw_async;
 
+use crate::async_io::{AsyncIo, AsyncIoError};
 #[cfg(feature = "io_uring")]
-use io_uring::Probe;
-use io_uring::{opcode, squeue, IoUring};
+use io_uring::{opcode, IoUring, Probe};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 #[cfg(feature = "io_uring")]
 use std::os::unix::io::AsRawFd;
-use std::os::unix::io::RawFd;
 use std::path::PathBuf;
 use std::result;
 use virtio_bindings::bindings::virtio_blk::*;
@@ -101,6 +100,9 @@ pub enum ExecuteError {
     Unsupported(u32),
     SubmitIoUring(io::Error),
     GetHostAddress(GuestMemoryError),
+    AsyncRead(AsyncIoError),
+    AsyncWrite(AsyncIoError),
+    AsyncFlush(AsyncIoError),
 }
 
 impl ExecuteError {
@@ -114,6 +116,9 @@ impl ExecuteError {
             ExecuteError::Unsupported(_) => VIRTIO_BLK_S_UNSUPP,
             ExecuteError::SubmitIoUring(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::GetHostAddress(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::AsyncRead(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::AsyncWrite(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::AsyncFlush(_) => VIRTIO_BLK_S_IOERR,
         }
     }
 }
@@ -271,21 +276,17 @@ impl Request {
         Ok(len)
     }
 
-    pub fn execute_io_uring(
+    pub fn execute_async(
         &self,
         mem: &GuestMemoryMmap,
-        io_uring: &mut IoUring,
         disk_nsectors: u64,
-        disk_image_fd: RawFd,
+        disk_image: &mut dyn AsyncIo,
         disk_id: &[u8],
         user_data: u64,
     ) -> result::Result<bool, ExecuteError> {
         let sector = self.sector;
         let request_type = self.request_type;
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
-
-        let (submitter, sq, _) = io_uring.split();
-        let mut avail_sq = sq.available();
 
         let mut iovecs = Vec::new();
         for (data_addr, data_len) in &self.data_descriptors {
@@ -314,49 +315,19 @@ impl Request {
         // Queue operations expected to be submitted.
         match request_type {
             RequestType::In => {
-                // Safe because we know the file descriptor is valid and we
-                // relied on vm-memory to provide the buffer address.
-                let _ = unsafe {
-                    avail_sq.push(
-                        opcode::Readv::new(
-                            opcode::types::Fd(disk_image_fd),
-                            iovecs.as_ptr(),
-                            iovecs.len() as u32,
-                        )
-                        .offset(offset)
-                        .build()
-                        .flags(squeue::Flags::ASYNC)
-                        .user_data(user_data),
-                    )
-                };
+                disk_image
+                    .read_vectored(offset, iovecs, user_data)
+                    .map_err(ExecuteError::AsyncRead)?;
             }
             RequestType::Out => {
-                // Safe because we know the file descriptor is valid and we
-                // relied on vm-memory to provide the buffer address.
-                let _ = unsafe {
-                    avail_sq.push(
-                        opcode::Writev::new(
-                            opcode::types::Fd(disk_image_fd),
-                            iovecs.as_ptr(),
-                            iovecs.len() as u32,
-                        )
-                        .offset(offset)
-                        .build()
-                        .flags(squeue::Flags::ASYNC)
-                        .user_data(user_data),
-                    )
-                };
+                disk_image
+                    .write_vectored(offset, iovecs, user_data)
+                    .map_err(ExecuteError::AsyncWrite)?;
             }
             RequestType::Flush => {
-                // Safe because we know the file descriptor is valid.
-                let _ = unsafe {
-                    avail_sq.push(
-                        opcode::Fsync::new(opcode::types::Fd(disk_image_fd))
-                            .build()
-                            .flags(squeue::Flags::ASYNC)
-                            .user_data(user_data),
-                    )
-                };
+                disk_image
+                    .fsync(Some(user_data))
+                    .map_err(ExecuteError::AsyncFlush)?;
             }
             RequestType::GetDeviceID => {
                 let (data_addr, data_len) = if self.data_descriptors.len() == 1 {
@@ -373,11 +344,6 @@ impl Request {
             }
             RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
         }
-
-        // Update the submission queue and submit new operations to the
-        // io_uring instance.
-        avail_sq.sync();
-        submitter.submit().map_err(ExecuteError::SubmitIoUring)?;
 
         Ok(true)
     }

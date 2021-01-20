@@ -36,7 +36,7 @@ use arch::layout;
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 #[cfg(target_arch = "aarch64")]
 use arch::DeviceType;
-use block_util::block_io_uring_is_supported;
+use block_util::{async_io::DiskFile, block_io_uring_is_supported, raw_async::RawFileDisk};
 #[cfg(target_arch = "aarch64")]
 use devices::gic;
 #[cfg(target_arch = "x86_64")]
@@ -1647,6 +1647,7 @@ impl DeviceManager {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
                     if block_io_uring_is_supported() && !disk_cfg.disable_io_uring {
+                        let image = Box::new(RawFileDisk::new(image)) as Box<dyn DiskFile>;
                         let dev = Arc::new(Mutex::new(
                             virtio_devices::BlockIoUring::new(
                                 id.clone(),
