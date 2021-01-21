@@ -978,14 +978,22 @@ impl Default for RngConfig {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct BalloonConfig {
     pub size: u64,
+    /// Option to deflate the balloon in case the guest is out of memory.
+    #[serde(default)]
+    pub deflate_on_oom: bool,
+}
+
+fn default_deflate_on_oom() -> bool {
+    false
 }
 
 impl BalloonConfig {
-    pub const SYNTAX: &'static str = "Balloon parameters \"size=<balloon_size>\"";
+    pub const SYNTAX: &'static str = "Balloon parameters \"size=<balloon_size>,deflate_on_oom=true|false\"";
 
     pub fn parse(balloon: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("size");
+        parser.add("deflate_on_oom");
         parser.parse(balloon).map_err(Error::ParseBalloon)?;
 
         let size = parser
@@ -994,7 +1002,13 @@ impl BalloonConfig {
             .map(|v| v.0)
             .unwrap_or(0);
 
-        Ok(BalloonConfig { size })
+        let deflate_on_oom = parser
+            .convert::<Toggle>("deflate_on_oom")
+            .map_err(Error::ParseBalloon)?
+            .unwrap_or_else(|| Toggle(default_deflate_on_oom()))
+            .0;
+
+        Ok(BalloonConfig { size, deflate_on_oom })
     }
 }
 
