@@ -745,6 +745,10 @@ components:
         size:
           type: integer
           format: int64
+        deflate_on_oom:
+          type: boolean
+          default: false
+          description: Whether the balloon should deflate when the guest is under memory pressure.
 
     FsConfig:
       required:
