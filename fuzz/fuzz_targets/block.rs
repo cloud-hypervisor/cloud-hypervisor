@@ -14,7 +14,7 @@ use std::mem::size_of;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::Arc;
-use virtio_devices::{BlockIoUring, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
+use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_virtio::Queue;
 use vmm_sys_util::eventfd::EventFd;
@@ -86,7 +86,7 @@ fuzz_target!(|bytes| {
     let disk_file: File = unsafe { File::from_raw_fd(shm) };
     let qcow_disk = Box::new(QcowDiskSync::new(disk_file, false)) as Box<dyn DiskFile>;
 
-    let mut block = BlockIoUring::new(
+    let mut block = Block::new(
         "tmp".to_owned(),
         qcow_disk,
         PathBuf::from(""),

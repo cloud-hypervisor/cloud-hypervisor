@@ -91,7 +91,7 @@ pub struct BlockCounters {
     write_ops: Arc<AtomicU64>,
 }
 
-struct BlockIoUringEpollHandler {
+struct BlockEpollHandler {
     queue: Queue,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     disk_image: Box<dyn AsyncIo>,
@@ -106,7 +106,7 @@ struct BlockIoUringEpollHandler {
     request_list: HashMap<u16, Request>,
 }
 
-impl BlockIoUringEpollHandler {
+impl BlockEpollHandler {
     fn process_queue_submit(&mut self) -> Result<bool> {
         let queue = &mut self.queue;
         let mem = self.mem.memory();
@@ -248,7 +248,7 @@ impl BlockIoUringEpollHandler {
     }
 }
 
-impl EpollHelperHandler for BlockIoUringEpollHandler {
+impl EpollHelperHandler for BlockEpollHandler {
     fn handle_event(&mut self, _helper: &mut EpollHelper, event: &epoll::Event) -> bool {
         let ev_type = event.data as u16;
         match ev_type {
@@ -304,7 +304,7 @@ impl EpollHelperHandler for BlockIoUringEpollHandler {
 }
 
 /// Virtio device for exposing block level read/write operations on a host file.
-pub struct BlockIoUring {
+pub struct Block {
     common: VirtioCommon,
     id: String,
     disk_image: Box<dyn DiskFile>,
@@ -325,7 +325,7 @@ pub struct BlockState {
     pub config: VirtioBlockConfig,
 }
 
-impl BlockIoUring {
+impl Block {
     /// Create a new virtio block device that operates on the given file.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -376,7 +376,7 @@ impl BlockIoUring {
             config.num_queues = num_queues as u16;
         }
 
-        Ok(BlockIoUring {
+        Ok(Block {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::TYPE_BLOCK as u32,
                 avail_features,
@@ -437,7 +437,7 @@ impl BlockIoUring {
     }
 }
 
-impl Drop for BlockIoUring {
+impl Drop for Block {
     fn drop(&mut self) {
         if let Some(kill_evt) = self.common.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
@@ -446,7 +446,7 @@ impl Drop for BlockIoUring {
     }
 }
 
-impl VirtioDevice for BlockIoUring {
+impl VirtioDevice for Block {
     fn device_type(&self) -> u32 {
         self.common.device_type
     }
@@ -523,7 +523,7 @@ impl VirtioDevice for BlockIoUring {
                     ActivateError::BadActivate
                 })?;
 
-            let mut handler = BlockIoUringEpollHandler {
+            let mut handler = BlockEpollHandler {
                 queue,
                 mem: mem.clone(),
                 disk_image: self
@@ -547,15 +547,15 @@ impl VirtioDevice for BlockIoUring {
             let paused = self.common.paused.clone();
             let paused_sync = self.common.paused_sync.clone();
 
-            // Retrieve seccomp filter for virtio_blk_io_uring thread
-            let virtio_blk_io_uring_seccomp_filter =
-                get_seccomp_filter(&self.seccomp_action, Thread::VirtioBlkIoUring)
+            // Retrieve seccomp filter for virtio_block thread
+            let virtio_block_seccomp_filter =
+                get_seccomp_filter(&self.seccomp_action, Thread::VirtioBlock)
                     .map_err(ActivateError::CreateSeccompFilter)?;
 
             thread::Builder::new()
                 .name(format!("{}_q{}", self.id.clone(), i))
                 .spawn(move || {
-                    if let Err(e) = SeccompFilter::apply(virtio_blk_io_uring_seccomp_filter) {
+                    if let Err(e) = SeccompFilter::apply(virtio_block_seccomp_filter) {
                         error!("Error applying seccomp filter: {:?}", e);
                     } else if let Err(e) = handler.run(paused, paused_sync.unwrap()) {
                         error!("Error running worker: {:?}", e);
@@ -563,7 +563,7 @@ impl VirtioDevice for BlockIoUring {
                 })
                 .map(|thread| epoll_threads.push(thread))
                 .map_err(|e| {
-                    error!("failed to clone the virtio-blk epoll thread: {}", e);
+                    error!("failed to clone the virtio-block epoll thread: {}", e);
                     ActivateError::BadActivate
                 })?;
         }
@@ -601,7 +601,7 @@ impl VirtioDevice for BlockIoUring {
     }
 }
 
-impl Pausable for BlockIoUring {
+impl Pausable for Block {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
         self.common.pause()
     }
@@ -611,7 +611,7 @@ impl Pausable for BlockIoUring {
     }
 }
 
-impl Snapshottable for BlockIoUring {
+impl Snapshottable for Block {
     fn id(&self) -> String {
         self.id.clone()
     }
@@ -651,5 +651,5 @@ impl Snapshottable for BlockIoUring {
         )))
     }
 }
-impl Transportable for BlockIoUring {}
-impl Migratable for BlockIoUring {}
+impl Transportable for Block {}
+impl Migratable for Block {}

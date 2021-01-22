@@ -13,7 +13,7 @@ use std::convert::TryInto;
 
 pub enum Thread {
     VirtioBalloon,
-    VirtioBlkIoUring,
+    VirtioBlock,
     VirtioConsole,
     VirtioIommu,
     VirtioMem,
@@ -76,7 +76,7 @@ fn virtio_balloon_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     ])
 }
 
-fn virtio_blk_io_uring_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
+fn virtio_block_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
     Ok(vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
@@ -423,7 +423,7 @@ fn virtio_watchdog_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
 fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
         Thread::VirtioBalloon => virtio_balloon_thread_rules()?,
-        Thread::VirtioBlkIoUring => virtio_blk_io_uring_thread_rules()?,
+        Thread::VirtioBlock => virtio_block_thread_rules()?,
         Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioIommu => virtio_iommu_thread_rules()?,
         Thread::VirtioMem => virtio_mem_thread_rules()?,
@@ -448,7 +448,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
 fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
         Thread::VirtioBalloon => virtio_balloon_thread_rules()?,
-        Thread::VirtioBlkIoUring => virtio_blk_io_uring_thread_rules()?,
+        Thread::VirtioBlock => virtio_block_thread_rules()?,
         Thread::VirtioConsole => virtio_console_thread_rules()?,
         Thread::VirtioIommu => virtio_iommu_thread_rules()?,
         Thread::VirtioMem => virtio_mem_thread_rules()?,
