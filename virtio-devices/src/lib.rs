@@ -29,7 +29,7 @@ use std::io;
 #[macro_use]
 mod device;
 pub mod balloon;
-pub mod block_io_uring;
+pub mod block;
 mod console;
 pub mod epoll_helper;
 mod iommu;
@@ -45,7 +45,7 @@ pub mod vsock;
 pub mod watchdog;
 
 pub use self::balloon::*;
-pub use self::block_io_uring::*;
+pub use self::block::*;
 pub use self::console::*;
 pub use self::device::*;
 pub use self::epoll_helper::*;

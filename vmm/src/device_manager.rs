@@ -1670,7 +1670,7 @@ impl DeviceManager {
             };
 
             let dev = Arc::new(Mutex::new(
-                virtio_devices::BlockIoUring::new(
+                virtio_devices::Block::new(
                     id.clone(),
                     image,
                     disk_cfg
