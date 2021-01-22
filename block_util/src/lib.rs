@@ -14,6 +14,7 @@ extern crate log;
 extern crate serde_derive;
 
 pub mod async_io;
+pub mod qcow_sync;
 pub mod raw_async;
 pub mod raw_sync;
 

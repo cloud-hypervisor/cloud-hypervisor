@@ -128,11 +128,19 @@ fn virtio_blk_io_uring_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_epoll_wait),
         allow_syscall(libc::SYS_exit),
         allow_syscall(libc::SYS_fsync),
+        #[cfg(target_arch = "x86_64")]
+        allow_syscall(libc::SYS_ftruncate),
+        #[cfg(target_arch = "aarch64")]
+        // The definition of libc::SYS_ftruncate is missing on AArch64.
+        // Use a hard-code number instead.
+        allow_syscall(46),
         allow_syscall(libc::SYS_futex),
         allow_syscall(SYS_IO_URING_ENTER),
         allow_syscall(libc::SYS_lseek),
         allow_syscall(libc::SYS_madvise),
+        allow_syscall(libc::SYS_mprotect),
         allow_syscall(libc::SYS_munmap),
+        allow_syscall(libc::SYS_openat),
         allow_syscall(libc::SYS_read),
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
