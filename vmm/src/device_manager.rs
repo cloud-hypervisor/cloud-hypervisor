@@ -37,8 +37,8 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 #[cfg(target_arch = "aarch64")]
 use arch::DeviceType;
 use block_util::{
-    async_io::DiskFile, block_io_uring_is_supported, raw_async::RawFileDisk,
-    raw_sync::RawFileDiskSync,
+    async_io::DiskFile, block_io_uring_is_supported, qcow_sync::QcowDiskSync,
+    raw_async::RawFileDisk, raw_sync::RawFileDiskSync,
 };
 #[cfg(target_arch = "aarch64")]
 use devices::gic;
@@ -60,7 +60,7 @@ use pci::{
     DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
     VfioPciDevice,
 };
-use qcow::{self, ImageType, QcowFile};
+use qcow::{self, ImageType};
 use seccomp::SeccompAction;
 use std::any::Any;
 use std::collections::HashMap;
@@ -1631,7 +1631,7 @@ impl DeviceManager {
                 options.custom_flags(libc::O_DIRECT);
             }
             // Open block device path
-            let image: File = options
+            let file: File = options
                 .open(
                     disk_cfg
                         .path
@@ -1641,70 +1641,47 @@ impl DeviceManager {
                 )
                 .map_err(DeviceManagerError::Disk)?;
 
-            let mut raw_img = qcow::RawFile::new(image.try_clone().unwrap(), disk_cfg.direct);
+            let mut raw_img = qcow::RawFile::new(file.try_clone().unwrap(), disk_cfg.direct);
 
             let image_type = qcow::detect_image_type(&mut raw_img)
                 .map_err(DeviceManagerError::DetectImageType)?;
-            let (virtio_device, migratable_device) = match image_type {
+
+            let image = match image_type {
                 ImageType::Raw => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
-                    let image = if block_io_uring_is_supported() && !disk_cfg.disable_io_uring {
-                        Box::new(RawFileDisk::new(image)) as Box<dyn DiskFile>
+                    if block_io_uring_is_supported() && !disk_cfg.disable_io_uring {
+                        Box::new(RawFileDisk::new(file)) as Box<dyn DiskFile>
                     } else {
-                        Box::new(RawFileDiskSync::new(image, disk_cfg.direct)) as Box<dyn DiskFile>
-                    };
-
-                    let dev = Arc::new(Mutex::new(
-                        virtio_devices::BlockIoUring::new(
-                            id.clone(),
-                            image,
-                            disk_cfg
-                                .path
-                                .as_ref()
-                                .ok_or(DeviceManagerError::NoDiskPath)?
-                                .clone(),
-                            disk_cfg.readonly,
-                            disk_cfg.iommu,
-                            disk_cfg.num_queues,
-                            disk_cfg.queue_size,
-                            self.seccomp_action.clone(),
-                        )
-                        .map_err(DeviceManagerError::CreateVirtioBlock)?,
-                    ));
-
-                    (
-                        Arc::clone(&dev) as VirtioDeviceArc,
-                        dev as Arc<Mutex<dyn Migratable>>,
-                    )
+                        Box::new(RawFileDiskSync::new(file, disk_cfg.direct)) as Box<dyn DiskFile>
+                    }
                 }
                 ImageType::Qcow2 => {
-                    let qcow_img =
-                        QcowFile::from(raw_img).map_err(DeviceManagerError::QcowDeviceCreate)?;
-                    let dev = Arc::new(Mutex::new(
-                        virtio_devices::Block::new(
-                            id.clone(),
-                            qcow_img,
-                            disk_cfg
-                                .path
-                                .as_ref()
-                                .ok_or(DeviceManagerError::NoDiskPath)?
-                                .clone(),
-                            disk_cfg.readonly,
-                            disk_cfg.iommu,
-                            disk_cfg.num_queues,
-                            disk_cfg.queue_size,
-                            self.seccomp_action.clone(),
-                        )
-                        .map_err(DeviceManagerError::CreateVirtioBlock)?,
-                    ));
-
-                    (
-                        Arc::clone(&dev) as VirtioDeviceArc,
-                        dev as Arc<Mutex<dyn Migratable>>,
-                    )
+                    Box::new(QcowDiskSync::new(file, disk_cfg.direct)) as Box<dyn DiskFile>
                 }
             };
+
+            let dev = Arc::new(Mutex::new(
+                virtio_devices::BlockIoUring::new(
+                    id.clone(),
+                    image,
+                    disk_cfg
+                        .path
+                        .as_ref()
+                        .ok_or(DeviceManagerError::NoDiskPath)?
+                        .clone(),
+                    disk_cfg.readonly,
+                    disk_cfg.iommu,
+                    disk_cfg.num_queues,
+                    disk_cfg.queue_size,
+                    self.seccomp_action.clone(),
+                )
+                .map_err(DeviceManagerError::CreateVirtioBlock)?,
+            ));
+
+            let virtio_device = Arc::clone(&dev) as VirtioDeviceArc;
+            let migratable_device = dev as Arc<Mutex<dyn Migratable>>;
+
             // Fill the device tree with a new node. In case of restore, we
             // know there is nothing to do, so we can simply override the
             // existing entry.
