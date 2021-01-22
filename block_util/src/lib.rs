@@ -18,21 +18,21 @@ pub mod qcow_sync;
 pub mod raw_async;
 pub mod raw_sync;
 
-use crate::async_io::{AsyncIo, AsyncIoError};
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, DiskFileError, DiskFileResult};
 #[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 #[cfg(feature = "io_uring")]
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::result;
+use std::sync::{Arc, Mutex};
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 use vm_virtio::DescriptorChain;
-#[cfg(feature = "io_uring")]
 use vmm_sys_util::eventfd::EventFd;
 
 const SECTOR_SHIFT: u8 = 9;
@@ -541,4 +541,114 @@ pub fn block_io_uring_is_supported() -> bool {
 #[cfg(not(feature = "io_uring"))]
 pub fn block_io_uring_is_supported() -> bool {
     false
+}
+
+pub fn disk_size(file: &mut dyn Seek, semaphore: &mut Arc<Mutex<()>>) -> DiskFileResult<u64> {
+    // Take the semaphore to ensure other threads are not interacting with
+    // the underlying file.
+    let _lock = semaphore.lock().unwrap();
+
+    Ok(file.seek(SeekFrom::End(0)).map_err(DiskFileError::Size)? as u64)
+}
+
+pub trait ReadSeekFile: Read + Seek {}
+impl<F: Read + Seek> ReadSeekFile for F {}
+
+pub fn read_vectored_sync(
+    offset: libc::off_t,
+    iovecs: Vec<libc::iovec>,
+    user_data: u64,
+    file: &mut dyn ReadSeekFile,
+    eventfd: &EventFd,
+    completion_list: &mut Vec<(u64, i32)>,
+    semaphore: &mut Arc<Mutex<()>>,
+) -> AsyncIoResult<()> {
+    // Convert libc::iovec into IoSliceMut
+    let mut slices = Vec::new();
+    for iovec in iovecs.iter() {
+        slices.push(IoSliceMut::new(unsafe { std::mem::transmute(*iovec) }));
+    }
+
+    let result = {
+        // Take the semaphore to ensure other threads are not interacting
+        // with the underlying file.
+        let _lock = semaphore.lock().unwrap();
+
+        // Move the cursor to the right offset
+        file.seek(SeekFrom::Start(offset as u64))
+            .map_err(AsyncIoError::ReadVectored)?;
+
+        // Read vectored
+        file.read_vectored(slices.as_mut_slice())
+            .map_err(AsyncIoError::ReadVectored)?
+    };
+
+    completion_list.push((user_data, result as i32));
+    eventfd.write(1).unwrap();
+
+    Ok(())
+}
+
+pub trait WriteSeekFile: Write + Seek {}
+impl<F: Write + Seek> WriteSeekFile for F {}
+
+pub fn write_vectored_sync(
+    offset: libc::off_t,
+    iovecs: Vec<libc::iovec>,
+    user_data: u64,
+    file: &mut dyn WriteSeekFile,
+    eventfd: &EventFd,
+    completion_list: &mut Vec<(u64, i32)>,
+    semaphore: &mut Arc<Mutex<()>>,
+) -> AsyncIoResult<()> {
+    // Convert libc::iovec into IoSlice
+    let mut slices = Vec::new();
+    for iovec in iovecs.iter() {
+        slices.push(IoSlice::new(unsafe { std::mem::transmute(*iovec) }));
+    }
+
+    let result = {
+        // Take the semaphore to ensure other threads are not interacting
+        // with the underlying file.
+        let _lock = semaphore.lock().unwrap();
+
+        // Move the cursor to the right offset
+        file.seek(SeekFrom::Start(offset as u64))
+            .map_err(AsyncIoError::WriteVectored)?;
+
+        // Write vectored
+        file.write_vectored(slices.as_slice())
+            .map_err(AsyncIoError::WriteVectored)?
+    };
+
+    completion_list.push((user_data, result as i32));
+    eventfd.write(1).unwrap();
+
+    Ok(())
+}
+
+pub fn fsync_sync(
+    user_data: Option<u64>,
+    file: &mut dyn Write,
+    eventfd: &EventFd,
+    completion_list: &mut Vec<(u64, i32)>,
+    semaphore: &mut Arc<Mutex<()>>,
+) -> AsyncIoResult<()> {
+    let result: i32 = {
+        // Take the semaphore to ensure other threads are not interacting
+        // with the underlying file.
+        let _lock = semaphore.lock().unwrap();
+
+        // Flush
+        file.flush().map_err(AsyncIoError::Fsync)?;
+
+        0
+    };
+
+    if let Some(user_data) = user_data {
+        completion_list.push((user_data, result));
+        eventfd.write(1).unwrap();
+    }
+
+    Ok(())
 }

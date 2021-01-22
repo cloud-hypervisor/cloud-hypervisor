@@ -2,12 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
-};
+use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileResult};
+use crate::{disk_size, fsync_sync, read_vectored_sync, write_vectored_sync};
 use qcow::{QcowFile, RawFile};
 use std::fs::File;
-use std::io::{IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -28,14 +26,7 @@ impl QcowDiskSync {
 
 impl DiskFile for QcowDiskSync {
     fn size(&mut self) -> DiskFileResult<u64> {
-        // Take the semaphore to ensure other threads are not interacting with
-        // the underlying file.
-        let _lock = self.semaphore.lock().unwrap();
-
-        Ok(self
-            .qcow_file
-            .seek(SeekFrom::End(0))
-            .map_err(DiskFileError::Size)? as u64)
+        disk_size(&mut self.qcow_file, &mut self.semaphore)
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
@@ -76,32 +67,15 @@ impl AsyncIo for QcowSync {
         iovecs: Vec<libc::iovec>,
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        // Convert libc::iovec into IoSliceMut
-        let mut slices = Vec::new();
-        for iovec in iovecs.iter() {
-            slices.push(IoSliceMut::new(unsafe { std::mem::transmute(*iovec) }));
-        }
-
-        let result = {
-            // Take the semaphore to ensure other threads are not interacting
-            // with the underlying file.
-            let _lock = self.semaphore.lock().unwrap();
-
-            // Move the cursor to the right offset
-            self.qcow_file
-                .seek(SeekFrom::Start(offset as u64))
-                .map_err(AsyncIoError::ReadVectored)?;
-
-            // Read vectored
-            self.qcow_file
-                .read_vectored(slices.as_mut_slice())
-                .map_err(AsyncIoError::ReadVectored)?
-        };
-
-        self.completion_list.push((user_data, result as i32));
-        self.eventfd.write(1).unwrap();
-
-        Ok(())
+        read_vectored_sync(
+            offset,
+            iovecs,
+            user_data,
+            &mut self.qcow_file,
+            &self.eventfd,
+            &mut self.completion_list,
+            &mut self.semaphore,
+        )
     }
 
     fn write_vectored(
@@ -110,52 +84,25 @@ impl AsyncIo for QcowSync {
         iovecs: Vec<libc::iovec>,
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        // Convert libc::iovec into IoSlice
-        let mut slices = Vec::new();
-        for iovec in iovecs.iter() {
-            slices.push(IoSlice::new(unsafe { std::mem::transmute(*iovec) }));
-        }
-
-        let result = {
-            // Take the semaphore to ensure other threads are not interacting
-            // with the underlying file.
-            let _lock = self.semaphore.lock().unwrap();
-
-            // Move the cursor to the right offset
-            self.qcow_file
-                .seek(SeekFrom::Start(offset as u64))
-                .map_err(AsyncIoError::WriteVectored)?;
-
-            // Write vectored
-            self.qcow_file
-                .write_vectored(slices.as_slice())
-                .map_err(AsyncIoError::WriteVectored)?
-        };
-
-        self.completion_list.push((user_data, result as i32));
-        self.eventfd.write(1).unwrap();
-
-        Ok(())
+        write_vectored_sync(
+            offset,
+            iovecs,
+            user_data,
+            &mut self.qcow_file,
+            &self.eventfd,
+            &mut self.completion_list,
+            &mut self.semaphore,
+        )
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
-        let result: i32 = {
-            // Take the semaphore to ensure other threads are not interacting
-            // with the underlying file.
-            let _lock = self.semaphore.lock().unwrap();
-
-            // Flush
-            self.qcow_file.flush().map_err(AsyncIoError::Fsync)?;
-
-            0
-        };
-
-        if let Some(user_data) = user_data {
-            self.completion_list.push((user_data, result));
-            self.eventfd.write(1).unwrap();
-        }
-
-        Ok(())
+        fsync_sync(
+            user_data,
+            &mut self.qcow_file,
+            &self.eventfd,
+            &mut self.completion_list,
+            &mut self.semaphore,
+        )
     }
 
     fn complete(&mut self) -> Vec<(u64, i32)> {
