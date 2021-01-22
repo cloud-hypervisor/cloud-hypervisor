@@ -1659,12 +1659,15 @@ impl DeviceManager {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
                     if block_io_uring_is_supported() && !disk_cfg.disable_io_uring {
+                        info!("Using asynchronous RAW disk file (io_uring)");
                         Box::new(RawFileDisk::new(file)) as Box<dyn DiskFile>
                     } else {
+                        info!("Using synchronous RAW disk file");
                         Box::new(RawFileDiskSync::new(file, disk_cfg.direct)) as Box<dyn DiskFile>
                     }
                 }
                 ImageType::Qcow2 => {
+                    info!("Using synchronous QCOW disk file");
                     Box::new(QcowDiskSync::new(file, disk_cfg.direct)) as Box<dyn DiskFile>
                 }
             };
