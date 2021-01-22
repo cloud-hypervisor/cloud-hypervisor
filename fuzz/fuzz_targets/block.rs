@@ -4,7 +4,9 @@
 
 #![no_main]
 
+use block_util::{async_io::DiskFile, qcow_sync::QcowDiskSync};
 use libfuzzer_sys::fuzz_target;
+use seccomp::SeccompAction;
 use std::ffi;
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
@@ -12,11 +14,10 @@ use std::mem::size_of;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::Arc;
-use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
+use virtio_devices::{BlockIoUring, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_virtio::Queue;
 use vmm_sys_util::eventfd::EventFd;
-use seccomp::SeccompAction;
 
 const MEM_SIZE: u64 = 256 * 1024 * 1024;
 const DESC_SIZE: u64 = 16; // Bytes in one virtio descriptor.
@@ -83,11 +84,11 @@ fuzz_target!(|bytes| {
 
     let shm = memfd_create(&ffi::CString::new("fuzz").unwrap(), 0).unwrap();
     let disk_file: File = unsafe { File::from_raw_fd(shm) };
-    let raw_img = qcow::RawFile::new(disk_file, false);
+    let qcow_disk = Box::new(QcowDiskSync::new(disk_file, false)) as Box<dyn DiskFile>;
 
-    let mut block = Block::new(
+    let mut block = BlockIoUring::new(
         "tmp".to_owned(),
-        raw_img,
+        qcow_disk,
         PathBuf::from(""),
         false,
         false,
