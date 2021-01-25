@@ -1033,6 +1033,17 @@ impl Vm {
 
         let pci_space = (pci_space_start.0, pci_space_size);
 
+        #[cfg(feature = "acpi")]
+        {
+            let _ = crate::acpi::create_acpi_tables(
+                &mem,
+                &self.device_manager,
+                &self.cpu_manager,
+                &self.memory_manager,
+                &self.numa_nodes,
+            );
+        }
+
         // Call `configure_system` and pass the GIC devices out, so that
         // we can register the GIC device to the device manager.
         let gic_device = arch::configure_system(
