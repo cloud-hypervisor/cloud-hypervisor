@@ -43,8 +43,8 @@ pub const NUM_IOAPIC_PINS: usize = 24;
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Exception {
-    DE = 1,  // Divide Error
-    DB = 2,  // Debug Exception
+    DE = 0,  // Divide Error
+    DB = 1,  // Debug Exception
     BP = 3,  // Breakpoint
     OF = 4,  // Overflow
     BR = 5,  // BOUND Range Exceeded
