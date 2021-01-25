@@ -6,12 +6,10 @@ use crate::cpu::CpuManager;
 use crate::device_manager::DeviceManager;
 use crate::memory_manager::MemoryManager;
 use crate::vm::NumaNodes;
-use acpi_tables::{
-    aml::Aml,
-    rsdp::RSDP,
-    sdt::{GenericAddress, SDT},
-};
-use arch::layout;
+#[cfg(target_arch = "x86_64")]
+use acpi_tables::sdt::GenericAddress;
+use acpi_tables::{aml::Aml, rsdp::RSDP, sdt::SDT};
+
 use bitflags::bitflags;
 use std::sync::{Arc, Mutex};
 use vm_memory::GuestRegionMmap;
@@ -114,8 +112,16 @@ pub fn create_acpi_tables(
     memory_manager: &Arc<Mutex<MemoryManager>>,
     numa_nodes: &NumaNodes,
 ) -> GuestAddress {
+    #[cfg(target_arch = "x86_64")]
     // RSDP is at the EBDA
-    let rsdp_offset = layout::RSDP_POINTER;
+    let rsdp_offset = arch::layout::RSDP_POINTER;
+    #[cfg(target_arch = "aarch64")]
+    // TODO: For aarch64 place the ACPI tables in the last MiB of guest RAM
+    let rsdp_offset = {
+        use vm_memory::GuestMemory;
+        guest_mem.last_addr().checked_sub(1 << 20).unwrap()
+    };
+
     let mut tables: Vec<u64> = Vec::new();
 
     // DSDT
@@ -130,6 +136,7 @@ pub fn create_acpi_tables(
     let mut facp = SDT::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
 
     // PM_TMR_BLK I/O port
+    #[cfg(target_arch = "x86_64")]
     facp.write(76, 0xb008u32);
 
     // HW_REDUCED_ACPI, RESET_REG_SUP, TMR_VAL_EXT
@@ -137,19 +144,24 @@ pub fn create_acpi_tables(
     facp.write(112, fadt_flags);
 
     // RESET_REG
+    #[cfg(target_arch = "x86_64")]
     facp.write(116, GenericAddress::io_port_address::<u8>(0x3c0));
     // RESET_VALUE
+    #[cfg(target_arch = "x86_64")]
     facp.write(128, 1u8);
 
     facp.write(131, 3u8); // FADT minor version
     facp.write(140, dsdt_offset.0); // X_DSDT
 
     // X_PM_TMR_BLK
+    #[cfg(target_arch = "x86_64")]
     facp.write(208, GenericAddress::io_port_address::<u32>(0xb008));
 
     // SLEEP_CONTROL_REG
+    #[cfg(target_arch = "x86_64")]
     facp.write(244, GenericAddress::io_port_address::<u8>(0x3c0));
     // SLEEP_STATUS_REG
+    #[cfg(target_arch = "x86_64")]
     facp.write(256, GenericAddress::io_port_address::<u8>(0x3c0));
 
     facp.write(268, b"CLOUDHYP"); // Hypervisor Vendor Identity
@@ -177,7 +189,7 @@ pub fn create_acpi_tables(
 
     // 32-bit PCI enhanced configuration mechanism
     mcfg.append(PCIRangeEntry {
-        base_address: layout::PCI_MMCONFIG_START.0,
+        base_address: arch::layout::PCI_MMCONFIG_START.0,
         segment: 0,
         start: 0,
         end: 0,

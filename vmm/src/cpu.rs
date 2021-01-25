@@ -22,8 +22,6 @@ use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
 use anyhow::anyhow;
-#[cfg(feature = "acpi")]
-use arch::layout;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::SgxEpcSection;
 #[cfg(target_arch = "x86_64")]
@@ -1031,40 +1029,48 @@ impl CpuManager {
         assert!(self.config.boot_vcpus <= self.config.max_vcpus);
 
         let mut madt = SDT::new(*b"APIC", 44, 5, *b"CLOUDH", *b"CHMADT  ", 1);
-        madt.write(36, layout::APIC_START);
+        #[cfg(target_arch = "x86_64")]
+        {
+            madt.write(36, arch::layout::APIC_START);
 
-        for cpu in 0..self.config.max_vcpus {
-            let lapic = LocalAPIC {
-                r#type: 0,
-                length: 8,
-                processor_id: cpu,
-                apic_id: cpu,
-                flags: if cpu < self.config.boot_vcpus {
-                    1 << MADT_CPU_ENABLE_FLAG
-                } else {
-                    0
-                },
-            };
-            madt.append(lapic);
+            for cpu in 0..self.config.max_vcpus {
+                let lapic = LocalAPIC {
+                    r#type: 0,
+                    length: 8,
+                    processor_id: cpu,
+                    apic_id: cpu,
+                    flags: if cpu < self.config.boot_vcpus {
+                        1 << MADT_CPU_ENABLE_FLAG
+                    } else {
+                        0
+                    },
+                };
+                madt.append(lapic);
+            }
+
+            madt.append(IOAPIC {
+                r#type: 1,
+                length: 12,
+                ioapic_id: 0,
+                apic_address: arch::layout::IOAPIC_START.0 as u32,
+                gsi_base: 0,
+                ..Default::default()
+            });
+
+            madt.append(InterruptSourceOverride {
+                r#type: 2,
+                length: 10,
+                bus: 0,
+                source: 4,
+                gsi: 4,
+                flags: 0,
+            });
         }
 
-        madt.append(IOAPIC {
-            r#type: 1,
-            length: 12,
-            ioapic_id: 0,
-            apic_address: layout::IOAPIC_START.0 as u32,
-            gsi_base: 0,
-            ..Default::default()
-        });
-
-        madt.append(InterruptSourceOverride {
-            r#type: 2,
-            length: 10,
-            bus: 0,
-            source: 4,
-            gsi: 4,
-            flags: 0,
-        });
+        #[cfg(target_arch = "aarch64")]
+        {
+            madt.update_checksum();
+        }
 
         madt
     }

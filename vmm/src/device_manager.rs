@@ -1201,17 +1201,20 @@ impl DeviceManager {
         self.bus_devices
             .push(Arc::clone(&shutdown_device) as Arc<Mutex<dyn BusDevice>>);
 
-        self.address_manager
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_io_addresses(Some(GuestAddress(0x3c0)), 0x8, None)
-            .ok_or(DeviceManagerError::AllocateIOPort)?;
+        #[cfg(target_arch = "x86_64")]
+        {
+            self.address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_io_addresses(Some(GuestAddress(0x3c0)), 0x8, None)
+                .ok_or(DeviceManagerError::AllocateIOPort)?;
 
-        self.address_manager
-            .io_bus
-            .insert(shutdown_device, 0x3c0, 0x4)
-            .map_err(DeviceManagerError::BusError)?;
+            self.address_manager
+                .io_bus
+                .insert(shutdown_device, 0x3c0, 0x4)
+                .map_err(DeviceManagerError::BusError)?;
+        }
 
         let ged_irq = self
             .address_manager
@@ -1253,17 +1256,20 @@ impl DeviceManager {
         self.bus_devices
             .push(Arc::clone(&pm_timer_device) as Arc<Mutex<dyn BusDevice>>);
 
-        self.address_manager
-            .allocator
-            .lock()
-            .unwrap()
-            .allocate_io_addresses(Some(GuestAddress(0xb008)), 0x4, None)
-            .ok_or(DeviceManagerError::AllocateIOPort)?;
+        #[cfg(target_arch = "x86_64")]
+        {
+            self.address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_io_addresses(Some(GuestAddress(0xb008)), 0x4, None)
+                .ok_or(DeviceManagerError::AllocateIOPort)?;
 
-        self.address_manager
-            .io_bus
-            .insert(pm_timer_device, 0xb008, 0x4)
-            .map_err(DeviceManagerError::BusError)?;
+            self.address_manager
+                .io_bus
+                .insert(pm_timer_device, 0xb008, 0x4)
+                .map_err(DeviceManagerError::BusError)?;
+        }
 
         Ok(Some(ged_device))
     }
