@@ -447,8 +447,8 @@ mod tests {
                 .expect("Expect device mapper nodes to be ready");
 
             self.osdisk_path = format!("/dev/mapper/{}", windows_snapshot);
-            self.windows_snapshot_cow = windows_snapshot_cow.clone();
-            self.windows_snapshot = windows_snapshot.clone();
+            self.windows_snapshot_cow = windows_snapshot_cow;
+            self.windows_snapshot = windows_snapshot;
         }
 
         fn disk(&self, disk_type: DiskType) -> Option<String> {
