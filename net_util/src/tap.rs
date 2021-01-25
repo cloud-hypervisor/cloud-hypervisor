@@ -579,12 +579,16 @@ mod tests {
 
     #[test]
     fn test_tap_create() {
+        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
+
         let t = Tap::new(1).unwrap();
         println!("created tap: {:?}", t);
     }
 
     #[test]
     fn test_tap_from_fd() {
+        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
+
         let orig_tap = Tap::new(1).unwrap();
         let fd = orig_tap.as_raw_fd();
         let _new_tap = Tap::from_tap_fd(fd).unwrap();
@@ -610,6 +614,8 @@ mod tests {
 
     #[test]
     fn test_set_options() {
+        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
+
         // This line will fail to provide an initialized FD if the test is not run as root.
         let tap = Tap::new(1).unwrap();
         tap.set_vnet_hdr_size(16).unwrap();
@@ -618,6 +624,8 @@ mod tests {
 
     #[test]
     fn test_tap_enable() {
+        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
+
         let tap = Tap::new(1).unwrap();
         let ret = tap.enable();
         assert!(ret.is_ok());
@@ -625,6 +633,8 @@ mod tests {
 
     #[test]
     fn test_tap_get_ifreq() {
+        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
+
         let tap = Tap::new(1).unwrap();
         let ret = tap.get_ifreq();
         assert_eq!(
@@ -635,6 +645,8 @@ mod tests {
 
     #[test]
     fn test_raw_fd() {
+        let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
+
         let tap = Tap::new(1).unwrap();
         assert_eq!(tap.as_raw_fd(), tap.tap_file.as_raw_fd());
     }
