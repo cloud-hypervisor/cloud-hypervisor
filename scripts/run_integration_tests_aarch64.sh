@@ -221,7 +221,7 @@ sudo bash -c "echo 10 > /sys/kernel/mm/ksm/sleep_millisecs"
 sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
 export RUST_BACKTRACE=1
-time cargo test $features_test "tests::parallel::"
+time cargo test $features_test "tests::parallel::$test_filter"
 RES=$?
 
 # Tear vhost_user_net test network down

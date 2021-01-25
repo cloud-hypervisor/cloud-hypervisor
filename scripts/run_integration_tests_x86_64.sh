@@ -9,7 +9,6 @@ export BUILD_TARGET=${BUILD_TARGET-x86_64-unknown-linux-gnu}
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
 
-
 process_common_args "$@"
 
 # For now these values are deafult for kvm
@@ -243,14 +242,14 @@ echo 4096 | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 export RUST_BACKTRACE=1
-time cargo test $features_test "tests::parallel::"
+time cargo test $features_test "tests::parallel::$test_filter"
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
     export RUST_BACKTRACE=1
-    time cargo test $features_test "tests::sequential::" -- --test-threads=1
+    time cargo test $features_test "tests::sequential::$test_filter" -- --test-threads=1
     RES=$?
 fi
 
