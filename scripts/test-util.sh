@@ -1,5 +1,7 @@
 #!/bin/bash
 hypervisor="kvm"
+test_filter=""
+
 cmd_help() {
     echo ""
     echo "Cloud Hypervisor $(basename $0)"
@@ -8,6 +10,7 @@ cmd_help() {
     echo "Available arguments:"
     echo ""
     echo "    --hypervisor  Underlying hypervisor. Options kvm, mshv"
+    echo "    --test-filter Tests to run"
     echo ""
     echo "    --help        Display this help message."
     echo ""
@@ -21,8 +24,11 @@ process_common_args() {
                 shift
                 hypervisor="$1"
                 ;;
+            "--test-filter")
+                shift
+                test_filter="$1"
+                ;;
             *)
-            # We only care about hypervisor , do nothing for other arguments
 		;;
 	esac
 	shift
