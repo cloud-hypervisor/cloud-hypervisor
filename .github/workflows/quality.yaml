@@ -43,3 +43,6 @@ jobs:
 
       - name: Clippy (mshv)
         run: cargo clippy --all --all-targets --no-default-features --tests --features "mshv" -- -D warnings
+
+      - name: Clippy (integration tests)
+        run: cargo clippy --all --all-targets --tests --features "integration_tests" -- -D warnings
