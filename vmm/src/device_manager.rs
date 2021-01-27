@@ -1790,11 +1790,11 @@ impl DeviceManager {
                     )
                     .map_err(DeviceManagerError::CreateVirtioNet)?,
                 ))
-            } else if let Some(fd) = net_cfg.fd {
+            } else if let Some(fds) = &net_cfg.fds {
                 Arc::new(Mutex::new(
-                    virtio_devices::Net::from_tap_fd(
+                    virtio_devices::Net::from_tap_fds(
                         id.clone(),
-                        fd,
+                        fds,
                         Some(net_cfg.mac),
                         net_cfg.iommu,
                         net_cfg.queue_size,

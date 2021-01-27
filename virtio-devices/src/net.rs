@@ -297,21 +297,28 @@ impl Net {
         )
     }
 
-    pub fn from_tap_fd(
+    pub fn from_tap_fds(
         id: String,
-        fd: RawFd,
+        fds: &[RawFd],
         guest_mac: Option<MacAddr>,
         iommu: bool,
         queue_size: u16,
         seccomp_action: SeccompAction,
     ) -> Result<Self> {
-        let tap = Tap::from_tap_fd(fd).map_err(Error::TapError)?;
+        let mut taps: Vec<Tap> = Vec::new();
+        let num_queue_pairs = fds.len();
+
+        for fd in fds.iter() {
+            let tap = Tap::from_tap_fd(*fd, num_queue_pairs).map_err(Error::TapError)?;
+            taps.push(tap);
+        }
+
         Self::new_with_tap(
             id,
-            vec![tap],
+            taps,
             guest_mac,
             iommu,
-            2,
+            num_queue_pairs * 2,
             queue_size,
             seccomp_action,
         )

@@ -107,6 +107,8 @@ pub enum ValidationError {
     CpuTopologyZeroPart,
     /// Virtio needs a min of 2 queues
     VnetQueueLowerThan2,
+    /// The input queue number for virtio_net must match the number of input fds
+    VnetQueueFdMismatch,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -132,6 +134,10 @@ impl fmt::Display for ValidationError {
                 "Product of CPU topology parts does not match maximum vCPUs"
             ),
             VnetQueueLowerThan2 => write!(f, "Number of queues to virtio_net less than 2"),
+            VnetQueueFdMismatch => write!(
+                f,
+                "Number of queues to virtio_net does not match the number of input FDs"
+            ),
         }
     }
 }
@@ -765,7 +771,7 @@ pub struct NetConfig {
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
-    pub fd: Option<i32>,
+    pub fds: Option<Vec<i32>>,
 }
 
 fn default_netconfig_tap() -> Option<String> {
@@ -806,14 +812,14 @@ impl Default for NetConfig {
             vhost_user: false,
             vhost_socket: None,
             id: None,
-            fd: None,
+            fds: None,
         }
     }
 }
 
 impl NetConfig {
     pub const SYNTAX: &'static str = "Network parameters \
-    \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,fd=<fd>,iommu=on|off,\
+    \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,fd=<fd1:fd2...>,iommu=on|off,\
     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,id=<device_id>\"";
 
@@ -869,7 +875,11 @@ impl NetConfig {
             .0;
         let vhost_socket = parser.get("socket");
         let id = parser.get("id");
-        let fd = parser.convert("fd").map_err(Error::ParseNetwork)?;
+        let fds = parser
+            .convert::<IntegerList>("fd")
+            .map_err(Error::ParseNetwork)?
+            .map(|v| v.0.iter().map(|e| *e as i32).collect());
+
         let config = NetConfig {
             tap,
             ip,
@@ -882,7 +892,7 @@ impl NetConfig {
             vhost_user,
             vhost_socket,
             id,
-            fd,
+            fds,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -891,6 +901,11 @@ impl NetConfig {
         if self.num_queues < 2 {
             return Err(ValidationError::VnetQueueLowerThan2);
         }
+
+        if self.fds.is_some() && self.fds.as_ref().unwrap().len() * 2 != self.num_queues {
+            return Err(ValidationError::VnetQueueFdMismatch);
+        }
+
         Ok(())
     }
 }
@@ -1949,10 +1964,11 @@ mod tests {
         );
 
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34,fd=3")?,
+            NetConfig::parse("mac=de:ad:be:ef:12:34,fd=3:7,num_queues=4")?,
             NetConfig {
                 mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
-                fd: Some(3),
+                fds: Some(vec![3, 7]),
+                num_queues: 4,
                 ..Default::default()
             }
         );

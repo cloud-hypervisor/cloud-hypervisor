@@ -153,7 +153,7 @@ impl Tap {
         Self::open_named("vmtap%d", num_queue_pairs, None)
     }
 
-    pub fn from_tap_fd(fd: RawFd) -> Result<Tap> {
+    pub fn from_tap_fd(fd: RawFd, num_queue_pairs: usize) -> Result<Tap> {
         // Ensure that the file is opened non-blocking, this is particularly
         // needed when opened via the shell for macvtap.
         let ret = unsafe {
@@ -181,6 +181,9 @@ impl Tap {
             let ifru_flags = ifreq.ifr_ifru.ifru_flags.as_mut();
             *ifru_flags =
                 (net_gen::IFF_TAP | net_gen::IFF_NO_PI | net_gen::IFF_VNET_HDR) as c_short;
+            if num_queue_pairs > 1 {
+                *ifru_flags |= net_gen::IFF_MULTI_QUEUE as c_short;
+            }
         }
         let ret = unsafe { ioctl_with_mut_ref(&tap_file, net_gen::TUNSETIFF(), &mut ifreq) };
         if ret < 0 && IoError::last_os_error().raw_os_error().unwrap() != libc::EEXIST {
@@ -591,7 +594,7 @@ mod tests {
 
         let orig_tap = Tap::new(1).unwrap();
         let fd = orig_tap.as_raw_fd();
-        let _new_tap = Tap::from_tap_fd(fd).unwrap();
+        let _new_tap = Tap::from_tap_fd(fd, 1).unwrap();
     }
 
     #[test]
