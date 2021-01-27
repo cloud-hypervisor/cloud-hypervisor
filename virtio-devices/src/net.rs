@@ -283,7 +283,7 @@ impl Net {
         queue_size: u16,
         seccomp_action: SeccompAction,
     ) -> Result<Self> {
-        let taps = open_tap(if_name, ip_addr, netmask, host_mac, num_queues / 2)
+        let taps = open_tap(if_name, ip_addr, netmask, host_mac, num_queues / 2, None)
             .map_err(Error::OpenTap)?;
 
         Self::new_with_tap(
