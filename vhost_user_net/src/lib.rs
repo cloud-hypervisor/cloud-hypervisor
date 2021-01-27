@@ -143,6 +143,7 @@ impl VhostUserNetBackend {
             Some(netmask),
             &mut Some(host_mac),
             num_queues / 2,
+            None,
         )
         .map_err(Error::OpenTap)?;
 
