@@ -398,7 +398,7 @@ components:
         pci_bdf:
           type: integer
           format: int32
-        
+
     VmCounters:
       type: object
       additionalProperties:
@@ -665,8 +665,10 @@ components:
         id:
           type: string
         fd:
-          type: integer
-          format: int32
+          type: array
+          items:
+            type: integer
+            format: int32
 
     RngConfig:
       required:
