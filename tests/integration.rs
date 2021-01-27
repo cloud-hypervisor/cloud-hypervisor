@@ -5673,27 +5673,35 @@ mod tests {
             let guest = Guest::new(&mut focal);
             let kernel_path = direct_kernel_boot_path().unwrap();
 
+            // Create a TAP interface with multi-queue enabled
+            let num_queue_pairs: usize = 2;
+
             use std::str::FromStr;
             let taps = net_util::open_tap(
                 Some("chtap0"),
                 Some(std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap()),
                 None,
                 &mut None,
-                1,
+                num_queue_pairs,
                 Some(libc::O_RDWR | libc::O_NONBLOCK),
             )
             .unwrap();
-            let tap_fd = taps[0].as_raw_fd();
 
             let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
+                .args(&["--cpus", &format!("boot={}", num_queue_pairs)])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", kernel_path.to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .args(&[
                     "--net",
-                    &format!("fd={},mac={}", tap_fd, guest.network.guest_mac),
+                    &format!(
+                        "fd={}:{},mac={},num_queues={}",
+                        taps[0].as_raw_fd(),
+                        taps[1].as_raw_fd(),
+                        guest.network.guest_mac,
+                        num_queue_pairs * 2
+                    ),
                 ])
                 .capture_output()
                 .spawn()
