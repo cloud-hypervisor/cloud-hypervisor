@@ -11,7 +11,7 @@ path = "src/qcow.rs"
 [dependencies]
 byteorder = "1.3.4"
 libc = "0.2.82"
-log = "0.4.13"
+log = "0.4.14"
 remain = "0.2.2"
 vmm-sys-util = ">=0.3.1"
 
