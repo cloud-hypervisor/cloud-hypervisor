@@ -5724,11 +5724,6 @@ mod tests {
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
 
-            std::process::Command::new("bash")
-                .args(&["-c", "sudo ip tuntap del mode tap name chtap0"])
-                .status()
-                .expect("Expected upping interface to work");
-
             handle_child_output(r, &output);
         }
     }
