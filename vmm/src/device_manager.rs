@@ -40,8 +40,8 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use arch::DeviceType;
 use block_util::{
     async_io::DiskFile, block_io_uring_is_supported, detect_image_type,
-    fixed_vhd_async::FixedVhdDiskAsync, qcow_sync::QcowDiskSync, raw_async::RawFileDisk,
-    raw_sync::RawFileDiskSync, ImageType,
+    fixed_vhd_async::FixedVhdDiskAsync, fixed_vhd_sync::FixedVhdDiskSync, qcow_sync::QcowDiskSync,
+    raw_async::RawFileDisk, raw_sync::RawFileDiskSync, ImageType,
 };
 #[cfg(target_arch = "aarch64")]
 use devices::gic;
@@ -383,6 +383,9 @@ pub enum DeviceManagerError {
 
     /// Failed to create FixedVhdDiskAsync
     CreateFixedVhdDiskAsync(io::Error),
+
+    /// Failed to create FixedVhdDiskSync
+    CreateFixedVhdDiskSync(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1675,7 +1678,11 @@ impl DeviceManager {
                                 .map_err(DeviceManagerError::CreateFixedVhdDiskAsync)?,
                         ) as Box<dyn DiskFile>
                     } else {
-                        unimplemented!("No synchronous implementation for fixed VHD files");
+                        info!("Using synchronous fixed VHD disk file");
+                        Box::new(
+                            FixedVhdDiskSync::new(file)
+                                .map_err(DeviceManagerError::CreateFixedVhdDiskSync)?,
+                        ) as Box<dyn DiskFile>
                     }
                 }
                 ImageType::Raw => {
