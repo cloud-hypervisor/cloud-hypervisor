@@ -67,6 +67,7 @@ fn virtio_balloon_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_epoll_wait),
         allow_syscall(libc::SYS_exit),
         allow_syscall(libc::SYS_futex),
+        allow_syscall(libc::SYS_fallocate),
         allow_syscall(libc::SYS_madvise),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_read),
