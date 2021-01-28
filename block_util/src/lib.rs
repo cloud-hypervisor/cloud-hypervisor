@@ -14,15 +14,19 @@ extern crate log;
 extern crate serde_derive;
 
 pub mod async_io;
+pub mod fixed_vhd_async;
 pub mod qcow_sync;
 pub mod raw_async;
 pub mod raw_sync;
+pub mod vhd;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, DiskFileError, DiskFileResult};
 #[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
+use std::convert::TryInto;
+use std::fs::File;
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 #[cfg(feature = "io_uring")]
@@ -651,4 +655,36 @@ pub fn fsync_sync(
     }
 
     Ok(())
+}
+
+pub enum ImageType {
+    FixedVhd,
+    Qcow2,
+    Raw,
+}
+
+const QCOW_MAGIC: u32 = 0x5146_49fb;
+
+/// Determine image type through file parsing.
+pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
+    // We must create a buffer aligned on 512 bytes with a size being a
+    // multiple of 512 bytes as the file might be opened with O_DIRECT flag.
+    #[repr(align(512))]
+    struct Sector {
+        data: [u8; 512],
+    }
+    let mut s = Sector { data: [0; 512] };
+
+    f.read_exact(&mut s.data)?;
+
+    // Check 4 first bytes to get the header value and determine the image type
+    let image_type = if u32::from_be_bytes(s.data[0..4].try_into().unwrap()) == QCOW_MAGIC {
+        ImageType::Qcow2
+    } else if vhd::is_fixed_vhd(f)? {
+        ImageType::FixedVhd
+    } else {
+        ImageType::Raw
+    };
+
+    Ok(image_type)
 }

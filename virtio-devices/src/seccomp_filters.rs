@@ -105,6 +105,7 @@ fn virtio_block_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_openat),
         allow_syscall(libc::SYS_prctl),
+        allow_syscall(libc::SYS_pread64),
         allow_syscall(libc::SYS_read),
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sched_getaffinity),

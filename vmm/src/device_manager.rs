@@ -39,8 +39,9 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 #[cfg(target_arch = "aarch64")]
 use arch::DeviceType;
 use block_util::{
-    async_io::DiskFile, block_io_uring_is_supported, qcow_sync::QcowDiskSync,
-    raw_async::RawFileDisk, raw_sync::RawFileDiskSync,
+    async_io::DiskFile, block_io_uring_is_supported, detect_image_type,
+    fixed_vhd_async::FixedVhdDiskAsync, qcow_sync::QcowDiskSync, raw_async::RawFileDisk,
+    raw_sync::RawFileDiskSync, ImageType,
 };
 #[cfg(target_arch = "aarch64")]
 use devices::gic;
@@ -62,7 +63,6 @@ use pci::{
     DeviceRelocation, PciBarRegionType, PciBus, PciConfigIo, PciConfigMmio, PciDevice, PciRoot,
     VfioPciDevice,
 };
-use qcow::{self, ImageType};
 use seccomp::SeccompAction;
 use std::any::Any;
 use std::collections::HashMap;
@@ -178,7 +178,7 @@ pub enum DeviceManagerError {
     CreateVirtioWatchdog(io::Error),
 
     /// Failed parsing disk image format
-    DetectImageType(qcow::Error),
+    DetectImageType(io::Error),
 
     /// Cannot open qcow disk path
     QcowDeviceCreate(qcow::Error),
@@ -377,6 +377,12 @@ pub enum DeviceManagerError {
 
     /// Failed to do power button notification
     PowerButtonNotification(io::Error),
+
+    /// Failed to set O_DIRECT flag to file descriptor
+    SetDirectIo,
+
+    /// Failed to create FixedVhdDiskAsync
+    CreateFixedVhdDiskAsync(io::Error),
 }
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
 
@@ -1645,7 +1651,7 @@ impl DeviceManager {
                 options.custom_flags(libc::O_DIRECT);
             }
             // Open block device path
-            let file: File = options
+            let mut file: File = options
                 .open(
                     disk_cfg
                         .path
@@ -1655,12 +1661,23 @@ impl DeviceManager {
                 )
                 .map_err(DeviceManagerError::Disk)?;
 
-            let mut raw_img = qcow::RawFile::new(file.try_clone().unwrap(), disk_cfg.direct);
-
-            let image_type = qcow::detect_image_type(&mut raw_img)
-                .map_err(DeviceManagerError::DetectImageType)?;
+            let image_type =
+                detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;
 
             let image = match image_type {
+                ImageType::FixedVhd => {
+                    // Use asynchronous backend relying on io_uring if the
+                    // syscalls are supported.
+                    if block_io_uring_is_supported() && !disk_cfg.disable_io_uring {
+                        info!("Using asynchronous fixed VHD disk file (io_uring)");
+                        Box::new(
+                            FixedVhdDiskAsync::new(file)
+                                .map_err(DeviceManagerError::CreateFixedVhdDiskAsync)?,
+                        ) as Box<dyn DiskFile>
+                    } else {
+                        unimplemented!("No synchronous implementation for fixed VHD files");
+                    }
+                }
                 ImageType::Raw => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
