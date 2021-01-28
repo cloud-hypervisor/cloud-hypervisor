@@ -1686,7 +1686,7 @@ impl DeviceManager {
                         Box::new(RawFileDisk::new(file)) as Box<dyn DiskFile>
                     } else {
                         info!("Using synchronous RAW disk file");
-                        Box::new(RawFileDiskSync::new(file, disk_cfg.direct)) as Box<dyn DiskFile>
+                        Box::new(RawFileDiskSync::new(file)) as Box<dyn DiskFile>
                     }
                 }
                 ImageType::Qcow2 => {
