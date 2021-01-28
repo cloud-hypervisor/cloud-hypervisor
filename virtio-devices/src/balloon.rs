@@ -61,6 +61,8 @@ pub enum Error {
     UnexpectedWriteOnlyDescriptor,
     // Guest sent us invalid request.
     InvalidRequest,
+    // Fallocate fail,
+    FallocateFail(std::io::Error),
     // Madvise fail.
     MadviseFail(std::io::Error),
     // Failed to EventFd write.
@@ -201,6 +203,32 @@ impl BalloonEpollHandler {
 
                 let gpa = (pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT;
                 if let Ok(hva) = mem.get_host_address(GuestAddress(gpa)) {
+                    if queue_index == 0 {
+                        let region = mem.find_region(GuestAddress(gpa)).unwrap();
+                        let (host_fd, f_offset) = if let Some(f_off) = region.file_offset() {
+                            (f_off.file().as_raw_fd(), f_off.start())
+                        } else {
+                            (-1, 0)
+                        };
+
+                        if host_fd != -1 {
+                            let start = unsafe {
+                                hva.offset_from(region.as_ptr())
+                            };
+                            let res = unsafe {
+                                libc::fallocate64(
+                                    host_fd,
+                                    libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+                                    (start as u64  + f_offset) as libc::off64_t,
+                                    (1 << VIRTIO_BALLOON_PFN_SHIFT) as libc::off64_t,
+                                )
+                            };
+                            if res != 0 {
+                                return Err(Error::FallocateFail(io::Error::last_os_error()));
+                            }
+                        }
+                    }
+
                     let advice = match ev_type {
                         INFLATE_QUEUE_EVENT => libc::MADV_DONTNEED,
                         DEFLATE_QUEUE_EVENT => libc::MADV_WILLNEED,
