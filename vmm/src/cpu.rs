@@ -1133,10 +1133,7 @@ impl Aml for CPU {
                     1,
                     false,
                     // Call into CEJ0 method which will actually eject device
-                    vec![&aml::Return::new(&aml::MethodCall::new(
-                        "CEJ0".into(),
-                        vec![&self.cpu_id],
-                    ))],
+                    vec![&aml::MethodCall::new("CEJ0".into(), vec![&self.cpu_id])],
                 ),
             ],
         )
