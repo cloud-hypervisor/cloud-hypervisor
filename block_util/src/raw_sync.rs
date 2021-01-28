@@ -2,54 +2,49 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileResult};
-use crate::{disk_size, fsync_sync, read_vectored_sync, write_vectored_sync};
-use qcow::RawFile;
+use crate::async_io::{
+    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
+};
 use std::fs::File;
-use std::sync::{Arc, Mutex};
+use std::io::{Seek, SeekFrom};
+use std::os::unix::io::{AsRawFd, RawFd};
 use vmm_sys_util::eventfd::EventFd;
 
 pub struct RawFileDiskSync {
-    raw_file: RawFile,
-    semaphore: Arc<Mutex<()>>,
+    file: File,
 }
 
 impl RawFileDiskSync {
-    pub fn new(file: File, direct_io: bool) -> Self {
-        RawFileDiskSync {
-            raw_file: RawFile::new(file, direct_io),
-            semaphore: Arc::new(Mutex::new(())),
-        }
+    pub fn new(file: File) -> Self {
+        RawFileDiskSync { file }
     }
 }
 
 impl DiskFile for RawFileDiskSync {
     fn size(&mut self) -> DiskFileResult<u64> {
-        disk_size(&mut self.raw_file, &mut self.semaphore)
+        Ok(self
+            .file
+            .seek(SeekFrom::End(0))
+            .map_err(DiskFileError::Size)? as u64)
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(RawFileSync::new(
-            self.raw_file.clone(),
-            self.semaphore.clone(),
-        )) as Box<dyn AsyncIo>)
+        Ok(Box::new(RawFileSync::new(self.file.as_raw_fd())) as Box<dyn AsyncIo>)
     }
 }
 
 pub struct RawFileSync {
-    raw_file: RawFile,
+    fd: RawFd,
     eventfd: EventFd,
     completion_list: Vec<(u64, i32)>,
-    semaphore: Arc<Mutex<()>>,
 }
 
 impl RawFileSync {
-    pub fn new(raw_file: RawFile, semaphore: Arc<Mutex<()>>) -> Self {
+    pub fn new(fd: RawFd) -> Self {
         RawFileSync {
-            raw_file,
+            fd,
             eventfd: EventFd::new(libc::EFD_NONBLOCK).expect("Failed creating EventFd for RawFile"),
             completion_list: Vec::new(),
-            semaphore,
         }
     }
 }
@@ -65,15 +60,22 @@ impl AsyncIo for RawFileSync {
         iovecs: Vec<libc::iovec>,
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        read_vectored_sync(
-            offset,
-            iovecs,
-            user_data,
-            &mut self.raw_file,
-            &self.eventfd,
-            &mut self.completion_list,
-            &mut self.semaphore,
-        )
+        let result = unsafe {
+            libc::preadv(
+                self.fd as libc::c_int,
+                iovecs.as_ptr() as *const libc::iovec,
+                iovecs.len() as libc::c_int,
+                offset,
+            )
+        };
+        if result < 0 {
+            return Err(AsyncIoError::ReadVectored(std::io::Error::last_os_error()));
+        }
+
+        self.completion_list.push((user_data, result as i32));
+        self.eventfd.write(1).unwrap();
+
+        Ok(())
     }
 
     fn write_vectored(
@@ -82,25 +84,36 @@ impl AsyncIo for RawFileSync {
         iovecs: Vec<libc::iovec>,
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        write_vectored_sync(
-            offset,
-            iovecs,
-            user_data,
-            &mut self.raw_file,
-            &self.eventfd,
-            &mut self.completion_list,
-            &mut self.semaphore,
-        )
+        let result = unsafe {
+            libc::pwritev(
+                self.fd as libc::c_int,
+                iovecs.as_ptr() as *const libc::iovec,
+                iovecs.len() as libc::c_int,
+                offset,
+            )
+        };
+        if result < 0 {
+            return Err(AsyncIoError::WriteVectored(std::io::Error::last_os_error()));
+        }
+
+        self.completion_list.push((user_data, result as i32));
+        self.eventfd.write(1).unwrap();
+
+        Ok(())
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
-        fsync_sync(
-            user_data,
-            &mut self.raw_file,
-            &self.eventfd,
-            &mut self.completion_list,
-            &mut self.semaphore,
-        )
+        let result = unsafe { libc::fsync(self.fd as libc::c_int) };
+        if result < 0 {
+            return Err(AsyncIoError::Fsync(std::io::Error::last_os_error()));
+        }
+
+        if let Some(user_data) = user_data {
+            self.completion_list.push((user_data, result as i32));
+            self.eventfd.write(1).unwrap();
+        }
+
+        Ok(())
     }
 
     fn complete(&mut self) -> Vec<(u64, i32)> {
