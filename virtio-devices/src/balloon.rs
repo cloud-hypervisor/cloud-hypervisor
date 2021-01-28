@@ -62,6 +62,8 @@ pub enum Error {
     UnexpectedWriteOnlyDescriptor,
     // Guest sent us invalid request.
     InvalidRequest,
+    // Fallocate fail.
+    FallocateFail(std::io::Error),
     // Madvise fail.
     MadviseFail(std::io::Error),
     // Failed to EventFd write.
@@ -203,7 +205,29 @@ impl BalloonEpollHandler {
                 let gpa = (pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT;
                 if let Ok(hva) = mem.get_host_address(GuestAddress(gpa)) {
                     let advice = match ev_type {
-                        INFLATE_QUEUE_EVENT => libc::MADV_DONTNEED,
+                        INFLATE_QUEUE_EVENT => {
+                            let region =
+                                mem.find_region(GuestAddress(gpa))
+                                    .ok_or(Error::GuestMemory(
+                                        GuestMemoryError::InvalidGuestAddress(GuestAddress(gpa)),
+                                    ))?;
+                            if let Some(f_off) = region.file_offset() {
+                                let offset = hva as usize - region.as_ptr() as usize;
+                                let res = unsafe {
+                                    libc::fallocate64(
+                                        f_off.file().as_raw_fd(),
+                                        libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+                                        (offset as u64 + f_off.start()) as libc::off64_t,
+                                        (1 << VIRTIO_BALLOON_PFN_SHIFT) as libc::off64_t,
+                                    )
+                                };
+
+                                if res != 0 {
+                                    return Err(Error::FallocateFail(io::Error::last_os_error()));
+                                }
+                            }
+                            libc::MADV_DONTNEED
+                        }
                         DEFLATE_QUEUE_EVENT => libc::MADV_WILLNEED,
                         _ => return Err(Error::ProcessQueueWrongEvType(ev_type)),
                     };
