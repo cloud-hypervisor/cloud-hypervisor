@@ -1178,7 +1178,7 @@ impl Aml for CPUMethods {
                 true,
                 vec![
                     // Take lock defined above
-                    &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xfff),
+                    &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xffff),
                     // Write CPU number (in first argument) to I/O port via field
                     &aml::Store::new(&aml::Path::new("\\_SB_.PRES.CSEL"), &aml::Arg(0)),
                     &aml::Store::new(&aml::Local(0), &aml::ZERO),
@@ -1216,7 +1216,7 @@ impl Aml for CPUMethods {
                 1,
                 true,
                 vec![
-                    &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xfff),
+                    &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xffff),
                     // Write CPU number (in first argument) to I/O port via field
                     &aml::Store::new(&aml::Path::new("\\_SB_.PRES.CSEL"), &aml::Arg(0)),
                     // Set CEJ0 bit
@@ -1234,7 +1234,7 @@ impl Aml for CPUMethods {
                 true,
                 vec![
                     // Take lock defined above
-                    &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xfff),
+                    &aml::Acquire::new("\\_SB_.PRES.CPLK".into(), 0xffff),
                     &aml::Store::new(&aml::Local(0), &aml::ZERO),
                     &aml::While::new(
                         &aml::LessThan::new(&aml::Local(0), &self.max_vcpus),

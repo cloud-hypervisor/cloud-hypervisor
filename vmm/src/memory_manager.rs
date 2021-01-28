@@ -1638,7 +1638,7 @@ impl Aml for MemoryMethods {
                 true,
                 vec![
                     // Take lock defined above
-                    &aml::Acquire::new("MLCK".into(), 0xfff),
+                    &aml::Acquire::new("MLCK".into(), 0xffff),
                     &aml::Store::new(&aml::Local(0), &aml::ZERO),
                     &aml::While::new(
                         &aml::LessThan::new(&aml::Local(0), &self.slots),
@@ -1695,7 +1695,7 @@ impl Aml for MemoryMethods {
                 true,
                 vec![
                     // Take lock defined above
-                    &aml::Acquire::new("MLCK".into(), 0xfff),
+                    &aml::Acquire::new("MLCK".into(), 0xffff),
                     // Write slot number (in first argument) to I/O port via field
                     &aml::Store::new(&aml::Path::new("\\_SB_.MHPC.MSEL"), &aml::Arg(0)),
                     &aml::Store::new(&aml::Local(0), &aml::ZERO),
@@ -1721,7 +1721,7 @@ impl Aml for MemoryMethods {
                 true,
                 vec![
                     // Take lock defined above
-                    &aml::Acquire::new("MLCK".into(), 0xfff),
+                    &aml::Acquire::new("MLCK".into(), 0xffff),
                     // Write slot number (in first argument) to I/O port via field
                     &aml::Store::new(&aml::Path::new("\\_SB_.MHPC.MSEL"), &aml::Arg(0)),
                     &aml::Name::new(
