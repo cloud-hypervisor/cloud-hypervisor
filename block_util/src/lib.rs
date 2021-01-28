@@ -15,6 +15,7 @@ extern crate serde_derive;
 
 pub mod async_io;
 pub mod fixed_vhd_async;
+pub mod fixed_vhd_sync;
 pub mod qcow_sync;
 pub mod raw_async;
 pub mod raw_sync;
