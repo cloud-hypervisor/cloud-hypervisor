@@ -96,6 +96,10 @@ mod tests {
     const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom.qcow2";
     #[cfg(target_arch = "x86_64")]
     const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210106-1.qcow2";
+    #[cfg(target_arch = "aarch64")]
+    const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom.vhd";
+    #[cfg(target_arch = "x86_64")]
+    const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210106-1.vhd";
     #[cfg(target_arch = "x86_64")]
     const WINDOWS_IMAGE_NAME: &str = "windows-server-2019.raw";
 
@@ -3094,6 +3098,31 @@ mod tests {
         #[test]
         fn test_virtio_block_qcow2() {
             _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false)
+        }
+
+        #[test]
+        fn test_virtio_block_vhd() {
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut raw_file_path = workload_path.clone();
+            let mut vhd_file_path = workload_path;
+            raw_file_path.push(FOCAL_IMAGE_NAME);
+            vhd_file_path.push(FOCAL_IMAGE_NAME_VHD);
+
+            // Generate VHD file from RAW file
+            std::process::Command::new("qemu-img")
+                .arg("convert")
+                .arg("-p")
+                .args(&["-f", "raw"])
+                .args(&["-O", "vpc"])
+                .args(&["-o", "subformat=fixed"])
+                .arg(raw_file_path.to_str().unwrap())
+                .arg(vhd_file_path.to_str().unwrap())
+                .output()
+                .expect("Expect generating VHD image from RAW image");
+
+            _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false)
         }
 
         #[test]
