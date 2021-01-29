@@ -118,3 +118,104 @@ pub fn is_fixed_vhd(f: &mut File) -> std::io::Result<bool> {
         && footer.data_offset() == 0xffff_ffff_ffff_ffff
         && footer.disk_type() == 0x2)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{is_fixed_vhd, VhdFooter};
+    use std::fs::File;
+    use std::io::{Seek, SeekFrom, Write};
+    use tempfile::tempfile;
+
+    fn valid_fixed_vhd_footer() -> Vec<u8> {
+        vec![
+            0x63, 0x6f, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x78, // cookie
+            0x00, 0x00, 0x00, 0x02, // features
+            0x00, 0x01, 0x00, 0x00, // file format version
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // data offset
+            0x27, 0xa6, 0xa6, 0x5d, // time stamp
+            0x71, 0x65, 0x6d, 0x75, // creator application
+            0x00, 0x05, 0x00, 0x03, // creator version
+            0x57, 0x69, 0x32, 0x6b, // creator host os
+            0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, // original size
+            0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, // current size
+            0x11, 0xe0, 0x10, 0x3f, // disk geometry
+            0x00, 0x00, 0x00, 0x02, // disk type
+            0x00, 0x00, 0x00, 0x00, // checksum
+            0x98, 0x7b, 0xb1, 0xcd, 0x84, 0x14, 0x41, 0xfc, 0xa4, 0xab, 0xd0, 0x69, 0x45, 0x2b,
+            0xf2, 0x23, // unique id
+            0x00, // saved state
+        ]
+    }
+
+    fn valid_dynamic_vhd_footer() -> Vec<u8> {
+        vec![
+            0x63, 0x6f, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x78, // cookie
+            0x00, 0x00, 0x00, 0x02, // features
+            0x00, 0x01, 0x00, 0x00, // file format version
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // data offset
+            0x27, 0xa6, 0xa6, 0x5d, // time stamp
+            0x71, 0x65, 0x6d, 0x75, // creator application
+            0x00, 0x05, 0x00, 0x03, // creator version
+            0x57, 0x69, 0x32, 0x6b, // creator host os
+            0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, // original size
+            0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, // current size
+            0x11, 0xe0, 0x10, 0x3f, // disk geometry
+            0x00, 0x00, 0x00, 0x03, // disk type
+            0x00, 0x00, 0x00, 0x00, // checksum
+            0x98, 0x7b, 0xb1, 0xcd, 0x84, 0x14, 0x41, 0xfc, 0xa4, 0xab, 0xd0, 0x69, 0x45, 0x2b,
+            0xf2, 0x23, // unique id
+            0x00, // saved state
+        ]
+    }
+
+    fn with_file<F>(footer: &[u8], mut testfn: F)
+    where
+        F: FnMut(File),
+    {
+        let mut disk_file: File = tempfile().unwrap();
+        disk_file.set_len(0x1000_0200).unwrap();
+        disk_file.seek(SeekFrom::Start(0x1000_0000)).unwrap();
+        disk_file.write_all(&footer).unwrap();
+
+        testfn(disk_file); // File closed when the function exits.
+    }
+
+    #[test]
+    fn test_check_vhd_footer() {
+        with_file(&valid_fixed_vhd_footer(), |mut file: File| {
+            let vhd_footer = VhdFooter::new(&mut file).expect("Failed to create VHD footer");
+            assert_eq!(vhd_footer.cookie(), 0x636f_6e65_6374_6978);
+            assert_eq!(vhd_footer.features(), 0x0000_0002);
+            assert_eq!(vhd_footer.file_format_version(), 0x0001_0000);
+            assert_eq!(vhd_footer.data_offset(), 0xffff_ffff_ffff_ffff);
+            assert_eq!(vhd_footer.time_stamp(), 0x27a6_a65d);
+            assert_eq!(vhd_footer.creator_application(), 0x7165_6d75);
+            assert_eq!(vhd_footer.creator_version(), 0x0005_0003);
+            assert_eq!(vhd_footer.creator_host_os(), 0x5769_326b);
+            assert_eq!(vhd_footer.original_size(), 0x0000_0000_1000_0000);
+            assert_eq!(vhd_footer.current_size(), 0x0000_0000_1000_0000);
+            assert_eq!(vhd_footer.disk_geometry(), 0x11e0_103f);
+            assert_eq!(vhd_footer.disk_type(), 0x0000_0002);
+            assert_eq!(vhd_footer.checksum(), 0x0000_0000);
+            assert_eq!(
+                vhd_footer.unique_id(),
+                0x987b_b1cd_8414_41fc_a4ab_d069_452b_f223
+            );
+            assert_eq!(vhd_footer.saved_state(), 0x00);
+        });
+    }
+
+    #[test]
+    fn test_is_fixed_vhd() {
+        with_file(&valid_fixed_vhd_footer(), |mut file: File| {
+            assert!(is_fixed_vhd(&mut file).unwrap());
+        });
+    }
+
+    #[test]
+    fn test_is_not_fixed_vhd() {
+        with_file(&valid_dynamic_vhd_footer(), |mut file: File| {
+            assert!(!(is_fixed_vhd(&mut file).unwrap()));
+        });
+    }
+}

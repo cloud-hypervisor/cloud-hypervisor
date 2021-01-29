@@ -21,3 +21,6 @@ virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"]}
 vm-memory = { version = "0.4.0", features = ["backend-mmap", "backend-atomic"] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
+
+[dev-dependencies]
+tempfile = "3.2.0"
