@@ -3161,14 +3161,13 @@ impl DeviceManager {
 
     #[cfg(feature = "acpi")]
     pub fn notify_power_button(&self) -> DeviceManagerResult<()> {
-        return self
-            .ged_notification_device
+        self.ged_notification_device
             .as_ref()
             .unwrap()
             .lock()
             .unwrap()
             .notify(AcpiNotificationFlags::POWER_BUTTON_CHANGED)
-            .map_err(DeviceManagerError::PowerButtonNotification);
+            .map_err(DeviceManagerError::PowerButtonNotification)
     }
 }
 
