@@ -15,6 +15,22 @@ use std::sync::{Arc, Mutex};
 use vm_memory::GuestRegionMmap;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryMmap, GuestMemoryRegion};
 
+/* Values for Type in APIC sub-headers */
+#[cfg(target_arch = "x86_64")]
+pub const ACPI_APIC_PROCESSOR: u8 = 0;
+#[cfg(target_arch = "x86_64")]
+pub const ACPI_APIC_IO: u8 = 1;
+#[cfg(target_arch = "x86_64")]
+pub const ACPI_APIC_XRUPT_OVERRIDE: u8 = 2;
+#[cfg(target_arch = "aarch64")]
+pub const ACPI_APIC_GENERIC_CPU_INTERFACE: u8 = 11;
+#[cfg(target_arch = "aarch64")]
+pub const ACPI_APIC_GENERIC_DISTRIBUTOR: u8 = 12;
+#[cfg(target_arch = "aarch64")]
+pub const ACPI_APIC_GENERIC_REDISTRIBUTOR: u8 = 14;
+#[cfg(target_arch = "aarch64")]
+pub const ACPI_APIC_GENERIC_TRANSLATOR: u8 = 15;
+
 #[repr(packed)]
 #[derive(Default)]
 struct PciRangeEntry {

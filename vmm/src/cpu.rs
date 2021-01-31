@@ -153,6 +153,63 @@ struct Ioapic {
     pub gsi_base: u32,
 }
 
+#[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[repr(packed)]
+struct GicC {
+    pub r#type: u8,
+    pub length: u8,
+    pub reserved0: u16,
+    pub cpu_interface_number: u32,
+    pub uid: u32,
+    pub flags: u32,
+    pub parking_version: u32,
+    pub performance_interrupt: u32,
+    pub parked_address: u64,
+    pub base_address: u64,
+    pub gicv_base_address: u64,
+    pub gich_base_address: u64,
+    pub vgic_interrupt: u32,
+    pub gicr_base_address: u64,
+    pub mpidr: u64,
+    pub proc_power_effi_class: u8,
+    pub reserved1: u8,
+    pub spe_overflow_interrupt: u16,
+}
+
+#[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[repr(packed)]
+struct GicD {
+    pub r#type: u8,
+    pub length: u8,
+    pub reserved0: u16,
+    pub gic_id: u32,
+    pub base_address: u64,
+    pub global_irq_base: u32,
+    pub version: u8,
+    pub reserved1: [u8; 3],
+}
+
+#[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[repr(packed)]
+struct GicR {
+    pub r#type: u8,
+    pub length: u8,
+    pub reserved: u16,
+    pub base_address: u64,
+    pub range_length: u32,
+}
+
+#[cfg(all(target_arch = "aarch64", feature = "acpi"))]
+#[repr(packed)]
+struct GicIts {
+    pub r#type: u8,
+    pub length: u8,
+    pub reserved0: u16,
+    pub translation_id: u32,
+    pub base_address: u64,
+    pub reserved1: u32,
+}
+
 #[repr(packed)]
 #[derive(Default)]
 struct InterruptSourceOverride {
@@ -1069,6 +1126,7 @@ impl CpuManager {
 
     #[cfg(feature = "acpi")]
     pub fn create_madt(&self) -> Sdt {
+        use crate::acpi;
         // This is also checked in the commandline parsing.
         assert!(self.config.boot_vcpus <= self.config.max_vcpus);
 
@@ -1079,7 +1137,7 @@ impl CpuManager {
 
             for cpu in 0..self.config.max_vcpus {
                 let lapic = LocalApic {
-                    r#type: 0,
+                    r#type: acpi::ACPI_APIC_PROCESSOR,
                     length: 8,
                     processor_id: cpu,
                     apic_id: cpu,
@@ -1093,7 +1151,7 @@ impl CpuManager {
             }
 
             madt.append(Ioapic {
-                r#type: 1,
+                r#type: acpi::ACPI_APIC_IO,
                 length: 12,
                 ioapic_id: 0,
                 apic_address: arch::layout::IOAPIC_START.0 as u32,
@@ -1102,7 +1160,7 @@ impl CpuManager {
             });
 
             madt.append(InterruptSourceOverride {
-                r#type: 2,
+                r#type: acpi::ACPI_APIC_XRUPT_OVERRIDE,
                 length: 10,
                 bus: 0,
                 source: 4,
@@ -1113,6 +1171,83 @@ impl CpuManager {
 
         #[cfg(target_arch = "aarch64")]
         {
+            /* Notes:
+             * Ignore Local Interrupt Controller Address at byte offset 36 of MADT table.
+             */
+
+            // See section 5.2.12.14 GIC CPU Interface (GICC) Structure in ACPI spec.
+            for cpu in 0..self.config.boot_vcpus {
+                let vcpu = &self.vcpus[cpu as usize];
+                let mpidr = vcpu.lock().unwrap().get_mpidr();
+                /* ARMv8 MPIDR format:
+                     Bits [63:40] Must be zero
+                     Bits [39:32] Aff3 : Match Aff3 of target processor MPIDR
+                     Bits [31:24] Must be zero
+                     Bits [23:16] Aff2 : Match Aff2 of target processor MPIDR
+                     Bits [15:8] Aff1 : Match Aff1 of target processor MPIDR
+                     Bits [7:0] Aff0 : Match Aff0 of target processor MPIDR
+                */
+                let mpidr_mask = 0xff_00ff_ffff;
+                let gicc = GicC {
+                    r#type: acpi::ACPI_APIC_GENERIC_CPU_INTERFACE,
+                    length: 80,
+                    reserved0: 0,
+                    cpu_interface_number: cpu as u32,
+                    uid: cpu as u32,
+                    flags: 1,
+                    parking_version: 0,
+                    performance_interrupt: 0,
+                    parked_address: 0,
+                    base_address: 0,
+                    gicv_base_address: 0,
+                    gich_base_address: 0,
+                    vgic_interrupt: 0,
+                    gicr_base_address: 0,
+                    mpidr: mpidr & mpidr_mask,
+                    proc_power_effi_class: 0,
+                    reserved1: 0,
+                    spe_overflow_interrupt: 0,
+                };
+
+                madt.append(gicc);
+            }
+
+            // GIC Distributor structure. See section 5.2.12.15 in ACPI spec.
+            let gicd = GicD {
+                r#type: acpi::ACPI_APIC_GENERIC_DISTRIBUTOR,
+                length: 24,
+                reserved0: 0,
+                gic_id: 0,
+                base_address: arch::layout::MAPPED_IO_START - 0x0001_0000,
+                global_irq_base: 0,
+                version: 3,
+                reserved1: [0; 3],
+            };
+            madt.append(gicd);
+
+            // See 5.2.12.17 GIC Redistributor (GICR) Structure in ACPI spec.
+            let gicr_size: u32 = 0x0001_0000 * 2 * (self.config.boot_vcpus as u32);
+            let gicr_base: u64 = arch::layout::MAPPED_IO_START - 0x0001_0000 - gicr_size as u64;
+            let gicr = GicR {
+                r#type: acpi::ACPI_APIC_GENERIC_REDISTRIBUTOR,
+                length: 16,
+                reserved: 0,
+                base_address: gicr_base,
+                range_length: gicr_size,
+            };
+            madt.append(gicr);
+
+            // See 5.2.12.18 GIC Interrupt Translation Service (ITS) Structure in ACPI spec.
+            let gicits = GicIts {
+                r#type: acpi::ACPI_APIC_GENERIC_TRANSLATOR,
+                length: 20,
+                reserved0: 0,
+                translation_id: 0,
+                base_address: gicr_base - 2 * 0x0001_0000,
+                reserved1: 0,
+            };
+            madt.append(gicits);
+
             madt.update_checksum();
         }
 
