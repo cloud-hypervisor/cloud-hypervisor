@@ -22,6 +22,15 @@ impl GenericAddress {
             address: u64::from(address),
         }
     }
+    pub fn mmio_address<T>(address: u64) -> Self {
+        GenericAddress {
+            address_space_id: 0,
+            register_bit_width: 8 * std::mem::size_of::<T>() as u8,
+            register_bit_offset: 0,
+            access_size: std::mem::size_of::<T>() as u8,
+            address,
+        }
+    }
 }
 
 pub struct Sdt {
