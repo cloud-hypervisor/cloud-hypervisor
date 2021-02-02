@@ -330,8 +330,8 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-mem device
     CreateVirtioMem(io::Error),
 
-    /// Cannot try Clone virtio-mem resize
-    TryCloneVirtioMemResize(virtio_devices::mem::Error),
+    /// Cannot generate a ResizeSender from the Resize object.
+    CreateResizeSender(virtio_devices::mem::Error),
 
     /// Cannot find a memory range for virtio-mem memory
     VirtioMemRangeAllocation,
@@ -2342,8 +2342,8 @@ impl DeviceManager {
                         virtio_mem_zone.region(),
                         virtio_mem_zone
                             .resize_handler()
-                            .try_clone()
-                            .map_err(DeviceManagerError::TryCloneVirtioMemResize)?,
+                            .new_resize_sender()
+                            .map_err(DeviceManagerError::CreateResizeSender)?,
                         self.seccomp_action.clone(),
                         node_id,
                         virtio_mem_zone.hotplugged_size(),
