@@ -599,4 +599,66 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    // movzx eax, bl
+    fn test_movzx_r32_r8l() -> MockResult {
+        let bx: u16 = 0x8899;
+        let ip: u64 = 0x1000;
+        let cpu_id = 0;
+        let insn = [0x0f, 0xb6, 0xc3];
+        let mut vmm = MockVMM::new(ip, vec![(Register::BX, bx as u64)], None);
+        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+
+        let eax: u64 = vmm
+            .cpu_state(cpu_id)
+            .unwrap()
+            .read_reg(Register::EAX)
+            .unwrap();
+        assert_eq!(eax, (bx & 0xff) as u64);
+
+        Ok(())
+    }
+
+    #[test]
+    // movzx eax, bh
+    fn test_movzx_r32_r8h() -> MockResult {
+        let bx: u16 = 0x8899;
+        let ip: u64 = 0x1000;
+        let cpu_id = 0;
+        let insn = [0x0f, 0xb6, 0xc7];
+        let mut vmm = MockVMM::new(ip, vec![(Register::BX, bx as u64)], None);
+        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+
+        let eax: u64 = vmm
+            .cpu_state(cpu_id)
+            .unwrap()
+            .read_reg(Register::EAX)
+            .unwrap();
+        assert_eq!(eax, (bx >> 8) as u64);
+
+        Ok(())
+    }
+
+    #[test]
+    // movzx eax, byte ptr [rbx]
+    fn test_movzx_r32_m8() -> MockResult {
+        let rbx: u64 = 0x100;
+        let value: u8 = 0xaa;
+        let ip: u64 = 0x1000;
+        let cpu_id = 0;
+        let insn = [0x0f, 0xb7, 0x03];
+        let memory: [u8; 1] = value.to_le_bytes();
+        let mut vmm = MockVMM::new(ip, vec![(Register::RBX, rbx)], Some((rbx, &memory)));
+        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+
+        let eax: u64 = vmm
+            .cpu_state(cpu_id)
+            .unwrap()
+            .read_reg(Register::EAX)
+            .unwrap();
+        assert_eq!(eax, value as u64);
+
+        Ok(())
+    }
 }
