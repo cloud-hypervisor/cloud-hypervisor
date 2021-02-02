@@ -114,7 +114,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
 
 pub fn write_fdt_to_memory(fdt_final: Vec<u8>, guest_mem: &GuestMemoryMmap) -> Result<()> {
     // Write FDT to memory.
-    let fdt_address = GuestAddress(get_fdt_addr(&guest_mem));
+    let fdt_address = GuestAddress(get_fdt_addr());
     guest_mem
         .write_slice(fdt_final.as_slice(), fdt_address)
         .map_err(Error::WriteFdtToMemory)?;

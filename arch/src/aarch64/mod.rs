@@ -82,28 +82,49 @@ pub fn configure_vcpu(
 }
 
 pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, RegionType)> {
+    // Normally UEFI should be loaded to a flash area at the beginning of memory.
+    // But now flash memory type is not supported.
+    // As a workaround, we take 64 MiB memory from the main RAM for UEFI.
+    // As a result, the RAM that the guest can see is less than what has been
+    // assigned in command line, when ACPI and UEFI is enabled.
+    let ram_deduction = if cfg!(feature = "acpi") {
+        layout::UEFI_SIZE
+    } else {
+        0
+    };
+
     vec![
-        // 0 ~ 256 MiB: Reserved
+        // 0 ~ 64 MiB: Reserved for UEFI space
+        #[cfg(feature = "acpi")]
+        (GuestAddress(0), layout::UEFI_SIZE as usize, RegionType::Ram),
+        #[cfg(not(feature = "acpi"))]
         (
             GuestAddress(0),
-            layout::MEM_32BIT_DEVICES_START.0 as usize,
+            layout::UEFI_SIZE as usize,
             RegionType::Reserved,
         ),
-        // 256 MiB ~ 1 G: MMIO space
+        // 64 MiB ~ 256 MiB: Gic and legacy devices
+        (
+            GuestAddress(layout::UEFI_SIZE),
+            (layout::MEM_32BIT_DEVICES_START.0 - layout::UEFI_SIZE) as usize,
+            RegionType::Reserved,
+        ),
+        // 256 MiB ~ 768 MiB: MMIO space
         (
             layout::MEM_32BIT_DEVICES_START,
             layout::MEM_32BIT_DEVICES_SIZE as usize,
             RegionType::SubRegion,
         ),
-        // 1G  ~ 2G: reserved. The leading 256M for PCIe MMCONFIG space
+        // 768 MiB ~ 1 GiB: reserved. The leading 256M for PCIe MMCONFIG space
         (
             layout::PCI_MMCONFIG_START,
-            (layout::RAM_64BIT_START - layout::PCI_MMCONFIG_START.0) as usize,
+            layout::PCI_MMCONFIG_SIZE as usize,
             RegionType::Reserved,
         ),
+        // 1 GiB ~ : Ram
         (
             GuestAddress(layout::RAM_64BIT_START),
-            size as usize,
+            (size - ram_deduction) as usize,
             RegionType::Ram,
         ),
     ]
@@ -150,8 +171,9 @@ pub fn initramfs_load_addr(
     initramfs_size: usize,
 ) -> super::Result<u64> {
     let round_to_pagesize = |size| (size + (super::PAGE_SIZE - 1)) & !(super::PAGE_SIZE - 1);
-    match GuestAddress(get_fdt_addr(&guest_mem))
-        .checked_sub(round_to_pagesize(initramfs_size) as u64)
+    match guest_mem
+        .last_addr()
+        .checked_sub(round_to_pagesize(initramfs_size) as u64 - 1)
     {
         Some(offset) => {
             if guest_mem.address_in_range(offset) {
@@ -166,22 +188,12 @@ pub fn initramfs_load_addr(
 
 /// Returns the memory address where the kernel could be loaded.
 pub fn get_kernel_start() -> u64 {
-    layout::RAM_64BIT_START
+    layout::KERNEL_START
 }
 
 // Auxiliary function to get the address where the device tree blob is loaded.
-fn get_fdt_addr(mem: &GuestMemoryMmap) -> u64 {
-    // If the memory allocated is smaller than the size allocated for the FDT,
-    // we return the start of the DRAM so that
-    // we allow the code to try and load the FDT.
-
-    if let Some(addr) = mem.last_addr().checked_sub(layout::FDT_MAX_SIZE as u64 - 1) {
-        if mem.address_in_range(addr) {
-            return addr.raw_value();
-        }
-    }
-
-    layout::RAM_64BIT_START
+fn get_fdt_addr() -> u64 {
+    layout::FDT_START
 }
 
 pub fn get_host_cpu_phys_bits() -> u8 {
@@ -210,38 +222,9 @@ mod tests {
     #[test]
     fn test_arch_memory_regions_dram() {
         let regions = arch_memory_regions((1usize << 32) as u64); //4GB
-        assert_eq!(4, regions.len());
-        assert_eq!(GuestAddress(layout::RAM_64BIT_START), regions[3].0);
-        assert_eq!(1usize << 32, regions[3].1);
-        assert_eq!(RegionType::Ram, regions[3].2);
-    }
-
-    #[test]
-    fn test_get_fdt_addr() {
-        let mut regions = Vec::new();
-
-        regions.push((
-            GuestAddress(layout::RAM_64BIT_START),
-            (layout::FDT_MAX_SIZE - 0x1000) as usize,
-        ));
-        let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
-        assert_eq!(get_fdt_addr(&mem), layout::RAM_64BIT_START);
-        regions.clear();
-
-        regions.push((
-            GuestAddress(layout::RAM_64BIT_START),
-            (layout::FDT_MAX_SIZE) as usize,
-        ));
-        let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
-        assert_eq!(get_fdt_addr(&mem), layout::RAM_64BIT_START);
-        regions.clear();
-
-        regions.push((
-            GuestAddress(layout::RAM_64BIT_START),
-            (layout::FDT_MAX_SIZE + 0x1000) as usize,
-        ));
-        let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
-        assert_eq!(get_fdt_addr(&mem), 0x1000 + layout::RAM_64BIT_START);
-        regions.clear();
+        assert_eq!(5, regions.len());
+        assert_eq!(GuestAddress(layout::RAM_64BIT_START), regions[4].0);
+        assert_eq!(1usize << 32, regions[4].1);
+        assert_eq!(RegionType::Ram, regions[4].2);
     }
 }

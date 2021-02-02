@@ -112,16 +112,7 @@ pub fn create_acpi_tables(
     memory_manager: &Arc<Mutex<MemoryManager>>,
     numa_nodes: &NumaNodes,
 ) -> GuestAddress {
-    #[cfg(target_arch = "x86_64")]
-    // RSDP is at the EBDA
     let rsdp_offset = arch::layout::RSDP_POINTER;
-    #[cfg(target_arch = "aarch64")]
-    // TODO: For aarch64 place the ACPI tables in the last MiB of guest RAM
-    let rsdp_offset = {
-        use vm_memory::GuestMemory;
-        guest_mem.last_addr().checked_sub(1 << 20).unwrap()
-    };
-
     let mut tables: Vec<u64> = Vec::new();
 
     // DSDT
