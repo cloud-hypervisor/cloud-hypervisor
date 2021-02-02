@@ -3647,6 +3647,9 @@ impl Aml for PciDevSlotMethods {
 #[cfg(feature = "acpi")]
 impl Aml for DeviceManager {
     fn to_aml_bytes(&self) -> Vec<u8> {
+        #[cfg(target_arch = "aarch64")]
+        use arch::aarch64::DeviceInfoForFdt;
+
         let mut bytes = Vec::new();
         // PCI hotplug controller
         bytes.extend_from_slice(
@@ -3723,7 +3726,14 @@ impl Aml for DeviceManager {
             "_CRS".into(),
             &aml::ResourceTemplate::new(vec![
                 &aml::AddressSpace::new_bus_number(0x0u16, 0xffu16),
+                #[cfg(target_arch = "x86_64")]
                 &aml::Io::new(0xcf8, 0xcf8, 1, 0x8),
+                #[cfg(target_arch = "aarch64")]
+                &aml::Memory32Fixed::new(
+                    true,
+                    layout::PCI_MMCONFIG_START.0 as u32,
+                    layout::PCI_MMCONFIG_SIZE as u32,
+                ),
                 &aml::AddressSpace::new_memory(
                     aml::AddressSpaceCachable::NotCacheable,
                     true,
@@ -3790,16 +3800,44 @@ impl Aml for DeviceManager {
         )
         .to_aml_bytes();
 
+        // Serial device
+        #[cfg(target_arch = "x86_64")]
+        let serial_irq = 4;
+        #[cfg(target_arch = "aarch64")]
+        let serial_irq =
+            if self.config.lock().unwrap().serial.clone().mode != ConsoleOutputMode::Off {
+                self.get_device_info()
+                    .clone()
+                    .get(&(DeviceType::Serial, DeviceType::Serial.to_string()))
+                    .unwrap()
+                    .irq()
+            } else {
+                // If serial is turned off, add a fake device with invalid irq.
+                31
+            };
         let com1_dsdt_data = aml::Device::new(
             "_SB_.COM1".into(),
             vec![
-                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0501")),
+                &aml::Name::new(
+                    "_HID".into(),
+                    #[cfg(target_arch = "x86_64")]
+                    &aml::EisaName::new("PNP0501"),
+                    #[cfg(target_arch = "aarch64")]
+                    &"ARMH0011",
+                ),
                 &aml::Name::new("_UID".into(), &aml::ZERO),
                 &aml::Name::new(
                     "_CRS".into(),
                     &aml::ResourceTemplate::new(vec![
-                        &aml::Interrupt::new(true, true, false, false, 4),
+                        &aml::Interrupt::new(true, true, false, false, serial_irq),
+                        #[cfg(target_arch = "x86_64")]
                         &aml::Io::new(0x3f8, 0x3f8, 0, 0x8),
+                        #[cfg(target_arch = "aarch64")]
+                        &aml::Memory32Fixed::new(
+                            true,
+                            arch::layout::LEGACY_SERIAL_MAPPED_IO_START as u32,
+                            MMIO_LEN as u32,
+                        ),
                     ]),
                 ),
             ],
