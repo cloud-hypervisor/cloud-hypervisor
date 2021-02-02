@@ -254,10 +254,39 @@ impl Request {
     }
 }
 
+pub struct ResizeSender {
+    size: Arc<AtomicU64>,
+    tx: mpsc::Sender<Result<(), Error>>,
+    evt: EventFd,
+}
+
+impl ResizeSender {
+    fn size(&self) -> u64 {
+        self.size.load(Ordering::Acquire)
+    }
+
+    fn send(&self, r: Result<(), Error>) -> Result<(), mpsc::SendError<Result<(), Error>>> {
+        self.tx.send(r)
+    }
+}
+
+impl Clone for ResizeSender {
+    fn clone(&self) -> Self {
+        ResizeSender {
+            size: self.size.clone(),
+            tx: self.tx.clone(),
+            evt: self
+                .evt
+                .try_clone()
+                .expect("Failed cloning EventFd from ResizeSender"),
+        }
+    }
+}
+
 pub struct Resize {
     size: Arc<AtomicU64>,
     tx: mpsc::Sender<Result<(), Error>>,
-    rx: Option<mpsc::Receiver<Result<(), Error>>>,
+    rx: mpsc::Receiver<Result<(), Error>>,
     evt: EventFd,
 }
 
@@ -268,36 +297,23 @@ impl Resize {
         Ok(Resize {
             size: Arc::new(AtomicU64::new(0)),
             tx,
-            rx: Some(rx),
+            rx,
             evt: EventFd::new(EFD_NONBLOCK)?,
         })
     }
 
-    pub fn try_clone(&self) -> Result<Self, Error> {
-        Ok(Resize {
+    pub fn new_resize_sender(&self) -> Result<ResizeSender, Error> {
+        Ok(ResizeSender {
             size: self.size.clone(),
             tx: self.tx.clone(),
-            rx: None,
             evt: self.evt.try_clone().map_err(Error::EventFdTryCloneFail)?,
         })
     }
 
     pub fn work(&self, size: u64) -> Result<(), Error> {
-        if let Some(rx) = &self.rx {
-            self.size.store(size, Ordering::Release);
-            self.evt.write(1).map_err(Error::EventFdWriteFail)?;
-            rx.recv().map_err(Error::MpscRecvFail)?
-        } else {
-            panic!("work should not work with cloned resize")
-        }
-    }
-
-    fn get_size(&self) -> u64 {
-        self.size.load(Ordering::Acquire)
-    }
-
-    fn send(&self, r: Result<(), Error>) -> Result<(), mpsc::SendError<Result<(), Error>>> {
-        self.tx.send(r)
+        self.size.store(size, Ordering::Release);
+        self.evt.write(1).map_err(Error::EventFdWriteFail)?;
+        self.rx.recv().map_err(Error::MpscRecvFail)?
     }
 }
 
@@ -306,7 +322,7 @@ struct MemEpollHandler {
     host_fd: Option<RawFd>,
     mem_state: Vec<bool>,
     config: Arc<Mutex<VirtioMemConfig>>,
-    resize: Resize,
+    resize: ResizeSender,
     queue: Queue,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
@@ -651,7 +667,7 @@ impl EpollHelperHandler for MemEpollHandler {
                     error!("Failed to get resize event: {:?}", e);
                     return true;
                 } else {
-                    let size = self.resize.get_size();
+                    let size = self.resize.size();
                     let mut config = self.config.lock().unwrap();
                     let mut signal_error = false;
                     let mut r = virtio_mem_config_resize(&mut config, size);
@@ -698,7 +714,7 @@ impl EpollHelperHandler for MemEpollHandler {
 pub struct Mem {
     common: VirtioCommon,
     id: String,
-    resize: Resize,
+    resize: ResizeSender,
     host_addr: u64,
     host_fd: Option<RawFd>,
     config: Arc<Mutex<VirtioMemConfig>>,
@@ -710,7 +726,7 @@ impl Mem {
     pub fn new(
         id: String,
         region: &Arc<GuestRegionMmap>,
-        resize: Resize,
+        resize: ResizeSender,
         seccomp_action: SeccompAction,
         numa_node_id: Option<u16>,
         initial_size: u64,
@@ -842,10 +858,7 @@ impl VirtioDevice for Mem {
             host_fd: self.host_fd,
             mem_state: vec![false; config.region_size as usize / config.block_size as usize],
             config: self.config.clone(),
-            resize: self.resize.try_clone().map_err(|e| {
-                error!("failed to clone resize EventFd: {:?}", e);
-                ActivateError::BadActivate
-            })?,
+            resize: self.resize.clone(),
             queue: queues.remove(0),
             mem,
             interrupt_cb,
