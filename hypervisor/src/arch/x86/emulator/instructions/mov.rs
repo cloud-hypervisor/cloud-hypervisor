@@ -74,21 +74,27 @@ macro_rules! mov_rm_imm {
     };
 }
 
-macro_rules! mov_r_rm {
-    ($bound:ty) => {
+macro_rules! movzx {
+    ($src_op_size:ty, $dest_op_size:ty) => {
         fn emulate(
             &self,
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
         ) -> Result<(), EmulationError<Exception>> {
-            let src_value = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
-                .map_err(EmulationError::PlatformEmulationError)?;
+            let src_value = get_op(
+                &insn,
+                1,
+                std::mem::size_of::<$src_op_size>(),
+                state,
+                platform,
+            )
+            .map_err(EmulationError::PlatformEmulationError)?;
 
             set_op(
                 &insn,
                 0,
-                std::mem::size_of::<$bound>(),
+                std::mem::size_of::<$dest_op_size>(),
                 state,
                 platform,
                 src_value,
@@ -99,6 +105,13 @@ macro_rules! mov_r_rm {
 
             Ok(())
         }
+    };
+}
+
+// MOV r/rm is a special case of MOVZX, where both operands have the same size.
+macro_rules! mov_r_rm {
+    ($op_size:ty) => {
+        movzx!($op_size, $op_size);
     };
 }
 
@@ -208,6 +221,32 @@ impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm64_imm32 {
 pub struct Mov_rm64_r64;
 impl<T: CpuStateManager> InstructionHandler<T> for Mov_rm64_r64 {
     mov_rm_r!(u64);
+}
+
+// MOVZX
+pub struct Movzx_r16_rm8;
+impl<T: CpuStateManager> InstructionHandler<T> for Movzx_r16_rm8 {
+    movzx!(u16, u8);
+}
+
+pub struct Movzx_r32_rm8;
+impl<T: CpuStateManager> InstructionHandler<T> for Movzx_r32_rm8 {
+    movzx!(u32, u8);
+}
+
+pub struct Movzx_r64_rm8;
+impl<T: CpuStateManager> InstructionHandler<T> for Movzx_r64_rm8 {
+    movzx!(u64, u8);
+}
+
+pub struct Movzx_r32_rm16;
+impl<T: CpuStateManager> InstructionHandler<T> for Movzx_r32_rm16 {
+    movzx!(u32, u16);
+}
+
+pub struct Movzx_r64_rm16;
+impl<T: CpuStateManager> InstructionHandler<T> for Movzx_r64_rm16 {
+    movzx!(u64, u16);
 }
 
 #[cfg(test)]
