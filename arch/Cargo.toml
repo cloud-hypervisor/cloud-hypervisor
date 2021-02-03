@@ -6,6 +6,7 @@ authors = ["The Chromium OS Authors"]
 [features]
 default = []
 acpi = ["acpi_tables"]
+tdx = []
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables", optional = true }
