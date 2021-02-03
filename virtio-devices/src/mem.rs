@@ -415,10 +415,12 @@ struct MemEpollHandler {
     queue_evt: EventFd,
     kill_evt: EventFd,
     pause_evt: EventFd,
+    hugepages: bool,
 }
 
 impl MemEpollHandler {
     fn discard_memory_range(&self, offset: u64, size: u64) -> Result<(), Error> {
+        // Use fallocate if the memory region is backed by a file.
         if let Some(fd) = self.host_fd {
             let res = unsafe {
                 libc::fallocate64(
@@ -434,17 +436,22 @@ impl MemEpollHandler {
                 return Err(Error::DiscardMemoryRange(err));
             }
         }
-        let res = unsafe {
-            libc::madvise(
-                (self.host_addr + offset) as *mut libc::c_void,
-                size as libc::size_t,
-                libc::MADV_DONTNEED,
-            )
-        };
-        if res != 0 {
-            let err = io::Error::last_os_error();
-            error!("Advising kernel about pages range failed: {}", err);
-            return Err(Error::DiscardMemoryRange(err));
+
+        // Only use madvise if the memory region is not allocated with
+        // hugepages.
+        if !self.hugepages {
+            let res = unsafe {
+                libc::madvise(
+                    (self.host_addr + offset) as *mut libc::c_void,
+                    size as libc::size_t,
+                    libc::MADV_DONTNEED,
+                )
+            };
+            if res != 0 {
+                let err = io::Error::last_os_error();
+                error!("Advising kernel about pages range failed: {}", err);
+                return Err(Error::DiscardMemoryRange(err));
+            }
         }
 
         Ok(())
@@ -667,6 +674,7 @@ pub struct Mem {
     host_fd: Option<RawFd>,
     config: Arc<Mutex<VirtioMemConfig>>,
     seccomp_action: SeccompAction,
+    hugepages: bool,
 }
 
 impl Mem {
@@ -678,6 +686,7 @@ impl Mem {
         seccomp_action: SeccompAction,
         numa_node_id: Option<u16>,
         initial_size: u64,
+        hugepages: bool,
     ) -> io::Result<Mem> {
         let region_len = region.len();
 
@@ -748,6 +757,7 @@ impl Mem {
             host_fd,
             config: Arc::new(Mutex::new(config)),
             seccomp_action,
+            hugepages,
         })
     }
 }
@@ -827,6 +837,7 @@ impl VirtioDevice for Mem {
             queue_evt: queue_evts.remove(0),
             kill_evt,
             pause_evt,
+            hugepages: self.hugepages,
         };
 
         handler
