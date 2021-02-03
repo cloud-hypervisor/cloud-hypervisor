@@ -72,6 +72,7 @@ pub struct VirtioMemZone {
     region: Arc<GuestRegionMmap>,
     resize_handler: virtio_devices::Resize,
     hotplugged_size: u64,
+    hugepages: bool,
 }
 
 impl VirtioMemZone {
@@ -83,6 +84,9 @@ impl VirtioMemZone {
     }
     pub fn hotplugged_size(&self) -> u64 {
         self.hotplugged_size
+    }
+    pub fn hugepages(&self) -> bool {
+        self.hugepages
     }
 }
 
@@ -684,6 +688,7 @@ impl MemoryManager {
                             resize_handler: virtio_devices::Resize::new()
                                 .map_err(Error::EventFdFail)?,
                             hotplugged_size: zone.hotplugged_size.unwrap_or(0),
+                            hugepages: zone.hugepages,
                         });
 
                         start_of_device_area = start_addr
