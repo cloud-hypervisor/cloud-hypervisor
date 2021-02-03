@@ -25,6 +25,8 @@ use vm_memory::{
 };
 mod smbios;
 use std::arch::x86_64;
+#[cfg(feature = "tdx")]
+pub mod tdx;
 
 #[derive(Debug, Copy, Clone)]
 pub enum BootProtocol {
