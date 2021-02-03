@@ -72,6 +72,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "thiserror",
  "vm-memory",
  "vm-migration",
 ]

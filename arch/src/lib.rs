@@ -25,6 +25,7 @@ extern crate vm_migration;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
+extern crate thiserror;
 
 use std::fmt;
 use std::result;
