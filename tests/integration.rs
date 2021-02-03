@@ -5875,6 +5875,139 @@ mod tests {
 
             handle_child_output(r, &output);
         }
+
+        #[test]
+        // By design, a guest VM won't be able to connect to the host
+        // machine when using a macvtap network interface (while it can
+        // communicate externally). As a workaround, this integration
+        // test creates two macvtap interfaces in 'bridge' mode on the
+        // same physical net interface, one for the guest and one for
+        // the host. With additional setup on the IP address and the
+        // routing table, it enables the communications between the
+        // guest VM and the host machine.
+        // Details: https://wiki.libvirt.org/page/TroubleshootMacvtapHostFail
+        fn test_macvtap() {
+            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+            let kernel_path = direct_kernel_boot_path().unwrap();
+            let phy_net = "eth0";
+
+            // Create a macvtap interface for the guest VM to use
+            let guest_macvtap_name = "guestmacvtap0";
+            std::process::Command::new("bash")
+                .args(&[
+                    "-c",
+                    &format!(
+                        "sudo ip link add link {} name {} type macvtap mod bridge",
+                        phy_net, guest_macvtap_name
+                    ),
+                ])
+                .status()
+                .expect("Expected 'ip link add' to work");
+            std::process::Command::new("bash")
+                .args(&[
+                    "-c",
+                    &format!(
+                        "sudo ip link set {} address {} up",
+                        guest_macvtap_name, guest.network.guest_mac
+                    ),
+                ])
+                .status()
+                .expect("Expected 'ip link set' to work");
+            std::process::Command::new("bash")
+                .args(&["-c", &format!("sudo ip link show {}", guest_macvtap_name)])
+                .status()
+                .expect("Expected 'ip link show' to work");
+
+            let tap_index =
+                fs::read_to_string(&format!("/sys/class/net/{}/ifindex", guest_macvtap_name))
+                    .unwrap();
+            let tap_device = format!("/dev/tap{}", tap_index.trim());
+
+            std::process::Command::new("bash")
+                .args(&["-c", &format!("sudo chown $UID.$UID {}", tap_device)])
+                .status()
+                .expect("Expected 'chown' to work");
+
+            let cstr_tap_device = std::ffi::CString::new(tap_device).unwrap();
+            let tap_fd = unsafe { libc::open(cstr_tap_device.as_ptr(), libc::O_RDWR) };
+            assert!(tap_fd > 0);
+
+            // Create a macvtap on the same physical net interface for
+            // the host machine to use
+            let host_macvtap_name = "hostmacvtap0";
+            std::process::Command::new("bash")
+                .args(&[
+                    "-c",
+                    &format!(
+                        "sudo ip link add link {} name {} type macvtap mod bridge",
+                        phy_net, host_macvtap_name
+                    ),
+                ])
+                .status()
+                .expect("Expected 'ip link add' to work");
+            // Use default mask "255.255.255.0"
+            std::process::Command::new("bash")
+                .args(&[
+                    "-c",
+                    &format!(
+                        "sudo ip address add {}/24 dev {}",
+                        guest.network.host_ip, host_macvtap_name
+                    ),
+                ])
+                .status()
+                .expect("Expected 'ip address add' to work");
+            std::process::Command::new("bash")
+                .args(&[
+                    "-c",
+                    &format!("sudo ip link set dev {} up", host_macvtap_name),
+                ])
+                .status()
+                .expect("Expected 'ip link set dev up' to work");
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=512M"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .default_disks()
+                .args(&[
+                    "--net",
+                    &format!("fd={},mac={}", tap_fd, guest.network.guest_mac),
+                ])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot(None).unwrap();
+
+                assert_eq!(
+                    guest
+                        .ssh_command("ip -o link | wc -l")
+                        .unwrap()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or_default(),
+                    2
+                );
+            });
+
+            let _ = child.kill();
+
+            std::process::Command::new("bash")
+                .args(&["-c", &format!("sudo ip link del {}", guest_macvtap_name)])
+                .status()
+                .expect("Expected 'ip link del' to work");
+            std::process::Command::new("bash")
+                .args(&["-c", &format!("sudo ip link del {}", host_macvtap_name)])
+                .status()
+                .expect("Expected 'ip link del' to work");
+
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
     }
 
     mod sequential {
