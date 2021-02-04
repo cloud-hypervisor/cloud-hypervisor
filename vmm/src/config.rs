@@ -2352,9 +2352,6 @@ mod tests {
         assert!(invalid_config.validate().is_err());
 
         let mut still_valid_config = valid_config;
-        invalid_config.fs = Some(vec![FsConfig {
-            ..Default::default()
-        }]);
         still_valid_config.memory.shared = true;
         assert!(still_valid_config.validate().is_ok());
 
