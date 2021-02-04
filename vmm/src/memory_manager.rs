@@ -131,6 +131,7 @@ pub struct MemoryManager {
     snapshot: Mutex<Option<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
     shared: bool,
     hugepages: bool,
+    hugepage_size: Option<u64>,
     #[cfg(target_arch = "x86_64")]
     sgx_epc_region: Option<SgxEpcRegion>,
     user_provided_zones: bool,
@@ -426,6 +427,7 @@ impl MemoryManager {
                     prefault,
                     zone.shared,
                     zone.hugepages,
+                    zone.hugepage_size,
                     zone.host_numa_node,
                 )?;
 
@@ -679,6 +681,7 @@ impl MemoryManager {
                             false,
                             zone.shared,
                             zone.hugepages,
+                            zone.hugepage_size,
                             zone.host_numa_node,
                         )?;
 
@@ -756,6 +759,7 @@ impl MemoryManager {
             snapshot: Mutex::new(None),
             shared: config.shared,
             hugepages: config.hugepages,
+            hugepage_size: config.hugepage_size,
             #[cfg(target_arch = "x86_64")]
             sgx_epc_region: None,
             user_provided_zones,
@@ -928,6 +932,7 @@ impl MemoryManager {
         prefault: bool,
         shared: bool,
         hugepages: bool,
+        hugepage_size: Option<u64>,
         host_numa_node: Option<u32>,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
         let (f, f_off) = match backing_file {
@@ -962,7 +967,23 @@ impl MemoryManager {
                 let fd = Self::memfd_create(
                     &ffi::CString::new("ch_ram").unwrap(),
                     if hugepages {
-                        libc::MFD_HUGETLB | libc::MAP_HUGE_2MB as u32
+                        libc::MFD_HUGETLB
+                            | if let Some(hugepage_size) = hugepage_size {
+                                /*
+                                 * From the Linux kernel:
+                                 * Several system calls take a flag to request "hugetlb" huge pages.
+                                 * Without further specification, these system calls will use the
+                                 * system's default huge page size.  If a system supports multiple
+                                 * huge page sizes, the desired huge page size can be specified in
+                                 * bits [26:31] of the flag arguments.  The value in these 6 bits
+                                 * will encode the log2 of the huge page size.
+                                 */
+
+                                hugepage_size.trailing_zeros() << 26
+                            } else {
+                                // Use the system default huge page size
+                                0
+                            }
                     } else {
                         0
                     },
@@ -1100,6 +1121,7 @@ impl MemoryManager {
             false,
             self.shared,
             self.hugepages,
+            self.hugepage_size,
             None,
         )?;
 
