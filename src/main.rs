@@ -147,7 +147,8 @@ fn create_app<'a, 'b>(
                 .long("memory")
                 .help(
                     "Memory parameters \
-                     \"size=<guest_memory_size>,mergeable=on|off,shared=on|off,hugepages=on|off,\
+                     \"size=<guest_memory_size>,mergeable=on|off,shared=on|off,\
+                     hugepages=on|off,hugepage_size=<hugepage_size>\
                      hotplug_method=acpi|virtio-mem,\
                      hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>\"",
@@ -161,7 +162,9 @@ fn create_app<'a, 'b>(
                 .help(
                     "User defined memory zone parameters \
                      \"size=<guest_memory_region_size>,file=<backing_file>,\
-                     shared=on|off,hugepages=on|off,host_numa_node=<node_id>,\
+                     shared=on|off,\
+                     hugepages=on|off,hugepage_size=<hugepage_size>\
+                     host_numa_node=<node_id>,\
                      id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>\"",
                 )
@@ -585,6 +588,7 @@ mod unit_tests {
                     shared: false,
                     hugepages: false,
                     zones: None,
+                    hugepage_size: None,
                 },
                 kernel: Some(KernelConfig {
                     path: PathBuf::from("/path/to/kernel"),

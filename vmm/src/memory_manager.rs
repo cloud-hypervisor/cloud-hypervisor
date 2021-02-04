@@ -552,6 +552,7 @@ impl MemoryManager {
                 file: None,
                 shared: config.shared,
                 hugepages: config.hugepages,
+                hugepage_size: config.hugepage_size,
                 host_numa_node: None,
                 hotplug_size: config.hotplug_size,
                 hotplugged_size: config.hotplugged_size,
