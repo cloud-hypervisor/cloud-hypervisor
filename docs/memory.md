@@ -15,6 +15,7 @@ struct MemoryConfig {
     mergeable: bool,
     shared: bool,
     hugepages: bool,
+    hugepage_size: Option<u64>,
     hotplug_method: HotplugMethod,
     hotplug_size: Option<u64>,
     hotplugged_size: Option<u64>,
@@ -76,23 +77,24 @@ _Example_
 --memory size=1G,shared=on
 ```
 
-### `hugepages`
+### `hugepages` and `hugepage_size`
 
-Specifies if the memory must be `mmap(2)` with `MAP_HUGETLB` and `MAP_HUGE_2MB`
-flags. This performs a memory mapping relying on 2MiB pages instead of the
-default 4kiB pages.
+Specifies if the memory must be created and `mmap(2)` with `MAP_HUGETLB` and size
+flags. This performs a memory mapping relying on the specified huge page size. If no huge page size is supplied the system's default huge page size is used.
 
 By using hugepages, one can improve the overall performance of the VM, assuming
 the guest will allocate hugepages as well. Another interesting use case is VFIO
 as it speeds up the VM's boot time since the amount of IOMMU mappings are
 reduced.
 
+The user is responsible for ensuring there are sufficient huge pages of the specified size for the VMM to use. Failure to do so may result in strange VMM behaviour.
+
 By default this option is turned off.
 
 _Example_
 
 ```
---memory size=1G,hugepages=on
+--memory size=1G,hugepages=on,hugepage_size=2M
 ```
 
 ### `hotplug_method`
