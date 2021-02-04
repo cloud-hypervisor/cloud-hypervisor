@@ -169,7 +169,7 @@ fn create_mcfg_table() -> Sdt {
         base_address: arch::layout::PCI_MMCONFIG_START.0,
         segment: 0,
         start: 0,
-        end: 0,
+        end: ((arch::layout::PCI_MMCONFIG_SIZE - 1) >> 20) as u8,
         ..Default::default()
     });
     mcfg
