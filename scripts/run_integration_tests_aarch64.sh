@@ -180,6 +180,12 @@ update_workloads() {
 
 process_common_args "$@"
 
+# aarch64 not supported for MSHV
+if [[ "$hypervisor" = "mshv" ]]; then
+    echo "Aarch64 is not supported in Microsoft Hypervisor"
+    exit 1
+fi
+
 features_build="--no-default-features --features $hypervisor "
 features_test="--no-default-features --features integration_tests,$hypervisor"
 
