@@ -109,6 +109,10 @@ pub enum ValidationError {
     VnetQueueLowerThan2,
     /// The input queue number for virtio_net must match the number of input fds
     VnetQueueFdMismatch,
+    // Hugepages not turned on
+    HugePageSizeWithoutHugePages,
+    // Huge page size is not power of 2
+    InvalidHugePageSize(u64),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -138,6 +142,12 @@ impl fmt::Display for ValidationError {
                 f,
                 "Number of queues to virtio_net does not match the number of input FDs"
             ),
+            HugePageSizeWithoutHugePages => {
+                write!(f, "Huge page size specified but huge pages not enabled")
+            }
+            InvalidHugePageSize(s) => {
+                write!(f, "Huge page size is not power of 2: {}", s)
+            }
         }
     }
 }
@@ -404,6 +414,8 @@ pub struct MemoryZoneConfig {
     #[serde(default)]
     pub hugepages: bool,
     #[serde(default)]
+    pub hugepage_size: Option<u64>,
+    #[serde(default)]
     pub host_numa_node: Option<u32>,
     #[serde(default)]
     pub hotplug_size: Option<u64>,
@@ -427,6 +439,8 @@ pub struct MemoryConfig {
     #[serde(default)]
     pub hugepages: bool,
     #[serde(default)]
+    pub hugepage_size: Option<u64>,
+    #[serde(default)]
     pub zones: Option<Vec<MemoryZoneConfig>>,
 }
 
@@ -441,7 +455,8 @@ impl MemoryConfig {
             .add("hotplug_size")
             .add("hotplugged_size")
             .add("shared")
-            .add("hugepages");
+            .add("hugepages")
+            .add("hugepage_size");
         parser.parse(memory).map_err(Error::ParseMemory)?;
 
         let size = parser
@@ -476,6 +491,10 @@ impl MemoryConfig {
             .map_err(Error::ParseMemory)?
             .unwrap_or(Toggle(false))
             .0;
+        let hugepage_size = parser
+            .convert::<ByteSized>("hugepage_size")
+            .map_err(Error::ParseMemory)?
+            .map(|v| v.0);
 
         let zones: Option<Vec<MemoryZoneConfig>> = if let Some(memory_zones) = &memory_zones {
             let mut zones = Vec::new();
@@ -487,6 +506,7 @@ impl MemoryConfig {
                     .add("file")
                     .add("shared")
                     .add("hugepages")
+                    .add("hugepage_size")
                     .add("host_numa_node")
                     .add("hotplug_size")
                     .add("hotplugged_size");
@@ -509,6 +529,11 @@ impl MemoryConfig {
                     .map_err(Error::ParseMemoryZone)?
                     .unwrap_or(Toggle(false))
                     .0;
+                let hugepage_size = parser
+                    .convert::<ByteSized>("hugepage_size")
+                    .map_err(Error::ParseMemoryZone)?
+                    .map(|v| v.0);
+
                 let host_numa_node = parser
                     .convert::<u32>("host_numa_node")
                     .map_err(Error::ParseMemoryZone)?;
@@ -527,6 +552,7 @@ impl MemoryConfig {
                     file,
                     shared,
                     hugepages,
+                    hugepage_size,
                     host_numa_node,
                     hotplug_size,
                     hotplugged_size,
@@ -545,6 +571,7 @@ impl MemoryConfig {
             hotplugged_size,
             shared,
             hugepages,
+            hugepage_size,
             zones,
         })
     }
@@ -578,6 +605,7 @@ impl Default for MemoryConfig {
             hotplugged_size: None,
             shared: false,
             hugepages: false,
+            hugepage_size: None,
             zones: None,
         }
     }
@@ -1523,6 +1551,15 @@ impl VmConfig {
             }
         }
 
+        if let Some(hugepage_size) = &self.memory.hugepage_size {
+            if !self.memory.hugepages {
+                return Err(ValidationError::HugePageSizeWithoutHugePages);
+            }
+            if !hugepage_size.is_power_of_two() {
+                return Err(ValidationError::InvalidHugePageSize(*hugepage_size));
+            }
+        }
+
         Ok(())
     }
 
@@ -1802,6 +1839,15 @@ mod tests {
             MemoryConfig {
                 hotplug_size: Some(512 << 20),
                 hotplug_method: HotplugMethod::VirtioMem,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            MemoryConfig::parse("hugepages=on,size=1G,hugepage_size=2M", None)?,
+            MemoryConfig {
+                hugepage_size: Some(2 << 20),
+                size: 1 << 30,
+                hugepages: true,
                 ..Default::default()
             }
         );
@@ -2228,6 +2274,7 @@ mod tests {
                 hotplugged_size: None,
                 shared: false,
                 hugepages: false,
+                hugepage_size: None,
                 zones: None,
             },
             kernel: Some(KernelConfig {
@@ -2351,9 +2398,28 @@ mod tests {
         }]);
         assert!(invalid_config.validate().is_err());
 
-        let mut still_valid_config = valid_config;
+        let mut still_valid_config = valid_config.clone();
         still_valid_config.memory.shared = true;
         assert!(still_valid_config.validate().is_ok());
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.memory.hugepages = true;
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.memory.hugepages = true;
+        still_valid_config.memory.hugepage_size = Some(2 << 20);
+        assert!(still_valid_config.validate().is_ok());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.memory.hugepages = false;
+        invalid_config.memory.hugepage_size = Some(2 << 20);
+        assert!(invalid_config.validate().is_err());
+
+        let mut invalid_config = valid_config;
+        invalid_config.memory.hugepages = true;
+        invalid_config.memory.hugepage_size = Some(3 << 20);
+        assert!(invalid_config.validate().is_err());
 
         Ok(())
     }
