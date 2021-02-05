@@ -4,6 +4,7 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use thiserror::Error;
+use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryError, GuestMemoryMmap};
 
 #[derive(Error, Debug)]
 pub enum TdvfError {
@@ -17,6 +18,8 @@ pub enum TdvfError {
     InvalidDescriptorSize,
     #[error("Invalid descriptor version")]
     InvalidDescriptorVersion,
+    #[error("Failed to write HOB details to guest memory: {0}")]
+    GuestMemoryWriteHob(#[source] GuestMemoryError),
 }
 
 // TDVF_DESCRIPTOR
@@ -109,6 +112,194 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<Vec<TdvfSection>, TdvfErro
     .map_err(TdvfError::ReadDescriptor)?;
 
     Ok(sections)
+}
+
+#[repr(u16)]
+#[derive(Copy, Clone, Debug)]
+enum HobType {
+    Handoff = 0x1,
+    ResourceDescriptor = 0x3,
+    Unused = 0xfffe,
+    EndOfHobList = 0xffff,
+}
+
+impl Default for HobType {
+    fn default() -> Self {
+        HobType::Unused
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, Debug)]
+struct HobHeader {
+    r#type: HobType,
+    length: u16,
+    reserved: u32,
+}
+unsafe impl ByteValued for HobHeader {}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, Debug)]
+struct HobHandoffInfoTable {
+    header: HobHeader,
+    version: u32,
+    efi_memory_top: u64,
+    efi_memory_bottom: u64,
+    efi_free_memory_top: u64,
+    efi_free_memory_bottom: u64,
+    efi_end_of_hob_list: u64,
+}
+unsafe impl ByteValued for HobHandoffInfoTable {}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, Debug)]
+struct EfiGuid {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, Debug)]
+struct HobResourceDescriptor {
+    header: HobHeader,
+    owner: EfiGuid,
+    resource_type: u32,
+    resource_attribute: u32,
+    physical_start: u64,
+    resource_length: u64,
+}
+unsafe impl ByteValued for HobResourceDescriptor {}
+
+pub struct TdHob {
+    start_offset: u64,
+    current_offset: u64,
+}
+
+fn align_hob(v: u64) -> u64 {
+    (v + 7) / 8 * 8
+}
+
+impl TdHob {
+    fn update_offset<T>(&mut self) {
+        self.current_offset = align_hob(self.current_offset + std::mem::size_of::<T>() as u64)
+    }
+
+    pub fn start(offset: u64) -> TdHob {
+        // Leave a gap to place the HandoffTable at the start as it can only be filled in later
+        let mut hob = TdHob {
+            start_offset: offset,
+            current_offset: offset,
+        };
+        hob.update_offset::<HobHandoffInfoTable>();
+        hob
+    }
+
+    pub fn finish(&mut self, mem: &GuestMemoryMmap) -> Result<(), TdvfError> {
+        // Write end
+        let end = HobHeader {
+            r#type: HobType::EndOfHobList,
+            length: std::mem::size_of::<HobHeader>() as u16,
+            reserved: 0,
+        };
+        info!("Writing HOB end {:x} {:x?}", self.current_offset, end);
+        mem.write_obj(end, GuestAddress(self.current_offset))
+            .map_err(TdvfError::GuestMemoryWriteHob)?;
+        self.update_offset::<HobHeader>();
+
+        // Write handoff, delayed as it needs end of HOB list
+        let efi_end_of_hob_list = self.current_offset;
+        let handoff = HobHandoffInfoTable {
+            header: HobHeader {
+                r#type: HobType::Handoff,
+                length: std::mem::size_of::<HobHandoffInfoTable>() as u16,
+                reserved: 0,
+            },
+            version: 0x9,
+            efi_memory_top: 0,
+            efi_memory_bottom: 0,
+            efi_free_memory_top: 0,
+            efi_free_memory_bottom: 0,
+            efi_end_of_hob_list,
+        };
+        info!("Writing HOB start {:x} {:x?}", self.start_offset, handoff);
+        mem.write_obj(handoff, GuestAddress(self.start_offset))
+            .map_err(TdvfError::GuestMemoryWriteHob)
+    }
+
+    pub fn add_resource(
+        &mut self,
+        mem: &GuestMemoryMmap,
+        physical_start: u64,
+        resource_length: u64,
+        resource_type: u32,
+        resource_attribute: u32,
+    ) -> Result<(), TdvfError> {
+        let resource_descriptor = HobResourceDescriptor {
+            header: HobHeader {
+                r#type: HobType::ResourceDescriptor,
+                length: std::mem::size_of::<HobResourceDescriptor>() as u16,
+                reserved: 0,
+            },
+            owner: EfiGuid::default(),
+            resource_type,
+            resource_attribute,
+            physical_start,
+            resource_length,
+        };
+        info!(
+            "Writing HOB resource {:x} {:x?}",
+            self.current_offset, resource_descriptor
+        );
+        mem.write_obj(resource_descriptor, GuestAddress(self.current_offset))
+            .map_err(TdvfError::GuestMemoryWriteHob)?;
+        self.update_offset::<HobResourceDescriptor>();
+        Ok(())
+    }
+
+    pub fn add_memory_resource(
+        &mut self,
+        mem: &GuestMemoryMmap,
+        physical_start: u64,
+        resource_length: u64,
+        ram: bool,
+    ) -> Result<(), TdvfError> {
+        self.add_resource(
+            mem,
+            physical_start,
+            resource_length,
+            if ram {
+                0 /* EFI_RESOURCE_SYSTEM_MEMORY */
+            } else {
+                0x5 /*EFI_RESOURCE_MEMORY_RESERVED */
+            },
+            /* TODO:
+             * QEMU currently fills it in like this:
+             * EFI_RESOURCE_ATTRIBUTE_PRESENT | EFI_RESOURCE_ATTRIBUTE_INITIALIZED | EFI_RESOURCE_ATTRIBUTE_TESTED
+             * which differs from the spec (due to TDVF implementation issue?)
+             */
+            0x7,
+        )
+    }
+
+    pub fn add_mmio_resource(
+        &mut self,
+        mem: &GuestMemoryMmap,
+        physical_start: u64,
+        resource_length: u64,
+    ) -> Result<(), TdvfError> {
+        self.add_resource(
+            mem,
+            physical_start,
+            resource_length,
+            0x1, /* EFI_RESOURCE_MEMORY_MAPPED_IO */
+            /*
+             * EFI_RESOURCE_ATTRIBUTE_PRESENT | EFI_RESOURCE_ATTRIBUTE_INITIALIZED | EFI_RESOURCE_ATTRIBUTE_UNCACHEABLE
+             */
+            0x403,
+        )
+    }
 }
 
 #[cfg(test)]
