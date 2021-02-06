@@ -313,6 +313,48 @@ fn create_spcr_table(base_address: u64, gsi: u32) -> Sdt {
     spcr
 }
 
+#[cfg(target_arch = "aarch64")]
+fn create_iort_table() -> Sdt {
+    const ACPI_IORT_NODE_ITS_GROUP: u8 = 0x00;
+    const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
+
+    // IORT
+    let mut iort = Sdt::new(*b"IORT", 124, 2, *b"CLOUDH", *b"CHIORT  ", 1);
+    // Nodes: PCI Root Complex, ITS
+    // Note: We currently do not support SMMU
+    iort.write(36, (2u32).to_le());
+    iort.write(40, (48u32).to_le());
+
+    // ITS group node
+    iort.write(48, ACPI_IORT_NODE_ITS_GROUP as u8);
+    // Length of the ITS group node in bytes
+    iort.write(49, (24u16).to_le());
+    // ITS counts
+    iort.write(64, (1u32).to_le());
+
+    // Root Complex Node
+    iort.write(72, ACPI_IORT_NODE_PCI_ROOT_COMPLEX as u8);
+    // Length of the root complex node in bytes
+    iort.write(73, (52u16).to_le());
+    // Mapping counts
+    iort.write(80, (1u32).to_le());
+    // Offset from the start of the RC node to the start of its Array of ID mappings
+    iort.write(84, (32u32).to_le());
+    // Fully coherent device
+    iort.write(88, (1u32).to_le());
+    // CCA = CPM = DCAS = 1
+    iort.write(95, 3u8);
+    // Identity RID mapping covering the whole input RID range
+    iort.write(108, (0xffff_u32).to_le());
+    // id_mapping_array_output_reference should be
+    // the ITS group node (the first node) if no SMMU
+    iort.write(116, (48u32).to_le());
+
+    iort.update_checksum();
+
+    iort
+}
+
 pub fn create_acpi_tables(
     guest_mem: &GuestMemoryMmap,
     device_manager: &Arc<Mutex<DeviceManager>>,
@@ -430,14 +472,25 @@ pub fn create_acpi_tables(
         prev_tbl_off = slit_offset;
     };
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        let iort = create_iort_table();
+        let iort_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        guest_mem
+            .write_slice(iort.as_slice(), iort_offset)
+            .expect("Error writing IORT table");
+        tables.push(iort_offset.0);
+        prev_tbl_len = iort.len() as u64;
+        prev_tbl_off = iort_offset;
+    }
+
     // XSDT
     let mut xsdt = Sdt::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
     for table in tables {
         xsdt.append(table);
     }
     xsdt.update_checksum();
-
-    let xsdt_offset = prev_tbl_off.checked_add(prev_tbl_len as u64).unwrap();
+    let xsdt_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
     guest_mem
         .write_slice(xsdt.as_slice(), xsdt_offset)
         .expect("Error writing XSDT table");
