@@ -32,48 +32,41 @@ use vmm_sys_util::eventfd::EventFd;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
-
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::NUM_IOAPIC_PINS;
+#[cfg(target_arch = "aarch64")]
+use aarch64::{RegList, Register, StandardRegisters};
+#[cfg(target_arch = "x86_64")]
+use kvm_bindings::{
+    kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
+};
 #[cfg(target_arch = "x86_64")]
 use x86_64::{
     check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters, KVM_TSS_ADDRESS,
 };
-
-#[cfg(target_arch = "aarch64")]
-use aarch64::{RegList, Register, StandardRegisters};
-
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     CpuId, CpuIdEntry, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState,
     Xsave, CPUID_FLAG_VALID_INDEX,
 };
-
-#[cfg(target_arch = "x86_64")]
-use kvm_bindings::{
-    kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
-};
-
-#[cfg(target_arch = "x86_64")]
-use crate::arch::x86::NUM_IOAPIC_PINS;
-
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
-#[cfg(target_arch = "aarch64")]
-use kvm_bindings::{
-    kvm_regs, user_fpsimd_state, user_pt_regs, KVM_NR_SPSR, KVM_REG_ARM64, KVM_REG_ARM_CORE,
-    KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
-};
-#[cfg(target_arch = "aarch64")]
-use std::mem;
-
 pub use kvm_bindings;
 pub use kvm_bindings::{
     kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing, kvm_irq_routing_entry,
     kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI, KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY,
     KVM_MSI_VALID_DEVID,
 };
+#[cfg(target_arch = "aarch64")]
+use kvm_bindings::{
+    kvm_regs, user_fpsimd_state, user_pt_regs, KVM_NR_SPSR, KVM_REG_ARM64, KVM_REG_ARM_CORE,
+    KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
+};
 pub use kvm_ioctls;
 pub use kvm_ioctls::{Cap, Kvm};
+#[cfg(target_arch = "aarch64")]
+use std::mem;
 
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
