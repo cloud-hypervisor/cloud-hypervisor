@@ -466,7 +466,7 @@ pub fn physical_bits(max_phys_bits: Option<u8>) -> u8 {
 }
 
 pub struct Vm {
-    kernel: File,
+    kernel: Option<File>,
     initramfs: Option<File>,
     threads: Vec<thread::JoinHandle<()>>,
     device_manager: Arc<Mutex<DeviceManager>>,
@@ -554,7 +554,13 @@ impl Vm {
         .map_err(Error::CpuManager)?;
 
         let on_tty = unsafe { libc::isatty(libc::STDIN_FILENO as i32) } != 0;
-        let kernel = File::open(&config.lock().unwrap().kernel.as_ref().unwrap().path)
+        let kernel = config
+            .lock()
+            .unwrap()
+            .kernel
+            .as_ref()
+            .map(|k| File::open(&k.path))
+            .transpose()
             .map_err(Error::KernelFile)?;
 
         let initramfs = config
@@ -842,10 +848,11 @@ impl Vm {
     fn load_kernel(&mut self) -> Result<EntryPoint> {
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
+        let mut kernel = self.kernel.as_ref().unwrap();
         let entry_addr = match linux_loader::loader::pe::PE::load(
             mem.deref(),
             Some(GuestAddress(arch::get_kernel_start())),
-            &mut self.kernel,
+            &mut kernel,
             None,
         ) {
             Ok(entry_addr) => entry_addr,
@@ -866,10 +873,11 @@ impl Vm {
         let cmdline_cstring = self.get_cmdline()?;
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
+        let mut kernel = self.kernel.as_ref().unwrap();
         let entry_addr = match linux_loader::loader::elf::Elf::load(
             mem.deref(),
             None,
-            &mut self.kernel,
+            &mut kernel,
             Some(arch::layout::HIGH_RAM_START),
         ) {
             Ok(entry_addr) => entry_addr,
@@ -877,7 +885,7 @@ impl Vm {
                 linux_loader::loader::bzimage::BzImage::load(
                     mem.deref(),
                     None,
-                    &mut self.kernel,
+                    &mut kernel,
                     Some(arch::layout::HIGH_RAM_START),
                 )
                 .map_err(Error::KernelLoad)?
@@ -1505,16 +1513,24 @@ impl Vm {
         let new_state = VmState::Running;
         current_state.valid_transition(new_state)?;
 
-        let entry_point = self.load_kernel()?;
+        // Load kernel if configured
+        let entry_point = if self.kernel.as_ref().is_some() {
+            Some(self.load_kernel()?)
+        } else {
+            None
+        };
 
-        // create and configure vcpus
+        // Create and configure vcpus
         self.cpu_manager
             .lock()
             .unwrap()
             .create_boot_vcpus(entry_point)
             .map_err(Error::CpuManager)?;
 
-        self.configure_system(entry_point)?;
+        // Configure shared state based on loaded kernel
+        entry_point
+            .map(|entry_point| self.configure_system(entry_point))
+            .transpose()?;
 
         self.cpu_manager
             .lock()

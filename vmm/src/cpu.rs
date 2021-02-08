@@ -1013,8 +1013,8 @@ impl CpuManager {
         Ok(())
     }
 
-    pub fn create_boot_vcpus(&mut self, entry_point: EntryPoint) -> Result<()> {
-        self.create_vcpus(self.boot_vcpus(), Some(entry_point))
+    pub fn create_boot_vcpus(&mut self, entry_point: Option<EntryPoint>) -> Result<()> {
+        self.create_vcpus(self.boot_vcpus(), entry_point)
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
