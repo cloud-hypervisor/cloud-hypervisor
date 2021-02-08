@@ -348,14 +348,8 @@ pub enum DeviceManagerError {
     /// Could not find the node in the device tree.
     MissingNode,
 
-    /// Could not find a MMIO range.
-    MmioRangeAllocation,
-
     /// Resource was already found.
     ResourceAlreadyExists,
-
-    /// Expected resources for virtio-mmio could not be found.
-    MissingVirtioMmioResources,
 
     /// Expected resources for virtio-pci could not be found.
     MissingVirtioPciResources,
