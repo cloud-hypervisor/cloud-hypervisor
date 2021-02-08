@@ -245,6 +245,34 @@ pub enum Error {
 
     /// Error triggering power button
     PowerButton(device_manager::DeviceManagerError),
+
+    /// Error doing I/O on TDX firmware file
+    #[cfg(feature = "tdx")]
+    LoadTdvf(std::io::Error),
+
+    /// Error parsing TDVF
+    #[cfg(feature = "tdx")]
+    ParseTdvf(arch::x86_64::tdx::TdvfError),
+
+    /// Error populating HOB
+    #[cfg(feature = "tdx")]
+    PopulateHob(arch::x86_64::tdx::TdvfError),
+
+    /// Error allocating TDVF memory
+    #[cfg(feature = "tdx")]
+    AllocatingTdvfMemory(crate::memory_manager::Error),
+
+    /// Error enabling TDX VM
+    #[cfg(feature = "tdx")]
+    InitializeTDXVM(hypervisor::HypervisorVmError),
+
+    /// Error enabling TDX memory region
+    #[cfg(feature = "tdx")]
+    InitializeTDXMemoryRegion(hypervisor::HypervisorVmError),
+
+    /// Error finalizing TDX setup
+    #[cfg(feature = "tdx")]
+    FinalizeTDX(hypervisor::HypervisorVmError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -669,14 +697,24 @@ impl Vm {
         serial_pty: Option<PtyPair>,
         console_pty: Option<PtyPair>,
     ) -> Result<Self> {
+        #[cfg(feature = "tdx")]
+        let tdx_enabled = config.lock().unwrap().tdx.is_some();
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor.check_required_extensions().unwrap();
+        #[cfg(feature = "tdx")]
+        let vm = hypervisor
+            .create_vm_with_type(if tdx_enabled {
+                2 // KVM_X86_TDX_VM
+            } else {
+                0 // KVM_X86_LEGACY_VM
+            })
+            .unwrap();
+        #[cfg(not(feature = "tdx"))]
         let vm = hypervisor.create_vm().unwrap();
+
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
         let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
-        #[cfg(feature = "tdx")]
-        let tdx_enabled = config.lock().unwrap().tdx.is_some();
         let memory_manager = MemoryManager::new(
             vm.clone(),
             &config.lock().unwrap().memory.clone(),
@@ -1509,6 +1547,131 @@ impl Vm {
         }
     }
 
+    #[cfg(feature = "tdx")]
+    fn init_tdx(&mut self) -> Result<()> {
+        let cpuid = self.cpu_manager.lock().unwrap().common_cpuid();
+        let max_vcpus = self.cpu_manager.lock().unwrap().max_vcpus() as u32;
+        self.vm
+            .tdx_init(&cpuid, max_vcpus)
+            .map_err(Error::InitializeTDXVM)?;
+        Ok(())
+    }
+
+    #[cfg(feature = "tdx")]
+    fn init_tdx_memory(&mut self) -> Result<Option<u64>> {
+        use arch::x86_64::tdx::*;
+        // Get the memory end *before* we start adding TDVF ram regions
+        let mem_end = {
+            let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+            let mem = guest_memory.memory();
+            mem.last_addr()
+        };
+
+        // The TDVF file contains a table of section as well as code
+        let mut firmware_file =
+            File::open(&self.config.lock().unwrap().tdx.as_ref().unwrap().firmware)
+                .map_err(Error::LoadTdvf)?;
+
+        // For all the sections allocate some RAM backing them
+        let sections = parse_tdvf_sections(&mut firmware_file).map_err(Error::ParseTdvf)?;
+        for section in &sections {
+            info!("Allocating TDVF Section: {:?}", section);
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .add_ram_region(GuestAddress(section.address), section.size as usize)
+                .map_err(Error::AllocatingTdvfMemory)?;
+        }
+
+        // The guest memory at this point now has all the required regions so it
+        // is safe to copy from the TDVF file into it.
+        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
+        let mem = guest_memory.memory();
+        let mut hob_offset = None;
+        for section in &sections {
+            info!("Populating TDVF Section: {:?}", section);
+            match section.r#type {
+                TdvfSectionType::Bfv | TdvfSectionType::Cfv => {
+                    info!("Copying section to guest memory");
+                    firmware_file
+                        .seek(SeekFrom::Start(section.data_offset as u64))
+                        .map_err(Error::LoadTdvf)?;
+                    mem.read_from(
+                        GuestAddress(section.address),
+                        &mut firmware_file,
+                        section.data_size as usize,
+                    )
+                    .unwrap();
+                }
+                TdvfSectionType::TdHob => {
+                    hob_offset = Some(section.address);
+                }
+                _ => {}
+            }
+        }
+
+        // Generate HOB
+        let mut hob = TdHob::start(hob_offset.unwrap());
+
+        // RAM regions (all below 3GiB case)
+        if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
+            hob.add_memory_resource(&mem, 0, mem_end.0 + 1, true)
+                .map_err(Error::PopulateHob)?;
+        } else {
+            // Otherwise split into two
+            hob.add_memory_resource(&mem, 0, arch::layout::MEM_32BIT_RESERVED_START.0, true)
+                .map_err(Error::PopulateHob)?;
+            if mem_end > arch::layout::RAM_64BIT_START {
+                hob.add_memory_resource(
+                    &mem,
+                    arch::layout::RAM_64BIT_START.raw_value(),
+                    mem_end.unchecked_offset_from(arch::layout::RAM_64BIT_START) + 1,
+                    true,
+                )
+                .map_err(Error::PopulateHob)?;
+            }
+        }
+
+        // MMIO regions
+        hob.add_mmio_resource(
+            &mem,
+            arch::layout::MEM_32BIT_DEVICES_START.raw_value(),
+            arch::layout::APIC_START.raw_value()
+                - arch::layout::MEM_32BIT_DEVICES_START.raw_value(),
+        )
+        .map_err(Error::PopulateHob)?;
+        let start_of_device_area = self
+            .memory_manager
+            .lock()
+            .unwrap()
+            .start_of_device_area()
+            .raw_value();
+        let end_of_device_area = self
+            .memory_manager
+            .lock()
+            .unwrap()
+            .end_of_device_area()
+            .raw_value();
+        hob.add_mmio_resource(&mem, start_of_device_area, end_of_device_area)
+            .map_err(Error::PopulateHob)?;
+
+        hob.finish(&mem).map_err(Error::PopulateHob)?;
+
+        for section in &sections {
+            self.vm
+                .tdx_init_memory_region(
+                    mem.get_host_address(GuestAddress(section.address)).unwrap() as u64,
+                    section.address,
+                    section.size,
+                    /* TDVF_SECTION_ATTRIBUTES_EXTENDMR */
+                    section.attributes == 1,
+                )
+                .map_err(Error::InitializeTDXMemoryRegion)?;
+        }
+
+        Ok(hob_offset)
+    }
+
     pub fn boot(&mut self) -> Result<()> {
         event!("vm", "booting");
         let current_state = self.get_state()?;
@@ -1526,6 +1689,13 @@ impl Vm {
             None
         };
 
+        // The initial TDX configuration must be done before the vCPUs are
+        // created
+        #[cfg(feature = "tdx")]
+        if self.config.lock().unwrap().tdx.is_some() {
+            self.init_tdx()?;
+        }
+
         // Create and configure vcpus
         self.cpu_manager
             .lock()
@@ -1533,10 +1703,31 @@ impl Vm {
             .create_boot_vcpus(entry_point)
             .map_err(Error::CpuManager)?;
 
+        // Configuring the TDX regions requires that the vCPUs are created
+        #[cfg(feature = "tdx")]
+        let hob_address = if self.config.lock().unwrap().tdx.is_some() {
+            self.init_tdx_memory()?
+        } else {
+            None
+        };
+
         // Configure shared state based on loaded kernel
         entry_point
             .map(|entry_point| self.configure_system(entry_point))
             .transpose()?;
+
+        #[cfg(feature = "tdx")]
+        if let Some(hob_address) = hob_address {
+            // With the HOB address extracted the vCPUs can have
+            // their TDX state configured.
+            self.cpu_manager
+                .lock()
+                .unwrap()
+                .initialize_tdx(hob_address)
+                .map_err(Error::CpuManager)?;
+            // With TDX memory and CPU state configured TDX setup is complete
+            self.vm.tdx_finalize().map_err(Error::FinalizeTDX)?;
+        }
 
         self.cpu_manager
             .lock()
