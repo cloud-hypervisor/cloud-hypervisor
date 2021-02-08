@@ -182,7 +182,7 @@ impl vm::Vm for KvmVm {
     ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
         let vc = self
             .fd
-            .create_vcpu(id)
+            .create_vcpu(id as u64)
             .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
         let vcpu = KvmVcpu {
             fd: vc,
