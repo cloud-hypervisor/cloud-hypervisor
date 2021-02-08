@@ -357,6 +357,17 @@ fn create_app<'a, 'b>(
         );
     }
 
+    #[cfg(feature = "tdx")]
+    {
+        app = app.arg(
+            Arg::with_name("tdx")
+                .long("tdx")
+                .help("TDX Support: firmware=<tdvf path>")
+                .takes_value(true)
+                .group("vm-config"),
+        );
+    }
+
     app
 }
 
@@ -664,6 +675,8 @@ mod unit_tests {
                 sgx_epc: None,
                 numa: None,
                 watchdog: false,
+                #[cfg(feature = "tdx")]
+                tdx: None,
             };
 
             aver_eq!(tb, expected_vm_config, result_vm_config);

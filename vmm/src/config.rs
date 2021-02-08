@@ -79,6 +79,12 @@ pub enum Error {
     ParseNuma(OptionParserError),
     /// Failed to validate configuration
     Validation(ValidationError),
+    #[cfg(feature = "tdx")]
+    /// Failed to parse TDX config
+    ParseTdx(OptionParserError),
+    #[cfg(feature = "tdx")]
+    // No TDX firmware
+    FirmwarePathMissing,
 }
 
 #[derive(Debug)]
@@ -190,6 +196,10 @@ impl fmt::Display for Error {
                 write!(f, "Error parsing --restore: source_url missing")
             }
             Validation(v) => write!(f, "Error validating configuration: {}", v),
+            #[cfg(feature = "tdx")]
+            ParseTdx(o) => write!(f, "Error parsing --tdx: {}", o),
+            #[cfg(feature = "tdx")]
+            FirmwarePathMissing => write!(f, "TDX firmware missing"),
         }
     }
 }
@@ -217,6 +227,8 @@ pub struct VmParams<'a> {
     pub sgx_epc: Option<Vec<&'a str>>,
     pub numa: Option<Vec<&'a str>>,
     pub watchdog: bool,
+    #[cfg(feature = "tdx")]
+    pub tdx: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -244,7 +256,8 @@ impl<'a> VmParams<'a> {
         let sgx_epc: Option<Vec<&str>> = args.values_of("sgx-epc").map(|x| x.collect());
         let numa: Option<Vec<&str>> = args.values_of("numa").map(|x| x.collect());
         let watchdog = args.is_present("watchdog");
-
+        #[cfg(feature = "tdx")]
+        let tdx = args.value_of("tdx");
         VmParams {
             cpus,
             memory,
@@ -266,6 +279,8 @@ impl<'a> VmParams<'a> {
             sgx_epc,
             numa,
             watchdog,
+            #[cfg(feature = "tdx")]
+            tdx,
         }
     }
 }
@@ -1326,6 +1341,26 @@ impl VsockConfig {
     }
 }
 
+#[cfg(feature = "tdx")]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+pub struct TdxConfig {
+    pub firmware: PathBuf,
+}
+
+#[cfg(feature = "tdx")]
+impl TdxConfig {
+    pub fn parse(tdx: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("firmware");
+        parser.parse(tdx).map_err(Error::ParseTdx)?;
+        let firmware = parser
+            .get("firmware")
+            .map(PathBuf::from)
+            .ok_or(Error::FirmwarePathMissing)?;
+        Ok(TdxConfig { firmware })
+    }
+}
+
 #[cfg(target_arch = "x86_64")]
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
 pub struct SgxEpcConfig {
@@ -1490,6 +1525,8 @@ pub struct VmConfig {
     pub numa: Option<Vec<NumaConfig>>,
     #[serde(default)]
     pub watchdog: bool,
+    #[cfg(feature = "tdx")]
+    pub tdx: Option<TdxConfig>,
 }
 
 impl VmConfig {
@@ -1695,6 +1732,9 @@ impl VmConfig {
             });
         }
 
+        #[cfg(feature = "tdx")]
+        let tdx = vm_params.tdx.map(TdxConfig::parse).transpose()?;
+
         let config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
@@ -1716,6 +1756,8 @@ impl VmConfig {
             sgx_epc,
             numa,
             watchdog: vm_params.watchdog,
+            #[cfg(feature = "tdx")]
+            tdx,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -2322,6 +2364,8 @@ mod tests {
             sgx_epc: None,
             numa: None,
             watchdog: false,
+            #[cfg(feature = "tdx")]
+            tdx: None,
         };
 
         assert!(valid_config.validate().is_ok());
