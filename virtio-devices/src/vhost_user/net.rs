@@ -366,7 +366,12 @@ impl Pausable for Net {
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
-        self.common.resume()
+        self.common.resume()?;
+
+        if let Some(ctrl_queue_epoll_thread) = &self.ctrl_queue_epoll_thread {
+            ctrl_queue_epoll_thread.thread().unpark();
+        }
+        Ok(())
     }
 }
 
