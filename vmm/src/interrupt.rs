@@ -246,6 +246,10 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
     fn update(&self, _index: InterruptIndex, _config: InterruptSourceConfig) -> Result<()> {
         Ok(())
     }
+
+    fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+        self.ioapic.lock().unwrap().notifier(self.irq as usize)
+    }
 }
 
 pub struct LegacyUserspaceInterruptManager {

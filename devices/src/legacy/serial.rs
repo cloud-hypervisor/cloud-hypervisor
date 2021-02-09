@@ -356,6 +356,9 @@ mod tests {
         ) -> result::Result<(), std::io::Error> {
             Ok(())
         }
+        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+            Some(self.event_fd.try_clone().unwrap())
+        }
     }
 
     impl TestInterrupt {

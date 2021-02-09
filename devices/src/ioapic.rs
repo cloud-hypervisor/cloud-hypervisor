@@ -24,6 +24,7 @@ use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
 };
+use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "GuestAddress")]
@@ -404,6 +405,10 @@ impl InterruptController for Ioapic {
         set_delivery_status(entry, 0);
 
         Ok(())
+    }
+
+    fn notifier(&self, irq: usize) -> Option<EventFd> {
+        self.interrupt_source_group.notifier(irq as InterruptIndex)
     }
 }
 
