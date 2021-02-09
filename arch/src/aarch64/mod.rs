@@ -63,7 +63,6 @@ pub fn configure_vcpu(
     id: u8,
     kernel_entry_point: Option<EntryPoint>,
     vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-    _phys_bits: u8,
 ) -> super::Result<u64> {
     if let Some(kernel_entry_point) = kernel_entry_point {
         regs::setup_regs(
