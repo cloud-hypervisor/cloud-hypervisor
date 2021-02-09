@@ -1106,8 +1106,6 @@ impl DeviceManager {
             (None, None)
         };
 
-        let interrupt_manager = Arc::clone(&self.msi_interrupt_manager);
-
         let mut iommu_attached_devices = Vec::new();
 
         for (device, iommu_attached, id) in virtio_devices {
@@ -1117,15 +1115,14 @@ impl DeviceManager {
                 &None
             };
 
-            let dev_id =
-                self.add_virtio_pci_device(device, &mut pci_bus, mapping, &interrupt_manager, id)?;
+            let dev_id = self.add_virtio_pci_device(device, &mut pci_bus, mapping, id)?;
 
             if iommu_attached {
                 iommu_attached_devices.push(dev_id);
             }
         }
 
-        let mut vfio_iommu_device_ids = self.add_vfio_devices(&mut pci_bus, &interrupt_manager)?;
+        let mut vfio_iommu_device_ids = self.add_vfio_devices(&mut pci_bus)?;
 
         iommu_attached_devices.append(&mut vfio_iommu_device_ids);
 
@@ -1138,13 +1135,7 @@ impl DeviceManager {
             // Because we determined the virtio-iommu b/d/f, we have to
             // add the device to the PCI topology now. Otherwise, the
             // b/d/f won't match the virtio-iommu device as expected.
-            self.add_virtio_pci_device(
-                iommu_device,
-                &mut pci_bus,
-                &None,
-                &interrupt_manager,
-                iommu_id,
-            )?;
+            self.add_virtio_pci_device(iommu_device, &mut pci_bus, &None, iommu_id)?;
         }
 
         let pci_bus = Arc::new(Mutex::new(pci_bus));
@@ -2607,11 +2598,10 @@ impl DeviceManager {
     fn add_passthrough_device(
         &mut self,
         pci: &mut PciBus,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(u32, String)> {
         #[cfg(feature = "kvm")]
-        return self.add_vfio_device(pci, interrupt_manager, device_cfg);
+        return self.add_vfio_device(pci, device_cfg);
 
         #[cfg(not(feature = "kvm"))]
         Err(DeviceManagerError::NoDevicePassthroughSupport)
@@ -2621,7 +2611,6 @@ impl DeviceManager {
     fn add_vfio_device(
         &mut self,
         pci: &mut PciBus,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(u32, String)> {
         let passthrough_device = self
@@ -2690,7 +2679,7 @@ impl DeviceManager {
         let mut vfio_pci_device = VfioPciDevice::new(
             &self.address_manager.vm,
             vfio_device,
-            interrupt_manager,
+            &self.msi_interrupt_manager,
             memory,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
@@ -2779,11 +2768,7 @@ impl DeviceManager {
         Ok(bars)
     }
 
-    fn add_vfio_devices(
-        &mut self,
-        pci: &mut PciBus,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-    ) -> DeviceManagerResult<Vec<u32>> {
+    fn add_vfio_devices(&mut self, pci: &mut PciBus) -> DeviceManagerResult<Vec<u32>> {
         let mut iommu_attached_device_ids = Vec::new();
         let mut devices = self.config.lock().unwrap().devices.clone();
 
@@ -2799,8 +2784,7 @@ impl DeviceManager {
             }
 
             for device_cfg in device_list_cfg.iter_mut() {
-                let (device_id, _) =
-                    self.add_passthrough_device(pci, interrupt_manager, device_cfg)?;
+                let (device_id, _) = self.add_passthrough_device(pci, device_cfg)?;
                 if device_cfg.iommu && self.iommu_device.is_some() {
                     iommu_attached_device_ids.push(device_id);
                 }
@@ -2818,7 +2802,6 @@ impl DeviceManager {
         virtio_device: VirtioDeviceArc,
         pci: &mut PciBus,
         iommu_mapping: &Option<Arc<IommuMapping>>,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         virtio_device_id: String,
     ) -> DeviceManagerResult<u32> {
         let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
@@ -2907,7 +2890,7 @@ impl DeviceManager {
             virtio_device,
             msix_num,
             iommu_mapping_cb,
-            interrupt_manager,
+            &self.msi_interrupt_manager,
             pci_device_bdf,
             self.activate_evt
                 .try_clone()
@@ -3046,8 +3029,6 @@ impl DeviceManager {
             return Err(DeviceManagerError::NoPciBus);
         };
 
-        let interrupt_manager = Arc::clone(&self.msi_interrupt_manager);
-
         if self.passthrough_device.is_none() {
             // If the passthrough device has not been created yet, it is created
             // here and stored in the DeviceManager structure for future needs.
@@ -3060,7 +3041,7 @@ impl DeviceManager {
         }
 
         let (device_id, device_name) =
-            self.add_passthrough_device(&mut pci.lock().unwrap(), &interrupt_manager, device_cfg)?;
+            self.add_passthrough_device(&mut pci.lock().unwrap(), device_cfg)?;
 
         // Update the PCIU bitmap
         self.pci_devices_up |= 1 << (device_id >> 3);
@@ -3243,21 +3224,14 @@ impl DeviceManager {
             return Err(DeviceManagerError::NoPciBus);
         };
 
-        let interrupt_manager = Arc::clone(&self.msi_interrupt_manager);
-
         // Add the virtio device to the device manager list. This is important
         // as the list is used to notify virtio devices about memory updates
         // for instance.
         self.virtio_devices
             .push((device.clone(), iommu_attached, id.clone()));
 
-        let device_id = self.add_virtio_pci_device(
-            device,
-            &mut pci.lock().unwrap(),
-            &None,
-            &interrupt_manager,
-            id.clone(),
-        )?;
+        let device_id =
+            self.add_virtio_pci_device(device, &mut pci.lock().unwrap(), &None, id.clone())?;
 
         // Update the PCIU bitmap
         self.pci_devices_up |= 1 << (device_id >> 3);
