@@ -476,8 +476,8 @@ mod tests {
             Ok(())
         }
 
-        fn notifier(&self, _index: InterruptIndex) -> Option<&EventFd> {
-            Some(&self.event_fd)
+        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
+            Some(self.event_fd.try_clone().unwrap())
         }
     }
 

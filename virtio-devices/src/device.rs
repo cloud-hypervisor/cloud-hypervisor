@@ -32,11 +32,7 @@ pub trait VirtioInterrupt: Send + Sync {
         int_type: &VirtioInterruptType,
         queue: Option<&Queue>,
     ) -> std::result::Result<(), std::io::Error>;
-    fn notifier(
-        &self,
-        _int_type: &VirtioInterruptType,
-        _queue: Option<&Queue>,
-    ) -> Option<&EventFd> {
+    fn notifier(&self, _int_type: &VirtioInterruptType, _queue: Option<&Queue>) -> Option<EventFd> {
         None
     }
 }
