@@ -393,22 +393,6 @@ pub fn configure_vcpu(
         }
     }
 
-    // Copy CPU identification string
-    for i in 0x8000_0002..=0x8000_0004 {
-        cpuid.retain(|c| c.function != i);
-        let leaf = unsafe { x86_64::__cpuid(i) };
-        cpuid
-            .push(CpuIdEntry {
-                function: i,
-                eax: leaf.eax,
-                ebx: leaf.ebx,
-                ecx: leaf.ecx,
-                edx: leaf.edx,
-                ..Default::default()
-            })
-            .map_err(|_| Error::PopulatingCpuid)?;
-    }
-
     fd.set_cpuid2(&cpuid)
         .map_err(|e| Error::SetSupportedCpusFailed(e.into()))?;
 
