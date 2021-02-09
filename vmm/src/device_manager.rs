@@ -834,6 +834,9 @@ pub struct DeviceManager {
     // MSI Interrupt Manager
     msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
 
+    // Legacy Interrupt Manager
+    legacy_interrupt_manager: Option<Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>>,
+
     // Passthrough device handle
     passthrough_device: Option<Arc<dyn hypervisor::Device>>,
 
@@ -941,6 +944,7 @@ impl DeviceManager {
             device_id_cnt: Wrapping(0),
             pci_bus: None,
             msi_interrupt_manager,
+            legacy_interrupt_manager: None,
             passthrough_device: None,
             iommu_device: None,
             pci_devices_up: 0,
@@ -1043,6 +1047,8 @@ impl DeviceManager {
         }
 
         self.console = self.add_console_device(&legacy_interrupt_manager, &mut virtio_devices)?;
+
+        self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
         virtio_devices.append(&mut self.make_virtio_devices()?);
 
