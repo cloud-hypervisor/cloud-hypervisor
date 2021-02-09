@@ -554,7 +554,13 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let cpuid = {
             let phys_bits = physical_bits(config.max_phys_bits);
-            CpuManager::patch_cpuid(hypervisor, &config.topology, sgx_epc_sections, phys_bits)?
+            CpuManager::patch_cpuid(
+                hypervisor,
+                &config.topology,
+                sgx_epc_sections,
+                phys_bits,
+                config.kvm_hyperv,
+            )?
         };
 
         let device_manager = device_manager.lock().unwrap();
@@ -604,6 +610,7 @@ impl CpuManager {
         topology: &Option<CpuTopology>,
         sgx_epc_sections: Option<Vec<SgxEpcSection>>,
         phys_bits: u8,
+        kvm_hyperv: bool,
     ) -> Result<CpuId> {
         let mut cpuid_patches = Vec::new();
 
@@ -681,6 +688,57 @@ impl CpuManager {
                     ..Default::default()
                 })
                 .unwrap();
+        }
+
+        if kvm_hyperv {
+            // Remove conflicting entries
+            cpuid.retain(|c| c.function != 0x4000_0000);
+            cpuid.retain(|c| c.function != 0x4000_0001);
+            // See "Hypervisor Top Level Functional Specification" for details
+            // Compliance with "Hv#1" requires leaves up to 0x4000_000a
+            cpuid
+                .push(CpuIdEntry {
+                    function: 0x40000000,
+                    eax: 0x4000000a, // Maximum cpuid leaf
+                    ebx: 0x756e694c, // "Linu"
+                    ecx: 0x564b2078, // "x KV"
+                    edx: 0x7648204d, // "M Hv"
+                    ..Default::default()
+                })
+                .unwrap();
+            cpuid
+                .push(CpuIdEntry {
+                    function: 0x40000001,
+                    eax: 0x31237648, // "Hv#1"
+                    ..Default::default()
+                })
+                .unwrap();
+            cpuid
+                .push(CpuIdEntry {
+                    function: 0x40000002,
+                    eax: 0x3839,  // "Build number"
+                    ebx: 0xa0000, // "Version"
+                    ..Default::default()
+                })
+                .unwrap();
+            cpuid
+                .push(CpuIdEntry {
+                    function: 0x4000_0003,
+                    eax: 1 << 1 // AccessPartitionReferenceCounter
+                       | 1 << 2 // AccessSynicRegs
+                       | 1 << 3 // AccessSyntheticTimerRegs
+                       | 1 << 9, // AccessPartitionReferenceTsc
+                    ..Default::default()
+                })
+                .unwrap();
+            for i in 0x4000_0004..=0x4000_000a {
+                cpuid
+                    .push(CpuIdEntry {
+                        function: i,
+                        ..Default::default()
+                    })
+                    .unwrap();
+            }
         }
 
         Ok(cpuid)
