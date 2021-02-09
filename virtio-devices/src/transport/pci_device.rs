@@ -755,7 +755,7 @@ impl VirtioInterrupt for VirtioInterruptMsix {
             .trigger(vector as InterruptIndex)
     }
 
-    fn notifier(&self, int_type: &VirtioInterruptType, queue: Option<&Queue>) -> Option<&EventFd> {
+    fn notifier(&self, int_type: &VirtioInterruptType, queue: Option<&Queue>) -> Option<EventFd> {
         let vector = match int_type {
             VirtioInterruptType::Config => self.config_vector.load(Ordering::Acquire),
             VirtioInterruptType::Queue => {

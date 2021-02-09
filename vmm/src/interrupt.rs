@@ -74,8 +74,12 @@ impl InterruptRoute {
         self.irq_fd.write(1)
     }
 
-    pub fn notifier(&self) -> Option<&EventFd> {
-        Some(&self.irq_fd)
+    pub fn notifier(&self) -> Option<EventFd> {
+        Some(
+            self.irq_fd
+                .try_clone()
+                .expect("Failed cloning interrupt's EventFd"),
+        )
     }
 }
 
@@ -149,7 +153,7 @@ where
         ))
     }
 
-    fn notifier(&self, index: InterruptIndex) -> Option<&EventFd> {
+    fn notifier(&self, index: InterruptIndex) -> Option<EventFd> {
         if let Some(route) = self.irq_routes.get(&index) {
             return route.notifier();
         }

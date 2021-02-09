@@ -429,7 +429,7 @@ impl VfioPciDevice {
         match self.interrupt.update_msi(offset, data) {
             Some(InterruptUpdateAction::EnableMsi) => {
                 if let Some(msi) = &self.interrupt.msi {
-                    let mut irq_fds: Vec<&EventFd> = Vec::new();
+                    let mut irq_fds: Vec<EventFd> = Vec::new();
                     for i in 0..msi.cfg.num_enabled_vectors() {
                         if let Some(eventfd) =
                             msi.interrupt_source_group.notifier(i as InterruptIndex)
@@ -440,7 +440,7 @@ impl VfioPciDevice {
                         }
                     }
 
-                    if let Err(e) = self.device.enable_msi(irq_fds) {
+                    if let Err(e) = self.device.enable_msi(irq_fds.iter().collect()) {
                         warn!("Could not enable MSI: {}", e);
                     }
                 }
@@ -460,7 +460,7 @@ impl VfioPciDevice {
         match self.interrupt.update_msix(offset, data) {
             Some(InterruptUpdateAction::EnableMsix) => {
                 if let Some(msix) = &self.interrupt.msix {
-                    let mut irq_fds: Vec<&EventFd> = Vec::new();
+                    let mut irq_fds: Vec<EventFd> = Vec::new();
                     for i in 0..msix.bar.table_entries.len() {
                         if let Some(eventfd) =
                             msix.interrupt_source_group.notifier(i as InterruptIndex)
@@ -471,7 +471,7 @@ impl VfioPciDevice {
                         }
                     }
 
-                    if let Err(e) = self.device.enable_msix(irq_fds) {
+                    if let Err(e) = self.device.enable_msix(irq_fds.iter().collect()) {
                         warn!("Could not enable MSI-X: {}", e);
                     }
                 }
