@@ -67,7 +67,7 @@ use pci::{
 };
 use seccomp::SeccompAction;
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryInto;
 use std::fs::{read_link, File, OpenOptions};
 use std::io::{self, sink, stdout, Seek, SeekFrom};
@@ -855,6 +855,9 @@ pub struct DeviceManager {
     // Hashmap of PCI b/d/f to their corresponding Arc<Mutex<dyn PciDevice>>.
     pci_devices: HashMap<u32, Arc<dyn Any + Send + Sync>>,
 
+    // BTreeMap of PCI b/d/f to their allocated IRQ.
+    pci_device_irqs: BTreeMap<u32, u32>,
+
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
     device_tree: Arc<Mutex<DeviceTree>>,
@@ -951,6 +954,7 @@ impl DeviceManager {
             pci_devices_down: 0,
             pci_id_list: HashMap::new(),
             pci_devices: HashMap::new(),
+            pci_device_irqs: BTreeMap::new(),
             device_tree,
             #[cfg(feature = "acpi")]
             exit_evt: _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
@@ -1048,6 +1052,9 @@ impl DeviceManager {
 
         self.console = self.add_console_device(&legacy_interrupt_manager, &mut virtio_devices)?;
 
+        // Reserve some IRQs for PCI devices in case they need to support INTx.
+        self.reserve_legacy_interrupts_for_pci_devices()?;
+
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
         virtio_devices.append(&mut self.make_virtio_devices()?);
@@ -1055,6 +1062,30 @@ impl DeviceManager {
         self.add_pci_devices(virtio_devices.clone())?;
 
         self.virtio_devices = virtio_devices;
+
+        Ok(())
+    }
+
+    fn reserve_legacy_interrupts_for_pci_devices(&mut self) -> DeviceManagerResult<()> {
+        // Reserve 8 IRQs which will be shared across all PCI devices.
+        let num_irqs = 8;
+        let mut irqs: Vec<u32> = Vec::new();
+        for _ in 0..num_irqs {
+            irqs.push(
+                self.address_manager
+                    .allocator
+                    .lock()
+                    .unwrap()
+                    .allocate_irq()
+                    .ok_or(DeviceManagerError::AllocateIrq)?,
+            );
+        }
+
+        // There are 32 devices on the PCI bus, let's assign them an IRQ.
+        for i in 0..32 {
+            self.pci_device_irqs
+                .insert(i << 3, irqs[(i % num_irqs) as usize]);
+        }
 
         Ok(())
     }
