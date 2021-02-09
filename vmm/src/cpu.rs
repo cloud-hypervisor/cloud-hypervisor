@@ -31,9 +31,9 @@ use arch::EntryPoint;
 use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
-#[cfg(target_arch = "x86_64")]
-use hypervisor::CpuId;
 use hypervisor::{vm::VmmOps, CpuState, HypervisorCpuError, VmExit};
+#[cfg(target_arch = "x86_64")]
+use hypervisor::{CpuId, CpuIdEntry};
 use libc::{c_void, siginfo_t};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::os::unix::thread::JoinHandleExt;
@@ -665,6 +665,22 @@ impl CpuManager {
             if entry.function == 0x8000_0008 {
                 entry.eax = (entry.eax & 0xffff_ff00) | (phys_bits as u32 & 0xff);
             }
+        }
+
+        // Copy CPU identification string
+        for i in 0x8000_0002..=0x8000_0004 {
+            cpuid.retain(|c| c.function != i);
+            let leaf = unsafe { std::arch::x86_64::__cpuid(i) };
+            cpuid
+                .push(CpuIdEntry {
+                    function: i,
+                    eax: leaf.eax,
+                    ebx: leaf.ebx,
+                    ecx: leaf.ecx,
+                    edx: leaf.edx,
+                    ..Default::default()
+                })
+                .unwrap();
         }
 
         Ok(cpuid)
