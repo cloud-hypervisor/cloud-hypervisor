@@ -174,6 +174,18 @@ pub enum Error {
 
     /// Failed to allocate MMIO address
     AllocateMMIOAddress,
+
+    /// Error populating CPUID with KVM HyperV emulation details
+    #[cfg(target_arch = "x86_64")]
+    CpuidKVMHyperV(vmm_sys_util::fam::Error),
+
+    /// Error populating CPUID with KVM HyperV emulation details
+    #[cfg(target_arch = "x86_64")]
+    CpuidSGX(arch::x86_64::Error),
+
+    /// Error populating CPUID with CPU identification
+    #[cfg(target_arch = "x86_64")]
+    CpuidIdentification(vmm_sys_util::fam::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -554,7 +566,7 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let cpuid = {
             let phys_bits = physical_bits(config.max_phys_bits);
-            CpuManager::patch_cpuid(
+            CpuManager::generate_common_cpuid(
                 hypervisor,
                 &config.topology,
                 sgx_epc_sections,
@@ -605,7 +617,7 @@ impl CpuManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn patch_cpuid(
+    fn generate_common_cpuid(
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         topology: &Option<CpuTopology>,
         sgx_epc_sections: Option<Vec<SgxEpcSection>>,
@@ -664,7 +676,8 @@ impl CpuManager {
         }
 
         if let Some(sgx_epc_sections) = sgx_epc_sections {
-            arch::x86_64::update_cpuid_sgx(&mut cpuid, sgx_epc_sections).unwrap();
+            arch::x86_64::update_cpuid_sgx(&mut cpuid, sgx_epc_sections)
+                .map_err(Error::CpuidSGX)?;
         }
 
         // Set CPU physical bits
@@ -687,7 +700,7 @@ impl CpuManager {
                     edx: leaf.edx,
                     ..Default::default()
                 })
-                .unwrap();
+                .map_err(Error::CpuidIdentification)?;
         }
 
         if kvm_hyperv {
@@ -705,14 +718,14 @@ impl CpuManager {
                     edx: 0x7648204d, // "M Hv"
                     ..Default::default()
                 })
-                .unwrap();
+                .map_err(Error::CpuidKVMHyperV)?;
             cpuid
                 .push(CpuIdEntry {
                     function: 0x40000001,
                     eax: 0x31237648, // "Hv#1"
                     ..Default::default()
                 })
-                .unwrap();
+                .map_err(Error::CpuidKVMHyperV)?;
             cpuid
                 .push(CpuIdEntry {
                     function: 0x40000002,
@@ -720,7 +733,7 @@ impl CpuManager {
                     ebx: 0xa0000, // "Version"
                     ..Default::default()
                 })
-                .unwrap();
+                .map_err(Error::CpuidKVMHyperV)?;
             cpuid
                 .push(CpuIdEntry {
                     function: 0x4000_0003,
@@ -730,14 +743,14 @@ impl CpuManager {
                        | 1 << 9, // AccessPartitionReferenceTsc
                     ..Default::default()
                 })
-                .unwrap();
+                .map_err(Error::CpuidKVMHyperV)?;
             for i in 0x4000_0004..=0x4000_000a {
                 cpuid
                     .push(CpuIdEntry {
                         function: i,
                         ..Default::default()
                     })
-                    .unwrap();
+                    .map_err(Error::CpuidKVMHyperV)?;
             }
         }
 
