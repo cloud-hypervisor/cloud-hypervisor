@@ -173,9 +173,6 @@ pub enum Error {
 
     /// Missing SGX_LC CPU feature
     MissingSgxLaunchControlFeature,
-
-    // Error populating Cpuid
-    PopulatingCpuid,
 }
 
 impl From<Error> for super::Error {
@@ -337,6 +334,7 @@ pub fn configure_vcpu(
     cpuid: CpuId,
     kvm_hyperv: bool,
 ) -> super::Result<()> {
+    // Per vCPU CPUID changes; common are handled via CpuManager::generate_common_cpuid()
     let mut cpuid = cpuid;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, u32::from(id));
