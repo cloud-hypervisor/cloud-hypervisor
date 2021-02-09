@@ -3566,6 +3566,23 @@ impl Aml for DeviceManager {
         let pci_device_methods = PciDevSlotMethods {};
         pci_dsdt_inner_data.push(&pci_device_methods);
 
+        // Build PCI routing table, listing IRQs assigned to PCI devices.
+        let prt_package_list: Vec<(u32, u32)> = self
+            .pci_device_irqs
+            .iter()
+            .map(|(bdf, irq)| (((((*bdf >> 3) & 0x1fu32) << 16) | 0xffffu32), *irq))
+            .collect();
+        let prt_package_list: Vec<aml::Package> = prt_package_list
+            .iter()
+            .map(|(bdf, irq)| aml::Package::new(vec![bdf, &0u8, &0u8, irq]))
+            .collect();
+        let prt_package_list: Vec<&dyn Aml> = prt_package_list
+            .iter()
+            .map(|item| item as &dyn Aml)
+            .collect();
+        let prt = aml::Name::new("_PRT".into(), &aml::Package::new(prt_package_list));
+        pci_dsdt_inner_data.push(&prt);
+
         let pci_dsdt_data =
             aml::Device::new("_SB_.PCI0".into(), pci_dsdt_inner_data).to_aml_bytes();
 
