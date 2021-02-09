@@ -8,6 +8,7 @@ use std::sync::Arc;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
+use vmm_sys_util::eventfd::EventFd;
 
 type Result<T> = result::Result<T, Error>;
 
@@ -60,5 +61,9 @@ impl InterruptController for Gic {
             .map_err(Error::TriggerInterrupt)?;
 
         Ok(())
+    }
+
+    fn notifier(&self, irq: usize) -> Option<EventFd> {
+        self.interrupt_source_group.notifier(irq as InterruptIndex)
     }
 }

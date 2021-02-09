@@ -4,6 +4,7 @@
 
 use std::io;
 use std::result;
+use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]
 pub enum Error {
@@ -56,4 +57,5 @@ pub trait InterruptController: Send {
     fn enable(&self) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
     fn end_of_interrupt(&mut self, vec: u8);
+    fn notifier(&self, irq: usize) -> Option<EventFd>;
 }
