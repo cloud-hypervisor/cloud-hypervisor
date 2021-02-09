@@ -2712,11 +2712,27 @@ impl DeviceManager {
             }
         }
 
+        let legacy_interrupt_group = if let (Some(irq), Some(legacy_interrupt_manager)) = (
+            self.pci_device_irqs.get(&pci_device_bdf),
+            &self.legacy_interrupt_manager,
+        ) {
+            Some(
+                legacy_interrupt_manager
+                    .create_group(LegacyIrqGroupConfig {
+                        irq: *irq as InterruptIndex,
+                    })
+                    .map_err(DeviceManagerError::CreateInterruptGroup)?,
+            )
+        } else {
+            None
+        };
+
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let mut vfio_pci_device = VfioPciDevice::new(
             &self.address_manager.vm,
             vfio_device,
             &self.msi_interrupt_manager,
+            legacy_interrupt_group,
             memory,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
