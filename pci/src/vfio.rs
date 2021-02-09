@@ -42,6 +42,7 @@ pub enum VfioPciError {
     MsiNotConfigured,
     MsixNotConfigured,
     UpdateMemory(VfioError),
+    UpdateIntxEventFd,
     UpdateMsiEventFd,
     UpdateMsixEventFd,
 }
@@ -64,6 +65,7 @@ impl fmt::Display for VfioPciError {
             VfioPciError::MsiNotConfigured => write!(f, "MSI interrupt not yet configured"),
             VfioPciError::MsixNotConfigured => write!(f, "MSI-X interrupt not yet configured"),
             VfioPciError::UpdateMemory(e) => write!(f, "failed to update memory: {}", e),
+            VfioPciError::UpdateIntxEventFd => write!(f, "failed to update INTx eventfd"),
             VfioPciError::UpdateMsiEventFd => write!(f, "failed to update MSI eventfd"),
             VfioPciError::UpdateMsixEventFd => write!(f, "failed to update MSI-X eventfd"),
         }
@@ -86,6 +88,11 @@ enum InterruptUpdateAction {
     DisableMsi,
     EnableMsix,
     DisableMsix,
+}
+
+struct VfioIntx {
+    interrupt_source_group: Arc<Box<dyn InterruptSourceGroup>>,
+    enabled: bool,
 }
 
 struct VfioMsi {
@@ -153,6 +160,7 @@ impl VfioMsix {
 }
 
 struct Interrupt {
+    intx: Option<VfioIntx>,
     msi: Option<VfioMsi>,
     msix: Option<VfioMsix>,
 }
@@ -217,6 +225,14 @@ impl Interrupt {
             let offset = offset - u64::from(msix.cap.table_offset());
             msix.bar.read_table(offset, data)
         }
+    }
+
+    fn intx_in_use(&self) -> bool {
+        if let Some(intx) = &self.intx {
+            return intx.enabled;
+        }
+
+        false
     }
 }
 
@@ -292,7 +308,8 @@ impl VfioPciDevice {
     pub fn new(
         vm: &Arc<dyn hypervisor::Vm>,
         device: VfioDevice,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        legacy_interrupt_group: Option<Arc<Box<dyn InterruptSourceGroup>>>,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> Result<Self> {
         let device = Arc::new(device);
@@ -320,15 +337,125 @@ impl VfioPciDevice {
             vfio_pci_configuration,
             mmio_regions: Vec::new(),
             interrupt: Interrupt {
+                intx: None,
                 msi: None,
                 msix: None,
             },
             mem,
         };
 
-        vfio_pci_device.parse_capabilities(interrupt_manager);
+        vfio_pci_device.parse_capabilities(msi_interrupt_manager);
+
+        vfio_pci_device.initialize_legacy_interrupt(legacy_interrupt_group)?;
 
         Ok(vfio_pci_device)
+    }
+
+    fn enable_intx(&mut self) -> Result<()> {
+        if let Some(intx) = &mut self.interrupt.intx {
+            if !intx.enabled {
+                if let Some(eventfd) = intx.interrupt_source_group.notifier(0) {
+                    if let Err(e) = self
+                        .device
+                        .enable_irq(VFIO_PCI_INTX_IRQ_INDEX, vec![&eventfd])
+                    {
+                        warn!("Could not enable INTx: {}", e);
+                    } else {
+                        intx.enabled = true;
+                    }
+                } else {
+                    return Err(VfioPciError::UpdateIntxEventFd);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn disable_intx(&mut self) {
+        if let Some(intx) = &mut self.interrupt.intx {
+            if intx.enabled {
+                if let Err(e) = self.device.disable_irq(VFIO_PCI_INTX_IRQ_INDEX) {
+                    warn!("Could not disable INTx: {}", e);
+                } else {
+                    intx.enabled = false;
+                }
+            }
+        }
+    }
+
+    fn enable_msi(&self) -> Result<()> {
+        if let Some(msi) = &self.interrupt.msi {
+            let mut irq_fds: Vec<EventFd> = Vec::new();
+            for i in 0..msi.cfg.num_enabled_vectors() {
+                if let Some(eventfd) = msi.interrupt_source_group.notifier(i as InterruptIndex) {
+                    irq_fds.push(eventfd);
+                } else {
+                    return Err(VfioPciError::UpdateMsiEventFd);
+                }
+            }
+
+            if let Err(e) = self.device.enable_msi(irq_fds.iter().collect()) {
+                warn!("Could not enable MSI: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn disable_msi(&self) {
+        if let Err(e) = self.device.disable_msi() {
+            warn!("Could not disable MSI: {}", e);
+        }
+    }
+
+    fn enable_msix(&self) -> Result<()> {
+        if let Some(msix) = &self.interrupt.msix {
+            let mut irq_fds: Vec<EventFd> = Vec::new();
+            for i in 0..msix.bar.table_entries.len() {
+                if let Some(eventfd) = msix.interrupt_source_group.notifier(i as InterruptIndex) {
+                    irq_fds.push(eventfd);
+                } else {
+                    return Err(VfioPciError::UpdateMsixEventFd);
+                }
+            }
+
+            if let Err(e) = self.device.enable_msix(irq_fds.iter().collect()) {
+                warn!("Could not enable MSI-X: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn disable_msix(&self) {
+        if let Err(e) = self.device.disable_msix() {
+            warn!("Could not disable MSI-X: {}", e);
+        }
+    }
+
+    fn initialize_legacy_interrupt(
+        &mut self,
+        legacy_interrupt_group: Option<Arc<Box<dyn InterruptSourceGroup>>>,
+    ) -> Result<()> {
+        if let Some(irq_info) = self.device.get_irq_info(VFIO_PCI_INTX_IRQ_INDEX) {
+            if irq_info.count == 0 {
+                // A count of 0 means the INTx IRQ is not supported, therefore
+                // it shouldn't be initialized.
+                return Ok(());
+            }
+        }
+
+        if let Some(interrupt_source_group) = legacy_interrupt_group {
+            self.interrupt.intx = Some(VfioIntx {
+                interrupt_source_group,
+                enabled: false,
+            });
+
+            self.enable_intx()?;
+        }
+
+        Ok(())
     }
 
     fn parse_msix_capabilities(
@@ -428,27 +555,14 @@ impl VfioPciDevice {
     fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
         match self.interrupt.update_msi(offset, data) {
             Some(InterruptUpdateAction::EnableMsi) => {
-                if let Some(msi) = &self.interrupt.msi {
-                    let mut irq_fds: Vec<EventFd> = Vec::new();
-                    for i in 0..msi.cfg.num_enabled_vectors() {
-                        if let Some(eventfd) =
-                            msi.interrupt_source_group.notifier(i as InterruptIndex)
-                        {
-                            irq_fds.push(eventfd);
-                        } else {
-                            return Err(VfioPciError::UpdateMsiEventFd);
-                        }
-                    }
-
-                    if let Err(e) = self.device.enable_msi(irq_fds.iter().collect()) {
-                        warn!("Could not enable MSI: {}", e);
-                    }
-                }
+                // Disable INTx before we can enable MSI
+                self.disable_intx();
+                self.enable_msi()?;
             }
             Some(InterruptUpdateAction::DisableMsi) => {
-                if let Err(e) = self.device.disable_msi() {
-                    warn!("Could not disable MSI: {}", e);
-                }
+                // Fallback onto INTx when disabling MSI
+                self.disable_msi();
+                self.enable_intx()?;
             }
             _ => {}
         }
@@ -459,27 +573,14 @@ impl VfioPciDevice {
     fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<()> {
         match self.interrupt.update_msix(offset, data) {
             Some(InterruptUpdateAction::EnableMsix) => {
-                if let Some(msix) = &self.interrupt.msix {
-                    let mut irq_fds: Vec<EventFd> = Vec::new();
-                    for i in 0..msix.bar.table_entries.len() {
-                        if let Some(eventfd) =
-                            msix.interrupt_source_group.notifier(i as InterruptIndex)
-                        {
-                            irq_fds.push(eventfd);
-                        } else {
-                            return Err(VfioPciError::UpdateMsiEventFd);
-                        }
-                    }
-
-                    if let Err(e) = self.device.enable_msix(irq_fds.iter().collect()) {
-                        warn!("Could not enable MSI-X: {}", e);
-                    }
-                }
+                // Disable INTx before we can enable MSI-X
+                self.disable_intx();
+                self.enable_msix()?;
             }
             Some(InterruptUpdateAction::DisableMsix) => {
-                if let Err(e) = self.device.disable_msix() {
-                    warn!("Could not disable MSI-X: {}", e);
-                }
+                // Fallback onto INTx when disabling MSI-X
+                self.disable_msix();
+                self.enable_intx()?;
             }
             _ => {}
         }
@@ -626,15 +727,19 @@ impl Drop for VfioPciDevice {
         self.unmap_mmio_regions();
 
         if let Some(msix) = &self.interrupt.msix {
-            if msix.bar.enabled() && self.device.disable_msix().is_err() {
-                error!("Could not disable MSI-X");
+            if msix.bar.enabled() {
+                self.disable_msix();
             }
         }
 
         if let Some(msi) = &self.interrupt.msi {
-            if msi.cfg.enabled() && self.device.disable_msi().is_err() {
-                error!("Could not disable MSI");
+            if msi.cfg.enabled() {
+                self.disable_msi();
             }
+        }
+
+        if self.interrupt.intx_in_use() {
+            self.disable_intx();
         }
 
         if self
@@ -677,8 +782,6 @@ const PCI_HEADER_TYPE_REG_INDEX: usize = 3;
 const PCI_CONFIG_BAR0_INDEX: usize = 4;
 // PCI ROM expansion BAR register index
 const PCI_ROM_EXP_BAR_INDEX: usize = 12;
-// PCI interrupt pin and line register index
-const PCI_INTX_REG_INDEX: usize = 15;
 
 impl PciDevice for VfioPciDevice {
     fn allocate_bars(
@@ -951,18 +1054,10 @@ impl PciDevice for VfioPciDevice {
             return self.configuration.read_reg(reg_idx);
         }
 
-        // Since we don't support INTx (only MSI and MSI-X), we should not
-        // expose an invalid Interrupt Pin to the guest. By using a specific
-        // mask in case the register being read correspond to the interrupt
-        // register, this code makes sure to always expose an Interrupt Pin
-        // value of 0, which stands for no interrupt pin support.
-        //
         // Since we don't support passing multi-functions devices, we should
         // mask the multi-function bit, bit 7 of the Header Type byte on the
         // register 3.
-        let mask = if reg_idx == PCI_INTX_REG_INDEX {
-            0xffff_00ff
-        } else if reg_idx == PCI_HEADER_TYPE_REG_INDEX {
+        let mask = if reg_idx == PCI_HEADER_TYPE_REG_INDEX {
             0xff7f_ffff
         } else {
             0xffff_ffff
@@ -993,6 +1088,15 @@ impl PciDevice for VfioPciDevice {
                 self.device.region_read(region.index, data, offset);
             }
         }
+
+        // INTx EOI
+        // The guest reading from the BAR potentially means the interrupt has
+        // been received and can be acknowledged.
+        if self.interrupt.intx_in_use() {
+            if let Err(e) = self.device.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
+                error!("Failed unmasking INTx IRQ: {}", e);
+            }
+        }
     }
 
     fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
@@ -1005,6 +1109,15 @@ impl PciDevice for VfioPciDevice {
                 self.interrupt.msix_write_table(offset, data);
             } else {
                 self.device.region_write(region.index, data, offset);
+            }
+        }
+
+        // INTx EOI
+        // The guest writing to the BAR potentially means the interrupt has
+        // been received and can be acknowledged.
+        if self.interrupt.intx_in_use() {
+            if let Err(e) = self.device.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
+                error!("Failed unmasking INTx IRQ: {}", e);
             }
         }
 
