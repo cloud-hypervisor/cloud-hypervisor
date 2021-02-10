@@ -27,7 +27,7 @@ signal-hook = "0.3.4"
 thiserror = "1.0"
 vmm = { path = "vmm" }
 vmm-sys-util = "0.7.0"
-vm-memory = "0.4.0"
+vm-memory = "0.5.0"
 wait-timeout = "0.2.0"
 
 [build-dependencies]
