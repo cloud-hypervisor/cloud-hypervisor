@@ -11,7 +11,7 @@ net_gen = { path = "../net_gen" }
 rand = "0.8.3"
 serde = "1.0.123"
 virtio-bindings = "0.1.0"
-vm-memory = { version = "0.4.0", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.5.0", features = ["backend-mmap", "backend-atomic"] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
 
