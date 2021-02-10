@@ -537,10 +537,22 @@ impl VfioPciDevice {
 
             match PciCapabilityID::from(cap_id) {
                 PciCapabilityID::MessageSignalledInterrupts => {
-                    self.parse_msi_capabilities(cap_next, interrupt_manager);
+                    if let Some(irq_info) = self.device.get_irq_info(VFIO_PCI_MSI_IRQ_INDEX) {
+                        if irq_info.count > 0 {
+                            // Parse capability only if the VFIO device
+                            // supports MSI.
+                            self.parse_msi_capabilities(cap_next, interrupt_manager);
+                        }
+                    }
                 }
                 PciCapabilityID::MSIX => {
-                    self.parse_msix_capabilities(cap_next, interrupt_manager);
+                    if let Some(irq_info) = self.device.get_irq_info(VFIO_PCI_MSIX_IRQ_INDEX) {
+                        if irq_info.count > 0 {
+                            // Parse capability only if the VFIO device
+                            // supports MSI-X.
+                            self.parse_msix_capabilities(cap_next, interrupt_manager);
+                        }
+                    }
                 }
                 _ => {}
             };
