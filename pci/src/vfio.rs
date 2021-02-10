@@ -33,18 +33,19 @@ use vmm_sys_util::eventfd::EventFd;
 #[derive(Debug)]
 pub enum VfioPciError {
     AllocateGsi,
+    EnableIntx(VfioError),
+    EnableMsi(VfioError),
+    EnableMsix(VfioError),
     EventFd(io::Error),
     InterruptSourceGroupCreate(io::Error),
     IrqFd(hypervisor::HypervisorVmError),
-    NewVfioPciDevice,
     MapRegionGuest(anyhow::Error),
-    SetGsiRouting(hypervisor::HypervisorVmError),
+    MissingNotifier,
     MsiNotConfigured,
     MsixNotConfigured,
+    NewVfioPciDevice,
+    SetGsiRouting(hypervisor::HypervisorVmError),
     UpdateMemory(VfioError),
-    UpdateIntxEventFd,
-    UpdateMsiEventFd,
-    UpdateMsixEventFd,
 }
 pub type Result<T> = std::result::Result<T, VfioPciError>;
 
@@ -52,22 +53,23 @@ impl fmt::Display for VfioPciError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             VfioPciError::AllocateGsi => write!(f, "failed to allocate GSI"),
+            VfioPciError::EnableIntx(e) => write!(f, "failed to enable INTx: {}", e),
+            VfioPciError::EnableMsi(e) => write!(f, "failed to enable MSI: {}", e),
+            VfioPciError::EnableMsix(e) => write!(f, "failed to enable MSI-X: {}", e),
             VfioPciError::EventFd(e) => write!(f, "failed to create eventfd: {}", e),
             VfioPciError::InterruptSourceGroupCreate(e) => {
                 write!(f, "failed to create interrupt source group: {}", e)
             }
             VfioPciError::IrqFd(e) => write!(f, "failed to register irqfd: {}", e),
-            VfioPciError::NewVfioPciDevice => write!(f, "failed to create VFIO PCI device"),
             VfioPciError::MapRegionGuest(e) => {
                 write!(f, "failed to map VFIO PCI region into guest: {}", e)
             }
-            VfioPciError::SetGsiRouting(e) => write!(f, "failed to set GSI routes: {}", e),
+            VfioPciError::MissingNotifier => write!(f, "failed to notifier's eventfd"),
             VfioPciError::MsiNotConfigured => write!(f, "MSI interrupt not yet configured"),
             VfioPciError::MsixNotConfigured => write!(f, "MSI-X interrupt not yet configured"),
+            VfioPciError::NewVfioPciDevice => write!(f, "failed to create VFIO PCI device"),
+            VfioPciError::SetGsiRouting(e) => write!(f, "failed to set GSI routes: {}", e),
             VfioPciError::UpdateMemory(e) => write!(f, "failed to update memory: {}", e),
-            VfioPciError::UpdateIntxEventFd => write!(f, "failed to update INTx eventfd"),
-            VfioPciError::UpdateMsiEventFd => write!(f, "failed to update MSI eventfd"),
-            VfioPciError::UpdateMsixEventFd => write!(f, "failed to update MSI-X eventfd"),
         }
     }
 }
@@ -355,16 +357,13 @@ impl VfioPciDevice {
         if let Some(intx) = &mut self.interrupt.intx {
             if !intx.enabled {
                 if let Some(eventfd) = intx.interrupt_source_group.notifier(0) {
-                    if let Err(e) = self
-                        .device
+                    self.device
                         .enable_irq(VFIO_PCI_INTX_IRQ_INDEX, vec![&eventfd])
-                    {
-                        warn!("Could not enable INTx: {}", e);
-                    } else {
-                        intx.enabled = true;
-                    }
+                        .map_err(VfioPciError::EnableIntx)?;
+
+                    intx.enabled = true;
                 } else {
-                    return Err(VfioPciError::UpdateIntxEventFd);
+                    return Err(VfioPciError::MissingNotifier);
                 }
             }
         }
@@ -376,7 +375,7 @@ impl VfioPciDevice {
         if let Some(intx) = &mut self.interrupt.intx {
             if intx.enabled {
                 if let Err(e) = self.device.disable_irq(VFIO_PCI_INTX_IRQ_INDEX) {
-                    warn!("Could not disable INTx: {}", e);
+                    error!("Could not disable INTx: {}", e);
                 } else {
                     intx.enabled = false;
                 }
@@ -391,13 +390,13 @@ impl VfioPciDevice {
                 if let Some(eventfd) = msi.interrupt_source_group.notifier(i as InterruptIndex) {
                     irq_fds.push(eventfd);
                 } else {
-                    return Err(VfioPciError::UpdateMsiEventFd);
+                    return Err(VfioPciError::MissingNotifier);
                 }
             }
 
-            if let Err(e) = self.device.enable_msi(irq_fds.iter().collect()) {
-                warn!("Could not enable MSI: {}", e);
-            }
+            self.device
+                .enable_msi(irq_fds.iter().collect())
+                .map_err(VfioPciError::EnableMsi)?;
         }
 
         Ok(())
@@ -405,7 +404,7 @@ impl VfioPciDevice {
 
     fn disable_msi(&self) {
         if let Err(e) = self.device.disable_msi() {
-            warn!("Could not disable MSI: {}", e);
+            error!("Could not disable MSI: {}", e);
         }
     }
 
@@ -416,13 +415,13 @@ impl VfioPciDevice {
                 if let Some(eventfd) = msix.interrupt_source_group.notifier(i as InterruptIndex) {
                     irq_fds.push(eventfd);
                 } else {
-                    return Err(VfioPciError::UpdateMsixEventFd);
+                    return Err(VfioPciError::MissingNotifier);
                 }
             }
 
-            if let Err(e) = self.device.enable_msix(irq_fds.iter().collect()) {
-                warn!("Could not enable MSI-X: {}", e);
-            }
+            self.device
+                .enable_msix(irq_fds.iter().collect())
+                .map_err(VfioPciError::EnableMsi)?;
         }
 
         Ok(())
@@ -430,7 +429,7 @@ impl VfioPciDevice {
 
     fn disable_msix(&self) {
         if let Err(e) = self.device.disable_msix() {
-            warn!("Could not disable MSI-X: {}", e);
+            error!("Could not disable MSI-X: {}", e);
         }
     }
 
