@@ -55,8 +55,8 @@ const SYS_IO_URING_ENTER: i64 = 426;
 // See include/uapi/asm-generic/ioctls.h in the kernel code.
 const FIONBIO: u64 = 0x5421;
 
-fn virtio_balloon_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_balloon_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -73,11 +73,11 @@ fn virtio_balloon_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_block_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_block_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -114,11 +114,11 @@ fn virtio_block_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_set_robust_list),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_console_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_console_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -140,11 +140,11 @@ fn virtio_console_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_set_robust_list),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_iommu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_iommu_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -162,11 +162,11 @@ fn virtio_iommu_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_read),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_mem_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_mem_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -184,11 +184,11 @@ fn virtio_mem_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_net_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_net_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -206,11 +206,11 @@ fn virtio_net_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_net_ctl_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_net_ctl_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -227,11 +227,11 @@ fn virtio_net_ctl_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_pmem_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_pmem_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -249,11 +249,11 @@ fn virtio_pmem_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_rng_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_rng_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -275,11 +275,11 @@ fn virtio_rng_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_set_robust_list),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_vhost_blk_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_vhost_blk_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -296,11 +296,11 @@ fn virtio_vhost_blk_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_vhost_fs_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_vhost_fs_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -320,11 +320,11 @@ fn virtio_vhost_fs_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_sendmsg),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_vhost_net_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_vhost_net_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -342,11 +342,11 @@ fn virtio_vhost_net_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_madvise),
         #[cfg(target_arch = "aarch64")]
         allow_syscall(libc::SYS_exit),
-    ])
+    ]
 }
 
-fn virtio_vhost_net_ctl_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_vhost_net_ctl_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -365,15 +365,15 @@ fn virtio_vhost_net_ctl_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_madvise),
         #[cfg(target_arch = "aarch64")]
         allow_syscall(libc::SYS_exit),
-    ])
+    ]
 }
 
-fn create_vsock_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, Error> {
-    Ok(or![and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO,)?],])
+fn create_vsock_ioctl_seccomp_rule() -> Vec<SeccompRule> {
+    or![and![Cond::new(1, ArgLen::DWORD, Eq, FIONBIO,).unwrap()],]
 }
 
-fn virtio_vsock_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_vsock_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_accept4),
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
@@ -384,7 +384,7 @@ fn virtio_vsock_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_epoll_wait),
         allow_syscall(libc::SYS_exit),
-        allow_syscall_if(libc::SYS_ioctl, create_vsock_ioctl_seccomp_rule()?),
+        allow_syscall_if(libc::SYS_ioctl, create_vsock_ioctl_seccomp_rule()),
         allow_syscall(libc::SYS_futex),
         allow_syscall(libc::SYS_madvise),
         allow_syscall(libc::SYS_munmap),
@@ -393,11 +393,11 @@ fn virtio_vsock_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
-fn virtio_watchdog_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
-    Ok(vec![
+fn virtio_watchdog_thread_rules() -> Vec<SyscallRuleSet> {
+    vec![
         allow_syscall(libc::SYS_brk),
         allow_syscall(libc::SYS_close),
         allow_syscall(libc::SYS_dup),
@@ -420,51 +420,48 @@ fn virtio_watchdog_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_timerfd_settime),
         allow_syscall(libc::SYS_write),
-    ])
+    ]
 }
 
 fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
-        Thread::VirtioBalloon => virtio_balloon_thread_rules()?,
-        Thread::VirtioBlock => virtio_block_thread_rules()?,
-        Thread::VirtioConsole => virtio_console_thread_rules()?,
-        Thread::VirtioIommu => virtio_iommu_thread_rules()?,
-        Thread::VirtioMem => virtio_mem_thread_rules()?,
-        Thread::VirtioNet => virtio_net_thread_rules()?,
-        Thread::VirtioNetCtl => virtio_net_ctl_thread_rules()?,
-        Thread::VirtioPmem => virtio_pmem_thread_rules()?,
-        Thread::VirtioRng => virtio_rng_thread_rules()?,
-        Thread::VirtioVhostBlk => virtio_vhost_blk_thread_rules()?,
-        Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules()?,
-        Thread::VirtioVhostNet => virtio_vhost_net_thread_rules()?,
-        Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules()?,
-        Thread::VirtioVsock => virtio_vsock_thread_rules()?,
-        Thread::VirtioWatchdog => virtio_watchdog_thread_rules()?,
+        Thread::VirtioBalloon => virtio_balloon_thread_rules(),
+        Thread::VirtioBlock => virtio_block_thread_rules(),
+        Thread::VirtioConsole => virtio_console_thread_rules(),
+        Thread::VirtioIommu => virtio_iommu_thread_rules(),
+        Thread::VirtioMem => virtio_mem_thread_rules(),
+        Thread::VirtioNet => virtio_net_thread_rules(),
+        Thread::VirtioNetCtl => virtio_net_ctl_thread_rules(),
+        Thread::VirtioPmem => virtio_pmem_thread_rules(),
+        Thread::VirtioRng => virtio_rng_thread_rules(),
+        Thread::VirtioVhostBlk => virtio_vhost_blk_thread_rules(),
+        Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules(),
+        Thread::VirtioVhostNet => virtio_vhost_net_thread_rules(),
+        Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules(),
+        Thread::VirtioVsock => virtio_vsock_thread_rules(),
+        Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
     };
 
-    Ok(SeccompFilter::new(
-        rules.into_iter().collect(),
-        SeccompAction::Trap,
-    )?)
+    SeccompFilter::new(rules.into_iter().collect(), SeccompAction::Trap)
 }
 
 fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
     let rules = match thread_type {
-        Thread::VirtioBalloon => virtio_balloon_thread_rules()?,
-        Thread::VirtioBlock => virtio_block_thread_rules()?,
-        Thread::VirtioConsole => virtio_console_thread_rules()?,
-        Thread::VirtioIommu => virtio_iommu_thread_rules()?,
-        Thread::VirtioMem => virtio_mem_thread_rules()?,
-        Thread::VirtioNet => virtio_net_thread_rules()?,
-        Thread::VirtioNetCtl => virtio_net_ctl_thread_rules()?,
-        Thread::VirtioPmem => virtio_pmem_thread_rules()?,
-        Thread::VirtioRng => virtio_rng_thread_rules()?,
-        Thread::VirtioVhostBlk => virtio_vhost_blk_thread_rules()?,
-        Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules()?,
-        Thread::VirtioVhostNet => virtio_vhost_net_thread_rules()?,
-        Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules()?,
-        Thread::VirtioVsock => virtio_vsock_thread_rules()?,
-        Thread::VirtioWatchdog => virtio_watchdog_thread_rules()?,
+        Thread::VirtioBalloon => virtio_balloon_thread_rules(),
+        Thread::VirtioBlock => virtio_block_thread_rules(),
+        Thread::VirtioConsole => virtio_console_thread_rules(),
+        Thread::VirtioIommu => virtio_iommu_thread_rules(),
+        Thread::VirtioMem => virtio_mem_thread_rules(),
+        Thread::VirtioNet => virtio_net_thread_rules(),
+        Thread::VirtioNetCtl => virtio_net_ctl_thread_rules(),
+        Thread::VirtioPmem => virtio_pmem_thread_rules(),
+        Thread::VirtioRng => virtio_rng_thread_rules(),
+        Thread::VirtioVhostBlk => virtio_vhost_blk_thread_rules(),
+        Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules(),
+        Thread::VirtioVhostNet => virtio_vhost_net_thread_rules(),
+        Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules(),
+        Thread::VirtioVsock => virtio_vsock_thread_rules(),
+        Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
     };
 
     Ok(SeccompFilter::new(

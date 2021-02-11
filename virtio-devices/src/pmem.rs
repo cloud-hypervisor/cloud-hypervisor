@@ -324,12 +324,10 @@ impl Pmem {
         }
     }
 
-    fn set_state(&mut self, state: &PmemState) -> io::Result<()> {
+    fn set_state(&mut self, state: &PmemState) {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         self.config = state.config;
-
-        Ok(())
     }
 }
 
@@ -484,9 +482,8 @@ impl Snapshottable for Pmem {
                 }
             };
 
-            return self.set_state(&pmem_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore PMEM state {:?}", e))
-            });
+            self.set_state(&pmem_state);
+            return Ok(());
         }
 
         Err(MigratableError::Restore(anyhow!(

@@ -144,9 +144,8 @@ impl SoftTLB {
     }
 
     // Adds a gva -> gpa mapping into the TLB.
-    fn add_mapping(&mut self, gva: u64, gpa: u64) -> Result<(), PlatformError> {
+    fn add_mapping(&mut self, gva: u64, gpa: u64) {
         *self.addr_map.entry(gva).or_insert(gpa) = gpa;
-        Ok(())
     }
 
     // Do the actual gva -> gpa translation
@@ -383,8 +382,7 @@ impl cpu::Vcpu for MshvVcpu {
                     // Add the GVA <-> GPA mapping.
                     context
                         .tlb
-                        .add_mapping(info.guest_virtual_address, info.guest_physical_address)
-                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+                        .add_mapping(info.guest_virtual_address, info.guest_physical_address);
 
                     // Create a new emulator.
                     let mut emul = Emulator::new(&mut context);

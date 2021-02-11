@@ -355,11 +355,9 @@ where
         }
     }
 
-    fn set_state(&mut self, state: &VsockState) -> io::Result<()> {
+    fn set_state(&mut self, state: &VsockState) {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
-
-        Ok(())
     }
 }
 
@@ -531,9 +529,8 @@ where
                 }
             };
 
-            return self.set_state(&vsock_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore VSOCK state {:?}", e))
-            });
+            self.set_state(&vsock_state);
+            return Ok(());
         }
 
         Err(MigratableError::Restore(anyhow!(

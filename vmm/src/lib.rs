@@ -539,10 +539,10 @@ impl Vmm {
         }
     }
 
-    fn vmm_ping(&self) -> result::Result<VmmPingResponse, ApiError> {
-        Ok(VmmPingResponse {
+    fn vmm_ping(&self) -> VmmPingResponse {
+        VmmPingResponse {
             version: self.version.clone(),
-        })
+        }
     }
 
     fn vm_delete(&mut self) -> result::Result<(), VmError> {
@@ -1205,9 +1205,9 @@ impl Vmm {
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmmPing(sender) => {
-                                    let response = self.vmm_ping().map(ApiResponsePayload::VmmPing);
+                                    let response = ApiResponsePayload::VmmPing(self.vmm_ping());
 
-                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                    sender.send(Ok(response)).map_err(Error::ApiResponseSend)?;
                                 }
                                 ApiRequest::VmPause(sender) => {
                                     let response = self

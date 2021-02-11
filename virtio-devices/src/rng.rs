@@ -174,10 +174,9 @@ impl Rng {
         }
     }
 
-    fn set_state(&mut self, state: &RngState) -> io::Result<()> {
+    fn set_state(&mut self, state: &RngState) {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
-        Ok(())
     }
 }
 
@@ -325,9 +324,8 @@ impl Snapshottable for Rng {
                 }
             };
 
-            return self.set_state(&rng_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore RNG state {:?}", e))
-            });
+            self.set_state(&rng_state);
+            return Ok(());
         }
 
         Err(MigratableError::Restore(anyhow!(

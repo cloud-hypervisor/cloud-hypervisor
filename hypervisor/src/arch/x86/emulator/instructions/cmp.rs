@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     // cmp ah,al
-    fn test_cmp_rm8_r8_1() -> MockResult {
+    fn test_cmp_rm8_r8_1() {
         let rax: u64 = 0x0;
         let ip: u64 = 0x1000;
         let cpu_id = 0;
@@ -234,13 +234,11 @@ mod tests {
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
         assert_eq!(0b1000100, rflags);
-
-        Ok(())
     }
 
     #[test]
     // cmp eax,100
-    fn test_cmp_rm32_imm8_1() -> MockResult {
+    fn test_cmp_rm32_imm8_1() {
         let rax: u64 = 0xabcdef;
         let ip: u64 = 0x1000;
         let cpu_id = 0;
@@ -250,13 +248,11 @@ mod tests {
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
         assert_eq!(0b100, rflags);
-
-        Ok(())
     }
 
     #[test]
     // cmp eax,-1
-    fn test_cmp_rm32_imm8_2() -> MockResult {
+    fn test_cmp_rm32_imm8_2() {
         let rax: u64 = 0xabcdef;
         let ip: u64 = 0x1000;
         let cpu_id = 0;
@@ -266,13 +262,11 @@ mod tests {
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
         assert_eq!(0b101, rflags);
-
-        Ok(())
     }
 
     #[test]
     // cmp rax,rbx
-    fn test_cmp_rm64_r64() -> MockResult {
+    fn test_cmp_rm64_r64() {
         let rax: u64 = 0xabcdef;
         let rbx: u64 = 0x1234;
         let ip: u64 = 0x1000;
@@ -283,12 +277,10 @@ mod tests {
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
         assert_eq!(0b100, rflags);
-
-        Ok(())
     }
 
     #[test]
-    fn test_cmp_64() -> MockResult {
+    fn test_cmp_64() {
         let data = [
             (0xabcdef, 0x1234, 0b100),
             (0x0, 0x101, 0b1001_0101),
@@ -313,12 +305,10 @@ mod tests {
             let rflags: u64 = vmm.cpu_state(0).unwrap().flags() & FLAGS_MASK;
             assert_eq!(d.2, rflags);
         }
-
-        Ok(())
     }
 
     #[test]
-    fn test_cmp_32() -> MockResult {
+    fn test_cmp_32() {
         let data = [
             (0xabcdef, 0x1234, 0b100),
             (0x0, 0x101, 0b1001_0101),
@@ -343,7 +333,5 @@ mod tests {
             let rflags: u64 = vmm.cpu_state(0).unwrap().flags() & FLAGS_MASK;
             assert_eq!(d.2, rflags);
         }
-
-        Ok(())
     }
 }

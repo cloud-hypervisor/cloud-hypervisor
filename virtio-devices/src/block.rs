@@ -406,14 +406,12 @@ impl Block {
         }
     }
 
-    fn set_state(&mut self, state: &BlockState) -> io::Result<()> {
+    fn set_state(&mut self, state: &BlockState) {
         self.disk_path = state.disk_path.clone();
         self.disk_nsectors = state.disk_nsectors;
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         self.config = state.config;
-
-        Ok(())
     }
 
     fn update_writeback(&mut self) {
@@ -641,9 +639,8 @@ impl Snapshottable for Block {
                 }
             };
 
-            return self.set_state(&block_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore BLOCK state {:?}", e))
-            });
+            self.set_state(&block_state);
+            return Ok(());
         }
 
         Err(MigratableError::Restore(anyhow!(

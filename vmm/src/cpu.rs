@@ -992,12 +992,11 @@ impl CpuManager {
         Ok(())
     }
 
-    fn mark_vcpus_for_removal(&mut self, desired_vcpus: u8) -> Result<()> {
+    fn mark_vcpus_for_removal(&mut self, desired_vcpus: u8) {
         // Mark vCPUs for removal, actual removal happens on ejection
         for cpu_id in desired_vcpus..self.present_vcpus() {
             self.vcpu_states[usize::from(cpu_id)].removing = true;
         }
-        Ok(())
     }
 
     fn remove_vcpu(&mut self, cpu_id: u8) -> Result<()> {
@@ -1049,7 +1048,10 @@ impl CpuManager {
                 self.activate_vcpus(desired_vcpus, true)?;
                 Ok(true)
             }
-            cmp::Ordering::Less => self.mark_vcpus_for_removal(desired_vcpus).and(Ok(true)),
+            cmp::Ordering::Less => {
+                self.mark_vcpus_for_removal(desired_vcpus);
+                Ok(true)
+            }
             _ => Ok(false),
         }
     }

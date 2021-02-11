@@ -370,13 +370,11 @@ impl Console {
         }
     }
 
-    fn set_state(&mut self, state: &ConsoleState) -> io::Result<()> {
+    fn set_state(&mut self, state: &ConsoleState) {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         *(self.config.lock().unwrap()) = state.config;
         *(self.input.in_buffer.lock().unwrap()) = state.in_buffer.clone();
-
-        Ok(())
     }
 }
 
@@ -535,9 +533,8 @@ impl Snapshottable for Console {
                 }
             };
 
-            return self.set_state(&console_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore CONSOLE state {:?}", e))
-            });
+            self.set_state(&console_state);
+            return Ok(());
         }
 
         Err(MigratableError::Restore(anyhow!(

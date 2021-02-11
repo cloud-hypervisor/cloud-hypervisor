@@ -333,13 +333,11 @@ impl Net {
         }
     }
 
-    fn set_state(&mut self, state: &NetState) -> Result<()> {
+    fn set_state(&mut self, state: &NetState) {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         self.config = state.config;
         self.common.queue_sizes = state.queue_size.clone();
-
-        Ok(())
     }
 }
 
@@ -604,9 +602,8 @@ impl Snapshottable for Net {
                 }
             };
 
-            return self.set_state(&net_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore NET state {:?}", e))
-            });
+            self.set_state(&net_state);
+            return Ok(());
         }
 
         Err(MigratableError::Restore(anyhow!(
