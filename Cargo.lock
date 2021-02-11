@@ -1573,6 +1573,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "thiserror",
+ "vm-memory",
 ]
 
 [[package]]
