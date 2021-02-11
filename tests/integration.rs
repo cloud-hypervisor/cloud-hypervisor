@@ -577,7 +577,7 @@ mod tests {
     // Creates the path for direct kernel boot and return the path.
     // For x86_64, this function returns the vmlinux kernel path.
     // For AArch64, this function returns the PE kernel path.
-    fn direct_kernel_boot_path() -> Option<PathBuf> {
+    fn direct_kernel_boot_path() -> PathBuf {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
@@ -587,7 +587,7 @@ mod tests {
         #[cfg(target_arch = "aarch64")]
         kernel_path.push("Image");
 
-        Some(kernel_path)
+        kernel_path
     }
 
     fn prepare_vhost_user_net_daemon(
@@ -923,7 +923,7 @@ mod tests {
             format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"kernel\":{{\"path\":\"{}\"}},\"cmdline\":{{\"args\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                      cpu_count,
                      cpu_count,
-                     direct_kernel_boot_path().unwrap().to_str().unwrap(),
+                     direct_kernel_boot_path().to_str().unwrap(),
                      DIRECT_KERNEL_BOOT_CMDLINE,
                      self.network.host_ip,
                      self.network.guest_mac,
@@ -1374,10 +1374,7 @@ mod tests {
                 ),
             ])
             .args(&["--memory", "size=512M"])
-            .args(&[
-                "--kernel",
-                direct_kernel_boot_path().unwrap().to_str().unwrap(),
-            ])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
@@ -1444,7 +1441,7 @@ mod tests {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
-        let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path();
 
         let host_mac = if generate_host_mac {
             Some(MacAddr::local_random())
@@ -1596,7 +1593,7 @@ mod tests {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
-        let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path();
 
         let (blk_params, daemon_child) = {
             let prepare_daemon = prepare_vhost_user_blk_daemon.unwrap();
@@ -1749,7 +1746,7 @@ mod tests {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
-        let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path();
 
         let disk_path = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
 
@@ -1828,7 +1825,7 @@ mod tests {
         let mut shared_dir = workload_path;
         shared_dir.push("shared_dir");
 
-        let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path();
 
         let (dax_vmm_param, dax_mount_param) = if dax { ("on", "-o dax") } else { ("off", "") };
         let cache_size_vmm_param = if let Some(cache) = cache_size {
@@ -2009,7 +2006,7 @@ mod tests {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
-        let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path();
 
         let mut pmem_temp_file = NamedTempFile::new().unwrap();
         pmem_temp_file.as_file_mut().set_len(128 << 20).unwrap();
@@ -2095,7 +2092,7 @@ mod tests {
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
 
-        let kernel_path = direct_kernel_boot_path().unwrap();
+        let kernel_path = direct_kernel_boot_path();
 
         let socket = temp_vsock_path(&guest.tmp_dir);
         let api_socket = temp_api_path(&guest.tmp_dir);
@@ -2447,10 +2444,7 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=2,max=4"])
                 .args(&["--memory", "size=512M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .default_disks()
@@ -2518,10 +2512,7 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", &format!("max_phys_bits={}", max_phys_bits)])
                 .args(&["--memory", "size=512M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
@@ -2555,10 +2546,7 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=48"])
                 .args(&["--memory", "size=5120M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .args(&["--serial", "tty"])
                 .args(&["--console", "off"])
@@ -2587,10 +2575,7 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=128G"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .default_disks()
@@ -2620,10 +2605,7 @@ mod tests {
 
             cmd.args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .default_disks()
@@ -2814,10 +2796,7 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .capture_output()
                 .default_disks()
@@ -2858,7 +2837,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
@@ -2912,7 +2891,7 @@ mod tests {
                 let mut workload_path = dirs::home_dir().unwrap();
                 workload_path.push("workloads");
 
-                let kernel_path = direct_kernel_boot_path().unwrap();
+                let kernel_path = direct_kernel_boot_path();
 
                 let mut child = GuestCommand::new(&guest)
                     .args(&["--cpus", "boot=1"])
@@ -3043,7 +3022,7 @@ mod tests {
             let mut blk_file_path = workload_path;
             blk_file_path.push("blk.img");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut cloud_child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=4"])
@@ -3236,10 +3215,7 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
@@ -3361,7 +3337,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
@@ -3419,7 +3395,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
@@ -3516,10 +3492,7 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&[
                     "--cmdline",
                     DIRECT_KERNEL_BOOT_CMDLINE
@@ -3570,7 +3543,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
@@ -3629,10 +3602,7 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&[
                     "--cmdline",
                     DIRECT_KERNEL_BOOT_CMDLINE
@@ -3697,10 +3667,7 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", &cmdline])
                 .default_disks()
                 .default_net()
@@ -3782,7 +3749,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
@@ -3832,10 +3799,7 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
@@ -4122,7 +4086,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
@@ -4168,10 +4132,7 @@ mod tests {
                 let mut cmd = GuestCommand::new(&guest);
                 cmd.args(&["--cpus", "boot=1"])
                     .args(&["--memory", "size=512M"])
-                    .args(&[
-                        "--kernel",
-                        direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                    ])
+                    .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                     .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                     .default_disks()
                     .default_net()
@@ -4525,10 +4486,7 @@ mod tests {
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .args(&[
@@ -4621,7 +4579,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=2,max=4"])
@@ -4722,7 +4680,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=2,max=4"])
@@ -4839,7 +4797,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=2,max=4"])
@@ -4927,7 +4885,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=2,max=4"])
@@ -4986,7 +4944,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let guest_memory_size_kb = 512 * 1024;
 
@@ -5029,7 +4987,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -5208,7 +5166,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -5340,7 +5298,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -5448,7 +5406,7 @@ mod tests {
             workload_path.push("workloads");
 
             let mut kernels = vec![];
-            kernels.push(direct_kernel_boot_path().unwrap());
+            kernels.push(direct_kernel_boot_path());
 
             #[cfg(target_arch = "x86_64")]
             {
@@ -5669,10 +5627,7 @@ mod tests {
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&[
-                    "--kernel",
-                    direct_kernel_boot_path().unwrap().to_str().unwrap(),
-                ])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .args(&["--net", guest.default_net_string().as_str()])
@@ -5707,7 +5662,7 @@ mod tests {
             let guest = Guest::new(&mut focal);
             let api_socket = temp_api_path(&guest.tmp_dir);
 
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             let mut cmd = GuestCommand::new(&guest);
             cmd.args(&["--cpus", "boot=1"])
@@ -5820,7 +5775,7 @@ mod tests {
         fn test_tap_from_fd() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
 
             // Create a TAP interface with multi-queue enabled
             let num_queue_pairs: usize = 2;
@@ -5889,7 +5844,7 @@ mod tests {
         fn test_macvtap() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
-            let kernel_path = direct_kernel_boot_path().unwrap();
+            let kernel_path = direct_kernel_boot_path();
             let phy_net = "eth0";
 
             // Create a macvtap interface for the guest VM to use

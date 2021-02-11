@@ -516,7 +516,7 @@ fn configure_pvh(
     let mut memmap: Vec<hvm_memmap_table_entry> = Vec::new();
 
     // Create the memory map entries.
-    add_memmap_entry(&mut memmap, 0, layout::EBDA_START.raw_value(), E820_RAM)?;
+    add_memmap_entry(&mut memmap, 0, layout::EBDA_START.raw_value(), E820_RAM);
 
     let mem_end = guest_mem.last_addr();
 
@@ -526,21 +526,21 @@ fn configure_pvh(
             layout::HIGH_RAM_START.raw_value(),
             mem_end.unchecked_offset_from(layout::HIGH_RAM_START) + 1,
             E820_RAM,
-        )?;
+        );
     } else {
         add_memmap_entry(
             &mut memmap,
             layout::HIGH_RAM_START.raw_value(),
             layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::HIGH_RAM_START),
             E820_RAM,
-        )?;
+        );
         if mem_end > layout::RAM_64BIT_START {
             add_memmap_entry(
                 &mut memmap,
                 layout::RAM_64BIT_START.raw_value(),
                 mem_end.unchecked_offset_from(layout::RAM_64BIT_START) + 1,
                 E820_RAM,
-            )?;
+            );
         }
     }
 
@@ -549,7 +549,7 @@ fn configure_pvh(
         layout::PCI_MMCONFIG_START.0,
         layout::PCI_MMCONFIG_SIZE,
         E820_RESERVED,
-    )?;
+    );
 
     if let Some(sgx_epc_region) = sgx_epc_region {
         add_memmap_entry(
@@ -557,7 +557,7 @@ fn configure_pvh(
             sgx_epc_region.start().raw_value(),
             sgx_epc_region.size() as u64,
             E820_RESERVED,
-        )?;
+        );
     }
 
     start_info.0.memmap_entries = memmap.len() as u32;
@@ -602,12 +602,7 @@ fn configure_pvh(
     Ok(())
 }
 
-fn add_memmap_entry(
-    memmap: &mut Vec<hvm_memmap_table_entry>,
-    addr: u64,
-    size: u64,
-    mem_type: u32,
-) -> Result<(), Error> {
+fn add_memmap_entry(memmap: &mut Vec<hvm_memmap_table_entry>, addr: u64, size: u64, mem_type: u32) {
     // Add the table entry to the vector
     memmap.push(hvm_memmap_table_entry {
         addr,
@@ -615,8 +610,6 @@ fn add_memmap_entry(
         type_: mem_type,
         reserved: 0,
     });
-
-    Ok(())
 }
 
 fn configure_64bit_boot(
@@ -1092,8 +1085,8 @@ mod tests {
             },
         ];
 
-        add_memmap_entry(&mut memmap, 0, 0x1000, E820_RAM).unwrap();
-        add_memmap_entry(&mut memmap, 0x10000, 0xa000, E820_RESERVED).unwrap();
+        add_memmap_entry(&mut memmap, 0, 0x1000, E820_RAM);
+        add_memmap_entry(&mut memmap, 0x10000, 0xa000, E820_RESERVED);
 
         assert_eq!(format!("{:?}", memmap), format!("{:?}", expected_memmap));
     }

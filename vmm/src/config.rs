@@ -1726,7 +1726,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_option_parser() -> std::result::Result<(), OptionParserError> {
+    fn test_option_parser() {
         let mut parser = OptionParser::new();
         parser
             .add("size")
@@ -1742,7 +1742,6 @@ mod tests {
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert!(!parser.is_set("mergeable"));
         assert!(parser.is_set("size"));
-        Ok(())
     }
 
     #[test]
@@ -2271,7 +2270,7 @@ mod tests {
     }
 
     #[test]
-    fn test_config_validation() -> Result<()> {
+    fn test_config_validation() {
         let valid_config = VmConfig {
             cpus: CpusConfig {
                 boot_vcpus: 1,
@@ -2432,7 +2431,5 @@ mod tests {
         invalid_config.memory.hugepages = true;
         invalid_config.memory.hugepage_size = Some(3 << 20);
         assert!(invalid_config.validate().is_err());
-
-        Ok(())
     }
 }

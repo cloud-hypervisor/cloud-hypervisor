@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     // mov rax,rbx
-    fn test_mov_r64_r64() -> MockResult {
+    fn test_mov_r64_r64() {
         let rbx: u64 = 0x8899aabbccddeeff;
         let ip: u64 = 0x1000;
         let cpu_id = 0;
@@ -263,13 +263,11 @@ mod tests {
             .read_reg(Register::RAX)
             .unwrap();
         assert_eq!(rax, rbx);
-
-        Ok(())
     }
 
     #[test]
     // mov rax,0x1122334411223344
-    fn test_mov_r64_imm64() -> MockResult {
+    fn test_mov_r64_imm64() {
         let imm64: u64 = 0x1122334411223344;
         let ip: u64 = 0x1000;
         let cpu_id = 0;
@@ -283,13 +281,11 @@ mod tests {
             .read_reg(Register::RAX)
             .unwrap();
         assert_eq!(rax, imm64);
-
-        Ok(())
     }
 
     #[test]
     // mov rax, [rax+rax]
-    fn test_mov_r64_m64() -> MockResult {
+    fn test_mov_r64_m64() {
         let target_rax: u64 = 0x1234567812345678;
         let mut rax: u64 = 0x100;
         let ip: u64 = 0x1000;
@@ -305,13 +301,11 @@ mod tests {
             .read_reg(Register::RAX)
             .unwrap();
         assert_eq!(rax, target_rax);
-
-        Ok(())
     }
 
     #[test]
     // mov al,0x11
-    fn test_mov_r8_imm8() -> MockResult {
+    fn test_mov_r8_imm8() {
         let imm8: u8 = 0x11;
         let ip: u64 = 0x1000;
         let cpu_id = 0;
@@ -325,13 +319,11 @@ mod tests {
             .read_reg(Register::AL)
             .unwrap();
         assert_eq!(al as u8, imm8);
-
-        Ok(())
     }
 
     #[test]
     // mov eax,0x11
-    fn test_mov_r32_imm8() -> MockResult {
+    fn test_mov_r32_imm8() {
         let imm8: u8 = 0x11;
         let ip: u64 = 0x1000;
         let cpu_id = 0;
@@ -345,13 +337,11 @@ mod tests {
             .read_reg(Register::EAX)
             .unwrap();
         assert_eq!(eax as u8, imm8);
-
-        Ok(())
     }
 
     #[test]
     // mov rax,0x11223344
-    fn test_mov_r64_imm32() -> MockResult {
+    fn test_mov_r64_imm32() {
         let imm32: u32 = 0x11223344;
         let ip: u64 = 0x1000;
         let cpu_id = 0;
@@ -365,13 +355,11 @@ mod tests {
             .read_reg(Register::RAX)
             .unwrap();
         assert_eq!(rax, imm32 as u64);
-
-        Ok(())
     }
 
     #[test]
     // mov byte ptr [rax],dh
-    fn test_mov_m8_r8() -> MockResult {
+    fn test_mov_m8_r8() {
         let rax: u64 = 0x100;
         let dh: u8 = 0x99;
         let ip: u64 = 0x1000;
@@ -388,13 +376,11 @@ mod tests {
         vmm.read_memory(rax, &mut memory).unwrap();
 
         assert_eq!(u8::from_le_bytes(memory), dh);
-
-        Ok(())
     }
 
     #[test]
     // mov dword ptr [rax],esi
-    fn test_mov_m32_r32() -> MockResult {
+    fn test_mov_m32_r32() {
         let rax: u64 = 0x100;
         let esi: u32 = 0x8899;
         let ip: u64 = 0x1000;
@@ -411,13 +397,11 @@ mod tests {
         vmm.read_memory(rax, &mut memory).unwrap();
 
         assert_eq!(u32::from_le_bytes(memory), esi);
-
-        Ok(())
     }
 
     #[test]
     // mov dword ptr [rax+0x00000001],edi
-    fn test_mov_m32imm32_r32() -> MockResult {
+    fn test_mov_m32imm32_r32() {
         let rax: u64 = 0x100;
         let displacement: u64 = 0x1;
         let edi: u32 = 0x8899;
@@ -435,13 +419,11 @@ mod tests {
         vmm.read_memory(rax + displacement, &mut memory).unwrap();
 
         assert_eq!(u32::from_le_bytes(memory), edi);
-
-        Ok(())
     }
 
     #[test]
     // mov eax,dword ptr [rax+10h]
-    fn test_mov_r32_m32imm32() -> MockResult {
+    fn test_mov_r32_m32imm32() {
         let rax: u64 = 0x100;
         let displacement: u64 = 0x10;
         let eax: u32 = 0xaabbccdd;
@@ -462,13 +444,11 @@ mod tests {
             .read_reg(Register::EAX)
             .unwrap();
         assert_eq!(new_eax, eax as u64);
-
-        Ok(())
     }
 
     #[test]
     // mov al,byte ptr [rax+10h]
-    fn test_mov_r8_m32imm32() -> MockResult {
+    fn test_mov_r8_m32imm32() {
         let rax: u64 = 0x100;
         let displacement: u64 = 0x10;
         let al: u8 = 0xaa;
@@ -489,14 +469,12 @@ mod tests {
             .read_reg(Register::AL)
             .unwrap();
         assert_eq!(new_al, al as u64);
-
-        Ok(())
     }
 
     #[test]
     // mov rax, 0x100
     // mov rbx, qword ptr [rax+10h]
-    fn test_mov_r64_imm64_and_r64_m64() -> MockResult {
+    fn test_mov_r64_imm64_and_r64_m64() {
         let target_rax: u64 = 0x1234567812345678;
         let rax: u64 = 0x100;
         let displacement: u64 = 0x10;
@@ -516,14 +494,12 @@ mod tests {
             .read_reg(Register::RBX)
             .unwrap();
         assert_eq!(rbx, target_rax);
-
-        Ok(())
     }
 
     #[test]
     // mov rax, 0x100
     // mov rbx, qword ptr [rax+10h]
-    fn test_mov_r64_imm64_and_r64_m64_first_insn() -> MockResult {
+    fn test_mov_r64_imm64_and_r64_m64_first_insn() {
         let target_rax: u64 = 0x1234567812345678;
         let rax: u64 = 0x100;
         let displacement: u64 = 0x10;
@@ -547,15 +523,13 @@ mod tests {
             .read_reg(Register::RAX)
             .unwrap();
         assert_eq!(rax, new_rax);
-
-        Ok(())
     }
 
     #[test]
     // mov rax, 0x100
     // mov rbx, qword ptr [rax+10h]
     // mov rax, 0x200
-    fn test_mov_r64_imm64_and_r64_m64_two_insns() -> MockResult {
+    fn test_mov_r64_imm64_and_r64_m64_two_insns() {
         let target_rax: u64 = 0x1234567812345678;
         let rax: u64 = 0x100;
         let displacement: u64 = 0x10;
@@ -588,13 +562,11 @@ mod tests {
             .read_reg(Register::RAX)
             .unwrap();
         assert_eq!(rax, new_rax);
-
-        Ok(())
     }
 
     #[test]
     // movzx eax, bl
-    fn test_movzx_r32_r8l() -> MockResult {
+    fn test_movzx_r32_r8l() {
         let bx: u16 = 0x8899;
         let ip: u64 = 0x1000;
         let cpu_id = 0;
@@ -608,13 +580,11 @@ mod tests {
             .read_reg(Register::EAX)
             .unwrap();
         assert_eq!(eax, (bx & 0xff) as u64);
-
-        Ok(())
     }
 
     #[test]
     // movzx eax, bh
-    fn test_movzx_r32_r8h() -> MockResult {
+    fn test_movzx_r32_r8h() {
         let bx: u16 = 0x8899;
         let ip: u64 = 0x1000;
         let cpu_id = 0;
@@ -628,13 +598,11 @@ mod tests {
             .read_reg(Register::EAX)
             .unwrap();
         assert_eq!(eax, (bx >> 8) as u64);
-
-        Ok(())
     }
 
     #[test]
     // movzx eax, byte ptr [rbx]
-    fn test_movzx_r32_m8() -> MockResult {
+    fn test_movzx_r32_m8() {
         let rbx: u64 = 0x100;
         let value: u8 = 0xaa;
         let ip: u64 = 0x1000;
@@ -650,7 +618,5 @@ mod tests {
             .read_reg(Register::EAX)
             .unwrap();
         assert_eq!(eax, value as u64);
-
-        Ok(())
     }
 }

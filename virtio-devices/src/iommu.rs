@@ -796,13 +796,11 @@ impl Iommu {
         }
     }
 
-    fn set_state(&mut self, state: &IommuState) -> io::Result<()> {
+    fn set_state(&mut self, state: &IommuState) {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         *(self.mapping.endpoints.write().unwrap()) = state.endpoints.clone();
         *(self.mapping.mappings.write().unwrap()) = state.mappings.clone();
-
-        Ok(())
     }
 
     // This function lets the caller specify a list of devices attached to the
@@ -998,9 +996,8 @@ impl Snapshottable for Iommu {
                 }
             };
 
-            return self.set_state(&iommu_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore IOMMU state {:?}", e))
-            });
+            self.set_state(&iommu_state);
+            return Ok(());
         }
 
         Err(MigratableError::Restore(anyhow!(

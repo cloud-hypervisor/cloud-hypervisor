@@ -212,7 +212,7 @@ impl Watchdog {
         }
     }
 
-    fn set_state(&mut self, state: &WatchdogState) -> io::Result<()> {
+    fn set_state(&mut self, state: &WatchdogState) {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         // When restoring enable the watchdog if it was previously enabled. We reset the timer
@@ -220,7 +220,6 @@ impl Watchdog {
         if state.enabled {
             self.last_ping_time.lock().unwrap().replace(Instant::now());
         }
-        Ok(())
     }
 }
 
@@ -418,9 +417,8 @@ impl Snapshottable for Watchdog {
                 }
             };
 
-            return self.set_state(&watchdog_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore watchdog state {:?}", e))
-            });
+            self.set_state(&watchdog_state);
+            return Ok(());
         }
 
         Err(MigratableError::Restore(anyhow!(

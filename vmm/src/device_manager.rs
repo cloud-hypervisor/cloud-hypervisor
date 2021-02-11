@@ -1097,11 +1097,9 @@ impl DeviceManager {
         }
     }
 
-    fn set_state(&mut self, state: &DeviceManagerState) -> DeviceManagerResult<()> {
+    fn set_state(&mut self, state: &DeviceManagerState) {
         self.device_tree = Arc::new(Mutex::new(state.device_tree.clone()));
         self.device_id_cnt = state.device_id_cnt;
-
-        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -3726,9 +3724,7 @@ impl Snapshottable for DeviceManager {
                     MigratableError::Restore(anyhow!("Could not deserialize DeviceManager {}", e))
                 })?;
 
-            self.set_state(&device_manager_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore DeviceManager state {:?}", e))
-            })?;
+            self.set_state(&device_manager_state);
         } else {
             return Err(MigratableError::Restore(anyhow!(
                 "Could not find DeviceManager snapshot section"
