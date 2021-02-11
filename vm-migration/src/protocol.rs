@@ -4,6 +4,7 @@
 //
 
 use crate::MigratableError;
+use vm_memory::ByteValued;
 
 // Migration protocol
 // 1: Source establishes communication with destination (file socket or TCP connection.)
@@ -47,22 +48,8 @@ impl Default for Command {
     }
 }
 
-trait AsBytes {
-    fn as_bytes<T: Sized>(p: &T) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts((p as *const T) as *const u8, std::mem::size_of::<T>())
-        }
-    }
-
-    fn as_mut_bytes<T: Sized>(p: &mut T) -> &mut [u8] {
-        unsafe {
-            std::slice::from_raw_parts_mut((p as *mut T) as *mut u8, std::mem::size_of::<T>())
-        }
-    }
-}
-
 #[repr(C)]
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct Request {
     command: Command,
     padding: [u8; 6],
@@ -112,19 +99,19 @@ impl Request {
 
     pub fn read_from(fd: &mut dyn Read) -> Result<Request, MigratableError> {
         let mut request = Request::default();
-        fd.read_exact(Self::as_mut_bytes(&mut request))
+        fd.read_exact(Self::as_mut_slice(&mut request))
             .map_err(MigratableError::MigrateSocket)?;
 
         Ok(request)
     }
 
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
-        fd.write_all(Self::as_bytes(self))
+        fd.write_all(Self::as_slice(self))
             .map_err(MigratableError::MigrateSocket)
     }
 }
 
-impl AsBytes for Request {}
+unsafe impl ByteValued for Request {}
 
 #[repr(u16)]
 #[derive(Copy, Clone, PartialEq)]
@@ -141,7 +128,7 @@ impl Default for Status {
 }
 
 #[repr(C)]
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct Response {
     status: Status,
     padding: [u8; 6],
@@ -171,19 +158,19 @@ impl Response {
 
     pub fn read_from(fd: &mut dyn Read) -> Result<Response, MigratableError> {
         let mut response = Response::default();
-        fd.read_exact(Self::as_mut_bytes(&mut response))
+        fd.read_exact(Self::as_mut_slice(&mut response))
             .map_err(MigratableError::MigrateSocket)?;
 
         Ok(response)
     }
 
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
-        fd.write_all(Self::as_bytes(self))
+        fd.write_all(Self::as_slice(self))
             .map_err(MigratableError::MigrateSocket)
     }
 }
 
-impl AsBytes for Response {}
+unsafe impl ByteValued for Response {}
 
 #[repr(C)]
 pub struct MemoryRange {

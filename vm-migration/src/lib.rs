@@ -7,6 +7,7 @@ extern crate serde;
 extern crate thiserror;
 #[macro_use]
 extern crate serde_derive;
+extern crate vm_memory;
 
 use thiserror::Error;
 
