@@ -205,6 +205,12 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to translate GVA: {0}")]
     TranslateGVA(#[source] anyhow::Error),
+    ///
+    /// Failed to initialize TDX on CPU
+    ///
+    #[cfg(feature = "tdx")]
+    #[error("Failed to initialize TDX: {0}")]
+    InitializeTdx(#[source] std::io::Error),
 }
 
 #[derive(Debug)]
@@ -410,4 +416,9 @@ pub trait Vcpu: Send + Sync {
     /// Translate guest virtual address to guest physical address
     ///
     fn translate_gva(&self, gva: u64, flags: u64) -> Result<(u64, hv_translate_gva_result)>;
+    ///
+    /// Initialize TDX support on the vCPU
+    ///
+    #[cfg(feature = "tdx")]
+    fn tdx_init(&self, hob_address: u64) -> Result<()>;
 }
