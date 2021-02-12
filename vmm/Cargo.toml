@@ -12,7 +12,7 @@ fwdebug = ["devices/fwdebug"]
 kvm = ["hypervisor/kvm"]
 mshv = ["hypervisor/mshv"]
 io_uring = ["virtio-devices/io_uring"]
-tdx = ["arch/tdx"]
+tdx = ["arch/tdx", "hypervisor/tdx"]
 
 [dependencies]
 acpi_tables = { path = "../acpi_tables", optional = true }

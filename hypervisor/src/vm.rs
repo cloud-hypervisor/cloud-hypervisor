@@ -12,6 +12,8 @@
 use crate::aarch64::VcpuInit;
 use crate::cpu::Vcpu;
 use crate::device::Device;
+#[cfg(feature = "tdx")]
+use crate::x86_64::CpuId;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::ClockData;
 #[cfg(feature = "kvm")]
@@ -163,6 +165,25 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to assert virtual Interrupt: {0}")]
     AsserttVirtualInterrupt(#[source] anyhow::Error),
+
+    #[cfg(feature = "tdx")]
+    ///
+    /// Error initializing TDX on the VM
+    ///
+    #[error("Failed to initialize TDX: {0}")]
+    InitializeTdx(#[source] std::io::Error),
+    #[cfg(feature = "tdx")]
+    ///
+    /// Error finalizing the TDX configuration on the VM
+    ///
+    #[error("Failed to finalize TDX: {0}")]
+    FinalizeTdx(#[source] std::io::Error),
+    #[cfg(feature = "tdx")]
+    ///
+    /// Error initializing the TDX memory region
+    ///
+    #[error("Failed to initialize memory region TDX: {0}")]
+    InitMemRegionTdx(#[source] std::io::Error),
 }
 ///
 /// Result type for returning from a function
@@ -235,6 +256,21 @@ pub trait Vm: Send + Sync {
     fn set_state(&self, state: VmState) -> Result<()>;
     /// Get dirty pages bitmap
     fn get_dirty_log(&self, slot: u32, memory_size: u64) -> Result<Vec<u64>>;
+    #[cfg(feature = "tdx")]
+    /// Initalize TDX on this VM
+    fn tdx_init(&self, cpuid: &CpuId, max_vcpus: u32) -> Result<()>;
+    #[cfg(feature = "tdx")]
+    /// Finalize the configuration of TDX on this VM
+    fn tdx_finalize(&self) -> Result<()>;
+    #[cfg(feature = "tdx")]
+    /// Initalize a TDX memory region for this VM
+    fn tdx_init_memory_region(
+        &self,
+        host_address: u64,
+        guest_address: u64,
+        size: u64,
+        measure: bool,
+    ) -> Result<()>;
 }
 
 pub trait VmmOps: Send + Sync {

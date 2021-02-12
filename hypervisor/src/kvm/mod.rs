@@ -53,6 +53,8 @@ pub use x86_64::{
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
 pub use kvm_bindings;
+#[cfg(feature = "tdx")]
+use kvm_bindings::KVMIO;
 pub use kvm_bindings::{
     kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing, kvm_irq_routing_entry,
     kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI, KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY,
@@ -67,6 +69,8 @@ pub use kvm_ioctls;
 pub use kvm_ioctls::{Cap, Kvm};
 #[cfg(target_arch = "aarch64")]
 use std::mem;
+#[cfg(feature = "tdx")]
+use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_expr, ioctl_ioc_nr, ioctl_iowr_nr};
 
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
@@ -79,6 +83,21 @@ pub use {
     kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
     kvm_ioctls::VcpuExit,
 };
+
+#[cfg(feature = "tdx")]
+ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, std::os::raw::c_ulong);
+
+#[cfg(feature = "tdx")]
+#[repr(u32)]
+enum TdxCommand {
+    #[allow(dead_code)]
+    Capabilities = 0,
+    InitVm,
+    InitVcpu,
+    InitMemRegion,
+    Finalize,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub struct KvmVmState {}
 
@@ -367,7 +386,109 @@ impl vm::Vm for KvmVm {
             .get_dirty_log(slot, memory_size as usize)
             .map_err(|e| vm::HypervisorVmError::GetDirtyLog(e.into()))
     }
+
+    ///
+    /// Initialize TDX for this VM
+    ///
+    #[cfg(feature = "tdx")]
+    fn tdx_init(&self, cpuid: &CpuId, max_vcpus: u32) -> vm::Result<()> {
+        #[repr(C)]
+        struct TdxInitVm {
+            max_vcpus: u32,
+            reserved: u32,
+            attributes: u64,
+            cpuid: u64,
+        };
+        let data = TdxInitVm {
+            max_vcpus,
+            reserved: 0,
+            attributes: 0,
+            cpuid: cpuid.as_fam_struct_ptr() as u64,
+        };
+
+        tdx_command(
+            &self.fd.as_raw_fd(),
+            TdxCommand::InitVm,
+            0,
+            &data as *const _ as u64,
+        )
+        .map_err(vm::HypervisorVmError::InitializeTdx)
+    }
+
+    ///
+    /// Finalize the TDX setup for this VM
+    ///
+    #[cfg(feature = "tdx")]
+    fn tdx_finalize(&self) -> vm::Result<()> {
+        tdx_command(&self.fd.as_raw_fd(), TdxCommand::Finalize, 0, 0)
+            .map_err(vm::HypervisorVmError::FinalizeTdx)
+    }
+
+    ///
+    /// Initialize memory regions for the TDX VM
+    ///
+    #[cfg(feature = "tdx")]
+    fn tdx_init_memory_region(
+        &self,
+        host_address: u64,
+        guest_address: u64,
+        size: u64,
+        measure: bool,
+    ) -> vm::Result<()> {
+        #[repr(C)]
+        struct TdxInitMemRegion {
+            host_address: u64,
+            guest_address: u64,
+            pages: u64,
+        };
+        let data = TdxInitMemRegion {
+            host_address,
+            guest_address,
+            pages: size / 4096,
+        };
+
+        tdx_command(
+            &self.fd.as_raw_fd(),
+            TdxCommand::InitMemRegion,
+            if measure { 1 } else { 0 },
+            &data as *const _ as u64,
+        )
+        .map_err(vm::HypervisorVmError::InitMemRegionTdx)
+    }
 }
+
+#[cfg(feature = "tdx")]
+fn tdx_command(
+    fd: &RawFd,
+    command: TdxCommand,
+    metadata: u32,
+    data: u64,
+) -> std::result::Result<(), std::io::Error> {
+    #[repr(C)]
+    struct TdxIoctlCmd {
+        command: TdxCommand,
+        metadata: u32,
+        data: u64,
+    };
+    let cmd = TdxIoctlCmd {
+        command,
+        metadata,
+        data,
+    };
+    let ret = unsafe {
+        ioctl_with_val(
+            fd,
+            KVM_MEMORY_ENCRYPT_OP(),
+            &cmd as *const TdxIoctlCmd as std::os::raw::c_ulong,
+        )
+    };
+
+    if ret < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Wrapper over KVM system ioctls.
 pub struct KvmHypervisor {
     kvm: Kvm,
@@ -1331,6 +1452,15 @@ impl cpu::Vcpu for KvmVcpu {
         self.set_mp_state(state.mp_state)?;
 
         Ok(())
+    }
+
+    ///
+    /// Initialize TDX for this CPU
+    ///
+    #[cfg(feature = "tdx")]
+    fn tdx_init(&self, hob_address: u64) -> cpu::Result<()> {
+        tdx_command(&self.fd.as_raw_fd(), TdxCommand::InitVcpu, 0, hob_address)
+            .map_err(cpu::HypervisorCpuError::InitializeTdx)
     }
 }
 
