@@ -430,7 +430,7 @@ fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &str) -> Result<(), Err
 
     // Can't test for "vm-config" group as some have default values. The kernel
     // is the only required option for booting the VM.
-    if cmd_arguments.is_present("kernel") {
+    if cmd_arguments.is_present("kernel") || cmd_arguments.is_present("tdx") {
         let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
         let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 

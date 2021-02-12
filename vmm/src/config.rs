@@ -1531,6 +1531,7 @@ pub struct VmConfig {
 
 impl VmConfig {
     pub fn validate(&self) -> ValidationResult<()> {
+        #[cfg(not(feature = "tdx"))]
         self.kernel.as_ref().ok_or(ValidationError::KernelMissing)?;
 
         if self.console.mode == ConsoleOutputMode::Tty && self.serial.mode == ConsoleOutputMode::Tty
