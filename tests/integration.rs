@@ -2392,6 +2392,120 @@ mod tests {
         )
     }
 
+    // VFIO test network setup.
+    // We reserve a different IP class for it: 172.18.0.0/24.
+    fn setup_vfio_network_interfaces() {
+        // 'vfio-br0'
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link add name vfio-br0 type bridge")
+            .output()
+            .expect("Failed to create 'vfio-br0'");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link set vfio-br0 up")
+            .output()
+            .expect("Failed to create 'vfio-br0'");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip addr add 172.18.0.1/24 dev vfio-br0")
+            .output()
+            .expect("Failed to create 'vfio-br0'");
+        // 'vfio-tap0'
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip tuntap add vfio-tap0 mode tap")
+            .output()
+            .expect("Failed to create 'vfio-tap0'");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link set vfio-tap0 master vfio-br0")
+            .output()
+            .expect("Failed to create 'vfio-tap0'");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link set vfio-tap0 up")
+            .output()
+            .expect("Failed to create 'vfio-tap0'");
+        // 'vfio-tap1'
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip tuntap add vfio-tap1 mode tap")
+            .output()
+            .expect("Failed to create 'vfio-tap1'");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link set vfio-tap1 master vfio-br0")
+            .output()
+            .expect("Failed to create 'vfio-tap1'");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link set vfio-tap1 up")
+            .output()
+            .expect("Failed to create 'vfio-tap1'");
+        // 'vfio-tap2'
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip tuntap add vfio-tap2 mode tap")
+            .output()
+            .expect("Failed to create 'vfio-tap2'");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link set vfio-tap2 master vfio-br0")
+            .output()
+            .expect("Failed to create 'vfio-tap2'");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link set vfio-tap2 up")
+            .output()
+            .expect("Failed to create 'vfio-tap2'");
+        // 'vfio-tap3'
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip tuntap add vfio-tap3 mode tap")
+            .output()
+            .expect("Failed to create 'vfio-tap3'");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link set vfio-tap3 master vfio-br0")
+            .output()
+            .expect("Failed to create 'vfio-tap3'");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link set vfio-tap3 up")
+            .output()
+            .expect("Failed to create 'vfio-tap3'");
+    }
+
+    // Tear VFIO test network down
+    fn cleanup_vfio_network_interfaces() {
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link del vfio-br0")
+            .output()
+            .expect("Failed to delete 'vfio-br0'");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link del vfio-tap0")
+            .output()
+            .expect("Failed to delete ''");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link del vfio-tap1")
+            .output()
+            .expect("Failed to delete ''");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link del vfio-tap2")
+            .output()
+            .expect("Failed to delete ''");
+        Command::new("bash")
+            .arg("-c")
+            .arg("sudo ip link del vfio-tap3")
+            .output()
+            .expect("Failed to delete ''");
+    }
+
     mod parallel {
         use crate::tests::*;
 
@@ -3845,6 +3959,8 @@ mod tests {
         // The third device is added to validate that hotplug works correctly since
         // it is being added to the L2 VM through hotplugging mechanism.
         fn test_vfio() {
+            setup_vfio_network_interfaces();
+
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new_from_ip_range(&mut focal, "172.18", 0);
 
@@ -4074,6 +4190,8 @@ mod tests {
 
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();
+
+            cleanup_vfio_network_interfaces();
 
             handle_child_output(r, &output);
         }

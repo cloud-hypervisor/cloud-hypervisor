@@ -187,33 +187,6 @@ cp $FOCAL_OS_IMAGE $VFIO_DIR
 cp $FW $VFIO_DIR
 cp $VMLINUX_IMAGE $VFIO_DIR || exit 1
 
-# VFIO test network setup.
-# We reserve a different IP class for it: 172.18.0.0/24.
-sudo ip link add name vfio-br0 type bridge
-sudo ip link set vfio-br0 up
-sudo ip addr add 172.18.0.1/24 dev vfio-br0
-
-sudo ip tuntap add vfio-tap0 mode tap
-sudo ip link set vfio-tap0 master vfio-br0
-sudo ip link set vfio-tap0 up
-
-sudo ip tuntap add vfio-tap1 mode tap
-sudo ip link set vfio-tap1 master vfio-br0
-sudo ip link set vfio-tap1 up
-
-sudo ip tuntap add vfio-tap2 mode tap
-sudo ip link set vfio-tap2 master vfio-br0
-sudo ip link set vfio-tap2 up
-
-sudo ip tuntap add vfio-tap3 mode tap
-sudo ip link set vfio-tap3 master vfio-br0
-sudo ip link set vfio-tap3 up
-
-# Create tap interface without multiple queues support for vhost_user_net test.
-sudo ip tuntap add name vunet-tap0 mode tap
-# Create tap interface with multiple queues support for vhost_user_net test.
-sudo ip tuntap add name vunet-tap1 mode tap multi_queue
-
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
@@ -252,16 +225,5 @@ if [ $RES -eq 0 ]; then
     time cargo test $features_test "tests::sequential::$test_filter" -- --test-threads=1
     RES=$?
 fi
-
-# Tear VFIO test network down
-sudo ip link del vfio-br0
-sudo ip link del vfio-tap0
-sudo ip link del vfio-tap1
-sudo ip link del vfio-tap2
-sudo ip link del vfio-tap3
-
-# Tear vhost_user_net test network down
-sudo ip link del vunet-tap0
-sudo ip link del vunet-tap1
 
 exit $RES
