@@ -203,11 +203,6 @@ if [ $RES -ne 0 ]; then
     exit 1
 fi
 
-# Create tap interface without multiple queues support for vhost_user_net test.
-sudo ip tuntap add name vunet-tap0 mode tap
-# Create tap interface with multiple queues support for vhost_user_net test.
-sudo ip tuntap add name vunet-tap1 mode tap multi_queue
-
 BUILD_TARGET="aarch64-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
@@ -230,9 +225,5 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 export RUST_BACKTRACE=1
 time cargo test $features_test "tests::parallel::$test_filter"
 RES=$?
-
-# Tear vhost_user_net test network down
-sudo ip link del vunet-tap0
-sudo ip link del vunet-tap1
 
 exit $RES
