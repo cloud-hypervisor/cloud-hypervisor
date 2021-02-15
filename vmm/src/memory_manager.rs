@@ -1093,25 +1093,11 @@ impl MemoryManager {
         Ok(start_addr)
     }
 
-    fn hotplug_ram_region(&mut self, size: usize) -> Result<Arc<GuestRegionMmap>, Error> {
-        info!("Hotplugging new RAM: {}", size);
-
-        // Check that there is a free slot
-        if self.next_hotplug_slot >= HOTPLUG_COUNT {
-            return Err(Error::NoSlotAvailable);
-        }
-
-        // "Inserted" DIMM must have a size that is a multiple of 128MiB
-        if size % (128 << 20) != 0 {
-            return Err(Error::InvalidSize);
-        }
-
-        let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
-
-        if start_addr.checked_add(size.try_into().unwrap()).unwrap() > self.start_of_device_area() {
-            return Err(Error::InsufficientHotplugRAM);
-        }
-
+    pub fn add_ram_region(
+        &mut self,
+        start_addr: GuestAddress,
+        size: usize,
+    ) -> Result<Arc<GuestRegionMmap>, Error> {
         // Allocate memory for the region
         let region = MemoryManager::create_ram_region(
             &None,
@@ -1140,6 +1126,32 @@ impl MemoryManager {
             slot,
         });
 
+        self.add_region(Arc::clone(&region))?;
+
+        Ok(region)
+    }
+
+    fn hotplug_ram_region(&mut self, size: usize) -> Result<Arc<GuestRegionMmap>, Error> {
+        info!("Hotplugging new RAM: {}", size);
+
+        // Check that there is a free slot
+        if self.next_hotplug_slot >= HOTPLUG_COUNT {
+            return Err(Error::NoSlotAvailable);
+        }
+
+        // "Inserted" DIMM must have a size that is a multiple of 128MiB
+        if size % (128 << 20) != 0 {
+            return Err(Error::InvalidSize);
+        }
+
+        let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
+
+        if start_addr.checked_add(size.try_into().unwrap()).unwrap() > self.start_of_device_area() {
+            return Err(Error::InsufficientHotplugRAM);
+        }
+
+        let region = self.add_ram_region(start_addr, size)?;
+
         // Tell the allocator
         self.allocator
             .lock()
@@ -1155,8 +1167,6 @@ impl MemoryManager {
         slot.length = region.len() as u64;
 
         self.next_hotplug_slot += 1;
-
-        self.add_region(Arc::clone(&region))?;
 
         Ok(region)
     }
