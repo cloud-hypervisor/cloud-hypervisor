@@ -503,12 +503,10 @@ impl Vmm {
 
         // Then we start the new VM.
         if let Some(ref mut vm) = self.vm {
-            vm.boot()?;
+            vm.boot()
         } else {
-            return Err(VmError::VmNotCreated);
+            Err(VmError::VmNotCreated)
         }
-
-        Ok(())
     }
 
     fn vm_info(&self) -> result::Result<VmInfo, VmError> {
