@@ -159,7 +159,7 @@ impl SoftTLB {
         // the translation for us.
     }
 }
-#[allow(clippy::type_complexity)]
+
 #[allow(dead_code)]
 /// Vcpu struct for Microsoft Hypervisor
 pub struct MshvVcpu {
@@ -630,7 +630,6 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
     }
 }
 
-#[allow(clippy::type_complexity)]
 #[allow(dead_code)]
 /// Wrapper over Mshv VM ioctls.
 pub struct MshvVm {
