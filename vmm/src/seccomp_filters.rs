@@ -353,6 +353,7 @@ fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_pwrite64),
         allow_syscall(libc::SYS_pwritev),
         allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_readv),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_readlink),
         allow_syscall(libc::SYS_recvfrom),
@@ -392,6 +393,7 @@ fn vmm_thread_rules() -> Result<Vec<SyscallRuleSet>, Error> {
         allow_syscall(libc::SYS_unlinkat),
         allow_syscall(libc::SYS_wait4),
         allow_syscall(libc::SYS_write),
+        allow_syscall(libc::SYS_writev),
     ])
 }
 
