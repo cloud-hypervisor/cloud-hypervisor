@@ -203,9 +203,11 @@ fn virtio_net_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_openat),
         allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_readv),
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_write),
+        allow_syscall(libc::SYS_writev),
     ]
 }
 
