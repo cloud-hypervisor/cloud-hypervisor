@@ -11,6 +11,9 @@ extern crate vmm_sys_util;
 #[macro_use(crate_authors)]
 extern crate clap;
 
+#[macro_use]
+extern crate event_monitor;
+
 use clap::{App, Arg, ArgGroup, ArgMatches};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
@@ -20,6 +23,8 @@ use signal_hook::{
     iterator::{exfiltrator::WithRawSiginfo, SignalsInfo},
 };
 use std::env;
+use std::fs::File;
+use std::os::unix::io::FromRawFd;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -316,6 +321,14 @@ fn create_app<'a, 'b>(
                 .group("vmm-config"),
         )
         .arg(
+            Arg::with_name("monitor-fd")
+                .long("monitor-fd")
+                .help("File descriptor to report events on")
+                .takes_value(true)
+                .min_values(1)
+                .group("vmm-config"),
+        )
+        .arg(
             Arg::with_name("restore")
                 .long("restore")
                 .help(config::RestoreConfig::SYNTAX)
@@ -388,6 +401,8 @@ fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &str) -> Result<(), Err
             })
             .unwrap();
     }
+
+    event!("vmm", "starting");
 
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
     let vmm_thread = vmm::start_vmm_thread(
@@ -500,6 +515,14 @@ fn main() {
         .value_of("api-socket")
         .expect("Missing argument: api-socket")
         .to_string();
+
+    if let Some(fd) = cmd_arguments
+        .value_of("monitor-fd")
+        .map(|s| s.parse::<i32>().expect("Expect integral file descriptor"))
+    {
+        let file = unsafe { File::from_raw_fd(fd) };
+        event_monitor::set_monitor(file).expect("Expected setting monitor to succeed");
+    }
 
     if let Err(e) = start_vmm(cmd_arguments, &api_socket_path) {
         eprintln!("{}", e);
