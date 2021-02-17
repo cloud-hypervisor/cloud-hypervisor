@@ -69,6 +69,7 @@ members = [
     "arch_gen",
     "block_util",
     "devices",
+    "event_monitor",
     "hypervisor",
     "net_gen",
     "net_util",
