@@ -222,6 +222,7 @@ dependencies = [
  "credibility",
  "dirs",
  "epoll",
+ "event_monitor",
  "hypervisor",
  "lazy_static",
  "libc",
