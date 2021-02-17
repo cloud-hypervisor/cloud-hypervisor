@@ -1115,6 +1115,8 @@ impl Vm {
         }
         *state = new_state;
 
+        event!("vm", "shutdown");
+
         Ok(())
     }
 
@@ -1124,6 +1126,8 @@ impl Vm {
         desired_memory: Option<u64>,
         desired_balloon: Option<u64>,
     ) -> Result<()> {
+        event!("vm", "resizing");
+
         if let Some(desired_vcpus) = desired_vcpus {
             if self
                 .cpu_manager
@@ -1198,6 +1202,8 @@ impl Vm {
                 balloon_config.size = desired_balloon;
             }
         }
+
+        event!("vm", "resized");
 
         Ok(())
     }
@@ -1485,6 +1491,7 @@ impl Vm {
     }
 
     pub fn boot(&mut self) -> Result<()> {
+        event!("vm", "booting");
         let current_state = self.get_state()?;
         if current_state == VmState::Paused {
             return self.resume().map_err(Error::Resume);
@@ -1556,7 +1563,7 @@ impl Vm {
 
         let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         *state = new_state;
-
+        event!("vm", "booted");
         Ok(())
     }
 
@@ -1825,6 +1832,7 @@ impl Vm {
 
 impl Pausable for Vm {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+        event!("vm", "pausing");
         let mut state = self
             .state
             .try_write()
@@ -1850,10 +1858,12 @@ impl Pausable for Vm {
 
         *state = new_state;
 
+        event!("vm", "paused");
         Ok(())
     }
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        event!("vm", "resuming");
         let mut state = self
             .state
             .try_write()
@@ -1877,7 +1887,7 @@ impl Pausable for Vm {
 
         // And we're back to the Running state.
         *state = new_state;
-
+        event!("vm", "resumed");
         Ok(())
     }
 }
@@ -1897,6 +1907,8 @@ impl Snapshottable for Vm {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+        event!("vm", "snapshotting");
+
         let current_state = self.get_state().unwrap();
         if current_state != VmState::Paused {
             return Err(MigratableError::Snapshot(anyhow!(
@@ -1930,10 +1942,13 @@ impl Snapshottable for Vm {
             snapshot: vm_snapshot_data,
         });
 
+        event!("vm", "snapshotted");
         Ok(vm_snapshot)
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        event!("vm", "restoring");
+
         let current_state = self
             .get_state()
             .map_err(|e| MigratableError::Restore(anyhow!("Could not get VM state: {:#?}", e)))?;
@@ -2053,6 +2068,8 @@ impl Snapshottable for Vm {
             .try_write()
             .map_err(|e| MigratableError::Restore(anyhow!("Could not set VM state: {:#?}", e)))?;
         *state = new_state;
+
+        event!("vm", "restored");
         Ok(())
     }
 }

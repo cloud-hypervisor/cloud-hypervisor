@@ -1614,6 +1614,7 @@ dependencies = [
  "credibility",
  "devices",
  "epoll",
+ "event_monitor",
  "hypervisor",
  "lazy_static",
  "libc",
