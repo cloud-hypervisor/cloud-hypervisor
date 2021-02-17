@@ -5,6 +5,8 @@
 
 extern crate anyhow;
 extern crate arc_swap;
+#[macro_use]
+extern crate event_monitor;
 extern crate hypervisor;
 extern crate option_parser;
 #[macro_use]
@@ -555,11 +557,15 @@ impl Vmm {
 
         self.vm_config = None;
 
+        event!("vm", "deleted");
+
         Ok(())
     }
 
     fn vmm_shutdown(&mut self) -> result::Result<(), VmError> {
-        self.vm_delete()
+        self.vm_delete()?;
+        event!("vmm", "shutdown");
+        Ok(())
     }
 
     fn vm_resize(
