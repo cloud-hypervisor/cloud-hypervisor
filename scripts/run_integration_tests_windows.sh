@@ -9,6 +9,7 @@ process_common_args "$@"
 features_build=""
 features_test="--features integration_tests"
 
+WIN_IMAGE_FILE="/root/workloads/windows-server-2019.raw"
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
@@ -18,8 +19,8 @@ CFLAGS="-I /usr/include/x86_64-linux-musl/ -idirafter /usr/include/"
 fi
 
 # Use device mapper to create a snapshot of the Windows image
-img_blk_size=$(du -b -B 512 /root/workloads/windows-server-2019.raw | awk '{print $1;}')
-loop_device=$(losetup --find --show --read-only /root/workloads/windows-server-2019.raw)
+img_blk_size=$(du -b -B 512 ${WIN_IMAGE_FILE} | awk '{print $1;}')
+loop_device=$(losetup --find --show --read-only ${WIN_IMAGE_FILE})
 dmsetup create windows-base --table "0 $img_blk_size linear $loop_device 0"
 dmsetup mknodes
 dmsetup create windows-snapshot-base --table "0 $img_blk_size snapshot-origin /dev/mapper/windows-base"
