@@ -145,6 +145,11 @@ fn create_facp_table(dsdt_offset: GuestAddress) -> Sdt {
         facp.write(256, GenericAddress::io_port_address::<u8>(0x3c0));
     }
 
+    // aarch64 specific fields
+    #[cfg(target_arch = "aarch64")]
+    // ARM_BOOT_ARCH: enable PSCI with HVC enable-method
+    facp.write(129, 3u16);
+
     // Architecture common fields
     // HW_REDUCED_ACPI, RESET_REG_SUP, TMR_VAL_EXT
     let fadt_flags: u32 = 1 << 20 | 1 << 10 | 1 << 8;
