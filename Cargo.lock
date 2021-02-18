@@ -1521,6 +1521,7 @@ dependencies = [
  "block_util",
  "byteorder",
  "epoll",
+ "event_monitor",
  "io-uring",
  "libc",
  "log 0.4.14",

@@ -567,12 +567,15 @@ impl VirtioDevice for Block {
         }
 
         self.common.epoll_threads = Some(epoll_threads);
+        event!("virtio-device", "activated", "id", &self.id);
 
         Ok(())
     }
 
     fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        self.common.reset()
+        let result = self.common.reset();
+        event!("virtio-device", "reset", "id", &self.id);
+        result
     }
 
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {

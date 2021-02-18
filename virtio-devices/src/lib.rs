@@ -13,6 +13,8 @@
 extern crate arc_swap;
 extern crate epoll;
 #[macro_use]
+extern crate event_monitor;
+#[macro_use]
 extern crate log;
 extern crate pci;
 extern crate serde;

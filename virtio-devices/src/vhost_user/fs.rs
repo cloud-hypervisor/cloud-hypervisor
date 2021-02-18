@@ -492,6 +492,7 @@ impl VirtioDevice for Fs {
 
         self.common.epoll_threads = Some(epoll_threads);
 
+        event!("virtio-device", "activated", "id", &self.id);
         Ok(())
     }
 
@@ -510,6 +511,8 @@ impl VirtioDevice for Fs {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
         }
+
+        event!("virtio-device", "reset", "id", &self.id);
 
         // Return the interrupt
         Some(self.common.interrupt_cb.take().unwrap())
