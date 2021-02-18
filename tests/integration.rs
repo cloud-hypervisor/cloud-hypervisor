@@ -6115,7 +6115,7 @@ mod tests {
             ovmf_path.push("OVMF.fd");
 
             let mut osdisk_path = workload_path;
-            osdisk_path.push("windows-server-2019.raw");
+            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
@@ -6169,7 +6169,7 @@ mod tests {
             ovmf_path.push("OVMF.fd");
 
             let mut osdisk_path = workload_path;
-            osdisk_path.push("windows-server-2019.raw");
+            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
 
             let api_socket = temp_api_path(&tmp_dir);
 
