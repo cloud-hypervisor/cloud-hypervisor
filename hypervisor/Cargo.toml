@@ -6,8 +6,8 @@ edition = "2018"
 license = "Apache-2.0 OR BSD-3-Clause"
 
 [features]
-kvm = []
-mshv = []
+kvm = ["kvm-ioctls", "kvm-bindings"]
+mshv = ["mshv-ioctls", "mshv-bindings"]
 
 [dependencies]
 anyhow = "1.0"
@@ -15,12 +15,10 @@ epoll = ">=4.0.1"
 thiserror = "1.0"
 libc = "0.2.86"
 log = "0.4.14"
-kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch", features = ["with-serde", "fam-wrappers"] }
-
-mshv-bindings = {git = "https://github.com/cloud-hypervisor/mshv", branch = "master", features = ["with-serde", "fam-wrappers"] }
-mshv-ioctls = { git = "https://github.com/cloud-hypervisor/mshv", branch = "master" }
-
+kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch", optional  = true }
+kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch", features = ["with-serde", "fam-wrappers"], optional  = true }
+mshv-bindings = {git = "https://github.com/cloud-hypervisor/mshv", branch = "master", features = ["with-serde", "fam-wrappers"], optional  = true }
+mshv-ioctls = { git = "https://github.com/cloud-hypervisor/mshv", branch = "master", optional  = true}
 serde = {version = ">=1.0.27", features = ["rc"] }
 serde_derive = ">=1.0.27"
 serde_json = ">=1.0.9"
