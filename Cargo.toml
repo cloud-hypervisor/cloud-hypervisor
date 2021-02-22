@@ -29,7 +29,6 @@ thiserror = "1.0"
 vmm = { path = "vmm" }
 vmm-sys-util = "0.7.0"
 vm-memory = "0.5.0"
-wait-timeout = "0.2.0"
 
 [build-dependencies]
 clap = { version = "2.33.3", features = ["wrap_help"] }
@@ -39,12 +38,13 @@ clap = { version = "2.33.3", features = ["wrap_help"] }
 vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "ch", package = "vhost", features = ["vhost-user-master", "vhost-user-slave"] }
 
 [dev-dependencies]
-ssh2 = "0.9.1"
-dirs = "3.0.1"
 credibility = "0.1.3"
+dirs = "3.0.1"
 lazy_static= "1.4.0"
-serde_json = "1.0.62"
 net_util = { path = "net_util" }
+serde_json = "1.0.62"
+ssh2 = "0.9.1"
+wait-timeout = "0.2.0"
 
 [features]
 default = ["acpi", "cmos", "io_uring", "kvm"]
