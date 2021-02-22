@@ -22,5 +22,3 @@ vm-memory = { version = "0.5.0", features = ["backend-mmap", "backend-atomic"] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
 
-[dev-dependencies]
-tempfile = "3.2.0"
