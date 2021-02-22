@@ -30,8 +30,7 @@ mod tests {
     use std::sync::mpsc::Receiver;
     use std::sync::{mpsc, Mutex};
     use std::thread;
-    use tempdir::TempDir;
-    use vmm_sys_util::tempfile::TempFile;
+    use vmm_sys_util::{tempdir::TempDir, tempfile::TempFile};
     #[cfg_attr(target_arch = "aarch64", allow(unused_imports))]
     use wait_timeout::ChildExt;
 
@@ -251,9 +250,9 @@ mod tests {
     impl DiskConfig for UbuntuDiskConfig {
         fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
             let cloudinit_file_path =
-                String::from(tmp_dir.path().join("cloudinit").to_str().unwrap());
+                String::from(tmp_dir.as_path().join("cloudinit").to_str().unwrap());
 
-            let cloud_init_directory = tmp_dir.path().join("cloud-init").join("ubuntu");
+            let cloud_init_directory = tmp_dir.as_path().join("cloud-init").join("ubuntu");
 
             fs::create_dir_all(&cloud_init_directory)
                 .expect("Expect creating cloud-init directory to succeed");
@@ -344,7 +343,7 @@ mod tests {
             let mut osdisk_base_path = workload_path;
             osdisk_base_path.push(&self.image_name);
 
-            let osdisk_path = String::from(tmp_dir.path().join("osdisk.img").to_str().unwrap());
+            let osdisk_path = String::from(tmp_dir.as_path().join("osdisk.img").to_str().unwrap());
             let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
 
             rate_limited_copy(osdisk_base_path, &osdisk_path)
@@ -380,7 +379,7 @@ mod tests {
                 >> 9;
 
             let snapshot_cow_path =
-                String::from(tmp_dir.path().join("snapshot_cow").to_str().unwrap());
+                String::from(tmp_dir.as_path().join("snapshot_cow").to_str().unwrap());
 
             // Create and truncate CoW file for device mapper
             let cow_file_size: u64 = 1 << 30;
@@ -403,7 +402,7 @@ mod tests {
                 .trim()
                 .to_string();
 
-            let random_extension = tmp_dir.path().file_name().unwrap();
+            let random_extension = tmp_dir.as_path().file_name().unwrap();
             let windows_snapshot_cow = format!(
                 "windows-snapshot-cow-{}",
                 random_extension.to_str().unwrap()
@@ -477,7 +476,7 @@ mod tests {
         let virtiofsd_path = String::from(virtiofsd_path.to_str().unwrap());
 
         let virtiofsd_socket_path =
-            String::from(tmp_dir.path().join("virtiofs.sock").to_str().unwrap());
+            String::from(tmp_dir.as_path().join("virtiofs.sock").to_str().unwrap());
 
         // Start the daemon
         let child = Command::new(virtiofsd_path.as_str())
@@ -505,7 +504,7 @@ mod tests {
         let virtiofsd_path = String::from(virtiofsd_path.to_str().unwrap());
 
         let virtiofsd_socket_path =
-            String::from(tmp_dir.path().join("virtiofs.sock").to_str().unwrap());
+            String::from(tmp_dir.as_path().join("virtiofs.sock").to_str().unwrap());
 
         // Start the daemon
         let child = Command::new(virtiofsd_path.as_str())
@@ -533,7 +532,7 @@ mod tests {
         blk_file_path.push(blk_img);
         let blk_file_path = String::from(blk_file_path.to_str().unwrap());
 
-        let vubd_socket_path = String::from(tmp_dir.path().join("vub.sock").to_str().unwrap());
+        let vubd_socket_path = String::from(tmp_dir.as_path().join("vub.sock").to_str().unwrap());
 
         // Start the daemon
         let child = Command::new(clh_command("vhost_user_block"))
@@ -554,13 +553,13 @@ mod tests {
     }
 
     fn temp_vsock_path(tmp_dir: &TempDir) -> String {
-        String::from(tmp_dir.path().join("vsock").to_str().unwrap())
+        String::from(tmp_dir.as_path().join("vsock").to_str().unwrap())
     }
 
     fn temp_api_path(tmp_dir: &TempDir) -> String {
         String::from(
             tmp_dir
-                .path()
+                .as_path()
                 .join("cloud-hypervisor.sock")
                 .to_str()
                 .unwrap(),
@@ -569,7 +568,7 @@ mod tests {
 
     // Creates the directory and returns the path.
     fn temp_snapshot_dir_path(tmp_dir: &TempDir) -> String {
-        let snapshot_dir = String::from(tmp_dir.path().join("snapshot").to_str().unwrap());
+        let snapshot_dir = String::from(tmp_dir.as_path().join("snapshot").to_str().unwrap());
         std::fs::create_dir(&snapshot_dir).unwrap();
         snapshot_dir
     }
@@ -596,7 +595,8 @@ mod tests {
         tap: Option<&str>,
         num_queues: usize,
     ) -> (std::process::Child, String) {
-        let vunet_socket_path = String::from(tmp_dir.path().join("vunet.sock").to_str().unwrap());
+        let vunet_socket_path =
+            String::from(tmp_dir.as_path().join("vunet.sock").to_str().unwrap());
 
         // Start the daemon
         let net_params = if let Some(tap_str) = tap {
@@ -807,7 +807,7 @@ mod tests {
 
     impl<'a> Guest<'a> {
         fn new_from_ip_range(disk_config: &'a mut dyn DiskConfig, class: &str, id: u8) -> Self {
-            let tmp_dir = TempDir::new("ch").unwrap();
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
 
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
@@ -3712,7 +3712,7 @@ mod tests {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
 
-            let serial_path = guest.tmp_dir.path().join("/tmp/serial-output");
+            let serial_path = guest.tmp_dir.as_path().join("/tmp/serial-output");
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
@@ -3909,7 +3909,7 @@ mod tests {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
 
-            let console_path = guest.tmp_dir.path().join("/tmp/console-output");
+            let console_path = guest.tmp_dir.as_path().join("/tmp/console-output");
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
@@ -6161,7 +6161,7 @@ mod tests {
             let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut windows);
 
-            let tmp_dir = TempDir::new("ch").unwrap();
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 

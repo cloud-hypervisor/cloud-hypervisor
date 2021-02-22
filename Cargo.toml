@@ -42,7 +42,6 @@ vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "ch", p
 ssh2 = "0.9.1"
 dirs = "3.0.1"
 credibility = "0.1.3"
-tempdir = "0.3.7"
 lazy_static= "1.4.0"
 serde_json = "1.0.62"
 net_util = { path = "net_util" }
