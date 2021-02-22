@@ -693,9 +693,10 @@ impl Default for DiskConfig {
 
 impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
-         \"path=<disk_image_path>,readonly=on|off,iommu=on|off,num_queues=<number_of_queues>,\
-         queue_size=<size_of_each_queue>,vhost_user=<vhost_user_enable>,\
-         socket=<vhost_user_socket_path>, default true>,id=<device_id>\"";
+         \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,\
+         num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
+         vhost_user=on|off,socket=<vhost_user_socket_path>,\
+         poll_queue=on|off,id=<device_id>\"";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
