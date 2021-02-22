@@ -124,7 +124,7 @@ mod tests {
     use super::{is_fixed_vhd, VhdFooter};
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
-    use tempfile::tempfile;
+    use vmm_sys_util::tempfile::TempFile;
 
     fn valid_fixed_vhd_footer() -> Vec<u8> {
         vec![
@@ -172,7 +172,7 @@ mod tests {
     where
         F: FnMut(File),
     {
-        let mut disk_file: File = tempfile().unwrap();
+        let mut disk_file: File = TempFile::new().unwrap().into_file();
         disk_file.set_len(0x1000_0200).unwrap();
         disk_file.seek(SeekFrom::Start(0x1000_0000)).unwrap();
         disk_file.write_all(&footer).unwrap();
