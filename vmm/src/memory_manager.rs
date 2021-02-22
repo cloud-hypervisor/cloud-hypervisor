@@ -2032,7 +2032,8 @@ impl Transportable for MemoryManager {
                     .to_file_path()
                     .map_err(|_| {
                         MigratableError::MigrateSend(anyhow!(
-                            "Could not convert file URL to a file path"
+                            "Could not convert file URL to a file path: {}",
+                            destination_url
                         ))
                     })
                     .and_then(|path| {
