@@ -31,7 +31,7 @@ mod tests {
     use std::sync::{mpsc, Mutex};
     use std::thread;
     use tempdir::TempDir;
-    use tempfile::NamedTempFile;
+    use vmm_sys_util::tempfile::TempFile;
     #[cfg_attr(target_arch = "aarch64", allow(unused_imports))]
     use wait_timeout::ChildExt;
 
@@ -2008,11 +2008,11 @@ mod tests {
 
         let kernel_path = direct_kernel_boot_path();
 
-        let mut pmem_temp_file = NamedTempFile::new().unwrap();
-        pmem_temp_file.as_file_mut().set_len(128 << 20).unwrap();
+        let pmem_temp_file = TempFile::new().unwrap();
+        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
 
         std::process::Command::new("mkfs.ext4")
-            .arg(pmem_temp_file.path())
+            .arg(pmem_temp_file.as_path())
             .output()
             .expect("Expect creating disk image to succeed");
 
@@ -2027,7 +2027,7 @@ mod tests {
                 "--pmem",
                 format!(
                     "file={}{}{}",
-                    pmem_temp_file.path().to_str().unwrap(),
+                    pmem_temp_file.as_path().to_str().unwrap(),
                     if specify_size { ",size=128M" } else { "" },
                     if discard_writes {
                         ",discard_writes=on"
@@ -5314,14 +5314,14 @@ mod tests {
                     0
                 );
 
-                let mut pmem_temp_file = NamedTempFile::new().unwrap();
-                pmem_temp_file.as_file_mut().set_len(128 << 20).unwrap();
+                let pmem_temp_file = TempFile::new().unwrap();
+                pmem_temp_file.as_file().set_len(128 << 20).unwrap();
                 let (cmd_success, cmd_output) = remote_command_w_output(
                     &api_socket,
                     "add-pmem",
                     Some(&format!(
                         "file={},id=test0",
-                        pmem_temp_file.path().to_str().unwrap()
+                        pmem_temp_file.as_path().to_str().unwrap()
                     )),
                 );
                 assert!(cmd_success);
