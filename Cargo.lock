@@ -1567,7 +1567,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "tempfile",
  "vfio-ioctls",
  "vhost",
  "virtio-bindings",
