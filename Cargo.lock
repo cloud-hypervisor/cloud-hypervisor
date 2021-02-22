@@ -911,7 +911,6 @@ dependencies = [
  "libc",
  "log 0.4.14",
  "remain",
- "tempfile",
  "vmm-sys-util",
 ]
 
