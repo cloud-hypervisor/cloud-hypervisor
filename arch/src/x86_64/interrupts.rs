@@ -5,14 +5,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use hypervisor::x86_64::LapicState;
 use std::io::Cursor;
 use std::mem;
 use std::result;
 use std::sync::Arc;
-
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
-use hypervisor::x86_64::LapicState;
 
 #[derive(Debug)]
 pub enum Error {
@@ -82,7 +80,6 @@ pub fn set_lint(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
 }
 
 #[cfg(test)]
-#[cfg(feature = "kvm")]
 mod tests {
     use super::*;
 
