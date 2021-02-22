@@ -26,5 +26,3 @@ vm-migration = { path = "../vm-migration" }
 git = "https://github.com/rust-vmm/linux-loader"
 features = ["elf", "bzimage"]
 
-[dev-dependencies]
-rand = "0.8.3"
