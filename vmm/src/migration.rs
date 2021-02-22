@@ -17,7 +17,10 @@ pub fn url_to_path(url: &Url) -> std::result::Result<PathBuf, MigratableError> {
         "file" => url
             .to_file_path()
             .map_err(|_| {
-                MigratableError::MigrateSend(anyhow!("Could not convert file URL to a file path"))
+                MigratableError::MigrateSend(anyhow!(
+                    "Could not convert file URL to a file path: {}",
+                    url.as_str()
+                ))
             })
             .and_then(|path| {
                 if !path.is_dir() {
