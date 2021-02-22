@@ -1704,7 +1704,7 @@ pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
 mod tests {
     use super::*;
     use std::io::{Read, Seek, SeekFrom, Write};
-    use tempfile::tempfile;
+    use vmm_sys_util::tempfile::TempFile;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![
@@ -1775,7 +1775,7 @@ mod tests {
     where
         F: FnMut(RawFile),
     {
-        let mut disk_file: RawFile = RawFile::new(tempfile().unwrap(), false);
+        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
         disk_file.write_all(&header).unwrap();
         disk_file.set_len(0x1_0000_0000).unwrap();
         disk_file.seek(SeekFrom::Start(0)).unwrap();
@@ -1787,7 +1787,7 @@ mod tests {
     where
         F: FnMut(QcowFile),
     {
-        let tmp: RawFile = RawFile::new(tempfile().unwrap(), direct);
+        let tmp: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), direct);
         let qcow_file = QcowFile::new(tmp, 3, file_size).unwrap();
 
         testfn(qcow_file); // File closed when the function exits.
@@ -1796,7 +1796,7 @@ mod tests {
     #[test]
     fn default_header_v2() {
         let header = QcowHeader::create_for_size(2, 0x10_0000);
-        let mut disk_file: RawFile = RawFile::new(tempfile().unwrap(), false);
+        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
         header
             .write_to(&mut disk_file)
             .expect("Failed to write header to temporary file.");
@@ -1807,7 +1807,7 @@ mod tests {
     #[test]
     fn default_header_v3() {
         let header = QcowHeader::create_for_size(3, 0x10_0000);
-        let mut disk_file: RawFile = RawFile::new(tempfile().unwrap(), false);
+        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
         header
             .write_to(&mut disk_file)
             .expect("Failed to write header to temporary file.");
