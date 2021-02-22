@@ -702,7 +702,6 @@ dependencies = [
  "log 0.4.14",
  "net_gen",
  "pnet",
- "rand 0.8.3",
  "serde",
  "serde_json",
  "virtio-bindings",
