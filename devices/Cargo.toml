@@ -19,9 +19,6 @@ vm-memory = "0.5.0"
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = ">=0.3.1"
 
-[dev-dependencies]
-tempfile = "3.2.0"
-
 [features]
 default = []
 acpi = ["acpi_tables"]
