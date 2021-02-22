@@ -71,7 +71,7 @@ macro_rules! mov_rm_imm {
 }
 
 macro_rules! movzx {
-    ($src_op_size:ty, $dest_op_size:ty) => {
+    ($dest_op_size:ty, $src_op_size:ty) => {
         fn emulate(
             &self,
             insn: &Instruction,
