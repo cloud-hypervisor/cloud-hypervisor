@@ -17,7 +17,6 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
-extern crate tempfile;
 extern crate url;
 extern crate vmm_sys_util;
 #[cfg(test)]
