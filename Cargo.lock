@@ -292,7 +292,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "tempfile",
  "vm-device",
  "vm-memory",
  "vm-migration",
