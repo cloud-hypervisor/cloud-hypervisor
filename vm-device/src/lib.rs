@@ -10,6 +10,7 @@ extern crate vm_memory;
 use std::io;
 
 mod bus;
+pub mod dma_mapping;
 pub mod interrupt;
 
 pub use self::bus::{Bus, BusDevice, Error as BusError};
