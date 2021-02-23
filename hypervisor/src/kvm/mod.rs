@@ -521,18 +521,18 @@ impl KvmHypervisor {
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 ///
 impl hypervisor::Hypervisor for KvmHypervisor {
-    /// Create a KVM vm object and return the object as Vm trait object
+    /// Create a KVM vm object of a specific VM type and return the object as Vm trait object
     /// Example
     /// # extern crate hypervisor;
     /// # use hypervisor::KvmHypervisor;
     /// use hypervisor::KvmVm;
     /// let hypervisor = KvmHypervisor::new().unwrap();
-    /// let vm = hypervisor.create_vm().unwrap()
+    /// let vm = hypervisor.create_vm_with_type(KvmVmType::LegacyVm).unwrap()
     ///
-    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+    fn create_vm_with_type(&self, vm_type: u64) -> hypervisor::Result<Arc<dyn vm::Vm>> {
         let fd: VmFd;
         loop {
-            match self.kvm.create_vm() {
+            match self.kvm.create_vm_with_type(vm_type) {
                 Ok(res) => fd = res,
                 Err(e) => {
                     if e.errno() == libc::EINTR {
@@ -575,6 +575,18 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 state: VmState {},
             }))
         }
+    }
+
+    /// Create a KVM vm object and return the object as Vm trait object
+    /// Example
+    /// # extern crate hypervisor;
+    /// # use hypervisor::KvmHypervisor;
+    /// use hypervisor::KvmVm;
+    /// let hypervisor = KvmHypervisor::new().unwrap();
+    /// let vm = hypervisor.create_vm().unwrap()
+    ///
+    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+        self.create_vm_with_type(0) // Create with default platform type
     }
 
     fn check_required_extensions(&self) -> hypervisor::Result<()> {
