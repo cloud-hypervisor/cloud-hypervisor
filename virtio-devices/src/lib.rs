@@ -59,6 +59,7 @@ pub use self::pmem::*;
 pub use self::rng::*;
 pub use self::vsock::*;
 pub use self::watchdog::*;
+use vm_memory::{GuestAddress, GuestMemory};
 use vm_virtio::{queue::*, VirtioDeviceType};
 
 const DEVICE_INIT: u32 = 0x00;
@@ -124,4 +125,20 @@ pub enum Error {
     NoMemoryConfigured,
     NetQueuePair(::net_util::NetQueuePairError),
     ApplySeccompFilter(seccomp::Error),
+}
+
+/// Convert an absolute address into an address space (GuestMemory)
+/// to a host pointer and verify that the provided size define a valid
+/// range within a single memory region.
+/// Return None if it is out of bounds or if addr+size overlaps a single region.
+pub fn get_host_address_range<M: GuestMemory>(
+    mem: &M,
+    addr: GuestAddress,
+    size: usize,
+) -> Option<*mut u8> {
+    if mem.check_range(addr, size) {
+        Some(mem.get_host_address(addr).unwrap())
+    } else {
+        None
+    }
 }

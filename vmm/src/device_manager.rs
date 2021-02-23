@@ -79,13 +79,15 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 #[cfg(feature = "kvm")]
-use vfio_ioctls::{VfioContainer, VfioDevice, VfioDmaMapping};
+use vfio_ioctls::{VfioContainer, VfioDevice};
 use virtio_devices::transport::VirtioPciDevice;
 use virtio_devices::transport::VirtioTransport;
 use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{DmaRemapping, IommuMapping};
 use virtio_devices::{VirtioSharedMemory, VirtioSharedMemoryList};
 use vm_allocator::SystemAllocator;
+#[cfg(feature = "kvm")]
+use vm_device::dma_mapping::vfio::VfioDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };

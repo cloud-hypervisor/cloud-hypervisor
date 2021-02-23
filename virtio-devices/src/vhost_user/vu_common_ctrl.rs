@@ -3,13 +3,12 @@
 
 use super::super::{Descriptor, Queue};
 use super::{Error, Result};
-use crate::{VirtioInterrupt, VirtioInterruptType};
+use crate::{get_host_address_range, VirtioInterrupt, VirtioInterruptType};
 use libc::EFD_NONBLOCK;
 use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::vec::Vec;
-use vfio_ioctls::get_host_address_range;
 use vhost_rs::vhost_user::{Master, VhostUserMaster};
 use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};

@@ -17,10 +17,9 @@
 ///
 use byteorder::{ByteOrder, LittleEndian};
 
-use super::super::DescriptorChain;
 use super::defs;
 use super::{Result, VsockError};
-use vfio_ioctls::get_host_address_range;
+use crate::{get_host_address_range, DescriptorChain};
 
 // The vsock packet header is defined by the C struct:
 //
