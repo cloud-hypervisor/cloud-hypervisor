@@ -1449,6 +1449,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "thiserror",
+ "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
 ]
