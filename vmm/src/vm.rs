@@ -675,11 +675,15 @@ impl Vm {
         #[cfg(target_arch = "x86_64")]
         vm.enable_split_irq().unwrap();
         let phys_bits = physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+        #[cfg(feature = "tdx")]
+        let tdx_enabled = config.lock().unwrap().tdx.is_some();
         let memory_manager = MemoryManager::new(
             vm.clone(),
             &config.lock().unwrap().memory.clone(),
             false,
             phys_bits,
+            #[cfg(feature = "tdx")]
+            tdx_enabled,
         )
         .map_err(Error::MemoryManager)?;
 
@@ -794,6 +798,8 @@ impl Vm {
             &config.lock().unwrap().memory.clone(),
             false,
             phys_bits,
+            #[cfg(feature = "tdx")]
+            false,
         )
         .map_err(Error::MemoryManager)?;
 
