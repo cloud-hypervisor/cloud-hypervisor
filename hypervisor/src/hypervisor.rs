@@ -15,7 +15,6 @@ use crate::x86_64::MsrList;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use kvm_ioctls::Cap;
 use std::sync::Arc;
-
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -85,6 +84,12 @@ pub trait Hypervisor: Send + Sync {
     /// Return a hypervisor-agnostic Vm trait object
     ///
     fn create_vm(&self) -> Result<Arc<dyn Vm>>;
+    #[cfg(feature = "kvm")]
+    ///
+    /// Create a Vm of a specific type using the underlying hypervisor
+    /// Return a hypervisor-agnostic Vm trait object
+    ///
+    fn create_vm_with_type(&self, vm_type: u64) -> Result<Arc<dyn Vm>>;
     #[cfg(feature = "kvm")]
     ///
     /// Returns the size of the memory mapping required to use the vcpu's structures
