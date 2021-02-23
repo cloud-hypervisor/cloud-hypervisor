@@ -18,15 +18,15 @@ use std::ptr::null_mut;
 use std::sync::{Arc, Barrier};
 use std::{fmt, io, result};
 use vfio_bindings::bindings::vfio::*;
-use vfio_ioctls::{VfioDevice, VfioError};
+use vfio_ioctls::{VfioContainer, VfioDevice, VfioError};
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
 use vm_device::BusDevice;
 use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap, GuestRegionMmap,
-    GuestUsize,
+    Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+    GuestMemoryRegion, GuestRegionMmap, GuestUsize,
 };
 use vmm_sys_util::eventfd::EventFd;
 
@@ -298,11 +298,13 @@ impl VfioPciConfig {
 pub struct VfioPciDevice {
     vm: Arc<dyn hypervisor::Vm>,
     device: Arc<VfioDevice>,
+    container: Arc<VfioContainer>,
     vfio_pci_configuration: VfioPciConfig,
     configuration: PciConfiguration,
     mmio_regions: Vec<MmioRegion>,
     interrupt: Interrupt,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    iommu_attached: bool,
 }
 
 impl VfioPciDevice {
@@ -310,9 +312,11 @@ impl VfioPciDevice {
     pub fn new(
         vm: &Arc<dyn hypervisor::Vm>,
         device: VfioDevice,
+        container: Arc<VfioContainer>,
         msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<Box<dyn InterruptSourceGroup>>>,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        iommu_attached: bool,
     ) -> Result<Self> {
         let device = Arc::new(device);
         device.reset();
@@ -335,6 +339,7 @@ impl VfioPciDevice {
         let mut vfio_pci_device = VfioPciDevice {
             vm: vm.clone(),
             device,
+            container,
             configuration,
             vfio_pci_configuration,
             mmio_regions: Vec::new(),
@@ -344,6 +349,7 @@ impl VfioPciDevice {
                 msix: None,
             },
             mem,
+            iommu_attached,
         };
 
         vfio_pci_device.parse_capabilities(msi_interrupt_manager);
@@ -723,9 +729,17 @@ impl VfioPciDevice {
     }
 
     pub fn update_memory(&self, new_region: &Arc<GuestRegionMmap>) -> Result<()> {
-        self.device
-            .extend_dma_map(new_region)
-            .map_err(VfioPciError::UpdateMemory)
+        if !self.iommu_attached {
+            self.container
+                .vfio_dma_map(
+                    new_region.start_addr().raw_value(),
+                    new_region.len() as u64,
+                    new_region.as_ptr() as u64,
+                )
+                .map_err(VfioPciError::UpdateMemory)?;
+        }
+
+        Ok(())
     }
 
     pub fn mmio_regions(&self) -> Vec<MmioRegion> {
@@ -753,10 +767,11 @@ impl Drop for VfioPciDevice {
             self.disable_intx();
         }
 
-        if self
-            .device
-            .unset_dma_map(self.mem.memory().deref())
-            .is_err()
+        if !self.iommu_attached
+            && self
+                .container
+                .vfio_unmap_guest_memory(self.mem.memory().deref())
+                .is_err()
         {
             error!("failed to remove all guest memory regions from iommu table");
         }
@@ -963,10 +978,11 @@ impl PciDevice for VfioPciDevice {
             }
         }
 
-        if self
-            .device
-            .setup_dma_map(self.mem.memory().deref())
-            .is_err()
+        if !self.iommu_attached
+            && self
+                .container
+                .vfio_map_guest_memory(self.mem.memory().deref())
+                .is_err()
         {
             error!("failed to add all guest memory regions into iommu table");
         }

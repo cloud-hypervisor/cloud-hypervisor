@@ -40,7 +40,7 @@ serde_json = ">=1.0.9"
 signal-hook = "0.3.6"
 thiserror = "1.0"
 url = "2.2.1"
-vfio-ioctls = { git = "https://github.com/cloud-hypervisor/vfio-ioctls", branch = "ch" }
+vfio-ioctls = { git = "https://github.com/rust-vmm/vfio-ioctls", branch = "master" }
 virtio-devices = { path = "../virtio-devices" }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }

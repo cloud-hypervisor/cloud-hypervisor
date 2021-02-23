@@ -2691,12 +2691,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::VfioCreate)?,
         );
 
-        let vfio_device = VfioDevice::new(
-            &device_cfg.path,
-            Arc::clone(&vfio_container),
-            device_cfg.iommu,
-        )
-        .map_err(DeviceManagerError::VfioCreate)?;
+        let vfio_device = VfioDevice::new(&device_cfg.path, Arc::clone(&vfio_container))
+            .map_err(DeviceManagerError::VfioCreate)?;
 
         if device_cfg.iommu {
             if let Some(iommu) = &self.iommu_device {
@@ -2731,9 +2727,11 @@ impl DeviceManager {
         let mut vfio_pci_device = VfioPciDevice::new(
             &self.address_manager.vm,
             vfio_device,
+            vfio_container,
             &self.msi_interrupt_manager,
             legacy_interrupt_group,
             memory,
+            device_cfg.iommu,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
