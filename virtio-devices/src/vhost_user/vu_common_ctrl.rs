@@ -9,8 +9,8 @@ use std::convert::TryInto;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::vec::Vec;
-use vhost_rs::vhost_user::{Master, VhostUserMaster};
-use vhost_rs::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
+use vhost::vhost_user::{Master, VhostUserMaster};
+use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
 use vm_memory::{Address, Error as MmapError, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
 use vmm_sys_util::eventfd::EventFd;
 
