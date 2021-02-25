@@ -14,7 +14,7 @@ use seccomp::{SeccompAction, SeccompFilter};
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use vhost::vhost_user::message::{
     VhostUserFSSlaveMsg, VhostUserFSSlaveMsgFlags, VhostUserProtocolFeatures,
@@ -53,12 +53,12 @@ impl SlaveReqHandler {
 }
 
 impl VhostUserMasterReqHandler for SlaveReqHandler {
-    fn handle_config_change(&mut self) -> HandlerResult<u64> {
+    fn handle_config_change(&self) -> HandlerResult<u64> {
         debug!("handle_config_change");
         Ok(0)
     }
 
-    fn fs_slave_map(&mut self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<u64> {
+    fn fs_slave_map(&self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<u64> {
         debug!("fs_slave_map");
 
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
@@ -98,7 +98,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         Ok(0)
     }
 
-    fn fs_slave_unmap(&mut self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<u64> {
+    fn fs_slave_unmap(&self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<u64> {
         debug!("fs_slave_unmap");
 
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
@@ -139,7 +139,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         Ok(0)
     }
 
-    fn fs_slave_sync(&mut self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<u64> {
+    fn fs_slave_sync(&self, fs: &VhostUserFSSlaveMsg) -> HandlerResult<u64> {
         debug!("fs_slave_sync");
 
         for i in 0..VHOST_USER_FS_SLAVE_ENTRIES {
@@ -166,7 +166,7 @@ impl VhostUserMasterReqHandler for SlaveReqHandler {
         Ok(0)
     }
 
-    fn fs_slave_io(&mut self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<u64> {
+    fn fs_slave_io(&self, fs: &VhostUserFSSlaveMsg, fd: RawFd) -> HandlerResult<u64> {
         debug!("fs_slave_io");
 
         let mut done: u64 = 0;
@@ -438,16 +438,18 @@ impl VirtioDevice for Fs {
         // Initialize slave communication.
         let slave_req_handler = if self.slave_req_support {
             if let Some(cache) = self.cache.as_ref() {
-                let vu_master_req_handler = Arc::new(Mutex::new(SlaveReqHandler {
+                let vu_master_req_handler = Arc::new(SlaveReqHandler {
                     cache_offset: cache.0.addr,
                     cache_size: cache.0.len,
                     mmap_cache_addr: cache.0.host_addr,
                     mem,
-                }));
+                });
 
-                let req_handler = MasterReqHandler::new(vu_master_req_handler).map_err(|e| {
-                    ActivateError::VhostUserSetup(Error::MasterReqHandlerCreation(e))
-                })?;
+                let mut req_handler =
+                    MasterReqHandler::new(vu_master_req_handler).map_err(|e| {
+                        ActivateError::VhostUserSetup(Error::MasterReqHandlerCreation(e))
+                    })?;
+                req_handler.set_reply_ack_flag(true);
                 self.vu
                     .set_slave_request_fd(req_handler.get_tx_raw_fd())
                     .map_err(|e| {

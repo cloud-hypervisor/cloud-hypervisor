@@ -37,6 +37,9 @@ clap = { version = "2.33.3", features = ["wrap_help"] }
 [patch.crates-io]
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.3.0", features = ["with-serde", "fam-wrappers"] }
 
+[patch.'https://github.com/rust-vmm/vhost']
+vhost = { git = 'https://github.com/jiangliu/vhost', branch = 'coverage2' }
+
 [dev-dependencies]
 credibility = "0.1.3"
 dirs = "3.0.1"

@@ -21,7 +21,7 @@ use vhost::vhost_user::message::{
 };
 use vhost::vhost_user::{
     Error as VhostUserError, Listener, Result as VhostUserResult, SlaveFsCacheReq, SlaveListener,
-    VhostUserSlaveReqHandler,
+    VhostUserSlaveReqHandlerMut,
 };
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::guest_memory::FileOffset;
@@ -544,7 +544,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
     }
 }
 
-impl<S: VhostUserBackend> VhostUserSlaveReqHandler for VhostUserHandler<S> {
+impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
     fn set_owner(&mut self) -> VhostUserResult<()> {
         if self.owned {
             return Err(VhostUserError::InvalidOperation);
