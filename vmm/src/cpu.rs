@@ -1611,7 +1611,8 @@ mod tests {
         let mut msrs = MsrEntries::from_entries(&[MsrEntry {
             index: msr_index::MSR_IA32_MISC_ENABLE,
             ..Default::default()
-        }]);
+        }])
+        .unwrap();
 
         // get_msrs returns the number of msrs that it succeed in reading. We only want to read 1
         // in this test case scenario.

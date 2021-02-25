@@ -93,7 +93,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 
         let msr_list = self.get_msr_list()?;
         let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
-        let mut msrs = MsrEntries::new(num_msrs);
+        let mut msrs = MsrEntries::new(num_msrs).unwrap();
         let indices = msr_list.as_slice();
         let msr_entries = msrs.as_mut_slice();
         for (pos, index) in indices.iter().enumerate() {
@@ -115,7 +115,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     /// Get the supported CpuID
     ///
     fn get_cpuid(&self) -> hypervisor::Result<CpuId> {
-        Ok(CpuId::new(1))
+        Ok(CpuId::new(1).unwrap())
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -759,7 +759,7 @@ impl vm::Vm for MshvVm {
         let vcpu = MshvVcpu {
             fd: vcpu_fd,
             vp_index: id,
-            cpuid: CpuId::new(1),
+            cpuid: CpuId::new(1).unwrap(),
             msrs: self.msrs.clone(),
             gsi_routes: self.gsi_routes.clone(),
             hv_state: self.hv_state.clone(),

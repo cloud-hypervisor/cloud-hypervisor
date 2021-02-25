@@ -108,6 +108,7 @@ fn virtio_block_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_pread64),
         allow_syscall(libc::SYS_preadv),
         allow_syscall(libc::SYS_pwritev),
+        allow_syscall(libc::SYS_pwrite64),
         allow_syscall(libc::SYS_read),
         allow_syscall(libc::SYS_rt_sigprocmask),
         allow_syscall(libc::SYS_sched_getaffinity),
