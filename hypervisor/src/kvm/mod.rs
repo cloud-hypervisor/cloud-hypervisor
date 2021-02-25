@@ -433,7 +433,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         {
             let msr_list = self.get_msr_list()?;
             let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
-            let mut msrs = MsrEntries::new(num_msrs);
+            let mut msrs = MsrEntries::new(num_msrs).unwrap();
             let indices = msr_list.as_slice();
             let msr_entries = msrs.as_mut_slice();
             for (pos, index) in indices.iter().enumerate() {
@@ -1036,7 +1036,7 @@ impl cpu::Vcpu for KvmVcpu {
     fn system_registers(&self, state: &mut Vec<Register>) -> cpu::Result<()> {
         // Call KVM_GET_REG_LIST to get all registers available to the guest. For ArmV8 there are
         // around 500 registers.
-        let mut reg_list = RegList::new(512);
+        let mut reg_list = RegList::new(500).unwrap();
         self.fd
             .get_reg_list(&mut reg_list)
             .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;
@@ -1170,7 +1170,7 @@ impl cpu::Vcpu for KvmVcpu {
         let msrs = if num_msrs != expected_num_msrs {
             let mut faulty_msr_index = num_msrs;
             let mut msr_entries_tmp =
-                MsrEntries::from_entries(&msr_entries.as_slice()[..faulty_msr_index]);
+                MsrEntries::from_entries(&msr_entries.as_slice()[..faulty_msr_index]).unwrap();
 
             loop {
                 warn!(
@@ -1180,7 +1180,7 @@ impl cpu::Vcpu for KvmVcpu {
 
                 let start_pos = faulty_msr_index + 1;
                 let mut sub_msr_entries =
-                    MsrEntries::from_entries(&msr_entries.as_slice()[start_pos..]);
+                    MsrEntries::from_entries(&msr_entries.as_slice()[start_pos..]).unwrap();
                 let expected_num_msrs = sub_msr_entries.as_fam_struct_ref().nmsrs as usize;
                 let num_msrs = self.get_msrs(&mut sub_msr_entries)?;
 
@@ -1304,7 +1304,8 @@ impl cpu::Vcpu for KvmVcpu {
                 );
 
                 let start_pos = faulty_msr_index + 1;
-                let sub_msr_entries = MsrEntries::from_entries(&state.msrs.as_slice()[start_pos..]);
+                let sub_msr_entries =
+                    MsrEntries::from_entries(&state.msrs.as_slice()[start_pos..]).unwrap();
                 let expected_num_msrs = sub_msr_entries.as_fam_struct_ref().nmsrs as usize;
                 let num_msrs = self.set_msrs(&sub_msr_entries)?;
 

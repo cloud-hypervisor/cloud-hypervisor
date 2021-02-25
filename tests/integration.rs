@@ -3221,6 +3221,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore]
         fn test_virtio_block_qcow2() {
             _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false)
         }

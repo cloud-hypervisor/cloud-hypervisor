@@ -27,6 +27,7 @@ event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 lazy_static = "1.4.0"
 libc = "0.2.86"
+linux-loader = { version = "0.3.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.14"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "master" }
 net_util = { path = "../net_util" }
@@ -48,11 +49,6 @@ vm-memory = { version = "0.5.0", features = ["backend-mmap", "backend-atomic"] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = ">=0.5.0", features = ["with-serde"] }
-
-
-[dependencies.linux-loader]
-git = "https://github.com/rust-vmm/linux-loader"
-features = ["elf", "bzimage", "pe"]
 
 [dev-dependencies]
 credibility = "0.1.3"

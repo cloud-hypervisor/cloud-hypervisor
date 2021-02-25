@@ -22,7 +22,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use vmm_sys_util::{
     file_traits::FileSetLen, file_traits::FileSync, seek_hole::SeekHole, write_zeroes::PunchHole,
-    write_zeroes::WriteZeroes,
+    write_zeroes::WriteZeroes, write_zeroes::WriteZeroesAt,
 };
 
 pub use crate::raw_file::RawFile;
@@ -1525,6 +1525,13 @@ impl PunchHole for QcowFile {
             offset += chunk_length as u64;
         }
         Ok(())
+    }
+}
+
+impl WriteZeroesAt for QcowFile {
+    fn write_zeroes_at(&mut self, offset: u64, length: usize) -> io::Result<usize> {
+        self.punch_hole(offset, length as u64)?;
+        Ok(length)
     }
 }
 

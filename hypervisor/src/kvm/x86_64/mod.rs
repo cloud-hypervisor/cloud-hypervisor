@@ -111,6 +111,7 @@ pub fn boot_msr_entries() -> MsrEntries {
         ),
         msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
     ])
+    .unwrap()
 }
 
 ///
