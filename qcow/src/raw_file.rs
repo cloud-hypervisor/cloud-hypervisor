@@ -15,7 +15,7 @@ use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::slice;
-use vmm_sys_util::{seek_hole::SeekHole, write_zeroes::PunchHole};
+use vmm_sys_util::{seek_hole::SeekHole, write_zeroes::PunchHole, write_zeroes::WriteZeroesAt};
 
 #[derive(Debug)]
 pub struct RawFile {
@@ -278,6 +278,12 @@ impl Seek for RawFile {
             }
             Err(e) => Err(e),
         }
+    }
+}
+
+impl WriteZeroesAt for RawFile {
+    fn write_zeroes_at(&mut self, offset: u64, length: usize) -> std::io::Result<usize> {
+        self.file.write_zeroes_at(offset, length)
     }
 }
 
