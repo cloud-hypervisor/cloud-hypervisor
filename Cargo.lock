@@ -1338,7 +1338,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.1.0"
-source = "git+https://github.com/cloud-hypervisor/vhost?branch=ch#6fc980bf5083d67586ab91d6a965c3a593c33a78"
+source = "git+https://github.com/rust-vmm/vhost?branch=master#8c6919bf60bd641398ddd53864fbc74d75548837"
 dependencies = [
  "bitflags 1.2.1",
  "libc",

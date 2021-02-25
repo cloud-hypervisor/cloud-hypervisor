@@ -8,7 +8,7 @@
 
 extern crate log;
 extern crate net_util;
-extern crate vhost_rs;
+extern crate vhost;
 extern crate vhost_user_backend;
 
 use libc::{self, EFD_NONBLOCK};
@@ -24,8 +24,8 @@ use std::os::unix::io::AsRawFd;
 use std::process;
 use std::sync::{Arc, Mutex, RwLock};
 use std::vec::Vec;
-use vhost_rs::vhost_user::message::*;
-use vhost_rs::vhost_user::{Error as VhostUserError, Listener};
+use vhost::vhost_user::message::*;
+use vhost::vhost_user::{Error as VhostUserError, Listener};
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring, VringWorker};
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;

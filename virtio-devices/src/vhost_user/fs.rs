@@ -16,14 +16,14 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
-use vhost_rs::vhost_user::message::{
+use vhost::vhost_user::message::{
     VhostUserFSSlaveMsg, VhostUserFSSlaveMsgFlags, VhostUserProtocolFeatures,
     VhostUserVirtioFeatures, VHOST_USER_FS_SLAVE_ENTRIES,
 };
-use vhost_rs::vhost_user::{
+use vhost::vhost_user::{
     HandlerResult, Master, MasterReqHandler, VhostUserMaster, VhostUserMasterReqHandler,
 };
-use vhost_rs::VhostBackend;
+use vhost::VhostBackend;
 use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryMmap, MmapRegion,

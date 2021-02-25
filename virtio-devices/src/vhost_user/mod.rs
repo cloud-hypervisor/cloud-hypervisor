@@ -3,12 +3,12 @@
 
 extern crate epoll;
 extern crate net_util;
-extern crate vhost_rs;
+extern crate vhost;
 extern crate virtio_bindings;
 extern crate vm_memory;
 
 use std::io;
-use vhost_rs::Error as VhostError;
+use vhost::Error as VhostError;
 use vm_memory::Error as MmapError;
 
 pub mod blk;
@@ -43,7 +43,7 @@ pub enum Error {
     /// Failed to open vhost device.
     VhostUserOpen(VhostError),
     /// Connection to socket failed.
-    VhostUserConnect(vhost_rs::Error),
+    VhostUserConnect(vhost::Error),
     /// Get features failed.
     VhostUserGetFeatures(VhostError),
     /// Get queue max number failed.
@@ -81,9 +81,9 @@ pub enum Error {
     /// Failed to read vhost eventfd.
     VhostUserMemoryRegion(MmapError),
     /// Failed to create the master request handler from slave.
-    MasterReqHandlerCreation(vhost_rs::vhost_user::Error),
+    MasterReqHandlerCreation(vhost::vhost_user::Error),
     /// Set slave request fd failed.
-    VhostUserSetSlaveRequestFd(vhost_rs::Error),
+    VhostUserSetSlaveRequestFd(vhost::Error),
     /// Invalid used address.
     UsedAddress,
     /// Invalid features provided from vhost-user backend

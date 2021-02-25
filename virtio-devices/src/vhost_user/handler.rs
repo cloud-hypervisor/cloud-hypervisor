@@ -18,7 +18,7 @@ use crate::VirtioInterrupt;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
-use vhost_rs::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
+use vhost::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 
 /// Collection of common parameters required by vhost-user devices while
 /// call Epoll handler.

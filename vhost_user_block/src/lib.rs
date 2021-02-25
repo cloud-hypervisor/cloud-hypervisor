@@ -10,7 +10,7 @@
 
 extern crate block_util;
 extern crate log;
-extern crate vhost_rs;
+extern crate vhost;
 extern crate vhost_user_backend;
 
 use block_util::{build_disk_image_id, Request, VirtioBlockConfig};
@@ -33,8 +33,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use std::vec::Vec;
 use std::{convert, error, fmt, io};
-use vhost_rs::vhost_user::message::*;
-use vhost_rs::vhost_user::Listener;
+use vhost::vhost_user::message::*;
+use vhost::vhost_user::Listener;
 use vhost_user_backend::{VhostUserBackend, VhostUserDaemon, Vring};
 use virtio_bindings::bindings::virtio_blk::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;

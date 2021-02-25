@@ -15,11 +15,11 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::result;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use vhost_rs::vhost_user::message::{
+use vhost::vhost_user::message::{
     VhostUserConfigFlags, VhostUserMemoryRegion, VhostUserProtocolFeatures,
     VhostUserVirtioFeatures, VhostUserVringAddrFlags, VhostUserVringState,
 };
-use vhost_rs::vhost_user::{
+use vhost::vhost_user::{
     Error as VhostUserError, Listener, Result as VhostUserResult, SlaveFsCacheReq, SlaveListener,
     VhostUserSlaveReqHandler,
 };
