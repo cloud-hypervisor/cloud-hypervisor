@@ -26,6 +26,7 @@ extern crate virtio_bindings;
 extern crate vm_device;
 extern crate vm_memory;
 
+use std::convert::TryInto;
 use std::io;
 
 #[macro_use]
@@ -39,6 +40,7 @@ pub mod mem;
 pub mod net;
 pub mod net_util;
 mod pmem;
+mod rate_limiter;
 mod rng;
 pub mod seccomp_filters;
 pub mod transport;
@@ -95,6 +97,8 @@ pub enum ActivateError {
     VhostUserReset(vhost_user::Error),
     /// Cannot create seccomp filter
     CreateSeccompFilter(seccomp::SeccompError),
+    /// Cannot create rate limiter
+    CreateRateLimiter(std::io::Error),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;
@@ -126,6 +130,37 @@ pub enum Error {
     NoMemoryConfigured,
     NetQueuePair(::net_util::NetQueuePairError),
     ApplySeccompFilter(seccomp::Error),
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct TokenBucketConfig {
+    pub size: u64,
+    pub one_time_burst: Option<u64>,
+    pub refill_time: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RateLimiterConfig {
+    pub bandwidth: Option<TokenBucketConfig>,
+    pub ops: Option<TokenBucketConfig>,
+}
+
+impl TryInto<rate_limiter::RateLimiter> for RateLimiterConfig {
+    type Error = io::Error;
+
+    fn try_into(self) -> std::result::Result<rate_limiter::RateLimiter, Self::Error> {
+        let bw = self.bandwidth.unwrap_or_default();
+        let ops = self.ops.unwrap_or_default();
+        rate_limiter::RateLimiter::new(
+            bw.size,
+            bw.one_time_burst.unwrap_or(0),
+            bw.refill_time,
+            ops.size,
+            ops.one_time_burst.unwrap_or(0),
+            ops.refill_time,
+        )
+    }
 }
 
 /// Convert an absolute address into an address space (GuestMemory)

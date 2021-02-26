@@ -15,6 +15,8 @@ use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
 
+use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
+
 pub const DEFAULT_VCPUS: u8 = 1;
 pub const DEFAULT_MEMORY_MB: u64 = 512;
 pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
@@ -677,6 +679,8 @@ pub struct DiskConfig {
     #[serde(default = "default_diskconfig_poll_queue")]
     pub poll_queue: bool,
     #[serde(default)]
+    pub rate_limiter_config: Option<RateLimiterConfig>,
+    #[serde(default)]
     pub id: Option<String>,
     // For testing use only. Not exposed in API.
     #[serde(default)]
@@ -709,6 +713,7 @@ impl Default for DiskConfig {
             poll_queue: default_diskconfig_poll_queue(),
             id: None,
             disable_io_uring: false,
+            rate_limiter_config: None,
         }
     }
 }
@@ -717,8 +722,10 @@ impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
          \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,\
          num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
-         vhost_user=on|off,socket=<vhost_user_socket_path>,\
-         poll_queue=on|off,id=<device_id>\"";
+         vhost_user=on|off,socket=<vhost_user_socket_path>,poll_queue=on|off,\
+         bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
+         ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
+         id=<device_id>\"";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -732,6 +739,12 @@ impl DiskConfig {
             .add("vhost_user")
             .add("socket")
             .add("poll_queue")
+            .add("bw_size")
+            .add("bw_one_time_burst")
+            .add("bw_refill_time")
+            .add("ops_size")
+            .add("ops_one_time_burst")
+            .add("ops_refill_time")
             .add("id")
             .add("_disable_io_uring");
         parser.parse(disk).map_err(Error::ParseDisk)?;
@@ -777,6 +790,56 @@ impl DiskConfig {
             .map_err(Error::ParseDisk)?
             .unwrap_or(Toggle(false))
             .0;
+        let bw_size = parser
+            .convert("bw_size")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_one_time_burst = parser
+            .convert("bw_one_time_burst")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_refill_time = parser
+            .convert("bw_refill_time")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_size = parser
+            .convert("ops_size")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_one_time_burst = parser
+            .convert("ops_one_time_burst")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_refill_time = parser
+            .convert("ops_refill_time")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
+            Some(TokenBucketConfig {
+                size: bw_size,
+                one_time_burst: Some(bw_one_time_burst),
+                refill_time: bw_refill_time,
+            })
+        } else {
+            None
+        };
+        let ops_tb_config = if ops_size != 0 && ops_refill_time != 0 {
+            Some(TokenBucketConfig {
+                size: ops_size,
+                one_time_burst: Some(ops_one_time_burst),
+                refill_time: ops_refill_time,
+            })
+        } else {
+            None
+        };
+        let rate_limiter_config = if bw_tb_config.is_some() || ops_tb_config.is_some() {
+            Some(RateLimiterConfig {
+                bandwidth: bw_tb_config,
+                ops: ops_tb_config,
+            })
+        } else {
+            None
+        };
 
         if parser.is_set("poll_queue") && !vhost_user {
             warn!("poll_queue parameter currently only has effect when used vhost_user=true");
@@ -794,6 +857,7 @@ impl DiskConfig {
             poll_queue,
             id,
             disable_io_uring,
+            rate_limiter_config,
         })
     }
 }
