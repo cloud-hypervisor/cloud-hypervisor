@@ -93,8 +93,11 @@ use vm_device::interrupt::{
 };
 use vm_device::{Bus, BusDevice, Resource};
 use vm_memory::guest_memory::FileOffset;
+#[cfg(feature = "cmos")]
+use vm_memory::GuestMemory;
 use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestRegionMmap, GuestUsize, MmapRegion,
+    Address, GuestAddress, GuestAddressSpace, GuestMemoryRegion, GuestRegionMmap, GuestUsize,
+    MmapRegion,
 };
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
@@ -254,6 +257,12 @@ pub enum DeviceManagerError {
 
     /// Failed to map VFIO MMIO region.
     VfioMapRegion(pci::VfioPciError),
+
+    /// Failed to DMA map VFIO device.
+    VfioDmaMap(pci::VfioPciError),
+
+    /// Failed to DMA unmap VFIO device.
+    VfioDmaUnmap(pci::VfioPciError),
 
     /// Failed to create the passthrough device.
     CreatePassthroughDevice(anyhow::Error),
@@ -1415,7 +1424,6 @@ impl DeviceManager {
         #[cfg(feature = "cmos")]
         {
             // Add a CMOS emulated device
-            use vm_memory::GuestMemory;
             let mem_size = self
                 .memory_manager
                 .lock()
@@ -2723,14 +2731,12 @@ impl DeviceManager {
             None
         };
 
-        let memory = self.memory_manager.lock().unwrap().guest_memory();
         let mut vfio_pci_device = VfioPciDevice::new(
             &self.address_manager.vm,
             vfio_device,
             vfio_container,
             &self.msi_interrupt_manager,
             legacy_interrupt_group,
-            memory,
             device_cfg.iommu,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
@@ -2760,6 +2766,21 @@ impl DeviceManager {
                 base: region.start.0,
                 size: region.length as u64,
             });
+        }
+
+        // Register DMA mapping in IOMMU.
+        // Do not register virtio-mem regions, as they are handled directly by
+        // virtio-mem device itself.
+        for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+            for region in zone.regions() {
+                vfio_pci_device
+                    .dma_map(
+                        region.start_addr().raw_value(),
+                        region.len() as u64,
+                        region.as_ptr() as u64,
+                    )
+                    .map_err(DeviceManagerError::VfioDmaMap)?;
+            }
         }
 
         let vfio_pci_device = Arc::new(Mutex::new(vfio_pci_device));
@@ -3017,7 +3038,7 @@ impl DeviceManager {
         self.cmdline_additions.as_slice()
     }
 
-    pub fn update_memory(&self, _new_region: &Arc<GuestRegionMmap>) -> DeviceManagerResult<()> {
+    pub fn update_memory(&self, new_region: &Arc<GuestRegionMmap>) -> DeviceManagerResult<()> {
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         for (virtio_device, _, _) in self.virtio_devices.iter() {
             virtio_device
@@ -3033,7 +3054,11 @@ impl DeviceManager {
                 vfio_pci_device
                     .lock()
                     .unwrap()
-                    .update_memory(_new_region)
+                    .dma_map(
+                        new_region.start_addr().raw_value(),
+                        new_region.len() as u64,
+                        new_region.as_ptr() as u64,
+                    )
                     .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
             }
         }
@@ -3173,6 +3198,19 @@ impl DeviceManager {
             let (pci_device, bus_device, virtio_device) = if let Ok(vfio_pci_device) =
                 any_device.clone().downcast::<Mutex<VfioPciDevice>>()
             {
+                // Unregister DMA mapping in IOMMU.
+                // Do not unregister the virtio-mem region, as it is directly
+                // handled by the virtio-mem device.
+                {
+                    let dev = vfio_pci_device.lock().unwrap();
+                    for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                        for region in zone.regions() {
+                            dev.dma_unmap(region.start_addr().raw_value(), region.len() as u64)
+                                .map_err(DeviceManagerError::VfioDmaUnmap)?;
+                        }
+                    }
+                }
+
                 (
                     Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
                     Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>,

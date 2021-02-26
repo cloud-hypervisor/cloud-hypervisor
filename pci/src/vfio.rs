@@ -12,7 +12,6 @@ use crate::{
 };
 use byteorder::{ByteOrder, LittleEndian};
 use std::any::Any;
-use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier};
@@ -24,15 +23,14 @@ use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
 };
 use vm_device::BusDevice;
-use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
-    GuestMemoryRegion, GuestRegionMmap, GuestUsize,
-};
+use vm_memory::{Address, GuestAddress, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]
 pub enum VfioPciError {
     AllocateGsi,
+    DmaMap(VfioError),
+    DmaUnmap(VfioError),
     EnableIntx(VfioError),
     EnableMsi(VfioError),
     EnableMsix(VfioError),
@@ -45,7 +43,6 @@ pub enum VfioPciError {
     MsixNotConfigured,
     NewVfioPciDevice,
     SetGsiRouting(hypervisor::HypervisorVmError),
-    UpdateMemory(VfioError),
 }
 pub type Result<T> = std::result::Result<T, VfioPciError>;
 
@@ -53,6 +50,8 @@ impl fmt::Display for VfioPciError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             VfioPciError::AllocateGsi => write!(f, "failed to allocate GSI"),
+            VfioPciError::DmaMap(e) => write!(f, "failed to DMA map: {}", e),
+            VfioPciError::DmaUnmap(e) => write!(f, "failed to DMA unmap: {}", e),
             VfioPciError::EnableIntx(e) => write!(f, "failed to enable INTx: {}", e),
             VfioPciError::EnableMsi(e) => write!(f, "failed to enable MSI: {}", e),
             VfioPciError::EnableMsix(e) => write!(f, "failed to enable MSI-X: {}", e),
@@ -69,7 +68,6 @@ impl fmt::Display for VfioPciError {
             VfioPciError::MsixNotConfigured => write!(f, "MSI-X interrupt not yet configured"),
             VfioPciError::NewVfioPciDevice => write!(f, "failed to create VFIO PCI device"),
             VfioPciError::SetGsiRouting(e) => write!(f, "failed to set GSI routes: {}", e),
-            VfioPciError::UpdateMemory(e) => write!(f, "failed to update memory: {}", e),
         }
     }
 }
@@ -303,7 +301,6 @@ pub struct VfioPciDevice {
     configuration: PciConfiguration,
     mmio_regions: Vec<MmioRegion>,
     interrupt: Interrupt,
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
     iommu_attached: bool,
 }
 
@@ -315,7 +312,6 @@ impl VfioPciDevice {
         container: Arc<VfioContainer>,
         msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<Box<dyn InterruptSourceGroup>>>,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
         iommu_attached: bool,
     ) -> Result<Self> {
         let device = Arc::new(device);
@@ -348,7 +344,6 @@ impl VfioPciDevice {
                 msi: None,
                 msix: None,
             },
-            mem,
             iommu_attached,
         };
 
@@ -427,7 +422,7 @@ impl VfioPciDevice {
 
             self.device
                 .enable_msix(irq_fds.iter().collect())
-                .map_err(VfioPciError::EnableMsi)?;
+                .map_err(VfioPciError::EnableMsix)?;
         }
 
         Ok(())
@@ -728,15 +723,21 @@ impl VfioPciDevice {
         }
     }
 
-    pub fn update_memory(&self, new_region: &Arc<GuestRegionMmap>) -> Result<()> {
+    pub fn dma_map(&self, iova: u64, size: u64, user_addr: u64) -> Result<()> {
         if !self.iommu_attached {
             self.container
-                .vfio_dma_map(
-                    new_region.start_addr().raw_value(),
-                    new_region.len() as u64,
-                    new_region.as_ptr() as u64,
-                )
-                .map_err(VfioPciError::UpdateMemory)?;
+                .vfio_dma_map(iova, size, user_addr)
+                .map_err(VfioPciError::DmaMap)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn dma_unmap(&self, iova: u64, size: u64) -> Result<()> {
+        if !self.iommu_attached {
+            self.container
+                .vfio_dma_unmap(iova, size)
+                .map_err(VfioPciError::DmaUnmap)?;
         }
 
         Ok(())
@@ -765,15 +766,6 @@ impl Drop for VfioPciDevice {
 
         if self.interrupt.intx_in_use() {
             self.disable_intx();
-        }
-
-        if !self.iommu_attached
-            && self
-                .container
-                .vfio_unmap_guest_memory(self.mem.memory().deref())
-                .is_err()
-        {
-            error!("failed to remove all guest memory regions from iommu table");
         }
     }
 }
@@ -976,15 +968,6 @@ impl PciDevice for VfioPciDevice {
             if is_64bit_bar {
                 bar_id += 1;
             }
-        }
-
-        if !self.iommu_attached
-            && self
-                .container
-                .vfio_map_guest_memory(self.mem.memory().deref())
-                .is_err()
-        {
-            error!("failed to add all guest memory regions into iommu table");
         }
 
         Ok(ranges)
