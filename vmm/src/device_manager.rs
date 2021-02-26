@@ -1944,6 +1944,7 @@ impl DeviceManager {
                     disk_cfg.num_queues,
                     disk_cfg.queue_size,
                     self.seccomp_action.clone(),
+                    disk_cfg.rate_limiter_config,
                 )
                 .map_err(DeviceManagerError::CreateVirtioBlock)?,
             ));
