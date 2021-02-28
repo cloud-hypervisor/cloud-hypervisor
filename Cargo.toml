@@ -23,7 +23,7 @@ libc = "0.2.86"
 log = { version = "0.4.14", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.22.0" }
-serde_json = "1.0.63"
+serde_json = "1.0.64"
 signal-hook = "0.3.6"
 thiserror = "1.0.24"
 vmm = { path = "vmm" }
@@ -42,7 +42,7 @@ credibility = "0.1.3"
 dirs = "3.0.1"
 lazy_static= "1.4.0"
 net_util = { path = "net_util" }
-serde_json = "1.0.63"
+serde_json = "1.0.64"
 ssh2 = "0.9.1"
 wait-timeout = "0.2.0"
 
