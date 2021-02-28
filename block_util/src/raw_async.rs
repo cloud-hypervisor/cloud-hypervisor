@@ -5,7 +5,7 @@
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
-use io_uring::{opcode, squeue, IoUring};
+use io_uring::{opcode, squeue, types, IoUring};
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -71,28 +71,23 @@ impl AsyncIo for RawFileAsync {
         iovecs: Vec<libc::iovec>,
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, sq, _) = self.io_uring.split();
-        let mut avail_sq = sq.available();
+        let (submitter, mut sq, _) = self.io_uring.split();
 
         // Safe because we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
         let _ = unsafe {
-            avail_sq.push(
-                opcode::Readv::new(
-                    opcode::types::Fd(self.fd),
-                    iovecs.as_ptr(),
-                    iovecs.len() as u32,
-                )
-                .offset(offset)
-                .build()
-                .flags(squeue::Flags::ASYNC)
-                .user_data(user_data),
+            sq.push(
+                &opcode::Readv::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
+                    .offset(offset)
+                    .build()
+                    .flags(squeue::Flags::ASYNC)
+                    .user_data(user_data),
             )
         };
 
         // Update the submission queue and submit new operations to the
         // io_uring instance.
-        avail_sq.sync();
+        sq.sync();
         submitter.submit().map_err(AsyncIoError::ReadVectored)?;
 
         Ok(())
@@ -104,28 +99,23 @@ impl AsyncIo for RawFileAsync {
         iovecs: Vec<libc::iovec>,
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, sq, _) = self.io_uring.split();
-        let mut avail_sq = sq.available();
+        let (submitter, mut sq, _) = self.io_uring.split();
 
         // Safe because we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
         let _ = unsafe {
-            avail_sq.push(
-                opcode::Writev::new(
-                    opcode::types::Fd(self.fd),
-                    iovecs.as_ptr(),
-                    iovecs.len() as u32,
-                )
-                .offset(offset)
-                .build()
-                .flags(squeue::Flags::ASYNC)
-                .user_data(user_data),
+            sq.push(
+                &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
+                    .offset(offset)
+                    .build()
+                    .flags(squeue::Flags::ASYNC)
+                    .user_data(user_data),
             )
         };
 
         // Update the submission queue and submit new operations to the
         // io_uring instance.
-        avail_sq.sync();
+        sq.sync();
         submitter.submit().map_err(AsyncIoError::WriteVectored)?;
 
         Ok(())
@@ -133,13 +123,12 @@ impl AsyncIo for RawFileAsync {
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         if let Some(user_data) = user_data {
-            let (submitter, sq, _) = self.io_uring.split();
-            let mut avail_sq = sq.available();
+            let (submitter, mut sq, _) = self.io_uring.split();
 
             // Safe because we know the file descriptor is valid.
             let _ = unsafe {
-                avail_sq.push(
-                    opcode::Fsync::new(opcode::types::Fd(self.fd))
+                sq.push(
+                    &opcode::Fsync::new(types::Fd(self.fd))
                         .build()
                         .flags(squeue::Flags::ASYNC)
                         .user_data(user_data),
@@ -148,7 +137,7 @@ impl AsyncIo for RawFileAsync {
 
             // Update the submission queue and submit new operations to the
             // io_uring instance.
-            avail_sq.sync();
+            sq.sync();
             submitter.submit().map_err(AsyncIoError::Fsync)?;
         } else {
             unsafe { libc::fsync(self.fd) };
@@ -161,7 +150,7 @@ impl AsyncIo for RawFileAsync {
         let mut completion_list = Vec::new();
 
         let cq = self.io_uring.completion();
-        for cq_entry in cq.available() {
+        for cq_entry in cq {
             completion_list.push((cq_entry.user_data(), cq_entry.result()));
         }
 

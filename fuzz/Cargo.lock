@@ -273,9 +273,9 @@ dependencies = [
 
 [[package]]
 name = "io-uring"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f7589adca0ddd74f56ed83a5098b45e3abf264dc27e150a8bec3397fcc34338"
+checksum = "4e06a309d419b77e3036c1eb5683482c9ee51cff165e448d04bd601b6cd16360"
 dependencies = [
  "bitflags",
  "libc",
@@ -512,9 +512,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.63"
+version = "1.0.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43535db9747a4ba938c0ce0a98cc631a46ebf943c9e1d604e091df6007620bf6"
+checksum = "799e97dc9fdae36a5c8b8f2cae9ce2ee9fdce2058c57a93e6099d919fd982f79"
 dependencies = [
  "itoa",
  "ryu",
