@@ -528,6 +528,18 @@ impl cpu::Vcpu for MshvVcpu {
             xsave,
         })
     }
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Translate guest virtual address to guest physical address
+    ///
+    fn translate_gva(&self, gva: u64, flags: u64) -> cpu::Result<(u64, hv_translate_gva_result)> {
+        let r = self
+            .fd
+            .translate_gva(gva, flags)
+            .map_err(|e| cpu::HypervisorCpuError::TranslateGVA(e.into()))?;
+
+        Ok(r)
+    }
 }
 
 struct MshvEmulatorContext<'a> {
@@ -537,14 +549,25 @@ struct MshvEmulatorContext<'a> {
 
 impl<'a> MshvEmulatorContext<'a> {
     // Do the actual gva -> gpa translation
+    #[allow(non_upper_case_globals)]
     fn translate(&self, gva: u64) -> Result<u64, PlatformError> {
         if self.map.0 == gva {
             return Ok(self.map.1);
         }
 
-        // TODO Check if we could fallback to e.g. an hypercall for doing
-        // the translation for us.
-        todo!()
+        // TODO: More fine-grained control for the flags
+        let flags = HV_TRANSLATE_GVA_VALIDATE_READ | HV_TRANSLATE_GVA_VALIDATE_WRITE;
+
+        let r = self
+            .vcpu
+            .translate_gva(gva, flags.into())
+            .map_err(|e| PlatformError::TranslateGVA(anyhow!(e)))?;
+
+        let result_code = unsafe { r.1.__bindgen_anon_1.result_code };
+        match result_code {
+            hv_translate_gva_result_code_HvTranslateGvaSuccess => Ok(r.0),
+            _ => Err(PlatformError::TranslateGVA(anyhow!(result_code))),
+        }
     }
 }
 
