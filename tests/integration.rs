@@ -102,6 +102,8 @@ mod tests {
     const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210106-1.vhd";
     #[cfg(target_arch = "x86_64")]
     const WINDOWS_IMAGE_NAME: &str = "windows-server-2019.raw";
+    #[cfg(target_arch = "x86_64")]
+    const OVMF_NAME: &str = "OVMF-4b47d0c6c8.fd";
 
     const DIRECT_KERNEL_BOOT_CMDLINE: &str =
         "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
@@ -6112,7 +6114,7 @@ mod tests {
             workload_path.push("workloads");
 
             let mut ovmf_path = workload_path.clone();
-            ovmf_path.push("OVMF.fd");
+            ovmf_path.push(OVMF_NAME);
 
             let mut osdisk_path = workload_path;
             osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
@@ -6166,7 +6168,7 @@ mod tests {
             workload_path.push("workloads");
 
             let mut ovmf_path = workload_path.clone();
-            ovmf_path.push("OVMF.fd");
+            ovmf_path.push(OVMF_NAME);
 
             let mut osdisk_path = workload_path;
             osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
