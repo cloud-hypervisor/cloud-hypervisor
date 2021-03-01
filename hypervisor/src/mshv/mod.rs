@@ -128,38 +128,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     }
 }
 
-#[derive(Clone)]
-// A software emulated TLB.
-// This is mostly used by the instruction emulator to cache gva to gpa translations
-// passed from the hypervisor.
-struct SoftTLB {
-    addr_map: HashMap<u64, u64>,
-}
-
-impl SoftTLB {
-    fn new() -> SoftTLB {
-        SoftTLB {
-            addr_map: HashMap::new(),
-        }
-    }
-
-    // Adds a gva -> gpa mapping into the TLB.
-    fn add_mapping(&mut self, gva: u64, gpa: u64) {
-        *self.addr_map.entry(gva).or_insert(gpa) = gpa;
-    }
-
-    // Do the actual gva -> gpa translation
-    fn translate(&self, gva: u64) -> Result<u64, PlatformError> {
-        self.addr_map
-            .get(&gva)
-            .ok_or_else(|| PlatformError::UnmappedGVA(anyhow!("{:#?}", gva)))
-            .map(|v| *v)
-
-        // TODO Check if we could fallback to e.g. an hypercall for doing
-        // the translation for us.
-    }
-}
-
 #[allow(dead_code)]
 /// Vcpu struct for Microsoft Hypervisor
 pub struct MshvVcpu {
@@ -411,13 +379,11 @@ impl cpu::Vcpu for MshvVcpu {
 
                     let mut context = MshvEmulatorContext {
                         vcpu: self,
-                        tlb: SoftTLB::new(),
+                        addr_map: HashMap::new(),
                     };
 
                     // Add the GVA <-> GPA mapping.
-                    context
-                        .tlb
-                        .add_mapping(info.guest_virtual_address, info.guest_physical_address);
+                    context.add_mapping(info.guest_virtual_address, info.guest_physical_address);
 
                     // Create a new emulator.
                     let mut emul = Emulator::new(&mut context);
@@ -569,7 +535,25 @@ impl cpu::Vcpu for MshvVcpu {
 
 struct MshvEmulatorContext<'a> {
     vcpu: &'a MshvVcpu,
-    tlb: SoftTLB,
+    addr_map: HashMap<u64, u64>,
+}
+
+impl<'a> MshvEmulatorContext<'a> {
+    // Adds a gva -> gpa mapping into the TLB.
+    fn add_mapping(&mut self, gva: u64, gpa: u64) {
+        *self.addr_map.entry(gva).or_insert(gpa) = gpa;
+    }
+
+    // Do the actual gva -> gpa translation
+    fn translate(&self, gva: u64) -> Result<u64, PlatformError> {
+        self.addr_map
+            .get(&gva)
+            .ok_or_else(|| PlatformError::UnmappedGVA(anyhow!("{:#?}", gva)))
+            .map(|v| *v)
+
+        // TODO Check if we could fallback to e.g. an hypercall for doing
+        // the translation for us.
+    }
 }
 
 /// Platform emulation for Hyper-V
@@ -577,7 +561,7 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
     type CpuState = EmulatorCpuState;
 
     fn read_memory(&self, gva: u64, data: &mut [u8]) -> Result<(), PlatformError> {
-        let gpa = self.tlb.translate(gva)?;
+        let gpa = self.translate(gva)?;
         debug!(
             "mshv emulator: memory read {} bytes from [{:#x} -> {:#x}]",
             data.len(),
@@ -597,7 +581,7 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
     }
 
     fn write_memory(&mut self, gva: u64, data: &[u8]) -> Result<(), PlatformError> {
-        let gpa = self.tlb.translate(gva)?;
+        let gpa = self.translate(gva)?;
         debug!(
             "mshv emulator: memory write {} bytes at [{:#x} -> {:#x}]",
             data.len(),
@@ -661,7 +645,7 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
     }
 
     fn gva_to_gpa(&self, gva: u64) -> Result<u64, PlatformError> {
-        self.tlb.translate(gva)
+        self.translate(gva)
     }
 
     fn fetch(&self, _ip: u64, _instruction_bytes: &mut [u8]) -> Result<(), PlatformError> {
