@@ -23,6 +23,8 @@ use crate::CpuState;
 use crate::MpState;
 #[cfg(target_arch = "x86_64")]
 use crate::Xsave;
+#[cfg(feature = "mshv")]
+use mshv_bindings::*;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -198,6 +200,11 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to set system register: {0}")]
     SetSysRegister(#[source] anyhow::Error),
+    ///
+    /// GVA translation error
+    ///
+    #[error("Failed to translate GVA: {0}")]
+    TranslateGVA(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -398,4 +405,9 @@ pub trait Vcpu: Send + Sync {
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///
     fn run(&self) -> std::result::Result<VmExit, HypervisorCpuError>;
+    #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+    ///
+    /// Translate guest virtual address to guest physical address
+    ///
+    fn translate_gva(&self, gva: u64, flags: u64) -> Result<(u64, hv_translate_gva_result)>;
 }
