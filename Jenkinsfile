@@ -149,7 +149,7 @@ pipeline{
 								sh "mkdir ${env.HOME}/workloads"
 								azureDownload(storageCredentialId: 'ch-image-store',
 											  containerName: 'private-images',
-											  includeFilesPattern: 'OVMF.fd',
+											  includeFilesPattern: 'OVMF-4b47d0c6c8.fd',
 											  downloadType: 'container',
 											  downloadDirLoc: "${env.HOME}/workloads")
 								azureDownload(storageCredentialId: 'ch-image-store',

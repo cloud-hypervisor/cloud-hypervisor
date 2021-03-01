@@ -10,7 +10,7 @@ features_build=""
 features_test="--features integration_tests"
 
 WIN_IMAGE_FILE="/root/workloads/windows-server-2019.raw"
-OVMF_FW_FILE="/root/workloads/OVMF.fd"
+OVMF_FW_FILE="/root/workloads/OVMF-4b47d0c6c8.fd"
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
 CFLAGS=""
 TARGET_CC=""
