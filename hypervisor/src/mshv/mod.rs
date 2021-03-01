@@ -379,11 +379,8 @@ impl cpu::Vcpu for MshvVcpu {
 
                     let mut context = MshvEmulatorContext {
                         vcpu: self,
-                        addr_map: HashMap::new(),
+                        map: (info.guest_virtual_address, info.guest_physical_address),
                     };
-
-                    // Add the GVA <-> GPA mapping.
-                    context.add_mapping(info.guest_virtual_address, info.guest_physical_address);
 
                     // Create a new emulator.
                     let mut emul = Emulator::new(&mut context);
@@ -535,24 +532,19 @@ impl cpu::Vcpu for MshvVcpu {
 
 struct MshvEmulatorContext<'a> {
     vcpu: &'a MshvVcpu,
-    addr_map: HashMap<u64, u64>,
+    map: (u64, u64), // Initial GVA to GPA mapping provided by the hypervisor
 }
 
 impl<'a> MshvEmulatorContext<'a> {
-    // Adds a gva -> gpa mapping into the TLB.
-    fn add_mapping(&mut self, gva: u64, gpa: u64) {
-        *self.addr_map.entry(gva).or_insert(gpa) = gpa;
-    }
-
     // Do the actual gva -> gpa translation
     fn translate(&self, gva: u64) -> Result<u64, PlatformError> {
-        self.addr_map
-            .get(&gva)
-            .ok_or_else(|| PlatformError::UnmappedGVA(anyhow!("{:#?}", gva)))
-            .map(|v| *v)
+        if self.map.0 == gva {
+            return Ok(self.map.1);
+        }
 
         // TODO Check if we could fallback to e.g. an hypercall for doing
         // the translation for us.
+        todo!()
     }
 }
 
