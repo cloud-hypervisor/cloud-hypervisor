@@ -319,6 +319,9 @@ impl VirtioDevice for Net {
                 pause_evt,
                 vu_interrupt_list: interrupt_list_sub,
                 slave_req_handler: None,
+                sockfd: None,
+                disconnected: None,
+                activate_evt: None,
             });
 
             let paused = self.common.paused.clone();

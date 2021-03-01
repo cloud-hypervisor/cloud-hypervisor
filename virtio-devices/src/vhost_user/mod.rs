@@ -94,3 +94,4 @@ pub enum Error {
     MissingRegionFd,
 }
 type Result<T> = std::result::Result<T, Error>;
+type ResultOnlyError = std::result::Result<(), Error>;

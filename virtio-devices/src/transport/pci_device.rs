@@ -329,6 +329,9 @@ pub struct VirtioPciDevice {
 
     // Barrier that is used to wait on for activation
     activate_barrier: Arc<Barrier>,
+
+    // Flag that indicates the broken of a connected vhost-user socket
+    disconneted: Arc<AtomicBool>,
 }
 
 impl VirtioPciDevice {
@@ -442,6 +445,7 @@ impl VirtioPciDevice {
             bar_regions: vec![],
             activate_evt,
             activate_barrier: Arc::new(Barrier::new(2)),
+            disconneted: locked_device.get_disconnected_arc().unwrap(),
         };
 
         if let Some(msix_config) = &virtio_pci_device.msix_config {
@@ -646,7 +650,7 @@ impl VirtioPciDevice {
     }
 
     fn activate(&mut self) -> ActivateResult {
-        if let Some(virtio_interrupt) = self.virtio_interrupt.take() {
+        if let Some(virtio_interrupt) = &self.virtio_interrupt {
             if self.memory.is_some() {
                 let mem = self.memory.as_ref().unwrap().clone();
                 let mut device = self.device.lock().unwrap();
@@ -659,7 +663,7 @@ impl VirtioPciDevice {
                         error!("Queue {} is not valid", i);
                     }
                 }
-                return device.activate(mem, virtio_interrupt, queues, queue_evts);
+                return device.activate(mem, virtio_interrupt.clone(), queues, queue_evts);
             }
         }
         Ok(())
@@ -669,16 +673,22 @@ impl VirtioPciDevice {
         if self.needs_activation() {
             self.activate().expect("Failed to activate device");
             self.device_activated.store(true, Ordering::SeqCst);
-            info!("{}: Waiting for barrier", self.id);
-            self.activate_barrier.wait();
-            info!("{}: Barrier released", self.id);
+            if !self.disconneted.load(Ordering::SeqCst) {
+                info!("{}: Waiting for barrier", self.id);
+                self.activate_barrier.wait();
+                info!("{}: Barrier released", self.id);
+            } else {
+                self.disconneted.store(false, Ordering::SeqCst);
+            }
         } else {
             info!("{}: Device does not need activation", self.id)
         }
     }
 
     fn needs_activation(&self) -> bool {
-        !self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready()
+        let ret = self.disconneted.load(Ordering::SeqCst)
+            || !self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready();
+        ret
     }
 }
 

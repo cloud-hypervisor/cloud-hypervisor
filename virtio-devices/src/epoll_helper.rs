@@ -29,6 +29,7 @@ pub enum EpollHelperError {
 
 pub const EPOLL_HELPER_EVENT_PAUSE: u16 = 0;
 pub const EPOLL_HELPER_EVENT_KILL: u16 = 1;
+pub const EPOLL_HELPER_EVENT_HUP: u16 = 2;
 pub const EPOLL_HELPER_EVENT_LAST: u16 = 15;
 
 pub trait EpollHelperHandler {
@@ -62,6 +63,30 @@ impl EpollHelper {
             epoll::ControlOptions::EPOLL_CTL_ADD,
             fd,
             epoll::Event::new(epoll::Events::EPOLLIN, id.into()),
+        )
+        .map_err(EpollHelperError::Ctl)
+    }
+
+    pub fn add_event_hup(
+        &mut self,
+        fd: RawFd,
+        id: u16,
+    ) -> std::result::Result<(), EpollHelperError> {
+        epoll::ctl(
+            self.epoll_file.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            fd,
+            epoll::Event::new(epoll::Events::EPOLLHUP, id.into()),
+        )
+        .map_err(EpollHelperError::Ctl)
+    }
+
+    pub fn remove_event(&mut self, fd: RawFd) -> std::result::Result<(), EpollHelperError> {
+        epoll::ctl(
+            self.epoll_file.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_DEL,
+            fd,
+            epoll::Event::new(epoll::Events::empty(), 0),
         )
         .map_err(EpollHelperError::Ctl)
     }
@@ -102,7 +127,10 @@ impl EpollHelper {
             };
 
             for event in events.iter().take(num_events) {
+                let ev_events = event.events as i32;
                 let ev_type = event.data as u16;
+
+                error!("event detected! type: {} event:{}", ev_type, ev_events);
 
                 match ev_type {
                     EPOLL_HELPER_EVENT_KILL => {

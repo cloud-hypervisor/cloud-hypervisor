@@ -33,3 +33,4 @@ vm-memory = { version = "0.5.0", features = ["backend-mmap", "backend-atomic"] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = ">=0.3.1"
+retry = "1.2.0"

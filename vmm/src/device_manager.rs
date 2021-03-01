@@ -1847,11 +1847,16 @@ impl DeviceManager {
                 num_queues: disk_cfg.num_queues,
                 queue_size: disk_cfg.queue_size,
             };
+            let activate_evt = self
+                .activate_evt
+                .try_clone()
+                .map_err(DeviceManagerError::EventFd)?;
             let vhost_user_block_device = Arc::new(Mutex::new(
                 match virtio_devices::vhost_user::Blk::new(
                     id.clone(),
                     vu_cfg,
                     self.seccomp_action.clone(),
+                    activate_evt,
                 ) {
                     Ok(vub_device) => vub_device,
                     Err(e) => {
@@ -2270,6 +2275,9 @@ impl DeviceManager {
                     fs_cfg.queue_size,
                     cache,
                     self.seccomp_action.clone(),
+                    self.activate_evt
+                        .try_clone()
+                        .map_err(DeviceManagerError::EventFd)?,
                 )
                 .map_err(DeviceManagerError::CreateVirtioFs)?,
             ));

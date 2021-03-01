@@ -9,14 +9,14 @@
 
 use super::super::{
     EpollHelper, EpollHelperError, EpollHelperHandler, Queue, VirtioInterruptType,
-    EPOLL_HELPER_EVENT_LAST,
+    EPOLL_HELPER_EVENT_HUP, EPOLL_HELPER_EVENT_LAST,
 };
 use super::{Error, Result};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::VirtioInterrupt;
-use std::os::unix::io::AsRawFd;
-use std::sync::atomic::AtomicBool;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use vhost::vhost_user::{MasterReqHandler, VhostUserMasterReqHandler};
 
@@ -33,6 +33,9 @@ pub struct VhostUserEpollConfig<S: VhostUserMasterReqHandler> {
     pub pause_evt: EventFd,
     pub vu_interrupt_list: Vec<(Option<EventFd>, Queue)>,
     pub slave_req_handler: Option<MasterReqHandler<S>>,
+    pub sockfd: Option<RawFd>,
+    pub disconnected: Option<Arc<AtomicBool>>,
+    pub activate_evt: Option<EventFd>,
 }
 
 pub struct VhostUserEpollHandler<S: VhostUserMasterReqHandler> {
@@ -85,6 +88,14 @@ impl<S: VhostUserMasterReqHandler> VhostUserEpollHandler<S> {
             helper.add_event(self_req_handler.as_raw_fd(), self.slave_evt_idx)?;
         }
 
+        if self.vu_epoll_cfg.sockfd.is_some()
+            && self.vu_epoll_cfg.disconnected.is_some()
+            && self.vu_epoll_cfg.activate_evt.is_some()
+        {
+            // watch the EPOLLHUP event for socket reconnection
+            helper.add_event_hup(self.vu_epoll_cfg.sockfd.unwrap(), EPOLL_HELPER_EVENT_HUP)?;
+        }
+
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -96,6 +107,7 @@ impl<S: VhostUserMasterReqHandler> EpollHelperHandler for VhostUserEpollHandler<
         let ev_type = event.data as u16;
         match ev_type {
             x if (x >= self.queue_evt_start_idx && x < self.slave_evt_idx) => {
+                info!("FS handler recieved ev_type: {}", ev_type);
                 let idx = (x - self.queue_evt_start_idx) as usize;
                 if let Some(eventfd) = &self.vu_epoll_cfg.vu_interrupt_list[idx].0 {
                     if let Err(e) = eventfd.read() {
@@ -117,6 +129,20 @@ impl<S: VhostUserMasterReqHandler> EpollHelperHandler for VhostUserEpollHandler<
                         return true;
                     }
                 }
+            }
+            x if (x == EPOLL_HELPER_EVENT_HUP) => {
+                self.vu_epoll_cfg
+                    .disconnected
+                    .as_ref()
+                    .unwrap()
+                    .store(true, Ordering::SeqCst);
+                self.vu_epoll_cfg
+                    .activate_evt
+                    .as_ref()
+                    .unwrap()
+                    .write(1)
+                    .ok();
+                return true;
             }
             _ => {
                 error!("Unknown event for vhost-user");

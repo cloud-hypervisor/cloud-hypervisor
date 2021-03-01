@@ -99,6 +99,8 @@ pub enum ActivateError {
     CreateSeccompFilter(seccomp::SeccompError),
     /// Cannot create rate limiter
     CreateRateLimiter(std::io::Error),
+    /// Failed to clone eventfd.
+    CloneEventfd(std::io::Error),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;

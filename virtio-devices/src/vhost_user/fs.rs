@@ -4,7 +4,7 @@
 use super::vu_common_ctrl::{
     add_memory_region, reset_vhost_user, setup_vhost_user, update_mem_table,
 };
-use super::{Error, Result};
+use super::{Error, Result, ResultOnlyError};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vhost_user::handler::{VhostUserEpollConfig, VhostUserEpollHandler};
 use crate::{
@@ -12,12 +12,13 @@ use crate::{
     VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_VERSION_1,
 };
 use libc::{self, c_void, off64_t, pread64, pwrite64};
+use retry::{delay, retry_with_index};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::io;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
-use std::sync::{Arc, Barrier};
+use std::sync::{atomic::AtomicBool, Arc, Barrier};
 use std::thread;
 use vhost::vhost_user::message::{
     VhostUserFSSlaveMsg, VhostUserFSSlaveMsgFlags, VhostUserProtocolFeatures,
@@ -270,7 +271,7 @@ unsafe impl ByteValued for VirtioFsConfig {}
 pub struct Fs {
     common: VirtioCommon,
     id: String,
-    vu: Master,
+    vu: Option<Master>,
     config: VirtioFsConfig,
     // Hold ownership of the memory that is allocated for the device
     // which will be automatically dropped when the device is dropped
@@ -279,6 +280,9 @@ pub struct Fs {
     seccomp_action: SeccompAction,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     acked_protocol_features: u64,
+    disconnected: Arc<AtomicBool>,
+    sock_path: String,
+    activate_evt: EventFd,
 }
 
 impl Fs {
@@ -291,62 +295,13 @@ impl Fs {
         queue_size: u16,
         cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
         seccomp_action: SeccompAction,
+        activate_evt: EventFd,
     ) -> Result<Fs> {
-        let mut slave_req_support = false;
-
-        // Calculate the actual number of queues needed.
-        let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
-
-        // Connect to the vhost-user socket.
-        let mut master =
-            Master::connect(path, num_queues as u64).map_err(Error::VhostUserCreateMaster)?;
-
-        // Filling device and vring features VMM supports.
-        let mut avail_features =
+        let avail_features =
             1 << VIRTIO_F_VERSION_1 | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
-        // Set vhost-user owner.
-        master.set_owner().map_err(Error::VhostUserSetOwner)?;
-
-        // Get features from backend, do negotiation to get a feature collection which
-        // both VMM and backend support.
-        let backend_features = master.get_features().map_err(Error::VhostUserGetFeatures)?;
-        avail_features &= backend_features;
-        // Set features back is required by the vhost crate mechanism, since the
-        // later vhost call will check if features is filled in master before execution.
-        master
-            .set_features(avail_features)
-            .map_err(Error::VhostUserSetFeatures)?;
-
-        // Identify if protocol features are supported by the slave.
-        let mut acked_features = 0;
-        let mut acked_protocol_features = 0;
-        if avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
-            acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
-
-            let mut protocol_features = master
-                .get_protocol_features()
-                .map_err(Error::VhostUserGetProtocolFeatures)?;
-
-            let mut supported_protocol_features = VhostUserProtocolFeatures::MQ
-                | VhostUserProtocolFeatures::REPLY_ACK
-                | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS;
-
-            if cache.is_some() {
-                supported_protocol_features |=
-                    VhostUserProtocolFeatures::SLAVE_REQ | VhostUserProtocolFeatures::SLAVE_SEND_FD
-            }
-
-            protocol_features &= supported_protocol_features;
-
-            master
-                .set_protocol_features(protocol_features)
-                .map_err(Error::VhostUserSetProtocolFeatures)?;
-
-            acked_protocol_features = protocol_features.bits();
-
-            slave_req_support = true;
-        }
+        let acked_features = 0;
+        let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
 
         // Create virtio-fs device configuration.
         let mut config = VirtioFsConfig::default();
@@ -361,18 +316,78 @@ impl Fs {
                 acked_features,
                 queue_sizes: vec![queue_size; num_queues],
                 paused_sync: Some(Arc::new(Barrier::new(2))),
-                min_queues: NUM_QUEUE_OFFSET as u16,
                 ..Default::default()
             },
             id,
-            vu: master,
+            vu: None,
             config,
             cache,
-            slave_req_support,
+            slave_req_support: false,
             seccomp_action,
+            disconnected: Arc::new(AtomicBool::new(false)),
+            sock_path: path.to_string(),
+            activate_evt,
             guest_memory: None,
-            acked_protocol_features,
+            acked_protocol_features: 0,
         })
+    }
+
+    pub fn start(&mut self) -> ResultOnlyError {
+        let num_queues = self.common.queue_sizes.len();
+
+        // Connect to the vhost-user socket.
+        let mut master = retry_with_index(delay::Fixed::from_millis(500), |retry_times| {
+            if retry_times == 1 {
+                println!("waiting for virtio-fs daemon opening...");
+            }
+            Master::connect(&self.sock_path, num_queues as u64)
+        })
+        .unwrap();
+
+        // Set vhost-user owner.
+        master.set_owner().map_err(Error::VhostUserSetOwner)?;
+
+        // Get features from backend, do negotiation to get a feature collection which
+        // both VMM and backend support.
+        let backend_features = master.get_features().map_err(Error::VhostUserGetFeatures)?;
+        self.common.avail_features &= backend_features;
+        // Set features back is required by the vhost crate mechanism, since the
+        // later vhost call will check if features is filled in master before execution.
+        master
+            .set_features(self.common.avail_features)
+            .map_err(Error::VhostUserSetFeatures)?;
+
+        // Identify if protocol features are supported by the slave.
+        if self.common.avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
+            self.common.acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+
+            let mut protocol_features = master
+                .get_protocol_features()
+                .map_err(Error::VhostUserGetProtocolFeatures)?;
+
+            let mut supported_protocol_features = VhostUserProtocolFeatures::MQ
+                | VhostUserProtocolFeatures::REPLY_ACK
+                | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS;
+
+            if self.cache.is_some() {
+                supported_protocol_features |=
+                    VhostUserProtocolFeatures::SLAVE_REQ | VhostUserProtocolFeatures::SLAVE_SEND_FD
+            }
+
+            protocol_features &= supported_protocol_features;
+
+            master
+                .set_protocol_features(protocol_features)
+                .map_err(Error::VhostUserSetProtocolFeatures)?;
+
+            self.acked_protocol_features = protocol_features.bits();
+
+            self.slave_req_support = true;
+        }
+
+        self.vu = Some(master);
+
+        return Ok(());
     }
 }
 
@@ -413,6 +428,8 @@ impl VirtioDevice for Fs {
         queues: Vec<Queue>,
         queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
+        self.start().map_err(ActivateError::VhostUserFsSetup)?;
+
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
 
         self.guest_memory = Some(mem.clone());
@@ -439,7 +456,7 @@ impl VirtioDevice for Fs {
             })?;
 
         let vu_call_evt_queue_list = setup_vhost_user(
-            &mut self.vu,
+            self.vu.as_mut().unwrap(),
             &mem.memory(),
             queues,
             queue_evts,
@@ -464,6 +481,8 @@ impl VirtioDevice for Fs {
                     })?;
                 req_handler.set_reply_ack_flag(true);
                 self.vu
+                    .as_mut()
+                    .unwrap()
                     .set_slave_request_fd(req_handler.get_tx_raw_fd())
                     .map_err(|e| {
                         ActivateError::VhostUserFsSetup(Error::VhostUserSetSlaveRequestFd(e))
@@ -482,10 +501,24 @@ impl VirtioDevice for Fs {
             kill_evt,
             pause_evt,
             slave_req_handler,
+            sockfd: Some(self.vu.as_mut().unwrap().as_raw_fd()),
+            disconnected: Some(self.disconnected.clone()),
+            activate_evt: Some(
+                self.activate_evt
+                    .try_clone()
+                    .map_err(ActivateError::CloneEventfd)
+                    .unwrap(),
+            ),
         });
 
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
+        /*
+        let disconnected = self.disconnected.clone();
+        let activate_evt = self.activate_evt
+                               .try_clone()
+                               .map_err(ActivateError::CloneEventfd);
+        */
         let mut epoll_threads = Vec::new();
         let virtio_vhost_fs_seccomp_filter =
             get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostFs)
@@ -517,7 +550,10 @@ impl VirtioDevice for Fs {
             self.common.resume().ok()?;
         }
 
-        if let Err(e) = reset_vhost_user(&mut self.vu, self.common.queue_sizes.len()) {
+        if let Err(e) = reset_vhost_user(
+            &mut self.vu.as_mut().unwrap(),
+            self.common.queue_sizes.len(),
+        ) {
             error!("Failed to reset vhost-user daemon: {:?}", e);
             return None;
         }
@@ -534,7 +570,7 @@ impl VirtioDevice for Fs {
     }
 
     fn shutdown(&mut self) {
-        let _ = unsafe { libc::close(self.vu.as_raw_fd()) };
+        let _ = unsafe { libc::close(self.vu.as_mut().unwrap().as_raw_fd()) };
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
@@ -563,10 +599,14 @@ impl VirtioDevice for Fs {
     ) -> std::result::Result<(), crate::Error> {
         if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits() != 0
         {
-            add_memory_region(&mut self.vu, region).map_err(crate::Error::VhostUserAddMemoryRegion)
+            add_memory_region(&mut self.vu.as_mut().unwrap(), region)
+                .map_err(crate::Error::VhostUserAddMemoryRegion)
         } else if let Some(guest_memory) = &self.guest_memory {
-            update_mem_table(&mut self.vu, guest_memory.memory().deref())
-                .map_err(crate::Error::VhostUserUpdateMemory)
+            update_mem_table(
+                &mut self.vu.as_mut().unwrap(),
+                guest_memory.memory().deref(),
+            )
+            .map_err(crate::Error::VhostUserUpdateMemory)
         } else {
             Ok(())
         }
@@ -585,6 +625,11 @@ impl VirtioDevice for Fs {
         }
 
         mappings
+    }
+
+    /// Return a clone of self.disconnected
+    fn get_disconnected_arc(&self) -> std::result::Result<Arc<AtomicBool>, std::io::Error> {
+        Ok(self.disconnected.clone())
     }
 }
 

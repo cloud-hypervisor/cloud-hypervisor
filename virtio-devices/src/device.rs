@@ -197,6 +197,13 @@ pub trait VirtioDevice: Send {
             offset_config.write_all(data).unwrap();
         }
     }
+
+    /// Default implementation if the device is not vhost-user or reconnection is
+    /// not supported, disconnected status will always be false for this default
+    /// one.
+    fn get_disconnected_arc(&self) -> Result<Arc<AtomicBool>, std::io::Error> {
+        Ok(Arc::new(AtomicBool::new(false)).clone())
+    }
 }
 
 /// Trait providing address translation the same way a physical DMA remapping
