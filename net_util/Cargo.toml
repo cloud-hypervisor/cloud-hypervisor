@@ -5,7 +5,7 @@ authors = ["The Chromium OS Authors"]
 
 [dependencies]
 epoll = ">=4.0.1"
-libc = "0.2.86"
+libc = "0.2.87"
 log = "0.4.14"
 net_gen = { path = "../net_gen" }
 serde = "1.0.123"
