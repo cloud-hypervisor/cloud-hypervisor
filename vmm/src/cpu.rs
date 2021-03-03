@@ -186,6 +186,9 @@ pub enum Error {
     /// Error populating CPUID with CPU identification
     #[cfg(target_arch = "x86_64")]
     CpuidIdentification(vmm_sys_util::fam::Error),
+
+    #[cfg(feature = "tdx")]
+    InitializeTdx(hypervisor::HypervisorCpuError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1080,6 +1083,18 @@ impl CpuManager {
             state.join_thread()?;
         }
 
+        Ok(())
+    }
+
+    #[cfg(feature = "tdx")]
+    pub fn initialize_tdx(&self, hob_address: u64) -> Result<()> {
+        for vcpu in &self.vcpus {
+            vcpu.lock()
+                .unwrap()
+                .vcpu
+                .tdx_init(hob_address)
+                .map_err(Error::InitializeTdx)?;
+        }
         Ok(())
     }
 
