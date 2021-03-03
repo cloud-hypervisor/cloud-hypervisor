@@ -1091,6 +1091,11 @@ impl CpuManager {
         self.config.max_vcpus
     }
 
+    #[cfg(target_arch = "x86_64")]
+    pub fn common_cpuid(&self) -> CpuId {
+        self.cpuid.clone()
+    }
+
     fn present_vcpus(&self) -> u8 {
         self.vcpu_states
             .iter()
