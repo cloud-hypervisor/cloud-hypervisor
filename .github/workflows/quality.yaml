@@ -35,6 +35,9 @@ jobs:
       - name: Clippy (acpi,kvm)
         run: cargo clippy --all --all-targets --no-default-features --tests --features "acpi,kvm" -- -D warnings
 
+      - name: Clippy (acpi,kvm,tdx)
+        run: cargo clippy --all --all-targets --no-default-features --tests --features "acpi,kvm,tdx" -- -D warnings
+
       - name: Clippy (kvm)
         run: cargo clippy --all --all-targets --no-default-features --tests --features "kvm" -- -D warnings
 
