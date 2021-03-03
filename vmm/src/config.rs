@@ -119,6 +119,9 @@ pub enum ValidationError {
     HugePageSizeWithoutHugePages,
     // Huge page size is not power of 2
     InvalidHugePageSize(u64),
+    // CPU Hotplug not permitted with TDX
+    #[cfg(feature = "tdx")]
+    TdxNoCPUHotplug,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -153,6 +156,10 @@ impl fmt::Display for ValidationError {
             }
             InvalidHugePageSize(s) => {
                 write!(f, "Huge page size is not power of 2: {}", s)
+            }
+            #[cfg(feature = "tdx")]
+            TdxNoCPUHotplug => {
+                write!(f, "CPU hotplug not possible with TDX")
             }
         }
     }
@@ -1533,6 +1540,17 @@ impl VmConfig {
     pub fn validate(&self) -> ValidationResult<()> {
         #[cfg(not(feature = "tdx"))]
         self.kernel.as_ref().ok_or(ValidationError::KernelMissing)?;
+
+        #[cfg(feature = "tdx")]
+        {
+            let tdx_enabled = self.tdx.is_some();
+            if !tdx_enabled && self.kernel.is_none() {
+                return Err(ValidationError::KernelMissing);
+            }
+            if tdx_enabled && (self.cpus.max_vcpus != self.cpus.boot_vcpus) {
+                return Err(ValidationError::TdxNoCPUHotplug);
+            }
+        }
 
         if self.console.mode == ConsoleOutputMode::Tty && self.serial.mode == ConsoleOutputMode::Tty
         {
