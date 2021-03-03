@@ -2127,6 +2127,15 @@ impl Snapshottable for Vm {
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
         event!("vm", "snapshotting");
 
+        #[cfg(feature = "tdx")]
+        {
+            if self.config.lock().unwrap().tdx.is_some() {
+                return Err(MigratableError::Snapshot(anyhow!(
+                    "Snapshot not possible with TDX VM"
+                )));
+            }
+        }
+
         let current_state = self.get_state().unwrap();
         if current_state != VmState::Paused {
             return Err(MigratableError::Snapshot(anyhow!(
