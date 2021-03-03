@@ -354,6 +354,10 @@ impl VfioPciDevice {
         Ok(vfio_pci_device)
     }
 
+    pub fn iommu_attached(&self) -> bool {
+        self.iommu_attached
+    }
+
     fn enable_intx(&mut self) -> Result<()> {
         if let Some(intx) = &mut self.interrupt.intx {
             if !intx.enabled {
