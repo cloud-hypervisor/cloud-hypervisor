@@ -1152,6 +1152,12 @@ impl MemoryManager {
 
         let region = self.add_ram_region(start_addr, size)?;
 
+        // Add region to the list of regions associated with the default
+        // memory zone.
+        if let Some(memory_zone) = self.memory_zones.get_mut(DEFAULT_MEMORY_ZONE) {
+            memory_zone.regions.push(Arc::clone(&region));
+        }
+
         // Tell the allocator
         self.allocator
             .lock()
