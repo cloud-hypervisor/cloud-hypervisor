@@ -103,39 +103,6 @@ pipeline{
 						}
 					}
 				}
-				stage ('Worker build SGX') {
-					agent { node { label 'bionic-sgx' } }
-					when { branch 'master' }
-					stages {
-						stage ('Checkout') {
-							steps {
-								checkout scm
-							}
-						}
-						stage ('Run SGX integration tests') {
-							options {
-								timeout(time: 1, unit: 'HOURS')
-							}
-							steps {
-								sh "scripts/dev_cli.sh tests --integration-sgx"
-							}
-						}
-						stage ('Run SGX integration tests for musl') {
-							options {
-								timeout(time: 1, unit: 'HOURS')
-							}
-							steps {
-								sh "scripts/dev_cli.sh tests --integration-sgx --libc musl"
-							}
-						}
-					}
-					post {
-						always {
-							sh "sudo chown -R jenkins.jenkins ${WORKSPACE}"
-							deleteDir()
-						}
-					}
-				}
 				stage ('Worker build - Windows guest') {
 					agent { node { label 'groovy-win' } }
 					stages {
