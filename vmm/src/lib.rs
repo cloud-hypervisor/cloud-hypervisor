@@ -359,15 +359,17 @@ impl Vmm {
                     &self.seccomp_action,
                     self.hypervisor.clone(),
                     activate_evt,
+                    None,
+                    None,
                 )?;
-                if let Some(ref serial_pty) = vm.serial_pty() {
+                if let Some(serial_pty) = vm.serial_pty() {
                     self.epoll
-                        .add_event(serial_pty, EpollDispatch::Pty)
+                        .add_event(&serial_pty.main, EpollDispatch::Pty)
                         .map_err(VmError::EventfdError)?;
                 };
-                if let Some(ref console_pty) = vm.console_pty() {
+                if let Some(console_pty) = vm.console_pty() {
                     self.epoll
-                        .add_event(console_pty, EpollDispatch::Pty)
+                        .add_event(&console_pty.main, EpollDispatch::Pty)
                         .map_err(VmError::EventfdError)?;
                 };
                 self.vm = Some(vm);
@@ -477,6 +479,8 @@ impl Vmm {
         // First we stop the current VM and create a new one.
         if let Some(ref mut vm) = self.vm {
             let config = vm.get_config();
+            let serial_pty = vm.serial_pty();
+            let console_pty = vm.console_pty();
             self.vm_shutdown()?;
 
             let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
@@ -499,6 +503,8 @@ impl Vmm {
                 &self.seccomp_action,
                 self.hypervisor.clone(),
                 activate_evt,
+                serial_pty,
+                console_pty,
             )?);
         }
 

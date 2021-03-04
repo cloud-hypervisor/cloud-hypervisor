@@ -29,7 +29,9 @@ use crate::config::{
     VmConfig, VsockConfig,
 };
 use crate::cpu;
-use crate::device_manager::{self, get_win_size, Console, DeviceManager, DeviceManagerError};
+use crate::device_manager::{
+    self, get_win_size, Console, DeviceManager, DeviceManagerError, PtyPair,
+};
 use crate::device_tree::DeviceTree;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{get_vm_snapshot, url_to_path, VM_SNAPSHOT_FILE};
@@ -650,6 +652,7 @@ impl Vm {
         Ok(numa_nodes)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Arc<Mutex<VmConfig>>,
         exit_evt: EventFd,
@@ -657,6 +660,8 @@ impl Vm {
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
+        serial_pty: Option<PtyPair>,
+        console_pty: Option<PtyPair>,
     ) -> Result<Self> {
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor.check_required_extensions().unwrap();
@@ -702,7 +707,7 @@ impl Vm {
             .device_manager
             .lock()
             .unwrap()
-            .create_devices()
+            .create_devices(serial_pty, console_pty)
             .map_err(Error::DeviceManager)?;
         Ok(new_vm)
     }
@@ -1068,11 +1073,11 @@ impl Vm {
         Ok(())
     }
 
-    pub fn serial_pty(&self) -> Option<File> {
+    pub fn serial_pty(&self) -> Option<PtyPair> {
         self.device_manager.lock().unwrap().serial_pty()
     }
 
-    pub fn console_pty(&self) -> Option<File> {
+    pub fn console_pty(&self) -> Option<PtyPair> {
         self.device_manager.lock().unwrap().console_pty()
     }
 
@@ -1574,7 +1579,7 @@ impl Vm {
         let dm = self.device_manager.lock().unwrap();
         let mut out = [0u8; 64];
         if let Some(mut pty) = dm.serial_pty() {
-            let count = pty.read(&mut out).map_err(Error::PtyConsole)?;
+            let count = pty.main.read(&mut out).map_err(Error::PtyConsole)?;
             let console = dm.console();
             if console.input_enabled() {
                 console
@@ -1583,7 +1588,7 @@ impl Vm {
             }
         };
         let count = match dm.console_pty() {
-            Some(mut pty) => pty.read(&mut out).map_err(Error::PtyConsole)?,
+            Some(mut pty) => pty.main.read(&mut out).map_err(Error::PtyConsole)?,
             None => return Ok(()),
         };
         let console = dm.console();
