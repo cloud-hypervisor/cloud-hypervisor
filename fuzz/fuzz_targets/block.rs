@@ -95,6 +95,7 @@ fuzz_target!(|bytes| {
         2,
         256,
         SeccompAction::Allow,
+        None,
     )
     .unwrap();
 
