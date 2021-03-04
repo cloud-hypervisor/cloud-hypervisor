@@ -17,6 +17,7 @@ extern crate event_monitor;
 use clap::{App, Arg, ArgGroup, ArgMatches};
 use libc::EFD_NONBLOCK;
 use log::LevelFilter;
+use option_parser::OptionParser;
 use seccomp::SeccompAction;
 use signal_hook::{
     consts::SIGSYS,
@@ -321,9 +322,9 @@ fn create_app<'a, 'b>(
                 .group("vmm-config"),
         )
         .arg(
-            Arg::with_name("monitor-fd")
-                .long("monitor-fd")
-                .help("File descriptor to report events on")
+            Arg::with_name("event-monitor")
+                .long("event-monitor")
+                .help("File to report events on: file=<file> or fd=<fd>")
                 .takes_value(true)
                 .min_values(1)
                 .group("vmm-config"),
@@ -516,11 +517,28 @@ fn main() {
         .expect("Missing argument: api-socket")
         .to_string();
 
-    if let Some(fd) = cmd_arguments
-        .value_of("monitor-fd")
-        .map(|s| s.parse::<i32>().expect("Expect integral file descriptor"))
-    {
-        let file = unsafe { File::from_raw_fd(fd) };
+    if let Some(monitor_config) = cmd_arguments.value_of("event-monitor") {
+        let mut parser = OptionParser::new();
+        parser.add("path").add("fd");
+        parser
+            .parse(monitor_config)
+            .expect("Error parsing event monitor config");
+
+        let file = if parser.is_set("fd") {
+            let fd = parser
+                .convert("fd")
+                .expect("Integral file descriptor expected")
+                .unwrap();
+            unsafe { File::from_raw_fd(fd) }
+        } else if parser.is_set("path") {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(parser.get("path").unwrap())
+                .expect("Error opening event monitor path")
+        } else {
+            panic!("--event-monitor requires either a fd or path provided")
+        };
         event_monitor::set_monitor(file).expect("Expected setting monitor to succeed");
     }
 
