@@ -797,6 +797,23 @@ impl DeviceInfoForFDT for MMIODeviceInfo {
     }
 }
 
+#[derive(Debug)]
+pub struct PtyPair {
+    pub main: File,
+    pub sub: File,
+    pub path: PathBuf,
+}
+
+impl PtyPair {
+    fn clone(&self) -> Self {
+        PtyPair {
+            main: self.main.try_clone().unwrap(),
+            sub: self.sub.try_clone().unwrap(),
+            path: self.path.clone(),
+        }
+    }
+}
+
 pub struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
@@ -805,10 +822,10 @@ pub struct DeviceManager {
     console: Arc<Console>,
 
     // console PTY
-    console_pty: Option<Arc<Mutex<(File, File)>>>,
+    console_pty: Option<Arc<Mutex<PtyPair>>>,
 
     // serial PTY
-    serial_pty: Option<Arc<Mutex<(File, File)>>>,
+    serial_pty: Option<Arc<Mutex<PtyPair>>>,
 
     // Interrupt controller
     #[cfg(target_arch = "x86_64")]
@@ -1010,19 +1027,23 @@ impl DeviceManager {
         Ok(device_manager)
     }
 
-    pub fn serial_pty(&self) -> Option<File> {
+    pub fn serial_pty(&self) -> Option<PtyPair> {
         self.serial_pty
             .as_ref()
-            .map(|pty| pty.lock().unwrap().0.try_clone().unwrap())
+            .map(|pty| pty.lock().unwrap().clone())
     }
 
-    pub fn console_pty(&self) -> Option<File> {
+    pub fn console_pty(&self) -> Option<PtyPair> {
         self.console_pty
             .as_ref()
-            .map(|pty| pty.lock().unwrap().0.try_clone().unwrap())
+            .map(|pty| pty.lock().unwrap().clone())
     }
 
-    pub fn create_devices(&mut self) -> DeviceManagerResult<()> {
+    pub fn create_devices(
+        &mut self,
+        serial_pty: Option<PtyPair>,
+        console_pty: Option<PtyPair>,
+    ) -> DeviceManagerResult<()> {
         let mut virtio_devices: Vec<(VirtioDeviceArc, bool, String)> = Vec::new();
 
         let interrupt_controller = self.add_interrupt_controller()?;
@@ -1071,7 +1092,12 @@ impl DeviceManager {
             )?;
         }
 
-        self.console = self.add_console_device(&legacy_interrupt_manager, &mut virtio_devices)?;
+        self.console = self.add_console_device(
+            &legacy_interrupt_manager,
+            &mut virtio_devices,
+            serial_pty,
+            console_pty,
+        )?;
 
         // Reserve some IRQs for PCI devices in case they need to support INTx.
         self.reserve_legacy_interrupts_for_pci_devices()?;
@@ -1664,6 +1690,8 @@ impl DeviceManager {
         &mut self,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         virtio_devices: &mut Vec<(VirtioDeviceArc, bool, String)>,
+        serial_pty: Option<PtyPair>,
+        console_pty: Option<PtyPair>,
     ) -> DeviceManagerResult<Arc<Console>> {
         let serial_config = self.config.lock().unwrap().serial.clone();
         let serial_writer: Option<Box<dyn io::Write + Send>> = match serial_config.mode {
@@ -1672,16 +1700,21 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::SerialOutputFileOpen)?,
             )),
             ConsoleOutputMode::Pty => {
-                let (main, mut sub, path) =
-                    create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
-                self.set_raw_mode(&mut sub)
-                    .map_err(DeviceManagerError::SetPtyRaw)?;
-                self.serial_pty = Some(Arc::new(Mutex::new((
-                    main.try_clone().unwrap(),
-                    sub.try_clone().unwrap(),
-                ))));
-                self.config.lock().unwrap().serial.file = Some(path);
-                Some(Box::new(main.try_clone().unwrap()))
+                if let Some(pty) = serial_pty {
+                    self.config.lock().unwrap().serial.file = Some(pty.path.clone());
+                    let writer = pty.main.try_clone().unwrap();
+                    self.serial_pty = Some(Arc::new(Mutex::new(pty)));
+                    Some(Box::new(writer))
+                } else {
+                    let (main, mut sub, path) =
+                        create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
+                    self.set_raw_mode(&mut sub)
+                        .map_err(DeviceManagerError::SetPtyRaw)?;
+                    self.config.lock().unwrap().serial.file = Some(path.clone());
+                    let writer = main.try_clone().unwrap();
+                    self.serial_pty = Some(Arc::new(Mutex::new(PtyPair { main, sub, path })));
+                    Some(Box::new(writer))
+                }
             }
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
             ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
@@ -1700,16 +1733,21 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::ConsoleOutputFileOpen)?,
             )),
             ConsoleOutputMode::Pty => {
-                let (main, mut sub, path) =
-                    create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
-                self.set_raw_mode(&mut sub)
-                    .map_err(DeviceManagerError::SetPtyRaw)?;
-                self.console_pty = Some(Arc::new(Mutex::new((
-                    main.try_clone().unwrap(),
-                    sub.try_clone().unwrap(),
-                ))));
-                self.config.lock().unwrap().console.file = Some(path);
-                Some(Box::new(main.try_clone().unwrap()))
+                if let Some(pty) = console_pty {
+                    self.config.lock().unwrap().console.file = Some(pty.path.clone());
+                    let writer = pty.main.try_clone().unwrap();
+                    self.console_pty = Some(Arc::new(Mutex::new(pty)));
+                    Some(Box::new(writer))
+                } else {
+                    let (main, mut sub, path) =
+                        create_pty().map_err(DeviceManagerError::ConsolePtyOpen)?;
+                    self.set_raw_mode(&mut sub)
+                        .map_err(DeviceManagerError::SetPtyRaw)?;
+                    self.config.lock().unwrap().console.file = Some(path.clone());
+                    let writer = main.try_clone().unwrap();
+                    self.console_pty = Some(Arc::new(Mutex::new(PtyPair { main, sub, path })));
+                    Some(Box::new(writer))
+                }
             }
             ConsoleOutputMode::Tty => Some(Box::new(stdout())),
             ConsoleOutputMode::Null => Some(Box::new(sink())),
@@ -3802,7 +3840,7 @@ impl Snapshottable for DeviceManager {
 
         // Now that DeviceManager is updated with the right states, it's time
         // to create the devices based on the configuration.
-        self.create_devices()
+        self.create_devices(None, None)
             .map_err(|e| MigratableError::Restore(anyhow!("Could not create devices {:?}", e)))?;
 
         // Finally, restore all devices associated with the DeviceManager.
