@@ -8,7 +8,7 @@ extern crate iced_x86;
 
 use crate::arch::emulator::{EmulationError, PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::CpuStateManager;
-use crate::arch::x86::Exception;
+use crate::arch::x86::ExceptionVector;
 use iced_x86::*;
 
 pub mod cmp;
@@ -143,7 +143,7 @@ pub trait InstructionHandler<T: CpuStateManager> {
         insn: &Instruction,
         state: &mut T,
         platform: &mut dyn PlatformEmulator<CpuState = T>,
-    ) -> Result<(), EmulationError<Exception>>;
+    ) -> Result<(), EmulationError<ExceptionVector>>;
 }
 
 macro_rules! insn_format {

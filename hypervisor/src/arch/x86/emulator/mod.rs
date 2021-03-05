@@ -10,7 +10,7 @@ use crate::arch::emulator::{EmulationError, EmulationResult, PlatformEmulator, P
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::*;
 use crate::arch::x86::*;
-use crate::arch::x86::{Exception, SegmentRegisterOps};
+use crate::arch::x86::{ExceptionVector, SegmentRegisterOps};
 use crate::x86_64::{SegmentRegister, SpecialRegisters, StandardRegisters};
 use anyhow::Context;
 use iced_x86::*;
@@ -537,7 +537,7 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
         cpu_id: usize,
         insn_stream: &[u8],
         num_insn: Option<usize>,
-    ) -> EmulationResult<T, Exception> {
+    ) -> EmulationResult<T, ExceptionVector> {
         let mut state = self
             .platform
             .cpu_state(cpu_id)
@@ -618,7 +618,11 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
     }
 
     /// Emulate all instructions from the instructions stream.
-    pub fn emulate(&mut self, cpu_id: usize, insn_stream: &[u8]) -> EmulationResult<T, Exception> {
+    pub fn emulate(
+        &mut self,
+        cpu_id: usize,
+        insn_stream: &[u8],
+    ) -> EmulationResult<T, ExceptionVector> {
         self.emulate_insn_stream(cpu_id, insn_stream, None)
     }
 
@@ -631,7 +635,7 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
         &mut self,
         cpu_id: usize,
         insn_stream: &[u8],
-    ) -> EmulationResult<T, Exception> {
+    ) -> EmulationResult<T, ExceptionVector> {
         self.emulate_insn_stream(cpu_id, insn_stream, Some(1))
     }
 }

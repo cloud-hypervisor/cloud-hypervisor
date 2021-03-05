@@ -16,7 +16,7 @@ extern crate iced_x86;
 
 use crate::arch::emulator::{EmulationError, PlatformEmulator};
 use crate::arch::x86::emulator::instructions::*;
-use crate::arch::x86::Exception;
+use crate::arch::x86::ExceptionVector;
 
 macro_rules! mov_rm_r {
     ($bound:ty) => {
@@ -25,7 +25,7 @@ macro_rules! mov_rm_r {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError<ExceptionVector>> {
             let src_reg_value = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
@@ -51,7 +51,7 @@ macro_rules! mov_rm_imm {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError<ExceptionVector>> {
             let imm = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
@@ -77,7 +77,7 @@ macro_rules! movzx {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError<ExceptionVector>> {
             let src_value = get_op(
                 &insn,
                 1,
@@ -116,7 +116,7 @@ macro_rules! mov_r_imm {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<Exception>> {
+        ) -> Result<(), EmulationError<ExceptionVector>> {
             let imm = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
 
