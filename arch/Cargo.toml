@@ -13,7 +13,7 @@ anyhow = "1.0"
 arch_gen = { path = "../arch_gen" }
 byteorder = "1.3.4"
 hypervisor = { path = "../hypervisor" }
-libc = "0.2.87"
+libc = "0.2.88"
 linux-loader = { version = "0.3.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.14"
 serde = {version = ">=1.0.27", features = ["rc"] }
