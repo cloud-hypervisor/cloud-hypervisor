@@ -17,7 +17,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use vhost::vhost_user::message::{
     VhostUserConfigFlags, VhostUserMemoryRegion, VhostUserProtocolFeatures,
-    VhostUserVirtioFeatures, VhostUserVringAddrFlags, VhostUserVringState,
+    VhostUserSingleMemoryRegion, VhostUserVirtioFeatures, VhostUserVringAddrFlags,
+    VhostUserVringState,
 };
 use vhost::vhost_user::{
     Error as VhostUserError, Listener, Result as VhostUserResult, SlaveFsCacheReq, SlaveListener,
@@ -25,9 +26,11 @@ use vhost::vhost_user::{
 };
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{GuestAddress, GuestMemoryMmap};
+use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap, MmapRegion};
 use vm_virtio::Queue;
 use vmm_sys_util::eventfd::EventFd;
+
+const MAX_MEM_SLOTS: u64 = 32;
 
 #[derive(Debug)]
 /// Errors related to vhost-user daemon.
@@ -201,10 +204,6 @@ struct AddrMapping {
     vmm_addr: u64,
     size: u64,
     gpa_base: u64,
-}
-
-struct Memory {
-    mappings: Vec<AddrMapping>,
 }
 
 pub struct Vring {
@@ -444,7 +443,8 @@ struct VhostUserHandler<S: VhostUserBackend> {
     num_queues: usize,
     max_queue_size: usize,
     queues_per_thread: Vec<u64>,
-    memory: Option<Memory>,
+    mappings: Vec<AddrMapping>,
+    guest_memory: Option<GuestMemoryMmap>,
     vrings: Vec<Arc<RwLock<Vring>>>,
     worker_threads: Vec<thread::JoinHandle<VringWorkerResult<()>>>,
 }
@@ -521,7 +521,8 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
             num_queues,
             max_queue_size,
             queues_per_thread,
-            memory: None,
+            mappings: Vec::new(),
+            guest_memory: None,
             vrings,
             worker_threads,
         })
@@ -532,11 +533,9 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
     }
 
     fn vmm_va_to_gpa(&self, vmm_va: u64) -> VhostUserHandlerResult<u64> {
-        if let Some(memory) = &self.memory {
-            for mapping in memory.mappings.iter() {
-                if vmm_va >= mapping.vmm_addr && vmm_va < mapping.vmm_addr + mapping.size {
-                    return Ok(vmm_va - mapping.vmm_addr + mapping.gpa_base);
-                }
+        for mapping in self.mappings.iter() {
+            if vmm_va >= mapping.vmm_addr && vmm_va < mapping.vmm_addr + mapping.size {
+                return Ok(vmm_va - mapping.vmm_addr + mapping.gpa_base);
             }
         }
 
@@ -636,11 +635,13 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
         self.backend
             .write()
             .unwrap()
-            .update_memory(mem)
+            .update_memory(mem.clone())
             .map_err(|e| {
                 VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
             })?;
-        self.memory = Some(Memory { mappings });
+
+        self.guest_memory = Some(mem);
+        self.mappings = mappings;
 
         Ok(())
     }
@@ -670,7 +671,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
             return Err(VhostUserError::InvalidParam);
         }
 
-        if self.memory.is_some() {
+        if !self.mappings.is_empty() {
             let desc_table = self.vmm_va_to_gpa(descriptor).map_err(|e| {
                 VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
             })?;
@@ -862,6 +863,84 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
 
     fn set_slave_req_fd(&mut self, vu_req: SlaveFsCacheReq) {
         self.backend.write().unwrap().set_slave_req_fd(vu_req);
+    }
+
+    fn get_max_mem_slots(&mut self) -> VhostUserResult<u64> {
+        Ok(MAX_MEM_SLOTS)
+    }
+
+    fn add_mem_region(
+        &mut self,
+        region: &VhostUserSingleMemoryRegion,
+        fd: RawFd,
+    ) -> VhostUserResult<()> {
+        let file = unsafe { File::from_raw_fd(fd) };
+        let mmap_region = MmapRegion::from_file(
+            FileOffset::new(file, region.mmap_offset),
+            region.memory_size as usize,
+        )
+        .map_err(|e| VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e)))?;
+        let guest_region = Arc::new(
+            GuestRegionMmap::new(mmap_region, GuestAddress(region.guest_phys_addr)).map_err(
+                |e| VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e)),
+            )?,
+        );
+
+        let guest_memory = if let Some(guest_memory) = &self.guest_memory {
+            guest_memory.insert_region(guest_region).map_err(|e| {
+                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
+            })?
+        } else {
+            GuestMemoryMmap::from_arc_regions(vec![guest_region]).map_err(|e| {
+                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
+            })?
+        };
+
+        self.backend
+            .write()
+            .unwrap()
+            .update_memory(guest_memory.clone())
+            .map_err(|e| {
+                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
+            })?;
+
+        self.guest_memory = Some(guest_memory);
+
+        self.mappings.push(AddrMapping {
+            vmm_addr: region.user_addr,
+            size: region.memory_size,
+            gpa_base: region.guest_phys_addr,
+        });
+
+        Ok(())
+    }
+
+    fn remove_mem_region(&mut self, region: &VhostUserSingleMemoryRegion) -> VhostUserResult<()> {
+        let guest_memory = if let Some(guest_memory) = &self.guest_memory {
+            let (updated_guest_memory, _) = guest_memory
+                .remove_region(GuestAddress(region.guest_phys_addr), region.memory_size)
+                .map_err(|e| {
+                    VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
+                })?;
+            updated_guest_memory
+        } else {
+            return Err(VhostUserError::InvalidOperation);
+        };
+
+        self.backend
+            .write()
+            .unwrap()
+            .update_memory(guest_memory.clone())
+            .map_err(|e| {
+                VhostUserError::ReqHandlerError(io::Error::new(io::ErrorKind::Other, e))
+            })?;
+
+        self.guest_memory = Some(guest_memory);
+
+        self.mappings
+            .retain(|mapping| mapping.gpa_base != region.guest_phys_addr);
+
+        Ok(())
     }
 }
 
