@@ -308,6 +308,8 @@ impl VhostUserBackend for VhostUserBlkBackend {
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
         VhostUserProtocolFeatures::CONFIG
+            | VhostUserProtocolFeatures::MQ
+            | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
