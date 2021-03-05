@@ -84,9 +84,13 @@ pub enum Error {
     MasterReqHandlerCreation(vhost::vhost_user::Error),
     /// Set slave request fd failed.
     VhostUserSetSlaveRequestFd(vhost::Error),
+    /// Add memory region failed.
+    VhostUserAddMemReg(VhostError),
     /// Invalid used address.
     UsedAddress,
     /// Invalid features provided from vhost-user backend
     InvalidFeatures,
+    /// Missing file descriptor for the region.
+    MissingRegionFd,
 }
 type Result<T> = std::result::Result<T, Error>;

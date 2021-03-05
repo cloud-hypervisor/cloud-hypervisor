@@ -14,6 +14,7 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use net_util::MacAddr;
 use seccomp::{SeccompAction, SeccompFilter};
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::{Arc, Barrier};
@@ -24,7 +25,9 @@ use vhost::vhost_user::{Master, VhostUserMaster, VhostUserMasterReqHandler};
 use vhost::VhostBackend;
 use virtio_bindings::bindings::virtio_net;
 use virtio_bindings::bindings::virtio_ring;
-use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::{
+    ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap, GuestRegionMmap,
+};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -41,6 +44,8 @@ pub struct Net {
     config: VirtioNetConfig,
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
     seccomp_action: SeccompAction,
+    guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    acked_protocol_features: u64,
 }
 
 impl Net {
@@ -88,7 +93,7 @@ impl Net {
             .set_features(avail_features)
             .map_err(Error::VhostUserSetFeatures)?;
 
-        let protocol_features;
+        let mut protocol_features;
         let mut acked_features = 0;
         if avail_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
             acked_features |= VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
@@ -99,11 +104,17 @@ impl Net {
             return Err(Error::VhostUserProtocolNotSupport);
         }
 
+        protocol_features &=
+            VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS;
+
+        vhost_user_net
+            .set_protocol_features(protocol_features)
+            .map_err(Error::VhostUserSetProtocolFeatures)?;
+
+        let acked_protocol_features = protocol_features.bits();
+
         let max_queue_number =
             if protocol_features.bits() & VhostUserProtocolFeatures::MQ.bits() != 0 {
-                vhost_user_net
-                    .set_protocol_features(protocol_features & VhostUserProtocolFeatures::MQ)
-                    .map_err(Error::VhostUserSetProtocolFeatures)?;
                 match vhost_user_net.get_queue_num() {
                     Ok(qn) => qn,
                     Err(_) => DEFAULT_QUEUE_NUMBER as u64,
@@ -111,6 +122,7 @@ impl Net {
             } else {
                 DEFAULT_QUEUE_NUMBER as u64
             };
+
         if vu_cfg.num_queues > max_queue_number as usize {
             error!("vhost-user-net has queue number: {} larger than the max queue number: {} backend allowed\n",
                 vu_cfg.num_queues, max_queue_number);
@@ -152,6 +164,8 @@ impl Net {
             config,
             ctrl_queue_epoll_thread: None,
             seccomp_action,
+            guest_memory: None,
+            acked_protocol_features,
         })
     }
 }
@@ -195,6 +209,8 @@ impl VirtioDevice for Net {
         mut queue_evts: Vec<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
+
+        self.guest_memory = Some(mem.clone());
 
         let queue_num = self.common.queue_evts.as_ref().unwrap().len();
 
@@ -359,6 +375,22 @@ impl VirtioDevice for Net {
 
     fn update_memory(&mut self, mem: &GuestMemoryMmap) -> std::result::Result<(), crate::Error> {
         update_mem_table(&mut self.vhost_user_net, mem).map_err(crate::Error::VhostUserUpdateMemory)
+    }
+
+    fn add_memory_region(
+        &mut self,
+        region: &Arc<GuestRegionMmap>,
+    ) -> std::result::Result<(), crate::Error> {
+        if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits() != 0
+        {
+            add_memory_region(&mut self.vhost_user_net, region)
+                .map_err(crate::Error::VhostUserAddMemoryRegion)
+        } else if let Some(guest_memory) = &self.guest_memory {
+            update_mem_table(&mut self.vhost_user_net, guest_memory.memory().deref())
+                .map_err(crate::Error::VhostUserUpdateMemory)
+        } else {
+            Ok(())
+        }
     }
 }
 
