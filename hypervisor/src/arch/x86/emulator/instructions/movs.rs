@@ -15,7 +15,6 @@ extern crate iced_x86;
 use crate::arch::emulator::{EmulationError, PlatformEmulator};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::DF;
-use crate::arch::x86::ExceptionVector;
 
 pub struct Movsd_m32_m32;
 impl<T: CpuStateManager> InstructionHandler<T> for Movsd_m32_m32 {
@@ -24,7 +23,7 @@ impl<T: CpuStateManager> InstructionHandler<T> for Movsd_m32_m32 {
         insn: &Instruction,
         state: &mut T,
         platform: &mut dyn PlatformEmulator<CpuState = T>,
-    ) -> Result<(), EmulationError<ExceptionVector>> {
+    ) -> Result<(), EmulationError> {
         let mut count: u64 = if insn.has_rep_prefix() {
             state
                 .read_reg(Register::ECX)

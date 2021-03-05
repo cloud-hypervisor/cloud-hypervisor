@@ -28,7 +28,7 @@ pub const NUM_IOAPIC_PINS: usize = 24;
 
 // X86 Exceptions
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub enum ExceptionVector {
     DE = 0,  // Divide Error
     DB = 1,  // Debug Exception

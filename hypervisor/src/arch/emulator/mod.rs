@@ -6,19 +6,20 @@
 
 extern crate thiserror;
 
+use crate::arch::x86::ExceptionVector;
 use core::fmt::Debug;
 use std::fmt::{self, Display};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Error, Debug)]
-pub struct Exception<T: Debug> {
-    vector: T,
+pub struct Exception {
+    vector: ExceptionVector,
     ip: u64,
     error: Option<u32>,
     payload: Option<u64>,
 }
 
-impl<T: Debug> Display for Exception<T> {
+impl Display for Exception {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Exception {:?} at IP {:#x}", self.vector, self.ip)
     }
@@ -58,7 +59,7 @@ pub enum PlatformError {
 }
 
 #[derive(Error, Debug)]
-pub enum EmulationError<T: Debug> {
+pub enum EmulationError {
     #[error("Unsupported instruction: {0}")]
     UnsupportedInstruction(#[source] anyhow::Error),
 
@@ -72,7 +73,7 @@ pub enum EmulationError<T: Debug> {
     WrongNumberOperands(#[source] anyhow::Error),
 
     #[error("Instruction Exception: {0}")]
-    InstructionException(Exception<T>),
+    InstructionException(Exception),
 
     #[error("Instruction fetching error: {0}")]
     InstructionFetchingError(#[source] anyhow::Error),
@@ -145,4 +146,4 @@ pub trait PlatformEmulator: Send + Sync {
     fn fetch(&self, ip: u64, instruction_bytes: &mut [u8]) -> Result<(), PlatformError>;
 }
 
-pub type EmulationResult<S, E> = std::result::Result<S, EmulationError<E>>;
+pub type EmulationResult<S> = std::result::Result<S, EmulationError>;

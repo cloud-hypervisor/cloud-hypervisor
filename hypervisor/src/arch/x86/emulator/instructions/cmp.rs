@@ -15,7 +15,6 @@ extern crate iced_x86;
 use crate::arch::emulator::{EmulationError, PlatformEmulator};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::*;
-use crate::arch::x86::ExceptionVector;
 
 // CMP affects OF, SF, ZF, AF, PF and CF
 const FLAGS_MASK: u64 = CF | PF | AF | ZF | SF | OF;
@@ -61,7 +60,7 @@ macro_rules! cmp_rm_r {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<ExceptionVector>> {
+        ) -> Result<(), EmulationError> {
             let op0_value = get_op(&insn, 0, std::mem::size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
             let op1_value = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
@@ -83,7 +82,7 @@ macro_rules! cmp_r_rm {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<ExceptionVector>> {
+        ) -> Result<(), EmulationError> {
             let op0_value = get_op(&insn, 0, std::mem::size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
             let op1_value = get_op(&insn, 1, std::mem::size_of::<$bound>(), state, platform)
@@ -105,7 +104,7 @@ macro_rules! cmp_rm_imm {
             insn: &Instruction,
             state: &mut T,
             platform: &mut dyn PlatformEmulator<CpuState = T>,
-        ) -> Result<(), EmulationError<ExceptionVector>> {
+        ) -> Result<(), EmulationError> {
             let op0_value = get_op(&insn, 0, std::mem::size_of::<$bound>(), state, platform)
                 .map_err(EmulationError::PlatformEmulationError)?;
             let op1_value = get_op(&insn, 1, std::mem::size_of::<$imm>(), state, platform)
