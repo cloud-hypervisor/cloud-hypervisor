@@ -119,6 +119,7 @@ pub enum Error {
     EpollWait(io::Error),
     FailedSignalingDriver(io::Error),
     VhostUserUpdateMemory(vhost_user::Error),
+    VhostUserAddMemoryRegion(vhost_user::Error),
     EventfdError(io::Error),
     SetShmRegionsNotSupported,
     EpollHander(String),
