@@ -557,10 +557,6 @@ impl VirtioDevice for Fs {
         }
     }
 
-    fn update_memory(&mut self, mem: &GuestMemoryMmap) -> std::result::Result<(), crate::Error> {
-        update_mem_table(&mut self.vu, mem).map_err(crate::Error::VhostUserUpdateMemory)
-    }
-
     fn add_memory_region(
         &mut self,
         region: &Arc<GuestRegionMmap>,
