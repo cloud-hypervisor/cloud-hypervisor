@@ -93,12 +93,11 @@ use vm_device::interrupt::{
 };
 use vm_device::{Bus, BusDevice, Resource};
 use vm_memory::guest_memory::FileOffset;
-#[cfg(feature = "cmos")]
-use vm_memory::GuestMemory;
 use vm_memory::{
-    Address, GuestAddress, GuestAddressSpace, GuestMemoryRegion, GuestRegionMmap, GuestUsize,
-    MmapRegion,
+    Address, GuestAddress, GuestMemoryRegion, GuestRegionMmap, GuestUsize, MmapRegion,
 };
+#[cfg(feature = "cmos")]
+use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
@@ -3096,12 +3095,11 @@ impl DeviceManager {
     }
 
     pub fn update_memory(&self, new_region: &Arc<GuestRegionMmap>) -> DeviceManagerResult<()> {
-        let memory = self.memory_manager.lock().unwrap().guest_memory();
         for (virtio_device, _, _) in self.virtio_devices.iter() {
             virtio_device
                 .lock()
                 .unwrap()
-                .update_memory(&memory.memory())
+                .add_memory_region(new_region)
                 .map_err(DeviceManagerError::UpdateMemoryForVirtioDevice)?;
         }
 
