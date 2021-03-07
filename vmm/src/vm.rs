@@ -2038,6 +2038,7 @@ impl Vm {
             .map_err(Error::ActivateVirtioDevices)
     }
 
+    #[cfg(target_arch = "x86_64")]
     pub fn power_button(&self) -> Result<()> {
         #[cfg(feature = "acpi")]
         return self
@@ -2048,6 +2049,15 @@ impl Vm {
             .map_err(Error::PowerButton);
         #[cfg(not(feature = "acpi"))]
         Err(Error::PowerButtonNotSupported)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn power_button(&self) -> Result<()> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .notify_power_button()
+            .map_err(Error::PowerButton)
     }
 }
 
