@@ -26,6 +26,8 @@ pub use self::i8042::I8042Device;
 pub use self::serial::Serial;
 
 #[cfg(target_arch = "aarch64")]
+pub use self::gpio_pl061::GPIO;
+#[cfg(target_arch = "aarch64")]
 pub use self::rtc_pl031::RTC;
 #[cfg(target_arch = "aarch64")]
 pub use self::uart_pl011::PL011;

@@ -51,6 +51,7 @@ pub const MAPPED_IO_START: u64 = 0x0900_0000;
 /// Space 0x0900_0000 ~ 0x1000_0000 is reserved for legacy devices.
 pub const LEGACY_SERIAL_MAPPED_IO_START: u64 = 0x0900_0000;
 pub const LEGACY_RTC_MAPPED_IO_START: u64 = 0x0901_0000;
+pub const LEGACY_GPIO_MAPPED_IO_START: u64 = 0x0902_0000;
 
 /// Legacy space will be allocated at once whiling setting up legacy devices.
 pub const LEGACY_DEVICES_MAPPED_IO_SIZE: u64 = 0x0700_0000;

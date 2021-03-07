@@ -129,6 +129,9 @@ pub enum DeviceType {
     /// Device Type: RTC.
     #[cfg(target_arch = "aarch64")]
     RTC,
+    /// Device Type: GPIO.
+    #[cfg(target_arch = "aarch64")]
+    GPIO,
 }
 
 /// Default (smallest) memory page size for the supported architectures.

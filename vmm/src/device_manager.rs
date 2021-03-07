@@ -118,6 +118,8 @@ const VFIO_DEVICE_NAME_PREFIX: &str = "_vfio";
 const IOAPIC_DEVICE_NAME: &str = "_ioapic";
 
 const SERIAL_DEVICE_NAME_PREFIX: &str = "_serial";
+#[cfg(target_arch = "aarch64")]
+const GPIO_DEVICE_NAME_PREFIX: &str = "_gpio";
 
 const CONSOLE_DEVICE_NAME: &str = "_console";
 const DISK_DEVICE_NAME_PREFIX: &str = "_disk";
@@ -929,6 +931,10 @@ pub struct DeviceManager {
 
     // Possible handle to the virtio-balloon device
     virtio_mem_devices: Vec<Arc<Mutex<virtio_devices::Mem>>>,
+
+    #[cfg(target_arch = "aarch64")]
+    // GPIO device for AArch64
+    gpio_device: Option<Arc<Mutex<devices::legacy::GPIO>>>,
 }
 
 impl DeviceManager {
@@ -1015,6 +1021,8 @@ impl DeviceManager {
             serial_pty: None,
             console_pty: None,
             virtio_mem_devices: Vec::new(),
+            #[cfg(target_arch = "aarch64")]
+            gpio_device: None,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1546,6 +1554,53 @@ impl DeviceManager {
                 irq: rtc_irq,
             },
         );
+
+        // Add a GPIO device
+        let id = String::from(GPIO_DEVICE_NAME_PREFIX);
+        let gpio_irq = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_irq()
+            .unwrap();
+
+        let interrupt_group = interrupt_manager
+            .create_group(LegacyIrqGroupConfig {
+                irq: gpio_irq as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+
+        let gpio_device = Arc::new(Mutex::new(devices::legacy::GPIO::new(
+            id.clone(),
+            interrupt_group,
+        )));
+
+        self.bus_devices
+            .push(Arc::clone(&gpio_device) as Arc<Mutex<dyn BusDevice>>);
+
+        let addr = GuestAddress(arch::layout::LEGACY_GPIO_MAPPED_IO_START);
+
+        self.address_manager
+            .mmio_bus
+            .insert(gpio_device.clone(), addr.0, MMIO_LEN)
+            .map_err(DeviceManagerError::BusError)?;
+
+        self.gpio_device = Some(gpio_device.clone());
+
+        self.id_to_dev_info.insert(
+            (DeviceType::GPIO, "gpio".to_string()),
+            MMIODeviceInfo {
+                addr: addr.0,
+                len: MMIO_LEN,
+                irq: gpio_irq,
+            },
+        );
+
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, gpio_device));
 
         Ok(())
     }
