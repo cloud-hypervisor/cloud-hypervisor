@@ -403,6 +403,10 @@ pub enum DeviceManagerError {
     /// Failed to do power button notification
     PowerButtonNotification(io::Error),
 
+    /// Failed to do AArch64 GPIO power button notification
+    #[cfg(target_arch = "aarch64")]
+    AArch64PowerButtonNotification(devices::legacy::GPIODeviceError),
+
     /// Failed to set O_DIRECT flag to file descriptor
     SetDirectIo,
 
@@ -3521,6 +3525,7 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "acpi")]
+    #[cfg(target_arch = "x86_64")]
     pub fn notify_power_button(&self) -> DeviceManagerResult<()> {
         self.ged_notification_device
             .as_ref()
@@ -3529,6 +3534,17 @@ impl DeviceManager {
             .unwrap()
             .notify(AcpiNotificationFlags::POWER_BUTTON_CHANGED)
             .map_err(DeviceManagerError::PowerButtonNotification)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn notify_power_button(&self) -> DeviceManagerResult<()> {
+        self.gpio_device
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .trigger_key(3)
+            .map_err(DeviceManagerError::AArch64PowerButtonNotification)
     }
 }
 
