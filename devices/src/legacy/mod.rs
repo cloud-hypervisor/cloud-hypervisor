@@ -9,6 +9,8 @@
 mod cmos;
 #[cfg(feature = "fwdebug")]
 mod fwdebug;
+#[cfg(target_arch = "aarch64")]
+mod gpio_pl061;
 mod i8042;
 #[cfg(target_arch = "aarch64")]
 mod rtc_pl031;
