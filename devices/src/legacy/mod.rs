@@ -13,6 +13,8 @@ mod i8042;
 #[cfg(target_arch = "aarch64")]
 mod rtc_pl031;
 mod serial;
+#[cfg(target_arch = "aarch64")]
+mod uart_pl011;
 
 #[cfg(feature = "cmos")]
 pub use self::cmos::Cmos;
@@ -23,3 +25,5 @@ pub use self::serial::Serial;
 
 #[cfg(target_arch = "aarch64")]
 pub use self::rtc_pl031::RTC;
+#[cfg(target_arch = "aarch64")]
+pub use self::uart_pl011::PL011;
