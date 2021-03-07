@@ -324,7 +324,7 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("event-monitor")
                 .long("event-monitor")
-                .help("File to report events on: file=<file> or fd=<fd>")
+                .help("File to report events on: path=</path/to/a/file> or fd=<fd>")
                 .takes_value(true)
                 .min_values(1)
                 .group("vmm-config"),
