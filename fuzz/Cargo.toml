@@ -20,7 +20,7 @@ vm-virtio = { path = "../vm-virtio" }
 vm-memory = "0.5.0"
 
 [patch.crates-io]
-kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.3.0", features = ["with-serde", "fam-wrappers"] }
+kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch-v0.4.0", features = ["with-serde", "fam-wrappers"] }
 
 [dependencies.cloud-hypervisor]
 path = ".."

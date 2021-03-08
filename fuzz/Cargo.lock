@@ -289,8 +289,8 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 
 [[package]]
 name = "kvm-bindings"
-version = "0.3.0"
-source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=ch-v0.3.0#e9340b35fbd81b98c007c3272727734657e12ea5"
+version = "0.4.0"
+source = "git+https://github.com/cloud-hypervisor/kvm-bindings?branch=ch-v0.4.0#1a68725639283e622f4bb64584885b30bfe8be44"
 dependencies = [
  "serde",
  "serde_derive",
@@ -299,9 +299,9 @@ dependencies = [
 
 [[package]]
 name = "kvm-ioctls"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c23a352d6371d3d651e2103abd6479b245cb0f19e9cc94ea55e9b53da9b5069"
+checksum = "74058b16912c6723db02d4ca3ec919b73cd41512ccd3b6202cf91ae8d6c9dce5"
 dependencies = [
  "kvm-bindings",
  "libc",
@@ -501,9 +501,9 @@ checksum = "bd761ff957cb2a45fbb9ab3da6512de9de55872866160b23c25f1a841e99d29f"
 
 [[package]]
 name = "serde_derive"
-version = "1.0.123"
+version = "1.0.124"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9391c295d64fc0abb2c556bad848f33cb8296276b1ad2677d1ae1ace4f258f31"
+checksum = "1800f7693e94e186f5e25a28291ae1570da908aff7d97a095dec1e56ff99069b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -678,7 +678,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=master#0903c222fa027ce2783e3d7a6d4676574d0e5200"
+source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=master#a87b13bdec026e8144b91f30f35451a966d8c1ca"
 dependencies = [
  "byteorder",
  "kvm-bindings",
@@ -692,7 +692,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vhost?branch=master#576694bcfb09e7c78d812ed07dbc5377d283852a"
+source = "git+https://github.com/rust-vmm/vhost?branch=master#77843048602ebc69cb5cd0352a66d98a68cb0e7d"
 dependencies = [
  "bitflags",
  "libc",
