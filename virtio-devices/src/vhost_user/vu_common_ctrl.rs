@@ -135,10 +135,6 @@ pub fn reset_vhost_user(vu: &mut Master, num_queues: usize) -> Result<()> {
         // Disable the vrings.
         vu.set_vring_enable(queue_index, false)
             .map_err(Error::VhostUserSetVringEnable)?;
-
-        // Stop the vrings.
-        vu.get_vring_base(queue_index)
-            .map_err(Error::VhostUserSetFeatures)?;
     }
 
     // Reset the owner.
