@@ -9,6 +9,10 @@ process_common_args "$@"
 features_build=""
 features_test="--features integration_tests"
 
+if [ "$hypervisor" = "mshv" ] ;  then
+    features_build="--no-default-features --features mshv,common"
+    features_test="--no-default-features --features mshv,common,integration_tests"
+fi
 WIN_IMAGE_FILE="/root/workloads/windows-server-2019.raw"
 OVMF_FW_FILE="/root/workloads/OVMF-4b47d0c6c8.fd"
 BUILD_TARGET="$(uname -m)-unknown-linux-${CH_LIBC}"
