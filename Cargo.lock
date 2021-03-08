@@ -425,7 +425,7 @@ dependencies = [
  "env_logger",
  "epoll",
  "iced-x86",
- "kvm-bindings",
+ "kvm-bindings 0.3.0",
  "kvm-ioctls",
  "libc",
  "log 0.4.14",
@@ -507,12 +507,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "kvm-ioctls"
-version = "0.7.0"
+name = "kvm-bindings"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c23a352d6371d3d651e2103abd6479b245cb0f19e9cc94ea55e9b53da9b5069"
+checksum = "04936b66155d2b23a0df85c411c234b329206e548e1d7f94b8e47c66c87a8a4f"
 dependencies = [
- "kvm-bindings",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "kvm-ioctls"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74058b16912c6723db02d4ca3ec919b73cd41512ccd3b6202cf91ae8d6c9dce5"
+dependencies = [
+ "kvm-bindings 0.4.0",
  "libc",
  "vmm-sys-util",
 ]
@@ -1292,7 +1301,7 @@ version = "0.1.0"
 source = "git+https://github.com/rust-vmm/vfio-ioctls?branch=master#a87b13bdec026e8144b91f30f35451a966d8c1ca"
 dependencies = [
  "byteorder",
- "kvm-bindings",
+ "kvm-bindings 0.3.0",
  "kvm-ioctls",
  "log 0.4.14",
  "vfio-bindings",
