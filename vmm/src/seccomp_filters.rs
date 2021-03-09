@@ -111,6 +111,7 @@ const KVM_GET_REGS: u64 = 0x8090_ae81;
 const KVM_GET_SUPPORTED_CPUID: u64 = 0xc008_ae05;
 const KVM_CREATE_DEVICE: u64 = 0xc00c_aee0;
 const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
+const KVM_MEMORY_ENCRYPT_OP: u64 = 0xc008_aeba;
 
 // The definition of libc::SYS_ftruncate on AArch64 is different from that on x86_64.
 #[cfg(target_arch = "aarch64")]
@@ -141,6 +142,7 @@ fn create_vmm_ioctl_seccomp_rule_common() -> Result<Vec<SeccompRule>, Error> {
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IOEVENTFD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_IRQFD)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_RUN)?],
+        and![Cond::new(1, ArgLen::DWORD, Eq, KVM_MEMORY_ENCRYPT_OP)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_DEVICE_ATTR,)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_GSI_ROUTING)?],
         and![Cond::new(1, ArgLen::DWORD, Eq, KVM_SET_MP_STATE)?],
