@@ -423,9 +423,9 @@ pub mod mshv {
     use super::*;
     use hypervisor::mshv::*;
 
-    type MshvMsiInterruptGroup = MsiInterruptGroup<MshvIrqRoutingEntry>;
-    type MshvRoutingEntry = RoutingEntry<MshvIrqRoutingEntry>;
-    pub type MshvMsiInterruptManager = MsiInterruptManager<MshvIrqRoutingEntry>;
+    type MshvMsiInterruptGroup = MsiInterruptGroup<mshv_msi_routing_entry>;
+    type MshvRoutingEntry = RoutingEntry<mshv_msi_routing_entry>;
+    pub type MshvMsiInterruptManager = MsiInterruptManager<mshv_msi_routing_entry>;
 
     impl RoutingEntryExt for MshvRoutingEntry {
         fn make_entry(
@@ -434,13 +434,11 @@ pub mod mshv {
             config: &InterruptSourceConfig,
         ) -> Result<Box<Self>> {
             if let InterruptSourceConfig::MsiIrq(cfg) = &config {
-                let route = MshvIrqRoutingEntry {
+                let route = mshv_msi_routing_entry {
                     gsi,
-                    route: MshvIrqRouting::Msi(MshvIrqRoutingMsi {
-                        address_lo: cfg.low_addr,
-                        address_hi: cfg.high_addr,
-                        data: cfg.data,
-                    }),
+                    address_lo: cfg.low_addr,
+                    address_hi: cfg.high_addr,
+                    data: cfg.data,
                 };
                 let entry = MshvRoutingEntry {
                     route,
@@ -457,12 +455,12 @@ pub mod mshv {
         }
     }
 
-    impl MsiInterruptGroupOps<MshvIrqRoutingEntry> for MshvMsiInterruptGroup {
+    impl MsiInterruptGroupOps<mshv_msi_routing_entry> for MshvMsiInterruptGroup {
         fn set_gsi_routes(
             &self,
-            routes: &HashMap<u32, RoutingEntry<MshvIrqRoutingEntry>>,
+            routes: &HashMap<u32, RoutingEntry<mshv_msi_routing_entry>>,
         ) -> Result<()> {
-            let mut entry_vec: Vec<MshvIrqRoutingEntry> = Vec::new();
+            let mut entry_vec: Vec<mshv_msi_routing_entry> = Vec::new();
             for (_, entry) in routes.iter() {
                 if entry.masked {
                     continue;
