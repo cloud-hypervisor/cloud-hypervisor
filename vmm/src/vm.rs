@@ -1652,8 +1652,12 @@ impl Vm {
             .unwrap()
             .end_of_device_area()
             .raw_value();
-        hob.add_mmio_resource(&mem, start_of_device_area, end_of_device_area)
-            .map_err(Error::PopulateHob)?;
+        hob.add_mmio_resource(
+            &mem,
+            start_of_device_area,
+            end_of_device_area - start_of_device_area,
+        )
+        .map_err(Error::PopulateHob)?;
 
         hob.finish(&mem).map_err(Error::PopulateHob)?;
 
