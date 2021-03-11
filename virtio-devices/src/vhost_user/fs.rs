@@ -433,7 +433,7 @@ impl VirtioDevice for Fs {
             &interrupt_cb,
             self.common.acked_features,
         )
-        .map_err(ActivateError::VhostUserSetup)?;
+        .map_err(ActivateError::VhostUserFsSetup)?;
 
         // Initialize slave communication.
         let slave_req_handler = if self.slave_req_support {
@@ -447,13 +447,13 @@ impl VirtioDevice for Fs {
 
                 let mut req_handler =
                     MasterReqHandler::new(vu_master_req_handler).map_err(|e| {
-                        ActivateError::VhostUserSetup(Error::MasterReqHandlerCreation(e))
+                        ActivateError::VhostUserFsSetup(Error::MasterReqHandlerCreation(e))
                     })?;
                 req_handler.set_reply_ack_flag(true);
                 self.vu
                     .set_slave_request_fd(req_handler.get_tx_raw_fd())
                     .map_err(|e| {
-                        ActivateError::VhostUserSetup(Error::VhostUserSetSlaveRequestFd(e))
+                        ActivateError::VhostUserFsSetup(Error::VhostUserSetSlaveRequestFd(e))
                     })?;
                 Some(req_handler)
             } else {
