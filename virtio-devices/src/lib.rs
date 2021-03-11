@@ -85,11 +85,11 @@ pub enum ActivateError {
     CloneKillEventFd,
     /// Failed to create Vhost-user interrupt eventfd
     VhostIrqCreate,
-    /// Failed to setup vhost-user daemon.
-    VhostUserSetup(vhost_user::Error),
-    /// Failed to setup vhost-user daemon.
+    /// Failed to setup vhost-user-fs daemon.
+    VhostUserFsSetup(vhost_user::Error),
+    /// Failed to setup vhost-user-net daemon.
     VhostUserNetSetup(vhost_user::Error),
-    /// Failed to setup vhost-user daemon.
+    /// Failed to setup vhost-user-blk daemon.
     VhostUserBlkSetup(vhost_user::Error),
     /// Failed to reset vhost-user daemon.
     VhostUserReset(vhost_user::Error),
