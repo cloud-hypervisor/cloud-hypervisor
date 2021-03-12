@@ -6,6 +6,7 @@ extern crate hypervisor;
 #[cfg(target_arch = "x86_64")]
 use crate::config::SgxEpcConfig;
 use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
+use crate::migration::url_to_path;
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml};
@@ -851,9 +852,7 @@ impl MemoryManager {
         )?;
 
         if let Some(source_url) = source_url {
-            let url = Url::parse(source_url).unwrap();
-            /* url must be valid dir which is verified in recv_vm_snapshot() */
-            let vm_snapshot_path = url.to_file_path().unwrap();
+            let vm_snapshot_path = url_to_path(source_url).map_err(Error::Restore)?;
 
             if let Some(mem_section) = snapshot
                 .snapshot_data
