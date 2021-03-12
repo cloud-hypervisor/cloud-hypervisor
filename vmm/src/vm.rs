@@ -71,7 +71,6 @@ use std::num::Wrapping;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{result, str, thread};
-use url::Url;
 use vm_device::Bus;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
@@ -2311,52 +2310,37 @@ impl Transportable for Vm {
         snapshot: &Snapshot,
         destination_url: &str,
     ) -> std::result::Result<(), MigratableError> {
-        let url = Url::parse(destination_url).map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Could not parse destination URL: {}", e))
-        })?;
+        let mut vm_snapshot_path = url_to_path(destination_url)?;
+        vm_snapshot_path.push(VM_SNAPSHOT_FILE);
 
-        match url.scheme() {
-            "file" => {
-                let mut vm_snapshot_path = url_to_path(&url)?;
-                vm_snapshot_path.push(VM_SNAPSHOT_FILE);
+        // Create the snapshot file
+        let mut vm_snapshot_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(vm_snapshot_path)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-                // Create the snapshot file
-                let mut vm_snapshot_file = OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .create_new(true)
-                    .open(vm_snapshot_path)
-                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+        // Serialize and write the snapshot
+        let vm_snapshot =
+            serde_json::to_vec(snapshot).map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-                // Serialize and write the snapshot
-                let vm_snapshot = serde_json::to_vec(snapshot)
-                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+        vm_snapshot_file
+            .write(&vm_snapshot)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-                vm_snapshot_file
-                    .write(&vm_snapshot)
-                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
-
-                // Tell the memory manager to also send/write its own snapshot.
-                if let Some(memory_manager_snapshot) =
-                    snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID)
-                {
-                    self.memory_manager
-                        .lock()
-                        .unwrap()
-                        .send(&*memory_manager_snapshot.clone(), destination_url)?;
-                } else {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Missing memory manager snapshot"
-                    )));
-                }
-            }
-            _ => {
-                return Err(MigratableError::MigrateSend(anyhow!(
-                    "Unsupported VM transport URL scheme: {}",
-                    url.scheme()
-                )))
-            }
+        // Tell the memory manager to also send/write its own snapshot.
+        if let Some(memory_manager_snapshot) = snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID) {
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .send(&*memory_manager_snapshot.clone(), destination_url)?;
+        } else {
+            return Err(MigratableError::Restore(anyhow!(
+                "Missing memory manager snapshot"
+            )));
         }
+
         Ok(())
     }
 }
