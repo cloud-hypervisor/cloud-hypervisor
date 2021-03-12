@@ -47,9 +47,12 @@ use block_util::{
 use devices::gic;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
+#[cfg(target_arch = "x86_64")]
+use devices::legacy::Serial;
+#[cfg(target_arch = "aarch64")]
+use devices::legacy::PL011;
 use devices::{
-    interrupt_controller, interrupt_controller::InterruptController, legacy::Serial,
-    AcpiNotificationFlags,
+    interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
 };
 #[cfg(feature = "kvm")]
 use hypervisor::kvm_ioctls::*;
@@ -494,8 +497,11 @@ enum ConsoleInput {
 }
 #[derive(Default)]
 pub struct Console {
+    #[cfg(target_arch = "x86_64")]
     // Serial port on 0x3f8
     serial: Option<Arc<Mutex<Serial>>>,
+    #[cfg(target_arch = "aarch64")]
+    serial: Option<Arc<Mutex<PL011>>>,
     virtio_console_input: Option<Arc<virtio_devices::ConsoleInput>>,
     input: Option<ConsoleInput>,
 }
@@ -1598,7 +1604,7 @@ impl DeviceManager {
         &mut self,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         serial_writer: Option<Box<dyn io::Write + Send>>,
-    ) -> DeviceManagerResult<Arc<Mutex<Serial>>> {
+    ) -> DeviceManagerResult<Arc<Mutex<devices::legacy::PL011>>> {
         let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
 
         let serial_irq = self
@@ -1615,7 +1621,7 @@ impl DeviceManager {
             })
             .map_err(DeviceManagerError::CreateInterruptGroup)?;
 
-        let serial = Arc::new(Mutex::new(Serial::new(
+        let serial = Arc::new(Mutex::new(devices::legacy::PL011::new(
             id.clone(),
             interrupt_group,
             serial_writer,
@@ -1628,20 +1634,20 @@ impl DeviceManager {
 
         self.address_manager
             .mmio_bus
-            .insert(serial.clone(), addr.0, 0x8)
+            .insert(serial.clone(), addr.0, MMIO_LEN)
             .map_err(DeviceManagerError::BusError)?;
 
         self.id_to_dev_info.insert(
             (DeviceType::Serial, DeviceType::Serial.to_string()),
             MMIODeviceInfo {
                 addr: addr.0,
-                len: 0x8,
+                len: MMIO_LEN,
                 irq: serial_irq,
             },
         );
 
         self.cmdline_additions
-            .push(format!("earlycon=uart,mmio,0x{:08x}", addr.0));
+            .push(format!("earlycon=pl011,mmio,0x{:08x}", addr.0));
 
         // Fill the device tree with a new node. In case of restore, we
         // know there is nothing to do, so we can simply override the
