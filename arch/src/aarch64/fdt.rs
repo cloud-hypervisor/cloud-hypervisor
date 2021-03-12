@@ -487,11 +487,12 @@ fn create_serial_node<T: DeviceInfoForFDT + Clone + Debug>(
     fdt: &mut Vec<u8>,
     dev_info: &T,
 ) -> Result<()> {
+    let compatible = b"arm,pl011\0arm,primecell\0";
     let serial_reg_prop = generate_prop64(&[dev_info.addr(), dev_info.length()]);
     let irq = generate_prop32(&[GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING]);
 
-    append_begin_node(fdt, &format!("U6_16550A@{:x}", dev_info.addr()))?;
-    append_property_string(fdt, "compatible", "ns16550a")?;
+    append_begin_node(fdt, &format!("pl011@{:x}", dev_info.addr()))?;
+    append_property(fdt, "compatible", compatible)?;
     append_property(fdt, "reg", &serial_reg_prop)?;
     append_property_u32(fdt, "clocks", CLOCK_PHANDLE)?;
     append_property_string(fdt, "clock-names", "apb_pclk")?;
