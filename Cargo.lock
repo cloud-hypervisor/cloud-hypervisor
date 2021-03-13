@@ -649,9 +649,9 @@ checksum = "a9a7ab5d64814df0fe4a4b5ead45ed6c5f181ee3ff04ba344313a6c80446c5d4"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.60"
+version = "0.9.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "921fc71883267538946025deffb622905ecad223c28efbfdef9bb59a0175f3e6"
+checksum = "313752393519e876837e09e1fa183ddef0be7735868dced3196f4472d536277f"
 dependencies = [
  "autocfg",
  "cc",
