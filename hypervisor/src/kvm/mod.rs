@@ -57,8 +57,8 @@ pub use kvm_bindings;
 use kvm_bindings::KVMIO;
 pub use kvm_bindings::{
     kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing, kvm_irq_routing_entry,
-    kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI, KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY,
-    KVM_MSI_VALID_DEVID,
+    kvm_userspace_memory_region, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
+    KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{

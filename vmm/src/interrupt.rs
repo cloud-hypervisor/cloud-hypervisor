@@ -337,7 +337,7 @@ where
 pub mod kvm {
     use super::*;
     use hypervisor::kvm::KVM_MSI_VALID_DEVID;
-    use hypervisor::kvm::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
+    use hypervisor::kvm::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI};
 
     type KvmMsiInterruptGroup = MsiInterruptGroup<kvm_irq_routing_entry>;
     type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
@@ -365,6 +365,20 @@ pub mod kvm {
                     kvm_route.u.msi.__bindgen_anon_1.devid = cfg.devid;
                 }
 
+                let kvm_entry = KvmRoutingEntry {
+                    route: kvm_route,
+                    masked: false,
+                };
+
+                return Ok(Box::new(kvm_entry));
+            } else if let InterruptSourceConfig::LegacyIrq(cfg) = &config {
+                let mut kvm_route = kvm_irq_routing_entry {
+                    gsi,
+                    type_: KVM_IRQ_ROUTING_IRQCHIP,
+                    ..Default::default()
+                };
+                kvm_route.u.irqchip.irqchip = cfg.irqchip;
+                kvm_route.u.irqchip.pin = cfg.pin;
                 let kvm_entry = KvmRoutingEntry {
                     route: kvm_route,
                     masked: false,
@@ -493,7 +507,7 @@ mod tests {
         let res = get_dist_regs(gic.device());
         assert!(res.is_ok());
         let state = res.unwrap();
-        assert_eq!(state.len(), 244);
+        assert_eq!(state.len(), 649);
 
         let res = set_dist_regs(gic.device(), &state);
         assert!(res.is_ok());
