@@ -1628,14 +1628,14 @@ impl DeviceManager {
 
         self.address_manager
             .mmio_bus
-            .insert(serial.clone(), addr.0, MMIO_LEN)
+            .insert(serial.clone(), addr.0, 0x8)
             .map_err(DeviceManagerError::BusError)?;
 
         self.id_to_dev_info.insert(
             (DeviceType::Serial, DeviceType::Serial.to_string()),
             MMIODeviceInfo {
                 addr: addr.0,
-                len: MMIO_LEN,
+                len: 0x8,
                 irq: serial_irq,
             },
         );
