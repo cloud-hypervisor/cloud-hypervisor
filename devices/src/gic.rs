@@ -6,16 +6,16 @@ use super::interrupt_controller::{Error, InterruptController};
 use std::result;
 use std::sync::Arc;
 use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
+    InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
+    LegacyIrqSourceConfig, MsiIrqGroupConfig,
 };
 use vmm_sys_util::eventfd::EventFd;
 
 type Result<T> = result::Result<T, Error>;
 
-// Reserve 32 IRQs (GSI 32 ~ 64) for legacy device.
-// GsiAllocator should allocate beyond this: from 64 on
+// Reserve 32 IRQs for legacy device.
+pub const IRQ_LEGACY_BASE: usize = 0;
 pub const IRQ_LEGACY_COUNT: usize = 32;
-pub const IRQ_SPI_OFFSET: usize = 32;
 
 // This Gic struct implements InterruptController to provide interrupt delivery service.
 // The Gic source files in arch/ folder maintain the Aarch64 specific Gic device.
@@ -34,7 +34,7 @@ impl Gic {
     ) -> Result<Gic> {
         let interrupt_source_group = interrupt_manager
             .create_group(MsiIrqGroupConfig {
-                base: IRQ_SPI_OFFSET as InterruptIndex,
+                base: IRQ_LEGACY_BASE as InterruptIndex,
                 count: IRQ_LEGACY_COUNT as InterruptIndex,
             })
             .map_err(Error::CreateInterruptSourceGroup)?;
@@ -47,9 +47,26 @@ impl Gic {
 
 impl InterruptController for Gic {
     fn enable(&self) -> Result<()> {
+        // Set irqfd for legacy interrupts
         self.interrupt_source_group
             .enable()
             .map_err(Error::EnableInterrupt)?;
+
+        // Set irq_routing for legacy interrupts.
+        //   irqchip: Hardcode to 0 as we support only 1 GIC
+        //   pin: Use irq number as pin
+        for i in IRQ_LEGACY_BASE..(IRQ_LEGACY_BASE + IRQ_LEGACY_COUNT) {
+            let config = LegacyIrqSourceConfig {
+                irqchip: 0,
+                pin: i as u32,
+            };
+            self.interrupt_source_group
+                .update(
+                    i as InterruptIndex,
+                    InterruptSourceConfig::LegacyIrq(config),
+                )
+                .map_err(Error::EnableInterrupt)?;
+        }
         Ok(())
     }
 

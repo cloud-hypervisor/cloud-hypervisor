@@ -70,7 +70,10 @@ pub type InterruptIndex = u32;
 ///
 /// On x86 platforms, legacy interrupts means those interrupts routed through PICs or IOAPICs.
 #[derive(Copy, Clone, Debug)]
-pub struct LegacyIrqSourceConfig {}
+pub struct LegacyIrqSourceConfig {
+    pub irqchip: u32,
+    pub pin: u32,
+}
 
 /// Configuration data for MSI/MSI-X interrupts.
 ///
