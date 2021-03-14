@@ -108,6 +108,11 @@ mod tests {
     const DIRECT_KERNEL_BOOT_CMDLINE: &str =
         "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
 
+    #[cfg(target_arch = "x86_64")]
+    const GREP_SERIAL_IRQ_CMD: &str = "cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'";
+    #[cfg(target_arch = "aarch64")]
+    const GREP_SERIAL_IRQ_CMD: &str = "cat /proc/interrupts | grep 'GICv3' | grep -c 'ttyS0'";
+
     const PIPE_SIZE: i32 = 32 << 20;
 
     impl UbuntuDiskConfig {
@@ -3558,20 +3563,13 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_serial_off() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut kernel_path = workload_path;
-            kernel_path.push("bzImage");
-
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
                 .default_disks()
                 .default_net()
@@ -3586,7 +3584,7 @@ mod tests {
                 // Test that there is no ttyS0
                 assert_eq!(
                     guest
-                        .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                        .ssh_command(GREP_SERIAL_IRQ_CMD)
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -3626,11 +3624,10 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 guest.wait_vm_boot(None).unwrap();
 
-                #[cfg(target_arch = "x86_64")]
                 // Test that there is a ttyS0
                 assert_eq!(
                     guest
-                        .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                        .ssh_command(GREP_SERIAL_IRQ_CMD)
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -3651,7 +3648,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_serial_tty() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -3685,7 +3681,7 @@ mod tests {
                 // Test that there is a ttyS0
                 assert_eq!(
                     guest
-                        .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                        .ssh_command(GREP_SERIAL_IRQ_CMD)
                         .unwrap()
                         .trim()
                         .parse::<u32>()
@@ -3709,7 +3705,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_serial_file() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -3741,7 +3736,7 @@ mod tests {
                 // Test that there is a ttyS0
                 assert_eq!(
                     guest
-                        .ssh_command("cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'")
+                        .ssh_command(GREP_SERIAL_IRQ_CMD)
                         .unwrap()
                         .trim()
                         .parse::<u32>()
