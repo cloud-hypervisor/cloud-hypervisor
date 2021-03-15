@@ -48,6 +48,10 @@ This device is built-in by default, but it can be compiled out with Rust
 features. When compiled in, it is always enabled, and cannot be disabled
 from the command line.
 
+For AArch64 machines, an ARM PrimeCell Real Time Clock(PL031) is implemented.
+This device is built-in by default for the AArch64 platform, and it is always
+enabled, and cannot be disabled from the command line.
+
 ### I/O APIC
 
 `cloud-hypervisor` supports a so-called split IRQ chip implementation by
@@ -68,6 +72,11 @@ This device is always built-in, but it is disabled by default. Because ACPI is
 enabled by default, the handling of reboot/shutdown goes through the dedicated
 ACPI device. In case ACPI is disabled, this device is enabled to bring to the
 VM some reboot/shutdown support.
+
+### ARM PrimeCell General Purpose Input/Output (PL061)
+
+Simplified ARM PrimeCell GPIO (PL061) implementation. Only supports key 3 to
+trigger a graceful shutdown of the AArch64 guest.
 
 ### ACPI device
 
