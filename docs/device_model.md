@@ -28,9 +28,13 @@ This document describes the device model supported by `cloud-hypervisor`.
 ### Serial port
 
 Simple emulation of a serial port by reading and writing to specific port I/O
-addresses. Used as the default console for Linux when booting with the option
-`console=ttyS0`, the serial port can be very useful to gather early logs from
-the operating system booted inside the VM.
+addresses. The serial port can be very useful to gather early logs from the
+operating system booted inside the VM.
+
+For x86_64, The default serial port is from an emulated 16550A device. It can
+be used as the default console for Linux when booting with the option
+`console=ttyS0`. For AArch64, the default serial port is from an emulated
+PL011 UART device. The related command line for AArch64 is `console=ttyAMA0`.
 
 This device is always built-in, and it is disabled by default. It can be
 enabled with the `--serial` option, as long as its parameter is not `off`.
