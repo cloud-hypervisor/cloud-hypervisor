@@ -132,6 +132,7 @@ fn virtio_block_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_sched_getaffinity),
         allow_syscall(libc::SYS_set_robust_list),
         allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_timerfd_settime),
         allow_syscall(libc::SYS_write),
     ]
 }
