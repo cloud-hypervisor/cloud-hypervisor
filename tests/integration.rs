@@ -111,7 +111,7 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     const GREP_SERIAL_IRQ_CMD: &str = "cat /proc/interrupts | grep 'IO-APIC' | grep -c 'ttyS0'";
     #[cfg(target_arch = "aarch64")]
-    const GREP_SERIAL_IRQ_CMD: &str = "cat /proc/interrupts | grep 'GICv3' | grep -c 'ttyS0'";
+    const GREP_SERIAL_IRQ_CMD: &str = "cat /proc/interrupts | grep 'GICv3' | grep -c 'uart-pl011'";
 
     const PIPE_SIZE: i32 = 32 << 20;
 
@@ -3604,13 +3604,18 @@ mod tests {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
             let mut cmd = GuestCommand::new(&guest);
+            #[cfg(target_arch = "x86_64")]
+            let console_str: &str = "console=ttyS0";
+            #[cfg(target_arch = "aarch64")]
+            let console_str: &str = "console=ttyAMA0";
+
             cmd.args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
                 .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
                 .args(&[
                     "--cmdline",
                     DIRECT_KERNEL_BOOT_CMDLINE
-                        .replace("console=hvc0 ", "console=ttyS0")
+                        .replace("console=hvc0 ", console_str)
                         .as_str(),
                 ])
                 .default_disks()
@@ -3657,6 +3662,11 @@ mod tests {
 
             let kernel_path = direct_kernel_boot_path();
 
+            #[cfg(target_arch = "x86_64")]
+            let console_str: &str = "console=ttyS0";
+            #[cfg(target_arch = "aarch64")]
+            let console_str: &str = "console=ttyAMA0";
+
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
@@ -3664,7 +3674,7 @@ mod tests {
                 .args(&[
                     "--cmdline",
                     DIRECT_KERNEL_BOOT_CMDLINE
-                        .replace("console=hvc0 ", "console=ttyS0")
+                        .replace("console=hvc0 ", console_str)
                         .as_str(),
                 ])
                 .default_disks()
@@ -3710,6 +3720,11 @@ mod tests {
             let guest = Guest::new(&mut focal);
 
             let serial_path = guest.tmp_dir.as_path().join("/tmp/serial-output");
+            #[cfg(target_arch = "x86_64")]
+            let console_str: &str = "console=ttyS0";
+            #[cfg(target_arch = "aarch64")]
+            let console_str: &str = "console=ttyAMA0";
+
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
                 .args(&["--memory", "size=512M"])
@@ -3717,7 +3732,7 @@ mod tests {
                 .args(&[
                     "--cmdline",
                     DIRECT_KERNEL_BOOT_CMDLINE
-                        .replace("console=hvc0 ", "console=ttyS0")
+                        .replace("console=hvc0 ", console_str)
                         .as_str(),
                 ])
                 .default_disks()
