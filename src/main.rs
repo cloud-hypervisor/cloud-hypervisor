@@ -371,7 +371,7 @@ fn create_app<'a, 'b>(
     app
 }
 
-fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &str) -> Result<(), Error> {
+fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &Option<String>) -> Result<(), Error> {
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateAPIEventFd)?;
 
@@ -435,7 +435,7 @@ fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &str) -> Result<(), Err
         let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 
         println!(
-            "Cloud Hypervisor Guest\n\tAPI server: {}\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: \
+            "Cloud Hypervisor Guest\n\tAPI server: {:?}\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: \
              {:?}\n\tInitramfs: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
             api_socket_path,
             vm_config.cpus.boot_vcpus,
@@ -523,10 +523,7 @@ fn main() {
     .map(|()| log::set_max_level(log_level))
     .expect("Expected to be able to setup logger");
 
-    let api_socket_path = cmd_arguments
-        .value_of("api-socket")
-        .expect("Missing argument: api-socket")
-        .to_string();
+    let api_socket_path = cmd_arguments.value_of("api-socket").map(|s| s.to_string());
 
     if let Some(monitor_config) = cmd_arguments.value_of("event-monitor") {
         let mut parser = OptionParser::new();
@@ -553,12 +550,15 @@ fn main() {
         event_monitor::set_monitor(file).expect("Expected setting monitor to succeed");
     }
 
-    if let Err(e) = start_vmm(cmd_arguments, &api_socket_path) {
+    let exit_code = if let Err(e) = start_vmm(cmd_arguments, &api_socket_path) {
         eprintln!("{}", e);
-        std::fs::remove_file(api_socket_path).ok();
-        std::process::exit(1);
-    }
-    std::fs::remove_file(api_socket_path).ok();
+        1
+    } else {
+        0
+    };
+
+    api_socket_path.map(|s| std::fs::remove_file(s).ok());
+    std::process::exit(exit_code);
 }
 
 #[cfg(test)]
