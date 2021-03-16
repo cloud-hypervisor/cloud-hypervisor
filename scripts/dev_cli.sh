@@ -182,6 +182,7 @@ cmd_help() {
     echo "        --cargo               Run the cargo tests."
     echo "        --integration         Run the integration tests."
     echo "        --integration-sgx     Run the SGX integration tests."
+    echo "        --integration-vfio    Run the VFIO integration tests."
     echo "        --integration-windows Run the Windows guest integration tests."
     echo "        --libc                Select the C library Cloud Hypervisor will be built against. Default is gnu"
     echo "        --volumes             Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
@@ -298,6 +299,7 @@ cmd_tests() {
     cargo=false
     integration=false
     integration_sgx=false
+    integration_vfio=false
     integration_windows=false
     libc="gnu"
     arg_vols=""
@@ -310,6 +312,7 @@ cmd_tests() {
             "--cargo")               { cargo=true; } ;;
             "--integration")         { integration=true; } ;;
             "--integration-sgx")     { integration_sgx=true; } ;;
+            "--integration-vfio")    { integration_vfio=true; } ;;
             "--integration-windows") { integration_windows=true; } ;;
             "--libc")
                 shift
@@ -417,6 +420,25 @@ cmd_tests() {
 	       --env CH_LIBC="${libc}" \
 	       "$CTR_IMAGE" \
 	       ./scripts/run_integration_tests_sgx.sh "$@" || fix_dir_perms $? || exit $?
+    fi
+
+    if [ "$integration_vfio" = true ] ;  then
+	say "Running VFIO integration tests for $target..."
+	$DOCKER_RUNTIME run \
+	       --workdir "$CTR_CLH_ROOT_DIR" \
+	       --rm \
+	       --privileged \
+	       --security-opt seccomp=unconfined \
+	       --ipc=host \
+	       --net="$CTR_CLH_NET" \
+	       --mount type=tmpfs,destination=/tmp \
+	       --volume /dev:/dev \
+	       --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
+	       --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+	       --env USER="root" \
+	       --env CH_LIBC="${libc}" \
+	       "$CTR_IMAGE" \
+	       ./scripts/run_integration_tests_vfio.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_windows" = true ] ;  then

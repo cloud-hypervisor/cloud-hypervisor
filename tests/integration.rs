@@ -88,6 +88,8 @@ mod tests {
     const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210106-1.raw";
     #[cfg(target_arch = "x86_64")]
     const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx.raw";
+    #[cfg(target_arch = "x86_64")]
+    const FOCAL_NVIDIA_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-nvidia.raw";
     #[cfg(target_arch = "aarch64")]
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64.raw";
     #[cfg(target_arch = "aarch64")]
@@ -6315,6 +6317,67 @@ mod tests {
                         establish secure channel.\nSucceed to exchange \
                         secure message...\nSucceed to close Session..."
                     ));
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    mod vfio {
+        use crate::tests::*;
+
+        #[test]
+        fn test_nvidia_card() {
+            let mut focal = UbuntuDiskConfig::new(FOCAL_NVIDIA_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut focal);
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=4"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
+                .default_disks()
+                .default_net()
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot(None).unwrap();
+
+                // Run CUDA sample to validate it can find the device
+                let device_query_result = guest
+                    .ssh_command(
+                        "sudo /root/NVIDIA_CUDA-11.2_Samples/bin/x86_64/linux/release/deviceQuery",
+                    )
+                    .unwrap();
+                assert!(device_query_result.contains("Detected 1 CUDA Capable device"));
+                assert!(device_query_result.contains("Device 0: \"Tesla T4\""));
+                assert!(device_query_result.contains("Result = PASS"));
+
+                // Run NVIDIA DCGM Diagnostics to validate the device is functional
+                assert_eq!(
+                    guest
+                        .ssh_command("sudo nv-hostengine && echo ok")
+                        .unwrap()
+                        .trim(),
+                    "ok"
+                );
+                assert!(guest
+                    .ssh_command("sudo dcgmi discovery -l")
+                    .unwrap()
+                    .contains("Name: Tesla T4"));
+                assert_eq!(
+                    guest
+                        .ssh_command("sudo dcgmi diag -r 'diagnostic' | grep Pass | wc -l")
+                        .unwrap()
+                        .trim(),
+                    "10"
+                );
             });
 
             let _ = child.kill();
