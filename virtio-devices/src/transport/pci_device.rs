@@ -16,7 +16,7 @@ use crate::transport::VirtioTransport;
 use crate::{
     ActivateResult, Queue, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
     DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
-    DEVICE_INIT, VIRTIO_MSI_NO_VECTOR,
+    DEVICE_INIT,
 };
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
@@ -45,7 +45,7 @@ use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
 };
-use vm_virtio::{queue, VirtioIommuRemapping};
+use vm_virtio::{queue, VirtioIommuRemapping, VIRTIO_MSI_NO_VECTOR};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
 #[derive(Debug)]
@@ -423,7 +423,7 @@ impl VirtioPciDevice {
                 device_feature_select: 0,
                 driver_feature_select: 0,
                 queue_select: 0,
-                msix_config: Arc::new(AtomicU16::new(0)),
+                msix_config: Arc::new(AtomicU16::new(VIRTIO_MSI_NO_VECTOR)),
             },
             msix_config,
             msix_num,

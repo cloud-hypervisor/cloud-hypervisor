@@ -8,7 +8,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::VirtioIommuRemapping;
+use crate::{VirtioIommuRemapping, VIRTIO_MSI_NO_VECTOR};
 use std::cmp::min;
 use std::convert::TryInto;
 use std::fmt::{self, Display};
@@ -438,7 +438,7 @@ impl Queue {
             max_size,
             size: max_size,
             ready: false,
-            vector: 0,
+            vector: VIRTIO_MSI_NO_VECTOR,
             desc_table: GuestAddress(0),
             avail_ring: GuestAddress(0),
             used_ring: GuestAddress(0),
@@ -486,7 +486,7 @@ impl Queue {
         self.size = self.max_size;
         self.next_avail = Wrapping(0);
         self.next_used = Wrapping(0);
-        self.vector = 0;
+        self.vector = VIRTIO_MSI_NO_VECTOR;
         self.desc_table = GuestAddress(0);
         self.avail_ring = GuestAddress(0);
         self.used_ring = GuestAddress(0);
