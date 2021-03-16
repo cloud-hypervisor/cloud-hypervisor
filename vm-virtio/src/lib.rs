@@ -23,6 +23,8 @@ pub use queue::*;
 pub type VirtioIommuRemapping =
     Box<dyn Fn(u64) -> std::result::Result<u64, std::io::Error> + Send + Sync>;
 
+pub const VIRTIO_MSI_NO_VECTOR: u16 = 0xffff;
+
 // Types taken from linux/virtio_ids.h
 #[derive(Copy, Clone, Debug)]
 #[allow(dead_code)]

@@ -75,8 +75,6 @@ const VIRTIO_F_VERSION_1: u32 = 32;
 const VIRTIO_F_IOMMU_PLATFORM: u32 = 33;
 const VIRTIO_F_IN_ORDER: u32 = 35;
 
-const VIRTIO_MSI_NO_VECTOR: u16 = 0xffff;
-
 #[derive(Debug)]
 pub enum ActivateError {
     EpollCtl(std::io::Error),
