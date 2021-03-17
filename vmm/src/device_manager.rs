@@ -2741,7 +2741,7 @@ impl DeviceManager {
             // Increment the counter.
             self.device_id_cnt += Wrapping(1);
             // Check if the name is already in use.
-            if !self.pci_id_list.contains_key(&name) {
+            if !self.device_tree.lock().unwrap().contains_key(&name) {
                 return Ok(name);
             }
 
@@ -2864,7 +2864,7 @@ impl DeviceManager {
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
         let vfio_name = if let Some(id) = &device_cfg.id {
-            if self.pci_id_list.contains_key(id) {
+            if self.device_tree.lock().unwrap().contains_key(id) {
                 return Err(DeviceManagerError::DeviceIdAlreadyInUse);
             }
 
@@ -2955,9 +2955,6 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::AddPciDevice)?;
 
-        if self.pci_id_list.contains_key(&device_id) {
-            return Err(DeviceManagerError::DeviceIdAlreadyInUse);
-        }
         self.pci_id_list.insert(device_id, bdf);
         Ok(bars)
     }

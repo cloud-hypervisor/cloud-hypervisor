@@ -51,6 +51,9 @@ impl DeviceTree {
     pub fn new() -> Self {
         DeviceTree(HashMap::new())
     }
+    pub fn contains_key(&self, k: &str) -> bool {
+        self.0.contains_key(k)
+    }
     pub fn get(&self, k: &str) -> Option<&DeviceNode> {
         self.0.get(k)
     }
