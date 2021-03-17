@@ -261,6 +261,7 @@ pub fn start_http_thread(
 ) -> Result<thread::JoinHandle<Result<()>>> {
     std::fs::remove_file(path).unwrap_or_default();
     let socket_path = PathBuf::from(path);
+    let mut server = HttpServer::new(socket_path).map_err(Error::CreatingAPIServer)?;
 
     // Retrieve seccomp filter for API thread
     let api_seccomp_filter =
@@ -272,7 +273,6 @@ pub fn start_http_thread(
             // Apply seccomp filter for API thread.
             SeccompFilter::apply(api_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
 
-            let mut server = HttpServer::new(socket_path).unwrap();
             server.start_server().unwrap();
             loop {
                 match server.requests() {

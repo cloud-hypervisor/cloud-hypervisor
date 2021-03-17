@@ -140,6 +140,10 @@ pub enum Error {
     /// Error activating virtio devices
     #[error("Error activating virtio devices: {0:?}")]
     ActivateVirtioDevices(VmError),
+
+    /// Error creating API server
+    #[error("Error creating API server {0:?}")]
+    CreatingAPIServer(micro_http::ServerError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
