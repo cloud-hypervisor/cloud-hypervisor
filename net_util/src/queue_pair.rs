@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use super::{unregister_listener, vnet_hdr_len, Tap};
+use rate_limiter::{RateLimiter, TokenType};
 use std::io;
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -36,10 +37,34 @@ impl TxVirtio {
         mem: &GuestMemoryMmap,
         tap: &mut Tap,
         queue: &mut Queue,
+        rate_limiter: &mut Option<RateLimiter>,
     ) -> Result<(), NetQueuePairError> {
         while let Some(avail_desc) = queue.iter(&mem).next() {
             let head_index = avail_desc.index;
             let mut next_desc = Some(avail_desc);
+
+            if let Some(rate_limiter) = rate_limiter {
+                if !rate_limiter.consume(1, TokenType::Ops) {
+                    queue.go_to_previous_position();
+                    break;
+                }
+
+                let mut bytes = Wrapping(0);
+                let mut tmp_next_desc = next_desc.clone();
+                while let Some(desc) = tmp_next_desc {
+                    if !desc.is_write_only() {
+                        bytes += Wrapping(desc.len as u64);
+                    }
+                    tmp_next_desc = desc.next_descriptor();
+                }
+                bytes -= Wrapping(vnet_hdr_len() as u64);
+                if !rate_limiter.consume(bytes.0, TokenType::Bytes) {
+                    // Revert the OPS consume().
+                    rate_limiter.manual_replenish(1, TokenType::Ops);
+                    queue.go_to_previous_position();
+                    break;
+                }
+            }
 
             let mut iovecs = Vec::new();
             while let Some(desc) = next_desc {
@@ -209,6 +234,7 @@ pub struct NetQueuePair {
     pub rx_tap_listening: bool,
     pub counters: NetCounters,
     pub tap_event_id: u16,
+    pub tx_rate_limiter: Option<RateLimiter>,
 }
 
 impl NetQueuePair {
@@ -220,7 +246,7 @@ impl NetQueuePair {
             .map(|m| m.memory())?;
 
         self.tx
-            .process_desc_chain(&mem, &mut self.tap, &mut queue)?;
+            .process_desc_chain(&mem, &mut self.tap, &mut queue, &mut self.tx_rate_limiter)?;
 
         self.counters
             .tx_bytes
