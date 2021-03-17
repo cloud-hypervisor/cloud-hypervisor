@@ -894,11 +894,8 @@ pub struct DeviceManager {
     // Bitmap of PCI devices to hotunplug.
     pci_devices_down: u32,
 
-    // Hashmap of PCI b/d/f to their corresponding device's name.
-    pci_id_list: HashMap<u32, String>,
-
-    // Hashmap of PCI b/d/f to their corresponding Arc<Mutex<dyn PciDevice>>.
-    pci_devices: HashMap<u32, Arc<dyn Any + Send + Sync>>,
+    // BTreeMap of PCI b/d/f to their corresponding MetaPciDevice.
+    pci_devices: BTreeMap<u32, (String, Arc<dyn Any + Send + Sync>)>,
 
     // BTreeMap of PCI b/d/f to their allocated IRQ.
     pci_device_irqs: BTreeMap<u32, u32>,
@@ -1004,8 +1001,7 @@ impl DeviceManager {
             iommu_device: None,
             pci_devices_up: 0,
             pci_devices_down: 0,
-            pci_id_list: HashMap::new(),
-            pci_devices: HashMap::new(),
+            pci_devices: BTreeMap::new(),
             pci_device_irqs: BTreeMap::new(),
             device_tree,
             #[cfg(feature = "acpi")]
@@ -2942,7 +2938,8 @@ impl DeviceManager {
             .add_device(bdf, pci_device)
             .map_err(DeviceManagerError::AddPciDevice)?;
 
-        self.pci_devices.insert(bdf, any_device);
+        self.pci_devices
+            .insert(bdf, (device_id.clone(), any_device));
         self.bus_devices.push(Arc::clone(&bus_device));
 
         pci_bus
@@ -2955,7 +2952,6 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::AddPciDevice)?;
 
-        self.pci_id_list.insert(bdf, device_id);
         Ok(bars)
     }
 
@@ -3167,8 +3163,9 @@ impl DeviceManager {
         }
 
         // Take care of updating the memory for VFIO PCI devices.
-        for (_, any_device) in self.pci_devices.iter() {
-            if let Ok(vfio_pci_device) = Arc::clone(any_device).downcast::<Mutex<VfioPciDevice>>() {
+        for (_, (_, any_device)) in self.pci_devices.iter() {
+            if let Ok(vfio_pci_device) = Arc::clone(&any_device).downcast::<Mutex<VfioPciDevice>>()
+            {
                 vfio_pci_device
                     .lock()
                     .unwrap()
@@ -3186,9 +3183,9 @@ impl DeviceManager {
 
     pub fn activate_virtio_devices(&self) -> DeviceManagerResult<()> {
         // Find virtio pci devices and activate any pending ones
-        for (_, any_device) in self.pci_devices.iter() {
+        for (_, (_, any_device)) in self.pci_devices.iter() {
             if let Ok(virtio_pci_device) =
-                Arc::clone(any_device).downcast::<Mutex<VirtioPciDevice>>()
+                Arc::clone(&any_device).downcast::<Mutex<VirtioPciDevice>>()
             {
                 virtio_pci_device.lock().unwrap().maybe_activate();
             }
@@ -3247,32 +3244,28 @@ impl DeviceManager {
     }
 
     pub fn remove_device(&mut self, id: String) -> DeviceManagerResult<()> {
-        for (pci_device_bdf, pci_device_name) in self.pci_id_list.iter() {
-            if *pci_device_name == id {
-                if let Some(any_device) = self.pci_devices.get(pci_device_bdf) {
-                    if let Ok(virtio_pci_device) =
-                        Arc::clone(any_device).downcast::<Mutex<VirtioPciDevice>>()
-                    {
-                        let device_type = VirtioDeviceType::from(
-                            virtio_pci_device
-                                .lock()
-                                .unwrap()
-                                .virtio_device()
-                                .lock()
-                                .unwrap()
-                                .device_type(),
-                        );
-                        match device_type {
-                            VirtioDeviceType::TYPE_NET
-                            | VirtioDeviceType::TYPE_BLOCK
-                            | VirtioDeviceType::TYPE_PMEM
-                            | VirtioDeviceType::TYPE_FS
-                            | VirtioDeviceType::TYPE_VSOCK => {}
-                            _ => return Err(DeviceManagerError::RemovalNotAllowed(device_type)),
-                        }
+        for (pci_device_bdf, (device_id, any_device)) in self.pci_devices.iter() {
+            if *device_id == id {
+                if let Ok(virtio_pci_device) =
+                    Arc::clone(&any_device).downcast::<Mutex<VirtioPciDevice>>()
+                {
+                    let device_type = VirtioDeviceType::from(
+                        virtio_pci_device
+                            .lock()
+                            .unwrap()
+                            .virtio_device()
+                            .lock()
+                            .unwrap()
+                            .device_type(),
+                    );
+                    match device_type {
+                        VirtioDeviceType::TYPE_NET
+                        | VirtioDeviceType::TYPE_BLOCK
+                        | VirtioDeviceType::TYPE_PMEM
+                        | VirtioDeviceType::TYPE_FS
+                        | VirtioDeviceType::TYPE_VSOCK => {}
+                        _ => return Err(DeviceManagerError::RemovalNotAllowed(device_type)),
                     }
-                } else {
-                    return Err(DeviceManagerError::UnknownPciBdf(*pci_device_bdf));
                 }
 
                 // Update the PCID bitmap
@@ -3304,17 +3297,13 @@ impl DeviceManager {
         // Convert the device ID into the corresponding b/d/f.
         let pci_device_bdf = (device_id as u32) << 3;
 
-        // Find the device name corresponding to the PCI b/d/f while removing
-        // the device entry.
-        self.pci_id_list.remove(&pci_device_bdf);
-
         // Give the PCI device ID back to the PCI bus.
         pci.lock()
             .unwrap()
             .put_device_id(device_id as usize)
             .map_err(DeviceManagerError::PutPciDeviceId)?;
 
-        if let Some(any_device) = self.pci_devices.remove(&pci_device_bdf) {
+        if let Some((_, any_device)) = self.pci_devices.remove(&pci_device_bdf) {
             let (pci_device, bus_device, virtio_device) = if let Ok(vfio_pci_device) =
                 any_device.clone().downcast::<Mutex<VfioPciDevice>>()
             {
