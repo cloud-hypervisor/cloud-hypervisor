@@ -894,8 +894,8 @@ pub struct DeviceManager {
     // Bitmap of PCI devices to hotunplug.
     pci_devices_down: u32,
 
-    // Hashmap of device's name to their corresponding PCI b/d/f.
-    pci_id_list: HashMap<String, u32>,
+    // Hashmap of PCI b/d/f to their corresponding device's name.
+    pci_id_list: HashMap<u32, String>,
 
     // Hashmap of PCI b/d/f to their corresponding Arc<Mutex<dyn PciDevice>>.
     pci_devices: HashMap<u32, Arc<dyn Any + Send + Sync>>,
@@ -2955,7 +2955,7 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::AddPciDevice)?;
 
-        self.pci_id_list.insert(device_id, bdf);
+        self.pci_id_list.insert(bdf, device_id);
         Ok(bars)
     }
 
@@ -3247,48 +3247,50 @@ impl DeviceManager {
     }
 
     pub fn remove_device(&mut self, id: String) -> DeviceManagerResult<()> {
-        if let Some(pci_device_bdf) = self.pci_id_list.get(&id) {
-            if let Some(any_device) = self.pci_devices.get(&pci_device_bdf) {
-                if let Ok(virtio_pci_device) =
-                    Arc::clone(any_device).downcast::<Mutex<VirtioPciDevice>>()
-                {
-                    let device_type = VirtioDeviceType::from(
-                        virtio_pci_device
-                            .lock()
-                            .unwrap()
-                            .virtio_device()
-                            .lock()
-                            .unwrap()
-                            .device_type(),
-                    );
-                    match device_type {
-                        VirtioDeviceType::TYPE_NET
-                        | VirtioDeviceType::TYPE_BLOCK
-                        | VirtioDeviceType::TYPE_PMEM
-                        | VirtioDeviceType::TYPE_FS
-                        | VirtioDeviceType::TYPE_VSOCK => {}
-                        _ => return Err(DeviceManagerError::RemovalNotAllowed(device_type)),
+        for (pci_device_bdf, pci_device_name) in self.pci_id_list.iter() {
+            if *pci_device_name == id {
+                if let Some(any_device) = self.pci_devices.get(pci_device_bdf) {
+                    if let Ok(virtio_pci_device) =
+                        Arc::clone(any_device).downcast::<Mutex<VirtioPciDevice>>()
+                    {
+                        let device_type = VirtioDeviceType::from(
+                            virtio_pci_device
+                                .lock()
+                                .unwrap()
+                                .virtio_device()
+                                .lock()
+                                .unwrap()
+                                .device_type(),
+                        );
+                        match device_type {
+                            VirtioDeviceType::TYPE_NET
+                            | VirtioDeviceType::TYPE_BLOCK
+                            | VirtioDeviceType::TYPE_PMEM
+                            | VirtioDeviceType::TYPE_FS
+                            | VirtioDeviceType::TYPE_VSOCK => {}
+                            _ => return Err(DeviceManagerError::RemovalNotAllowed(device_type)),
+                        }
+                    }
+                } else {
+                    return Err(DeviceManagerError::UnknownPciBdf(*pci_device_bdf));
+                }
+
+                // Update the PCID bitmap
+                self.pci_devices_down |= 1 << (*pci_device_bdf >> 3);
+
+                // Remove the device from the device tree along with its parent.
+                let mut device_tree = self.device_tree.lock().unwrap();
+                if let Some(node) = device_tree.remove(&id) {
+                    if let Some(parent) = &node.parent {
+                        device_tree.remove(parent);
                     }
                 }
-            } else {
-                return Err(DeviceManagerError::UnknownPciBdf(*pci_device_bdf));
+
+                return Ok(());
             }
-
-            // Update the PCID bitmap
-            self.pci_devices_down |= 1 << (*pci_device_bdf >> 3);
-
-            // Remove the device from the device tree along with its parent.
-            let mut device_tree = self.device_tree.lock().unwrap();
-            if let Some(node) = device_tree.remove(&id) {
-                if let Some(parent) = &node.parent {
-                    device_tree.remove(parent);
-                }
-            }
-
-            Ok(())
-        } else {
-            Err(DeviceManagerError::UnknownDeviceId(id))
         }
+
+        Err(DeviceManagerError::UnknownDeviceId(id))
     }
 
     pub fn eject_device(&mut self, device_id: u8) -> DeviceManagerResult<()> {
@@ -3304,7 +3306,7 @@ impl DeviceManager {
 
         // Find the device name corresponding to the PCI b/d/f while removing
         // the device entry.
-        self.pci_id_list.retain(|_, bdf| *bdf != pci_device_bdf);
+        self.pci_id_list.remove(&pci_device_bdf);
 
         // Give the PCI device ID back to the PCI bus.
         pci.lock()
