@@ -903,8 +903,8 @@ pub struct DeviceManager {
     // BTreeMap of PCI b/d/f to their corresponding MetaPciDevice.
     pci_devices: BTreeMap<u32, (String, PciDeviceHandle)>,
 
-    // BTreeMap of PCI b/d/f to their allocated IRQ.
-    pci_device_irqs: BTreeMap<u32, u32>,
+    // List of allocated IRQs for each PCI slot.
+    pci_irq_slots: [u8; 32],
 
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
@@ -1008,7 +1008,7 @@ impl DeviceManager {
             pci_devices_up: 0,
             pci_devices_down: 0,
             pci_devices: BTreeMap::new(),
-            pci_device_irqs: BTreeMap::new(),
+            pci_irq_slots: [0; 32],
             device_tree,
             #[cfg(feature = "acpi")]
             exit_evt: _exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
@@ -1135,7 +1135,7 @@ impl DeviceManager {
     fn reserve_legacy_interrupts_for_pci_devices(&mut self) -> DeviceManagerResult<()> {
         // Reserve 8 IRQs which will be shared across all PCI devices.
         let num_irqs = 8;
-        let mut irqs: Vec<u32> = Vec::new();
+        let mut irqs: Vec<u8> = Vec::new();
         for _ in 0..num_irqs {
             irqs.push(
                 self.address_manager
@@ -1143,14 +1143,13 @@ impl DeviceManager {
                     .lock()
                     .unwrap()
                     .allocate_irq()
-                    .ok_or(DeviceManagerError::AllocateIrq)?,
+                    .ok_or(DeviceManagerError::AllocateIrq)? as u8,
             );
         }
 
         // There are 32 devices on the PCI bus, let's assign them an IRQ.
         for i in 0..32 {
-            self.pci_device_irqs
-                .insert(i << 3, irqs[(i % num_irqs) as usize]);
+            self.pci_irq_slots[i] = irqs[(i % num_irqs) as usize];
         }
 
         Ok(())
@@ -2840,14 +2839,13 @@ impl DeviceManager {
             }
         }
 
-        let legacy_interrupt_group = if let (Some(irq), Some(legacy_interrupt_manager)) = (
-            self.pci_device_irqs.get(&pci_device_bdf),
-            &self.legacy_interrupt_manager,
-        ) {
+        let legacy_interrupt_group = if let Some(legacy_interrupt_manager) =
+            &self.legacy_interrupt_manager
+        {
             Some(
                 legacy_interrupt_manager
                     .create_group(LegacyIrqGroupConfig {
-                        irq: *irq as InterruptIndex,
+                        irq: self.pci_irq_slots[(pci_device_bdf >> 3) as usize] as InterruptIndex,
                     })
                     .map_err(DeviceManagerError::CreateInterruptGroup)?,
             )
@@ -3758,9 +3756,10 @@ impl Aml for DeviceManager {
 
         // Build PCI routing table, listing IRQs assigned to PCI devices.
         let prt_package_list: Vec<(u32, u32)> = self
-            .pci_device_irqs
+            .pci_irq_slots
             .iter()
-            .map(|(bdf, irq)| (((((*bdf >> 3) & 0x1fu32) << 16) | 0xffffu32), *irq))
+            .enumerate()
+            .map(|(i, irq)| (((((i as u32) & 0x1fu32) << 16) | 0xffffu32), *irq as u32))
             .collect();
         let prt_package_list: Vec<aml::Package> = prt_package_list
             .iter()
