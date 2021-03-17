@@ -887,6 +887,8 @@ pub struct NetConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub fds: Option<Vec<i32>>,
+    #[serde(default)]
+    pub rate_limiter_config: Option<RateLimiterConfig>,
 }
 
 fn default_netconfig_tap() -> Option<String> {
@@ -928,6 +930,7 @@ impl Default for NetConfig {
             vhost_socket: None,
             id: None,
             fds: None,
+            rate_limiter_config: None,
         }
     }
 }
@@ -936,7 +939,9 @@ impl NetConfig {
     pub const SYNTAX: &'static str = "Network parameters \
     \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,fd=<fd1:fd2...>,iommu=on|off,\
     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
-    vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,id=<device_id>\"";
+    vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,id=<device_id>,\
+    bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
+    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>\"";
 
     pub fn parse(net: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -953,7 +958,13 @@ impl NetConfig {
             .add("vhost_user")
             .add("socket")
             .add("id")
-            .add("fd");
+            .add("fd")
+            .add("bw_size")
+            .add("bw_one_time_burst")
+            .add("bw_refill_time")
+            .add("ops_size")
+            .add("ops_one_time_burst")
+            .add("ops_refill_time");
         parser.parse(net).map_err(Error::ParseNetwork)?;
 
         let tap = parser.get("tap");
@@ -995,6 +1006,57 @@ impl NetConfig {
             .map_err(Error::ParseNetwork)?
             .map(|v| v.0.iter().map(|e| *e as i32).collect());
 
+        let bw_size = parser
+            .convert("bw_size")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_one_time_burst = parser
+            .convert("bw_one_time_burst")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_refill_time = parser
+            .convert("bw_refill_time")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_size = parser
+            .convert("ops_size")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_one_time_burst = parser
+            .convert("ops_one_time_burst")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let ops_refill_time = parser
+            .convert("ops_refill_time")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
+        let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
+            Some(TokenBucketConfig {
+                size: bw_size,
+                one_time_burst: Some(bw_one_time_burst),
+                refill_time: bw_refill_time,
+            })
+        } else {
+            None
+        };
+        let ops_tb_config = if ops_size != 0 && ops_refill_time != 0 {
+            Some(TokenBucketConfig {
+                size: ops_size,
+                one_time_burst: Some(ops_one_time_burst),
+                refill_time: ops_refill_time,
+            })
+        } else {
+            None
+        };
+        let rate_limiter_config = if bw_tb_config.is_some() || ops_tb_config.is_some() {
+            Some(RateLimiterConfig {
+                bandwidth: bw_tb_config,
+                ops: ops_tb_config,
+            })
+        } else {
+            None
+        };
+
         let config = NetConfig {
             tap,
             ip,
@@ -1008,6 +1070,7 @@ impl NetConfig {
             vhost_socket,
             id,
             fds,
+            rate_limiter_config,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)

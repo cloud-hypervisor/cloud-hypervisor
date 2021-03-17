@@ -12,7 +12,8 @@ use super::net_util::{
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+    RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
+    EPOLL_HELPER_EVENT_LAST,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
@@ -21,7 +22,6 @@ use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio,
 };
 use seccomp::{SeccompAction, SeccompFilter};
-use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -30,6 +30,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::vec::Vec;
+use std::{collections::HashMap, convert::TryInto};
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
@@ -45,6 +46,8 @@ pub const RX_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 pub const TX_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // A frame is available for reading from the tap device to receive in the guest.
 pub const RX_TAP_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
+// New 'wake up' event from the tx rate limiter
+pub const TX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 
 #[derive(Debug)]
 pub enum Error {
@@ -122,7 +125,15 @@ impl NetEpollHandler {
             error!("Failed to get tx queue event: {:?}", e);
         }
 
-        self.process_tx()?;
+        let rate_limit_reached = self
+            .net
+            .tx_rate_limiter
+            .as_ref()
+            .map_or(false, |r| r.is_blocked());
+
+        if !rate_limit_reached {
+            self.process_tx()?;
+        }
 
         Ok(())
     }
@@ -150,6 +161,9 @@ impl NetEpollHandler {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt_pair[0].as_raw_fd(), RX_QUEUE_EVENT)?;
         helper.add_event(self.queue_evt_pair[1].as_raw_fd(), TX_QUEUE_EVENT)?;
+        if let Some(rate_limiter) = &self.net.tx_rate_limiter {
+            helper.add_event(rate_limiter.as_raw_fd(), TX_RATE_LIMITER_EVENT)?;
+        }
 
         // If there are some already available descriptors on the RX queue,
         // then we can start the thread while listening onto the TAP.
@@ -195,6 +209,28 @@ impl EpollHelperHandler for NetEpollHandler {
                     return true;
                 }
             }
+            TX_RATE_LIMITER_EVENT => {
+                if let Some(rate_limiter) = &mut self.net.tx_rate_limiter {
+                    // Upon rate limiter event, call the rate limiter handler
+                    // and restart processing the queue.
+                    match rate_limiter.event_handler() {
+                        Ok(_) => {
+                            self.driver_awake = true;
+                            if let Err(e) = self.process_tx() {
+                                error!("Error processing TX queue: {:?}", e);
+                                return true;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error from 'rate_limiter.event_handler()': {:?}", e);
+                            return true;
+                        }
+                    }
+                } else {
+                    error!("Unexpected TX_RATE_LIMITER_EVENT");
+                    return true;
+                }
+            }
             _ => {
                 error!("Unknown event: {}", ev_type);
                 return true;
@@ -212,6 +248,7 @@ pub struct Net {
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
     counters: NetCounters,
     seccomp_action: SeccompAction,
+    rate_limiter_config: Option<RateLimiterConfig>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -224,6 +261,7 @@ pub struct NetState {
 
 impl Net {
     /// Create a new virtio network device with the given TAP interface.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_tap(
         id: String,
         taps: Vec<Tap>,
@@ -232,6 +270,7 @@ impl Net {
         num_queues: usize,
         queue_size: u16,
         seccomp_action: SeccompAction,
+        rate_limiter_config: Option<RateLimiterConfig>,
     ) -> Result<Self> {
         let mut avail_features = 1 << VIRTIO_NET_F_GUEST_CSUM
             | 1 << VIRTIO_NET_F_CSUM
@@ -271,6 +310,7 @@ impl Net {
             ctrl_queue_epoll_thread: None,
             counters: NetCounters::default(),
             seccomp_action,
+            rate_limiter_config,
         })
     }
 
@@ -288,6 +328,7 @@ impl Net {
         num_queues: usize,
         queue_size: u16,
         seccomp_action: SeccompAction,
+        rate_limiter_config: Option<RateLimiterConfig>,
     ) -> Result<Self> {
         let taps = open_tap(if_name, ip_addr, netmask, host_mac, num_queues / 2, None)
             .map_err(Error::OpenTap)?;
@@ -300,6 +341,7 @@ impl Net {
             num_queues,
             queue_size,
             seccomp_action,
+            rate_limiter_config,
         )
     }
 
@@ -310,6 +352,7 @@ impl Net {
         iommu: bool,
         queue_size: u16,
         seccomp_action: SeccompAction,
+        rate_limiter_config: Option<RateLimiterConfig>,
     ) -> Result<Self> {
         let mut taps: Vec<Tap> = Vec::new();
         let num_queue_pairs = fds.len();
@@ -327,6 +370,7 @@ impl Net {
             num_queue_pairs * 2,
             queue_size,
             seccomp_action,
+            rate_limiter_config,
         )
     }
 
@@ -483,6 +527,12 @@ impl VirtioDevice for Net {
                         ActivateError::BadActivate
                     })?;
 
+                let tx_rate_limiter: Option<rate_limiter::RateLimiter> = self
+                    .rate_limiter_config
+                    .map(RateLimiterConfig::try_into)
+                    .transpose()
+                    .map_err(ActivateError::CreateRateLimiter)?;
+
                 let mut handler = NetEpollHandler {
                     net: NetQueuePair {
                         mem: Some(mem.clone()),
@@ -493,6 +543,7 @@ impl VirtioDevice for Net {
                         rx_tap_listening,
                         counters: self.counters.clone(),
                         tap_event_id: RX_TAP_EVENT,
+                        tx_rate_limiter,
                     },
                     queue_pair,
                     queue_evt_pair,

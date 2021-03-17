@@ -2076,6 +2076,7 @@ impl DeviceManager {
                         net_cfg.num_queues,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
+                        net_cfg.rate_limiter_config,
                     )
                     .map_err(DeviceManagerError::CreateVirtioNet)?,
                 ))
@@ -2088,6 +2089,7 @@ impl DeviceManager {
                         net_cfg.iommu,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
+                        net_cfg.rate_limiter_config,
                     )
                     .map_err(DeviceManagerError::CreateVirtioNet)?,
                 ))
@@ -2104,6 +2106,7 @@ impl DeviceManager {
                         net_cfg.num_queues,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
+                        net_cfg.rate_limiter_config,
                     )
                     .map_err(DeviceManagerError::CreateVirtioNet)?,
                 ))
