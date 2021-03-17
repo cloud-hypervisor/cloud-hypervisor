@@ -127,10 +127,7 @@ impl EpollHelper {
             };
 
             for event in events.iter().take(num_events) {
-                let ev_events = event.events as i32;
                 let ev_type = event.data as u16;
-
-                error!("event detected! type: {} event:{}", ev_type, ev_events);
 
                 match ev_type {
                     EPOLL_HELPER_EVENT_KILL => {

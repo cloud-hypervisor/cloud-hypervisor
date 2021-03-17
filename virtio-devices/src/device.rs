@@ -202,7 +202,7 @@ pub trait VirtioDevice: Send {
     /// not supported, disconnected status will always be false for this default
     /// one.
     fn get_disconnected_arc(&self) -> Result<Arc<AtomicBool>, std::io::Error> {
-        Ok(Arc::new(AtomicBool::new(false)).clone())
+        Ok(Arc::new(AtomicBool::new(false)))
     }
 }
 

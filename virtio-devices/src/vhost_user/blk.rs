@@ -59,12 +59,12 @@ impl Blk {
         activate_evt: EventFd,
     ) -> Result<Blk> {
         let mut vhost_user_blk = retry_with_index(delay::Fixed::from_millis(500), |retry_times| {
-            if retry_times == 1 {
-                println!("waiting for vhost-user-blk deamon opening...");
+            if retry_times == 2 {
+                info!("Waiting for vhost-user-blk daemon to open...");
             }
             Master::connect(&vu_cfg.socket, vu_cfg.num_queues as u64)
         })
-        .unwrap();
+        .map_err(Error::VhostUserConnect)?;
 
         // Filling device and vring features VMM supports.
         let mut avail_features = 1 << VIRTIO_BLK_F_SEG_MAX
@@ -171,7 +171,7 @@ impl Blk {
             acked_protocol_features,
             disconnected: Arc::new(AtomicBool::new(false)),
             sock_path: vu_cfg.socket,
-            activate_evt: activate_evt,
+            activate_evt,
             first_activated: AtomicBool::new(false),
         })
     }
@@ -181,11 +181,11 @@ impl Blk {
         let max_queues_num = 1024;
         let mut vhost_user_blk = retry_with_index(delay::Fixed::from_millis(500), |retry_times| {
             if retry_times == 1 {
-                println!("waiting for vhost-user-blk deamon opening...");
+                info!("Waiting for vhost-user-blk daemon to open...");
             }
             Master::connect(&self.sock_path, max_queues_num as u64)
         })
-        .unwrap();
+        .map_err(Error::VhostUserConnect)?;
 
         // Set vhost-user owner.
         vhost_user_blk
@@ -261,7 +261,7 @@ impl Blk {
 
         self.vhost_user_blk = Some(vhost_user_blk);
 
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -331,24 +331,21 @@ impl VirtioDevice for Blk {
             self.first_activated.store(true, Ordering::SeqCst);
         }
 
-        let mut queues_real = queues.clone();
-        queues_real.truncate(self.common.queue_sizes.len());
-        self.common
-            .activate(&queues_real, &queue_evts, &interrupt_cb)?;
+        self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
 
         self.guest_memory = Some(mem.clone());
 
         let mut vu_interrupt_list = setup_vhost_user(
             &mut self.vhost_user_blk.as_mut().unwrap(),
             &mem.memory(),
-            queues_real,
+            queues,
             queue_evts,
             &interrupt_cb,
             self.common.acked_features,
         )
         .map_err(ActivateError::VhostUserBlkSetup)?;
 
-        let epoll_threads = Vec::new();
+        let mut epoll_threads = Vec::new();
         for i in 0..vu_interrupt_list.len() {
             let mut interrupt_list_sub: Vec<(Option<EventFd>, Queue)> = Vec::with_capacity(1);
             interrupt_list_sub.push(vu_interrupt_list.remove(0));
@@ -380,19 +377,17 @@ impl VirtioDevice for Blk {
                 pause_evt,
                 vu_interrupt_list: interrupt_list_sub,
                 slave_req_handler: None,
-                sockfd: Some(self.vhost_user_blk.as_mut().unwrap().as_raw_fd()),
+                sockfd: Some(self.vhost_user_blk.as_ref().unwrap().as_raw_fd()),
                 disconnected: Some(self.disconnected.clone()),
                 activate_evt: Some(
                     self.activate_evt
                         .try_clone()
-                        .map_err(ActivateError::CloneEventfd)
-                        .unwrap(),
+                        .map_err(ActivateError::CloneEventfd)?,
                 ),
             });
 
             let paused = self.common.paused.clone();
             let paused_sync = self.common.paused_sync.clone();
-            let mut epoll_threads = Vec::new();
 
             let virtio_vhost_blk_seccomp_filter =
                 get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostBlk)
@@ -444,7 +439,7 @@ impl VirtioDevice for Blk {
     }
 
     fn shutdown(&mut self) {
-        let _ = unsafe { libc::close(self.vhost_user_blk.as_mut().unwrap().as_raw_fd()) };
+        let _ = unsafe { libc::close(self.vhost_user_blk.as_ref().unwrap().as_raw_fd()) };
     }
 
     fn add_memory_region(

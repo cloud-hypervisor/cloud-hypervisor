@@ -43,7 +43,7 @@ pub enum Error {
     /// Failed to open vhost device.
     VhostUserOpen(VhostError),
     /// Connection to socket failed.
-    VhostUserConnect(vhost::Error),
+    VhostUserConnect(retry::Error<vhost::Error>),
     /// Get features failed.
     VhostUserGetFeatures(VhostError),
     /// Get queue max number failed.

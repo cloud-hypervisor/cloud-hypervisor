@@ -287,6 +287,7 @@ pub struct Fs {
 
 impl Fs {
     /// Create a new virtio-fs device.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         path: &str,
@@ -338,11 +339,11 @@ impl Fs {
         // Connect to the vhost-user socket.
         let mut master = retry_with_index(delay::Fixed::from_millis(500), |retry_times| {
             if retry_times == 1 {
-                println!("waiting for virtio-fs daemon opening...");
+                info!("Waiting for virtio-fs daemon to open...");
             }
             Master::connect(&self.sock_path, num_queues as u64)
         })
-        .unwrap();
+        .map_err(Error::VhostUserConnect)?;
 
         // Set vhost-user owner.
         master.set_owner().map_err(Error::VhostUserSetOwner)?;
@@ -387,7 +388,7 @@ impl Fs {
 
         self.vu = Some(master);
 
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -501,24 +502,17 @@ impl VirtioDevice for Fs {
             kill_evt,
             pause_evt,
             slave_req_handler,
-            sockfd: Some(self.vu.as_mut().unwrap().as_raw_fd()),
+            sockfd: Some(self.vu.as_ref().unwrap().as_raw_fd()),
             disconnected: Some(self.disconnected.clone()),
             activate_evt: Some(
                 self.activate_evt
                     .try_clone()
-                    .map_err(ActivateError::CloneEventfd)
-                    .unwrap(),
+                    .map_err(ActivateError::CloneEventfd)?,
             ),
         });
 
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
-        /*
-        let disconnected = self.disconnected.clone();
-        let activate_evt = self.activate_evt
-                               .try_clone()
-                               .map_err(ActivateError::CloneEventfd);
-        */
         let mut epoll_threads = Vec::new();
         let virtio_vhost_fs_seccomp_filter =
             get_seccomp_filter(&self.seccomp_action, Thread::VirtioVhostFs)
@@ -570,7 +564,7 @@ impl VirtioDevice for Fs {
     }
 
     fn shutdown(&mut self) {
-        let _ = unsafe { libc::close(self.vu.as_mut().unwrap().as_raw_fd()) };
+        let _ = unsafe { libc::close(self.vu.as_ref().unwrap().as_raw_fd()) };
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {

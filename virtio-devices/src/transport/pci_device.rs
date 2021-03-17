@@ -656,6 +656,7 @@ impl VirtioPciDevice {
                 let mut device = self.device.lock().unwrap();
                 let mut queue_evts = Vec::new();
                 let mut queues = self.queues.clone();
+                let virtio_interrupt = virtio_interrupt.clone();
                 queues.retain(|q| q.ready);
                 for (i, queue) in queues.iter().enumerate() {
                     queue_evts.push(self.queue_evts[i].try_clone().unwrap());
@@ -663,7 +664,7 @@ impl VirtioPciDevice {
                         error!("Queue {} is not valid", i);
                     }
                 }
-                return device.activate(mem, virtio_interrupt.clone(), queues, queue_evts);
+                return device.activate(mem, virtio_interrupt, queues, queue_evts);
             }
         }
         Ok(())
@@ -686,9 +687,8 @@ impl VirtioPciDevice {
     }
 
     fn needs_activation(&self) -> bool {
-        let ret = self.disconneted.load(Ordering::SeqCst)
-            || !self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready();
-        ret
+        self.disconneted.load(Ordering::SeqCst)
+            || !self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready()
     }
 }
 
