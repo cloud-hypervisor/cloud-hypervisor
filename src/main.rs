@@ -121,7 +121,6 @@ fn create_app<'a, 'b>(
     default_vcpus: &'a str,
     default_memory: &'a str,
     default_rng: &'a str,
-    api_server_path: &'a str,
 ) -> App<'a, 'b> {
     #[cfg(target_arch = "x86_64")]
     let mut app: App;
@@ -318,7 +317,6 @@ fn create_app<'a, 'b>(
                 .help("HTTP API socket path (UNIX domain socket).")
                 .takes_value(true)
                 .min_values(1)
-                .default_value(&api_server_path)
                 .group("vmm-config"),
         )
         .arg(
@@ -474,31 +472,9 @@ fn main() {
     // Ensure all created files (.e.g sockets) are only accessible by this user
     let _ = unsafe { libc::umask(0o077) };
 
-    let pid = unsafe { libc::getpid() };
-    let uid = unsafe { libc::getuid() };
-
-    let mut api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", uid, pid};
-    if uid == 0 {
-        // If we're running as root, we try to get the real user ID if we've been sudo'ed
-        // or else create our socket directly under /run.
-        let key = "SUDO_UID";
-        match env::var(key) {
-            Ok(sudo_uid) => {
-                api_server_path = format! {"/run/user/{}/cloud-hypervisor.{}", sudo_uid, pid}
-            }
-            Err(_) => api_server_path = format! {"/run/cloud-hypervisor.{}", pid},
-        }
-    }
-
     let (default_vcpus, default_memory, default_rng) = prepare_default_values();
 
-    let cmd_arguments = create_app(
-        &default_vcpus,
-        &default_memory,
-        &default_rng,
-        &api_server_path,
-    )
-    .get_matches();
+    let cmd_arguments = create_app(&default_vcpus, &default_memory, &default_rng).get_matches();
 
     let log_level = match cmd_arguments.occurrences_of("v") {
         0 => LevelFilter::Warn,
@@ -577,15 +553,8 @@ mod unit_tests {
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-        let api_server_path = "";
-
-        let cmd_arguments = create_app(
-            &default_vcpus,
-            &default_memory,
-            &default_rng,
-            &api_server_path,
-        )
-        .get_matches_from(args);
+        let cmd_arguments =
+            create_app(&default_vcpus, &default_memory, &default_rng).get_matches_from(args);
 
         let vm_params = VmParams::from_arg_matches(&cmd_arguments);
 
