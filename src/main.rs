@@ -432,18 +432,6 @@ fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &Option<String>) -> Res
         let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
         let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 
-        println!(
-            "Cloud Hypervisor Guest\n\tAPI server: {:?}\n\tvCPUs: {}\n\tMemory: {} MB\n\tKernel: \
-             {:?}\n\tInitramfs: {:?}\n\tKernel cmdline: {}\n\tDisk(s): {:?}",
-            api_socket_path,
-            vm_config.cpus.boot_vcpus,
-            vm_config.memory.size >> 20,
-            vm_config.kernel,
-            vm_config.initramfs,
-            vm_config.cmdline.args.as_str(),
-            vm_config.disks,
-        );
-
         // Create and boot the VM based off the VM config we just built.
         let sender = api_request_sender.clone();
         vmm::api::vm_create(
