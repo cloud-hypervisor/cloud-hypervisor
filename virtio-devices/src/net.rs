@@ -101,11 +101,7 @@ impl NetEpollHandler {
         Ok(())
     }
 
-    fn handle_tx_event(&mut self) -> result::Result<(), DeviceError> {
-        let queue_evt = &self.queue_evt_pair[1];
-        if let Err(e) = queue_evt.read() {
-            error!("Failed to get tx queue event: {:?}", e);
-        }
+    fn process_tx(&mut self) -> result::Result<(), DeviceError> {
         if self
             .net
             .process_tx(&mut self.queue_pair[1])
@@ -117,6 +113,17 @@ impl NetEpollHandler {
         } else {
             debug!("Not signalling TX queue");
         }
+        Ok(())
+    }
+
+    fn handle_tx_event(&mut self) -> result::Result<(), DeviceError> {
+        let queue_evt = &self.queue_evt_pair[1];
+        if let Err(e) = queue_evt.read() {
+            error!("Failed to get tx queue event: {:?}", e);
+        }
+
+        self.process_tx()?;
+
         Ok(())
     }
 
