@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::device_manager::PciDeviceHandle;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use vm_device::Resource;
@@ -16,6 +17,8 @@ pub struct DeviceNode {
     #[serde(skip)]
     pub migratable: Option<Arc<Mutex<dyn Migratable>>>,
     pub pci_bdf: Option<u32>,
+    #[serde(skip)]
+    pub pci_device_handle: Option<PciDeviceHandle>,
 }
 
 impl DeviceNode {
@@ -27,6 +30,7 @@ impl DeviceNode {
             children: Vec::new(),
             migratable,
             pci_bdf: None,
+            pci_device_handle: None,
         }
     }
 }
@@ -71,6 +75,29 @@ impl DeviceTree {
     }
     pub fn breadth_first_traversal(&self) -> BftIter {
         BftIter::new(&self.0)
+    }
+    pub fn pci_devices(&self) -> Vec<&DeviceNode> {
+        self.0
+            .values()
+            .filter(|v| v.pci_bdf.is_some() && v.pci_device_handle.is_some())
+            .collect()
+    }
+    pub fn remove_node_by_pci_bdf(&mut self, pci_bdf: u32) -> Option<DeviceNode> {
+        let mut id = None;
+        for (k, v) in self.0.iter() {
+            if let Some(bdf) = v.pci_bdf {
+                if bdf == pci_bdf {
+                    id = Some(k.clone());
+                    break;
+                }
+            }
+        }
+
+        if let Some(id) = &id {
+            self.0.remove(id)
+        } else {
+            None
+        }
     }
 }
 
