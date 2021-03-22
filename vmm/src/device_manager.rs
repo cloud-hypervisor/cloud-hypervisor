@@ -2758,6 +2758,17 @@ impl DeviceManager {
         pci: &mut PciBus,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(u32, String)> {
+        // If the passthrough device has not been created yet, it is created
+        // here and stored in the DeviceManager structure for future needs.
+        if self.passthrough_device.is_none() {
+            self.passthrough_device = Some(
+                self.address_manager
+                    .vm
+                    .create_passthrough_device()
+                    .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?,
+            );
+        }
+
         #[cfg(feature = "kvm")]
         return self.add_vfio_device(pci, device_cfg);
 
@@ -2959,16 +2970,6 @@ impl DeviceManager {
         let mut devices = self.config.lock().unwrap().devices.clone();
 
         if let Some(device_list_cfg) = &mut devices {
-            if self.passthrough_device.is_none() {
-                // Create the passthrough device.
-                self.passthrough_device = Some(
-                    self.address_manager
-                        .vm
-                        .create_passthrough_device()
-                        .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?,
-                );
-            }
-
             for device_cfg in device_list_cfg.iter_mut() {
                 let (device_id, _) = self.add_passthrough_device(pci, device_cfg)?;
                 if device_cfg.iommu && self.iommu_device.is_some() {
@@ -3228,17 +3229,6 @@ impl DeviceManager {
         } else {
             return Err(DeviceManagerError::NoPciBus);
         };
-
-        if self.passthrough_device.is_none() {
-            // If the passthrough device has not been created yet, it is created
-            // here and stored in the DeviceManager structure for future needs.
-            self.passthrough_device = Some(
-                self.address_manager
-                    .vm
-                    .create_passthrough_device()
-                    .map_err(|e| DeviceManagerError::CreatePassthroughDevice(e.into()))?,
-            );
-        }
 
         let (device_id, device_name) =
             self.add_passthrough_device(&mut pci.lock().unwrap(), device_cfg)?;
