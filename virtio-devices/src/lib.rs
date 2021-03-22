@@ -40,7 +40,6 @@ pub mod mem;
 pub mod net;
 pub mod net_util;
 mod pmem;
-mod rate_limiter;
 mod rng;
 pub mod seccomp_filters;
 pub mod transport;

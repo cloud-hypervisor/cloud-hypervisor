@@ -1,0 +1,9 @@
+[package]
+name = "rate_limiter"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+libc = "0.2.91"
+log = "0.4.14"
+vmm-sys-util = "0.8.0"

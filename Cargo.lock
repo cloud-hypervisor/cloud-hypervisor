@@ -832,6 +832,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rate_limiter"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "log 0.4.14",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.1.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1274,6 +1283,7 @@ dependencies = [
  "net_gen",
  "net_util",
  "pci",
+ "rate_limiter",
  "seccomp",
  "serde",
  "serde_derive",

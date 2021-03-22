@@ -14,7 +14,6 @@ use super::{
     RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
     EPOLL_HELPER_EVENT_LAST,
 };
-use crate::rate_limiter::{RateLimiter, TokenType};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use anyhow::anyhow;
@@ -22,6 +21,7 @@ use block_util::{
     async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_disk_image_id, Request,
     RequestType, VirtioBlockConfig,
 };
+use rate_limiter::{RateLimiter, TokenType};
 use seccomp::{SeccompAction, SeccompFilter};
 use std::io;
 use std::num::Wrapping;

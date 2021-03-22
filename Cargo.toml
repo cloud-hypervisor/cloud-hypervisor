@@ -76,6 +76,7 @@ members = [
     "option_parser",
     "pci",
     "qcow",
+    "rate_limiter",
     "vhost_user_backend",
     "vhost_user_block",
     "vhost_user_net",
