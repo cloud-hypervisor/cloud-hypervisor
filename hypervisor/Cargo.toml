@@ -27,7 +27,7 @@ vm-memory = { version = "0.5.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = ">=0.5.0", features = ["with-serde"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
-version = "1.10"
+version = "1.11"
 default-features = false
 features = ["std", "decoder", "op_code_info", "instr_info", "fast_fmt"]
 
