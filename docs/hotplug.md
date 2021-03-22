@@ -63,12 +63,16 @@ As per adding CPUs to the guest, after a reboot the VM will be running with the 
 
 ## Memory Hot Plug
 
+### ACPI method
+
 Extra memory can be added from a running Cloud Hypervisor instance. This is controlled by two mechanisms:
 
 1. Allocating some of the guest physical address space for hotplug memory.
 2. Making a HTTP API request to the VMM to ask for a new amount of RAM to be assigned to the VM. In the case of expanding the memory for the VM the new memory will be hotplugged into the running VM, if reducing the size of the memory then change will take effect after the next reboot.
 
-To use memory hotplug start the VM specifying some size RAM in the "hotplug_size" parameter to the memory configuration. Not all the memory specified in this parameter will be available to hotplug as there are spacing and alignment requirements so it is recommended to make it larger than the hotplug RAM needed.
+To use memory hotplug start the VM specifying some size RAM in the `hotplug_size` parameter to the memory configuration. Not all the memory specified in this parameter will be available to hotplug as there are spacing and alignment requirements so it is recommended to make it larger than the hotplug RAM needed.
+
+Because the ACPI method is the default, there is no need to add the extra option `hotplug_method=acpi`.
 
 ```shell
 $ pushd $CLOUDH
@@ -111,6 +115,45 @@ Due to guest OS limitations is is necessary to ensure that amount of memory adde
 The same API can also be used to reduce the desired RAM for a VM but the change will not be applied until the VM is rebooted.
 
 Memory and CPU resizing can be combined together into the same HTTP API request.
+
+### virtio-mem method
+
+Extra memory can be added and removed from a running Cloud Hypervisor instance. This is controlled by two mechanisms:
+
+1. Allocating some of the guest physical address space for hotplug memory.
+2. Making a HTTP API request to the VMM to ask for a new amount of RAM to be assigned to the VM.
+
+To use memory hotplug start the VM specifying some size RAM in the `hotplug_size` parameter along with `hotplug_method=virtio-mem` to the memory configuration.
+
+```shell
+$ pushd $CLOUDH
+$ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hypervisor
+$ ./cloud-hypervisor/target/release/cloud-hypervisor \
+	--kernel custom-vmlinux.bin \
+	--cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
+	--disk path=focal-server-cloudimg-amd64.raw \
+	--memory size=1024M,hotplug_size=8192M,hotplug_method=virtio-mem \
+	--net "tap=,mac=,ip=,mask=" \
+    --api-socket=/tmp/ch-socket
+$ popd
+```
+
+To ask the VMM to expand the RAM for the VM (request is in bytes):
+
+```shell
+curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"desired_ram\" : 3221225472}" http://localhost/api/v1/vm.resize
+```
+
+The new memory is now available to use inside the VM:
+
+```shell
+free -h
+              total        used        free      shared  buff/cache   available
+Mem:          3.0Gi        71Mi       2.8Gi       0.0Ki        47Mi       2.8Gi
+Swap:          32Mi          0B        32Mi
+```
+
+The same API can also be used to reduce the desired RAM for a VM. It is important to note that reducing RAM size might only partially work, as the guest might be using some of it.
 
 ## PCI Device Hot Plug
 
