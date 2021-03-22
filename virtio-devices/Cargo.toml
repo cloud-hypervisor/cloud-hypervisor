@@ -21,6 +21,7 @@ log = "0.4.14"
 net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
 pci = { path = "../pci" }
+rate_limiter = { path = "../rate_limiter" }
 seccomp = { git = "https://github.com/firecracker-microvm/firecracker", tag = "v0.22.0" }
 serde = ">=1.0.27"
 serde_derive = ">=1.0.27"
