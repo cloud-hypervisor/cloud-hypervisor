@@ -111,3 +111,95 @@ Due to guest OS limitations is is necessary to ensure that amount of memory adde
 The same API can also be used to reduce the desired RAM for a VM but the change will not be applied until the VM is rebooted.
 
 Memory and CPU resizing can be combined together into the same HTTP API request.
+
+## PCI Device Hot Plug
+
+Extra PCI devices can be added and removed from a running Cloud Hypervisor instance. This is controlled by making a HTTP API request to the VMM to ask for the additional device to be added, or for the existing device to be removed.
+
+To use PCI device hotplug start the VM with the HTTP server.
+
+```shell
+$ sudo setcap cap_net_admin+ep ./cloud-hypervisor/target/release/cloud-hypervisor
+$ ./cloud-hypervisor/target/release/cloud-hypervisor \
+	--kernel custom-vmlinux.bin \
+	--cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
+	--disk path=focal-server-cloudimg-amd64.raw \
+	--cpus boot=4 \
+	--memory size=1024M \
+	--net "tap=,mac=,ip=,mask=" \
+    --api-socket=/tmp/ch-socket
+```
+
+Notice the addition of `--api-socket=/tmp/ch-socket`.
+
+### Add VFIO Device
+
+To ask the VMM to add additional VFIO device then use the `add-device` API.
+
+```shell
+curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"path\":\"/sys/bus/pci/devices/0000:01:00.0/\"}" http://localhost/api/v1/vm.add-device
+```
+
+### Add Disk Device
+
+To ask the VMM to add additional disk device then use the `add-disk` API.
+
+```shell
+curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"path\":\"/foo/bar/cloud.img\"}" http://localhost/api/v1/vm.add-disk
+```
+
+### Add Fs Device
+
+To ask the VMM to add additional fs device then use the `add-fs` API.
+
+```shell
+curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"tag\":\"myfs\", \"socket\":\"/foo/bar/virtiofs.sock\"}" http://localhost/api/v1/vm.add-fs
+```
+
+### Add Net Device
+
+To ask the VMM to add additional network device then use the `add-net` API.
+
+```shell
+curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"tap\":\"chtap0\"}" http://localhost/api/v1/vm.add-net
+```
+
+### Add Pmem Device
+
+To ask the VMM to add additional PMEM device then use the `add-pmem` API.
+
+```shell
+curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"file\":\"/foo/bar.cloud.img\"}" http://localhost/api/v1/vm.add-pmem
+```
+
+### Add Vsock Device
+
+To ask the VMM to add additional vsock device then use the `add-vsock` API.
+
+```shell
+curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"cid\":3, \"socket\":\"/foo/bar/vsock.sock\"}" http://localhost/api/v1/vm.add-vsock
+```
+
+### Common Across All PCI Devices
+
+The extra PCI device will be created and advertised to the running kernel. The new device can be found by checking the list of PCI devices.
+
+```shell
+root@ch-guest ~ # lspci
+00:00.0 Host bridge: Intel Corporation Device 0d57
+00:01.0 Unassigned class [ffff]: Red Hat, Inc. Virtio console (rev 01)
+00:02.0 Mass storage controller: Red Hat, Inc. Virtio block device (rev 01)
+00:03.0 Unassigned class [ffff]: Red Hat, Inc. Virtio RNG (rev 01)
+```
+
+After a reboot the added PCI device will remain.
+
+### Remove PCI device
+
+Removing a PCI device works the same way for all kind of PCI devices. The unique identifier related to the device must be provided. This identifier can be provided by the user when adding the new device, or by default Cloud Hypervisor will assign one.
+
+```shell
+curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"id\":\"_disk0\"}" http://localhost/api/v1/vm.remove-device
+```
+
+As per adding a PCI device to the guest, after a reboot the VM will be running without the removed PCI device.
