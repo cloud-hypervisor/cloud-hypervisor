@@ -42,11 +42,11 @@ fn pagesize() -> usize {
 ///   #[cfg(target_arch = "x86_64")]
 ///   assert_eq!(allocator.allocate_irq(), Some(5));
 ///   #[cfg(target_arch = "aarch64")]
-///   assert_eq!(allocator.allocate_irq(), Some(0));
+///   assert_eq!(allocator.allocate_irq(), Some(32));
 ///   #[cfg(target_arch = "x86_64")]
 ///   assert_eq!(allocator.allocate_irq(), Some(6));
 ///   #[cfg(target_arch = "aarch64")]
-///   assert_eq!(allocator.allocate_irq(), Some(1));
+///   assert_eq!(allocator.allocate_irq(), Some(33));
 ///   assert_eq!(allocator.allocate_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fff_f000)));
 ///
 /// ```

@@ -456,7 +456,7 @@ mod tests {
         let res = get_dist_regs(gic.device());
         assert!(res.is_ok());
         let state = res.unwrap();
-        assert_eq!(state.len(), 649);
+        assert_eq!(state.len(), 568);
 
         let res = set_dist_regs(gic.device(), &state);
         assert!(res.is_ok());

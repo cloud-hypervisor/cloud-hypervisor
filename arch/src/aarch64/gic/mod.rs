@@ -149,7 +149,7 @@ pub mod kvm {
             /* We need to tell the kernel how many irqs to support with this vgic.
              * See the `layout` module for details.
              */
-            let nr_irqs: u32 = layout::IRQ_MAX - layout::IRQ_BASE + 1;
+            let nr_irqs: u32 = layout::IRQ_NUM;
             let nr_irqs_ptr = &nr_irqs as *const u32;
             Self::set_device_attribute(
                 gic_device.device(),

@@ -97,8 +97,8 @@ pub const KERNEL_START: u64 = ACPI_START + ACPI_MAX_SIZE as u64;
 // * less than 1023 and
 // * a multiple of 32.
 // We are setting up our interrupt controller to support a maximum of 256 interrupts.
-/// First usable interrupt on aarch64.
-pub const IRQ_BASE: u32 = 0;
+/// First usable interrupt on aarch64
+pub const IRQ_BASE: u32 = 32;
 
-/// Last usable interrupt on aarch64.
-pub const IRQ_MAX: u32 = 255;
+/// Number of supported interrupts
+pub const IRQ_NUM: u32 = 256;
