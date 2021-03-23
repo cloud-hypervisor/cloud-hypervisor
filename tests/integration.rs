@@ -10,12 +10,11 @@ extern crate lazy_static;
 
 #[cfg(test)]
 #[cfg(feature = "integration_tests")]
-mod test_infra;
+extern crate test_infra;
 
 #[cfg(test)]
 #[cfg(feature = "integration_tests")]
 mod tests {
-    use crate::test_infra::*;
     use net_util::MacAddr;
     use std::collections::HashMap;
     use std::env;
@@ -31,6 +30,7 @@ mod tests {
     use std::sync::mpsc::Receiver;
     use std::sync::{mpsc, Mutex};
     use std::thread;
+    use test_infra::*;
     use vmm_sys_util::{tempdir::TempDir, tempfile::TempFile};
     #[cfg_attr(target_arch = "aarch64", allow(unused_imports))]
     use wait_timeout::ChildExt;

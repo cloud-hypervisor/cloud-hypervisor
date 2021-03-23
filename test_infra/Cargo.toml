@@ -1,0 +1,13 @@
+[package]
+name = "test_infra"
+version = "0.1.0"
+authors = ["The Cloud Hypervisor Authors"]
+edition = "2018"
+
+[dependencies]
+dirs = "3.0.1"
+epoll = "4.3.1"
+libc = "0.2.91"
+ssh2 = "0.9.1"
+vmm-sys-util = "0.8.0"
+wait-timeout = "0.2.0"
