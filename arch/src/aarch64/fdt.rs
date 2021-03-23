@@ -16,7 +16,7 @@ use super::super::InitramfsConfig;
 use super::get_fdt_addr;
 use super::gic::GicDevice;
 use super::layout::{
-    FDT_MAX_SIZE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, PCI_MMCONFIG_SIZE,
+    FDT_MAX_SIZE, IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, PCI_MMCONFIG_SIZE,
     PCI_MMCONFIG_START,
 };
 use vm_fdt::{FdtWriter, FdtWriterResult};
@@ -293,7 +293,11 @@ fn create_serial_node<T: DeviceInfoForFdt + Clone + Debug>(
 ) -> FdtWriterResult<()> {
     let compatible = b"arm,pl011\0arm,primecell\0";
     let serial_reg_prop = [dev_info.addr(), dev_info.length()];
-    let irq = [GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING];
+    let irq = [
+        GIC_FDT_IRQ_TYPE_SPI,
+        dev_info.irq() - IRQ_BASE,
+        IRQ_TYPE_EDGE_RISING,
+    ];
 
     let serial_node = fdt.begin_node(&format!("pl011@{:x}", dev_info.addr()))?;
     fdt.property("compatible", compatible)?;
@@ -312,7 +316,11 @@ fn create_rtc_node<T: DeviceInfoForFdt + Clone + Debug>(
 ) -> FdtWriterResult<()> {
     let compatible = b"arm,pl031\0arm,primecell\0";
     let rtc_reg_prop = [dev_info.addr(), dev_info.length()];
-    let irq = [GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_LEVEL_HI];
+    let irq = [
+        GIC_FDT_IRQ_TYPE_SPI,
+        dev_info.irq() - IRQ_BASE,
+        IRQ_TYPE_LEVEL_HI,
+    ];
 
     let rtc_node = fdt.begin_node(&format!("rtc@{:x}", dev_info.addr()))?;
     fdt.property("compatible", compatible)?;
@@ -332,7 +340,11 @@ fn create_gpio_node<T: DeviceInfoForFdt + Clone + Debug>(
     // PL061 GPIO controller node
     let compatible = b"arm,pl061\0arm,primecell\0";
     let gpio_reg_prop = [dev_info.addr(), dev_info.length()];
-    let irq = [GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING];
+    let irq = [
+        GIC_FDT_IRQ_TYPE_SPI,
+        dev_info.irq() - IRQ_BASE,
+        IRQ_TYPE_EDGE_RISING,
+    ];
 
     let gpio_node = fdt.begin_node(&format!("pl061@{:x}", dev_info.addr()))?;
     fdt.property("compatible", compatible)?;

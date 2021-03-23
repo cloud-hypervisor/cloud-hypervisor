@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use super::interrupt_controller::{Error, InterruptController};
+extern crate arch;
 use std::result;
 use std::sync::Arc;
 use vm_device::interrupt::{
@@ -14,7 +15,7 @@ use vmm_sys_util::eventfd::EventFd;
 type Result<T> = result::Result<T, Error>;
 
 // Reserve 32 IRQs for legacy device.
-pub const IRQ_LEGACY_BASE: usize = 0;
+pub const IRQ_LEGACY_BASE: usize = arch::layout::IRQ_BASE as usize;
 pub const IRQ_LEGACY_COUNT: usize = 32;
 
 // This Gic struct implements InterruptController to provide interrupt delivery service.
@@ -58,7 +59,7 @@ impl InterruptController for Gic {
         for i in IRQ_LEGACY_BASE..(IRQ_LEGACY_BASE + IRQ_LEGACY_COUNT) {
             let config = LegacyIrqSourceConfig {
                 irqchip: 0,
-                pin: i as u32,
+                pin: (i - IRQ_LEGACY_BASE) as u32,
             };
             self.interrupt_source_group
                 .update(

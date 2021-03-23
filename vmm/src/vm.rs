@@ -2425,20 +2425,23 @@ mod tests {
         let dev_info: HashMap<(DeviceType, std::string::String), MmioDeviceInfo> = [
             (
                 (DeviceType::Serial, DeviceType::Serial.to_string()),
-                MmioDeviceInfo { addr: 0x00, irq: 1 },
+                MmioDeviceInfo {
+                    addr: 0x00,
+                    irq: 33,
+                },
             ),
             (
                 (DeviceType::Virtio(1), "virtio".to_string()),
                 MmioDeviceInfo {
                     addr: 0x00 + LEN,
-                    irq: 2,
+                    irq: 34,
                 },
             ),
             (
                 (DeviceType::Rtc, "rtc".to_string()),
                 MmioDeviceInfo {
                     addr: 0x00 + 2 * LEN,
-                    irq: 3,
+                    irq: 35,
                 },
             ),
         ]
