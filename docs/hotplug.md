@@ -27,7 +27,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
 	--rng \
-    --api-socket=/tmp/ch-socket
+	--api-socket=/tmp/ch-socket
 $ popd
 ```
 
@@ -36,7 +36,7 @@ Notice the addition of `--api-socket=/tmp/ch-socket` and a `max` parameter on `-
 To ask the VMM to add additional vCPUs then use the resize API:
 
 ```shell
-curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"desired_vcpus\":8}" http://localhost/api/v1/vm.resize
+./ch-remote --api-socket=/tmp/ch-socket resize --cpus 8
 ```
 
 The extra vCPU threads will be created and advertised to the running kernel. The kernel does not bring up the CPUs immediately and instead the user must "online" them from inside the VM:
@@ -56,7 +56,7 @@ After a reboot the added CPUs will remain.
 Removing CPUs works similarly by reducing the number in the "desired_vcpus" field of the reisze API. The CPUs will be automatically offlined inside the guest so there is no need to run any commands inside the guest:
 
 ```shell
-curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"desired_vcpus\":2}" http://localhost/api/v1/vm.resize
+./ch-remote --api-socket=/tmp/ch-socket resize --cpus 2
 ```
 
 As per adding CPUs to the guest, after a reboot the VM will be running with the reduced number of vCPUs.
@@ -85,7 +85,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--memory size=1024M,hotplug_size=8192M \
 	--net "tap=,mac=,ip=,mask=" \
 	--rng \
-    --api-socket=/tmp/ch-socket
+	--api-socket=/tmp/ch-socket
 $ popd
 ```
 
@@ -95,10 +95,10 @@ Before issuing the API request it is necessary to run the following command insi
 root@ch-guest ~ # echo online | sudo tee /sys/devices/system/memory/auto_online_blocks
 ```
 
-To ask the VMM to add expand the RAM for the VM  (request is in bytes):
+To ask the VMM to expand the RAM for the VM:
 
 ```shell
-curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"desired_vcpus\": 4, \"desired_ram\" : 3221225472}" http://localhost/api/v1/vm.resize
+./ch-remote --api-socket=/tmp/ch-socket resize --memory 3G
 ```
 
 The new memory is now available to use inside the VM:
@@ -134,14 +134,14 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--disk path=focal-server-cloudimg-amd64.raw \
 	--memory size=1024M,hotplug_size=8192M,hotplug_method=virtio-mem \
 	--net "tap=,mac=,ip=,mask=" \
-    --api-socket=/tmp/ch-socket
+	--api-socket=/tmp/ch-socket
 $ popd
 ```
 
 To ask the VMM to expand the RAM for the VM (request is in bytes):
 
 ```shell
-curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"desired_ram\" : 3221225472}" http://localhost/api/v1/vm.resize
+./ch-remote --api-socket=/tmp/ch-socket resize --memory 3G
 ```
 
 The new memory is now available to use inside the VM:
@@ -170,7 +170,7 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 	--cpus boot=4 \
 	--memory size=1024M \
 	--net "tap=,mac=,ip=,mask=" \
-    --api-socket=/tmp/ch-socket
+	--api-socket=/tmp/ch-socket
 ```
 
 Notice the addition of `--api-socket=/tmp/ch-socket`.
@@ -180,7 +180,7 @@ Notice the addition of `--api-socket=/tmp/ch-socket`.
 To ask the VMM to add additional VFIO device then use the `add-device` API.
 
 ```shell
-curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"path\":\"/sys/bus/pci/devices/0000:01:00.0/\"}" http://localhost/api/v1/vm.add-device
+./ch-remote --api-socket=/tmp/ch-socket add-device path=/sys/bus/pci/devices/0000:01:00.0/
 ```
 
 ### Add Disk Device
@@ -188,7 +188,7 @@ curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT 
 To ask the VMM to add additional disk device then use the `add-disk` API.
 
 ```shell
-curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"path\":\"/foo/bar/cloud.img\"}" http://localhost/api/v1/vm.add-disk
+./ch-remote --api-socket=/tmp/ch-socket add-disk path=/foo/bar/cloud.img
 ```
 
 ### Add Fs Device
@@ -196,7 +196,7 @@ curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT 
 To ask the VMM to add additional fs device then use the `add-fs` API.
 
 ```shell
-curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"tag\":\"myfs\", \"socket\":\"/foo/bar/virtiofs.sock\"}" http://localhost/api/v1/vm.add-fs
+./ch-remote --api-socket=/tmp/ch-socket add-fs tag=myfs,socket=/foo/bar/virtiofs.sock
 ```
 
 ### Add Net Device
@@ -204,7 +204,7 @@ curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT 
 To ask the VMM to add additional network device then use the `add-net` API.
 
 ```shell
-curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"tap\":\"chtap0\"}" http://localhost/api/v1/vm.add-net
+./ch-remote --api-socket=/tmp/ch-socket add-net tap=chtap0
 ```
 
 ### Add Pmem Device
@@ -212,7 +212,7 @@ curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT 
 To ask the VMM to add additional PMEM device then use the `add-pmem` API.
 
 ```shell
-curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"file\":\"/foo/bar.cloud.img\"}" http://localhost/api/v1/vm.add-pmem
+./ch-remote --api-socket=/tmp/ch-socket add-pmem file=/foo/bar.cloud.img
 ```
 
 ### Add Vsock Device
@@ -220,7 +220,7 @@ curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT 
 To ask the VMM to add additional vsock device then use the `add-vsock` API.
 
 ```shell
-curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"cid\":3, \"socket\":\"/foo/bar/vsock.sock\"}" http://localhost/api/v1/vm.add-vsock
+./ch-remote --api-socket=/tmp/ch-socket add-vsock cid=3,socket=/foo/bar/vsock.sock
 ```
 
 ### Common Across All PCI Devices
@@ -242,7 +242,7 @@ After a reboot the added PCI device will remain.
 Removing a PCI device works the same way for all kind of PCI devices. The unique identifier related to the device must be provided. This identifier can be provided by the user when adding the new device, or by default Cloud Hypervisor will assign one.
 
 ```shell
-curl -H "Accept: application/json" -H "Content-Type: application/json" -i -XPUT --unix-socket /tmp/ch-socket -d "{ \"id\":\"_disk0\"}" http://localhost/api/v1/vm.remove-device
+./ch-remote --api-socket=/tmp/ch-socket remove-device _disk0
 ```
 
 As per adding a PCI device to the guest, after a reboot the VM will be running without the removed PCI device.
