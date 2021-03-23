@@ -43,7 +43,7 @@ dirs = "3.0.1"
 lazy_static= "1.4.0"
 net_util = { path = "net_util" }
 serde_json = "1.0.64"
-ssh2 = "0.9.1"
+test_infra = { path = "test_infra" }
 wait-timeout = "0.2.0"
 
 [features]
@@ -86,3 +86,4 @@ members = [
     "vm-migration",
     "vm-virtio"
 ]
+exclude = ["test_infra"]

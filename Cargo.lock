@@ -230,7 +230,7 @@ dependencies = [
  "seccomp",
  "serde_json",
  "signal-hook",
- "ssh2",
+ "test_infra",
  "thiserror",
  "vm-memory",
  "vmm",
@@ -1096,6 +1096,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dfed899f0eb03f32ee8c6a0aabdb8a7949659e3466561fc0adf54e26d88c5f4"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "test_infra"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "epoll",
+ "libc",
+ "ssh2",
+ "vmm-sys-util",
+ "wait-timeout",
 ]
 
 [[package]]
