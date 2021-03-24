@@ -98,6 +98,27 @@ pub trait MsiInterruptGroupOps<E> {
     fn set_gsi_routes(&self, routes: &HashMap<u32, RoutingEntry<E>>) -> Result<()>;
 }
 
+use hypervisor::IrqRoutingEntry;
+impl MsiInterruptGroupOps<IrqRoutingEntry> for MsiInterruptGroup<IrqRoutingEntry> {
+    fn set_gsi_routes(&self, routes: &HashMap<u32, RoutingEntry<IrqRoutingEntry>>) -> Result<()> {
+        let mut entry_vec: Vec<IrqRoutingEntry> = Vec::new();
+        for (_, entry) in routes.iter() {
+            if entry.masked {
+                continue;
+            }
+
+            entry_vec.push(entry.route);
+        }
+
+        self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed setting GSI routing: {}", e),
+            )
+        })
+    }
+}
+
 pub trait RoutingEntryExt {
     fn make_entry(
         vm: &Arc<dyn hypervisor::Vm>,
@@ -339,7 +360,6 @@ pub mod kvm {
     use hypervisor::kvm::KVM_MSI_VALID_DEVID;
     use hypervisor::kvm::{kvm_irq_routing_entry, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI};
 
-    type KvmMsiInterruptGroup = MsiInterruptGroup<kvm_irq_routing_entry>;
     type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
     pub type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
 
@@ -393,29 +413,6 @@ pub mod kvm {
             ))
         }
     }
-
-    impl MsiInterruptGroupOps<kvm_irq_routing_entry> for KvmMsiInterruptGroup {
-        fn set_gsi_routes(
-            &self,
-            routes: &HashMap<u32, RoutingEntry<kvm_irq_routing_entry>>,
-        ) -> Result<()> {
-            let mut entry_vec: Vec<kvm_irq_routing_entry> = Vec::new();
-            for (_, entry) in routes.iter() {
-                if entry.masked {
-                    continue;
-                }
-
-                entry_vec.push(entry.route);
-            }
-
-            self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed setting GSI routing: {}", e),
-                )
-            })
-        }
-    }
 }
 
 #[cfg(feature = "mshv")]
@@ -423,7 +420,6 @@ pub mod mshv {
     use super::*;
     use hypervisor::mshv::*;
 
-    type MshvMsiInterruptGroup = MsiInterruptGroup<mshv_msi_routing_entry>;
     type MshvRoutingEntry = RoutingEntry<mshv_msi_routing_entry>;
     pub type MshvMsiInterruptManager = MsiInterruptManager<mshv_msi_routing_entry>;
 
@@ -452,29 +448,6 @@ pub mod mshv {
                 io::ErrorKind::Other,
                 "Interrupt config type not supported",
             ))
-        }
-    }
-
-    impl MsiInterruptGroupOps<mshv_msi_routing_entry> for MshvMsiInterruptGroup {
-        fn set_gsi_routes(
-            &self,
-            routes: &HashMap<u32, RoutingEntry<mshv_msi_routing_entry>>,
-        ) -> Result<()> {
-            let mut entry_vec: Vec<mshv_msi_routing_entry> = Vec::new();
-            for (_, entry) in routes.iter() {
-                if entry.masked {
-                    continue;
-                }
-
-                entry_vec.push(entry.route);
-            }
-
-            self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed setting GSI routing: {}", e),
-                )
-            })
         }
     }
 }
