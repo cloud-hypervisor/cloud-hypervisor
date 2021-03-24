@@ -43,7 +43,7 @@ impl TxVirtio {
 
             let mut iovecs = Vec::new();
             while let Some(desc) = next_desc {
-                if !desc.is_write_only() {
+                if !desc.is_write_only() && desc.len > 0 {
                     let buf = mem
                         .get_slice(desc.addr, desc.len as usize)
                         .map_err(NetQueuePairError::GuestMemory)?
@@ -118,7 +118,7 @@ impl RxVirtio {
 
             let mut iovecs = Vec::new();
             while let Some(desc) = next_desc {
-                if desc.is_write_only() {
+                if desc.is_write_only() && desc.len > 0 {
                     let buf = mem
                         .get_slice(desc.addr, desc.len as usize)
                         .map_err(NetQueuePairError::GuestMemory)?
