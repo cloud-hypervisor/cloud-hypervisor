@@ -4,6 +4,7 @@
 //
 
 use devices::interrupt_controller::InterruptController;
+use hypervisor::IrqRoutingEntry;
 use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -83,23 +84,18 @@ impl InterruptRoute {
     }
 }
 
-pub struct RoutingEntry<E> {
-    route: E,
+pub struct RoutingEntry<IrqRoutingEntry> {
+    route: IrqRoutingEntry,
     masked: bool,
 }
 
-pub struct MsiInterruptGroup<E> {
+pub struct MsiInterruptGroup<IrqRoutingEntry> {
     vm: Arc<dyn hypervisor::Vm>,
-    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
+    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
     irq_routes: HashMap<InterruptIndex, InterruptRoute>,
 }
 
-pub trait MsiInterruptGroupOps<E> {
-    fn set_gsi_routes(&self, routes: &HashMap<u32, RoutingEntry<E>>) -> Result<()>;
-}
-
-use hypervisor::IrqRoutingEntry;
-impl MsiInterruptGroupOps<IrqRoutingEntry> for MsiInterruptGroup<IrqRoutingEntry> {
+impl MsiInterruptGroup<IrqRoutingEntry> {
     fn set_gsi_routes(&self, routes: &HashMap<u32, RoutingEntry<IrqRoutingEntry>>) -> Result<()> {
         let mut entry_vec: Vec<IrqRoutingEntry> = Vec::new();
         for (_, entry) in routes.iter() {
@@ -127,10 +123,10 @@ pub trait RoutingEntryExt {
     ) -> Result<Box<Self>>;
 }
 
-impl<E> MsiInterruptGroup<E> {
+impl<IrqRoutingEntry> MsiInterruptGroup<IrqRoutingEntry> {
     fn new(
         vm: Arc<dyn hypervisor::Vm>,
-        gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
+        gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
         irq_routes: HashMap<InterruptIndex, InterruptRoute>,
     ) -> Self {
         MsiInterruptGroup {
@@ -141,12 +137,7 @@ impl<E> MsiInterruptGroup<E> {
     }
 }
 
-impl<E> InterruptSourceGroup for MsiInterruptGroup<E>
-where
-    E: Send + Sync,
-    RoutingEntry<E>: RoutingEntryExt,
-    MsiInterruptGroup<E>: MsiInterruptGroupOps<E>,
-{
+impl InterruptSourceGroup for MsiInterruptGroup<IrqRoutingEntry> {
     fn enable(&self) -> Result<()> {
         for (_, route) in self.irq_routes.iter() {
             route.enable(&self.vm)?;
@@ -277,10 +268,10 @@ pub struct LegacyUserspaceInterruptManager {
     ioapic: Arc<Mutex<dyn InterruptController>>,
 }
 
-pub struct MsiInterruptManager<E> {
+pub struct MsiInterruptManager<IrqRoutingEntry> {
     allocator: Arc<Mutex<SystemAllocator>>,
     vm: Arc<dyn hypervisor::Vm>,
-    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<E>>>>,
+    gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
 }
 
 impl LegacyUserspaceInterruptManager {
@@ -289,7 +280,7 @@ impl LegacyUserspaceInterruptManager {
     }
 }
 
-impl<E> MsiInterruptManager<E> {
+impl MsiInterruptManager<IrqRoutingEntry> {
     pub fn new(allocator: Arc<Mutex<SystemAllocator>>, vm: Arc<dyn hypervisor::Vm>) -> Self {
         // Create a shared list of GSI that can be shared through all PCI
         // devices. This way, we can maintain the full list of used GSI,
@@ -323,12 +314,7 @@ impl InterruptManager for LegacyUserspaceInterruptManager {
     }
 }
 
-impl<E> InterruptManager for MsiInterruptManager<E>
-where
-    E: Send + Sync + 'static,
-    RoutingEntry<E>: RoutingEntryExt,
-    MsiInterruptGroup<E>: MsiInterruptGroupOps<E>,
-{
+impl InterruptManager for MsiInterruptManager<IrqRoutingEntry> {
     type GroupConfig = MsiIrqGroupConfig;
 
     fn create_group(
