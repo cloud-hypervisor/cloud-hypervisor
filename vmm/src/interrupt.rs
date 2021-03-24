@@ -115,14 +115,6 @@ impl MsiInterruptGroup<IrqRoutingEntry> {
     }
 }
 
-pub trait RoutingEntryExt {
-    fn make_entry(
-        vm: &Arc<dyn hypervisor::Vm>,
-        gsi: u32,
-        config: &InterruptSourceConfig,
-    ) -> Result<Box<Self>>;
-}
-
 impl<IrqRoutingEntry> MsiInterruptGroup<IrqRoutingEntry> {
     fn new(
         vm: Arc<dyn hypervisor::Vm>,
@@ -349,8 +341,8 @@ pub mod kvm {
     type KvmRoutingEntry = RoutingEntry<kvm_irq_routing_entry>;
     pub type KvmMsiInterruptManager = MsiInterruptManager<kvm_irq_routing_entry>;
 
-    impl RoutingEntryExt for KvmRoutingEntry {
-        fn make_entry(
+    impl KvmRoutingEntry {
+        pub fn make_entry(
             vm: &Arc<dyn hypervisor::Vm>,
             gsi: u32,
             config: &InterruptSourceConfig,
@@ -409,8 +401,8 @@ pub mod mshv {
     type MshvRoutingEntry = RoutingEntry<mshv_msi_routing_entry>;
     pub type MshvMsiInterruptManager = MsiInterruptManager<mshv_msi_routing_entry>;
 
-    impl RoutingEntryExt for MshvRoutingEntry {
-        fn make_entry(
+    impl MshvRoutingEntry {
+        pub fn make_entry(
             _vm: &Arc<dyn hypervisor::Vm>,
             gsi: u32,
             config: &InterruptSourceConfig,
