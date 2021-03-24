@@ -33,10 +33,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::{collections::HashMap, convert::TryInto};
 use virtio_bindings::bindings::virtio_blk::*;
-use vm_memory::{
-    ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError,
-    GuestMemoryMmap,
-};
+use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
@@ -55,24 +52,6 @@ const RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
 #[derive(Debug)]
 pub enum Error {
-    /// Guest gave us bad memory addresses.
-    GuestMemory(GuestMemoryError),
-    /// Guest gave us offsets that would have overflowed a usize.
-    CheckedOffset(GuestAddress, usize),
-    /// Guest gave us a write only descriptor that protocol says to read from.
-    UnexpectedWriteOnlyDescriptor,
-    /// Guest gave us a read only descriptor that protocol says to write to.
-    UnexpectedReadOnlyDescriptor,
-    /// Guest gave us too few descriptors in a descriptor chain.
-    DescriptorChainTooShort,
-    /// Guest gave us a descriptor that was too short to use.
-    DescriptorLengthTooSmall,
-    /// Getting a block's metadata fails for any reason.
-    GetFileMetadata,
-    /// The requested operation would cause a seek beyond disk end.
-    InvalidOffset,
-    /// Unsupported operation on the disk.
-    Unsupported(u32),
     /// Failed to parse the request.
     RequestParsing(block_util::Error),
     /// Failed to execute the request.
