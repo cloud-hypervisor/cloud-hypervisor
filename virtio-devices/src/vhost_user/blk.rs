@@ -231,8 +231,7 @@ impl VirtioDevice for Blk {
 
         let mut epoll_threads = Vec::new();
         for i in 0..vu_interrupt_list.len() {
-            let mut interrupt_list_sub: Vec<(Option<EventFd>, Queue)> = Vec::with_capacity(1);
-            interrupt_list_sub.push(vu_interrupt_list.remove(0));
+            let interrupt_list_sub = vec![vu_interrupt_list.remove(0)];
 
             let kill_evt = self
                 .common
