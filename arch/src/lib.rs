@@ -56,7 +56,7 @@ pub enum Error {
     /// Error writing module entry to guest memory.
     ModlistSetup(vm_memory::GuestMemoryError),
     /// RSDP Beyond Guest Memory
-    RSDPPastRamEnd,
+    RsdpPastRamEnd,
 }
 
 /// Type for returning public functions outcome.

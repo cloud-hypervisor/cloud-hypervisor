@@ -25,25 +25,25 @@ pub enum Error {
     /// Failed to set base registers for this CPU.
     SetBaseRegisters(hypervisor::HypervisorCpuError),
     /// Failed to configure the FPU.
-    SetFPURegisters(hypervisor::HypervisorCpuError),
+    SetFpuRegisters(hypervisor::HypervisorCpuError),
     /// Setting up MSRs failed.
     SetModelSpecificRegisters(hypervisor::HypervisorCpuError),
     /// Failed to set SREGs for this CPU.
     SetStatusRegisters(hypervisor::HypervisorCpuError),
     /// Checking the GDT address failed.
-    CheckGDTAddr,
+    CheckGdtAddr,
     /// Writing the GDT to RAM failed.
-    WriteGDT(GuestMemoryError),
+    WriteGdt(GuestMemoryError),
     /// Writing the IDT to RAM failed.
-    WriteIDT(GuestMemoryError),
+    WriteIdt(GuestMemoryError),
     /// Writing PDPTE to RAM failed.
-    WritePDPTEAddress(GuestMemoryError),
+    WritePdpteAddress(GuestMemoryError),
     /// Writing PDE to RAM failed.
-    WritePDEAddress(GuestMemoryError),
+    WritePdeAddress(GuestMemoryError),
     /// Writing PML4 to RAM failed.
-    WritePML4Address(GuestMemoryError),
+    WritePml4Address(GuestMemoryError),
     /// Writing PML5 to RAM failed.
-    WritePML5Address(GuestMemoryError),
+    WritePml5Address(GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -60,7 +60,7 @@ pub fn setup_fpu(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
         ..Default::default()
     };
 
-    vcpu.set_fpu(&fpu).map_err(Error::SetFPURegisters)
+    vcpu.set_fpu(&fpu).map_err(Error::SetFpuRegisters)
 }
 
 /// Configure Model Specific Registers (MSRs) for a given CPU.
@@ -140,8 +140,8 @@ fn write_gdt_table(table: &[u64], guest_mem: &GuestMemoryMmap) -> Result<()> {
     for (index, entry) in table.iter().enumerate() {
         let addr = guest_mem
             .checked_offset(boot_gdt_addr, index * mem::size_of::<u64>())
-            .ok_or(Error::CheckGDTAddr)?;
-        guest_mem.write_obj(*entry, addr).map_err(Error::WriteGDT)?;
+            .ok_or(Error::CheckGdtAddr)?;
+        guest_mem.write_obj(*entry, addr).map_err(Error::WriteGdt)?;
     }
     Ok(())
 }
@@ -150,7 +150,7 @@ fn write_idt_value(val: u64, guest_mem: &GuestMemoryMmap) -> Result<()> {
     let boot_idt_addr = BOOT_IDT_START;
     guest_mem
         .write_obj(val, boot_idt_addr)
-        .map_err(Error::WriteIDT)
+        .map_err(Error::WriteIdt)
 }
 
 pub fn configure_segments_and_sregs(
@@ -220,7 +220,7 @@ pub fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut SpecialRegisters) ->
     if unsafe { std::arch::x86_64::__cpuid(7).ecx } & (1 << 16) != 0 {
         // Entry covering VA [0..256TB)
         mem.write_obj(PML4_START.raw_value() | 0x03, PML5_START)
-            .map_err(Error::WritePML5Address)?;
+            .map_err(Error::WritePml5Address)?;
 
         sregs.cr3 = PML5_START.raw_value();
         sregs.cr4 |= CR4_LA57;
@@ -230,17 +230,17 @@ pub fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut SpecialRegisters) ->
 
     // Entry covering VA [0..512GB)
     mem.write_obj(PDPTE_START.raw_value() | 0x03, PML4_START)
-        .map_err(Error::WritePML4Address)?;
+        .map_err(Error::WritePml4Address)?;
 
     // Entry covering VA [0..1GB)
     mem.write_obj(PDE_START.raw_value() | 0x03, PDPTE_START)
-        .map_err(Error::WritePDPTEAddress)?;
+        .map_err(Error::WritePdpteAddress)?;
 
     // 512 2MB entries together covering VA [0..1GB). Note we are assuming
     // CPU supports 2MB pages (/proc/cpuinfo has 'pse'). All modern CPUs do.
     for i in 0..512 {
         mem.write_obj((i << 21) + 0x83u64, PDE_START.unchecked_add(i * 8))
-            .map_err(Error::WritePDEAddress)?;
+            .map_err(Error::WritePdeAddress)?;
     }
 
     sregs.cr4 |= CR4_PAE;
