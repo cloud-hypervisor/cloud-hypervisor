@@ -295,7 +295,7 @@ impl BusDevice for Gpio {
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data.len() <= 4 {
-            let value = read_le_u32(&data[..]);
+            let value = read_le_u32(&data);
             if let Err(e) = self.handle_write(offset, value) {
                 warn!("Failed to write to GPIO PL061 device: {}", e);
             }
@@ -409,7 +409,7 @@ mod tests {
         write_le_u32(&mut data, 1);
         gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIODIR, &mut data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIODIR, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(v, 1);
 
         // Read and write to the GPIODATA register.
@@ -418,7 +418,7 @@ mod tests {
         let offset = 0x00000004 as u64;
         gpio.write(LEGACY_GPIO_MAPPED_IO_START, offset, &mut data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, offset, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(v, 1);
 
         // Read and write to the GPIOIS register.
@@ -426,7 +426,7 @@ mod tests {
         write_le_u32(&mut data, 1);
         gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIS, &mut data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIOIS, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(v, 1);
 
         // Read and write to the GPIOIBE register.
@@ -434,7 +434,7 @@ mod tests {
         write_le_u32(&mut data, 2);
         gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIBE, &mut data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIOIBE, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(v, 2);
 
         // Read and write to the GPIOIEV register.
@@ -442,7 +442,7 @@ mod tests {
         write_le_u32(&mut data, 4);
         gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIEV, &mut data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIOIEV, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(v, 4);
 
         // Read and write to the GPIOIE register.
@@ -451,7 +451,7 @@ mod tests {
         write_le_u32(&mut data, 7);
         gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIE, &mut data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIOIE, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(v, 7);
 
         let mask = 0x00000002 as u32;
@@ -461,7 +461,7 @@ mod tests {
         // The interrupt line on pin 1 should be on.
         // Read the GPIOMIS register.
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIOMIS, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(v, 2);
 
         // Read and Write to the GPIOIC register.
@@ -469,7 +469,7 @@ mod tests {
         write_le_u32(&mut data, 2);
         gpio.write(LEGACY_GPIO_MAPPED_IO_START, GPIOIC, &mut data);
         gpio.read(LEGACY_GPIO_MAPPED_IO_START, GPIOIC, &mut data);
-        let v = read_le_u32(&data[..]);
+        let v = read_le_u32(&data);
         assert_eq!(v, 2);
 
         // Attempts to write beyond the writable space.
