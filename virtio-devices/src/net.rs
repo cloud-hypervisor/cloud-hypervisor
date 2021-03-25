@@ -46,8 +46,10 @@ pub const RX_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 pub const TX_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // A frame is available for reading from the tap device to receive in the guest.
 pub const RX_TAP_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
+// New 'wake up' event from the rx rate limiter
+pub const RX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 // New 'wake up' event from the tx rate limiter
-pub const TX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
+pub const TX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
 
 #[derive(Debug)]
 pub enum Error {
@@ -90,7 +92,16 @@ impl NetEpollHandler {
             error!("Failed to get rx queue event: {:?}", e);
         }
 
-        if !self.net.rx_tap_listening {
+        self.net.rx_desc_avail = true;
+
+        let rate_limit_reached = self
+            .net
+            .rx_rate_limiter
+            .as_ref()
+            .map_or(false, |r| r.is_blocked());
+
+        // Start to listen on RX_TAP_EVENT only when the rate limit is not reached
+        if !self.net.rx_tap_listening && !rate_limit_reached {
             net_util::register_listener(
                 self.net.epoll_fd.unwrap(),
                 self.net.tap.as_raw_fd(),
@@ -161,6 +172,9 @@ impl NetEpollHandler {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt_pair[0].as_raw_fd(), RX_QUEUE_EVENT)?;
         helper.add_event(self.queue_evt_pair[1].as_raw_fd(), TX_QUEUE_EVENT)?;
+        if let Some(rate_limiter) = &self.net.rx_rate_limiter {
+            helper.add_event(rate_limiter.as_raw_fd(), RX_RATE_LIMITER_EVENT)?;
+        }
         if let Some(rate_limiter) = &self.net.tx_rate_limiter {
             helper.add_event(rate_limiter.as_raw_fd(), TX_RATE_LIMITER_EVENT)?;
         }
@@ -206,6 +220,35 @@ impl EpollHelperHandler for NetEpollHandler {
             RX_TAP_EVENT => {
                 if let Err(e) = self.handle_rx_tap_event() {
                     error!("Error processing tap queue: {:?}", e);
+                    return true;
+                }
+            }
+            RX_RATE_LIMITER_EVENT => {
+                if let Some(rate_limiter) = &mut self.net.rx_rate_limiter {
+                    // Upon rate limiter event, call the rate limiter handler and register the
+                    // TAP fd for further processing if some RX buffers are available
+                    match rate_limiter.event_handler() {
+                        Ok(_) => {
+                            if !self.net.rx_tap_listening && self.net.rx_desc_avail {
+                                if let Err(e) = net_util::register_listener(
+                                    self.net.epoll_fd.unwrap(),
+                                    self.net.tap.as_raw_fd(),
+                                    epoll::Events::EPOLLIN,
+                                    u64::from(self.net.tap_event_id),
+                                ) {
+                                    error!("Error register_listener with `RX_RATE_LIMITER_EVENT`: {:?}", e);
+                                    return true;
+                                }
+                                self.net.rx_tap_listening = true;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error from 'rate_limiter.event_handler()': {:?}", e);
+                            return true;
+                        }
+                    }
+                } else {
+                    error!("Unexpected RX_RATE_LIMITER_EVENT");
                     return true;
                 }
             }
@@ -527,6 +570,12 @@ impl VirtioDevice for Net {
                         ActivateError::BadActivate
                     })?;
 
+                let rx_rate_limiter: Option<rate_limiter::RateLimiter> = self
+                    .rate_limiter_config
+                    .map(RateLimiterConfig::try_into)
+                    .transpose()
+                    .map_err(ActivateError::CreateRateLimiter)?;
+
                 let tx_rate_limiter: Option<rate_limiter::RateLimiter> = self
                     .rate_limiter_config
                     .map(RateLimiterConfig::try_into)
@@ -543,6 +592,8 @@ impl VirtioDevice for Net {
                         rx_tap_listening,
                         counters: self.counters.clone(),
                         tap_event_id: RX_TAP_EVENT,
+                        rx_desc_avail: false,
+                        rx_rate_limiter,
                         tx_rate_limiter,
                     },
                     queue_pair,
