@@ -17,7 +17,7 @@ use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryMmap, Guest
 
 #[repr(packed)]
 #[derive(Default)]
-struct PCIRangeEntry {
+struct PciRangeEntry {
     pub base_address: u64,
     pub segment: u16,
     pub start: u8,
@@ -188,7 +188,7 @@ pub fn create_acpi_tables(
     mcfg.append(0u64);
 
     // 32-bit PCI enhanced configuration mechanism
-    mcfg.append(PCIRangeEntry {
+    mcfg.append(PciRangeEntry {
         base_address: arch::layout::PCI_MMCONFIG_START.0,
         segment: 0,
         start: 0,

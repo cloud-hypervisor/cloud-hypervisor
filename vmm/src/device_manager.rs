@@ -278,10 +278,10 @@ pub enum DeviceManagerError {
     BusError(vm_device::BusError),
 
     /// Failed to allocate IO port
-    AllocateIOPort,
+    AllocateIoPort,
 
     /// Failed to allocate MMIO address
-    AllocateMMIOAddress,
+    AllocateMmioAddress,
 
     // Failed to make hotplug notification
     HotPlugNotification(io::Error),
@@ -432,13 +432,13 @@ const DEVICE_MANAGER_ACPI_SIZE: usize = 0x10;
 pub fn get_win_size() -> (u16, u16) {
     #[repr(C)]
     #[derive(Default)]
-    struct WS {
+    struct WindowSize {
         rows: u16,
         cols: u16,
         xpixel: u16,
         ypixel: u16,
     }
-    let ws: WS = WS::default();
+    let ws: WindowSize = WindowSize::default();
 
     unsafe {
         libc::ioctl(0, TIOCGWINSZ, &ws);
@@ -983,7 +983,7 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .allocate_mmio_addresses(None, DEVICE_MANAGER_ACPI_SIZE as u64, None)
-            .ok_or(DeviceManagerError::AllocateIOPort)?;
+            .ok_or(DeviceManagerError::AllocateIoPort)?;
         let device_manager = DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
@@ -1394,7 +1394,7 @@ impl DeviceManager {
                 .lock()
                 .unwrap()
                 .allocate_io_addresses(Some(GuestAddress(0x3c0)), 0x8, None)
-                .ok_or(DeviceManagerError::AllocateIOPort)?;
+                .ok_or(DeviceManagerError::AllocateIoPort)?;
 
             self.address_manager
                 .io_bus
@@ -1420,7 +1420,7 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .allocate_mmio_addresses(None, devices::acpi::GED_DEVICE_ACPI_SIZE as u64, None)
-            .ok_or(DeviceManagerError::AllocateMMIOAddress)?;
+            .ok_or(DeviceManagerError::AllocateMmioAddress)?;
         let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(
             interrupt_group,
             ged_irq,
@@ -1449,7 +1449,7 @@ impl DeviceManager {
                 .lock()
                 .unwrap()
                 .allocate_io_addresses(Some(GuestAddress(0xb008)), 0x4, None)
-                .ok_or(DeviceManagerError::AllocateIOPort)?;
+                .ok_or(DeviceManagerError::AllocateIoPort)?;
 
             self.address_manager
                 .io_bus
@@ -1638,7 +1638,7 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .allocate_io_addresses(Some(GuestAddress(0x3f8)), 0x8, None)
-            .ok_or(DeviceManagerError::AllocateIOPort)?;
+            .ok_or(DeviceManagerError::AllocateIoPort)?;
 
         self.address_manager
             .io_bus

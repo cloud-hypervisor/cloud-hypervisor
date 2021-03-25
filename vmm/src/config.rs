@@ -55,7 +55,7 @@ pub enum Error {
     /// Error parsing network options
     ParseNetwork(OptionParserError),
     /// Error parsing RNG options
-    ParseRNG(OptionParserError),
+    ParseRng(OptionParserError),
     /// Error parsing balloon options
     ParseBalloon(OptionParserError),
     /// Error parsing filesystem parameters
@@ -195,7 +195,7 @@ impl fmt::Display for Error {
             ParseMemoryZoneIdMissing => write!(f, "Error parsing --memory-zone: id missing"),
             ParseNetwork(o) => write!(f, "Error parsing --net: {}", o),
             ParseDisk(o) => write!(f, "Error parsing --disk: {}", o),
-            ParseRNG(o) => write!(f, "Error parsing --rng: {}", o),
+            ParseRng(o) => write!(f, "Error parsing --rng: {}", o),
             ParseBalloon(o) => write!(f, "Error parsing --balloon: {}", o),
             ParseRestore(o) => write!(f, "Error parsing --restore: {}", o),
             #[cfg(target_arch = "x86_64")]
@@ -1036,7 +1036,7 @@ impl RngConfig {
     pub fn parse(rng: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("src").add("iommu");
-        parser.parse(rng).map_err(Error::ParseRNG)?;
+        parser.parse(rng).map_err(Error::ParseRng)?;
 
         let src = PathBuf::from(
             parser
@@ -1045,7 +1045,7 @@ impl RngConfig {
         );
         let iommu = parser
             .convert::<Toggle>("iommu")
-            .map_err(Error::ParseRNG)?
+            .map_err(Error::ParseRng)?
             .unwrap_or(Toggle(false))
             .0;
 
