@@ -6,7 +6,7 @@
 extern crate byteorder;
 extern crate vm_memory;
 
-use crate::{PciCapability, PciCapabilityID};
+use crate::{PciCapability, PciCapabilityId};
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::io;
@@ -498,8 +498,8 @@ impl PciCapability for MsixCap {
         self.as_slice()
     }
 
-    fn id(&self) -> PciCapabilityID {
-        PciCapabilityID::MSIX
+    fn id(&self) -> PciCapabilityId {
+        PciCapabilityId::MsiX
     }
 }
 
