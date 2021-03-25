@@ -7,7 +7,7 @@ extern crate vm_allocator;
 
 use crate::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig,
-    PciBarConfiguration, PciBarRegionType, PciCapabilityID, PciClassCode, PciConfiguration,
+    PciBarConfiguration, PciBarRegionType, PciCapabilityId, PciClassCode, PciConfiguration,
     PciDevice, PciDeviceError, PciHeaderType, PciSubclass, MSIX_TABLE_ENTRY_SIZE,
 };
 use byteorder::{ByteOrder, LittleEndian};
@@ -184,13 +184,13 @@ impl Interrupt {
         None
     }
 
-    fn accessed(&self, offset: u64) -> Option<(PciCapabilityID, u64)> {
+    fn accessed(&self, offset: u64) -> Option<(PciCapabilityId, u64)> {
         if let Some(msi) = &self.msi {
             if offset >= u64::from(msi.cap_offset)
                 && offset < u64::from(msi.cap_offset) + msi.cfg.size()
             {
                 return Some((
-                    PciCapabilityID::MessageSignalledInterrupts,
+                    PciCapabilityId::MessageSignalledInterrupts,
                     u64::from(msi.cap_offset),
                 ));
             }
@@ -198,7 +198,7 @@ impl Interrupt {
 
         if let Some(msix) = &self.msix {
             if offset == u64::from(msix.cap_offset) {
-                return Some((PciCapabilityID::MSIX, u64::from(msix.cap_offset)));
+                return Some((PciCapabilityId::MsiX, u64::from(msix.cap_offset)));
             }
         }
 
@@ -540,8 +540,8 @@ impl VfioPciDevice {
                 .vfio_pci_configuration
                 .read_config_byte(cap_next.into());
 
-            match PciCapabilityID::from(cap_id) {
-                PciCapabilityID::MessageSignalledInterrupts => {
+            match PciCapabilityId::from(cap_id) {
+                PciCapabilityId::MessageSignalledInterrupts => {
                     if let Some(irq_info) = self.device.get_irq_info(VFIO_PCI_MSI_IRQ_INDEX) {
                         if irq_info.count > 0 {
                             // Parse capability only if the VFIO device
@@ -550,7 +550,7 @@ impl VfioPciDevice {
                         }
                     }
                 }
-                PciCapabilityID::MSIX => {
+                PciCapabilityId::MsiX => {
                     if let Some(irq_info) = self.device.get_irq_info(VFIO_PCI_MSIX_IRQ_INDEX) {
                         if irq_info.count > 0 {
                             // Parse capability only if the VFIO device
@@ -867,7 +867,7 @@ impl PciDevice for VfioPciDevice {
                 #[cfg(target_arch = "x86_64")]
                 {
                     // IO BAR
-                    region_type = PciBarRegionType::IORegion;
+                    region_type = PciBarRegionType::IoRegion;
 
                     // Clear first bit.
                     lsb_size &= 0xffff_fffc;
@@ -983,7 +983,7 @@ impl PciDevice for VfioPciDevice {
     ) -> std::result::Result<(), PciDeviceError> {
         for region in self.mmio_regions.iter() {
             match region.type_ {
-                PciBarRegionType::IORegion => {
+                PciBarRegionType::IoRegion => {
                     #[cfg(target_arch = "x86_64")]
                     allocator.free_io_addresses(region.start, region.length);
                     #[cfg(target_arch = "aarch64")]
@@ -1029,12 +1029,12 @@ impl PciDevice for VfioPciDevice {
         if let Some((cap_id, cap_base)) = self.interrupt.accessed(reg) {
             let cap_offset: u64 = reg - cap_base + offset;
             match cap_id {
-                PciCapabilityID::MessageSignalledInterrupts => {
+                PciCapabilityId::MessageSignalledInterrupts => {
                     if let Err(e) = self.update_msi_capabilities(cap_offset, data) {
                         error!("Could not update MSI capabilities: {}", e);
                     }
                 }
-                PciCapabilityID::MSIX => {
+                PciCapabilityId::MsiX => {
                     if let Err(e) = self.update_msix_capabilities(cap_offset, data) {
                         error!("Could not update MSI-X capabilities: {}", e);
                     }

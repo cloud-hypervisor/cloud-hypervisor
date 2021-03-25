@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use pci::{
     BarReprogrammingParams, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
-    PciCapability, PciCapabilityID, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
+    PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
     PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
 };
 use std::any::Any;
@@ -89,8 +89,8 @@ impl PciCapability for VirtioPciCap {
         self.as_slice()
     }
 
-    fn id(&self) -> PciCapabilityID {
-        PciCapabilityID::VendorSpecific
+    fn id(&self) -> PciCapabilityId {
+        PciCapabilityId::VendorSpecific
     }
 }
 
@@ -125,8 +125,8 @@ impl PciCapability for VirtioPciNotifyCap {
         self.as_slice()
     }
 
-    fn id(&self) -> PciCapabilityID {
-        PciCapabilityID::VendorSpecific
+    fn id(&self) -> PciCapabilityId {
+        PciCapabilityId::VendorSpecific
     }
 }
 
@@ -170,8 +170,8 @@ impl PciCapability for VirtioPciCap64 {
         self.as_slice()
     }
 
-    fn id(&self) -> PciCapabilityID {
-        PciCapabilityID::VendorSpecific
+    fn id(&self) -> PciCapabilityId {
+        PciCapabilityId::VendorSpecific
     }
 }
 
@@ -208,8 +208,8 @@ impl PciCapability for VirtioPciCfgCap {
         self.as_slice()
     }
 
-    fn id(&self) -> PciCapabilityID {
-        PciCapabilityID::VendorSpecific
+    fn id(&self) -> PciCapabilityId {
+        PciCapabilityId::VendorSpecific
     }
 }
 

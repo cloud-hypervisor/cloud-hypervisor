@@ -100,7 +100,7 @@ pub enum PciBridgeSubclass {
     PcmciaBridge = 0x05,
     NuBusBridge = 0x06,
     CardBusBridge = 0x07,
-    RACEwayBridge = 0x08,
+    RacEwayBridge = 0x08,
     PciToPciSemiTransparentBridge = 0x09,
     InfiniBrandToPciHostBridge = 0x0a,
     OtherBridgeDevice = 0x80,
@@ -117,9 +117,9 @@ impl PciSubclass for PciBridgeSubclass {
 #[derive(Copy, Clone)]
 pub enum PciSerialBusSubClass {
     Firewire = 0x00,
-    ACCESSbus = 0x01,
-    SSA = 0x02,
-    USB = 0x03,
+    Accessbus = 0x01,
+    Ssa = 0x02,
+    Usb = 0x03,
 }
 
 impl PciSubclass for PciSerialBusSubClass {
@@ -132,15 +132,15 @@ impl PciSubclass for PciSerialBusSubClass {
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub enum PciMassStorageSubclass {
-    SCSIStorage = 0x00,
-    IDEInterface = 0x01,
+    ScsiStorage = 0x00,
+    IdeInterface = 0x01,
     FloppyController = 0x02,
-    IPIController = 0x03,
-    RAIDController = 0x04,
-    ATAController = 0x05,
-    SATAController = 0x06,
-    SerialSCSIController = 0x07,
-    NVMController = 0x08,
+    IpiController = 0x03,
+    RaidController = 0x04,
+    AtaController = 0x05,
+    SataController = 0x06,
+    SerialScsiController = 0x07,
+    NvmController = 0x08,
     MassStorage = 0x80,
 }
 
@@ -156,11 +156,11 @@ impl PciSubclass for PciMassStorageSubclass {
 pub enum PciNetworkControllerSubclass {
     EthernetController = 0x00,
     TokenRingController = 0x01,
-    FDDIController = 0x02,
-    ATMController = 0x03,
-    ISDNController = 0x04,
+    FddiController = 0x02,
+    AtmController = 0x03,
+    IsdnController = 0x04,
     WorldFipController = 0x05,
-    PICMGController = 0x06,
+    PicmgController = 0x06,
     InfinibandController = 0x07,
     FabricController = 0x08,
     NetworkController = 0x80,
@@ -186,55 +186,55 @@ pub trait PciProgrammingInterface {
 #[allow(dead_code)]
 #[allow(non_camel_case_types)]
 #[repr(C)]
-pub enum PciCapabilityID {
-    ListID = 0,
+pub enum PciCapabilityId {
+    ListId = 0,
     PowerManagement = 0x01,
     AcceleratedGraphicsPort = 0x02,
     VitalProductData = 0x03,
     SlotIdentification = 0x04,
     MessageSignalledInterrupts = 0x05,
-    CompactPCIHotSwap = 0x06,
-    PCIX = 0x07,
+    CompactPciHotSwap = 0x06,
+    PciX = 0x07,
     HyperTransport = 0x08,
     VendorSpecific = 0x09,
     Debugport = 0x0A,
-    CompactPCICentralResourceControl = 0x0B,
-    PCIStandardHotPlugController = 0x0C,
-    BridgeSubsystemVendorDeviceID = 0x0D,
-    AGPTargetPCIPCIbridge = 0x0E,
+    CompactPciCentralResourceControl = 0x0B,
+    PciStandardHotPlugController = 0x0C,
+    BridgeSubsystemVendorDeviceId = 0x0D,
+    AgpTargetPciPcibridge = 0x0E,
     SecureDevice = 0x0F,
-    PCIExpress = 0x10,
-    MSIX = 0x11,
-    SATADataIndexConf = 0x12,
-    PCIAdvancedFeatures = 0x13,
-    PCIEnhancedAllocation = 0x14,
+    PciExpress = 0x10,
+    MsiX = 0x11,
+    SataDataIndexConf = 0x12,
+    PciAdvancedFeatures = 0x13,
+    PciEnhancedAllocation = 0x14,
 }
 
-impl From<u8> for PciCapabilityID {
+impl From<u8> for PciCapabilityId {
     fn from(c: u8) -> Self {
         match c {
-            0 => PciCapabilityID::ListID,
-            0x01 => PciCapabilityID::PowerManagement,
-            0x02 => PciCapabilityID::AcceleratedGraphicsPort,
-            0x03 => PciCapabilityID::VitalProductData,
-            0x04 => PciCapabilityID::SlotIdentification,
-            0x05 => PciCapabilityID::MessageSignalledInterrupts,
-            0x06 => PciCapabilityID::CompactPCIHotSwap,
-            0x07 => PciCapabilityID::PCIX,
-            0x08 => PciCapabilityID::HyperTransport,
-            0x09 => PciCapabilityID::VendorSpecific,
-            0x0A => PciCapabilityID::Debugport,
-            0x0B => PciCapabilityID::CompactPCICentralResourceControl,
-            0x0C => PciCapabilityID::PCIStandardHotPlugController,
-            0x0D => PciCapabilityID::BridgeSubsystemVendorDeviceID,
-            0x0E => PciCapabilityID::AGPTargetPCIPCIbridge,
-            0x0F => PciCapabilityID::SecureDevice,
-            0x10 => PciCapabilityID::PCIExpress,
-            0x11 => PciCapabilityID::MSIX,
-            0x12 => PciCapabilityID::SATADataIndexConf,
-            0x13 => PciCapabilityID::PCIAdvancedFeatures,
-            0x14 => PciCapabilityID::PCIEnhancedAllocation,
-            _ => PciCapabilityID::ListID,
+            0 => PciCapabilityId::ListId,
+            0x01 => PciCapabilityId::PowerManagement,
+            0x02 => PciCapabilityId::AcceleratedGraphicsPort,
+            0x03 => PciCapabilityId::VitalProductData,
+            0x04 => PciCapabilityId::SlotIdentification,
+            0x05 => PciCapabilityId::MessageSignalledInterrupts,
+            0x06 => PciCapabilityId::CompactPciHotSwap,
+            0x07 => PciCapabilityId::PciX,
+            0x08 => PciCapabilityId::HyperTransport,
+            0x09 => PciCapabilityId::VendorSpecific,
+            0x0A => PciCapabilityId::Debugport,
+            0x0B => PciCapabilityId::CompactPciCentralResourceControl,
+            0x0C => PciCapabilityId::PciStandardHotPlugController,
+            0x0D => PciCapabilityId::BridgeSubsystemVendorDeviceId,
+            0x0E => PciCapabilityId::AgpTargetPciPcibridge,
+            0x0F => PciCapabilityId::SecureDevice,
+            0x10 => PciCapabilityId::PciExpress,
+            0x11 => PciCapabilityId::MsiX,
+            0x12 => PciCapabilityId::SataDataIndexConf,
+            0x13 => PciCapabilityId::PciAdvancedFeatures,
+            0x14 => PciCapabilityId::PciEnhancedAllocation,
+            _ => PciCapabilityId::ListId,
         }
     }
 }
@@ -242,7 +242,7 @@ impl From<u8> for PciCapabilityID {
 /// A PCI capability list. Devices can optionally specify capabilities in their configuration space.
 pub trait PciCapability {
     fn bytes(&self) -> &[u8];
-    fn id(&self) -> PciCapabilityID;
+    fn id(&self) -> PciCapabilityId;
 }
 
 fn encode_32_bits_bar_size(bar_size: u32) -> Option<u32> {
@@ -317,7 +317,7 @@ pub struct PciConfiguration {
 #[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PciBarRegionType {
     Memory32BitRegion = 0,
-    IORegion = 0x01,
+    IoRegion = 0x01,
     Memory64BitRegion = 0x04,
 }
 
@@ -572,7 +572,7 @@ impl PciConfiguration {
             .checked_add(config.size - 1)
             .ok_or(Error::BarAddressInvalid(config.addr, config.size))?;
         match config.region_type {
-            PciBarRegionType::Memory32BitRegion | PciBarRegionType::IORegion => {
+            PciBarRegionType::Memory32BitRegion | PciBarRegionType::IoRegion => {
                 if end_addr > u64::from(u32::max_value()) {
                     return Err(Error::BarAddressInvalid(config.addr, config.size));
                 }
@@ -614,7 +614,7 @@ impl PciConfiguration {
                 BAR_MEM_ADDR_MASK,
                 config.prefetchable as u32 | config.region_type as u32,
             ),
-            PciBarRegionType::IORegion => (BAR_IO_ADDR_MASK, config.region_type as u32),
+            PciBarRegionType::IoRegion => (BAR_IO_ADDR_MASK, config.region_type as u32),
         };
 
         self.registers[bar_idx] = ((config.addr as u32) & mask) | lower_bits;
@@ -711,7 +711,7 @@ impl PciConfiguration {
         }
         self.last_capability = Some((cap_offset, total_len));
 
-        if cap_data.id() == PciCapabilityID::MSIX {
+        if cap_data.id() == PciCapabilityId::MsiX {
             self.msix_cap_reg_idx = Some(cap_offset / 4);
         }
 
@@ -1005,8 +1005,8 @@ mod tests {
             self.as_slice()
         }
 
-        fn id(&self) -> PciCapabilityID {
-            PciCapabilityID::VendorSpecific
+        fn id(&self) -> PciCapabilityId {
+            PciCapabilityId::VendorSpecific
         }
     }
 
@@ -1056,11 +1056,11 @@ mod tests {
     }
 
     #[derive(Copy, Clone)]
-    enum TestPI {
+    enum TestPi {
         Test = 0x5a,
     }
 
-    impl PciProgrammingInterface for TestPI {
+    impl PciProgrammingInterface for TestPi {
         fn get_register_value(&self) -> u8 {
             *self as u8
         }
@@ -1074,7 +1074,7 @@ mod tests {
             0x1,
             PciClassCode::MultimediaController,
             &PciMultimediaSubclass::AudioController,
-            Some(&TestPI::Test),
+            Some(&TestPi::Test),
             PciHeaderType::Device,
             0xABCD,
             0x2468,

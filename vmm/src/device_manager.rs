@@ -582,7 +582,7 @@ impl DeviceRelocation for AddressManager {
         region_type: PciBarRegionType,
     ) -> std::result::Result<(), std::io::Error> {
         match region_type {
-            PciBarRegionType::IORegion => {
+            PciBarRegionType::IoRegion => {
                 #[cfg(target_arch = "x86_64")]
                 {
                     // Update system allocator
