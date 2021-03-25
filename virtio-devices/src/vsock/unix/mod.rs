@@ -29,7 +29,7 @@ mod defs {
 #[derive(Debug)]
 pub enum Error {
     /// Error converting from UTF-8
-    ConvertFromUTF8(std::str::Utf8Error),
+    ConvertFromUtf8(std::str::Utf8Error),
     /// Error registering a new epoll-listening FD.
     EpollAdd(std::io::Error),
     /// Error creating an epoll FD.
