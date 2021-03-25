@@ -475,50 +475,45 @@ mod tests {
         }
 
         fn get_cpu_count(&self) -> Result<u32, Error> {
-            Ok(self
-                .ssh_command("grep -c processor /proc/cpuinfo")?
+            self.ssh_command("grep -c processor /proc/cpuinfo")?
                 .trim()
                 .parse()
-                .map_err(Error::Parsing)?)
+                .map_err(Error::Parsing)
         }
 
         fn get_initial_apicid(&self) -> Result<u32, Error> {
-            Ok(self
-                .ssh_command("grep \"initial apicid\" /proc/cpuinfo | grep -o \"[0-9]*\"")?
+            self.ssh_command("grep \"initial apicid\" /proc/cpuinfo | grep -o \"[0-9]*\"")?
                 .trim()
                 .parse()
-                .map_err(Error::Parsing)?)
+                .map_err(Error::Parsing)
         }
 
         fn get_total_memory(&self) -> Result<u32, Error> {
-            Ok(self
-                .ssh_command("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")?
+            self.ssh_command("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")?
                 .trim()
                 .parse()
-                .map_err(Error::Parsing)?)
+                .map_err(Error::Parsing)
         }
 
         fn get_total_memory_l2(&self) -> Result<u32, Error> {
-            Ok(self
-                .ssh_command_l2_1("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")?
+            self.ssh_command_l2_1("grep MemTotal /proc/meminfo | grep -o \"[0-9]*\"")?
                 .trim()
                 .parse()
-                .map_err(Error::Parsing)?)
+                .map_err(Error::Parsing)
         }
 
         fn get_numa_node_memory(&self, node_id: usize) -> Result<u32, Error> {
-            Ok(self
-                .ssh_command(
-                    format!(
-                        "grep MemTotal /sys/devices/system/node/node{}/meminfo \
+            self.ssh_command(
+                format!(
+                    "grep MemTotal /sys/devices/system/node/node{}/meminfo \
                         | cut -d \":\" -f 2 | grep -o \"[0-9]*\"",
-                        node_id
-                    )
-                    .as_str(),
-                )?
-                .trim()
-                .parse()
-                .map_err(Error::Parsing)?)
+                    node_id
+                )
+                .as_str(),
+            )?
+            .trim()
+            .parse()
+            .map_err(Error::Parsing)
         }
 
         fn wait_vm_boot(&self, custom_timeout: Option<i32>) -> Result<(), Error> {
@@ -590,11 +585,10 @@ mod tests {
         }
 
         fn get_entropy(&self) -> Result<u32, Error> {
-            Ok(self
-                .ssh_command("cat /proc/sys/kernel/random/entropy_avail")?
+            self.ssh_command("cat /proc/sys/kernel/random/entropy_avail")?
                 .trim()
                 .parse()
-                .map_err(Error::Parsing)?)
+                .map_err(Error::Parsing)
         }
 
         fn get_pci_bridge_class(&self) -> Result<String, Error> {
@@ -4992,8 +4986,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernels = vec![];
-            kernels.push(direct_kernel_boot_path());
+            let mut kernels = vec![direct_kernel_boot_path()];
 
             #[cfg(target_arch = "x86_64")]
             {
