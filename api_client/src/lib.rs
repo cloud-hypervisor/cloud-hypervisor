@@ -37,7 +37,7 @@ impl fmt::Display for Error {
 #[derive(Clone, Copy, Debug)]
 pub enum StatusCode {
     Continue,
-    OK,
+    Ok,
     NoContent,
     BadRequest,
     NotFound,
@@ -50,7 +50,7 @@ impl StatusCode {
     fn from_raw(code: usize) -> StatusCode {
         match code {
             100 => StatusCode::Continue,
-            200 => StatusCode::OK,
+            200 => StatusCode::Ok,
             204 => StatusCode::NoContent,
             400 => StatusCode::BadRequest,
             404 => StatusCode::NotFound,
@@ -69,7 +69,7 @@ impl StatusCode {
     fn is_server_error(self) -> bool {
         !matches!(
             self,
-            StatusCode::OK | StatusCode::Continue | StatusCode::NoContent
+            StatusCode::Ok | StatusCode::Continue | StatusCode::NoContent
         )
     }
 }
