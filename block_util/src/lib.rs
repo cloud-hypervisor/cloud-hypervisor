@@ -135,7 +135,7 @@ pub enum RequestType {
     In,
     Out,
     Flush,
-    GetDeviceID,
+    GetDeviceId,
     Unsupported(u32),
 }
 
@@ -148,7 +148,7 @@ pub fn request_type(
         VIRTIO_BLK_T_IN => Ok(RequestType::In),
         VIRTIO_BLK_T_OUT => Ok(RequestType::Out),
         VIRTIO_BLK_T_FLUSH => Ok(RequestType::Flush),
-        VIRTIO_BLK_T_GET_ID => Ok(RequestType::GetDeviceID),
+        VIRTIO_BLK_T_GET_ID => Ok(RequestType::GetDeviceId),
         t => Ok(RequestType::Unsupported(t)),
     }
 }
@@ -214,7 +214,7 @@ impl Request {
                 if !desc.is_write_only() && req.request_type == RequestType::In {
                     return Err(Error::UnexpectedReadOnlyDescriptor);
                 }
-                if !desc.is_write_only() && req.request_type == RequestType::GetDeviceID {
+                if !desc.is_write_only() && req.request_type == RequestType::GetDeviceId {
                     return Err(Error::UnexpectedReadOnlyDescriptor);
                 }
                 req.data_descriptors.push((desc.addr, desc.len));
@@ -280,7 +280,7 @@ impl Request {
                     }
                 }
                 RequestType::Flush => disk.flush().map_err(ExecuteError::Flush)?,
-                RequestType::GetDeviceID => {
+                RequestType::GetDeviceId => {
                     if (*data_len as usize) < disk_id.len() {
                         return Err(ExecuteError::BadRequest(Error::InvalidOffset));
                     }
@@ -346,7 +346,7 @@ impl Request {
                     .fsync(Some(user_data))
                     .map_err(ExecuteError::AsyncFlush)?;
             }
-            RequestType::GetDeviceID => {
+            RequestType::GetDeviceId => {
                 let (data_addr, data_len) = if self.data_descriptors.len() == 1 {
                     (self.data_descriptors[0].0, self.data_descriptors[0].1)
                 } else {
