@@ -449,15 +449,11 @@ impl VirtioDevice for Net {
                 let tx = TxVirtio::new();
                 let rx_tap_listening = false;
 
-                let mut queue_pair = Vec::new();
-                queue_pair.push(queues.remove(0));
-                queue_pair.push(queues.remove(0));
+                let mut queue_pair = vec![queues.remove(0), queues.remove(0)];
                 queue_pair[0].set_event_idx(event_idx);
                 queue_pair[1].set_event_idx(event_idx);
 
-                let mut queue_evt_pair = Vec::new();
-                queue_evt_pair.push(queue_evts.remove(0));
-                queue_evt_pair.push(queue_evts.remove(0));
+                let queue_evt_pair = vec![queue_evts.remove(0), queue_evts.remove(0)];
 
                 let kill_evt = self
                     .common
