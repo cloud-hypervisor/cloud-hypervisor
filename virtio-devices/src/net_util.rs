@@ -69,7 +69,7 @@ unsafe impl ByteValued for VirtioNetConfig {}
 #[derive(Debug)]
 pub enum Error {
     /// Read process MQ.
-    FailedProcessMQ,
+    FailedProcessMq,
     /// Read queue failed.
     GuestMemory(GuestMemoryError),
     /// Invalid ctrl class
@@ -148,7 +148,7 @@ impl CtrlVirtio {
                         return Err(Error::InvalidCtlCmd);
                     }
                     if let Err(_e) = self.process_mq(&mem, avail_desc) {
-                        return Err(Error::FailedProcessMQ);
+                        return Err(Error::FailedProcessMq);
                     }
                 }
                 _ => return Err(Error::InvalidCtlClass),
