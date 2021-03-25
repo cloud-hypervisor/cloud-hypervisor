@@ -333,7 +333,7 @@ where
 
         Ok(Vsock {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_VSOCK as u32,
+                device_type: VirtioDeviceType::Vsock as u32,
                 avail_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes: QUEUE_SIZES.to_vec(),
@@ -566,10 +566,7 @@ mod tests {
             (driver_features & 0xffff_ffff) as u32,
             (driver_features >> 32) as u32,
         ];
-        assert_eq!(
-            ctx.device.device_type(),
-            VirtioDeviceType::TYPE_VSOCK as u32
-        );
+        assert_eq!(ctx.device.device_type(), VirtioDeviceType::Vsock as u32);
         assert_eq!(ctx.device.queue_max_sizes(), QUEUE_SIZES);
         assert_eq!(ctx.device.features() as u32, device_pages[0]);
         assert_eq!((ctx.device.features() >> 32) as u32, device_pages[1]);

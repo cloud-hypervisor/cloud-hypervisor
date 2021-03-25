@@ -300,7 +300,7 @@ impl Pmem {
 
         Ok(Pmem {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_PMEM as u32,
+                device_type: VirtioDeviceType::Pmem as u32,
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 avail_features,

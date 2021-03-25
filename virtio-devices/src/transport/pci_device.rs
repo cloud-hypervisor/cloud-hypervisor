@@ -384,11 +384,11 @@ impl VirtioPciDevice {
         // to firmware without requiring excessive identity mapping.
         let mut use_64bit_bar = true;
         let (class, subclass) = match VirtioDeviceType::from(locked_device.device_type()) {
-            VirtioDeviceType::TYPE_NET => (
+            VirtioDeviceType::Net => (
                 PciClassCode::NetworkController,
                 &PciNetworkControllerSubclass::EthernetController as &dyn PciSubclass,
             ),
-            VirtioDeviceType::TYPE_BLOCK => {
+            VirtioDeviceType::Block => {
                 use_64bit_bar = false;
                 (
                     PciClassCode::MassStorage,

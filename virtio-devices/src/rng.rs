@@ -154,7 +154,7 @@ impl Rng {
 
         Ok(Rng {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_RNG as u32,
+                device_type: VirtioDeviceType::Rng as u32,
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 avail_features,

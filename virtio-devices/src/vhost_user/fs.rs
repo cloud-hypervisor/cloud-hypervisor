@@ -356,7 +356,7 @@ impl Fs {
 
         Ok(Fs {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_FS as u32,
+                device_type: VirtioDeviceType::Fs as u32,
                 avail_features,
                 acked_features,
                 queue_sizes: vec![queue_size; num_queues],

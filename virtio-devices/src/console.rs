@@ -344,7 +344,7 @@ impl Console {
         Ok((
             Console {
                 common: VirtioCommon {
-                    device_type: VirtioDeviceType::TYPE_CONSOLE as u32,
+                    device_type: VirtioDeviceType::Console as u32,
                     queue_sizes: QUEUE_SIZES.to_vec(),
                     avail_features,
                     paused_sync: Some(Arc::new(Barrier::new(2))),

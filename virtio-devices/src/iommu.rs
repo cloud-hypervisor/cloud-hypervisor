@@ -769,7 +769,7 @@ impl Iommu {
             Iommu {
                 id,
                 common: VirtioCommon {
-                    device_type: VirtioDeviceType::TYPE_IOMMU as u32,
+                    device_type: VirtioDeviceType::Iommu as u32,
                     queue_sizes: QUEUE_SIZES.to_vec(),
                     avail_features: 1u64 << VIRTIO_F_VERSION_1
                         | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP

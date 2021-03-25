@@ -3283,11 +3283,11 @@ impl DeviceManager {
                     .device_type(),
             );
             match device_type {
-                VirtioDeviceType::TYPE_NET
-                | VirtioDeviceType::TYPE_BLOCK
-                | VirtioDeviceType::TYPE_PMEM
-                | VirtioDeviceType::TYPE_FS
-                | VirtioDeviceType::TYPE_VSOCK => {}
+                VirtioDeviceType::Net
+                | VirtioDeviceType::Block
+                | VirtioDeviceType::Pmem
+                | VirtioDeviceType::Fs
+                | VirtioDeviceType::Vsock => {}
                 _ => return Err(DeviceManagerError::RemovalNotAllowed(device_type)),
             }
         }

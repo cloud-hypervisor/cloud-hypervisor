@@ -430,7 +430,7 @@ impl Block {
 
         Ok(Block {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_BLOCK as u32,
+                device_type: VirtioDeviceType::Block as u32,
                 avail_features,
                 paused_sync: Some(Arc::new(Barrier::new(num_queues + 1))),
                 queue_sizes: vec![queue_size; num_queues],

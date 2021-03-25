@@ -151,7 +151,7 @@ impl Net {
         Ok(Net {
             id,
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_NET as u32,
+                device_type: VirtioDeviceType::Net as u32,
                 queue_sizes: vec![vu_cfg.queue_size; queue_num],
                 avail_features,
                 acked_features,
