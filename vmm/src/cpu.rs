@@ -742,10 +742,18 @@ impl CpuManager {
                        | 1 << 2 // AccessSynicRegs
                        | 1 << 3 // AccessSyntheticTimerRegs
                        | 1 << 9, // AccessPartitionReferenceTsc
+                    edx: 1 << 3, // CPU dynamic partitioning
                     ..Default::default()
                 })
                 .map_err(Error::CpuidKvmHyperV)?;
-            for i in 0x4000_0004..=0x4000_000a {
+            cpuid
+                .push(CpuIdEntry {
+                    function: 0x4000_0004,
+                    eax: 1 << 5, // Recommend relaxed timing
+                    ..Default::default()
+                })
+                .map_err(Error::CpuidKvmHyperV)?;
+            for i in 0x4000_0005..=0x4000_000a {
                 cpuid
                     .push(CpuIdEntry {
                         function: i,
