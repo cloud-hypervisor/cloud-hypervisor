@@ -32,7 +32,7 @@ use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 #[cfg(feature = "io_uring")]
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
+use std::path::Path;
 use std::result;
 use std::sync::{Arc, Mutex};
 use virtio_bindings::bindings::virtio_blk::*;
@@ -65,7 +65,7 @@ pub enum Error {
     TooManyDescriptors,
 }
 
-fn build_device_id(disk_path: &PathBuf) -> result::Result<String, Error> {
+fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
     let blk_metadata = match disk_path.metadata() {
         Err(_) => return Err(Error::GetFileMetadata),
         Ok(m) => m,
@@ -80,7 +80,7 @@ fn build_device_id(disk_path: &PathBuf) -> result::Result<String, Error> {
     Ok(device_id)
 }
 
-pub fn build_disk_image_id(disk_path: &PathBuf) -> Vec<u8> {
+pub fn build_disk_image_id(disk_path: &Path) -> Vec<u8> {
     let mut default_disk_image_id = vec![0; VIRTIO_BLK_ID_BYTES as usize];
     match build_device_id(disk_path) {
         Err(_) => {
