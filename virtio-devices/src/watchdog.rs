@@ -189,7 +189,7 @@ impl Watchdog {
         let timer = unsafe { File::from_raw_fd(timer_fd) };
         Ok(Watchdog {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_WATCHDOG as u32,
+                device_type: VirtioDeviceType::Watchdog as u32,
                 queue_sizes: QUEUE_SIZES.to_vec(),
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 avail_features,

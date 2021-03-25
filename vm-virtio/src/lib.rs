@@ -31,41 +31,41 @@ pub const VIRTIO_MSI_NO_VECTOR: u16 = 0xffff;
 #[allow(non_camel_case_types)]
 #[repr(C)]
 pub enum VirtioDeviceType {
-    TYPE_NET = 1,
-    TYPE_BLOCK = 2,
-    TYPE_CONSOLE = 3,
-    TYPE_RNG = 4,
-    TYPE_BALLOON = 5,
-    TYPE_9P = 9,
-    TYPE_GPU = 16,
-    TYPE_INPUT = 18,
-    TYPE_VSOCK = 19,
-    TYPE_IOMMU = 23,
-    TYPE_MEM = 24,
-    TYPE_FS = 26,
-    TYPE_PMEM = 27,
-    TYPE_WATCHDOG = 35, // Temporary until official number allocated
-    TYPE_UNKNOWN = 0xFF,
+    Net = 1,
+    Block = 2,
+    Console = 3,
+    Rng = 4,
+    Balloon = 5,
+    Fs9P = 9,
+    Gpu = 16,
+    Input = 18,
+    Vsock = 19,
+    Iommu = 23,
+    Mem = 24,
+    Fs = 26,
+    Pmem = 27,
+    Watchdog = 35, // Temporary until official number allocated
+    Unknown = 0xFF,
 }
 
 impl From<u32> for VirtioDeviceType {
     fn from(t: u32) -> Self {
         match t {
-            1 => VirtioDeviceType::TYPE_NET,
-            2 => VirtioDeviceType::TYPE_BLOCK,
-            3 => VirtioDeviceType::TYPE_CONSOLE,
-            4 => VirtioDeviceType::TYPE_RNG,
-            5 => VirtioDeviceType::TYPE_BALLOON,
-            9 => VirtioDeviceType::TYPE_9P,
-            16 => VirtioDeviceType::TYPE_GPU,
-            18 => VirtioDeviceType::TYPE_INPUT,
-            19 => VirtioDeviceType::TYPE_VSOCK,
-            23 => VirtioDeviceType::TYPE_IOMMU,
-            24 => VirtioDeviceType::TYPE_MEM,
-            26 => VirtioDeviceType::TYPE_FS,
-            27 => VirtioDeviceType::TYPE_PMEM,
-            35 => VirtioDeviceType::TYPE_WATCHDOG,
-            _ => VirtioDeviceType::TYPE_UNKNOWN,
+            1 => VirtioDeviceType::Net,
+            2 => VirtioDeviceType::Block,
+            3 => VirtioDeviceType::Console,
+            4 => VirtioDeviceType::Rng,
+            5 => VirtioDeviceType::Balloon,
+            9 => VirtioDeviceType::Fs9P,
+            16 => VirtioDeviceType::Gpu,
+            18 => VirtioDeviceType::Input,
+            19 => VirtioDeviceType::Vsock,
+            23 => VirtioDeviceType::Iommu,
+            24 => VirtioDeviceType::Mem,
+            26 => VirtioDeviceType::Fs,
+            27 => VirtioDeviceType::Pmem,
+            35 => VirtioDeviceType::Watchdog,
+            _ => VirtioDeviceType::Unknown,
         }
     }
 }
@@ -76,21 +76,21 @@ impl fmt::Display for VirtioDeviceType {
     // This trait requires `fmt` with this exact signature.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let output = match *self {
-            VirtioDeviceType::TYPE_NET => "net",
-            VirtioDeviceType::TYPE_BLOCK => "block",
-            VirtioDeviceType::TYPE_CONSOLE => "console",
-            VirtioDeviceType::TYPE_RNG => "rng",
-            VirtioDeviceType::TYPE_BALLOON => "balloon",
-            VirtioDeviceType::TYPE_GPU => "gpu",
-            VirtioDeviceType::TYPE_9P => "9p",
-            VirtioDeviceType::TYPE_INPUT => "input",
-            VirtioDeviceType::TYPE_VSOCK => "vsock",
-            VirtioDeviceType::TYPE_IOMMU => "iommu",
-            VirtioDeviceType::TYPE_MEM => "mem",
-            VirtioDeviceType::TYPE_FS => "fs",
-            VirtioDeviceType::TYPE_PMEM => "pmem",
-            VirtioDeviceType::TYPE_WATCHDOG => "watchdog",
-            VirtioDeviceType::TYPE_UNKNOWN => "UNKNOWN",
+            VirtioDeviceType::Net => "net",
+            VirtioDeviceType::Block => "block",
+            VirtioDeviceType::Console => "console",
+            VirtioDeviceType::Rng => "rng",
+            VirtioDeviceType::Balloon => "balloon",
+            VirtioDeviceType::Gpu => "gpu",
+            VirtioDeviceType::Fs9P => "9p",
+            VirtioDeviceType::Input => "input",
+            VirtioDeviceType::Vsock => "vsock",
+            VirtioDeviceType::Iommu => "iommu",
+            VirtioDeviceType::Mem => "mem",
+            VirtioDeviceType::Fs => "fs",
+            VirtioDeviceType::Pmem => "pmem",
+            VirtioDeviceType::Watchdog => "watchdog",
+            VirtioDeviceType::Unknown => "UNKNOWN",
         };
         write!(f, "{}", output)
     }

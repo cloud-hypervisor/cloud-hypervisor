@@ -251,7 +251,7 @@ impl Net {
 
         Ok(Net {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_NET as u32,
+                device_type: VirtioDeviceType::Net as u32,
                 avail_features,
                 queue_sizes: vec![queue_size; queue_num],
                 paused_sync: Some(Arc::new(Barrier::new((num_queues / 2) + 1))),

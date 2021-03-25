@@ -816,7 +816,7 @@ impl Mem {
 
         Ok(Mem {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_MEM as u32,
+                device_type: VirtioDeviceType::Mem as u32,
                 avail_features,
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 queue_sizes: QUEUE_SIZES.to_vec(),

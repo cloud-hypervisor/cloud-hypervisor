@@ -139,7 +139,7 @@ impl Blk {
 
         Ok(Blk {
             common: VirtioCommon {
-                device_type: VirtioDeviceType::TYPE_BLOCK as u32,
+                device_type: VirtioDeviceType::Block as u32,
                 queue_sizes: vec![vu_cfg.queue_size; vu_cfg.num_queues],
                 avail_features,
                 acked_features,
