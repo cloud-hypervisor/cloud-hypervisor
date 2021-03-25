@@ -2304,11 +2304,10 @@ impl DeviceManager {
                     )
                     .map_err(DeviceManagerError::MemoryManager)?;
 
-                let mut region_list = Vec::new();
-                region_list.push(VirtioSharedMemory {
+                let region_list = vec![VirtioSharedMemory {
                     offset: 0,
                     len: cache_size,
-                });
+                }];
 
                 Some((
                     VirtioSharedMemoryList {
@@ -4000,7 +3999,7 @@ impl BusDevice for DeviceManager {
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
                 let mut data_array: [u8; 4] = [0, 0, 0, 0];
-                data_array.copy_from_slice(&data[..]);
+                data_array.copy_from_slice(&data);
                 let device_bitmap = u32::from_le_bytes(data_array);
 
                 for device_id in 0..32 {
