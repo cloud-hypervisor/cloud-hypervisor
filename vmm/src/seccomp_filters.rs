@@ -490,10 +490,7 @@ fn get_seccomp_filter_trap(thread_type: Thread) -> Result<SeccompFilter, Error> 
         Thread::Vmm => vmm_thread_rules()?,
     };
 
-    Ok(SeccompFilter::new(
-        rules.into_iter().collect(),
-        SeccompAction::Trap,
-    )?)
+    SeccompFilter::new(rules.into_iter().collect(), SeccompAction::Trap)
 }
 
 fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
@@ -504,10 +501,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
         Thread::Vmm => vmm_thread_rules()?,
     };
 
-    Ok(SeccompFilter::new(
-        rules.into_iter().collect(),
-        SeccompAction::Log,
-    )?)
+    SeccompFilter::new(rules.into_iter().collect(), SeccompAction::Log)
 }
 
 /// Generate a BPF program based on the seccomp_action value
