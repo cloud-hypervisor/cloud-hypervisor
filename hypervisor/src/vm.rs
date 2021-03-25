@@ -38,9 +38,9 @@ pub enum DataMatch {
     DataMatch64(u64),
 }
 
-impl Into<u64> for DataMatch {
-    fn into(self) -> u64 {
-        match self {
+impl From<DataMatch> for u64 {
+    fn from(dm: DataMatch) -> u64 {
+        match dm {
             DataMatch::DataMatch32(dm) => dm.into(),
             DataMatch::DataMatch64(dm) => dm,
         }
