@@ -147,16 +147,16 @@ pub enum Error {
     MpTableSetup(mptable::Error),
 
     /// Error configuring the general purpose registers
-    REGSConfiguration(regs::Error),
+    RegsConfiguration(regs::Error),
 
     /// Error configuring the special registers
-    SREGSConfiguration(regs::Error),
+    SregsConfiguration(regs::Error),
 
     /// Error configuring the floating point related registers
-    FPUConfiguration(regs::Error),
+    FpuConfiguration(regs::Error),
 
     /// Error configuring the MSR registers
-    MSRSConfiguration(regs::Error),
+    MsrsConfiguration(regs::Error),
 
     /// Failed to set supported CPUs.
     SetSupportedCpusFailed(anyhow::Error),
@@ -183,7 +183,7 @@ impl From<Error> for super::Error {
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::upper_case_acronyms)]
 #[derive(Copy, Clone)]
 pub enum CpuidReg {
     EAX,
@@ -348,7 +348,7 @@ pub fn configure_vcpu(
         fd.enable_hyperv_synic().unwrap();
     }
 
-    regs::setup_msrs(fd).map_err(Error::MSRSConfiguration)?;
+    regs::setup_msrs(fd).map_err(Error::MsrsConfiguration)?;
     if let Some(kernel_entry_point) = kernel_entry_point {
         // Safe to unwrap because this method is called after the VM is configured
         regs::setup_regs(
@@ -358,10 +358,10 @@ pub fn configure_vcpu(
             layout::ZERO_PAGE_START.raw_value(),
             kernel_entry_point.protocol,
         )
-        .map_err(Error::REGSConfiguration)?;
-        regs::setup_fpu(fd).map_err(Error::FPUConfiguration)?;
+        .map_err(Error::RegsConfiguration)?;
+        regs::setup_fpu(fd).map_err(Error::FpuConfiguration)?;
         regs::setup_sregs(&vm_memory.memory(), fd, kernel_entry_point.protocol)
-            .map_err(Error::SREGSConfiguration)?;
+            .map_err(Error::SregsConfiguration)?;
     }
     interrupts::set_lint(fd).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
     Ok(())
@@ -444,7 +444,7 @@ pub fn configure_system(
     // Check that the RAM is not smaller than the RSDP start address
     if let Some(rsdp_addr) = rsdp_addr {
         if rsdp_addr.0 > guest_mem.last_addr().0 {
-            return Err(super::Error::RSDPPastRamEnd);
+            return Err(super::Error::RsdpPastRamEnd);
         }
     }
 

@@ -37,7 +37,7 @@ pub enum Error {
     InitramfsAddress,
 
     /// Error configuring the general purpose registers
-    REGSConfiguration(regs::Error),
+    RegsConfiguration(regs::Error),
 
     /// Error configuring the MPIDR register
     VcpuRegMPIDR(hypervisor::HypervisorCpuError),
@@ -71,7 +71,7 @@ pub fn configure_vcpu(
             kernel_entry_point.entry_addr.raw_value(),
             &vm_memory.memory(),
         )
-        .map_err(Error::REGSConfiguration)?;
+        .map_err(Error::RegsConfiguration)?;
     }
 
     let mpidr = fd.read_mpidr().map_err(Error::VcpuRegMPIDR)?;
