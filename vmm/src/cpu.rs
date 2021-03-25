@@ -627,40 +627,38 @@ impl CpuManager {
         phys_bits: u8,
         kvm_hyperv: bool,
     ) -> Result<CpuId> {
-        let mut cpuid_patches = Vec::new();
-
-        // Patch tsc deadline timer bit
-        cpuid_patches.push(CpuidPatch {
-            function: 1,
-            index: 0,
-            flags_bit: None,
-            eax_bit: None,
-            ebx_bit: None,
-            ecx_bit: Some(TSC_DEADLINE_TIMER_ECX_BIT),
-            edx_bit: None,
-        });
-
-        // Patch hypervisor bit
-        cpuid_patches.push(CpuidPatch {
-            function: 1,
-            index: 0,
-            flags_bit: None,
-            eax_bit: None,
-            ebx_bit: None,
-            ecx_bit: Some(HYPERVISOR_ECX_BIT),
-            edx_bit: None,
-        });
-
-        // Enable MTRR feature
-        cpuid_patches.push(CpuidPatch {
-            function: 1,
-            index: 0,
-            flags_bit: None,
-            eax_bit: None,
-            ebx_bit: None,
-            ecx_bit: None,
-            edx_bit: Some(MTRR_EDX_BIT),
-        });
+        let cpuid_patches = vec![
+            // Patch tsc deadline timer bit
+            CpuidPatch {
+                function: 1,
+                index: 0,
+                flags_bit: None,
+                eax_bit: None,
+                ebx_bit: None,
+                ecx_bit: Some(TSC_DEADLINE_TIMER_ECX_BIT),
+                edx_bit: None,
+            },
+            // Patch hypervisor bit
+            CpuidPatch {
+                function: 1,
+                index: 0,
+                flags_bit: None,
+                eax_bit: None,
+                ebx_bit: None,
+                ecx_bit: Some(HYPERVISOR_ECX_BIT),
+                edx_bit: None,
+            },
+            // Enable MTRR feature
+            CpuidPatch {
+                function: 1,
+                index: 0,
+                flags_bit: None,
+                eax_bit: None,
+                ebx_bit: None,
+                ecx_bit: None,
+                edx_bit: Some(MTRR_EDX_BIT),
+            },
+        ];
 
         // Supported CPUID
         let mut cpuid = hypervisor
