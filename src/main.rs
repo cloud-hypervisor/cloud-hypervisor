@@ -36,7 +36,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[derive(Error, Debug)]
 enum Error {
     #[error("Failed to create API EventFd: {0}")]
-    CreateAPIEventFd(#[source] std::io::Error),
+    CreateApiEventFd(#[source] std::io::Error),
     #[cfg_attr(
         feature = "kvm",
         error("Failed to open hypervisor interface (is /dev/kvm available?): {0}")
@@ -47,7 +47,7 @@ enum Error {
     )]
     CreateHypervisor(#[source] hypervisor::HypervisorError),
     #[error("Failed to start the VMM thread: {0}")]
-    StartVMMThread(#[source] vmm::Error),
+    StartVmmThread(#[source] vmm::Error),
     #[error("Error parsing config: {0}")]
     ParsingConfig(vmm::config::Error),
     #[error("Error creating VM: {0:?}")]
@@ -371,7 +371,7 @@ fn create_app<'a, 'b>(
 
 fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &Option<String>) -> Result<(), Error> {
     let (api_request_sender, api_request_receiver) = channel();
-    let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateAPIEventFd)?;
+    let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
 
     let http_sender = api_request_sender.clone();
     let seccomp_action = if let Some(seccomp_value) = cmd_arguments.value_of("seccomp") {
@@ -424,7 +424,7 @@ fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &Option<String>) -> Res
         &seccomp_action,
         hypervisor,
     )
-    .map_err(Error::StartVMMThread)?;
+    .map_err(Error::StartVmmThread)?;
 
     // Can't test for "vm-config" group as some have default values. The kernel
     // is the only required option for booting the VM.
