@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#![allow(non_camel_case_types)]
+#![allow(non_camel_case_types, clippy::upper_case_acronyms)]
 
 //
 // CMP-Compare Two Operands
@@ -229,7 +229,7 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x38, 0xc4]; // cmp ah,al
-        let mut vmm = MockVMM::new(ip, vec![(Register::RAX, rax)], None);
+        let mut vmm = MockVmm::new(ip, vec![(Register::RAX, rax)], None);
         assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
@@ -243,7 +243,7 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x83, 0xf8, 0x64]; // cmp eax,100
-        let mut vmm = MockVMM::new(ip, vec![(Register::RAX, rax)], None);
+        let mut vmm = MockVmm::new(ip, vec![(Register::RAX, rax)], None);
         assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
@@ -257,7 +257,7 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x83, 0xf8, 0xff]; // cmp eax,-1
-        let mut vmm = MockVMM::new(ip, vec![(Register::RAX, rax)], None);
+        let mut vmm = MockVmm::new(ip, vec![(Register::RAX, rax)], None);
         assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
@@ -272,7 +272,7 @@ mod tests {
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let insn = [0x48, 0x39, 0xd8, 0x00, 0xc3]; // cmp rax,rbx + two bytes garbage
-        let mut vmm = MockVMM::new(ip, vec![(Register::RAX, rax), (Register::RBX, rbx)], None);
+        let mut vmm = MockVmm::new(ip, vec![(Register::RAX, rax), (Register::RBX, rbx)], None);
         assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
@@ -295,7 +295,7 @@ mod tests {
             let rax = d.0;
             let rbx = d.1;
             let insn = [0x48, 0x39, 0xd8]; // cmp rax,rbx
-            let mut vmm = MockVMM::new(
+            let mut vmm = MockVmm::new(
                 0x1000,
                 vec![(Register::RAX, rax), (Register::RBX, rbx)],
                 None,
@@ -323,7 +323,7 @@ mod tests {
             let rax = d.0;
             let rbx = d.1;
             let insn = [0x39, 0xd8]; // cmp eax,ebx
-            let mut vmm = MockVMM::new(
+            let mut vmm = MockVmm::new(
                 0x1000,
                 vec![(Register::RAX, rax), (Register::RBX, rbx)],
                 None,
