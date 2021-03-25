@@ -21,7 +21,7 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::physical_bits;
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
-use acpi_tables::{aml, aml::Aml, sdt::SDT};
+use acpi_tables::{aml, aml::Aml, sdt::Sdt};
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::SgxEpcSection;
@@ -1134,11 +1134,11 @@ impl CpuManager {
     }
 
     #[cfg(feature = "acpi")]
-    pub fn create_madt(&self) -> SDT {
+    pub fn create_madt(&self) -> Sdt {
         // This is also checked in the commandline parsing.
         assert!(self.config.boot_vcpus <= self.config.max_vcpus);
 
-        let mut madt = SDT::new(*b"APIC", 44, 5, *b"CLOUDH", *b"CHMADT  ", 1);
+        let mut madt = Sdt::new(*b"APIC", 44, 5, *b"CLOUDH", *b"CHMADT  ", 1);
         #[cfg(target_arch = "x86_64")]
         {
             madt.write(36, arch::layout::APIC_START);
@@ -1402,7 +1402,7 @@ impl Aml for CpuManager {
             &aml::Device::new(
                 "_SB_.PRES".into(),
                 vec![
-                    &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
+                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
                     &aml::Name::new("_UID".into(), &"CPU Hotplug Controller"),
                     // Mutex to protect concurrent access as we write to choose CPU and then read back status
                     &aml::Mutex::new("CPLK".into(), 0),
@@ -1453,7 +1453,7 @@ impl Aml for CpuManager {
 
         // CPU devices
         let hid = aml::Name::new("_HID".into(), &"ACPI0010");
-        let uid = aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A05"));
+        let uid = aml::Name::new("_CID".into(), &aml::EisaName::new("PNP0A05"));
         // Bundle methods together under a common object
         let methods = CPUMethods {
             max_vcpus: self.config.max_vcpus,

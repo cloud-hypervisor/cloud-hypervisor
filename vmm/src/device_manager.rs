@@ -3671,7 +3671,7 @@ impl Aml for DeviceManager {
             &aml::Device::new(
                 "_SB_.PHPR".into(),
                 vec![
-                    &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
+                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
                     &aml::Name::new("_STA".into(), &0x0bu8),
                     &aml::Name::new("_UID".into(), &"PCI Hotplug Controller"),
                     &aml::Mutex::new("BLCK".into(), 0),
@@ -3725,9 +3725,9 @@ impl Aml for DeviceManager {
         let end_of_device_area = self.memory_manager.lock().unwrap().end_of_device_area().0;
 
         let mut pci_dsdt_inner_data: Vec<&dyn aml::Aml> = Vec::new();
-        let hid = aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A08"));
+        let hid = aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A08"));
         pci_dsdt_inner_data.push(&hid);
-        let cid = aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A03"));
+        let cid = aml::Name::new("_CID".into(), &aml::EisaName::new("PNP0A03"));
         pci_dsdt_inner_data.push(&cid);
         let adr = aml::Name::new("_ADR".into(), &aml::ZERO);
         pci_dsdt_inner_data.push(&adr);
@@ -3741,7 +3741,7 @@ impl Aml for DeviceManager {
             "_CRS".into(),
             &aml::ResourceTemplate::new(vec![
                 &aml::AddressSpace::new_bus_number(0x0u16, 0xffu16),
-                &aml::IO::new(0xcf8, 0xcf8, 1, 0x8),
+                &aml::Io::new(0xcf8, 0xcf8, 1, 0x8),
                 &aml::AddressSpace::new_memory(
                     aml::AddressSpaceCachable::NotCacheable,
                     true,
@@ -3794,7 +3794,7 @@ impl Aml for DeviceManager {
         let mbrd_dsdt_data = aml::Device::new(
             "_SB_.MBRD".into(),
             vec![
-                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C02")),
+                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C02")),
                 &aml::Name::new("_UID".into(), &aml::ZERO),
                 &aml::Name::new(
                     "_CRS".into(),
@@ -3811,13 +3811,13 @@ impl Aml for DeviceManager {
         let com1_dsdt_data = aml::Device::new(
             "_SB_.COM1".into(),
             vec![
-                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0501")),
+                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0501")),
                 &aml::Name::new("_UID".into(), &aml::ZERO),
                 &aml::Name::new(
                     "_CRS".into(),
                     &aml::ResourceTemplate::new(vec![
                         &aml::Interrupt::new(true, true, false, false, 4),
-                        &aml::IO::new(0x3f8, 0x3f8, 0, 0x8),
+                        &aml::Io::new(0x3f8, 0x3f8, 0, 0x8),
                     ]),
                 ),
             ],
@@ -3830,7 +3830,7 @@ impl Aml for DeviceManager {
         let power_button_dsdt_data = aml::Device::new(
             "_SB_.PWRB".into(),
             vec![
-                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C0C")),
+                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C0C")),
                 &aml::Name::new("_UID".into(), &aml::ZERO),
             ],
         )

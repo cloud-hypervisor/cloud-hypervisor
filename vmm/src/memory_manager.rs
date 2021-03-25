@@ -1599,7 +1599,7 @@ impl Aml for MemorySlot {
         aml::Device::new(
             format!("M{:03}", self.slot_id).as_str().into(),
             vec![
-                &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0C80")),
+                &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0C80")),
                 &aml::Name::new("_UID".into(), &self.slot_id),
                 /*
                 _STA return value:
@@ -1836,7 +1836,7 @@ impl Aml for MemoryManager {
             &aml::Device::new(
                 "_SB_.MHPC".into(),
                 vec![
-                    &aml::Name::new("_HID".into(), &aml::EISAName::new("PNP0A06")),
+                    &aml::Name::new("_HID".into(), &aml::EisaName::new("PNP0A06")),
                     &aml::Name::new("_UID".into(), &"Memory Hotplug Controller"),
                     // Mutex to protect concurrent access as we write to choose slot and then read back status
                     &aml::Mutex::new("MLCK".into(), 0),
@@ -1919,7 +1919,7 @@ impl Aml for MemoryManager {
                     &aml::Device::new(
                         "_SB_.EPC_".into(),
                         vec![
-                            &aml::Name::new("_HID".into(), &aml::EISAName::new("INT0E0C")),
+                            &aml::Name::new("_HID".into(), &aml::EisaName::new("INT0E0C")),
                             // QWORD describing the EPC region start and size
                             &aml::Name::new(
                                 "_CRS".into(),
