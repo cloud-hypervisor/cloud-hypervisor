@@ -393,7 +393,7 @@ impl VhostUserBackend for VhostUserBlkBackend {
             return Err(io::Error::from_raw_os_error(libc::EINVAL));
         }
         let (_, right) = config_slice.split_at_mut(offset as usize);
-        right.copy_from_slice(&data[..]);
+        right.copy_from_slice(&data);
         self.update_writeback();
         Ok(())
     }
