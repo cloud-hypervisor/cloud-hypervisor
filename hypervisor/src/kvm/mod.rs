@@ -369,7 +369,7 @@ impl vm::Vm for KvmVm {
             reserved: u32,
             attributes: u64,
             cpuid: u64,
-        };
+        }
         let data = TdxInitVm {
             max_vcpus,
             reserved: 0,
@@ -411,7 +411,7 @@ impl vm::Vm for KvmVm {
             host_address: u64,
             guest_address: u64,
             pages: u64,
-        };
+        }
         let data = TdxInitMemRegion {
             host_address,
             guest_address,
@@ -440,7 +440,7 @@ fn tdx_command(
         command: TdxCommand,
         metadata: u32,
         data: u64,
-    };
+    }
     let cmd = TdxIoctlCmd {
         command,
         metadata,

@@ -263,15 +263,15 @@ pub enum Error {
 
     /// Error enabling TDX VM
     #[cfg(feature = "tdx")]
-    InitializeTDXVM(hypervisor::HypervisorVmError),
+    InitializeTdxVm(hypervisor::HypervisorVmError),
 
     /// Error enabling TDX memory region
     #[cfg(feature = "tdx")]
-    InitializeTDXMemoryRegion(hypervisor::HypervisorVmError),
+    InitializeTdxMemoryRegion(hypervisor::HypervisorVmError),
 
     /// Error finalizing TDX setup
     #[cfg(feature = "tdx")]
-    FinalizeTDX(hypervisor::HypervisorVmError),
+    FinalizeTdx(hypervisor::HypervisorVmError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1552,7 +1552,7 @@ impl Vm {
         let max_vcpus = self.cpu_manager.lock().unwrap().max_vcpus() as u32;
         self.vm
             .tdx_init(&cpuid, max_vcpus)
-            .map_err(Error::InitializeTDXVM)?;
+            .map_err(Error::InitializeTdxVm)?;
         Ok(())
     }
 
@@ -1669,7 +1669,7 @@ impl Vm {
                     /* TDVF_SECTION_ATTRIBUTES_EXTENDMR */
                     section.attributes == 1,
                 )
-                .map_err(Error::InitializeTDXMemoryRegion)?;
+                .map_err(Error::InitializeTdxMemoryRegion)?;
         }
 
         Ok(hob_offset)
@@ -1729,7 +1729,7 @@ impl Vm {
                 .initialize_tdx(hob_address)
                 .map_err(Error::CpuManager)?;
             // With TDX memory and CPU state configured TDX setup is complete
-            self.vm.tdx_finalize().map_err(Error::FinalizeTDX)?;
+            self.vm.tdx_finalize().map_err(Error::FinalizeTdx)?;
         }
 
         self.cpu_manager
