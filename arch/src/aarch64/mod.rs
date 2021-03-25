@@ -11,10 +11,10 @@ pub mod layout;
 /// Logic for configuring aarch64 registers.
 pub mod regs;
 
-pub use self::fdt::DeviceInfoForFDT;
+pub use self::fdt::DeviceInfoForFdt;
 use crate::DeviceType;
 use crate::RegionType;
-use aarch64::gic::GICDevice;
+use aarch64::gic::GicDevice;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
@@ -28,10 +28,10 @@ use vm_memory::{
 #[derive(Debug)]
 pub enum Error {
     /// Failed to create a FDT.
-    SetupFDT(fdt::Error),
+    SetupFdt(fdt::Error),
 
     /// Failed to create a GIC.
-    SetupGIC(gic::Error),
+    SetupGic(gic::Error),
 
     /// Failed to compute the initramfs address.
     InitramfsAddress,
@@ -40,7 +40,7 @@ pub enum Error {
     RegsConfiguration(regs::Error),
 
     /// Error configuring the MPIDR register
-    VcpuRegMPIDR(hypervisor::HypervisorCpuError),
+    VcpuRegMpidr(hypervisor::HypervisorCpuError),
 }
 
 impl From<Error> for super::Error {
@@ -74,7 +74,7 @@ pub fn configure_vcpu(
         .map_err(Error::RegsConfiguration)?;
     }
 
-    let mpidr = fd.read_mpidr().map_err(Error::VcpuRegMPIDR)?;
+    let mpidr = fd.read_mpidr().map_err(Error::VcpuRegMpidr)?;
     Ok(mpidr)
 }
 
@@ -117,7 +117,7 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
 /// * `guest_mem` - The memory to be used by the guest.
 /// * `num_cpus` - Number of virtual CPUs the guest will have.
 #[allow(clippy::too_many_arguments)]
-pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::BuildHasher>(
+pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
     vm: &Arc<dyn hypervisor::Vm>,
     guest_mem: &GuestMemoryMmap,
     cmdline_cstring: &CStr,
@@ -126,8 +126,8 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::Bui
     device_info: &HashMap<(DeviceType, String), T, S>,
     initrd: &Option<super::InitramfsConfig>,
     pci_space_address: &(u64, u64),
-) -> super::Result<Box<dyn GICDevice>> {
-    let gic_device = gic::kvm::create_gic(vm, vcpu_count).map_err(Error::SetupGIC)?;
+) -> super::Result<Box<dyn GicDevice>> {
+    let gic_device = gic::kvm::create_gic(vm, vcpu_count).map_err(Error::SetupGic)?;
 
     fdt::create_fdt(
         guest_mem,
@@ -138,7 +138,7 @@ pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::Bui
         initrd,
         pci_space_address,
     )
-    .map_err(Error::SetupFDT)?;
+    .map_err(Error::SetupFdt)?;
 
     Ok(gic_device)
 }

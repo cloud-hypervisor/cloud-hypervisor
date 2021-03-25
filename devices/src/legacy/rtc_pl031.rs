@@ -215,7 +215,7 @@ pub fn seconds_to_nanoseconds(value: i64) -> Option<i64> {
 }
 
 /// A RTC device following the PL031 specification..
-pub struct RTC {
+pub struct Rtc {
     previous_now: Instant,
     tick_offset: i64,
     // This is used for implementing the RTC alarm. However, in Firecracker we do not need it.
@@ -227,10 +227,10 @@ pub struct RTC {
     interrupt: Arc<Box<dyn InterruptSourceGroup>>,
 }
 
-impl RTC {
+impl Rtc {
     /// Constructs an AMBA PL031 RTC device.
-    pub fn new(interrupt: Arc<Box<dyn InterruptSourceGroup>>) -> RTC {
-        RTC {
+    pub fn new(interrupt: Arc<Box<dyn InterruptSourceGroup>>) -> Self {
+        Self {
             // This is used only for duration measuring purposes.
             previous_now: Instant::now(),
             tick_offset: get_time(ClockType::Real) as i64,
@@ -289,7 +289,7 @@ impl RTC {
     }
 }
 
-impl BusDevice for RTC {
+impl BusDevice for Rtc {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         let v;
         let mut read_ok = true;
@@ -450,7 +450,7 @@ mod tests {
     fn test_rtc_read_write_and_event() {
         let intr_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
 
-        let mut rtc = RTC::new(Arc::new(Box::new(TestInterrupt::new(
+        let mut rtc = Rtc::new(Arc::new(Box::new(TestInterrupt::new(
             intr_evt.try_clone().unwrap(),
         ))));
         let mut data = [0; 4];

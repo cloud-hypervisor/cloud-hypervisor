@@ -87,7 +87,7 @@ pub mod aarch64;
 
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{
-    arch_memory_regions, configure_system, configure_vcpu, fdt::DeviceInfoForFDT,
+    arch_memory_regions, configure_system, configure_vcpu, fdt::DeviceInfoForFdt,
     get_host_cpu_phys_bits, get_kernel_start, initramfs_load_addr, layout,
     layout::CMDLINE_MAX_SIZE, layout::IRQ_BASE, layout::IRQ_MAX, EntryPoint,
 };
@@ -128,10 +128,10 @@ pub enum DeviceType {
     Serial,
     /// Device Type: RTC.
     #[cfg(target_arch = "aarch64")]
-    RTC,
+    Rtc,
     /// Device Type: GPIO.
     #[cfg(target_arch = "aarch64")]
-    GPIO,
+    Gpio,
 }
 
 /// Default (smallest) memory page size for the supported architectures.
@@ -146,13 +146,13 @@ impl fmt::Display for DeviceType {
 /// Structure to describe MMIO device information
 #[derive(Clone, Debug)]
 #[cfg(target_arch = "aarch64")]
-pub struct MMIODeviceInfo {
+pub struct MmioDeviceInfo {
     pub addr: u64,
     pub irq: u32,
 }
 
 #[cfg(target_arch = "aarch64")]
-impl DeviceInfoForFDT for MMIODeviceInfo {
+impl DeviceInfoForFdt for MmioDeviceInfo {
     fn addr(&self) -> u64 {
         self.addr
     }

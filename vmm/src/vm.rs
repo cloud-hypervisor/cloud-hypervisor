@@ -85,7 +85,7 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::terminal::Terminal;
 
 #[cfg(target_arch = "aarch64")]
-use arch::aarch64::gic::gicv3::kvm::{KvmGICv3, GIC_V3_SNAPSHOT_ID};
+use arch::aarch64::gic::gicv3::kvm::{KvmGicV3, GIC_V3_SNAPSHOT_ID};
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::gic::kvm::create_gic;
 
@@ -1879,7 +1879,7 @@ impl Vm {
                 .lock()
                 .unwrap()
                 .as_any_concrete_mut()
-                .downcast_mut::<KvmGICv3>()
+                .downcast_mut::<KvmGicV3>()
                 .unwrap()
                 .snapshot()?,
         );
@@ -1925,7 +1925,7 @@ impl Vm {
                 .lock()
                 .unwrap()
                 .as_any_concrete_mut()
-                .downcast_mut::<KvmGICv3>()
+                .downcast_mut::<KvmGicV3>()
                 .unwrap()
                 .restore(*gic_v3_snapshot.clone())?;
         } else {
@@ -2421,19 +2421,19 @@ mod tests {
     use super::*;
     use arch::aarch64::fdt::create_fdt;
     use arch::aarch64::gic::kvm::create_gic;
-    use arch::aarch64::{layout, DeviceInfoForFDT};
+    use arch::aarch64::{layout, DeviceInfoForFdt};
     use arch::DeviceType;
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 
     const LEN: u64 = 4096;
 
     #[derive(Clone, Debug)]
-    pub struct MMIODeviceInfo {
+    pub struct MmioDeviceInfo {
         addr: u64,
         irq: u32,
     }
 
-    impl DeviceInfoForFDT for MMIODeviceInfo {
+    impl DeviceInfoForFdt for MmioDeviceInfo {
         fn addr(&self) -> u64 {
             self.addr
         }
@@ -2454,21 +2454,21 @@ mod tests {
         ));
         let mem = GuestMemoryMmap::from_ranges(&regions).expect("Cannot initialize memory");
 
-        let dev_info: HashMap<(DeviceType, std::string::String), MMIODeviceInfo> = [
+        let dev_info: HashMap<(DeviceType, std::string::String), MmioDeviceInfo> = [
             (
                 (DeviceType::Serial, DeviceType::Serial.to_string()),
-                MMIODeviceInfo { addr: 0x00, irq: 1 },
+                MmioDeviceInfo { addr: 0x00, irq: 1 },
             ),
             (
                 (DeviceType::Virtio(1), "virtio".to_string()),
-                MMIODeviceInfo {
+                MmioDeviceInfo {
                     addr: 0x00 + LEN,
                     irq: 2,
                 },
             ),
             (
-                (DeviceType::RTC, "rtc".to_string()),
-                MMIODeviceInfo {
+                (DeviceType::Rtc, "rtc".to_string()),
+                MmioDeviceInfo {
                     addr: 0x00 + 2 * LEN,
                     irq: 3,
                 },

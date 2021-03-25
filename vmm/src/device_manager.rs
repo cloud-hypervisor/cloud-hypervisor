@@ -29,9 +29,9 @@ use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "aarch64")]
-use arch::aarch64::gic::GICDevice;
+use arch::aarch64::gic::GicDevice;
 #[cfg(target_arch = "aarch64")]
-use arch::aarch64::DeviceInfoForFDT;
+use arch::aarch64::DeviceInfoForFdt;
 #[cfg(feature = "acpi")]
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
@@ -47,10 +47,10 @@ use block_util::{
 use devices::gic;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
+#[cfg(target_arch = "aarch64")]
+use devices::legacy::Pl011;
 #[cfg(target_arch = "x86_64")]
 use devices::legacy::Serial;
-#[cfg(target_arch = "aarch64")]
-use devices::legacy::PL011;
 use devices::{
     interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
 };
@@ -405,7 +405,7 @@ pub enum DeviceManagerError {
 
     /// Failed to do AArch64 GPIO power button notification
     #[cfg(target_arch = "aarch64")]
-    AArch64PowerButtonNotification(devices::legacy::GPIODeviceError),
+    AArch64PowerButtonNotification(devices::legacy::GpioDeviceError),
 
     /// Failed to set O_DIRECT flag to file descriptor
     SetDirectIo,
@@ -507,7 +507,7 @@ pub struct Console {
     // Serial port on 0x3f8
     serial: Option<Arc<Mutex<Serial>>>,
     #[cfg(target_arch = "aarch64")]
-    serial: Option<Arc<Mutex<PL011>>>,
+    serial: Option<Arc<Mutex<Pl011>>>,
     virtio_console_input: Option<Arc<virtio_devices::ConsoleInput>>,
     input: Option<ConsoleInput>,
 }
@@ -789,14 +789,14 @@ struct DeviceManagerState {
 /// Private structure for storing information about the MMIO device registered at some address on the bus.
 #[derive(Clone, Debug)]
 #[cfg(target_arch = "aarch64")]
-pub struct MMIODeviceInfo {
+pub struct MmioDeviceInfo {
     addr: u64,
     irq: u32,
     len: u64,
 }
 
 #[cfg(target_arch = "aarch64")]
-impl DeviceInfoForFDT for MMIODeviceInfo {
+impl DeviceInfoForFdt for MmioDeviceInfo {
     fn addr(&self) -> u64 {
         self.addr
     }
@@ -852,7 +852,7 @@ pub struct DeviceManager {
     interrupt_controller: Option<Arc<Mutex<gic::Gic>>>,
 
     #[cfg(target_arch = "aarch64")]
-    gic_device_entity: Option<Arc<Mutex<Box<dyn GICDevice>>>>,
+    gic_device_entity: Option<Arc<Mutex<Box<dyn GicDevice>>>>,
 
     // Things to be added to the commandline (i.e. for virtio-mmio)
     cmdline_additions: Vec<String>,
@@ -915,7 +915,7 @@ pub struct DeviceManager {
     reset_evt: EventFd,
 
     #[cfg(target_arch = "aarch64")]
-    id_to_dev_info: HashMap<(DeviceType, String), MMIODeviceInfo>,
+    id_to_dev_info: HashMap<(DeviceType, String), MmioDeviceInfo>,
 
     // seccomp action
     seccomp_action: SeccompAction,
@@ -939,7 +939,7 @@ pub struct DeviceManager {
 
     #[cfg(target_arch = "aarch64")]
     // GPIO device for AArch64
-    gpio_device: Option<Arc<Mutex<devices::legacy::GPIO>>>,
+    gpio_device: Option<Arc<Mutex<devices::legacy::Gpio>>>,
 }
 
 impl DeviceManager {
@@ -1166,7 +1166,7 @@ impl DeviceManager {
 
     #[cfg(target_arch = "aarch64")]
     /// Gets the information of the devices registered up to some point in time.
-    pub fn get_device_info(&self) -> &HashMap<(DeviceType, String), MMIODeviceInfo> {
+    pub fn get_device_info(&self) -> &HashMap<(DeviceType, String), MmioDeviceInfo> {
         &self.id_to_dev_info
     }
 
@@ -1284,12 +1284,12 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn set_gic_device_entity(&mut self, device_entity: Arc<Mutex<Box<dyn GICDevice>>>) {
+    pub fn set_gic_device_entity(&mut self, device_entity: Arc<Mutex<Box<dyn GicDevice>>>) {
         self.gic_device_entity = Some(device_entity);
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn get_gic_device_entity(&self) -> Option<&Arc<Mutex<Box<dyn GICDevice>>>> {
+    pub fn get_gic_device_entity(&self) -> Option<&Arc<Mutex<Box<dyn GicDevice>>>> {
         self.gic_device_entity.as_ref()
     }
     #[cfg(target_arch = "aarch64")]
@@ -1536,7 +1536,7 @@ impl DeviceManager {
             })
             .map_err(DeviceManagerError::CreateInterruptGroup)?;
 
-        let rtc_device = Arc::new(Mutex::new(devices::legacy::RTC::new(interrupt_group)));
+        let rtc_device = Arc::new(Mutex::new(devices::legacy::Rtc::new(interrupt_group)));
 
         self.bus_devices
             .push(Arc::clone(&rtc_device) as Arc<Mutex<dyn BusDevice>>);
@@ -1549,8 +1549,8 @@ impl DeviceManager {
             .map_err(DeviceManagerError::BusError)?;
 
         self.id_to_dev_info.insert(
-            (DeviceType::RTC, "rtc".to_string()),
-            MMIODeviceInfo {
+            (DeviceType::Rtc, "rtc".to_string()),
+            MmioDeviceInfo {
                 addr: addr.0,
                 len: MMIO_LEN,
                 irq: rtc_irq,
@@ -1573,7 +1573,7 @@ impl DeviceManager {
             })
             .map_err(DeviceManagerError::CreateInterruptGroup)?;
 
-        let gpio_device = Arc::new(Mutex::new(devices::legacy::GPIO::new(
+        let gpio_device = Arc::new(Mutex::new(devices::legacy::Gpio::new(
             id.clone(),
             interrupt_group,
         )));
@@ -1591,8 +1591,8 @@ impl DeviceManager {
         self.gpio_device = Some(gpio_device.clone());
 
         self.id_to_dev_info.insert(
-            (DeviceType::GPIO, "gpio".to_string()),
-            MMIODeviceInfo {
+            (DeviceType::Gpio, "gpio".to_string()),
+            MmioDeviceInfo {
                 addr: addr.0,
                 len: MMIO_LEN,
                 irq: gpio_irq,
@@ -1661,7 +1661,7 @@ impl DeviceManager {
         &mut self,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         serial_writer: Option<Box<dyn io::Write + Send>>,
-    ) -> DeviceManagerResult<Arc<Mutex<devices::legacy::PL011>>> {
+    ) -> DeviceManagerResult<Arc<Mutex<Pl011>>> {
         let id = String::from(SERIAL_DEVICE_NAME_PREFIX);
 
         let serial_irq = self
@@ -1678,7 +1678,7 @@ impl DeviceManager {
             })
             .map_err(DeviceManagerError::CreateInterruptGroup)?;
 
-        let serial = Arc::new(Mutex::new(devices::legacy::PL011::new(
+        let serial = Arc::new(Mutex::new(devices::legacy::Pl011::new(
             id.clone(),
             interrupt_group,
             serial_writer,
@@ -1696,7 +1696,7 @@ impl DeviceManager {
 
         self.id_to_dev_info.insert(
             (DeviceType::Serial, DeviceType::Serial.to_string()),
-            MMIODeviceInfo {
+            MmioDeviceInfo {
                 addr: addr.0,
                 len: MMIO_LEN,
                 irq: serial_irq,
