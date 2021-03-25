@@ -49,7 +49,7 @@ const AMBA_ID_HIGH: u64 = 0x401;
 #[derive(Debug)]
 pub enum Error {
     BadWriteOffset(u64),
-    DMANotImplemented,
+    DmaNotImplemented,
     InterruptFailure(io::Error),
     WriteAllFailure(io::Error),
     FlushFailure(io::Error),
@@ -59,7 +59,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::BadWriteOffset(offset) => write!(f, "pl011_write: Bad Write Offset: {}", offset),
-            Error::DMANotImplemented => write!(f, "pl011: DMA not implemented."),
+            Error::DmaNotImplemented => write!(f, "pl011: DMA not implemented."),
             Error::InterruptFailure(e) => write!(f, "Failed to trigger interrupt: {}", e),
             Error::WriteAllFailure(e) => write!(f, "Failed to write: {}", e),
             Error::FlushFailure(e) => write!(f, "Failed to flush: {}", e),
@@ -70,7 +70,7 @@ impl fmt::Display for Error {
 type Result<T> = result::Result<T, Error>;
 
 /// A PL011 device following the PL011 specification.
-pub struct PL011 {
+pub struct Pl011 {
     id: String,
     flags: u32,
     lcr: u32,
@@ -91,7 +91,7 @@ pub struct PL011 {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct PL011State {
+pub struct Pl011State {
     flags: u32,
     lcr: u32,
     rsr: u32,
@@ -108,14 +108,14 @@ pub struct PL011State {
     read_trigger: u32,
 }
 
-impl PL011 {
+impl Pl011 {
     /// Constructs an AMBA PL011 UART device.
     pub fn new(
         id: String,
         irq: Arc<Box<dyn InterruptSourceGroup>>,
         out: Option<Box<dyn io::Write + Send>>,
-    ) -> PL011 {
-        PL011 {
+    ) -> Self {
+        Self {
             id,
             flags: 0x90u32,
             lcr: 0u32,
@@ -136,8 +136,8 @@ impl PL011 {
         }
     }
 
-    fn state(&self) -> PL011State {
-        PL011State {
+    fn state(&self) -> Pl011State {
+        Pl011State {
             flags: self.flags,
             lcr: self.lcr,
             rsr: self.rsr,
@@ -155,7 +155,7 @@ impl PL011 {
         }
     }
 
-    fn set_state(&mut self, state: &PL011State) {
+    fn set_state(&mut self, state: &Pl011State) {
         self.flags = state.flags;
         self.lcr = state.lcr;
         self.rsr = state.rsr;
@@ -264,7 +264,7 @@ impl PL011 {
             UARTDMACR => {
                 self.dmacr = val;
                 if (val & 3) != 0 {
-                    return Err(Error::DMANotImplemented);
+                    return Err(Error::DmaNotImplemented);
                 }
             }
             off => {
@@ -279,7 +279,7 @@ impl PL011 {
     }
 }
 
-impl BusDevice for PL011 {
+impl BusDevice for Pl011 {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         let v;
         let mut read_ok = true;
@@ -355,7 +355,7 @@ impl BusDevice for PL011 {
     }
 }
 
-impl Snapshottable for PL011 {
+impl Snapshottable for Pl011 {
     fn id(&self) -> String {
         self.id.clone()
     }
@@ -396,9 +396,9 @@ impl Snapshottable for PL011 {
     }
 }
 
-impl Pausable for PL011 {}
-impl Transportable for PL011 {}
-impl Migratable for PL011 {}
+impl Pausable for Pl011 {}
+impl Transportable for Pl011 {}
+impl Migratable for Pl011 {}
 
 #[cfg(test)]
 mod tests {
@@ -462,7 +462,7 @@ mod tests {
     fn pl011_output() {
         let intr_evt = EventFd::new(0).unwrap();
         let pl011_out = SharedBuffer::new();
-        let mut pl011 = PL011::new(
+        let mut pl011 = Pl011::new(
             String::from(SERIAL_NAME),
             Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
             Some(Box::new(pl011_out.clone())),
@@ -482,7 +482,7 @@ mod tests {
     fn pl011_input() {
         let intr_evt = EventFd::new(0).unwrap();
         let pl011_out = SharedBuffer::new();
-        let mut pl011 = PL011::new(
+        let mut pl011 = Pl011::new(
             String::from(SERIAL_NAME),
             Arc::new(Box::new(TestInterrupt::new(intr_evt.try_clone().unwrap()))),
             Some(Box::new(pl011_out)),

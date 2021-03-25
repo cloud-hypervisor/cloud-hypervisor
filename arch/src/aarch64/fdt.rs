@@ -16,12 +16,12 @@ use std::{io, result};
 use super::super::DeviceType;
 use super::super::InitramfsConfig;
 use super::get_fdt_addr;
-use super::gic::GICDevice;
+use super::gic::GicDevice;
 use super::layout::{
     FDT_MAX_SIZE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, PCI_MMCONFIG_SIZE,
     PCI_MMCONFIG_START,
 };
-use crate::aarch64::fdt::Error::CstringFDTTransform;
+use crate::aarch64::fdt::Error::CstringFdtTransform;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryMmap};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
@@ -68,7 +68,7 @@ extern "C" {
 }
 
 /// Trait for devices to be added to the Flattened Device Tree.
-pub trait DeviceInfoForFDT {
+pub trait DeviceInfoForFdt {
     /// Returns the address where this device will be loaded.
     fn addr(&self) -> u64;
     /// Returns the associated interrupt for this device.
@@ -81,27 +81,27 @@ pub trait DeviceInfoForFDT {
 #[derive(Debug)]
 pub enum Error {
     /// Failed to append node to the FDT.
-    AppendFDTNode(io::Error),
+    AppendFdtNode(io::Error),
     /// Failed to append a property to the FDT.
-    AppendFDTProperty(io::Error),
+    AppendFdtProperty(io::Error),
     /// Syscall for creating FDT failed.
-    CreateFDT(io::Error),
+    CreateFdt(io::Error),
     /// Failed to obtain a C style string.
-    CstringFDTTransform(NulError),
+    CstringFdtTransform(NulError),
     /// Failure in calling syscall for terminating this FDT.
-    FinishFDTReserveMap(io::Error),
+    FinishFdtReserveMap(io::Error),
     /// Failure in writing FDT in memory.
-    WriteFDTToMemory(GuestMemoryError),
+    WriteFdtToMemory(GuestMemoryError),
 }
 type Result<T> = result::Result<T, Error>;
 
 /// Creates the flattened device tree for this aarch64 VM.
-pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::BuildHasher>(
+pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
     guest_mem: &GuestMemoryMmap,
     cmdline: &CStr,
     vcpu_mpidr: Vec<u64>,
     device_info: &HashMap<(DeviceType, String), T, S>,
-    gic_device: &dyn GICDevice,
+    gic_device: &dyn GicDevice,
     initrd: &Option<InitramfsConfig>,
     pci_space_address: &(u64, u64),
 ) -> Result<Vec<u8>> {
@@ -145,7 +145,7 @@ pub fn create_fdt<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::BuildHash
     let fdt_address = GuestAddress(get_fdt_addr(&guest_mem));
     guest_mem
         .write_slice(fdt_final.as_slice(), fdt_address)
-        .map_err(Error::WriteFDTToMemory)?;
+        .map_err(Error::WriteFdtToMemory)?;
     Ok(fdt_final)
 }
 
@@ -155,7 +155,7 @@ fn allocate_fdt(fdt: &mut Vec<u8>) -> Result<()> {
     let mut fdt_ret = unsafe { fdt_create(fdt.as_mut_ptr() as *mut c_void, FDT_MAX_SIZE as c_int) };
 
     if fdt_ret != 0 {
-        return Err(Error::CreateFDT(io::Error::last_os_error()));
+        return Err(Error::CreateFdt(io::Error::last_os_error()));
     }
 
     // The flattened device trees created with fdt_create() contains a list of
@@ -166,7 +166,7 @@ fn allocate_fdt(fdt: &mut Vec<u8>) -> Result<()> {
     // Safe since we previously allocated this array.
     fdt_ret = unsafe { fdt_finish_reservemap(fdt.as_mut_ptr() as *mut c_void) };
     if fdt_ret != 0 {
-        return Err(Error::FinishFDTReserveMap(io::Error::last_os_error()));
+        return Err(Error::FinishFdtReserveMap(io::Error::last_os_error()));
     }
     Ok(())
 }
@@ -175,7 +175,7 @@ fn finish_fdt(from_fdt: &mut Vec<u8>, to_fdt: &mut Vec<u8>) -> Result<()> {
     // Safe since we allocated `fdt_final` and previously passed in its size.
     let mut fdt_ret = unsafe { fdt_finish(from_fdt.as_mut_ptr() as *mut c_void) };
     if fdt_ret != 0 {
-        return Err(Error::FinishFDTReserveMap(io::Error::last_os_error()));
+        return Err(Error::FinishFdtReserveMap(io::Error::last_os_error()));
     }
 
     // Safe because we allocated both arrays with the correct size.
@@ -187,25 +187,25 @@ fn finish_fdt(from_fdt: &mut Vec<u8>, to_fdt: &mut Vec<u8>) -> Result<()> {
         )
     };
     if fdt_ret != 0 {
-        return Err(Error::FinishFDTReserveMap(io::Error::last_os_error()));
+        return Err(Error::FinishFdtReserveMap(io::Error::last_os_error()));
     }
 
     // Safe since we allocated `to_fdt`.
     fdt_ret = unsafe { fdt_pack(to_fdt.as_mut_ptr() as *mut c_void) };
     if fdt_ret != 0 {
-        return Err(Error::FinishFDTReserveMap(io::Error::last_os_error()));
+        return Err(Error::FinishFdtReserveMap(io::Error::last_os_error()));
     }
     Ok(())
 }
 
 // Following are auxiliary functions for appending nodes to FDT.
 fn append_begin_node(fdt: &mut Vec<u8>, name: &str) -> Result<()> {
-    let cstr_name = CString::new(name).map_err(CstringFDTTransform)?;
+    let cstr_name = CString::new(name).map_err(CstringFdtTransform)?;
 
     // Safe because we allocated fdt and converted name to a CString
     let fdt_ret = unsafe { fdt_begin_node(fdt.as_mut_ptr() as *mut c_void, cstr_name.as_ptr()) };
     if fdt_ret != 0 {
-        return Err(Error::AppendFDTNode(io::Error::last_os_error()));
+        return Err(Error::AppendFdtNode(io::Error::last_os_error()));
     }
     Ok(())
 }
@@ -214,7 +214,7 @@ fn append_end_node(fdt: &mut Vec<u8>) -> Result<()> {
     // Safe because we allocated fdt.
     let fdt_ret = unsafe { fdt_end_node(fdt.as_mut_ptr() as *mut c_void) };
     if fdt_ret != 0 {
-        return Err(Error::AppendFDTNode(io::Error::last_os_error()));
+        return Err(Error::AppendFdtNode(io::Error::last_os_error()));
     }
     Ok(())
 }
@@ -229,13 +229,13 @@ fn append_property_u64(fdt: &mut Vec<u8>, name: &str, val: u64) -> Result<()> {
 }
 
 fn append_property_string(fdt: &mut Vec<u8>, name: &str, value: &str) -> Result<()> {
-    let cstr_value = CString::new(value).map_err(CstringFDTTransform)?;
+    let cstr_value = CString::new(value).map_err(CstringFdtTransform)?;
     append_property_cstring(fdt, name, &cstr_value)
 }
 
 fn append_property_cstring(fdt: &mut Vec<u8>, name: &str, cstr_value: &CStr) -> Result<()> {
     let value_bytes = cstr_value.to_bytes_with_nul();
-    let cstr_name = CString::new(name).map_err(CstringFDTTransform)?;
+    let cstr_name = CString::new(name).map_err(CstringFdtTransform)?;
     // Safe because we allocated fdt, converted name and value to CStrings
     let fdt_ret = unsafe {
         fdt_property(
@@ -246,13 +246,13 @@ fn append_property_cstring(fdt: &mut Vec<u8>, name: &str, cstr_value: &CStr) -> 
         )
     };
     if fdt_ret != 0 {
-        return Err(Error::AppendFDTProperty(io::Error::last_os_error()));
+        return Err(Error::AppendFdtProperty(io::Error::last_os_error()));
     }
     Ok(())
 }
 
 fn append_property_null(fdt: &mut Vec<u8>, name: &str) -> Result<()> {
-    let cstr_name = CString::new(name).map_err(CstringFDTTransform)?;
+    let cstr_name = CString::new(name).map_err(CstringFdtTransform)?;
 
     // Safe because we allocated fdt, converted name to a CString
     let fdt_ret = unsafe {
@@ -264,13 +264,13 @@ fn append_property_null(fdt: &mut Vec<u8>, name: &str) -> Result<()> {
         )
     };
     if fdt_ret != 0 {
-        return Err(Error::AppendFDTProperty(io::Error::last_os_error()));
+        return Err(Error::AppendFdtProperty(io::Error::last_os_error()));
     }
     Ok(())
 }
 
 fn append_property(fdt: &mut Vec<u8>, name: &str, val: &[u8]) -> Result<()> {
-    let cstr_name = CString::new(name).map_err(CstringFDTTransform)?;
+    let cstr_name = CString::new(name).map_err(CstringFdtTransform)?;
     let val_ptr = val.as_ptr() as *const c_void;
 
     // Safe because we allocated fdt and converted name to a CString
@@ -283,7 +283,7 @@ fn append_property(fdt: &mut Vec<u8>, name: &str, val: &[u8]) -> Result<()> {
         )
     };
     if fdt_ret != 0 {
-        return Err(Error::AppendFDTProperty(io::Error::last_os_error()));
+        return Err(Error::AppendFdtProperty(io::Error::last_os_error()));
     }
     Ok(())
 }
@@ -380,7 +380,7 @@ fn create_chosen_node(
     Ok(())
 }
 
-fn create_gic_node(fdt: &mut Vec<u8>, gic_device: &dyn GICDevice) -> Result<()> {
+fn create_gic_node(fdt: &mut Vec<u8>, gic_device: &dyn GicDevice) -> Result<()> {
     let gic_reg_prop = generate_prop64(gic_device.device_properties());
 
     append_begin_node(fdt, "intc")?;
@@ -472,7 +472,7 @@ fn create_psci_node(fdt: &mut Vec<u8>) -> Result<()> {
     Ok(())
 }
 
-fn create_virtio_node<T: DeviceInfoForFDT + Clone + Debug>(
+fn create_virtio_node<T: DeviceInfoForFdt + Clone + Debug>(
     fdt: &mut Vec<u8>,
     dev_info: &T,
 ) -> Result<()> {
@@ -489,7 +489,7 @@ fn create_virtio_node<T: DeviceInfoForFDT + Clone + Debug>(
     Ok(())
 }
 
-fn create_serial_node<T: DeviceInfoForFDT + Clone + Debug>(
+fn create_serial_node<T: DeviceInfoForFdt + Clone + Debug>(
     fdt: &mut Vec<u8>,
     dev_info: &T,
 ) -> Result<()> {
@@ -508,7 +508,7 @@ fn create_serial_node<T: DeviceInfoForFDT + Clone + Debug>(
     Ok(())
 }
 
-fn create_rtc_node<T: DeviceInfoForFDT + Clone + Debug>(
+fn create_rtc_node<T: DeviceInfoForFdt + Clone + Debug>(
     fdt: &mut Vec<u8>,
     dev_info: &T,
 ) -> Result<()> {
@@ -526,7 +526,7 @@ fn create_rtc_node<T: DeviceInfoForFDT + Clone + Debug>(
     Ok(())
 }
 
-fn create_gpio_node<T: DeviceInfoForFDT + Clone + Debug>(
+fn create_gpio_node<T: DeviceInfoForFdt + Clone + Debug>(
     fdt: &mut Vec<u8>,
     dev_info: &T,
 ) -> Result<()> {
@@ -561,7 +561,7 @@ fn create_gpio_node<T: DeviceInfoForFDT + Clone + Debug>(
     Ok(())
 }
 
-fn create_devices_node<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::BuildHasher>(
+fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
     fdt: &mut Vec<u8>,
     dev_info: &HashMap<(DeviceType, String), T, S>,
 ) -> Result<()> {
@@ -570,8 +570,8 @@ fn create_devices_node<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::Buil
 
     for ((device_type, _device_id), info) in dev_info {
         match device_type {
-            DeviceType::GPIO => create_gpio_node(fdt, info)?,
-            DeviceType::RTC => create_rtc_node(fdt, info)?,
+            DeviceType::Gpio => create_gpio_node(fdt, info)?,
+            DeviceType::Rtc => create_rtc_node(fdt, info)?,
             DeviceType::Serial => create_serial_node(fdt, info)?,
             DeviceType::Virtio(_) => {
                 ordered_virtio_device.push(info);
