@@ -174,7 +174,7 @@ pub enum HypervisorCpuError {
     /// Enabling HyperV SynIC error
     ///
     #[error("Failed to enable HyperV SynIC")]
-    EnableHyperVSynIC(#[source] anyhow::Error),
+    EnableHyperVSyncIc(#[source] anyhow::Error),
     ///
     /// Getting AArch64 core register error
     ///
@@ -204,7 +204,7 @@ pub enum HypervisorCpuError {
     /// GVA translation error
     ///
     #[error("Failed to translate GVA: {0}")]
-    TranslateGVA(#[source] anyhow::Error),
+    TranslateVirtualAddress(#[source] anyhow::Error),
     ///
     /// Failed to initialize TDX on CPU
     ///

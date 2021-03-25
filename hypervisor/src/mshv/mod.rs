@@ -530,7 +530,7 @@ impl cpu::Vcpu for MshvVcpu {
         let r = self
             .fd
             .translate_gva(gva, flags)
-            .map_err(|e| cpu::HypervisorCpuError::TranslateGVA(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::TranslateVirtualAddress(e.into()))?;
 
         Ok(r)
     }
@@ -555,12 +555,12 @@ impl<'a> MshvEmulatorContext<'a> {
         let r = self
             .vcpu
             .translate_gva(gva, flags.into())
-            .map_err(|e| PlatformError::TranslateGVA(anyhow!(e)))?;
+            .map_err(|e| PlatformError::TranslateVirtualAddress(anyhow!(e)))?;
 
         let result_code = unsafe { r.1.__bindgen_anon_1.result_code };
         match result_code {
             hv_translate_gva_result_code_HvTranslateGvaSuccess => Ok(r.0),
-            _ => Err(PlatformError::TranslateGVA(anyhow!(result_code))),
+            _ => Err(PlatformError::TranslateVirtualAddress(anyhow!(result_code))),
         }
     }
 }

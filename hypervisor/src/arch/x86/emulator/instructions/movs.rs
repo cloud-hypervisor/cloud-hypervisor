@@ -107,7 +107,7 @@ mod tests {
         let regs = vec![(Register::ECX, 3), (Register::ESI, 0), (Register::EDI, 0xc)];
         let mut data = [0u8; 4];
 
-        let mut vmm = MockVMM::new(ip, regs, Some((0, &memory)));
+        let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
 
         assert!(vmm.emulate_first_insn(0, &insn).is_ok());
 
@@ -117,7 +117,7 @@ mod tests {
         assert_eq!(0xaabbccdd, <u32>::from_le_bytes(data));
         vmm.read_memory(0xc + 8, &mut data).unwrap();
         assert_eq!(0x5aa55aa5, <u32>::from_le_bytes(data));
-        // The rest should be default value 0 from MockVMM
+        // The rest should be default value 0 from MockVmm
         vmm.read_memory(0xc + 12, &mut data).unwrap();
         assert_eq!(0x0, <u32>::from_le_bytes(data));
     }
@@ -132,13 +132,13 @@ mod tests {
         let regs = vec![(Register::ESI, 0), (Register::EDI, 0x8)];
         let mut data = [0u8; 4];
 
-        let mut vmm = MockVMM::new(ip, regs, Some((0, &memory)));
+        let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
 
         assert!(vmm.emulate_first_insn(0, &insn).is_ok());
 
         vmm.read_memory(0x8, &mut data).unwrap();
         assert_eq!(0x12345678, <u32>::from_le_bytes(data));
-        // The rest should be default value 0 from MockVMM
+        // The rest should be default value 0 from MockVmm
         vmm.read_memory(0x4, &mut data).unwrap();
         assert_eq!(0x0, <u32>::from_le_bytes(data));
         vmm.read_memory(0x8 + 8, &mut data).unwrap();

@@ -709,7 +709,7 @@ impl cpu::Vcpu for KvmVcpu {
         };
         self.fd
             .enable_cap(&cap)
-            .map_err(|e| cpu::HypervisorCpuError::EnableHyperVSynIC(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::EnableHyperVSyncIc(e.into()))
     }
     ///
     /// X86 specific call to retrieve the CPUID registers.
