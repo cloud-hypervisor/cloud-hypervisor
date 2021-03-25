@@ -113,9 +113,9 @@ enum TriggerMode {
 enum DeliveryMode {
     Fixed = 0b000,
     Lowest = 0b001,
-    SMI = 0b010,        // System management interrupt
+    Smi = 0b010,        // System management interrupt
     RemoteRead = 0b011, // This is no longer supported by intel.
-    NMI = 0b100,        // Non maskable interrupt
+    Nmi = 0b100,        // Non maskable interrupt
     Init = 0b101,
     Startup = 0b110,
     External = 0b111,
@@ -333,9 +333,9 @@ impl Ioapic {
         match delivery_mode {
             x if (x == DeliveryMode::Fixed as u8)
                 || (x == DeliveryMode::Lowest as u8)
-                || (x == DeliveryMode::SMI as u8)
+                || (x == DeliveryMode::Smi as u8)
                 || (x == DeliveryMode::RemoteRead as u8)
-                || (x == DeliveryMode::NMI as u8)
+                || (x == DeliveryMode::Nmi as u8)
                 || (x == DeliveryMode::Init as u8)
                 || (x == DeliveryMode::Startup as u8)
                 || (x == DeliveryMode::External as u8) => {}

@@ -859,7 +859,7 @@ pub struct DeviceManager {
 
     // ACPI GED notification device
     #[cfg(feature = "acpi")]
-    ged_notification_device: Option<Arc<Mutex<devices::AcpiGEDDevice>>>,
+    ged_notification_device: Option<Arc<Mutex<devices::AcpiGedDevice>>>,
 
     // VM configuration
     config: Arc<Mutex<VmConfig>>,
@@ -1379,7 +1379,7 @@ impl DeviceManager {
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         reset_evt: EventFd,
         exit_evt: EventFd,
-    ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGEDDevice>>>> {
+    ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGedDevice>>>> {
         let shutdown_device = Arc::new(Mutex::new(devices::AcpiShutdownDevice::new(
             exit_evt, reset_evt,
         )));
@@ -1421,7 +1421,7 @@ impl DeviceManager {
             .unwrap()
             .allocate_mmio_addresses(None, devices::acpi::GED_DEVICE_ACPI_SIZE as u64, None)
             .ok_or(DeviceManagerError::AllocateMmioAddress)?;
-        let ged_device = Arc::new(Mutex::new(devices::AcpiGEDDevice::new(
+        let ged_device = Arc::new(Mutex::new(devices::AcpiGedDevice::new(
             interrupt_group,
             ged_irq,
             ged_address,
@@ -1437,7 +1437,7 @@ impl DeviceManager {
         self.bus_devices
             .push(Arc::clone(&ged_device) as Arc<Mutex<dyn BusDevice>>);
 
-        let pm_timer_device = Arc::new(Mutex::new(devices::AcpiPMTimerDevice::new()));
+        let pm_timer_device = Arc::new(Mutex::new(devices::AcpiPmTimerDevice::new()));
 
         self.bus_devices
             .push(Arc::clone(&pm_timer_device) as Arc<Mutex<dyn BusDevice>>);
