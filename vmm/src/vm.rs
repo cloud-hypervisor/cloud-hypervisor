@@ -884,7 +884,7 @@ impl Vm {
         for entry in self.device_manager.lock().unwrap().cmdline_additions() {
             cmdline.insert_str(entry).map_err(Error::CmdLineInsertStr)?;
         }
-        Ok(CString::new(cmdline).map_err(Error::CmdLineCString)?)
+        CString::new(cmdline).map_err(Error::CmdLineCString)
     }
 
     #[cfg(target_arch = "aarch64")]
