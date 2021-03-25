@@ -35,7 +35,7 @@ pub mod ioapic;
 pub mod legacy;
 
 #[cfg(feature = "acpi")]
-pub use self::acpi::{AcpiGEDDevice, AcpiPMTimerDevice, AcpiShutdownDevice};
+pub use self::acpi::{AcpiGedDevice, AcpiPmTimerDevice, AcpiShutdownDevice};
 
 bitflags! {
     pub struct AcpiNotificationFlags: u8 {
