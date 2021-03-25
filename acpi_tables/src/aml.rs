@@ -95,8 +95,7 @@ pub type Byte = u8;
 
 impl Aml for Byte {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x0a); /* BytePrefix */
+        let mut bytes = vec![0x0a]; /* BytePrefix */
         bytes.push(*self);
         bytes
     }
@@ -106,8 +105,7 @@ pub type Word = u16;
 
 impl Aml for Word {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x0bu8); /* WordPrefix */
+        let mut bytes = vec![0x0bu8]; /* WordPrefix */
         bytes.append(&mut self.to_le_bytes().to_vec());
         bytes
     }
@@ -117,8 +115,7 @@ pub type DWord = u32;
 
 impl Aml for DWord {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x0c); /* DWordPrefix */
+        let mut bytes = vec![0x0c]; /* DWordPrefix */
         bytes.append(&mut self.to_le_bytes().to_vec());
         bytes
     }
@@ -128,8 +125,7 @@ pub type QWord = u64;
 
 impl Aml for QWord {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x0e); /* QWordPrefix */
+        let mut bytes = vec![0x0e]; /* QWordPrefix */
         bytes.append(&mut self.to_le_bytes().to_vec());
         bytes
     }
@@ -147,8 +143,7 @@ impl Aml for Name {
 
 impl Name {
     pub fn new(path: Path, inner: &dyn Aml) -> Self {
-        let mut bytes = Vec::new();
-        bytes.push(0x08); /* NameOp */
+        let mut bytes = vec![0x08]; /* NameOp */
         bytes.append(&mut path.to_aml_bytes());
         bytes.append(&mut inner.to_aml_bytes());
         Name { bytes }
@@ -161,8 +156,7 @@ pub struct Package<'a> {
 
 impl<'a> Aml for Package<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(self.children.len() as u8);
+        let mut bytes = vec![self.children.len() as u8];
         for child in &self.children {
             bytes.append(&mut child.to_aml_bytes());
         }
@@ -289,8 +283,7 @@ impl Aml for Usize {
 }
 
 fn create_aml_string(v: &str) -> Vec<u8> {
-    let mut data = Vec::new();
-    data.push(0x0D); /* String Op */
+    let mut data = vec![0x0D]; /* String Op */
     data.extend_from_slice(v.as_bytes());
     data.push(0x0); /* NullChar */
     data
@@ -374,9 +367,7 @@ impl Memory32Fixed {
 
 impl Aml for Memory32Fixed {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-
-        bytes.push(0x86); /* Memory32Fixed */
+        let mut bytes = vec![0x86]; /* Memory32Fixed */
         bytes.append(&mut 9u16.to_le_bytes().to_vec());
 
         // 9 bytes of payload
@@ -530,9 +521,8 @@ impl Io {
 
 impl Aml for Io {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
+        let mut bytes = vec![0x47]; /* Io Port Descriptor */
 
-        bytes.push(0x47); /* IO Port Descriptor */
         bytes.push(1); /* IODecode16 */
         bytes.append(&mut self.min.to_le_bytes().to_vec());
         bytes.append(&mut self.max.to_le_bytes().to_vec());
@@ -571,9 +561,7 @@ impl Interrupt {
 
 impl Aml for Interrupt {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-
-        bytes.push(0x89); /* Extended IRQ Descriptor */
+        let mut bytes = vec![0x89]; /* Extended IRQ Descriptor */
         bytes.append(&mut 6u16.to_le_bytes().to_vec());
         let flags = (self.shared as u8) << 3
             | (self.active_low as u8) << 2
@@ -699,8 +687,7 @@ impl<'a> Return<'a> {
 
 impl<'a> Aml for Return<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0xa4); /* ReturnOp */
+        let mut bytes = vec![0xa4]; /* ReturnOp */
         bytes.append(&mut self.value.to_aml_bytes());
         bytes
     }
@@ -876,8 +863,7 @@ impl<'a> Equal<'a> {
 
 impl<'a> Aml for Equal<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x93); /* LEqualOp */
+        let mut bytes = vec![0x93]; /* LEqualOp */
         bytes.extend_from_slice(&self.left.to_aml_bytes());
         bytes.extend_from_slice(&self.right.to_aml_bytes());
         bytes
@@ -897,8 +883,7 @@ impl<'a> LessThan<'a> {
 
 impl<'a> Aml for LessThan<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x95); /* LLessOp */
+        let mut bytes = vec![0x95]; /* LLessOp */
         bytes.extend_from_slice(&self.left.to_aml_bytes());
         bytes.extend_from_slice(&self.right.to_aml_bytes());
         bytes
@@ -940,8 +925,7 @@ impl<'a> Store<'a> {
 
 impl<'a> Aml for Store<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x70); /* StoreOp */
+        let mut bytes = vec![0x70]; /* StoreOp */
         bytes.extend_from_slice(&self.value.to_aml_bytes());
         bytes.extend_from_slice(&self.name.to_aml_bytes());
         bytes
@@ -961,8 +945,7 @@ impl Mutex {
 
 impl Aml for Mutex {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x5b); /* ExtOpPrefix */
+        let mut bytes = vec![0x5b]; /* ExtOpPrefix */
         bytes.push(0x01); /* MutexOp */
         bytes.extend_from_slice(&self.path.to_aml_bytes());
         bytes.push(self.sync_level);
@@ -983,8 +966,7 @@ impl Acquire {
 
 impl Aml for Acquire {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x5b); /* ExtOpPrefix */
+        let mut bytes = vec![0x5b]; /* ExtOpPrefix */
         bytes.push(0x23); /* AcquireOp */
         bytes.extend_from_slice(&self.mutex.to_aml_bytes());
         bytes.extend_from_slice(&self.timeout.to_le_bytes());
@@ -1004,8 +986,7 @@ impl Release {
 
 impl Aml for Release {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x5b); /* ExtOpPrefix */
+        let mut bytes = vec![0x5b]; /* ExtOpPrefix */
         bytes.push(0x27); /* ReleaseOp */
         bytes.extend_from_slice(&self.mutex.to_aml_bytes());
         bytes
@@ -1025,8 +1006,7 @@ impl<'a> Notify<'a> {
 
 impl<'a> Aml for Notify<'a> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x86); /* NotifyOp */
+        let mut bytes = vec![0x86]; /* NotifyOp */
         bytes.extend_from_slice(&self.object.to_aml_bytes());
         bytes.extend_from_slice(&self.value.to_aml_bytes());
         bytes
@@ -1082,8 +1062,7 @@ macro_rules! binary_op {
 
         impl<'a> Aml for $name<'a> {
             fn to_aml_bytes(&self) -> Vec<u8> {
-                let mut bytes = Vec::new();
-                bytes.push($opcode); /* Op for the binary operator */
+                let mut bytes = vec![$opcode]; /* Op for the binary operator */
                 bytes.extend_from_slice(&self.a.to_aml_bytes());
                 bytes.extend_from_slice(&self.b.to_aml_bytes());
                 bytes.extend_from_slice(&self.target.to_aml_bytes());
@@ -1180,8 +1159,7 @@ impl<'a, T> CreateField<'a, T> {
 
 impl<'a> Aml for CreateField<'a, u64> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x8f); /* CreateQWordFieldOp */
+        let mut bytes = vec![0x8f]; /* CreateQWordFieldOp */
         bytes.extend_from_slice(&self.buffer.to_aml_bytes());
         bytes.extend_from_slice(&self.offset.to_aml_bytes());
         bytes.extend_from_slice(&self.field.to_aml_bytes());
@@ -1191,8 +1169,7 @@ impl<'a> Aml for CreateField<'a, u64> {
 
 impl<'a> Aml for CreateField<'a, u32> {
     fn to_aml_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(0x8a); /* CreateDWordFieldOp */
+        let mut bytes = vec![0x8a]; /* CreateDWordFieldOp */
         bytes.extend_from_slice(&self.buffer.to_aml_bytes());
         bytes.extend_from_slice(&self.offset.to_aml_bytes());
         bytes.extend_from_slice(&self.field.to_aml_bytes());
