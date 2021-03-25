@@ -172,7 +172,7 @@ pub enum Error {
     NoSlotAvailable,
 
     /// Not enough space in the hotplug RAM region
-    InsufficientHotplugRAM,
+    InsufficientHotplugRam,
 
     /// The requested hotplug memory addition is not a valid size
     InvalidSize,
@@ -267,7 +267,7 @@ pub enum Error {
     SnapshotCopy(GuestMemoryError),
 
     /// Failed to allocate MMIO address
-    AllocateMMIOAddress,
+    AllocateMmioAddress,
 }
 
 const ENABLE_FLAG: usize = 0;
@@ -741,7 +741,7 @@ impl MemoryManager {
             .lock()
             .unwrap()
             .allocate_mmio_addresses(None, MEMORY_MANAGER_ACPI_SIZE as u64, None)
-            .ok_or(Error::AllocateMMIOAddress)?;
+            .ok_or(Error::AllocateMmioAddress)?;
 
         #[cfg(not(feature = "tdx"))]
         let log_dirty = true;
@@ -1160,7 +1160,7 @@ impl MemoryManager {
         let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
 
         if start_addr.checked_add(size.try_into().unwrap()).unwrap() > self.start_of_device_area() {
-            return Err(Error::InsufficientHotplugRAM);
+            return Err(Error::InsufficientHotplugRam);
         }
 
         let region = self.add_ram_region(start_addr, size)?;

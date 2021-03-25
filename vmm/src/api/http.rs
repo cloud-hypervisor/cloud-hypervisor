@@ -261,7 +261,7 @@ pub fn start_http_thread(
 ) -> Result<thread::JoinHandle<Result<()>>> {
     std::fs::remove_file(path).unwrap_or_default();
     let socket_path = PathBuf::from(path);
-    let mut server = HttpServer::new(socket_path).map_err(Error::CreatingAPIServer)?;
+    let mut server = HttpServer::new(socket_path).map_err(Error::CreateApiServer)?;
 
     // Retrieve seccomp filter for API thread
     let api_seccomp_filter =
