@@ -79,35 +79,31 @@ pub fn configure_vcpu(
 }
 
 pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, RegionType)> {
-    let mut regions = Vec::new();
-    // 0 ~ 256 MiB: Reserved
-    regions.push((
-        GuestAddress(0),
-        layout::MEM_32BIT_DEVICES_START.0 as usize,
-        RegionType::Reserved,
-    ));
-
-    // 256 MiB ~ 1 G: MMIO space
-    regions.push((
-        layout::MEM_32BIT_DEVICES_START,
-        layout::MEM_32BIT_DEVICES_SIZE as usize,
-        RegionType::SubRegion,
-    ));
-
-    // 1G  ~ 2G: reserved. The leading 256M for PCIe MMCONFIG space
-    regions.push((
-        layout::PCI_MMCONFIG_START,
-        (layout::RAM_64BIT_START - layout::PCI_MMCONFIG_START.0) as usize,
-        RegionType::Reserved,
-    ));
-
-    regions.push((
-        GuestAddress(layout::RAM_64BIT_START),
-        size as usize,
-        RegionType::Ram,
-    ));
-
-    regions
+    vec![
+        // 0 ~ 256 MiB: Reserved
+        (
+            GuestAddress(0),
+            layout::MEM_32BIT_DEVICES_START.0 as usize,
+            RegionType::Reserved,
+        ),
+        // 256 MiB ~ 1 G: MMIO space
+        (
+            layout::MEM_32BIT_DEVICES_START,
+            layout::MEM_32BIT_DEVICES_SIZE as usize,
+            RegionType::SubRegion,
+        ),
+        // 1G  ~ 2G: reserved. The leading 256M for PCIe MMCONFIG space
+        (
+            layout::PCI_MMCONFIG_START,
+            (layout::RAM_64BIT_START - layout::PCI_MMCONFIG_START.0) as usize,
+            RegionType::Reserved,
+        ),
+        (
+            GuestAddress(layout::RAM_64BIT_START),
+            size as usize,
+            RegionType::Ram,
+        ),
+    ]
 }
 
 /// Configures the system and should be called once per vm before starting vcpu threads.
