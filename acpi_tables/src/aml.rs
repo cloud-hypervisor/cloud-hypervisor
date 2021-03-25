@@ -239,11 +239,11 @@ fn create_pkg_length(data: &[u8], include_self: bool) -> Vec<u8> {
     result
 }
 
-pub struct EISAName {
+pub struct EisaName {
     value: DWord,
 }
 
-impl EISAName {
+impl EisaName {
     pub fn new(name: &str) -> Self {
         assert_eq!(name.len(), 7);
 
@@ -258,11 +258,11 @@ impl EISAName {
             | name.chars().nth(6).unwrap().to_digit(16).unwrap())
         .swap_bytes();
 
-        EISAName { value }
+        EisaName { value }
     }
 }
 
-impl Aml for EISAName {
+impl Aml for EisaName {
     fn to_aml_bytes(&self) -> Vec<u8> {
         self.value.to_aml_bytes()
     }
@@ -390,7 +390,7 @@ impl Aml for Memory32Fixed {
 #[derive(Copy, Clone)]
 enum AddressSpaceType {
     Memory,
-    IO,
+    Io,
     BusNumber,
 }
 
@@ -421,7 +421,7 @@ impl<T> AddressSpace<T> {
 
     pub fn new_io(min: T, max: T) -> Self {
         AddressSpace {
-            r#type: AddressSpaceType::IO,
+            r#type: AddressSpaceType::Io,
             min,
             max,
             type_flags: 3, /* EntireRange */
@@ -510,16 +510,16 @@ impl Aml for AddressSpace<u64> {
     }
 }
 
-pub struct IO {
+pub struct Io {
     min: u16,
     max: u16,
     alignment: u8,
     length: u8,
 }
 
-impl IO {
+impl Io {
     pub fn new(min: u16, max: u16, alignment: u8, length: u8) -> Self {
-        IO {
+        Io {
             min,
             max,
             alignment,
@@ -528,7 +528,7 @@ impl IO {
     }
 }
 
-impl Aml for IO {
+impl Aml for Io {
     fn to_aml_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -788,14 +788,14 @@ impl Aml for Field {
 #[derive(Clone, Copy)]
 pub enum OpRegionSpace {
     SystemMemory,
-    SystemIO,
-    PCIConfig,
+    SystemIo,
+    PConfig,
     EmbeddedControl,
-    SMBus,
-    SystemCMOS,
+    Smbus,
+    SystemCmos,
     PciBarTarget,
-    IPMI,
-    GeneralPurposeIO,
+    Ipmi,
+    GeneralPurposeIo,
     GenericSerialBus,
 }
 
@@ -1235,12 +1235,12 @@ mod tests {
             Device::new(
                 "_SB_.COM1".into(),
                 vec![
-                    &Name::new("_HID".into(), &EISAName::new("PNP0501")),
+                    &Name::new("_HID".into(), &EisaName::new("PNP0501")),
                     &Name::new(
                         "_CRS".into(),
                         &ResourceTemplate::new(vec![
                             &Interrupt::new(true, true, false, false, 4),
-                            &IO::new(0x3f8, 0x3f8, 0, 0x8)
+                            &Io::new(0x3f8, 0x3f8, 0, 0x8)
                         ])
                     )
                 ]
@@ -1476,7 +1476,7 @@ mod tests {
                 "_CRS".into(),
                 &ResourceTemplate::new(vec![
                     &Interrupt::new(true, true, false, false, 4),
-                    &IO::new(0x3f8, 0x3f8, 0, 0x8)
+                    &Io::new(0x3f8, 0x3f8, 0, 0x8)
                 ])
             )
             .to_aml_bytes(),
@@ -1519,7 +1519,7 @@ mod tests {
     #[test]
     fn test_eisa_name() {
         assert_eq!(
-            Name::new("_HID".into(), &EISAName::new("PNP0501")).to_aml_bytes(),
+            Name::new("_HID".into(), &EisaName::new("PNP0501")).to_aml_bytes(),
             [0x08, 0x5F, 0x48, 0x49, 0x44, 0x0C, 0x41, 0xD0, 0x05, 0x01],
         )
     }
@@ -1665,14 +1665,14 @@ mod tests {
     #[test]
     fn test_op_region() {
         /*
-            OperationRegion (PRST, SystemIO, 0x0CD8, 0x0C)
+            OperationRegion (PRST, SystemIo, 0x0CD8, 0x0C)
         */
         let op_region_data = [
             0x5Bu8, 0x80, 0x50, 0x52, 0x53, 0x54, 0x01, 0x0B, 0xD8, 0x0C, 0x0A, 0x0C,
         ];
 
         assert_eq!(
-            OpRegion::new("PRST".into(), OpRegionSpace::SystemIO, 0xcd8, 0xc).to_aml_bytes(),
+            OpRegion::new("PRST".into(), OpRegionSpace::SystemIo, 0xcd8, 0xc).to_aml_bytes(),
             &op_region_data[..]
         );
     }
@@ -1766,7 +1766,7 @@ mod tests {
             Device::new(
                 "_SB_.MHPC".into(),
                 vec![
-                    &Name::new("_HID".into(), &EISAName::new("PNP0A06")),
+                    &Name::new("_HID".into(), &EisaName::new("PNP0A06")),
                     &mutex,
                     &Method::new(
                         "TEST".into(),
@@ -1807,7 +1807,7 @@ mod tests {
             Device::new(
                 "_SB_.MHPC".into(),
                 vec![
-                    &Name::new("_HID".into(), &EISAName::new("PNP0A06")),
+                    &Name::new("_HID".into(), &EisaName::new("PNP0A06")),
                     &Method::new(
                         "TEST".into(),
                         0,
@@ -1848,7 +1848,7 @@ mod tests {
             Device::new(
                 "_SB_.MHPC".into(),
                 vec![
-                    &Name::new("_HID".into(), &EISAName::new("PNP0A06")),
+                    &Name::new("_HID".into(), &EisaName::new("PNP0A06")),
                     &Method::new(
                         "TEST".into(),
                         0,

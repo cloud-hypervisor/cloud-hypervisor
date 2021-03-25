@@ -7,7 +7,7 @@ use vm_memory::ByteValued;
 
 #[repr(packed)]
 #[derive(Clone, Copy, Default)]
-pub struct RSDP {
+pub struct Rsdp {
     pub signature: [u8; 8],
     pub checksum: u8,
     pub oem_id: [u8; 6],
@@ -19,17 +19,17 @@ pub struct RSDP {
     _reserved: [u8; 3],
 }
 
-unsafe impl ByteValued for RSDP {}
+unsafe impl ByteValued for Rsdp {}
 
-impl RSDP {
+impl Rsdp {
     pub fn new(oem_id: [u8; 6], xsdt_addr: u64) -> Self {
-        let mut rsdp = RSDP {
+        let mut rsdp = Rsdp {
             signature: *b"RSD PTR ",
             checksum: 0,
             oem_id,
             revision: 2,
             _rsdt_addr: 0,
-            length: std::mem::size_of::<RSDP>() as u32,
+            length: std::mem::size_of::<Rsdp>() as u32,
             xsdt_addr,
             extended_checksum: 0,
             _reserved: [0; 3],
@@ -41,18 +41,18 @@ impl RSDP {
     }
 
     pub fn len() -> usize {
-        std::mem::size_of::<RSDP>()
+        std::mem::size_of::<Rsdp>()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::RSDP;
+    use super::Rsdp;
     use vm_memory::bytes::ByteValued;
 
     #[test]
     fn test_rsdp() {
-        let rsdp = RSDP::new(*b"CHYPER", 0xdead_beef);
+        let rsdp = Rsdp::new(*b"CHYPER", 0xdead_beef);
         let sum = rsdp
             .as_slice()
             .iter()
