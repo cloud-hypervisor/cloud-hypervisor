@@ -482,10 +482,7 @@ fn get_seccomp_filter_log(thread_type: Thread) -> Result<SeccompFilter, Error> {
         Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
     };
 
-    Ok(SeccompFilter::new(
-        rules.into_iter().collect(),
-        SeccompAction::Log,
-    )?)
+    SeccompFilter::new(rules.into_iter().collect(), SeccompAction::Log)
 }
 
 /// Generate a BPF program based on the seccomp_action value
