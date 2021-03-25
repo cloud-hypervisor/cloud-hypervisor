@@ -163,6 +163,7 @@ fn sector(mem: &GuestMemoryMmap, desc_addr: GuestAddress) -> result::Result<u64,
     mem.read_obj(addr).map_err(Error::GuestMemory)
 }
 
+#[derive(Debug)]
 pub struct Request {
     pub request_type: RequestType,
     pub sector: u64,
@@ -192,12 +193,17 @@ impl Request {
         let status_desc;
         let mut desc = avail_desc
             .next_descriptor()
-            .ok_or(Error::DescriptorChainTooShort)?;
+            .ok_or(Error::DescriptorChainTooShort)
+            .map_err(|e| {
+                error!("Only head descriptor present: request = {:?}", req);
+                e
+            })?;
 
         if !desc.has_next() {
             status_desc = desc;
             // Only flush requests are allowed to skip the data descriptor.
             if req.request_type != RequestType::Flush {
+                error!("Need a data descriptor: request = {:?}", req);
                 return Err(Error::DescriptorChainTooShort);
             }
         } else {
@@ -214,7 +220,11 @@ impl Request {
                 req.data_descriptors.push((desc.addr, desc.len));
                 desc = desc
                     .next_descriptor()
-                    .ok_or(Error::DescriptorChainTooShort)?;
+                    .ok_or(Error::DescriptorChainTooShort)
+                    .map_err(|e| {
+                        error!("DescriptorChain corrupted: request = {:?}", req);
+                        e
+                    })?;
             }
             status_desc = desc;
         }
