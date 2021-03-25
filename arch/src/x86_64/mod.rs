@@ -459,6 +459,7 @@ pub fn configure_system(
             )?;
         }
         BootProtocol::LinuxBoot => {
+            error!("Using deprecated LinuxBoot protocol: Please configure your kernel with CONFIG_PVH=y and supply the `vmlinux` file to `--kernel`");
             configure_64bit_boot(
                 guest_mem,
                 cmdline_addr,
