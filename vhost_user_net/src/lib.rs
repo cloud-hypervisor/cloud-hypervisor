@@ -111,6 +111,8 @@ impl VhostUserNetThread {
                 epoll_fd: None,
                 counters: NetCounters::default(),
                 tap_event_id: 2,
+                rx_desc_avail: false,
+                rx_rate_limiter: None,
                 tx_rate_limiter: None,
             },
         })
