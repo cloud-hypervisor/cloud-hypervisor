@@ -6,12 +6,19 @@ jobs:
     if: github.event_name == 'pull_request'
     name: Quality (clippy, rustfmt)
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
+      fail-fast: false
       matrix:
         rust:
           - stable
         target:
           - x86_64-unknown-linux-gnu
+        experimental: [false]
+        include:
+          - rust: beta
+            target: x86_64-unknown-linux-gnu
+            experimental: true
     steps:
       - name: Code checkout
         uses: actions/checkout@v2
