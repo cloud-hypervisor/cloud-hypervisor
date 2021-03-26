@@ -30,14 +30,12 @@ use acpi_tables::{aml, aml::Aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::gic::GicDevice;
-#[cfg(target_arch = "aarch64")]
-use arch::aarch64::DeviceInfoForFdt;
 #[cfg(feature = "acpi")]
 use arch::layout;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 #[cfg(target_arch = "aarch64")]
-use arch::DeviceType;
+use arch::{DeviceType, MmioDeviceInfo};
 use block_util::{
     async_io::DiskFile, block_io_uring_is_supported, detect_image_type,
     fixed_vhd_async::FixedVhdDiskAsync, fixed_vhd_sync::FixedVhdDiskSync, qcow_sync::QcowDiskSync,
@@ -786,28 +784,6 @@ struct DeviceManagerState {
     device_id_cnt: Wrapping<usize>,
 }
 
-/// Private structure for storing information about the MMIO device registered at some address on the bus.
-#[derive(Clone, Debug)]
-#[cfg(target_arch = "aarch64")]
-pub struct MmioDeviceInfo {
-    addr: u64,
-    irq: u32,
-    len: u64,
-}
-
-#[cfg(target_arch = "aarch64")]
-impl DeviceInfoForFdt for MmioDeviceInfo {
-    fn addr(&self) -> u64 {
-        self.addr
-    }
-    fn irq(&self) -> u32 {
-        self.irq
-    }
-    fn length(&self) -> u64 {
-        self.len
-    }
-}
-
 #[derive(Debug)]
 pub struct PtyPair {
     pub main: File,
@@ -1552,7 +1528,6 @@ impl DeviceManager {
             (DeviceType::Rtc, "rtc".to_string()),
             MmioDeviceInfo {
                 addr: addr.0,
-                len: MMIO_LEN,
                 irq: rtc_irq,
             },
         );
@@ -1594,7 +1569,6 @@ impl DeviceManager {
             (DeviceType::Gpio, "gpio".to_string()),
             MmioDeviceInfo {
                 addr: addr.0,
-                len: MMIO_LEN,
                 irq: gpio_irq,
             },
         );
@@ -1698,7 +1672,6 @@ impl DeviceManager {
             (DeviceType::Serial, DeviceType::Serial.to_string()),
             MmioDeviceInfo {
                 addr: addr.0,
-                len: MMIO_LEN,
                 irq: serial_irq,
             },
         );

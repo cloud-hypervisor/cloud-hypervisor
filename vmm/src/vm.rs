@@ -2422,28 +2422,10 @@ mod tests {
     use arch::aarch64::fdt::create_fdt;
     use arch::aarch64::gic::kvm::create_gic;
     use arch::aarch64::{layout, DeviceInfoForFdt};
-    use arch::DeviceType;
+    use arch::{DeviceType, MmioDeviceInfo};
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 
     const LEN: u64 = 4096;
-
-    #[derive(Clone, Debug)]
-    pub struct MmioDeviceInfo {
-        addr: u64,
-        irq: u32,
-    }
-
-    impl DeviceInfoForFdt for MmioDeviceInfo {
-        fn addr(&self) -> u64 {
-            self.addr
-        }
-        fn irq(&self) -> u32 {
-            self.irq
-        }
-        fn length(&self) -> u64 {
-            LEN
-        }
-    }
 
     #[test]
     fn test_create_fdt_with_devices() {
