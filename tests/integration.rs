@@ -1858,6 +1858,22 @@ mod tests {
         assert!(exec_host_command_status("sudo ip link del vfio-tap3").success());
     }
 
+    fn balloon_size(api_socket: &str) -> u64 {
+        let (cmd_success, cmd_output) = remote_command_w_output(&api_socket, "info", None);
+        assert!(cmd_success);
+
+        let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
+        let total_mem = &info["config"]["memory"]["size"]
+            .to_string()
+            .parse::<u64>()
+            .unwrap();
+        let actual_mem = &info["memory_actual_size"]
+            .to_string()
+            .parse::<u64>()
+            .unwrap();
+        total_mem - actual_mem
+    }
+
     mod parallel {
         use crate::tests::*;
 
@@ -4293,6 +4309,66 @@ mod tests {
                         .unwrap_or(1),
                     0
                 );
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
+
+        #[test]
+        #[cfg(target_arch = "x86_64")]
+        fn test_virtio_balloon() {
+            let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+            let guest = Guest::new(Box::new(focal));
+
+            let kernel_path = direct_kernel_boot_path();
+
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            //Let's start a 4G guest with balloon occupied 2G memory
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=1"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", kernel_path.to_str().unwrap()])
+                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+                .args(&["--balloon", "size=2G,deflate_on_oom=on"])
+                .default_disks()
+                .default_net()
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot(None).unwrap();
+
+                // Wait for balloon memory's initialization and check its size.
+                // The virtio-balloon driver might take a few seconds to report the
+                // balloon effective size back to the VMM.
+                thread::sleep(std::time::Duration::new(20, 0));
+
+                let orig_balloon = balloon_size(&api_socket);
+                println!("The original balloon memory size is {} bytes", orig_balloon);
+                assert!(orig_balloon == 2147483648);
+
+                // Two steps to verify if the 'deflate_on_oom' parameter works.
+                // 1st: run a command in guest to eat up memory heavily, which
+                // will consume much more memory than $(total_mem - balloon_size)
+                // to trigger an oom.
+                guest
+                    .ssh_command("sudo stress --vm 25 --vm-keep --vm-bytes 1G --timeout 20")
+                    .unwrap();
+
+                // 2nd: check balloon_mem's value to verify balloon has been automatically deflated
+                let deflated_balloon = balloon_size(&api_socket);
+                println!(
+                    "After deflating, balloon memory size is {} bytes",
+                    deflated_balloon
+                );
+                // Verify the balloon size deflated by 10% at least
+                assert!(deflated_balloon > 0 && deflated_balloon < 1932735283);
             });
 
             let _ = child.kill();
