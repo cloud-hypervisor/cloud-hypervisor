@@ -469,10 +469,10 @@ impl VhostUserBlkBackendConfig {
             path,
             socket,
             num_queues,
+            queue_size,
             readonly,
             direct,
             poll_queue,
-            queue_size,
         })
     }
 }

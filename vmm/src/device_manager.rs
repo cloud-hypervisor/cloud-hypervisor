@@ -862,6 +862,7 @@ pub struct DeviceManager {
     // MSI Interrupt Manager
     msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
 
+    #[cfg_attr(feature = "mshv", allow(dead_code))]
     // Legacy Interrupt Manager
     legacy_interrupt_manager: Option<Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>>,
 

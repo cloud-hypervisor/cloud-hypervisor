@@ -111,10 +111,10 @@ pub mod kvm {
             flags: u32,
         ) -> Result<()> {
             let attr = kvm_bindings::kvm_device_attr {
+                flags,
                 group,
                 attr,
                 addr,
-                flags,
             };
             device
                 .set_device_attr(&attr)
@@ -132,10 +132,10 @@ pub mod kvm {
             flags: u32,
         ) -> Result<()> {
             let mut attr = kvm_bindings::kvm_device_attr {
+                flags,
                 group,
                 attr,
                 addr,
-                flags,
             };
             device
                 .get_device_attr(&mut attr)
