@@ -433,12 +433,16 @@ const CPU_SELECTION_OFFSET: u64 = 0;
 
 impl BusDevice for CpuManager {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
+        // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
+        data.copy_from_slice(&[0; 8][0..data.len()]);
+
         match offset {
+            CPU_SELECTION_OFFSET => {
+                data[0] = self.selected_cpu;
+            }
             CPU_STATUS_OFFSET => {
                 if self.selected_cpu < self.present_vcpus() {
                     let state = &self.vcpu_states[usize::from(self.selected_cpu)];
-                    // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
-                    data.copy_from_slice(&[0; 8][0..data.len()]);
                     if state.active() {
                         data[0] |= 1 << CPU_ENABLE_FLAG;
                     }
