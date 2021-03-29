@@ -852,12 +852,12 @@ impl DiskConfig {
             iommu,
             num_queues,
             queue_size,
-            vhost_socket,
             vhost_user,
+            vhost_socket,
             poll_queue,
+            rate_limiter_config,
             id,
             disable_io_uring,
-            rate_limiter_config,
         })
     }
 }
@@ -1319,7 +1319,7 @@ impl ConsoleConfig {
             .unwrap_or(Toggle(false))
             .0;
 
-        Ok(Self { mode, file, iommu })
+        Ok(Self { file, mode, iommu })
     }
 
     pub fn default_serial() -> Self {
