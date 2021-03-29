@@ -3,7 +3,6 @@
 
 pub mod kvm {
     use std::any::Any;
-    use std::convert::TryInto;
     use std::sync::Arc;
     use std::{boxed::Box, result};
     type Result<T> = result::Result<T, Error>;
@@ -15,9 +14,6 @@ pub mod kvm {
     pub struct KvmGicV3Its {
         /// The hypervisor agnostic device
         device: Arc<dyn hypervisor::Device>,
-
-        /// Vector holding values of GICR_TYPER for each vCPU
-        gicr_typers: Vec<u64>,
 
         /// GIC device properties, to be used for setting up the fdt entry
         gic_properties: [u64; 4],
@@ -74,9 +70,7 @@ pub mod kvm {
             self.vcpu_count
         }
 
-        fn set_gicr_typers(&mut self, gicr_typers: Vec<u64>) {
-            self.gicr_typers = gicr_typers;
-        }
+        fn set_gicr_typers(&mut self, _gicr_typers: Vec<u64>) {}
 
         fn as_any_concrete_mut(&mut self) -> &mut dyn Any {
             self
@@ -94,7 +88,6 @@ pub mod kvm {
         ) -> Box<dyn GicDevice> {
             Box::new(KvmGicV3Its {
                 device,
-                gicr_typers: vec![0; vcpu_count.try_into().unwrap()],
                 gic_properties: [
                     KvmGicV3::get_dist_addr(),
                     KvmGicV3::get_dist_size(),

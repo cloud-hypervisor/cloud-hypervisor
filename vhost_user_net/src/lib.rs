@@ -94,7 +94,6 @@ impl std::convert::From<Error> for std::io::Error {
 
 struct VhostUserNetThread {
     net: NetQueuePair,
-    vring_worker: Option<Arc<VringWorker>>,
     kill_evt: EventFd,
 }
 
@@ -102,7 +101,6 @@ impl VhostUserNetThread {
     /// Create a new virtio network device with the given TAP interface.
     fn new(tap: Tap) -> Result<Self> {
         Ok(VhostUserNetThread {
-            vring_worker: None,
             kill_evt: EventFd::new(EFD_NONBLOCK).map_err(Error::CreateKillEventFd)?,
             net: NetQueuePair {
                 mem: None,
@@ -119,7 +117,6 @@ impl VhostUserNetThread {
 
     pub fn set_vring_worker(&mut self, vring_worker: Option<Arc<VringWorker>>) {
         self.net.epoll_fd = Some(vring_worker.as_ref().unwrap().as_raw_fd());
-        self.vring_worker = vring_worker;
     }
 }
 
@@ -345,11 +342,7 @@ pub fn start_net_backend(backend_command: &str) {
         }
     };
 
-    let tap = if let Some(tap) = backend_config.tap.as_ref() {
-        Some(tap.as_str())
-    } else {
-        None
-    };
+    let tap = backend_config.tap.as_deref();
 
     let net_backend = Arc::new(RwLock::new(
         VhostUserNetBackend::new(

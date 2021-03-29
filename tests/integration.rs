@@ -1814,8 +1814,8 @@ mod tests {
             tx_bytes,
             tx_frames,
             read_bytes,
-            read_ops,
             write_bytes,
+            read_ops,
             write_ops,
         }
     }

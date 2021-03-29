@@ -437,9 +437,7 @@ struct VhostUserHandler<S: VhostUserBackend> {
     backend: Arc<RwLock<S>>,
     workers: Vec<Arc<VringWorker>>,
     owned: bool,
-    features_acked: bool,
     acked_features: u64,
-    acked_protocol_features: u64,
     num_queues: usize,
     max_queue_size: usize,
     queues_per_thread: Vec<u64>,
@@ -515,9 +513,7 @@ impl<S: VhostUserBackend> VhostUserHandler<S> {
             backend,
             workers,
             owned: false,
-            features_acked: false,
             acked_features: 0,
-            acked_protocol_features: 0,
             num_queues,
             max_queue_size,
             queues_per_thread,
@@ -554,9 +550,7 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
 
     fn reset_owner(&mut self) -> VhostUserResult<()> {
         self.owned = false;
-        self.features_acked = false;
         self.acked_features = 0;
-        self.acked_protocol_features = 0;
         Ok(())
     }
 
@@ -570,7 +564,6 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
         }
 
         self.acked_features = features;
-        self.features_acked = true;
 
         // If VHOST_USER_F_PROTOCOL_FEATURES has not been negotiated,
         // the ring is initialized in an enabled state.
@@ -597,11 +590,10 @@ impl<S: VhostUserBackend> VhostUserSlaveReqHandlerMut for VhostUserHandler<S> {
         Ok(self.backend.read().unwrap().protocol_features())
     }
 
-    fn set_protocol_features(&mut self, features: u64) -> VhostUserResult<()> {
+    fn set_protocol_features(&mut self, _features: u64) -> VhostUserResult<()> {
         // Note: slave that reported VHOST_USER_F_PROTOCOL_FEATURES must
         // support this message even before VHOST_USER_SET_FEATURES was
         // called.
-        self.acked_protocol_features = features;
         Ok(())
     }
 
