@@ -3136,11 +3136,9 @@ impl DeviceManager {
     }
 
     pub fn interrupt_controller(&self) -> Option<Arc<Mutex<dyn InterruptController>>> {
-        if let Some(interrupt_controller) = &self.interrupt_controller {
-            Some(interrupt_controller.clone() as Arc<Mutex<dyn InterruptController>>)
-        } else {
-            None
-        }
+        self.interrupt_controller
+            .as_ref()
+            .map(|ic| ic.clone() as Arc<Mutex<dyn InterruptController>>)
     }
 
     pub fn console(&self) -> &Arc<Console> {

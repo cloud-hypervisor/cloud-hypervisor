@@ -560,12 +560,12 @@ impl CpuManager {
         vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
 
         #[cfg(target_arch = "x86_64")]
-        let sgx_epc_sections =
-            if let Some(sgx_epc_region) = memory_manager.lock().unwrap().sgx_epc_region() {
-                Some(sgx_epc_region.epc_sections().clone())
-            } else {
-                None
-            };
+        let sgx_epc_sections = memory_manager
+            .lock()
+            .unwrap()
+            .sgx_epc_region()
+            .as_ref()
+            .map(|sgx_epc_region| sgx_epc_region.epc_sections().clone());
         #[cfg(target_arch = "x86_64")]
         let cpuid = {
             let phys_bits = physical_bits(config.max_phys_bits);
@@ -858,12 +858,7 @@ impl CpuManager {
             .map_err(Error::CreateSeccompFilter)?;
 
         #[cfg(target_arch = "x86_64")]
-        let interrupt_controller_clone =
-            if let Some(interrupt_controller) = &self.interrupt_controller {
-                Some(interrupt_controller.clone())
-            } else {
-                None
-            };
+        let interrupt_controller_clone = self.interrupt_controller.as_ref().cloned();
 
         let handle = Some(
             thread::Builder::new()
