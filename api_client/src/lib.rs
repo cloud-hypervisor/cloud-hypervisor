@@ -76,11 +76,8 @@ impl StatusCode {
 
 fn get_header<'a>(res: &'a str, header: &'a str) -> Option<&'a str> {
     let header_str = format!("{}: ", header);
-    if let Some(o) = res.find(&header_str) {
-        Some(&res[o + header_str.len()..o + res[o..].find('\r').unwrap()])
-    } else {
-        None
-    }
+    res.find(&header_str)
+        .map(|o| &res[o + header_str.len()..o + res[o..].find('\r').unwrap()])
 }
 
 fn get_status_code(res: &str) -> Result<StatusCode, Error> {
