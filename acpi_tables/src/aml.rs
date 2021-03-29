@@ -732,9 +732,9 @@ impl Field {
     ) -> Self {
         Field {
             path,
+            fields,
             access_type,
             update_rule,
-            fields,
         }
     }
 }
@@ -851,8 +851,8 @@ impl<'a> Aml for If<'a> {
 }
 
 pub struct Equal<'a> {
-    right: &'a dyn Aml,
     left: &'a dyn Aml,
+    right: &'a dyn Aml,
 }
 
 impl<'a> Equal<'a> {
@@ -871,8 +871,8 @@ impl<'a> Aml for Equal<'a> {
 }
 
 pub struct LessThan<'a> {
-    right: &'a dyn Aml,
     left: &'a dyn Aml,
+    right: &'a dyn Aml,
 }
 
 impl<'a> LessThan<'a> {
@@ -1056,7 +1056,7 @@ macro_rules! binary_op {
 
         impl<'a> $name<'a> {
             pub fn new(target: &'a dyn Aml, a: &'a dyn Aml, b: &'a dyn Aml) -> Self {
-                $name { target, a, b }
+                $name { a, b, target }
             }
         }
 
