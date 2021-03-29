@@ -265,10 +265,7 @@ impl<'a> DescriptorChain<'a> {
     }
 
     fn is_valid(&self) -> bool {
-        !(self
-            .mem
-            .checked_offset(self.addr, self.len as usize)
-            .is_none()
+        !(!self.mem.check_range(self.addr, self.len as usize)
             || (self.has_next() && self.next >= self.table_size))
     }
 
