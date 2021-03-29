@@ -538,11 +538,7 @@ impl VirtioDevice for Fs {
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
-        if let Some(cache) = self.cache.as_ref() {
-            Some(cache.0.clone())
-        } else {
-            None
-        }
+        self.cache.as_ref().map(|cache| cache.0.clone())
     }
 
     fn set_shm_regions(
