@@ -184,6 +184,10 @@ Set-Service -Name sshd -StartupType ‘Automatic’
 
 This allows for SSH login from a remote machine, for example through the `administrator` user: `ssh administrator@192.168.249.2`. For a more detailed OpenSSH guide, please follow the MSDN article from the [links](#links) section.
 
+## Hotplug capability
+
+CPU hotplug is supported. The VM operating system needs to support hotplug and be appropriately licensed. SKU limitations like constraints on the number of cores are to be taken into consideration.
+
 ## Debugging
 
 The Windows guest debugging process relies heavily on QEMU and [socat](http://www.dest-unreach.org/socat/). The procedure requires two Windows VMs:
