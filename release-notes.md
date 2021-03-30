@@ -753,11 +753,11 @@ to run their guest I/O into separate executions contexts.
 ### Command Line Interface
 
 More and more Cloud Hypervisor services are exposed through the
-[Rest API](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/vmm/src/api/openapi/cloud-hypervisor.yaml)
-and thus only accessible via relatively cumbersome HTTP calls. In order
-to abstract those calls into a more user friendly tool, we created a Cloud
-Hypervisor Command Line Interface (CLI) called `ch-remote`.
-The `ch-remote` binary is created with each build and available e.g. at
+[Rest API](vmm/src/api/openapi/cloud-hypervisor.yaml) and thus only
+accessible via relatively cumbersome HTTP calls. In order to abstract
+those calls into a more user friendly tool, we created a Cloud Hypervisor
+Command Line Interface (CLI) called `ch-remote`.  The `ch-remote` binary
+is created with each build and available e.g. at
 `cloud-hypervisor/target/debug/ch-remote` when doing a debug build.
 
 Please check `ch-remote --help` for a complete description of all available
@@ -833,7 +833,7 @@ In order to provide a better developer experience, we worked on improving our
 build, development and testing tools.
 Somehow similar to the excellent
 [Firecracker's devtool](https://github.com/firecracker-microvm/firecracker/blob/master/tools/devtool),
-we now provide a [dev_cli script](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/scripts/dev_cli.sh).
+we now provide a [dev_cli script](scripts/dev_cli.sh).
 
 With this new tool, our users and contributors will be able to build and test
 Cloud Hypervisor through a containerized environment.
@@ -870,7 +870,7 @@ As a way to vertically scale Cloud-Hypervisor guests, we now support dynamically
 adding virtual CPUs to the guests, a mechanism also known as CPU hot plug.
 Through hardware-reduced ACPI notifications, Cloud Hypervisor can now add CPUs
 to an already running guest and the high level operations for that process are
-documented [here](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/hotplug.md)
+documented [here](docs/hotplug.md)
 
 During the next release cycles we are planning to extend Cloud Hypervisor
 hot plug framework to other resources, namely PCI devices and memory.
@@ -986,9 +986,8 @@ configurations that do not require a PCI bus emulation.
 ### Paravirtualized IOMMU
 
 As we want to improve our nested guests support, we added support for exposing
-a [paravirtualized IOMMU](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/iommu.md)
-device through virtio. This allows for a safer nested virtio and directly
-assigned devices support.
+a [paravirtualized IOMMU](docs/iommu.md) device through virtio. This allows
+for a safer nested virtio and directly assigned devices support.
 
 To add the IOMMU support, we had to make some CLI changes for Cloud Hypervisor
 users to be able to specify if devices had to be handled through this virtual
@@ -1037,8 +1036,8 @@ Based on the Firecracker idea of using a dedicated I/O port to measure guest
 boot times, we added support for logging guest events through the
 [0x80](https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html)
 PC debug port. This allows, among other things, for granular guest boot time
-measurements. See our [debug port documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/debug-port.md)
-for more details.
+measurements. See our [debug port documentation](docs/debug-port.md) for more
+details.
 
 ### Improved direct device assignment
 
@@ -1073,8 +1072,8 @@ We added support for the [virtio-fs](https://virtio-fs.gitlab.io/) shared file
 system, allowing for an efficient and reliable way of sharing a filesystem
 between the host and the `cloud-hypervisor` guest.
 
-See our [filesystem sharing](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/fs.md)
-documentation for more details on how to use virtio-fs with `cloud-hypervisor`.
+See our [filesystem sharing](docs/fs.md) documentation for more details on how
+to use virtio-fs with `cloud-hypervisor`.
 
 ### Initial direct device assignment support
 
@@ -1082,9 +1081,8 @@ VFIO (Virtual Function I/O) is a kernel framework that exposes direct device
 access to userspace. `cloud-hypervisor` uses VFIO to directly assign host
 physical devices into its guest.
 
-See our [VFIO](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/vfio.md)
-documentation for more detail on how to directly assign host devices to
-`cloud-hypervisor` guests.
+See our [VFIO](docs/vfio.md) documentation for more detail on how to directly
+assign host devices to `cloud-hypervisor` guests.
 
 ### Userspace IOAPIC
 

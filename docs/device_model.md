@@ -113,9 +113,8 @@ selecting `--serial tty --console off` from the command line.
 ### virtio-iommu
 
 As we want to improve our nested guests support, we added support for exposing
-a [paravirtualized IOMMU](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/iommu.md)
-device through virtio. This allows for a safer nested virtio and directly
-assigned devices support.
+a [paravirtualized IOMMU](iommu.md) device through virtio. This allows for a
+safer nested virtio and directly assigned devices support.
 
 This device is always built-in, and it is enabled based on the presence of the
 parameter `iommu=on` in any of the virtio or VFIO devices. If at least one of
@@ -184,8 +183,8 @@ This device is always built-in, and it is enabled when `vhost_user=true` and
 shared file system, allowing for an efficient and reliable way of sharing
 a filesystem between the host and the cloud-hypervisor guest.
 
-See our [filesystem sharing](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/fs.md)
-documentation for more details on how to use virtio-fs with cloud-hypervisor.
+See our [filesystem sharing](fs.md) documentation for more details on how to
+use virtio-fs with cloud-hypervisor.
 
 This device is always built-in, and it is enabled based on the presence of the
 flag `--fs`.
@@ -206,9 +205,8 @@ VFIO (Virtual Function I/O) is a kernel framework that exposes direct device
 access to userspace. `cloud-hypervisor` uses VFIO to directly assign host
 physical devices into its guest.
 
-See our [VFIO documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/vfio.md)
-for more details on how to directly assign host devices to `cloud-hypervisor`
-guests.
+See our [VFIO documentation](vfio.md) for more details on how to directly
+assign host devices to `cloud-hypervisor` guests.
 
 Because VFIO implies `vfio-pci` in the `cloud-hypervisor` context, the VFIO
 support is built-in when the `pci` feature is selected. And because the `pci`
