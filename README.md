@@ -252,12 +252,12 @@ Direct kernel boot to userspace should work with a rootfs from most distribution
 
 ## Hot Plug
 
-Cloud Hypervisor supports hotplug of CPUs, passthrough devices (VFIO), `virtio-{net,block,pmem,fs,vsock}` and memory resizing. This [document](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/hotplug.md) details how to add devices to
+Cloud Hypervisor supports hotplug of CPUs, passthrough devices (VFIO), `virtio-{net,block,pmem,fs,vsock}` and memory resizing. This [document](docs/hotplug.md) details how to add devices to
 a running VM.
 
 ## Device Model
 
-Details of the device model can be found in this [documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/master/docs/device_model.md).
+Details of the device model can be found in this [documentation](docs/device_model.md).
 
 ## TODO
 
