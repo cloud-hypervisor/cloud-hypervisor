@@ -124,6 +124,17 @@
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
 
+# v0.14.1
+
+Bug fix release branched off the v0.14.0 release. The following bugs were fixed
+in this release:
+
+* CPU hotplug on Windows failed due to misreported CPU state information and
+  the lack of HyperV CPUID bit enabled (#2437, #2449, #2436)
+* A seccomp rule was missing that was triggered on CPU unplug (#2455)
+* A bounds check in VIRTIO queue validation was erroneously generating
+  DescriptorChainTooShort errors in certain circumstances (#2450, #2424)
+
 # v0.14.0
 
 This release has been tracked through the [0.14.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/17).
