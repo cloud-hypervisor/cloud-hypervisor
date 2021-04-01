@@ -5566,7 +5566,7 @@ mod tests {
         }
 
         fn get_cpu_count_windows(auth: &PasswordAuth) -> u8 {
-            return ssh_command_ip_with_auth(
+            ssh_command_ip_with_auth(
                 "powershell -Command \"(Get-CimInstance win32_computersystem).NumberOfLogicalProcessors\"",
                 &auth,
                 "192.168.249.2",
@@ -5576,7 +5576,7 @@ mod tests {
             .unwrap()
             .trim()
             .parse::<u8>()
-            .unwrap_or(0);
+            .unwrap_or(0)
         }
 
         fn get_vcpu_threads_count(pid: u32) -> u8 {
@@ -5586,7 +5586,7 @@ mod tests {
                 .output()
                 .expect("ps command failed")
                 .stdout;
-            return String::from_utf8_lossy(&out).matches("vcpu").count() as u8;
+            String::from_utf8_lossy(&out).matches("vcpu").count() as u8
         }
 
         #[test]

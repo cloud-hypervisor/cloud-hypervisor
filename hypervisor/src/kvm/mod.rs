@@ -22,6 +22,10 @@ use crate::vm::{self, VmmOps};
 use crate::{arm64_core_reg_id, offset__of};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use serde_derive::{Deserialize, Serialize};
+#[cfg(feature = "tdx")]
+use std::fs::File;
+#[cfg(feature = "tdx")]
+use std::os::unix::io::FromRawFd;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result;
 #[cfg(target_arch = "x86_64")]
@@ -446,9 +450,10 @@ fn tdx_command(
         metadata,
         data,
     };
+    let tmp_file: File = unsafe { File::from_raw_fd(*fd) };
     let ret = unsafe {
         ioctl_with_val(
-            fd,
+            &tmp_file,
             KVM_MEMORY_ENCRYPT_OP(),
             &cmd as *const TdxIoctlCmd as std::os::raw::c_ulong,
         )

@@ -156,13 +156,9 @@ impl fmt::Display for ValidationError {
             HugePageSizeWithoutHugePages => {
                 write!(f, "Huge page size specified but huge pages not enabled")
             }
-            InvalidHugePageSize(s) => {
-                write!(f, "Huge page size is not power of 2: {}", s)
-            }
+            InvalidHugePageSize(s) => write!(f, "Huge page size is not power of 2: {}", s),
             #[cfg(feature = "tdx")]
-            TdxNoCpuHotplug => {
-                write!(f, "CPU hotplug not possible with TDX")
-            }
+            TdxNoCpuHotplug => write!(f, "CPU hotplug not possible with TDX"),
         }
     }
 }

@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#![allow(non_camel_case_types, clippy::upper_case_acronyms)]
+#![allow(non_camel_case_types)]
 
 //
 // CMP-Compare Two Operands
