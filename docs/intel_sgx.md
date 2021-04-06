@@ -32,7 +32,7 @@ memory, the second one being 32MiB with no pre-allocated memory.
     --cpus boot=1 \
     --memory size=1G \
     --disk path=focal-server-cloudimg-amd64.raw \
-    --kernel bzImage \
+    --kernel vmlinux \
     --cmdline "console=ttyS0 console=hvc0 root=/dev/vda1 rw" \
     --sgx-epc size=64M,prefault=on size=32M,prefault=off
 ```
