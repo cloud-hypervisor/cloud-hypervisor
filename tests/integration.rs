@@ -2206,8 +2206,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path;
-            kernel_path.push("bzImage");
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
@@ -2290,8 +2289,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path;
-            kernel_path.push("bzImage");
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=6"])
@@ -3430,8 +3428,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path.clone();
-            kernel_path.push("bzImage");
+            let kernel_path = direct_kernel_boot_path();
 
             let mut vfio_path = workload_path.clone();
             vfio_path.push("vfio");
@@ -3982,8 +3979,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path;
-            kernel_path.push("bzImage");
+            let kernel_path = direct_kernel_boot_path();
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
@@ -5036,8 +5032,7 @@ mod tests {
             let mut workload_path = dirs::home_dir().unwrap();
             workload_path.push("workloads");
 
-            let mut kernel_path = workload_path;
-            kernel_path.push("bzImage");
+            let kernel_path = direct_kernel_boot_path();
 
             let api_socket = temp_api_path(&guest.tmp_dir);
 
