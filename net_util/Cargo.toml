@@ -5,7 +5,7 @@ authors = ["The Chromium OS Authors"]
 
 [dependencies]
 epoll = ">=4.0.1"
-libc = "0.2.92"
+libc = "0.2.93"
 log = "0.4.14"
 net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
