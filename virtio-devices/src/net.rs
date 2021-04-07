@@ -684,7 +684,7 @@ impl Snapshottable for Net {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self, _app_version: u16) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
@@ -697,7 +697,11 @@ impl Snapshottable for Net {
         Ok(net_snapshot)
     }
 
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+    fn restore(
+        &mut self,
+        snapshot: Snapshot,
+        _app_version: u16,
+    ) -> std::result::Result<(), MigratableError> {
         if let Some(net_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
             let net_state = match serde_json::from_slice(&net_section.snapshot) {
                 Ok(state) => state,

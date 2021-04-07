@@ -3857,13 +3857,13 @@ impl Snapshottable for DeviceManager {
         DEVICE_MANAGER_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self, app_version: u16) -> std::result::Result<Snapshot, MigratableError> {
         let mut snapshot = Snapshot::new(DEVICE_MANAGER_SNAPSHOT_ID);
 
         // We aggregate all devices snapshots.
         for (_, device_node) in self.device_tree.lock().unwrap().iter() {
             if let Some(migratable) = &device_node.migratable {
-                let device_snapshot = migratable.lock().unwrap().snapshot()?;
+                let device_snapshot = migratable.lock().unwrap().snapshot(app_version)?;
                 snapshot.add_snapshot(device_snapshot);
             }
         }
@@ -3878,7 +3878,11 @@ impl Snapshottable for DeviceManager {
         Ok(snapshot)
     }
 
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+    fn restore(
+        &mut self,
+        snapshot: Snapshot,
+        app_version: u16,
+    ) -> std::result::Result<(), MigratableError> {
         // Let's first restore the DeviceManager.
         if let Some(device_manager_section) = snapshot
             .snapshot_data
@@ -3917,7 +3921,10 @@ impl Snapshottable for DeviceManager {
                 debug!("Restoring {} from DeviceManager", node.id);
                 if let Some(snapshot) = snapshot.snapshots.get(&node.id) {
                     migratable.lock().unwrap().pause()?;
-                    migratable.lock().unwrap().restore(*snapshot.clone())?;
+                    migratable
+                        .lock()
+                        .unwrap()
+                        .restore(*snapshot.clone(), app_version)?;
                 } else {
                     return Err(MigratableError::Restore(anyhow!(
                         "Missing device {}",

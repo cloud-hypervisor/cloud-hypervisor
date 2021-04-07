@@ -1971,7 +1971,7 @@ impl Snapshottable for MemoryManager {
         MEMORY_MANAGER_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&mut self) -> result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self, _app_version: u16) -> result::Result<Snapshot, MigratableError> {
         let mut memory_manager_snapshot = Snapshot::new(MEMORY_MANAGER_SNAPSHOT_ID);
         let guest_memory = self.guest_memory.memory();
 

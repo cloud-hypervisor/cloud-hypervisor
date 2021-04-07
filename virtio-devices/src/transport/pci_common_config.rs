@@ -290,7 +290,7 @@ impl Snapshottable for VirtioPciCommonConfig {
         String::from("virtio_pci_common_config")
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self, _app_version: u16) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot =
             serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
 
@@ -303,7 +303,11 @@ impl Snapshottable for VirtioPciCommonConfig {
         Ok(config_snapshot)
     }
 
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+    fn restore(
+        &mut self,
+        snapshot: Snapshot,
+        _app_version: u16,
+    ) -> std::result::Result<(), MigratableError> {
         if let Some(config_section) = snapshot
             .snapshot_data
             .get(&format!("{}-section", self.id()))
