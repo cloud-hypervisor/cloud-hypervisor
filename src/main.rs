@@ -68,6 +68,10 @@ enum Error {
     BareEventMonitor,
     #[error("Error doing event monitor I/O: {0}")]
     EventMonitorIo(std::io::Error),
+    #[error("Error creating log file: {0}")]
+    LogFileCreation(std::io::Error),
+    #[error("Error setting up logger: {0}")]
+    LoggerSetup(log::SetLoggerError),
 }
 
 struct Logger {
@@ -376,6 +380,28 @@ fn create_app<'a, 'b>(
 }
 
 fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &Option<String>) -> Result<(), Error> {
+    let log_level = match cmd_arguments.occurrences_of("v") {
+        0 => LevelFilter::Warn,
+        1 => LevelFilter::Info,
+        2 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    };
+
+    let log_file: Box<dyn std::io::Write + Send> = if let Some(file) =
+        cmd_arguments.value_of("log-file")
+    {
+        Box::new(std::fs::File::create(std::path::Path::new(file)).map_err(Error::LogFileCreation)?)
+    } else {
+        Box::new(std::io::stderr())
+    };
+
+    log::set_boxed_logger(Box::new(Logger {
+        output: Mutex::new(log_file),
+        start: std::time::Instant::now(),
+    }))
+    .map(|()| log::set_max_level(log_level))
+    .map_err(Error::LoggerSetup)?;
+
     if let Some(monitor_config) = cmd_arguments.value_of("event-monitor") {
         let mut parser = OptionParser::new();
         parser.add("path").add("fd");
@@ -492,32 +518,7 @@ fn main() {
     let _ = unsafe { libc::umask(0o077) };
 
     let (default_vcpus, default_memory, default_rng) = prepare_default_values();
-
     let cmd_arguments = create_app(&default_vcpus, &default_memory, &default_rng).get_matches();
-
-    let log_level = match cmd_arguments.occurrences_of("v") {
-        0 => LevelFilter::Warn,
-        1 => LevelFilter::Info,
-        2 => LevelFilter::Debug,
-        _ => LevelFilter::Trace,
-    };
-
-    let log_file: Box<dyn std::io::Write + Send> =
-        if let Some(file) = cmd_arguments.value_of("log-file") {
-            Box::new(
-                std::fs::File::create(std::path::Path::new(file)).expect("Error creating log file"),
-            )
-        } else {
-            Box::new(std::io::stderr())
-        };
-
-    log::set_boxed_logger(Box::new(Logger {
-        output: Mutex::new(log_file),
-        start: std::time::Instant::now(),
-    }))
-    .map(|()| log::set_max_level(log_level))
-    .expect("Expected to be able to setup logger");
-
     let api_socket_path = cmd_arguments.value_of("api-socket").map(|s| s.to_string());
 
     let exit_code = if let Err(e) = start_vmm(cmd_arguments, &api_socket_path) {
