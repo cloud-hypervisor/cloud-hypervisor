@@ -5835,7 +5835,7 @@ mod tests {
             workload_path.push("workloads");
 
             let mut kernel_path = workload_path;
-            kernel_path.push("bzImage_w_sgx");
+            kernel_path.push("vmlinux_w_sgx");
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=1"])
