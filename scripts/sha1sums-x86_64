@@ -1,5 +1,5 @@
 27f3b17962ace69b51f0ddc2012095e3109e6ed8 bionic-server-cloudimg-amd64.qcow2
 8db9cc58b01452ce2d06c313177e6e74d8582d93 bionic-server-cloudimg-amd64.raw
 d4a44acc6014d5f83dea1c625c43d677a95fa75f alpine-minirootfs-x86_64.tar.gz
-4ee774e9e10f3cd985203c3ea20b487c285dfa1d focal-server-cloudimg-amd64-custom-20210106-1.qcow2
-7cd439f9dfe63b5f354011ea0e893256a8111174 focal-server-cloudimg-amd64-custom-20210106-1.raw
+f2f88ab4c08e36a4b6747a1aac4f94065952cadd focal-server-cloudimg-amd64-custom-20210407-0.qcow2
+6c5770ebd34c0dd53987bc9deae43690ef02ffc5 focal-server-cloudimg-amd64-custom-20210407-0.raw
