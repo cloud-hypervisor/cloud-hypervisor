@@ -5784,6 +5784,27 @@ mod tests {
                 // Check the CH process has the correct number of vcpu threads
                 assert_eq!(get_vcpu_threads_count(child.id()), vcpu_num);
 
+                let vcpu_num = 4;
+                // Remove some CPUs. Note that Windows doesn't support hot-remove.
+                resize_command(&api_socket, Some(vcpu_num), None, None);
+                // Wait to make sure CPUs are removed
+                thread::sleep(std::time::Duration::new(10, 0));
+                // Reboot to let Windows catch up
+                ssh_command_ip_with_auth(
+                    "shutdown /r /t 0",
+                    &auth,
+                    "192.168.249.2",
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+                // Wait to make sure Windows completely rebooted
+                thread::sleep(std::time::Duration::new(60, 0));
+                // Check the guest sees the correct number
+                assert_eq!(get_cpu_count_windows(&auth), vcpu_num);
+                // Check the CH process has the correct number of vcpu threads
+                assert_eq!(get_vcpu_threads_count(child.id()), vcpu_num);
+
                 ssh_command_ip_with_auth(
                     "shutdown /s",
                     &auth,

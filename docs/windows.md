@@ -186,7 +186,7 @@ This allows for SSH login from a remote machine, for example through the `admini
 
 ## Hotplug capability
 
-CPU hotplug is supported. The VM operating system needs to support hotplug and be appropriately licensed. SKU limitations like constraints on the number of cores are to be taken into consideration.
+CPU hotplug is supported. The VM operating system needs to support hotplug and be appropriately licensed. SKU limitations like constraints on the number of cores are to be taken into consideration. Note, that Windows doesn't support CPU hot-remove. When `ch-remote` is invoked to reduce the number of CPUs, the result will be visible after the OS reboot within the same hypervisor instance.
 
 ## Debugging
 
