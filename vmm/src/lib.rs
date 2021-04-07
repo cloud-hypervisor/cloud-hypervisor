@@ -65,6 +65,9 @@ pub mod vm;
 #[cfg(feature = "acpi")]
 mod acpi;
 
+// Keep in sync with release version
+const SNAPSHOT_RESTORE_APP_VERSION: u16 = 14;
+
 /// Errors associated with VMM management
 #[derive(Debug, Error)]
 #[allow(clippy::large_enum_variant)]
@@ -407,7 +410,7 @@ impl Vmm {
 
     fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            vm.snapshot()
+            vm.snapshot(SNAPSHOT_RESTORE_APP_VERSION)
                 .map_err(VmError::Snapshot)
                 .and_then(|snapshot| {
                     vm.send(&snapshot, destination_url)
@@ -456,7 +459,8 @@ impl Vmm {
 
         // Now we can restore the rest of the VM.
         if let Some(ref mut vm) = self.vm {
-            vm.restore(snapshot).map_err(VmError::Restore)
+            vm.restore(snapshot, SNAPSHOT_RESTORE_APP_VERSION)
+                .map_err(VmError::Restore)
         } else {
             Err(VmError::VmNotCreated)
         }
@@ -784,10 +788,11 @@ impl Vmm {
         })?;
 
         // Create VM
-        vm.restore(snapshot).map_err(|e| {
-            Response::error().write_to(socket).ok();
-            e
-        })?;
+        vm.restore(snapshot, SNAPSHOT_RESTORE_APP_VERSION)
+            .map_err(|e| {
+                Response::error().write_to(socket).ok();
+                e
+            })?;
         self.vm = Some(vm);
 
         Response::ok().write_to(socket)?;
@@ -1033,7 +1038,7 @@ impl Vmm {
             Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
 
             // Capture snapshot and send it
-            let vm_snapshot = vm.snapshot()?;
+            let vm_snapshot = vm.snapshot(SNAPSHOT_RESTORE_APP_VERSION)?;
             let snapshot_data = serde_json::to_vec(&vm_snapshot).unwrap();
             Request::state(snapshot_data.len() as u64).write_to(&mut socket)?;
             socket

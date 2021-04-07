@@ -414,11 +414,15 @@ impl Snapshottable for Ioapic {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self, _app_version: u16) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.id, &self.state())
     }
 
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+    fn restore(
+        &mut self,
+        snapshot: Snapshot,
+        _app_version: u16,
+    ) -> std::result::Result<(), MigratableError> {
         self.set_state(&snapshot.to_state(&self.id)?).map_err(|e| {
             MigratableError::Restore(anyhow!("Could not restore state for {}: {:?}", self.id, e))
         })

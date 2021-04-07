@@ -1074,24 +1074,29 @@ impl Snapshottable for VirtioPciDevice {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self, app_version: u16) -> std::result::Result<Snapshot, MigratableError> {
         let mut virtio_pci_dev_snapshot = Snapshot::new_from_state(&self.id, &self.state())?;
 
         // Snapshot PciConfiguration
-        virtio_pci_dev_snapshot.add_snapshot(self.configuration.snapshot()?);
+        virtio_pci_dev_snapshot.add_snapshot(self.configuration.snapshot(app_version)?);
 
         // Snapshot VirtioPciCommonConfig
-        virtio_pci_dev_snapshot.add_snapshot(self.common_config.snapshot()?);
+        virtio_pci_dev_snapshot.add_snapshot(self.common_config.snapshot(app_version)?);
 
         // Snapshot MSI-X
         if let Some(msix_config) = &self.msix_config {
-            virtio_pci_dev_snapshot.add_snapshot(msix_config.lock().unwrap().snapshot()?);
+            virtio_pci_dev_snapshot
+                .add_snapshot(msix_config.lock().unwrap().snapshot(app_version)?);
         }
 
         Ok(virtio_pci_dev_snapshot)
     }
 
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+    fn restore(
+        &mut self,
+        snapshot: Snapshot,
+        app_version: u16,
+    ) -> std::result::Result<(), MigratableError> {
         if let Some(virtio_pci_dev_section) =
             snapshot.snapshot_data.get(&format!("{}-section", self.id))
         {
@@ -1102,19 +1107,20 @@ impl Snapshottable for VirtioPciDevice {
                     msix_config
                         .lock()
                         .unwrap()
-                        .restore(*msix_snapshot.clone())?;
+                        .restore(*msix_snapshot.clone(), app_version)?;
                 }
             }
 
             // Restore VirtioPciCommonConfig
             if let Some(virtio_config_snapshot) = snapshot.snapshots.get(&self.common_config.id()) {
                 self.common_config
-                    .restore(*virtio_config_snapshot.clone())?;
+                    .restore(*virtio_config_snapshot.clone(), app_version)?;
             }
 
             // Restore PciConfiguration
             if let Some(pci_config_snapshot) = snapshot.snapshots.get(&self.configuration.id()) {
-                self.configuration.restore(*pci_config_snapshot.clone())?;
+                self.configuration
+                    .restore(*pci_config_snapshot.clone(), app_version)?;
             }
 
             let virtio_pci_dev_state =

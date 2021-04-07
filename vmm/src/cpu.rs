@@ -364,7 +364,7 @@ impl Snapshottable for Vcpu {
         VCPU_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self, _app_version: u16) -> std::result::Result<Snapshot, MigratableError> {
         let snapshot = serde_json::to_vec(&self.saved_state)
             .map_err(|e| MigratableError::Snapshot(e.into()))?;
 
@@ -377,7 +377,11 @@ impl Snapshottable for Vcpu {
         Ok(vcpu_snapshot)
     }
 
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+    fn restore(
+        &mut self,
+        snapshot: Snapshot,
+        _app_version: u16,
+    ) -> std::result::Result<(), MigratableError> {
         if let Some(vcpu_section) = snapshot
             .snapshot_data
             .get(&format!("{}-section", VCPU_SNAPSHOT_ID))
@@ -803,7 +807,7 @@ impl CpuManager {
 
             vcpu.lock()
                 .unwrap()
-                .restore(snapshot)
+                .restore(snapshot, crate::SNAPSHOT_RESTORE_APP_VERSION)
                 .expect("Failed to restore vCPU");
         } else {
             let vm_memory = self.vm_memory.clone();
@@ -1552,19 +1556,23 @@ impl Snapshottable for CpuManager {
         CPU_MANAGER_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self, app_version: u16) -> std::result::Result<Snapshot, MigratableError> {
         let mut cpu_manager_snapshot = Snapshot::new(CPU_MANAGER_SNAPSHOT_ID);
 
         // The CpuManager snapshot is a collection of all vCPUs snapshots.
         for vcpu in &self.vcpus {
-            let cpu_snapshot = vcpu.lock().unwrap().snapshot()?;
+            let cpu_snapshot = vcpu.lock().unwrap().snapshot(app_version)?;
             cpu_manager_snapshot.add_snapshot(cpu_snapshot);
         }
 
         Ok(cpu_manager_snapshot)
     }
 
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+    fn restore(
+        &mut self,
+        snapshot: Snapshot,
+        _app_version: u16,
+    ) -> std::result::Result<(), MigratableError> {
         for (cpu_id, snapshot) in snapshot.snapshots.iter() {
             debug!("Restoring VCPU {}", cpu_id);
             self.create_vcpu(cpu_id.parse::<u8>().unwrap(), None, Some(*snapshot.clone()))

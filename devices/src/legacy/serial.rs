@@ -5,8 +5,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use std::collections::VecDeque;
 use std::sync::{Arc, Barrier};
+use std::{collections::VecDeque, u16};
 use std::{io, result};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
@@ -287,11 +287,15 @@ impl Snapshottable for Serial {
         self.id.clone()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self, _app_version: u16) -> std::result::Result<Snapshot, MigratableError> {
         Snapshot::new_from_state(&self.id, &self.state())
     }
 
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+    fn restore(
+        &mut self,
+        snapshot: Snapshot,
+        _app_version: u16,
+    ) -> std::result::Result<(), MigratableError> {
         self.set_state(&snapshot.to_state(&self.id)?);
         Ok(())
     }

@@ -1863,6 +1863,7 @@ impl Vm {
     fn add_vgic_snapshot_section(
         &self,
         vm_snapshot: &mut Snapshot,
+        app_version: u16,
     ) -> std::result::Result<(), MigratableError> {
         let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
         self.device_manager
@@ -1881,7 +1882,7 @@ impl Vm {
                 .as_any_concrete_mut()
                 .downcast_mut::<KvmGicV3>()
                 .unwrap()
-                .snapshot()?,
+                .snapshot(app_version)?,
         );
 
         Ok(())
@@ -1892,6 +1893,7 @@ impl Vm {
     fn restore_vgic_and_enable_interrupt(
         &self,
         vm_snapshot: &Snapshot,
+        app_version: u16,
     ) -> std::result::Result<(), MigratableError> {
         let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
         // The number of vCPUs is the same as the number of saved vCPU states.
@@ -1927,7 +1929,7 @@ impl Vm {
                 .as_any_concrete_mut()
                 .downcast_mut::<KvmGicV3>()
                 .unwrap()
-                .restore(*gic_v3_snapshot.clone())?;
+                .restore(*gic_v3_snapshot.clone(), app_version)?;
         } else {
             return Err(MigratableError::Restore(anyhow!("Missing GICv3 snapshot")));
         }
@@ -2137,7 +2139,7 @@ impl Snapshottable for Vm {
         VM_SNAPSHOT_ID.to_string()
     }
 
-    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+    fn snapshot(&mut self, app_version: u16) -> std::result::Result<Snapshot, MigratableError> {
         event!("vm", "snapshotting");
 
         #[cfg(feature = "tdx")]
@@ -2169,14 +2171,14 @@ impl Snapshottable for Vm {
         })
         .map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        vm_snapshot.add_snapshot(self.cpu_manager.lock().unwrap().snapshot()?);
-        vm_snapshot.add_snapshot(self.memory_manager.lock().unwrap().snapshot()?);
+        vm_snapshot.add_snapshot(self.cpu_manager.lock().unwrap().snapshot(app_version)?);
+        vm_snapshot.add_snapshot(self.memory_manager.lock().unwrap().snapshot(app_version)?);
 
         #[cfg(target_arch = "aarch64")]
-        self.add_vgic_snapshot_section(&mut vm_snapshot)
+        self.add_vgic_snapshot_section(&mut vm_snapshot, app_version)
             .map_err(|e| MigratableError::Snapshot(e.into()))?;
 
-        vm_snapshot.add_snapshot(self.device_manager.lock().unwrap().snapshot()?);
+        vm_snapshot.add_snapshot(self.device_manager.lock().unwrap().snapshot(app_version)?);
         vm_snapshot.add_data_section(SnapshotDataSection {
             id: format!("{}-section", VM_SNAPSHOT_ID),
             snapshot: vm_snapshot_data,
@@ -2186,7 +2188,11 @@ impl Snapshottable for Vm {
         Ok(vm_snapshot)
     }
 
-    fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+    fn restore(
+        &mut self,
+        snapshot: Snapshot,
+        app_version: u16,
+    ) -> std::result::Result<(), MigratableError> {
         event!("vm", "restoring");
 
         let current_state = self
@@ -2201,7 +2207,7 @@ impl Snapshottable for Vm {
             self.memory_manager
                 .lock()
                 .unwrap()
-                .restore(*memory_manager_snapshot.clone())?;
+                .restore(*memory_manager_snapshot.clone(), app_version)?;
         } else {
             return Err(MigratableError::Restore(anyhow!(
                 "Missing memory manager snapshot"
@@ -2212,7 +2218,7 @@ impl Snapshottable for Vm {
             self.cpu_manager
                 .lock()
                 .unwrap()
-                .restore(*cpu_manager_snapshot.clone())?;
+                .restore(*cpu_manager_snapshot.clone(), app_version)?;
         } else {
             return Err(MigratableError::Restore(anyhow!(
                 "Missing CPU manager snapshot"
@@ -2223,7 +2229,7 @@ impl Snapshottable for Vm {
             self.device_manager
                 .lock()
                 .unwrap()
-                .restore(*device_manager_snapshot.clone())?;
+                .restore(*device_manager_snapshot.clone(), app_version)?;
         } else {
             return Err(MigratableError::Restore(anyhow!(
                 "Missing device manager snapshot"
@@ -2231,7 +2237,7 @@ impl Snapshottable for Vm {
         }
 
         #[cfg(target_arch = "aarch64")]
-        self.restore_vgic_and_enable_interrupt(&snapshot)?;
+        self.restore_vgic_and_enable_interrupt(&snapshot, app_version)?;
 
         // Now we can start all vCPUs from here.
         self.cpu_manager

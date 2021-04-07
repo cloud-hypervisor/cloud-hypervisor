@@ -227,12 +227,19 @@ pub mod kvm {
             GIC_V3_SNAPSHOT_ID.to_string()
         }
 
-        fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+        fn snapshot(
+            &mut self,
+            _app_version: u16,
+        ) -> std::result::Result<Snapshot, MigratableError> {
             let gicr_typers = self.gicr_typers.clone();
             Snapshot::new_from_state(&self.id(), &self.state(&gicr_typers).unwrap())
         }
 
-        fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
+        fn restore(
+            &mut self,
+            snapshot: Snapshot,
+            _app_version: u16,
+        ) -> std::result::Result<(), MigratableError> {
             let gicr_typers = self.gicr_typers.clone();
             self.set_state(&gicr_typers, &snapshot.to_state(&self.id())?)
                 .map_err(|e| {
