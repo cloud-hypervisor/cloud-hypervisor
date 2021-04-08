@@ -5574,6 +5574,20 @@ mod tests {
             .unwrap_or(0);
         }
 
+        fn get_ram_size_windows(auth: &PasswordAuth) -> usize {
+            return ssh_command_ip_with_auth(
+                "powershell -Command \"(Get-CimInstance win32_computersystem).TotalPhysicalMemory\"",
+                &auth,
+                "192.168.249.2",
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
+            .unwrap()
+            .trim()
+            .parse::<usize>()
+            .unwrap_or(0);
+        }
+
         fn get_vcpu_threads_count(pid: u32) -> u8 {
             // ps -T -p 12345 | grep vcpu | wc -l
             let out = Command::new("ps")
@@ -5804,6 +5818,96 @@ mod tests {
                 assert_eq!(get_cpu_count_windows(&auth), vcpu_num);
                 // Check the CH process has the correct number of vcpu threads
                 assert_eq!(get_vcpu_threads_count(child.id()), vcpu_num);
+
+                ssh_command_ip_with_auth(
+                    "shutdown /s",
+                    &auth,
+                    "192.168.249.2",
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+            });
+
+            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
+
+        #[test]
+        fn test_windows_guest_ram_hotplug() {
+            let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut windows);
+
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut ovmf_path = workload_path.clone();
+            ovmf_path.push(OVMF_NAME);
+
+            let mut osdisk_path = workload_path;
+            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
+
+            let api_socket = temp_api_path(&tmp_dir);
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=2,kvm_hyperv=on"])
+                .args(&["--memory", "size=2G,hotplug_size=5G"])
+                .args(&["--kernel", ovmf_path.to_str().unwrap()])
+                .default_disks()
+                .args(&["--serial", "tty"])
+                .args(&["--console", "off"])
+                .args(&["--net", "tap="])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            // Wait to make sure Windows boots up
+            thread::sleep(std::time::Duration::new(60, 0));
+
+            let r = std::panic::catch_unwind(|| {
+                let auth = windows_auth();
+
+                let ram_size = 2 * 1024 * 1024 * 1024;
+                // Check the initial number of RAM the guest sees
+                let current_ram_size = get_ram_size_windows(&auth);
+                // This size seems to be reserved by the system and thus the
+                // reported amount differs by this constant value.
+                let reserved_ram_size = ram_size - current_ram_size;
+                // Verify that there's not more than 4mb constant diff wasted
+                // by the reserved ram.
+                assert!(reserved_ram_size < 4 * 1024 * 1024);
+
+                let ram_size = 4 * 1024 * 1024 * 1024;
+                // Hotplug some RAM
+                resize_command(&api_socket, None, Some(ram_size), None);
+                // Wait to make sure RAM has been added
+                thread::sleep(std::time::Duration::new(10, 0));
+                // Check the guest sees the correct number
+                assert_eq!(get_ram_size_windows(&auth), ram_size - reserved_ram_size);
+
+                let ram_size = 3 * 1024 * 1024 * 1024;
+                // Unplug some RAM. Note that hot-remove most likely won't work.
+                resize_command(&api_socket, None, Some(ram_size), None);
+                // Wait to make sure RAM has been added
+                thread::sleep(std::time::Duration::new(10, 0));
+                // Reboot to let Windows catch up
+                ssh_command_ip_with_auth(
+                    "shutdown /r /t 0",
+                    &auth,
+                    "192.168.249.2",
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+                // Wait to make sure guest completely rebooted
+                thread::sleep(std::time::Duration::new(60, 0));
+                // Check the guest sees the correct number
+                assert_eq!(get_ram_size_windows(&auth), ram_size - reserved_ram_size);
 
                 ssh_command_ip_with_auth(
                     "shutdown /s",

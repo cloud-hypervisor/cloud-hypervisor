@@ -1810,9 +1810,17 @@ impl Aml for MemoryMethods {
                         &aml::Path::new("MINH"),
                         &aml::Path::new("LENH"),
                     ),
+                    &aml::If::new(
+                        &aml::LessThan::new(&aml::Path::new("MAXL"), &aml::Path::new("MINL")),
+                        vec![&aml::Add::new(
+                            &aml::Path::new("MAXH"),
+                            &aml::ONE,
+                            &aml::Path::new("MAXH"),
+                        )],
+                    ),
                     &aml::Subtract::new(
-                        &aml::Path::new("MAXH"),
-                        &aml::Path::new("MAXH"),
+                        &aml::Path::new("MAXL"),
+                        &aml::Path::new("MAXL"),
                         &aml::ONE,
                     ),
                     // Release lock
