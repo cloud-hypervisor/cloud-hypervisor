@@ -10,7 +10,6 @@ use super::{
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
-use anyhow::anyhow;
 use seccomp::{SeccompAction, SeccompFilter};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display};
@@ -27,10 +26,7 @@ use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryMmap,
 };
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 /// Queues sizes
@@ -975,37 +971,12 @@ impl Snapshottable for Iommu {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut iommu_snapshot = Snapshot::new(self.id.as_str());
-        iommu_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(iommu_snapshot)
+        Snapshot::new_from_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(iommu_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
-            let iommu_state = match serde_json::from_slice(&iommu_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize IOMMU {}",
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&iommu_state);
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find IOMMU snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?);
+        Ok(())
     }
 }
 impl Transportable for Iommu {}

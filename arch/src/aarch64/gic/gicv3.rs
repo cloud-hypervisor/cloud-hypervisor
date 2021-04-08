@@ -15,8 +15,7 @@ pub mod kvm {
     use std::sync::Arc;
     use std::{boxed::Box, result};
     use vm_migration::{
-        Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-        Transportable,
+        Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable,
     };
 
     /// Errors thrown while saving/restoring the GICv3.
@@ -230,42 +229,15 @@ pub mod kvm {
 
         fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
             let gicr_typers = self.gicr_typers.clone();
-            let snapshot = serde_json::to_vec(&self.state(&gicr_typers).unwrap())
-                .map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-            let mut gic_v3_snapshot = Snapshot::new(self.id().as_str());
-            gic_v3_snapshot.add_data_section(SnapshotDataSection {
-                id: format!("{}-section", self.id()),
-                snapshot,
-            });
-
-            Ok(gic_v3_snapshot)
+            Snapshot::new_from_state(&self.id(), &self.state(&gicr_typers).unwrap())
         }
 
         fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-            if let Some(gic_v3_section) = snapshot
-                .snapshot_data
-                .get(&format!("{}-section", self.id()))
-            {
-                let gic_v3_state = match serde_json::from_slice(&gic_v3_section.snapshot) {
-                    Ok(state) => state,
-                    Err(error) => {
-                        return Err(MigratableError::Restore(anyhow!(
-                            "Could not deserialize GICv3 {}",
-                            error
-                        )))
-                    }
-                };
-
-                let gicr_typers = self.gicr_typers.clone();
-                return self.set_state(&gicr_typers, &gic_v3_state).map_err(|e| {
+            let gicr_typers = self.gicr_typers.clone();
+            self.set_state(&gicr_typers, &snapshot.to_state(&self.id())?)
+                .map_err(|e| {
                     MigratableError::Restore(anyhow!("Could not restore GICv3 state {:?}", e))
-                });
-            }
-
-            Err(MigratableError::Restore(anyhow!(
-                "Could not find GICv3 snapshot section"
-            )))
+                })
         }
     }
 

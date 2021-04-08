@@ -41,10 +41,7 @@ use vm_memory::{
     Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
     GuestUsize, Le32,
 };
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{queue, VirtioIommuRemapping, VIRTIO_MSI_NO_VECTOR};
 use vmm_sys_util::{errno::Result, eventfd::EventFd};
 
@@ -1078,14 +1075,7 @@ impl Snapshottable for VirtioPciDevice {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut virtio_pci_dev_snapshot = Snapshot::new(self.id.as_str());
-        virtio_pci_dev_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
+        let mut virtio_pci_dev_snapshot = Snapshot::new_from_state(&self.id, &self.state())?;
 
         // Snapshot PciConfiguration
         virtio_pci_dev_snapshot.add_snapshot(self.configuration.snapshot()?);

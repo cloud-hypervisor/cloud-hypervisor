@@ -7,17 +7,13 @@
 //!
 
 use crate::{read_le_u32, write_le_u32};
-use anyhow::anyhow;
 use std::collections::VecDeque;
 use std::fmt;
 use std::sync::{Arc, Barrier};
 use std::{io, result};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 /* Registers */
 const UARTDR: u64 = 0;
@@ -361,38 +357,12 @@ impl Snapshottable for Pl011 {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut pl011_snapshot = Snapshot::new(self.id.as_str());
-        pl011_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(pl011_snapshot)
+        Snapshot::new_from_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(pl011_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
-            let pl011_state = match serde_json::from_slice(&pl011_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize PL011 {}",
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&pl011_state);
-
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find the PL011 snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?);
+        Ok(())
     }
 }
 

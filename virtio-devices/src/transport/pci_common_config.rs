@@ -8,12 +8,11 @@
 extern crate byteorder;
 
 use crate::{Queue, VirtioDevice};
-use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use vm_memory::GuestAddress;
-use vm_migration::{MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable};
+use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VirtioPciCommonConfigState {
@@ -291,43 +290,12 @@ impl Snapshottable for VirtioPciCommonConfig {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut config_snapshot = Snapshot::new(self.id().as_str());
-        config_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id()),
-            snapshot,
-        });
-
-        Ok(config_snapshot)
+        Snapshot::new_from_state(&self.id(), &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(config_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", self.id()))
-        {
-            let config_state = match serde_json::from_slice(&config_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize {}: {}",
-                        self.id(),
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&config_state);
-
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find {} snapshot section",
-            self.id()
-        )))
+        self.set_state(&snapshot.to_state(&self.id())?);
+        Ok(())
     }
 }
 

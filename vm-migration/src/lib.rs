@@ -9,6 +9,8 @@ extern crate thiserror;
 extern crate serde_derive;
 extern crate vm_memory;
 
+use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod protocol;
@@ -97,6 +99,23 @@ impl Snapshot {
         }
     }
 
+    /// Create from state that can be serialized
+    pub fn new_from_state<T>(id: &str, state: &T) -> Result<Self, MigratableError>
+    where
+        T: Serialize,
+    {
+        let snapshot = serde_json::to_vec(state)
+            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {} {}", id, e)))?;
+
+        let mut snapshot_data = Snapshot::new(id);
+        snapshot_data.add_data_section(SnapshotDataSection {
+            id: format!("{}-section", id),
+            snapshot,
+        });
+
+        Ok(snapshot_data)
+    }
+
     /// Add a sub-component's Snapshot to the Snapshot.
     pub fn add_snapshot(&mut self, snapshot: Snapshot) {
         self.snapshots
@@ -106,6 +125,20 @@ impl Snapshot {
     /// Add a SnapshotDatasection to the component snapshot data.
     pub fn add_data_section(&mut self, section: SnapshotDataSection) {
         self.snapshot_data.insert(section.id.clone(), section);
+    }
+
+    /// Generate the state data from the snapshot
+    pub fn to_state<'a, T>(&'a self, id: &str) -> Result<T, MigratableError>
+    where
+        T: Deserialize<'a>,
+    {
+        let section = self
+            .snapshot_data
+            .get(&format!("{}-section", id))
+            .ok_or_else(|| MigratableError::Restore(anyhow!("Missing section for {}", id)))?;
+
+        serde_json::from_slice(&section.snapshot)
+            .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {} {}", id, e)))
     }
 }
 
