@@ -9,7 +9,6 @@ use super::{
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
-use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use seccomp::{SeccompAction, SeccompFilter};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
@@ -24,10 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
@@ -512,37 +508,12 @@ impl Snapshottable for Console {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut console_snapshot = Snapshot::new(self.id.as_str());
-        console_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(console_snapshot)
+        Snapshot::new_from_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(console_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
-            let console_state = match serde_json::from_slice(&console_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize CONSOLE {}",
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&console_state);
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find CONSOLE snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?);
+        Ok(())
     }
 }
 impl Transportable for Console {}

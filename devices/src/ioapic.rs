@@ -20,10 +20,7 @@ use vm_device::interrupt::{
 };
 use vm_device::BusDevice;
 use vm_memory::GuestAddress;
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Serialize, Deserialize)]
@@ -418,38 +415,13 @@ impl Snapshottable for Ioapic {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut ioapic_snapshot = Snapshot::new(self.id.as_str());
-        ioapic_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(ioapic_snapshot)
+        Snapshot::new_from_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(ioapic_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
-            let ioapic_state = match serde_json::from_slice(&ioapic_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize IOAPIC {}",
-                        error
-                    )))
-                }
-            };
-
-            return self.set_state(&ioapic_state).map_err(|e| {
-                MigratableError::Restore(anyhow!("Could not restore IOAPIC state {:?}", e))
-            });
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find IOAPIC snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?).map_err(|e| {
+            MigratableError::Restore(anyhow!("Could not restore state for {}: {:?}", self.id, e))
+        })
     }
 }
 

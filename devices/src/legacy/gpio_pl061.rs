@@ -8,16 +8,12 @@
 //!
 
 use crate::{read_le_u32, write_le_u32};
-use anyhow::anyhow;
 use std::result;
 use std::sync::{Arc, Barrier};
 use std::{fmt, io};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 const OFS_DATA: u64 = 0x400; // Data Register
 const GPIODIR: u64 = 0x400; // Direction Register
@@ -317,38 +313,12 @@ impl Snapshottable for Gpio {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut gpio_snapshot = Snapshot::new(self.id.as_str());
-        gpio_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(gpio_snapshot)
+        Snapshot::new_from_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(gpio_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
-            let gpio_state = match serde_json::from_slice(&gpio_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize GPIO {}",
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&gpio_state);
-
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find the GPIO snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?);
+        Ok(())
     }
 }
 

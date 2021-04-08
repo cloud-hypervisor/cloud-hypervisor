@@ -17,7 +17,6 @@ use super::{
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
-use anyhow::anyhow;
 use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio,
 };
@@ -34,10 +33,7 @@ use std::{collections::HashMap, convert::TryInto};
 use virtio_bindings::bindings::virtio_net::*;
 use virtio_bindings::bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 // The guest has made a buffer available to receive a frame into.
@@ -685,37 +681,12 @@ impl Snapshottable for Net {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut net_snapshot = Snapshot::new(self.id.as_str());
-        net_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(net_snapshot)
+        Snapshot::new_from_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(net_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
-            let net_state = match serde_json::from_slice(&net_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize NET {}",
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&net_state);
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find NET snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?);
+        Ok(())
     }
 }
 impl Transportable for Net {}

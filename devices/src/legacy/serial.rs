@@ -5,16 +5,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use anyhow::anyhow;
 use std::collections::VecDeque;
 use std::sync::{Arc, Barrier};
 use std::{io, result};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
-use vm_migration::{
-    Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
-    Transportable,
-};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::errno::Result;
 
 const LOOP_SIZE: usize = 0x40;
@@ -292,38 +288,12 @@ impl Snapshottable for Serial {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot =
-            serde_json::to_vec(&self.state()).map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        let mut serial_snapshot = Snapshot::new(self.id.as_str());
-        serial_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", self.id),
-            snapshot,
-        });
-
-        Ok(serial_snapshot)
+        Snapshot::new_from_state(&self.id, &self.state())
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
-        if let Some(serial_section) = snapshot.snapshot_data.get(&format!("{}-section", self.id)) {
-            let serial_state = match serde_json::from_slice(&serial_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize SERIAL {}",
-                        error
-                    )))
-                }
-            };
-
-            self.set_state(&serial_state);
-
-            return Ok(());
-        }
-
-        Err(MigratableError::Restore(anyhow!(
-            "Could not find the serial snapshot section"
-        )))
+        self.set_state(&snapshot.to_state(&self.id)?);
+        Ok(())
     }
 }
 
