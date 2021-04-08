@@ -1632,21 +1632,12 @@ mod tests {
         handle_child_output(r, &output);
     }
 
-    fn get_pss(pid: u32) -> u32 {
-        let smaps = fs::File::open(format!("/proc/{}/smaps", pid)).unwrap();
-        let reader = io::BufReader::new(smaps);
-
-        let mut total = 0;
-        for line in reader.lines() {
-            let l = line.unwrap();
-            // Lines look like this:
-            // Pss:                 176 kB
-            if l.contains("Pss") {
-                let values: Vec<&str> = l.rsplit(' ').collect();
-                total += values[1].trim().parse::<u32>().unwrap()
-            }
-        }
-        total
+    fn get_ksm_pages_shared() -> u32 {
+        fs::read_to_string("/sys/kernel/mm/ksm/pages_shared")
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap()
     }
 
     fn test_memory_mergeable(mergeable: bool) {
@@ -1656,15 +1647,17 @@ mod tests {
             "mergeable=off"
         };
 
+        // We are assuming the rest of the system in our CI is not using mergeable memeory
+        let ksm_ps_init = get_ksm_pages_shared();
+        assert!(ksm_ps_init == 0);
+
         let mut focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let mut focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-
         let guest1 = Guest::new(&mut focal1 as &mut dyn DiskConfig);
-
         let mut child1 = GuestCommand::new(&guest1)
             .args(&["--cpus", "boot=1"])
             .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
-            .args(&["--kernel", guest1.fw_path.as_str()])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .args(&["--net", guest1.default_net_string().as_str()])
             .args(&["--serial", "tty", "--console", "off"])
@@ -1672,19 +1665,25 @@ mod tests {
             .spawn()
             .unwrap();
 
-        // Let enough time for the first VM to be spawned, and to make
-        // sure the PSS measurement is accurate.
-        thread::sleep(std::time::Duration::new(120, 0));
+        let r = std::panic::catch_unwind(|| {
+            guest1.wait_vm_boot(None).unwrap();
+        });
+        if r.is_err() {
+            let _ = child1.kill();
+            let output = child1.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+            panic!("Test should already be failed/panicked"); // To explicitly mark this block never return
+        }
 
-        // Get initial PSS
-        let old_pss = get_pss(child1.id());
+        let ksm_ps_guest1 = get_ksm_pages_shared();
 
+        let mut focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest2 = Guest::new(&mut focal2 as &mut dyn DiskConfig);
-
         let mut child2 = GuestCommand::new(&guest2)
             .args(&["--cpus", "boot=1"])
             .args(&["--memory", format!("size=512M,{}", memory_param).as_str()])
-            .args(&["--kernel", guest2.fw_path.as_str()])
+            .args(&["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .args(&["--net", guest2.default_net_string().as_str()])
             .args(&["--serial", "tty", "--console", "off"])
@@ -1692,24 +1691,20 @@ mod tests {
             .spawn()
             .unwrap();
 
-        // Let enough time for the second VM to be spawned, and to make
-        // sure KSM has enough time to merge identical pages between the
-        // 2 VMs.
-        thread::sleep(std::time::Duration::new(60, 0));
         let r = std::panic::catch_unwind(|| {
-            // Get new PSS
-            let new_pss = get_pss(child1.id());
-
-            // Convert PSS from u32 into float.
-            let old_pss = old_pss as f32;
-            let new_pss = new_pss as f32;
-
-            println!("old PSS {}, new PSS {}", old_pss, new_pss);
+            guest2.wait_vm_boot(None).unwrap();
+            let ksm_ps_guest2 = get_ksm_pages_shared();
 
             if mergeable {
-                assert!(new_pss < (old_pss * 0.95));
+                println!(
+                    "ksm pages_shared after vm1 booted '{}', ksm pages_shared after vm2 booted '{}'",
+                    ksm_ps_guest1, ksm_ps_guest2
+                );
+                // We are expecting the number of shared pages to increase as the number of VM increases
+                assert!(ksm_ps_guest1 < ksm_ps_guest2);
             } else {
-                assert!((old_pss * 0.95) < new_pss && new_pss < (old_pss * 1.05));
+                assert!(ksm_ps_guest1 == 0);
+                assert!(ksm_ps_guest2 == 0);
             }
         });
 
