@@ -317,3 +317,7 @@ etc, are all equal and welcome means of contribution. See the [CONTRIBUTING](CON
 
 Get an [invite to our Slack channel](https://join.slack.com/t/cloud-hypervisor/shared_invite/enQtNjY3MTE3MDkwNDQ4LWQ1MTA1ZDVmODkwMWQ1MTRhYzk4ZGNlN2UwNTI3ZmFlODU0OTcwOWZjMTkwZDExYWE3YjFmNzgzY2FmNDAyMjI)
 and [join us on Slack](https://cloud-hypervisor.slack.com/).
+
+## Security issues
+
+Please use the GitHub security advisories feature for reporting issues: https://github.com/cloud-hypervisor/cloud-hypervisor/security/advisories/new
