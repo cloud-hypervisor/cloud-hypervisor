@@ -250,6 +250,7 @@ impl Serialize for PciDeviceInfo {
 pub fn start_vmm_thread(
     vmm_version: String,
     http_path: &Option<String>,
+    http_fd: Option<RawFd>,
     api_event: EventFd,
     api_sender: Sender<ApiRequest>,
     api_receiver: Receiver<ApiRequest>,
@@ -280,9 +281,11 @@ pub fn start_vmm_thread(
         })
         .map_err(Error::VmmThreadSpawn)?;
 
+    // The VMM thread is started, we can start serving HTTP requests
     if let Some(http_path) = http_path {
-        // The VMM thread is started, we can start serving HTTP requests
-        api::start_http_thread(http_path, http_api_event, api_sender, seccomp_action)?;
+        api::start_http_path_thread(http_path, http_api_event, api_sender, seccomp_action)?;
+    } else if let Some(http_fd) = http_fd {
+        api::start_http_fd_thread(http_fd, http_api_event, api_sender, seccomp_action)?;
     }
     Ok(thread)
 }

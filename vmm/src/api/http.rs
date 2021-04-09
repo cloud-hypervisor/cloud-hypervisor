@@ -11,6 +11,7 @@ use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusC
 use seccomp::{SeccompAction, SeccompFilter};
 use serde_json::Error as SerdeError;
 use std::collections::HashMap;
+use std::os::unix::io::RawFd;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -253,16 +254,12 @@ fn handle_http_request(
     response
 }
 
-pub fn start_http_thread(
-    path: &str,
+fn start_http_thread(
+    mut server: HttpServer,
     api_notifier: EventFd,
     api_sender: Sender<ApiRequest>,
     seccomp_action: &SeccompAction,
 ) -> Result<thread::JoinHandle<Result<()>>> {
-    std::fs::remove_file(path).unwrap_or_default();
-    let socket_path = PathBuf::from(path);
-    let mut server = HttpServer::new(socket_path).map_err(Error::CreateApiServer)?;
-
     // Retrieve seccomp filter for API thread
     let api_seccomp_filter =
         get_seccomp_filter(seccomp_action, Thread::Api).map_err(Error::CreateSeccompFilter)?;
@@ -298,4 +295,26 @@ pub fn start_http_thread(
             }
         })
         .map_err(Error::HttpThreadSpawn)
+}
+
+pub fn start_http_path_thread(
+    path: &str,
+    api_notifier: EventFd,
+    api_sender: Sender<ApiRequest>,
+    seccomp_action: &SeccompAction,
+) -> Result<thread::JoinHandle<Result<()>>> {
+    std::fs::remove_file(path).unwrap_or_default();
+    let socket_path = PathBuf::from(path);
+    let server = HttpServer::new(socket_path).map_err(Error::CreateApiServer)?;
+    start_http_thread(server, api_notifier, api_sender, seccomp_action)
+}
+
+pub fn start_http_fd_thread(
+    fd: RawFd,
+    api_notifier: EventFd,
+    api_sender: Sender<ApiRequest>,
+    seccomp_action: &SeccompAction,
+) -> Result<thread::JoinHandle<Result<()>>> {
+    let server = HttpServer::new_from_fd(fd).map_err(Error::CreateApiServer)?;
+    start_http_thread(server, api_notifier, api_sender, seccomp_action)
 }

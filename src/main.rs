@@ -25,7 +25,7 @@ use signal_hook::{
 };
 use std::env;
 use std::fs::File;
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{FromRawFd, RawFd};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -324,7 +324,15 @@ fn create_app<'a, 'b>(
         .arg(
             Arg::with_name("api-socket")
                 .long("api-socket")
-                .help("HTTP API socket path (UNIX domain socket).")
+                .help("HTTP API socket (UNIX domain socket).")
+                .takes_value(true)
+                .min_values(1)
+                .group("vmm-config"),
+        )
+        .arg(
+            Arg::with_name("api-socket-fd")
+                .long("api-socket-fd")
+                .help("HTTP API socket (UNIX domain socket) fd.")
                 .takes_value(true)
                 .min_values(1)
                 .group("vmm-config"),
@@ -379,7 +387,11 @@ fn create_app<'a, 'b>(
     app
 }
 
-fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &Option<String>) -> Result<(), Error> {
+fn start_vmm(
+    cmd_arguments: ArgMatches,
+    api_socket_path: &Option<String>,
+    api_socket_fd: Option<RawFd>,
+) -> Result<(), Error> {
     let log_level = match cmd_arguments.occurrences_of("v") {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,
@@ -475,6 +487,7 @@ fn start_vmm(cmd_arguments: ArgMatches, api_socket_path: &Option<String>) -> Res
     let vmm_thread = vmm::start_vmm_thread(
         env!("CARGO_PKG_VERSION").to_string(),
         api_socket_path,
+        api_socket_fd,
         api_evt.try_clone().unwrap(),
         http_sender,
         api_request_receiver,
@@ -520,8 +533,11 @@ fn main() {
     let (default_vcpus, default_memory, default_rng) = prepare_default_values();
     let cmd_arguments = create_app(&default_vcpus, &default_memory, &default_rng).get_matches();
     let api_socket_path = cmd_arguments.value_of("api-socket").map(|s| s.to_string());
+    let api_socket_fd = cmd_arguments
+        .value_of("api-socket-fd")
+        .map(|s| s.parse::<i32>().unwrap());
 
-    let exit_code = if let Err(e) = start_vmm(cmd_arguments, &api_socket_path) {
+    let exit_code = if let Err(e) = start_vmm(cmd_arguments, &api_socket_path, api_socket_fd) {
         eprintln!("{}", e);
         1
     } else {
