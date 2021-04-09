@@ -31,7 +31,8 @@
 extern crate vm_device;
 extern crate vmm_sys_util;
 
-pub use self::http::start_http_thread;
+pub use self::http::start_http_fd_thread;
+pub use self::http::start_http_path_thread;
 
 pub mod http;
 pub mod http_endpoint;
