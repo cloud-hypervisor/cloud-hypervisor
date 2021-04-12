@@ -115,7 +115,7 @@ impl MsiInterruptGroup<IrqRoutingEntry> {
     }
 }
 
-impl<IrqRoutingEntry> MsiInterruptGroup<IrqRoutingEntry> {
+impl MsiInterruptGroup<IrqRoutingEntry> {
     fn new(
         vm: Arc<dyn hypervisor::Vm>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry<IrqRoutingEntry>>>>,
