@@ -33,6 +33,9 @@ pub struct VirtioNetConfig {
     pub mtu: u16,
     pub speed: u32,
     pub duplex: u8,
+    pub rss_max_key_size: u8,
+    pub rss_max_indirection_table_length: u16,
+    pub supported_hash_types: u32,
 }
 
 // We must explicitly implement Serialize since the structure is packed and
