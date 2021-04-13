@@ -1715,6 +1715,7 @@ impl VmConfig {
                 if net.vhost_user && !self.memory.shared {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
                 }
+                net.validate()?;
             }
         }
 
