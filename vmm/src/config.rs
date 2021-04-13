@@ -117,6 +117,8 @@ pub enum ValidationError {
     VnetQueueLowerThan2,
     /// The input queue number for virtio_net must match the number of input fds
     VnetQueueFdMismatch,
+    /// Using reserved fd
+    VnetReservedFd,
     // Hugepages not turned on
     HugePageSizeWithoutHugePages,
     // Huge page size is not power of 2
@@ -153,6 +155,7 @@ impl fmt::Display for ValidationError {
                 f,
                 "Number of queues to virtio_net does not match the number of input FDs"
             ),
+            VnetReservedFd => write!(f, "Reserved fd number (<= 2)"),
             HugePageSizeWithoutHugePages => {
                 write!(f, "Huge page size specified but huge pages not enabled")
             }
@@ -1075,6 +1078,7 @@ impl NetConfig {
         config.validate().map_err(Error::Validation)?;
         Ok(config)
     }
+
     pub fn validate(&self) -> ValidationResult<()> {
         if self.num_queues < 2 {
             return Err(ValidationError::VnetQueueLowerThan2);
@@ -1082,6 +1086,14 @@ impl NetConfig {
 
         if self.fds.is_some() && self.fds.as_ref().unwrap().len() * 2 != self.num_queues {
             return Err(ValidationError::VnetQueueFdMismatch);
+        }
+
+        if let Some(fds) = self.fds.as_ref() {
+            for fd in fds {
+                if *fd <= 2 {
+                    return Err(ValidationError::VnetReservedFd);
+                }
+            }
         }
 
         Ok(())
@@ -2594,6 +2606,13 @@ mod tests {
         }]);
         still_valid_config.memory.shared = true;
         assert!(still_valid_config.validate().is_ok());
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.net = Some(vec![NetConfig {
+            fds: Some(vec![0]),
+            ..Default::default()
+        }]);
+        assert!(invalid_config.validate().is_err());
 
         let mut invalid_config = valid_config.clone();
         invalid_config.fs = Some(vec![FsConfig {
