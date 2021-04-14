@@ -365,14 +365,11 @@ impl Snapshottable for Vcpu {
     }
 
     fn snapshot(&mut self, _app_version: u16) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot = serde_json::to_vec(&self.saved_state)
-            .map_err(|e| MigratableError::Snapshot(e.into()))?;
-
         let mut vcpu_snapshot = Snapshot::new(&format!("{}", self.id));
-        vcpu_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", VCPU_SNAPSHOT_ID),
-            snapshot,
-        });
+        vcpu_snapshot.add_data_section(SnapshotDataSection::new_from_state(
+            VCPU_SNAPSHOT_ID,
+            &self.saved_state,
+        )?);
 
         Ok(vcpu_snapshot)
     }
@@ -382,28 +379,8 @@ impl Snapshottable for Vcpu {
         snapshot: Snapshot,
         _app_version: u16,
     ) -> std::result::Result<(), MigratableError> {
-        if let Some(vcpu_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", VCPU_SNAPSHOT_ID))
-        {
-            let vcpu_state = match serde_json::from_slice(&vcpu_section.snapshot) {
-                Ok(state) => state,
-                Err(error) => {
-                    return Err(MigratableError::Restore(anyhow!(
-                        "Could not deserialize the vCPU snapshot {}",
-                        error
-                    )))
-                }
-            };
-
-            self.saved_state = Some(vcpu_state);
-
-            Ok(())
-        } else {
-            Err(MigratableError::Restore(anyhow!(
-                "Could not find the vCPU snapshot section"
-            )))
-        }
+        self.saved_state = Some(snapshot.to_state(VCPU_SNAPSHOT_ID)?);
+        Ok(())
     }
 }
 
