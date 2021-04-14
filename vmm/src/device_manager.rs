@@ -3869,32 +3869,18 @@ impl Snapshottable for DeviceManager {
         }
 
         // Then we store the DeviceManager state.
-        snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", DEVICE_MANAGER_SNAPSHOT_ID),
-            snapshot: serde_json::to_vec(&self.state())
-                .map_err(|e| MigratableError::Snapshot(e.into()))?,
-        });
+        snapshot.add_data_section(SnapshotDataSection::new_from_state(
+            DEVICE_MANAGER_SNAPSHOT_ID,
+            &self.state(),
+        )?);
 
         Ok(snapshot)
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> std::result::Result<(), MigratableError> {
         // Let's first restore the DeviceManager.
-        if let Some(device_manager_section) = snapshot
-            .snapshot_data
-            .get(&format!("{}-section", DEVICE_MANAGER_SNAPSHOT_ID))
-        {
-            let device_manager_state = serde_json::from_slice(&device_manager_section.snapshot)
-                .map_err(|e| {
-                    MigratableError::Restore(anyhow!("Could not deserialize DeviceManager {}", e))
-                })?;
 
-            self.set_state(&device_manager_state);
-        } else {
-            return Err(MigratableError::Restore(anyhow!(
-                "Could not find DeviceManager snapshot section"
-            )));
-        }
+        self.set_state(&snapshot.to_state(DEVICE_MANAGER_SNAPSHOT_ID)?);
 
         // Now that DeviceManager is updated with the right states, it's time
         // to create the devices based on the configuration.
