@@ -66,6 +66,34 @@ pub struct SnapshotDataSection {
     pub snapshot: Vec<u8>,
 }
 
+impl SnapshotDataSection {
+    /// Generate the state data from the snapshot data
+    pub fn to_state<'a, T>(&'a self) -> Result<T, MigratableError>
+    where
+        T: Deserialize<'a>,
+    {
+        serde_json::from_slice(&self.snapshot).map_err(|e| {
+            MigratableError::Restore(anyhow!("Error deserialising: {} {}", self.id, e))
+        })
+    }
+
+    /// Create from state that can be serialized
+    pub fn new_from_state<T>(id: &str, state: &T) -> Result<Self, MigratableError>
+    where
+        T: Serialize,
+    {
+        let snapshot = serde_json::to_vec(state)
+            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {} {}", id, e)))?;
+
+        let snapshot_data = SnapshotDataSection {
+            id: format!("{}-section", id),
+            snapshot,
+        };
+
+        Ok(snapshot_data)
+    }
+}
+
 /// A Snapshottable component's snapshot is a tree of snapshots, where leafs
 /// contain the snapshot data. Nodes of this tree track all their children
 /// through the snapshots field, which is basically their sub-components.
@@ -104,14 +132,8 @@ impl Snapshot {
     where
         T: Serialize,
     {
-        let snapshot = serde_json::to_vec(state)
-            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {} {}", id, e)))?;
-
         let mut snapshot_data = Snapshot::new(id);
-        snapshot_data.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", id),
-            snapshot,
-        });
+        snapshot_data.add_data_section(SnapshotDataSection::new_from_state(id, state)?);
 
         Ok(snapshot_data)
     }
@@ -132,13 +154,10 @@ impl Snapshot {
     where
         T: Deserialize<'a>,
     {
-        let section = self
-            .snapshot_data
+        self.snapshot_data
             .get(&format!("{}-section", id))
-            .ok_or_else(|| MigratableError::Restore(anyhow!("Missing section for {}", id)))?;
-
-        serde_json::from_slice(&section.snapshot)
-            .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {} {}", id, e)))
+            .ok_or_else(|| MigratableError::Restore(anyhow!("Missing section for {}", id)))?
+            .to_state()
     }
 }
 
