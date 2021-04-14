@@ -1117,24 +1117,14 @@ impl Snapshottable for VirtioPciDevice {
                 self.configuration.restore(*pci_config_snapshot.clone())?;
             }
 
-            let virtio_pci_dev_state =
-                match serde_json::from_slice(&virtio_pci_dev_section.snapshot) {
-                    Ok(state) => state,
-                    Err(error) => {
-                        return Err(MigratableError::Restore(anyhow!(
-                            "Could not deserialize VIRTIO_PCI_DEVICE {}",
-                            error
-                        )))
-                    }
-                };
-
             // First restore the status of the virtqueues.
-            self.set_state(&virtio_pci_dev_state).map_err(|e| {
-                MigratableError::Restore(anyhow!(
-                    "Could not restore VIRTIO_PCI_DEVICE state {:?}",
-                    e
-                ))
-            })?;
+            self.set_state(&virtio_pci_dev_section.to_state()?)
+                .map_err(|e| {
+                    MigratableError::Restore(anyhow!(
+                        "Could not restore VIRTIO_PCI_DEVICE state {:?}",
+                        e
+                    ))
+                })?;
 
             // Then we can activate the device, as we know at this point that
             // the virtqueues are in the right state and the device is ready
