@@ -853,47 +853,30 @@ impl MemoryManager {
         if let Some(source_url) = source_url {
             let vm_snapshot_path = url_to_path(source_url).map_err(Error::Restore)?;
 
-            if let Some(mem_section) = snapshot
-                .snapshot_data
-                .get(&format!("{}-section", MEMORY_MANAGER_SNAPSHOT_ID))
-            {
-                let mem_snapshot: MemoryManagerSnapshotData =
-                    match serde_json::from_slice(&mem_section.snapshot) {
-                        Ok(snapshot) => snapshot,
-                        Err(error) => {
-                            return Err(Error::Restore(MigratableError::Restore(anyhow!(
-                                "Could not deserialize MemoryManager {}",
-                                error
-                            ))))
-                        }
-                    };
+            let mem_snapshot: MemoryManagerSnapshotData = snapshot
+                .to_state(MEMORY_MANAGER_SNAPSHOT_ID)
+                .map_err(Error::Restore)?;
 
-                // Here we turn the content file name into a content file path as
-                // this will be needed to copy the content of the saved memory
-                // region into the newly created memory region.
-                // We simply ignore the content files that are None, as they
-                // represent regions that have been directly saved by the user, with
-                // no need for saving into a dedicated external file. For these
-                // files, the VmConfig already contains the information on where to
-                // find them.
-                let mut saved_regions = mem_snapshot.memory_regions;
-                for region in saved_regions.iter_mut() {
-                    if let Some(content) = &mut region.content {
-                        let mut memory_region_path = vm_snapshot_path.clone();
-                        memory_region_path.push(content.clone());
-                        *content = memory_region_path;
-                    }
+            // Here we turn the content file name into a content file path as
+            // this will be needed to copy the content of the saved memory
+            // region into the newly created memory region.
+            // We simply ignore the content files that are None, as they
+            // represent regions that have been directly saved by the user, with
+            // no need for saving into a dedicated external file. For these
+            // files, the VmConfig already contains the information on where to
+            // find them.
+            let mut saved_regions = mem_snapshot.memory_regions;
+            for region in saved_regions.iter_mut() {
+                if let Some(content) = &mut region.content {
+                    let mut memory_region_path = vm_snapshot_path.clone();
+                    memory_region_path.push(content.clone());
+                    *content = memory_region_path;
                 }
-
-                mm.lock().unwrap().fill_saved_regions(saved_regions)?;
-
-                Ok(mm)
-            } else {
-                Err(Error::Restore(MigratableError::Restore(anyhow!(
-                    "Could not find {}-section from snapshot",
-                    MEMORY_MANAGER_SNAPSHOT_ID
-                ))))
             }
+
+            mm.lock().unwrap().fill_saved_regions(saved_regions)?;
+
+            Ok(mm)
         } else {
             Ok(mm)
         }
@@ -2009,14 +1992,10 @@ impl Snapshottable for MemoryManager {
         // memory region content for the regions requiring it.
         self.snapshot_memory_regions = memory_regions.clone();
 
-        let snapshot_data_section =
-            serde_json::to_vec(&MemoryManagerSnapshotData { memory_regions })
-                .map_err(|e| MigratableError::Snapshot(e.into()))?;
-
-        memory_manager_snapshot.add_data_section(SnapshotDataSection {
-            id: format!("{}-section", MEMORY_MANAGER_SNAPSHOT_ID),
-            snapshot: snapshot_data_section,
-        });
+        memory_manager_snapshot.add_data_section(SnapshotDataSection::new_from_state(
+            MEMORY_MANAGER_SNAPSHOT_ID,
+            &MemoryManagerSnapshotData { memory_regions },
+        )?);
 
         let mut memory_snapshot = self.snapshot.lock().unwrap();
         *memory_snapshot = Some(guest_memory);
