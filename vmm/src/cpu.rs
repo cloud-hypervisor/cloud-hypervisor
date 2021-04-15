@@ -59,6 +59,10 @@ const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 #[cfg(target_arch = "x86_64")]
 const MTRR_EDX_BIT: u8 = 12; // Hypervisor ecx bit.
 
+// KVM feature bits
+#[cfg(target_arch = "x86_64")]
+const KVM_FEATURE_ASYNC_PF_INT_BIT: u8 = 14;
+
 #[cfg(feature = "acpi")]
 pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
 
@@ -685,10 +689,22 @@ impl CpuManager {
                 .map_err(Error::CpuidSgx)?;
         }
 
-        // Set CPU physical bits
+        // Update some existing CPUID
         for entry in cpuid.as_mut_slice().iter_mut() {
-            if entry.function == 0x8000_0008 {
-                entry.eax = (entry.eax & 0xffff_ff00) | (phys_bits as u32 & 0xff);
+            match entry.function {
+                // Set CPU physical bits
+                0x8000_0008 => {
+                    entry.eax = (entry.eax & 0xffff_ff00) | (phys_bits as u32 & 0xff);
+                }
+                // Disable KVM_FEATURE_ASYNC_PF_INT
+                // This is required until we find out why the asynchronous page
+                // fault is generating unexpected behavior when using interrupt
+                // mechanism.
+                // TODO: Re-enable KVM_FEATURE_ASYNC_PF_INT (#2277)
+                0x4000_0001 => {
+                    entry.eax &= !(1 << KVM_FEATURE_ASYNC_PF_INT_BIT);
+                }
+                _ => {}
             }
         }
 
