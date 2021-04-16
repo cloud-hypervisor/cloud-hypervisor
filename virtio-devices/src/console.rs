@@ -11,7 +11,6 @@ use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::VirtioInterrupt;
 use libc::EFD_NONBLOCK;
 use seccomp::{SeccompAction, SeccompFilter};
-use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::collections::VecDeque;
 use std::io;
@@ -41,37 +40,13 @@ const CONFIG_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 //Console size feature bit
 const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
 
-#[derive(Copy, Clone, Debug, Default, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize)]
 #[repr(C, packed)]
 pub struct VirtioConsoleConfig {
     cols: u16,
     rows: u16,
     max_nr_ports: u32,
     emerg_wr: u32,
-}
-
-// We must explicitly implement Serialize since the structure is packed and
-// it's unsafe to borrow from a packed structure. And by default, if we derive
-// Serialize from serde, it will borrow the values from the structure.
-// That's why this implementation copies each field separately before it
-// serializes the entire structure field by field.
-impl Serialize for VirtioConsoleConfig {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let cols = self.cols;
-        let rows = self.rows;
-        let max_nr_ports = self.max_nr_ports;
-        let emerg_wr = self.emerg_wr;
-
-        let mut virtio_console_config = serializer.serialize_struct("VirtioConsoleConfig", 12)?;
-        virtio_console_config.serialize_field("cols", &cols)?;
-        virtio_console_config.serialize_field("rows", &rows)?;
-        virtio_console_config.serialize_field("max_nr_ports", &max_nr_ports)?;
-        virtio_console_config.serialize_field("emerg_wr", &emerg_wr)?;
-        virtio_console_config.end()
-    }
 }
 
 // Safe because it only has data and has no implicit padding.

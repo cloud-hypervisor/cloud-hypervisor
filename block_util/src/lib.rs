@@ -24,7 +24,6 @@ pub mod vhd;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, DiskFileError, DiskFileResult};
 #[cfg(feature = "io_uring")]
 use io_uring::{opcode, IoUring, Probe};
-use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::cmp;
 use std::convert::TryInto;
 use std::fs::File;
@@ -370,7 +369,7 @@ impl Request {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize)]
 #[repr(C, packed)]
 pub struct VirtioBlockConfig {
     pub capacity: u64,
@@ -393,95 +392,15 @@ pub struct VirtioBlockConfig {
     pub write_zeroes_may_unmap: u8,
     pub unused1: [u8; 3],
 }
-
-// We must explicitly implement Serialize since the structure is packed and
-// it's unsafe to borrow from a packed structure. And by default, if we derive
-// Serialize from serde, it will borrow the values from the structure.
-// That's why this implementation copies each field separately before it
-// serializes the entire structure field by field.
-impl Serialize for VirtioBlockConfig {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let capacity = self.capacity;
-        let size_max = self.size_max;
-        let seg_max = self.seg_max;
-        let geometry = self.geometry;
-        let blk_size = self.blk_size;
-        let physical_block_exp = self.physical_block_exp;
-        let alignment_offset = self.alignment_offset;
-        let min_io_size = self.min_io_size;
-        let opt_io_size = self.opt_io_size;
-        let writeback = self.writeback;
-        let unused = self.unused;
-        let num_queues = self.num_queues;
-        let max_discard_sectors = self.max_discard_sectors;
-        let max_discard_seg = self.max_discard_seg;
-        let discard_sector_alignment = self.discard_sector_alignment;
-        let max_write_zeroes_sectors = self.max_write_zeroes_sectors;
-        let max_write_zeroes_seg = self.max_write_zeroes_seg;
-        let write_zeroes_may_unmap = self.write_zeroes_may_unmap;
-        let unused1 = self.unused1;
-
-        let mut virtio_block_config = serializer.serialize_struct("VirtioBlockConfig", 60)?;
-        virtio_block_config.serialize_field("capacity", &capacity)?;
-        virtio_block_config.serialize_field("size_max", &size_max)?;
-        virtio_block_config.serialize_field("seg_max", &seg_max)?;
-        virtio_block_config.serialize_field("geometry", &geometry)?;
-        virtio_block_config.serialize_field("blk_size", &blk_size)?;
-        virtio_block_config.serialize_field("physical_block_exp", &physical_block_exp)?;
-        virtio_block_config.serialize_field("alignment_offset", &alignment_offset)?;
-        virtio_block_config.serialize_field("min_io_size", &min_io_size)?;
-        virtio_block_config.serialize_field("opt_io_size", &opt_io_size)?;
-        virtio_block_config.serialize_field("writeback", &writeback)?;
-        virtio_block_config.serialize_field("unused", &unused)?;
-        virtio_block_config.serialize_field("num_queues", &num_queues)?;
-        virtio_block_config.serialize_field("max_discard_sectors", &max_discard_sectors)?;
-        virtio_block_config.serialize_field("max_discard_seg", &max_discard_seg)?;
-        virtio_block_config
-            .serialize_field("discard_sector_alignment", &discard_sector_alignment)?;
-        virtio_block_config
-            .serialize_field("max_write_zeroes_sectors", &max_write_zeroes_sectors)?;
-        virtio_block_config.serialize_field("max_write_zeroes_seg", &max_write_zeroes_seg)?;
-        virtio_block_config.serialize_field("write_zeroes_may_unmap", &write_zeroes_may_unmap)?;
-        virtio_block_config.serialize_field("unused1", &unused1)?;
-        virtio_block_config.end()
-    }
-}
-
 unsafe impl ByteValued for VirtioBlockConfig {}
 
-#[derive(Copy, Clone, Debug, Default, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 #[repr(C, packed)]
 pub struct VirtioBlockGeometry {
     pub cylinders: u16,
     pub heads: u8,
     pub sectors: u8,
 }
-
-// We must explicitly implement Serialize since the structure is packed and
-// it's unsafe to borrow from a packed structure. And by default, if we derive
-// Serialize from serde, it will borrow the values from the structure.
-// That's why this implementation copies each field separately before it
-// serializes the entire structure field by field.
-impl Serialize for VirtioBlockGeometry {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let cylinders = self.cylinders;
-        let heads = self.heads;
-        let sectors = self.sectors;
-
-        let mut virtio_block_geometry = serializer.serialize_struct("VirtioBlockGeometry", 4)?;
-        virtio_block_geometry.serialize_field("cylinders", &cylinders)?;
-        virtio_block_geometry.serialize_field("heads", &heads)?;
-        virtio_block_geometry.serialize_field("sectors", &sectors)?;
-        virtio_block_geometry.end()
-    }
-}
-
 unsafe impl ByteValued for VirtioBlockGeometry {}
 
 /// Check if io_uring for block device can be used on the current system, as
