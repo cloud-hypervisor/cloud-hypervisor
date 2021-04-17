@@ -1493,25 +1493,13 @@ impl MemoryManager {
         &self.memory_zones
     }
 
-    // Generate a table for the pages that are dirty. The algorithm is currently
-    // very simple. If any page in a "block" of 64 pages is dirty then that whole
-    // "block" is added to the table. These "blocks" are also collapsed together if
-    // they are contiguous:
-    //
-    // For every block of 64 pages we check to see if there are any dirty pages in it
-    // if there are we increase the size of the current range if there is one, otherwise
-    // create a new range. If there are no dirty pages in the current "block" the range is
-    // closed if there is one and added to the table. After iterating through the dirty
-    // page bitmaps an open range will be closed and added to the table.
-    //
-    // This algorithm is very simple and could be refined to count the number of pages
-    // in the block and instead create smaller ranges covering those pages.
+    // Generate a table for the pages that are dirty. The dirty pages are collapsed
+    // together in the table if they are contiguous.
     pub fn dirty_memory_range_table(
         &self,
     ) -> std::result::Result<MemoryRangeTable, MigratableError> {
         let page_size = 4096; // TODO: Does this need to vary?
         let mut table = MemoryRangeTable::default();
-        let mut total_pages = 0;
         for r in &self.guest_ram_mappings {
             let dirty_bitmap = self.vm.get_dirty_log(r.slot, r.size).map_err(|e| {
                 MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
@@ -1519,18 +1507,21 @@ impl MemoryManager {
 
             let mut entry: Option<MemoryRange> = None;
             for (i, block) in dirty_bitmap.iter().enumerate() {
-                if *block > 0 {
-                    if let Some(entry) = &mut entry {
-                        entry.length += 64 * page_size;
-                    } else {
-                        entry = Some(MemoryRange {
-                            gpa: r.gpa + (64 * i as u64 * page_size),
-                            length: 64 * page_size,
-                        });
+                for j in 0..64 {
+                    let is_page_dirty = ((block >> j) & 1u64) != 0u64;
+                    let page_offset = ((i * 64) + j) as u64 * page_size;
+                    if is_page_dirty {
+                        if let Some(entry) = &mut entry {
+                            entry.length += page_size;
+                        } else {
+                            entry = Some(MemoryRange {
+                                gpa: r.gpa + page_offset,
+                                length: page_size,
+                            });
+                        }
+                    } else if let Some(entry) = entry.take() {
+                        table.push(entry);
                     }
-                    total_pages += block.count_ones() as u64;
-                } else if let Some(entry) = entry.take() {
-                    table.push(entry);
                 }
             }
             if let Some(entry) = entry.take() {
@@ -1541,18 +1532,9 @@ impl MemoryManager {
                 info!("Dirty Memory Range Table is empty");
             } else {
                 info!("Dirty Memory Range Table:");
-                let mut total_size = 0;
                 for range in table.regions() {
                     info!("GPA: {:x} size: {} (KiB)", range.gpa, range.length / 1024);
-                    total_size += range.length;
                 }
-                info!(
-                    "Total pages: {} ({} KiB). Total size: {} KiB. Efficiency: {}%",
-                    total_pages,
-                    total_pages * page_size / 1024,
-                    total_size / 1024,
-                    (total_pages * page_size * 100) / total_size
-                );
             }
         }
         Ok(table)
