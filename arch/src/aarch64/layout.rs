@@ -54,12 +54,12 @@ pub const UEFI_SIZE: u64 = 0x0400_0000;
 /// Below this address will reside the GIC, above this address will reside the MMIO devices.
 pub const MAPPED_IO_START: u64 = 0x0900_0000;
 
-/// Space 0x0900_0000 ~ 0x1000_0000 is reserved for legacy devices.
+/// Space 0x0900_0000 ~ 0x0905_0000 is reserved for legacy devices.
 pub const LEGACY_SERIAL_MAPPED_IO_START: u64 = 0x0900_0000;
 pub const LEGACY_RTC_MAPPED_IO_START: u64 = 0x0901_0000;
 pub const LEGACY_GPIO_MAPPED_IO_START: u64 = 0x0902_0000;
 
-/// Space 0x0905_0000 ~ 0x906_0000 is reserved for pcie io address
+/// Space 0x0905_0000 ~ 0x0906_0000 is reserved for pcie io address
 pub const MEM_PCI_IO_START: GuestAddress = GuestAddress(0x0905_0000);
 pub const MEM_PCI_IO_SIZE: u64 = 0x10000;
 
@@ -90,6 +90,9 @@ pub const RSDP_POINTER: GuestAddress = GuestAddress(ACPI_START);
 
 /// Kernel start after FDT and ACPI
 pub const KERNEL_START: u64 = ACPI_START + ACPI_MAX_SIZE as u64;
+
+/// Pci high memory base
+pub const PCI_HIGH_BASE: u64 = 0x80_0000_0000_u64;
 
 // As per virt/kvm/arm/vgic/vgic-kvm-device.c we need
 // the number of interrupts our GIC will support to be:
