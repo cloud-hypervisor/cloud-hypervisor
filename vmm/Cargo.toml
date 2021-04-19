@@ -30,7 +30,7 @@ lazy_static = "1.4.0"
 libc = "0.2.93"
 linux-loader = { version = "0.3.0", features = ["elf", "bzimage", "pe"] }
 log = "0.4.14"
-micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "master" }
+micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
 pci = { path = "../pci" }
