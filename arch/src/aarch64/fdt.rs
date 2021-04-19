@@ -17,8 +17,8 @@ use super::super::InitramfsConfig;
 use super::get_fdt_addr;
 use super::gic::GicDevice;
 use super::layout::{
-    IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, PCI_MMCONFIG_SIZE,
-    PCI_MMCONFIG_START,
+    IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE, MEM_PCI_IO_START,
+    PCI_HIGH_BASE, PCI_MMCONFIG_SIZE, PCI_MMCONFIG_START,
 };
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
@@ -413,7 +413,16 @@ fn create_pci_nodes(
     // Add node for PCIe controller.
     // See Documentation/devicetree/bindings/pci/host-generic-pci.txt in the kernel
     // and https://elinux.org/Device_Tree_Usage.
+    let pci_device_base = pci_device_base + PCI_HIGH_BASE;
     let ranges = [
+        // io addresses
+        0x1000000,
+        0_u32,
+        0_u32,
+        (MEM_PCI_IO_START.0 >> 32) as u32,
+        MEM_PCI_IO_START.0 as u32,
+        (MEM_PCI_IO_SIZE >> 32) as u32,
+        MEM_PCI_IO_SIZE as u32,
         // mmio addresses
         0x2000000,                                // (ss = 10: 32-bit memory space)
         (MEM_32BIT_DEVICES_START.0 >> 32) as u32, // PCI address

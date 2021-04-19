@@ -39,6 +39,8 @@ use hypervisor::vm::{HypervisorVmError, VmmOps};
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
+#[cfg(target_arch = "aarch64")]
+use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
 use linux_loader::loader::KernelLoader;
 use seccomp::{SeccompAction, SeccompFilter};
 use signal_hook::{
@@ -90,6 +92,10 @@ pub enum Error {
 
     /// Cannot load the kernel in memory
     KernelLoad(linux_loader::loader::Error),
+
+    #[cfg(target_arch = "aarch64")]
+    /// Cannot load the UEFI binary in memory
+    UefiLoad(arch::aarch64::uefi::Error),
 
     /// Cannot load the initramfs in memory
     InitramfsLoad,
@@ -883,6 +889,21 @@ impl Vm {
             None,
         ) {
             Ok(entry_addr) => entry_addr,
+            // Try to load the binary as kernel PE file at first.
+            // If failed, retry to load it as UEFI binary.
+            // As the UEFI binary is formatless, it must be the last option to try.
+            Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
+                arch::aarch64::uefi::load_uefi(
+                    mem.deref(),
+                    GuestAddress(arch::get_uefi_start()),
+                    &mut kernel,
+                )
+                .map_err(Error::UefiLoad)?;
+                // The entry point offset in UEFI image is always 0.
+                return Ok(EntryPoint {
+                    entry_addr: GuestAddress(arch::get_uefi_start()),
+                });
+            }
             Err(e) => {
                 return Err(Error::KernelLoad(e));
             }

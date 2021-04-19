@@ -10,6 +10,8 @@ pub mod gic;
 pub mod layout;
 /// Logic for configuring aarch64 registers.
 pub mod regs;
+/// Module for loading UEFI binary.
+pub mod uefi;
 
 pub use self::fdt::DeviceInfoForFdt;
 use crate::DeviceType;
@@ -180,6 +182,11 @@ pub fn initramfs_load_addr(
 /// Returns the memory address where the kernel could be loaded.
 pub fn get_kernel_start() -> u64 {
     layout::KERNEL_START
+}
+
+///Return guest memory address where the uefi should be loaded.
+pub fn get_uefi_start() -> u64 {
+    layout::UEFI_START
 }
 
 // Auxiliary function to get the address where the device tree blob is loaded.
