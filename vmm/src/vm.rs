@@ -38,6 +38,8 @@ use hypervisor::vm::{HypervisorVmError, VmmOps};
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
+#[cfg(target_arch = "aarch64")]
+use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
 use linux_loader::loader::KernelLoader;
 use seccomp::{SeccompAction, SeccompFilter};
 use signal_hook::{
@@ -875,6 +877,21 @@ impl Vm {
             None,
         ) {
             Ok(entry_addr) => entry_addr,
+            // Try to load the binary as kernel PE file at first.
+            // If failed, retry to load it as UEFI binary.
+            // As the UEFI binary is formatless, it must be the last option to try.
+            Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
+                linux_loader::loader::pe::load_uefi(
+                    mem.deref(),
+                    GuestAddress(arch::get_uefi_start()),
+                    &mut kernel,
+                )
+                .map_err(Error::KernelLoad)?;
+                // The entry point offset in UEFI image is always 0.
+                return Ok(EntryPoint {
+                    entry_addr: GuestAddress(arch::get_uefi_start()),
+                });
+            }
             Err(e) => {
                 return Err(Error::KernelLoad(e));
             }

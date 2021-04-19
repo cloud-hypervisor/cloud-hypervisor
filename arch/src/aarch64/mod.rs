@@ -191,6 +191,11 @@ pub fn get_kernel_start() -> u64 {
     layout::KERNEL_START
 }
 
+///Return guest memory address where the uefi should be loaded.
+pub fn get_uefi_start() -> u64 {
+    layout::UEFI_START
+}
+
 // Auxiliary function to get the address where the device tree blob is loaded.
 fn get_fdt_addr() -> u64 {
     layout::FDT_START
