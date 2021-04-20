@@ -768,85 +768,77 @@ impl PciConfiguration {
 
         let mask = self.writable_bits[reg_idx];
         if (BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) {
+            // Ignore the case where the BAR size is being asked for.
+            if value == 0xffff_ffff {
+                return None;
+            }
+
             let bar_idx = reg_idx - 4;
-            if (value & mask) != (self.bars[bar_idx].addr & mask) {
-                // Handle special case where the address being written is
-                // different from the address initially provided. This is a
-                // BAR reprogramming case which needs to be properly caught.
-                if let Some(bar_type) = self.bars[bar_idx].r#type {
-                    match bar_type {
-                        PciBarRegionType::Memory64BitRegion => {}
-                        _ => {
-                            // Ignore the case where the BAR size is being
-                            // asked for.
-                            if value == 0xffff_ffff {
-                                return None;
-                            }
-
-                            debug!(
-                                "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
-                                self.registers[reg_idx], value
-                            );
-                            let old_base = u64::from(self.bars[bar_idx].addr & mask);
-                            let new_base = u64::from(value & mask);
-                            let len = u64::from(
-                                decode_32_bits_bar_size(self.bars[bar_idx].size)
-                                    .ok_or(Error::Decode32BarSize)
-                                    .unwrap(),
-                            );
-                            let region_type = bar_type;
-
-                            self.bars[bar_idx].addr = value;
-
-                            return Some(BarReprogrammingParams {
-                                old_base,
-                                new_base,
-                                len,
-                                region_type,
-                            });
-                        }
-                    }
-                } else if (reg_idx > BAR0_REG)
-                    && (self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1])
-                        != (self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1])
-                {
-                    // Ignore the case where the BAR size is being asked for.
-                    // Because we are in the 64bits case here, we have to check
-                    // if the lower 32bits of the current BAR have already been
-                    // asked for the BAR size too.
-                    if value == 0xffff_ffff
-                        && self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1]
-                            == self.bars[bar_idx - 1].size & self.writable_bits[reg_idx - 1]
-                    {
-                        return None;
-                    }
-
-                    debug!(
-                        "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
-                        self.registers[reg_idx], value
-                    );
-                    let old_base = u64::from(self.bars[bar_idx].addr & mask) << 32
-                        | u64::from(self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1]);
-                    let new_base = u64::from(value & mask) << 32
-                        | u64::from(self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1]);
-                    let len = decode_64_bits_bar_size(
-                        self.bars[bar_idx].size,
-                        self.bars[bar_idx - 1].size,
-                    )
-                    .ok_or(Error::Decode64BarSize)
-                    .unwrap();
-                    let region_type = PciBarRegionType::Memory64BitRegion;
-
-                    self.bars[bar_idx].addr = value;
-                    self.bars[bar_idx - 1].addr = self.registers[reg_idx - 1];
-
-                    return Some(BarReprogrammingParams {
-                        old_base,
-                        new_base,
-                        len,
-                        region_type,
-                    });
+            // Handle special case where the address being written is
+            // different from the address initially provided. This is a
+            // BAR reprogramming case which needs to be properly caught.
+            if let Some(bar_type) = self.bars[bar_idx].r#type {
+                // In case of 64 bits memory BAR, we don't do anything until
+                // the upper BAR is modified, otherwise we would be moving the
+                // BAR to a wrong location in memory.
+                if bar_type == PciBarRegionType::Memory64BitRegion {
+                    return None;
                 }
+
+                // Ignore the case where the value is unchanged.
+                if (value & mask) == (self.bars[bar_idx].addr & mask) {
+                    return None;
+                }
+
+                debug!(
+                    "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
+                    self.registers[reg_idx], value
+                );
+                let old_base = u64::from(self.bars[bar_idx].addr & mask);
+                let new_base = u64::from(value & mask);
+                let len = u64::from(
+                    decode_32_bits_bar_size(self.bars[bar_idx].size)
+                        .ok_or(Error::Decode32BarSize)
+                        .unwrap(),
+                );
+                let region_type = bar_type;
+
+                self.bars[bar_idx].addr = value;
+
+                return Some(BarReprogrammingParams {
+                    old_base,
+                    new_base,
+                    len,
+                    region_type,
+                });
+            } else if (reg_idx > BAR0_REG)
+                && ((self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1])
+                    != (self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1])
+                    || (value & mask) != (self.bars[bar_idx].addr & mask))
+            {
+                debug!(
+                    "DETECT BAR REPROG: current 0x{:x}, new 0x{:x}",
+                    self.registers[reg_idx], value
+                );
+                let old_base = u64::from(self.bars[bar_idx].addr & mask) << 32
+                    | u64::from(self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1]);
+                let new_base = u64::from(value & mask) << 32
+                    | u64::from(self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1]);
+                let len =
+                    decode_64_bits_bar_size(self.bars[bar_idx].size, self.bars[bar_idx - 1].size)
+                        .ok_or(Error::Decode64BarSize)
+                        .unwrap();
+                let region_type = PciBarRegionType::Memory64BitRegion;
+
+                self.bars[bar_idx].addr = value;
+                self.bars[bar_idx - 1].addr = self.registers[reg_idx - 1];
+
+                return Some(BarReprogrammingParams {
+                    old_base,
+                    new_base,
+                    len,
+                    region_type,
+                });
             }
         } else if reg_idx == ROM_BAR_REG && (value & mask) != (self.rom_bar_addr & mask) {
             // Ignore the case where the BAR size is being asked for.
