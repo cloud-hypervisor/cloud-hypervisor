@@ -3943,6 +3943,12 @@ impl BusDevice for DeviceManager {
                 // Clear the PCID bitmap
                 self.pci_devices_down = 0;
             }
+            B0EJ_FIELD_OFFSET => {
+                assert!(data.len() == B0EJ_FIELD_SIZE);
+                // Always return an empty bitmap since the eject is always
+                // taken care of right away during a write access.
+                data.copy_from_slice(&[0, 0, 0, 0]);
+            }
             _ => error!(
                 "Accessing unknown location at base 0x{:x}, offset 0x{:x}",
                 base, offset
