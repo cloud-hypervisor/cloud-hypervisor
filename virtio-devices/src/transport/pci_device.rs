@@ -832,14 +832,22 @@ impl PciDevice for VirtioPciDevice {
         let (virtio_pci_bar_addr, region_type) = if self.use_64bit_bar {
             let region_type = PciBarRegionType::Memory64BitRegion;
             let addr = allocator
-                .allocate_mmio_addresses(self.settings_bar_addr, CAPABILITY_BAR_SIZE, None)
+                .allocate_mmio_addresses(
+                    self.settings_bar_addr,
+                    CAPABILITY_BAR_SIZE,
+                    Some(CAPABILITY_BAR_SIZE),
+                )
                 .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
             ranges.push((addr, CAPABILITY_BAR_SIZE, region_type));
             (addr, region_type)
         } else {
             let region_type = PciBarRegionType::Memory32BitRegion;
             let addr = allocator
-                .allocate_mmio_hole_addresses(self.settings_bar_addr, CAPABILITY_BAR_SIZE, None)
+                .allocate_mmio_hole_addresses(
+                    self.settings_bar_addr,
+                    CAPABILITY_BAR_SIZE,
+                    Some(CAPABILITY_BAR_SIZE),
+                )
                 .ok_or(PciDeviceError::IoAllocationFailed(CAPABILITY_BAR_SIZE))?;
             ranges.push((addr, CAPABILITY_BAR_SIZE, region_type));
             (addr, region_type)
