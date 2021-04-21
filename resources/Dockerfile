@@ -1,4 +1,4 @@
-FROM ubuntu:18.04 as dev
+FROM ubuntu:20.04 as dev
 
 ARG TARGETARCH
 ARG RUST_TOOLCHAIN="1.51.0"
@@ -37,7 +37,6 @@ RUN apt-get update \
 	socat \
 	dosfstools \
 	cpio \
-	bsdtar \
 	libfdt-dev \
 	python3-setuptools \
     && apt-get clean \
