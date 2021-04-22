@@ -5604,6 +5604,34 @@ mod tests {
             return String::from_utf8_lossy(&out).matches("vcpu").count() as u8;
         }
 
+        fn get_netdev_count_windows(auth: &PasswordAuth) -> u8 {
+            return ssh_command_ip_with_auth(
+                "powershell -Command \"netsh int ipv4 show interfaces | Select-String ethernet | Measure-Object -Line | Format-Table -HideTableHeaders\"",
+                &auth,
+                "192.168.249.2",
+                DEFAULT_SSH_RETRIES,
+                DEFAULT_SSH_TIMEOUT,
+            )
+            .unwrap()
+            .trim()
+            .parse::<u8>()
+            .unwrap_or(0);
+        }
+
+        fn get_netdev_ctrl_threads_count_windows(pid: u32) -> u8 {
+            // ps -T -p 12345 | grep "_net[0-9]*_ctrl" | wc -l
+            let out = Command::new("ps")
+                .args(&["-T", "-p", format!("{}", pid).as_str()])
+                .output()
+                .expect("ps command failed")
+                .stdout;
+            let mut n = 0;
+            String::from_utf8_lossy(&out)
+                .split_whitespace()
+                .for_each(|s| n += (s.starts_with("_net") && s.ends_with("_ctrl")) as u8); // _net1_ctrl
+            n
+        }
+
         #[test]
         fn test_windows_guest() {
             let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
@@ -5914,6 +5942,96 @@ mod tests {
                 thread::sleep(std::time::Duration::new(60, 0));
                 // Check the guest sees the correct number
                 assert_eq!(get_ram_size_windows(&auth), ram_size - reserved_ram_size);
+
+                ssh_command_ip_with_auth(
+                    "shutdown /s",
+                    &auth,
+                    "192.168.249.2",
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap();
+            });
+
+            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
+
+        #[test]
+        fn test_windows_guest_netdev_hotplug() {
+            let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut windows);
+
+            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+
+            let mut ovmf_path = workload_path.clone();
+            ovmf_path.push(OVMF_NAME);
+
+            let mut osdisk_path = workload_path;
+            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
+
+            let api_socket = temp_api_path(&tmp_dir);
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--api-socket", &api_socket])
+                .args(&["--cpus", "boot=2,kvm_hyperv=on"])
+                .args(&["--memory", "size=2G,hotplug_size=5G"])
+                .args(&["--kernel", ovmf_path.to_str().unwrap()])
+                .default_disks()
+                .args(&["--serial", "tty"])
+                .args(&["--console", "off"])
+                .args(&["--net", "tap="])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            // Wait to make sure Windows boots up
+            thread::sleep(std::time::Duration::new(60, 0));
+
+            let r = std::panic::catch_unwind(|| {
+                let auth = windows_auth();
+
+                // Initially present network device
+                let netdev_num = 1;
+                assert_eq!(get_netdev_count_windows(&auth), netdev_num);
+                assert_eq!(
+                    get_netdev_ctrl_threads_count_windows(child.id()),
+                    netdev_num
+                );
+
+                // Hotplug network device
+                let (cmd_success, cmd_output) = remote_command_w_output(
+                    &api_socket,
+                    "add-net",
+                    Some(guest.default_net_string().as_str()),
+                );
+                assert!(cmd_success);
+                assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_net2\""));
+                thread::sleep(std::time::Duration::new(5, 0));
+                // Verify the device  is on the system
+                let netdev_num = 2;
+                assert_eq!(get_netdev_count_windows(&auth), netdev_num);
+                assert_eq!(
+                    get_netdev_ctrl_threads_count_windows(child.id()),
+                    netdev_num
+                );
+
+                // Remove network device
+                let cmd_success = remote_command(&api_socket, "remove-device", Some("_net2"));
+                assert!(cmd_success);
+                thread::sleep(std::time::Duration::new(5, 0));
+                // Verify the device has been removed
+                let netdev_num = 1;
+                assert_eq!(get_netdev_count_windows(&auth), netdev_num);
+                assert_eq!(
+                    get_netdev_ctrl_threads_count_windows(child.id()),
+                    netdev_num
+                );
 
                 ssh_command_ip_with_auth(
                     "shutdown /s",
