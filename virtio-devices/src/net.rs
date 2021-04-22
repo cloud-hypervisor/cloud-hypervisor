@@ -54,6 +54,9 @@ pub enum Error {
 
     // Using existing tap
     TapError(TapError),
+
+    // Error calling dup() on tap fd
+    DuplicateTapFd(std::io::Error),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -397,7 +400,12 @@ impl Net {
         let num_queue_pairs = fds.len();
 
         for fd in fds.iter() {
-            let tap = Tap::from_tap_fd(*fd, num_queue_pairs).map_err(Error::TapError)?;
+            // Duplicate so that it can survive reboots
+            let fd = unsafe { libc::dup(*fd) };
+            if fd < 0 {
+                return Err(Error::DuplicateTapFd(std::io::Error::last_os_error()));
+            }
+            let tap = Tap::from_tap_fd(fd, num_queue_pairs).map_err(Error::TapError)?;
             taps.push(tap);
         }
 
