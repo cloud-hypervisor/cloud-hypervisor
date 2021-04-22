@@ -92,8 +92,14 @@ impl TxVirtio {
                 };
                 if result < 0 {
                     let e = std::io::Error::last_os_error();
-                    error!("net: tx: failed writing to tap: {}", e);
                     queue.go_to_previous_position();
+
+                    /* EAGAIN */
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                        warn!("net: tx: (recoverable) failed writing to tap: {}", e);
+                        break;
+                    }
+                    error!("net: tx: failed writing to tap: {}", e);
                     return Err(NetQueuePairError::WriteTap(e));
                 }
 
@@ -179,10 +185,9 @@ impl RxVirtio {
                     exhausted_descs = false;
                     queue.go_to_previous_position();
 
-                    if let Some(raw_err) = e.raw_os_error() {
-                        if raw_err == libc::EAGAIN {
-                            break;
-                        }
+                    /* EAGAIN */
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                        break;
                     }
 
                     error!("net: rx: failed reading from tap: {}", e);
