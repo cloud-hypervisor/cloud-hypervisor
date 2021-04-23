@@ -282,7 +282,7 @@ pub struct ConsoleState {
     avail_features: u64,
     acked_features: u64,
     config: VirtioConsoleConfig,
-    in_buffer: VecDeque<u8>,
+    in_buffer: Vec<u8>,
 }
 
 impl Console {
@@ -337,7 +337,7 @@ impl Console {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
             config: *(self.config.lock().unwrap()),
-            in_buffer: self.input.in_buffer.lock().unwrap().clone(),
+            in_buffer: self.input.in_buffer.lock().unwrap().clone().into(),
         }
     }
 
@@ -345,7 +345,7 @@ impl Console {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
         *(self.config.lock().unwrap()) = state.config;
-        *(self.input.in_buffer.lock().unwrap()) = state.in_buffer.clone();
+        *(self.input.in_buffer.lock().unwrap()) = state.in_buffer.clone().into();
     }
 }
 
