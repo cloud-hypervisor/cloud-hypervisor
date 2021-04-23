@@ -744,8 +744,8 @@ pub struct Iommu {
 struct IommuState {
     avail_features: u64,
     acked_features: u64,
-    endpoints: BTreeMap<u32, u32>,
-    mappings: BTreeMap<u32, BTreeMap<u64, Mapping>>,
+    endpoints: Vec<(u32, u32)>,
+    mappings: Vec<(u32, Vec<(u64, Mapping)>)>,
 }
 
 impl Iommu {
@@ -787,16 +787,36 @@ impl Iommu {
         IommuState {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
-            endpoints: self.mapping.endpoints.read().unwrap().clone(),
-            mappings: self.mapping.mappings.read().unwrap().clone(),
+            endpoints: self
+                .mapping
+                .endpoints
+                .read()
+                .unwrap()
+                .clone()
+                .into_iter()
+                .collect(),
+            mappings: self
+                .mapping
+                .mappings
+                .read()
+                .unwrap()
+                .clone()
+                .into_iter()
+                .map(|(k, v)| (k, v.into_iter().collect()))
+                .collect(),
         }
     }
 
     fn set_state(&mut self, state: &IommuState) {
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
-        *(self.mapping.endpoints.write().unwrap()) = state.endpoints.clone();
-        *(self.mapping.mappings.write().unwrap()) = state.mappings.clone();
+        *(self.mapping.endpoints.write().unwrap()) = state.endpoints.clone().into_iter().collect();
+        *(self.mapping.mappings.write().unwrap()) = state
+            .mappings
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (k, v.into_iter().collect()))
+            .collect();
     }
 
     // This function lets the caller specify a list of devices attached to the

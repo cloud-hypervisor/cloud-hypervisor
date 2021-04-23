@@ -365,7 +365,7 @@ pub struct Block {
 
 #[derive(Serialize, Deserialize)]
 pub struct BlockState {
-    pub disk_path: PathBuf,
+    pub disk_path: String,
     pub disk_nsectors: u64,
     pub avail_features: u64,
     pub acked_features: u64,
@@ -447,7 +447,7 @@ impl Block {
 
     fn state(&self) -> BlockState {
         BlockState {
-            disk_path: self.disk_path.clone(),
+            disk_path: self.disk_path.to_str().unwrap().to_owned(),
             disk_nsectors: self.disk_nsectors,
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
@@ -456,7 +456,7 @@ impl Block {
     }
 
     fn set_state(&mut self, state: &BlockState) {
-        self.disk_path = state.disk_path.clone();
+        self.disk_path = state.disk_path.clone().into();
         self.disk_nsectors = state.disk_nsectors;
         self.common.avail_features = state.avail_features;
         self.common.acked_features = state.acked_features;
