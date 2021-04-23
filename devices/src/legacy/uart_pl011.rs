@@ -95,7 +95,7 @@ pub struct Pl011State {
     dmacr: u32,
     int_enabled: u32,
     int_level: u32,
-    read_fifo: VecDeque<u8>,
+    read_fifo: Vec<u8>,
     ilpr: u32,
     ibrd: u32,
     fbrd: u32,
@@ -141,7 +141,7 @@ impl Pl011 {
             dmacr: self.dmacr,
             int_enabled: self.int_enabled,
             int_level: self.int_level,
-            read_fifo: self.read_fifo.clone(),
+            read_fifo: self.read_fifo.clone().into(),
             ilpr: self.ilpr,
             ibrd: self.ibrd,
             fbrd: self.fbrd,
@@ -159,7 +159,7 @@ impl Pl011 {
         self.dmacr = state.dmacr;
         self.int_enabled = state.int_enabled;
         self.int_level = state.int_level;
-        self.read_fifo = state.read_fifo.clone();
+        self.read_fifo = state.read_fifo.clone().into();
         self.ilpr = state.ilpr;
         self.ibrd = state.ibrd;
         self.fbrd = state.fbrd;

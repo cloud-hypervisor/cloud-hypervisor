@@ -80,7 +80,7 @@ pub struct SerialState {
     modem_status: u8,
     scratch: u8,
     baud_divisor: u16,
-    in_buffer: VecDeque<u8>,
+    in_buffer: Vec<u8>,
 }
 
 impl Serial {
@@ -223,7 +223,7 @@ impl Serial {
             modem_status: self.modem_status,
             scratch: self.scratch,
             baud_divisor: self.baud_divisor,
-            in_buffer: self.in_buffer.clone(),
+            in_buffer: self.in_buffer.clone().into(),
         }
     }
 
@@ -236,7 +236,7 @@ impl Serial {
         self.modem_status = state.modem_status;
         self.scratch = state.scratch;
         self.baud_divisor = state.baud_divisor;
-        self.in_buffer = state.in_buffer.clone();
+        self.in_buffer = state.in_buffer.clone().into();
     }
 }
 

@@ -23,10 +23,6 @@ use vm_memory::GuestAddress;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "GuestAddress")]
-pub struct GuestAddressDef(pub u64);
-
 type Result<T> = result::Result<T, Error>;
 
 // I/O REDIRECTION TABLE REGISTER
@@ -143,8 +139,7 @@ pub struct IoapicState {
     reg_sel: u32,
     reg_entries: [RedirectionTableEntry; NUM_IOAPIC_PINS],
     used_entries: [bool; NUM_IOAPIC_PINS],
-    #[serde(with = "GuestAddressDef")]
-    apic_address: GuestAddress,
+    apic_address: u64,
 }
 
 impl BusDevice for Ioapic {
@@ -281,7 +276,7 @@ impl Ioapic {
             reg_sel: self.reg_sel,
             reg_entries: self.reg_entries,
             used_entries: self.used_entries,
-            apic_address: self.apic_address,
+            apic_address: self.apic_address.0,
         }
     }
 
@@ -290,7 +285,7 @@ impl Ioapic {
         self.reg_sel = state.reg_sel;
         self.reg_entries = state.reg_entries;
         self.used_entries = state.used_entries;
-        self.apic_address = state.apic_address;
+        self.apic_address = GuestAddress(state.apic_address);
         for (irq, entry) in self.used_entries.iter().enumerate() {
             if *entry {
                 self.update_entry(irq)?;
