@@ -5686,6 +5686,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_snapshot_restore() {
             let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut windows);
@@ -5781,6 +5782,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_cpu_hotplug() {
             let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut windows);
@@ -5871,6 +5873,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_ram_hotplug() {
             let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut windows);
@@ -5961,6 +5964,7 @@ mod tests {
         }
 
         #[test]
+        #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_netdev_hotplug() {
             let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut windows);
