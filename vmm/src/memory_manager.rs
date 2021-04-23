@@ -488,7 +488,7 @@ impl MemoryManager {
                 self.guest_memory
                     .memory()
                     .read_exact_from(
-                        region.start_addr,
+                        GuestAddress(region.start_addr),
                         &mut memory_region_file,
                         region.size as usize,
                     )
@@ -870,7 +870,7 @@ impl MemoryManager {
                 if let Some(content) = &mut region.content {
                     let mut memory_region_path = vm_snapshot_path.clone();
                     memory_region_path.push(content.clone());
-                    *content = memory_region_path;
+                    *content = memory_region_path.to_str().unwrap().to_owned();
                 }
             }
 
@@ -1928,10 +1928,9 @@ pub struct GuestAddressDef(pub u64);
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MemoryRegion {
-    content: Option<PathBuf>,
-    #[serde(with = "GuestAddressDef")]
-    start_addr: GuestAddress,
-    size: GuestUsize,
+    content: Option<String>,
+    start_addr: u64,
+    size: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1974,8 +1973,8 @@ impl Snapshottable for MemoryManager {
             }
 
             memory_regions.push(MemoryRegion {
-                content,
-                start_addr: region.start_addr(),
+                content: content.map(|p| p.to_str().unwrap().to_owned()),
+                start_addr: region.start_addr().0,
                 size: region.len(),
             });
 
@@ -2028,7 +2027,7 @@ impl Transportable for MemoryManager {
 
                     guest_memory
                         .write_all_to(
-                            region.start_addr,
+                            GuestAddress(region.start_addr),
                             &mut memory_region_file,
                             region.size as usize,
                         )
