@@ -190,6 +190,8 @@ CPU hotplug is supported. The VM operating system needs to support hotplug and b
 
 RAM hotplug is supported. Note, that while the `pnpmem.sys` driver in use supports RAM hot-remove, the RAM being unplugged has to be not in use and have no reserved pages. In most cases it means, hot-remove won't work. Same as with the CPU hot-remove, when `ch-remote` is invoked to reduce the RAM size, the result will be visible after the OS reboot.
 
+Network device hotplug and hot-remove are supported.
+
 ## Debugging
 
 The Windows guest debugging process relies heavily on QEMU and [socat](http://www.dest-unreach.org/socat/). The procedure requires two Windows VMs:
