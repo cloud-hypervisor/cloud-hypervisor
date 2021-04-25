@@ -5566,29 +5566,32 @@ mod tests {
             }
         }
 
+        macro_rules! ssh_command_windows {
+            ($auth:ident, $cmd:expr) => {
+                ssh_command_ip_with_auth(
+                    $cmd,
+                    &$auth,
+                    "192.168.249.2",
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT,
+                )
+                .unwrap()
+            };
+        }
+
         fn get_cpu_count_windows(auth: &PasswordAuth) -> u8 {
-            return ssh_command_ip_with_auth(
-                "powershell -Command \"(Get-CimInstance win32_computersystem).NumberOfLogicalProcessors\"",
-                &auth,
-                "192.168.249.2",
-                DEFAULT_SSH_RETRIES,
-                DEFAULT_SSH_TIMEOUT,
+            return ssh_command_windows!(auth,
+                "powershell -Command \"(Get-CimInstance win32_computersystem).NumberOfLogicalProcessors\""
             )
-            .unwrap()
             .trim()
             .parse::<u8>()
             .unwrap_or(0);
         }
 
         fn get_ram_size_windows(auth: &PasswordAuth) -> usize {
-            return ssh_command_ip_with_auth(
-                "powershell -Command \"(Get-CimInstance win32_computersystem).TotalPhysicalMemory\"",
-                &auth,
-                "192.168.249.2",
-                DEFAULT_SSH_RETRIES,
-                DEFAULT_SSH_TIMEOUT,
+            return ssh_command_windows!(auth,
+                "powershell -Command \"(Get-CimInstance win32_computersystem).TotalPhysicalMemory\""
             )
-            .unwrap()
             .trim()
             .parse::<usize>()
             .unwrap_or(0);
@@ -5605,14 +5608,9 @@ mod tests {
         }
 
         fn get_netdev_count_windows(auth: &PasswordAuth) -> u8 {
-            return ssh_command_ip_with_auth(
-                "powershell -Command \"netsh int ipv4 show interfaces | Select-String ethernet | Measure-Object -Line | Format-Table -HideTableHeaders\"",
-                &auth,
-                "192.168.249.2",
-                DEFAULT_SSH_RETRIES,
-                DEFAULT_SSH_TIMEOUT,
+            return ssh_command_windows!(auth,
+                "powershell -Command \"netsh int ipv4 show interfaces | Select-String ethernet | Measure-Object -Line | Format-Table -HideTableHeaders\""
             )
-            .unwrap()
             .trim()
             .parse::<u8>()
             .unwrap_or(0);
@@ -5632,19 +5630,64 @@ mod tests {
             n
         }
 
+        macro_rules! test_init_windows {
+            ($guest:ident, $workload_path:ident, $ovmf_path:ident, $tmp_dir:ident, $api_socket:ident) => {
+                let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
+                let $guest = Guest::new(&mut windows);
+
+                let mut $workload_path = dirs::home_dir().unwrap();
+                $workload_path.push("workloads");
+
+                let mut $ovmf_path = $workload_path.clone();
+                $ovmf_path.push(OVMF_NAME);
+
+                let $tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
+                let $api_socket = temp_api_path(&$tmp_dir);
+            };
+        }
+
+        macro_rules! test_complete_windows {
+            ($r:ident, $child:ident) => {
+                let _ = $child.wait_timeout(std::time::Duration::from_secs(60));
+                let _ = $child.kill();
+                let output = $child.wait_with_output().unwrap();
+
+                handle_child_output($r, &output);
+            };
+        }
+
+        macro_rules! guest_shutdown_windows {
+            ($auth:ident) => {
+                ssh_command_windows!($auth, "shutdown /s /t 0")
+            };
+        }
+
+        macro_rules! guest_reboot_windows {
+            ($auth:ident) => {
+                ssh_command_windows!($auth, "shutdown /r /t 0")
+            };
+        }
+
+        macro_rules! vm_start {
+            ($guest:ident, $api_socket:ident, $ovmf_path:ident) => {
+                GuestCommand::new(&$guest)
+                    .args(&["--api-socket", &$api_socket])
+                    .args(&["--cpus", "boot=2,max=8,kvm_hyperv=on"])
+                    .args(&["--memory", "size=2G,hotplug_size=5G"])
+                    .args(&["--kernel", $ovmf_path.to_str().unwrap()])
+                    .default_disks()
+                    .args(&["--serial", "tty"])
+                    .args(&["--console", "off"])
+                    .args(&["--net", "tap="])
+                    .capture_output()
+                    .spawn()
+                    .unwrap()
+            };
+        }
+
         #[test]
         fn test_windows_guest() {
-            let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut windows);
-
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut ovmf_path = workload_path.clone();
-            ovmf_path.push(OVMF_NAME);
-
-            let mut osdisk_path = workload_path;
-            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
+            test_init_windows!(guest, workload_path, ovmf_path, _tmp_dir, _api_socket);
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=2,kvm_hyperv=on"])
@@ -5668,53 +5711,18 @@ mod tests {
             thread::sleep(std::time::Duration::new(60, 0));
             let auth = windows_auth();
             let r = std::panic::catch_unwind(|| {
-                ssh_command_ip_with_auth(
-                    "shutdown /s",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                guest_shutdown_windows!(auth);
             });
 
-            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
-            let _ = child.kill();
-            let output = child.wait_with_output().unwrap();
-
-            handle_child_output(r, &output);
+            test_complete_windows!(r, child);
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_snapshot_restore() {
-            let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut windows);
+            test_init_windows!(guest, workload_path, ovmf_path, tmp_dir, api_socket);
 
-            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut ovmf_path = workload_path.clone();
-            ovmf_path.push(OVMF_NAME);
-
-            let mut osdisk_path = workload_path;
-            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
-
-            let api_socket = temp_api_path(&tmp_dir);
-
-            let mut child = GuestCommand::new(&guest)
-                .args(&["--api-socket", &api_socket])
-                .args(&["--cpus", "boot=2,kvm_hyperv=on"])
-                .args(&["--memory", "size=4G"])
-                .args(&["--kernel", ovmf_path.to_str().unwrap()])
-                .default_disks()
-                .args(&["--serial", "tty"])
-                .args(&["--console", "off"])
-                .args(&["--net", "tap="])
-                .capture_output()
-                .spawn()
-                .unwrap();
+            let mut child = vm_start!(guest, api_socket, ovmf_path);
 
             let fd = child.stdout.as_ref().unwrap().as_raw_fd();
             let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
@@ -5764,53 +5772,18 @@ mod tests {
 
                 let auth = windows_auth();
 
-                ssh_command_ip_with_auth(
-                    "shutdown /s",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                guest_shutdown_windows!(auth);
             });
 
-            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
-            let _ = child.kill();
-            let output = child.wait_with_output().unwrap();
-
-            handle_child_output(r, &output);
+            test_complete_windows!(r, child);
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_cpu_hotplug() {
-            let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut windows);
+            test_init_windows!(guest, workload_path, ovmf_path, tmp_dir, api_socket);
 
-            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut ovmf_path = workload_path.clone();
-            ovmf_path.push(OVMF_NAME);
-
-            let mut osdisk_path = workload_path;
-            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
-
-            let api_socket = temp_api_path(&tmp_dir);
-
-            let mut child = GuestCommand::new(&guest)
-                .args(&["--api-socket", &api_socket])
-                .args(&["--cpus", "boot=2,max=8,kvm_hyperv=on"])
-                .args(&["--memory", "size=4G"])
-                .args(&["--kernel", ovmf_path.to_str().unwrap()])
-                .default_disks()
-                .args(&["--serial", "tty"])
-                .args(&["--console", "off"])
-                .args(&["--net", "tap="])
-                .capture_output()
-                .spawn()
-                .unwrap();
+            let mut child = vm_start!(guest, api_socket, ovmf_path);
 
             // Wait to make sure Windows boots up
             thread::sleep(std::time::Duration::new(60, 0));
@@ -5840,14 +5813,7 @@ mod tests {
                 // Wait to make sure CPUs are removed
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Reboot to let Windows catch up
-                ssh_command_ip_with_auth(
-                    "shutdown /r /t 0",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                guest_reboot_windows!(auth);
                 // Wait to make sure Windows completely rebooted
                 thread::sleep(std::time::Duration::new(60, 0));
                 // Check the guest sees the correct number
@@ -5855,53 +5821,18 @@ mod tests {
                 // Check the CH process has the correct number of vcpu threads
                 assert_eq!(get_vcpu_threads_count(child.id()), vcpu_num);
 
-                ssh_command_ip_with_auth(
-                    "shutdown /s",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                guest_shutdown_windows!(auth);
             });
 
-            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
-            let _ = child.kill();
-            let output = child.wait_with_output().unwrap();
-
-            handle_child_output(r, &output);
+            test_complete_windows!(r, child);
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_ram_hotplug() {
-            let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut windows);
+            test_init_windows!(guest, workload_path, ovmf_path, tmp_dir, api_socket);
 
-            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut ovmf_path = workload_path.clone();
-            ovmf_path.push(OVMF_NAME);
-
-            let mut osdisk_path = workload_path;
-            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
-
-            let api_socket = temp_api_path(&tmp_dir);
-
-            let mut child = GuestCommand::new(&guest)
-                .args(&["--api-socket", &api_socket])
-                .args(&["--cpus", "boot=2,kvm_hyperv=on"])
-                .args(&["--memory", "size=2G,hotplug_size=5G"])
-                .args(&["--kernel", ovmf_path.to_str().unwrap()])
-                .default_disks()
-                .args(&["--serial", "tty"])
-                .args(&["--console", "off"])
-                .args(&["--net", "tap="])
-                .capture_output()
-                .spawn()
-                .unwrap();
+            let mut child = vm_start!(guest, api_socket, ovmf_path);
 
             // Wait to make sure Windows boots up
             thread::sleep(std::time::Duration::new(60, 0));
@@ -5933,66 +5864,24 @@ mod tests {
                 // Wait to make sure RAM has been added
                 thread::sleep(std::time::Duration::new(10, 0));
                 // Reboot to let Windows catch up
-                ssh_command_ip_with_auth(
-                    "shutdown /r /t 0",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                guest_reboot_windows!(auth);
                 // Wait to make sure guest completely rebooted
                 thread::sleep(std::time::Duration::new(60, 0));
                 // Check the guest sees the correct number
                 assert_eq!(get_ram_size_windows(&auth), ram_size - reserved_ram_size);
 
-                ssh_command_ip_with_auth(
-                    "shutdown /s",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                guest_shutdown_windows!(auth);
             });
 
-            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
-            let _ = child.kill();
-            let output = child.wait_with_output().unwrap();
-
-            handle_child_output(r, &output);
+            test_complete_windows!(r, child);
         }
 
         #[test]
         #[cfg(not(feature = "mshv"))]
         fn test_windows_guest_netdev_hotplug() {
-            let mut windows = WindowsDiskConfig::new(WINDOWS_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut windows);
+            test_init_windows!(guest, workload_path, ovmf_path, tmp_dir, api_socket);
 
-            let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut ovmf_path = workload_path.clone();
-            ovmf_path.push(OVMF_NAME);
-
-            let mut osdisk_path = workload_path;
-            osdisk_path.push(WINDOWS_IMAGE_NAME.to_string());
-
-            let api_socket = temp_api_path(&tmp_dir);
-
-            let mut child = GuestCommand::new(&guest)
-                .args(&["--api-socket", &api_socket])
-                .args(&["--cpus", "boot=2,kvm_hyperv=on"])
-                .args(&["--memory", "size=2G,hotplug_size=5G"])
-                .args(&["--kernel", ovmf_path.to_str().unwrap()])
-                .default_disks()
-                .args(&["--serial", "tty"])
-                .args(&["--console", "off"])
-                .args(&["--net", "tap="])
-                .capture_output()
-                .spawn()
-                .unwrap();
+            let mut child = vm_start!(guest, api_socket, ovmf_path);
 
             // Wait to make sure Windows boots up
             thread::sleep(std::time::Duration::new(60, 0));
@@ -6037,21 +5926,10 @@ mod tests {
                     netdev_num
                 );
 
-                ssh_command_ip_with_auth(
-                    "shutdown /s",
-                    &auth,
-                    "192.168.249.2",
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT,
-                )
-                .unwrap();
+                guest_shutdown_windows!(auth);
             });
 
-            let _ = child.wait_timeout(std::time::Duration::from_secs(60));
-            let _ = child.kill();
-            let output = child.wait_with_output().unwrap();
-
-            handle_child_output(r, &output);
+            test_complete_windows!(r, child);
         }
     }
 
