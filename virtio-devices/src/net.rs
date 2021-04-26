@@ -6,8 +6,8 @@
 // found in the THIRD-PARTY file.
 
 use super::net_util::{
-    build_net_config_space, build_net_config_space_with_mq, CtrlVirtio, NetCtrlEpollHandler,
-    VirtioNetConfig,
+    build_net_config_space, build_net_config_space_with_mq, virtio_features_to_tap_offload,
+    CtrlVirtio, NetCtrlEpollHandler, VirtioNetConfig,
 };
 use super::Error as DeviceError;
 use super::{
@@ -586,10 +586,17 @@ impl VirtioDevice for Net {
                     .transpose()
                     .map_err(ActivateError::CreateRateLimiter)?;
 
+                let tap = taps.remove(0);
+                tap.set_offload(virtio_features_to_tap_offload(self.common.acked_features))
+                    .map_err(|e| {
+                        error!("Error programming tap offload: {:?}", e);
+                        ActivateError::BadActivate
+                    })?;
+
                 let mut handler = NetEpollHandler {
                     net: NetQueuePair {
                         mem: Some(mem.clone()),
-                        tap: taps.remove(0),
+                        tap,
                         rx,
                         tx,
                         epoll_fd: None,

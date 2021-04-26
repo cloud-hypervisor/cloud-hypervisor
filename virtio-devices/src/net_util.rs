@@ -7,6 +7,7 @@ use super::{
     EPOLL_HELPER_EVENT_LAST,
 };
 use net_util::MacAddr;
+use std::os::raw::c_uint;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
@@ -207,4 +208,25 @@ pub fn build_net_config_space_with_mq(
         config.max_virtqueue_pairs = num_queue_pairs;
         *avail_features |= 1 << VIRTIO_NET_F_MQ;
     }
+}
+
+pub fn virtio_features_to_tap_offload(features: u64) -> c_uint {
+    let mut tap_offloads: c_uint = 0;
+    if features & (1 << VIRTIO_NET_F_GUEST_CSUM) != 0 {
+        tap_offloads |= net_gen::TUN_F_CSUM;
+    }
+    if features & (1 << VIRTIO_NET_F_GUEST_TSO4) != 0 {
+        tap_offloads |= net_gen::TUN_F_TSO4;
+    }
+    if features & (1 << VIRTIO_NET_F_GUEST_TSO6) != 0 {
+        tap_offloads |= net_gen::TUN_F_TSO6;
+    }
+    if features & (1 << VIRTIO_NET_F_GUEST_ECN) != 0 {
+        tap_offloads |= net_gen::TUN_F_TSO_ECN;
+    }
+    if features & (1 << VIRTIO_NET_F_GUEST_UFO) != 0 {
+        tap_offloads |= net_gen::TUN_F_UFO;
+    }
+
+    tap_offloads
 }
