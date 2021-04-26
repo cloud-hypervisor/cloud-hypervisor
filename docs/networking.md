@@ -2,7 +2,7 @@
 
 cloud-hypervisor can emulate one or more virtual network interfaces, represented at the hypervisor host by [tap devices](https://www.kernel.org/doc/Documentation/networking/tuntap.txt). This guide briefly describes, in a manual and distribution neutral way, how to setup and use networking with cloud-hypervisor.
 
-## Multiple queue support for net devices ##
+## Multiple queue support for net devices
 
 While multiple vcpus defined for guest, to gain the benefit of vcpu scalable to improve performance, it suggests to define multiple queue pairs for net devices, one Tx/Rx queue pair per one vcpu, that means the number of queue pairs at least is equal to the vcpu count. In that case, after virtnet driver set cpu affinity for virtqueues in guest kernel, vcpus could handle interrupt from different virtqueue pairs in parallel.
 
@@ -34,14 +34,14 @@ Use one `--net` command-line argument from cloud-hypervisor to specify the emula
 
 The `--net` argument takes 1 or more space-separated strings of key value pairs containing the following 4 keys or fields:
 
-| Name       | Purpose                    | Optional  |
-| -----------|----------------------------| ----------|
-| tap        | tap device name            | Yes       |
-| mac        | vNIC mac address           | Yes       |
-| ip         | tap IP IP address          | yes       |
-| mask       | tap IP netmask             | Yes       |
-| num_queues | the number of queues       | yes       |
-| queue_size | the size of each queue     | Yes       |
+| Name       | Purpose                | Optional |
+| ---------- | ---------------------- | -------- |
+| tap        | tap device name        | Yes      |
+| mac        | vNIC mac address       | Yes      |
+| ip         | tap IP IP address      | yes      |
+| mask       | tap IP netmask         | Yes      |
+| num_queues | the number of queues   | yes      |
+| queue_size | the size of each queue | Yes      |
 
 num_queues is the total number of tx and rx queues, the default value is 2, and it could be increased by multiples of 2. Additionally, num_queues is suggested to be as 2 times of vcpu count. The default value for queue_size is 256.
 
@@ -104,6 +104,7 @@ bridge name     bridge id               STP enabled     interfaces
 ich-dpl         8000.067afc1b9a67       no              ich1
 ich-int         8000.725412ffce6f       no              ich0
 ```
+
 This completes the layer 2 wiring: The cloud-hypervisor is now connected to the hypervisor host via the 2 linux bridges.
 
 ## IP (Layer 3) provisioning
@@ -116,6 +117,7 @@ On the hypervisor host add the network gateway IP address of each network to the
 root@host:~# ip addr add 192.168.4.1/24 dev ich-int
 root@host:~# ip addr add 10.0.1.1/24 dev ich-dpl
 ```
+
 The routing table of the hypervisor host should now also have corresponding routing entries:
 
 ```bash
@@ -127,9 +129,10 @@ Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
 192.168.4.0     0.0.0.0         255.255.255.0   U     0      0        0 ich-int
 192.168.178.0   0.0.0.0         255.255.255.0   U     600    0        0 wlan1
 ```
+
 ### Virtual Machine
 
-Within the virtual machine set the vNIC's to up state and provision the corresponding IP addresses on the 2 vNIC's. The steps outlined below use the ip command as an example. Alternative distribution specific procedures can also apply.   
+Within the virtual machine set the vNIC's to up state and provision the corresponding IP addresses on the 2 vNIC's. The steps outlined below use the ip command as an example. Alternative distribution specific procedures can also apply.
 
 ```bash
 root@guest:~# ip link set up enp0s2
@@ -165,7 +168,7 @@ root@192.168.4.2's password:
 Linux cloud-hypervisor 5.2.0 #2 SMP Thu Jul 11 08:08:16 CEST 2019 x86_64
 
 Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
-permitted by applicable law.                                                         
+permitted by applicable law.
 
 
 Last login: Fri Jul 12 13:27:56 2019 from 192.168.4.1
@@ -189,7 +192,7 @@ nameserver 192.168.178.1
 make sure that the default gateway of the hypervisor host (in this example host 192.168.178.1 which is an adsl router) has an entry in the routing table for the 192.168.4.0/24 network otherwise IP connectivity will not work.
 
 ```bash
-root@guest:~# nslookup  ftp.nl.debian.org       
+root@guest:~# nslookup  ftp.nl.debian.org
 Server:         192.168.178.1
 Address:        192.168.178.1#53
 
