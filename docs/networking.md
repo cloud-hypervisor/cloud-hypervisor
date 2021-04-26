@@ -23,7 +23,7 @@ Use one `--net` command-line argument from cloud-hypervisor to specify the emula
 
 ```bash
 ./cloud-hypervisor \
-    --cpus 4 \
+    --cpus boot=4 \
     --memory "size=512M" \
     --disk path=focal-server-cloudimg-amd64.raw \
     --kernel my-vmlinux.bin \
