@@ -37,8 +37,12 @@ RUN apt-get update \
 	socat \
 	dosfstools \
 	cpio \
+	python \
+	python3 \
 	python3-setuptools \
 	ntfs-3g \
+	python3-distutils \
+	uuid-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
