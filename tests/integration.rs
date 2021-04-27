@@ -3559,7 +3559,7 @@ mod tests {
                 ).unwrap();
                 guest
                     .ssh_command_l1(
-                        "echo 1af4 1041 | sudo tee /sys/bus/pci/drivers/vfio-pci/new_id",
+                        "echo 0000:00:08.0 | sudo tee /sys/bus/pci/drivers/vfio-pci/bind",
                     )
                     .unwrap();
                 let vfio_hotplug_output = guest
