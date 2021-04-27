@@ -35,13 +35,10 @@ The `cache=none` option should be the default when using `virtiofsd` with the __
 
 The `cache=always` option will allow for the guest page cache to be used, which will increase the memory footprint of the guest. This option should be used only for specific use cases where a single VM is going to be running on a host.
 
-### The kernel
+### Kernel support
 
-In order to leverage __virtio-fs__ support from within the guest, and because the code has not been merged in upstream Linux kernel yet, it is required to build a custom kernel embedding the patches.
-
-The following branch `virtio-fs-virtio-iommu` on the repository https://github.com/cloud-hypervisor/linux.git includes all the needed patches to support __virtio-fs__.
-
-Make sure to build a kernel out of this branch that can be then used to boot the VM.
+Modern Linux kernels starting (at least v5.10) have support for virtio-fs. Use
+of older kernels, with additional patches, are not supported.
 
 ## How to share directories with cloud-hypervisor
 
