@@ -107,7 +107,7 @@ update_workloads() {
     }
 
     SRCDIR=$PWD
-    LINUX_CUSTOM_BRANCH="ch-5.10.6"
+    LINUX_CUSTOM_BRANCH="ch-5.12"
 
     # Check whether the local HEAD commit same as the remote HEAD or not. Remove the folder if they are different.
     if [ -d "$LINUX_CUSTOM_DIR" ]; then
