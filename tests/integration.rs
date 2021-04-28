@@ -2487,52 +2487,6 @@ mod tests {
 
         #[test]
         #[cfg(target_arch = "x86_64")]
-        fn test_pvh_boot() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut focal);
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-
-            let mut kernel_path = workload_path;
-            kernel_path.push("vmlinux.pvh");
-
-            let mut child = GuestCommand::new(&guest)
-                .args(&["--cpus", "boot=1"])
-                .args(&["--memory", "size=512M"])
-                .args(&["--kernel", kernel_path.to_str().unwrap()])
-                .args(&["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-                .default_disks()
-                .default_net()
-                .capture_output()
-                .spawn()
-                .unwrap();
-
-            let r = std::panic::catch_unwind(|| {
-                guest.wait_vm_boot(None).unwrap();
-
-                assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-                assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-                assert!(guest.get_entropy().unwrap_or_default() >= 900);
-
-                assert_eq!(
-                    guest
-                        .ssh_command("grep -c PCI-MSI /proc/interrupts")
-                        .unwrap()
-                        .trim()
-                        .parse::<u32>()
-                        .unwrap_or_default(),
-                    12
-                );
-            });
-
-            let _ = child.kill();
-            let output = child.wait_with_output().unwrap();
-
-            handle_child_output(r, &output);
-        }
-
-        #[test]
-        #[cfg(target_arch = "x86_64")]
         fn test_bzimage_boot() {
             let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut focal);
@@ -4982,7 +4936,7 @@ mod tests {
             #[cfg(target_arch = "x86_64")]
             {
                 let mut pvh_kernel_path = workload_path.clone();
-                pvh_kernel_path.push("vmlinux.pvh");
+                pvh_kernel_path.push("vmlinux");
                 kernels.push(pvh_kernel_path);
             }
 
