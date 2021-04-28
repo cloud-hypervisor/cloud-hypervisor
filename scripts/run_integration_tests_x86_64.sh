@@ -96,12 +96,11 @@ popd
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
-VMLINUX_PVH_IMAGE="$WORKLOADS_DIR/vmlinux.pvh"
 BZIMAGE_IMAGE="$WORKLOADS_DIR/bzImage"
 
 LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
 
-if [ ! -f "$VMLINUX_IMAGE" ] || [ ! -f "$VMLINUX_PVH_IMAGE" ]; then
+if [ ! -f "$VMLINUX_IMAGE" ]; then
     SRCDIR=$PWD
     pushd $WORKLOADS_DIR
     time git clone --depth 1 "https://github.com/cloud-hypervisor/linux.git" -b "ch-5.12" $LINUX_CUSTOM_DIR
@@ -111,18 +110,9 @@ fi
 
 if [ ! -f "$VMLINUX_IMAGE" ]; then
     pushd $LINUX_CUSTOM_DIR
-    scripts/config --disable "CONFIG_PVH"
     time make bzImage -j `nproc`
     cp vmlinux $VMLINUX_IMAGE || exit 1
     cp arch/x86/boot/bzImage $BZIMAGE_IMAGE || exit 1
-    popd
-fi
-
-if [ ! -f "$VMLINUX_PVH_IMAGE" ]; then
-    pushd $LINUX_CUSTOM_DIR
-    scripts/config --enable "CONFIG_PVH"
-    time make bzImage -j `nproc`
-    cp vmlinux $VMLINUX_PVH_IMAGE || exit 1
     popd
 fi
 
