@@ -49,14 +49,14 @@ pub enum Error {
     NoStatusDescriptor,
 }
 
-pub struct CtrlVirtio {
+pub struct NetCtrl {
     pub queue_evt: EventFd,
     pub queue: Queue,
 }
 
-impl std::clone::Clone for CtrlVirtio {
+impl std::clone::Clone for NetCtrl {
     fn clone(&self) -> Self {
-        CtrlVirtio {
+        NetCtrl {
             queue_evt: self.queue_evt.try_clone().unwrap(),
             queue: self.queue.clone(),
         }
@@ -72,9 +72,9 @@ pub struct ControlHeader {
 
 unsafe impl ByteValued for ControlHeader {}
 
-impl CtrlVirtio {
+impl NetCtrl {
     pub fn new(queue: Queue, queue_evt: EventFd) -> Self {
-        CtrlVirtio { queue_evt, queue }
+        NetCtrl { queue_evt, queue }
     }
 
     pub fn process_cvq(&mut self, mem: &GuestMemoryMmap) -> Result<()> {
@@ -131,7 +131,7 @@ pub struct NetCtrlEpollHandler {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
-    pub ctrl_q: CtrlVirtio,
+    pub ctrl_q: NetCtrl,
 }
 
 impl NetCtrlEpollHandler {

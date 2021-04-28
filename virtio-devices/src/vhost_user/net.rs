@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::super::net_util::{
-    build_net_config_space, CtrlVirtio, NetCtrlEpollHandler, VirtioNetConfig,
+    build_net_config_space, NetCtrl, NetCtrlEpollHandler, VirtioNetConfig,
 };
 use super::super::{
     ActivateError, ActivateResult, Queue, VirtioCommon, VirtioDevice, VirtioDeviceType,
@@ -247,7 +247,7 @@ impl VirtioDevice for Net {
                 mem: mem.clone(),
                 kill_evt,
                 pause_evt,
-                ctrl_q: CtrlVirtio::new(cvq_queue, cvq_queue_evt),
+                ctrl_q: NetCtrl::new(cvq_queue, cvq_queue_evt),
             };
 
             let paused = self.common.paused.clone();
