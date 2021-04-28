@@ -712,6 +712,50 @@ mod tests {
                 "HelloWorld!"
             );
         }
+
+        fn check_nvidia_gpu(&self) {
+            // Run CUDA sample to validate it can find the device
+            let device_query_result = self
+                .ssh_command(
+                    "sudo /root/NVIDIA_CUDA-11.2_Samples/bin/x86_64/linux/release/deviceQuery",
+                )
+                .unwrap();
+            assert!(device_query_result.contains("Detected 1 CUDA Capable device"));
+            assert!(device_query_result.contains("Device 0: \"Tesla T4\""));
+            assert!(device_query_result.contains("Result = PASS"));
+
+            assert!(self
+                .ssh_command("sudo dcgmi discovery -l")
+                .unwrap()
+                .contains("Name: Tesla T4"));
+            assert_eq!(
+                self.ssh_command("sudo dcgmi diag -r 'diagnostic' | grep Pass | wc -l")
+                    .unwrap()
+                    .trim(),
+                "10"
+            );
+        }
+
+        fn reboot_linux(&self, current_reboot_count: u32) {
+            let reboot_count = self
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(current_reboot_count + 1);
+
+            assert_eq!(reboot_count, current_reboot_count);
+            self.ssh_command("sudo reboot").unwrap();
+
+            self.wait_vm_boot(None).unwrap();
+            let reboot_count = self
+                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            assert_eq!(reboot_count, current_reboot_count + 1);
+        }
     }
 
     struct GuestCommand<'a> {
@@ -1518,15 +1562,7 @@ mod tests {
             assert_eq!(guest.ssh_command("sudo umount /mnt").unwrap(), "");
             assert_eq!(guest.ssh_command("ls /mnt").unwrap(), "");
 
-            guest.ssh_command("sudo reboot").unwrap();
-            guest.wait_vm_boot(None).unwrap();
-            let reboot_count = guest
-                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default();
-            assert_eq!(reboot_count, 1);
+            guest.reboot_linux(0);
             assert_eq!(guest.ssh_command("sudo mount /dev/pmem0 /mnt").unwrap(), "");
             assert_eq!(
                 guest.ssh_command("sudo cat /mnt/test").unwrap().trim(),
@@ -1599,24 +1635,7 @@ mod tests {
             // skip the reboot test here.
             #[cfg(target_arch = "x86_64")]
             {
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or(1);
-
-                assert_eq!(reboot_count, 0);
-                guest.ssh_command("sudo reboot").unwrap();
-
-                guest.wait_vm_boot(None).unwrap();
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 1);
+                guest.reboot_linux(0);
 
                 // Validate vsock still works after a reboot.
                 guest.check_vsock(socket.as_str());
@@ -2245,15 +2264,7 @@ mod tests {
                 thread::sleep(std::time::Duration::new(5, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
 
-                guest.ssh_command("sudo reboot").unwrap();
-                guest.wait_vm_boot(None).unwrap();
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 1);
+                guest.reboot_linux(0);
 
                 // Check the amount of RAM after reboot
                 assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
@@ -3670,27 +3681,9 @@ mod tests {
                 let r = std::panic::catch_unwind(|| {
                     guest.wait_vm_boot(Some(120)).unwrap();
 
-                    let reboot_count = guest
-                        .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                        .unwrap()
-                        .trim()
-                        .parse::<u32>()
-                        .unwrap_or(1);
                     let fd_count_1 = get_fd_count(child.id());
-
-                    assert_eq!(reboot_count, 0);
-                    guest.ssh_command("sudo reboot").unwrap();
-
-                    guest.wait_vm_boot(Some(120)).unwrap();
-
-                    let reboot_count = guest
-                        .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                        .unwrap()
-                        .trim()
-                        .parse::<u32>()
-                        .unwrap_or_default();
+                    guest.reboot_linux(0);
                     let fd_count_2 = get_fd_count(child.id());
-                    assert_eq!(reboot_count, 1);
                     assert_eq!(fd_count_1, fd_count_2);
 
                     guest.ssh_command("sudo shutdown -h now").unwrap();
@@ -3735,27 +3728,9 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 guest.wait_vm_boot(None).unwrap();
 
-                let reboot_count = guest
-                    .ssh_command("journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or(1);
                 let fd_count_1 = get_fd_count(child.id());
-
-                assert_eq!(reboot_count, 0);
-                guest.ssh_command("sudo reboot").unwrap();
-
-                guest.wait_vm_boot(None).unwrap();
-
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
+                guest.reboot_linux(0);
                 let fd_count_2 = get_fd_count(child.id());
-                assert_eq!(reboot_count, 1);
                 assert_eq!(fd_count_1, fd_count_2);
 
                 guest.ssh_command("sudo shutdown -h now").unwrap();
@@ -4140,24 +4115,7 @@ mod tests {
                     u32::from(desired_vcpus)
                 );
 
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or(1);
-
-                assert_eq!(reboot_count, 0);
-                guest.ssh_command("sudo reboot").unwrap();
-
-                guest.wait_vm_boot(None).unwrap();
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 1);
+                guest.reboot_linux(0);
 
                 assert_eq!(
                     guest.get_cpu_count().unwrap_or_default(),
@@ -4247,24 +4205,7 @@ mod tests {
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
                 assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
 
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or(1);
-
-                assert_eq!(reboot_count, 0);
-                guest.ssh_command("sudo reboot").unwrap();
-
-                guest.wait_vm_boot(None).unwrap();
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 1);
+                guest.reboot_linux(0);
 
                 assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
 
@@ -4293,16 +4234,7 @@ mod tests {
                 let desired_ram = 1024 << 20;
                 resize_command(&api_socket, None, Some(desired_ram), None);
 
-                guest.ssh_command("sudo reboot").unwrap();
-
-                guest.wait_vm_boot(None).unwrap();
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 2);
+                guest.reboot_linux(1);
 
                 assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
                 assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
@@ -4373,15 +4305,7 @@ mod tests {
                 assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
                 assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
 
-                guest.ssh_command("sudo reboot").unwrap();
-                guest.wait_vm_boot(None).unwrap();
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 1);
+                guest.reboot_linux(0);
 
                 // Check the amount of memory after reboot is 1GiB
                 assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
@@ -4615,17 +4539,7 @@ mod tests {
                     .is_ok());
 
                 // Reboot the VM.
-                guest.ssh_command("sudo reboot").unwrap();
-
-                guest.wait_vm_boot(None).unwrap();
-
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 1);
+                guest.reboot_linux(0);
 
                 // Check still there after reboot
                 assert_eq!(
@@ -4653,17 +4567,7 @@ mod tests {
                     0
                 );
 
-                guest.ssh_command("sudo reboot").unwrap();
-
-                guest.wait_vm_boot(None).unwrap();
-
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 2);
+                guest.reboot_linux(1);
 
                 // Check device still absent
                 assert_eq!(
@@ -4747,17 +4651,7 @@ mod tests {
                     1
                 );
 
-                guest.ssh_command("sudo reboot").unwrap();
-
-                guest.wait_vm_boot(None).unwrap();
-
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 1);
+                guest.reboot_linux(0);
 
                 // Check still there after reboot
                 assert_eq!(
@@ -4785,17 +4679,7 @@ mod tests {
                     0
                 );
 
-                guest.ssh_command("sudo reboot").unwrap();
-
-                guest.wait_vm_boot(None).unwrap();
-
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 2);
+                guest.reboot_linux(1);
 
                 // Check still absent after reboot
                 assert_eq!(
@@ -4893,17 +4777,7 @@ mod tests {
                     2
                 );
 
-                guest.ssh_command("sudo reboot").unwrap();
-
-                guest.wait_vm_boot(None).unwrap();
-
-                let reboot_count = guest
-                    .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default();
-                assert_eq!(reboot_count, 1);
+                guest.reboot_linux(0);
 
                 // Check still there after reboot
                 // 1 network interfaces + default localhost ==> 2 interfaces
@@ -5347,8 +5221,9 @@ mod tests {
                         .unwrap_or_default(),
                     2
                 );
-                guest.ssh_command("sudo reboot").unwrap();
-                guest.wait_vm_boot(None).unwrap();
+
+                guest.reboot_linux(0);
+
                 assert_eq!(
                     guest
                         .ssh_command("ip -o link | wc -l")
@@ -6093,16 +5968,6 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 guest.wait_vm_boot(None).unwrap();
 
-                // Run CUDA sample to validate it can find the device
-                let device_query_result = guest
-                    .ssh_command(
-                        "sudo /root/NVIDIA_CUDA-11.2_Samples/bin/x86_64/linux/release/deviceQuery",
-                    )
-                    .unwrap();
-                assert!(device_query_result.contains("Detected 1 CUDA Capable device"));
-                assert!(device_query_result.contains("Device 0: \"Tesla T4\""));
-                assert!(device_query_result.contains("Result = PASS"));
-
                 // Run NVIDIA DCGM Diagnostics to validate the device is functional
                 assert_eq!(
                     guest
@@ -6111,17 +5976,8 @@ mod tests {
                         .trim(),
                     "ok"
                 );
-                assert!(guest
-                    .ssh_command("sudo dcgmi discovery -l")
-                    .unwrap()
-                    .contains("Name: Tesla T4"));
-                assert_eq!(
-                    guest
-                        .ssh_command("sudo dcgmi diag -r 'diagnostic' | grep Pass | wc -l")
-                        .unwrap()
-                        .trim(),
-                    "10"
-                );
+
+                guest.check_nvidia_gpu();
             });
 
             let _ = child.kill();
