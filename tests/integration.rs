@@ -756,6 +756,13 @@ mod tests {
                 .unwrap_or_default();
             assert_eq!(reboot_count, current_reboot_count + 1);
         }
+
+        fn enable_memory_hotplug(&self) {
+            self.ssh_command(
+                "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
+            )
+            .unwrap();
+        }
     }
 
     struct GuestCommand<'a> {
@@ -1049,11 +1056,7 @@ mod tests {
             // ACPI feature is needed.
             #[cfg(feature = "acpi")]
             {
-                guest
-                    .ssh_command(
-                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
-                    )
-                    .unwrap();
+                guest.enable_memory_hotplug();
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
@@ -1198,11 +1201,7 @@ mod tests {
             // ACPI feature is needed.
             #[cfg(feature = "acpi")]
             {
-                guest
-                    .ssh_command(
-                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
-                    )
-                    .unwrap();
+                guest.enable_memory_hotplug();
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
@@ -1412,11 +1411,7 @@ mod tests {
             // ACPI feature is needed.
             #[cfg(feature = "acpi")]
             {
-                guest
-                    .ssh_command(
-                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
-                    )
-                    .unwrap();
+                guest.enable_memory_hotplug();
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
@@ -2245,11 +2240,7 @@ mod tests {
 
                 assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
 
-                guest
-                    .ssh_command(
-                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
-                    )
-                    .unwrap();
+                guest.enable_memory_hotplug();
 
                 resize_zone_command(&api_socket, "mem0", "3G");
                 thread::sleep(std::time::Duration::new(5, 0));
@@ -2340,11 +2331,7 @@ mod tests {
                 assert!(guest.check_numa_node_distances(1, "20 10 25").unwrap());
                 assert!(guest.check_numa_node_distances(2, "25 30 10").unwrap());
 
-                guest
-                    .ssh_command(
-                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
-                    )
-                    .unwrap();
+                guest.enable_memory_hotplug();
 
                 // Resize every memory zone and check each associated NUMA node
                 // has been assigned the right amount of memory.
@@ -4184,11 +4171,7 @@ mod tests {
 
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
-                guest
-                    .ssh_command(
-                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
-                    )
-                    .unwrap();
+                guest.enable_memory_hotplug();
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
@@ -4217,11 +4200,7 @@ mod tests {
 
                 assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
 
-                guest
-                    .ssh_command(
-                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
-                    )
-                    .unwrap();
+                guest.enable_memory_hotplug();
 
                 // Add RAM to the VM
                 let desired_ram = 2048 << 20;
@@ -4277,11 +4256,7 @@ mod tests {
 
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
-                guest
-                    .ssh_command(
-                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
-                    )
-                    .unwrap();
+                guest.enable_memory_hotplug();
 
                 // Add RAM to the VM
                 let desired_ram = 1024 << 20;
@@ -4355,11 +4330,7 @@ mod tests {
                 assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
-                guest
-                    .ssh_command(
-                        "echo online | sudo tee /sys/devices/system/memory/auto_online_blocks",
-                    )
-                    .unwrap();
+                guest.enable_memory_hotplug();
 
                 // Resize the VM
                 let desired_vcpus = 4;
