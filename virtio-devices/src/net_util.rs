@@ -4,6 +4,7 @@
 
 use super::{EpollHelper, EpollHelperError, EpollHelperHandler, Queue, EPOLL_HELPER_EVENT_LAST};
 use net_util::MacAddr;
+use net_util::Tap;
 use std::os::raw::c_uint;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
@@ -48,6 +49,7 @@ pub enum Error {
 pub struct NetCtrl {
     pub queue_evt: EventFd,
     pub queue: Queue,
+    pub taps: Option<Vec<Tap>>,
 }
 
 #[repr(C, packed)]
@@ -60,8 +62,12 @@ pub struct ControlHeader {
 unsafe impl ByteValued for ControlHeader {}
 
 impl NetCtrl {
-    pub fn new(queue: Queue, queue_evt: EventFd) -> Self {
-        NetCtrl { queue_evt, queue }
+    pub fn new(queue: Queue, queue_evt: EventFd, taps: Option<Vec<Tap>>) -> Self {
+        NetCtrl {
+            queue_evt,
+            queue,
+            taps,
+        }
     }
 
     pub fn process_cvq(&mut self, mem: &GuestMemoryMmap) -> Result<()> {
@@ -94,6 +100,29 @@ impl NetCtrl {
                     } else {
                         info!("Number of MQ pairs requested: {}", queue_pairs);
                         true
+                    }
+                }
+                VIRTIO_NET_CTRL_GUEST_OFFLOADS => {
+                    let features = mem
+                        .read_obj::<u64>(data_desc.addr)
+                        .map_err(Error::GuestMemory)?;
+                    if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
+                        warn!("Unsupported command: {}", ctrl_hdr.cmd);
+                        false
+                    } else {
+                        let mut ok = true;
+                        if let Some(ref mut taps) = &mut self.taps {
+                            for tap in taps.iter_mut() {
+                                info!("Reprogramming tap offload with features: {}", features);
+                                tap.set_offload(virtio_features_to_tap_offload(features))
+                                    .map_err(|e| {
+                                        error!("Error programming tap offload: {:?}", e);
+                                        ok = false
+                                    })
+                                    .ok();
+                            }
+                        }
+                        ok
                     }
                 }
                 _ => {

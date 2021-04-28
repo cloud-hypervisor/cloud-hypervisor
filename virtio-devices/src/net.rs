@@ -315,6 +315,7 @@ impl Net {
         rate_limiter_config: Option<RateLimiterConfig>,
     ) -> Result<Self> {
         let mut avail_features = 1 << VIRTIO_NET_F_CSUM
+            | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS
             | 1 << VIRTIO_NET_F_GUEST_CSUM
             | 1 << VIRTIO_NET_F_GUEST_ECN
             | 1 << VIRTIO_NET_F_GUEST_TSO4
@@ -511,7 +512,7 @@ impl VirtioDevice for Net {
                 mem: mem.clone(),
                 kill_evt,
                 pause_evt,
-                ctrl_q: NetCtrl::new(cvq_queue, cvq_queue_evt),
+                ctrl_q: NetCtrl::new(cvq_queue, cvq_queue_evt, Some(self.taps.clone())),
             };
 
             let paused = self.common.paused.clone();

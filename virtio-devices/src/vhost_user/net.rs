@@ -247,7 +247,7 @@ impl VirtioDevice for Net {
                 mem: mem.clone(),
                 kill_evt,
                 pause_evt,
-                ctrl_q: NetCtrl::new(cvq_queue, cvq_queue_evt),
+                ctrl_q: NetCtrl::new(cvq_queue, cvq_queue_evt, None),
             };
 
             let paused = self.common.paused.clone();
