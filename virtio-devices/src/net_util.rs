@@ -39,10 +39,6 @@ unsafe impl ByteValued for VirtioNetConfig {}
 pub enum Error {
     /// Read queue failed.
     GuestMemory(GuestMemoryError),
-    /// Invalid ctrl class
-    InvalidCtlClass,
-    /// Invalid ctrl command
-    InvalidCtlCmd,
     /// No queue pairs number.
     NoQueuePairsDescriptor,
     /// No status descriptor
@@ -75,17 +71,19 @@ impl NetCtrl {
         for avail_desc in queue.iter(&mem) {
             let ctrl_hdr: ControlHeader =
                 mem.read_obj(avail_desc.addr).map_err(Error::GuestMemory)?;
-            match u32::from(ctrl_hdr.class) {
-                VIRTIO_NET_CTRL_MQ => {
-                    let mq_desc = avail_desc
-                        .next_descriptor()
-                        .ok_or(Error::NoQueuePairsDescriptor)?;
-                    let queue_pairs = mem
-                        .read_obj::<u16>(mq_desc.addr)
-                        .map_err(Error::GuestMemory)?;
-                    let status_desc = mq_desc.next_descriptor().ok_or(Error::NoStatusDescriptor)?;
+            let data_desc = avail_desc
+                .next_descriptor()
+                .ok_or(Error::NoQueuePairsDescriptor)?;
+            let status_desc = data_desc
+                .next_descriptor()
+                .ok_or(Error::NoStatusDescriptor)?;
 
-                    let ok = if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET {
+            let ok = match u32::from(ctrl_hdr.class) {
+                VIRTIO_NET_CTRL_MQ => {
+                    let queue_pairs = mem
+                        .read_obj::<u16>(data_desc.addr)
+                        .map_err(Error::GuestMemory)?;
+                    if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET {
                         warn!("Unsupported command: {}", ctrl_hdr.cmd);
                         false
                     } else if (queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
@@ -96,16 +94,19 @@ impl NetCtrl {
                     } else {
                         info!("Number of MQ pairs requested: {}", queue_pairs);
                         true
-                    };
-
-                    mem.write_obj(
-                        if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
-                        status_desc.addr,
-                    )
-                    .map_err(Error::GuestMemory)?;
+                    }
                 }
-                _ => return Err(Error::InvalidCtlClass),
-            }
+                _ => {
+                    warn!("Unsupported command {:?}", ctrl_hdr);
+                    false
+                }
+            };
+
+            mem.write_obj(
+                if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
+                status_desc.addr,
+            )
+            .map_err(Error::GuestMemory)?;
             used_desc_heads[used_count] = (avail_desc.index, avail_desc.len);
             used_count += 1;
         }
