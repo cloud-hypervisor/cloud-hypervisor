@@ -144,6 +144,10 @@ pub enum Error {
     /// Error creating API server
     #[error("Error creating API server {0:?}")]
     CreateApiServer(micro_http::ServerError),
+
+    /// Error binding API server socket
+    #[error("Error creation API server's socket {0:?}")]
+    CreateApiServerSocket(#[source] io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
