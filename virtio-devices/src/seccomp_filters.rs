@@ -378,12 +378,13 @@ fn virtio_vhost_net_ctl_thread_rules() -> Vec<SyscallRuleSet> {
         allow_syscall(libc::SYS_epoll_pwait),
         #[cfg(target_arch = "x86_64")]
         allow_syscall(libc::SYS_epoll_wait),
+        allow_syscall(libc::SYS_exit),
         allow_syscall(libc::SYS_futex),
-        allow_syscall(libc::SYS_read),
-        allow_syscall(libc::SYS_sigaltstack),
         allow_syscall(libc::SYS_munmap),
         allow_syscall(libc::SYS_madvise),
-        allow_syscall(libc::SYS_exit),
+        allow_syscall(libc::SYS_read),
+        allow_syscall(libc::SYS_sigaltstack),
+        allow_syscall(libc::SYS_write),
     ]
 }
 
