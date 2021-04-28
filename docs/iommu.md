@@ -194,6 +194,7 @@ guest, and bind it to VFIO (it should appear as `0000:00:04.0`).
 ```bash
 echo 0000:00:04.0 > /sys/bus/pci/devices/0000\:00\:04.0/driver/unbind
 echo 8086 1502 > /sys/bus/pci/drivers/vfio-pci/new_id
+echo 0000:00:04.0 > /sys/bus/pci/drivers/vfio-pci/bind
 ```
 
 Last thing is to start the L2 guest with the huge pages memory backend.
