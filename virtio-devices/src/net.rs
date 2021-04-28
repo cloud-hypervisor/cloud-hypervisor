@@ -7,7 +7,7 @@
 
 use super::net_util::{
     build_net_config_space, build_net_config_space_with_mq, virtio_features_to_tap_offload,
-    CtrlVirtio, NetCtrlEpollHandler, VirtioNetConfig,
+    NetCtrl, NetCtrlEpollHandler, VirtioNetConfig,
 };
 use super::Error as DeviceError;
 use super::{
@@ -512,7 +512,7 @@ impl VirtioDevice for Net {
                     mem: mem.clone(),
                     kill_evt,
                     pause_evt,
-                    ctrl_q: CtrlVirtio::new(cvq_queue, cvq_queue_evt),
+                    ctrl_q: NetCtrl::new(cvq_queue, cvq_queue_evt),
                 };
 
                 let paused = self.common.paused.clone();
