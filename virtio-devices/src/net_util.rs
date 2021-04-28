@@ -54,15 +54,6 @@ pub struct NetCtrl {
     pub queue: Queue,
 }
 
-impl std::clone::Clone for NetCtrl {
-    fn clone(&self) -> Self {
-        NetCtrl {
-            queue_evt: self.queue_evt.try_clone().unwrap(),
-            queue: self.queue.clone(),
-        }
-    }
-}
-
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ControlHeader {
