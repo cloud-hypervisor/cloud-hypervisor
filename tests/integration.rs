@@ -696,6 +696,14 @@ mod tests {
             assert!(device_query_result.contains("Device 0: \"NVIDIA Tesla T4\""));
             assert!(device_query_result.contains("Result = PASS"));
 
+            // Run NVIDIA DCGM Diagnostics to validate the device is functional
+            assert_eq!(
+                self.ssh_command("sudo nv-hostengine && echo ok")
+                    .unwrap()
+                    .trim(),
+                "ok"
+            );
+
             assert!(self
                 .ssh_command("sudo dcgmi discovery -l")
                 .unwrap()
@@ -5774,16 +5782,20 @@ mod tests {
     mod vfio {
         use crate::tests::*;
 
-        #[test]
-        fn test_nvidia_card() {
+        fn test_nvidia_card_memory_hotplug(hotplug_method: &str) {
             let mut hirsute = UbuntuDiskConfig::new(HIRSUTE_NVIDIA_IMAGE_NAME.to_string());
             let guest = Guest::new(&mut hirsute);
+            let api_socket = temp_api_path(&guest.tmp_dir);
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=4"])
-                .args(&["--memory", "size=4G"])
+                .args(&[
+                    "--memory",
+                    format!("size=4G,hotplug_size=4G,hotplug_method={}", hotplug_method).as_str(),
+                ])
                 .args(&["--kernel", guest.fw_path.as_str()])
                 .args(&["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
+                .args(&["--api-socket", &api_socket])
                 .default_disks()
                 .default_net()
                 .capture_output()
@@ -5793,28 +5805,105 @@ mod tests {
             let r = std::panic::catch_unwind(|| {
                 guest.wait_vm_boot(None).unwrap();
 
-                // Run NVIDIA DCGM Diagnostics to validate the device is functional
-                assert_eq!(
-                    guest
-                        .ssh_command("sudo nv-hostengine && echo ok")
-                        .unwrap()
-                        .trim(),
-                    "ok"
-                );
+                assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
 
+                guest.enable_memory_hotplug();
+
+                // Add RAM to the VM
+                let desired_ram = 6 << 30;
+                resize_command(&api_socket, None, Some(desired_ram), None);
+                thread::sleep(std::time::Duration::new(10, 0));
+                assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+
+                // Check the VFIO device works when RAM is increased to 6GiB
+                guest.check_nvidia_gpu();
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
+
+        #[test]
+        fn test_nvidia_card_memory_hotplug_acpi() {
+            test_nvidia_card_memory_hotplug("acpi")
+        }
+
+        #[test]
+        fn test_nvidia_card_memory_hotplug_virtio_mem() {
+            test_nvidia_card_memory_hotplug("virtio-mem")
+        }
+
+        #[test]
+        fn test_nvidia_card_pci_hotplug() {
+            let mut hirsute = UbuntuDiskConfig::new(HIRSUTE_NVIDIA_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut hirsute);
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=4"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--api-socket", &api_socket])
+                .default_disks()
+                .default_net()
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot(None).unwrap();
+
+                // Hotplug the card to the VM
+                let (cmd_success, cmd_output) = remote_command_w_output(
+                    &api_socket,
+                    "add-device",
+                    Some("id=vfio0,path=/sys/bus/pci/devices/0000:31:00.0/"),
+                );
+                assert!(cmd_success);
+                assert!(String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"vfio0\",\"bdf\":\"0000:00:06.0\"}"));
+
+                thread::sleep(std::time::Duration::new(10, 0));
+
+                // Check the VFIO device works after hotplug
+                guest.check_nvidia_gpu();
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        }
+
+        #[test]
+        fn test_nvidia_card_reboot() {
+            let mut hirsute = UbuntuDiskConfig::new(HIRSUTE_NVIDIA_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut hirsute);
+            let api_socket = temp_api_path(&guest.tmp_dir);
+
+            let mut child = GuestCommand::new(&guest)
+                .args(&["--cpus", "boot=4"])
+                .args(&["--memory", "size=4G"])
+                .args(&["--kernel", guest.fw_path.as_str()])
+                .args(&["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
+                .args(&["--api-socket", &api_socket])
+                .default_disks()
+                .default_net()
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot(None).unwrap();
+
+                // Check the VFIO device works after boot
                 guest.check_nvidia_gpu();
 
                 guest.reboot_linux(0, None);
 
-                // Run NVIDIA DCGM Diagnostics to validate the device is functional
-                assert_eq!(
-                    guest
-                        .ssh_command("sudo nv-hostengine && echo ok")
-                        .unwrap()
-                        .trim(),
-                    "ok"
-                );
-
+                // Check the VFIO device works after reboot
                 guest.check_nvidia_gpu();
             });
 

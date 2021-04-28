@@ -22,7 +22,7 @@ strip target/$BUILD_TARGET/release/cloud-hypervisor
 
 export RUST_BACKTRACE=1
 
-time cargo test $features_test "tests::vfio::$test_filter"
+time cargo test $features_test "tests::vfio::$test_filter" -- --test-threads=1
 RES=$?
 
 exit $RES
