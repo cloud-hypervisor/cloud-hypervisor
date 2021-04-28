@@ -11,7 +11,8 @@ use micro_http::{Body, HttpServer, MediaType, Method, Request, Response, StatusC
 use seccomp::{SeccompAction, SeccompFilter};
 use serde_json::Error as SerdeError;
 use std::collections::HashMap;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{IntoRawFd, RawFd};
+use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -305,7 +306,9 @@ pub fn start_http_path_thread(
 ) -> Result<thread::JoinHandle<Result<()>>> {
     std::fs::remove_file(path).unwrap_or_default();
     let socket_path = PathBuf::from(path);
-    let server = HttpServer::new(socket_path).map_err(Error::CreateApiServer)?;
+    let socket_fd = UnixListener::bind(socket_path).map_err(Error::CreateApiServerSocket)?;
+    let server =
+        HttpServer::new_from_fd(socket_fd.into_raw_fd()).map_err(Error::CreateApiServer)?;
     start_http_thread(server, api_notifier, api_sender, seccomp_action)
 }
 
