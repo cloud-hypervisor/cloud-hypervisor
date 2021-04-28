@@ -2,13 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::{
-    DescriptorChain, EpollHelper, EpollHelperError, EpollHelperHandler, Queue,
-    EPOLL_HELPER_EVENT_LAST,
-};
+use super::{EpollHelper, EpollHelperError, EpollHelperHandler, Queue, EPOLL_HELPER_EVENT_LAST};
 use net_util::MacAddr;
 use std::os::raw::c_uint;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 use virtio_bindings::bindings::virtio_net::*;
@@ -40,22 +37,16 @@ unsafe impl ByteValued for VirtioNetConfig {}
 
 #[derive(Debug)]
 pub enum Error {
-    /// Read process MQ.
-    FailedProcessMq,
     /// Read queue failed.
     GuestMemory(GuestMemoryError),
     /// Invalid ctrl class
     InvalidCtlClass,
     /// Invalid ctrl command
     InvalidCtlCmd,
-    /// Invalid descriptor
-    InvalidDesc,
-    /// Invalid queue pairs number
-    InvalidQueuePairsNum,
-    /// No memory passed in.
-    NoMemory,
-    /// No ueue pairs number.
-    NoQueuePairsNum,
+    /// No queue pairs number.
+    NoQueuePairsDescriptor,
+    /// No status descriptor
+    NoStatusDescriptor,
 }
 
 pub struct CtrlVirtio {
@@ -72,61 +63,60 @@ impl std::clone::Clone for CtrlVirtio {
     }
 }
 
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ControlHeader {
+    pub class: u8,
+    pub cmd: u8,
+}
+
+unsafe impl ByteValued for ControlHeader {}
+
 impl CtrlVirtio {
     pub fn new(queue: Queue, queue_evt: EventFd) -> Self {
         CtrlVirtio { queue_evt, queue }
     }
 
-    fn process_mq(&self, mem: &GuestMemoryMmap, avail_desc: DescriptorChain) -> Result<()> {
-        let mq_desc = if avail_desc.has_next() {
-            avail_desc.next_descriptor().unwrap()
-        } else {
-            return Err(Error::NoQueuePairsNum);
-        };
-        let queue_pairs = mem
-            .read_obj::<u16>(mq_desc.addr)
-            .map_err(Error::GuestMemory)?;
-        if (queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
-            || (queue_pairs > VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
-        {
-            return Err(Error::InvalidQueuePairsNum);
-        }
-        let status_desc = if mq_desc.has_next() {
-            mq_desc.next_descriptor().unwrap()
-        } else {
-            return Err(Error::NoQueuePairsNum);
-        };
-        mem.write_obj::<u8>(0, status_desc.addr)
-            .map_err(Error::GuestMemory)?;
-
-        Ok(())
-    }
-
     pub fn process_cvq(&mut self, mem: &GuestMemoryMmap) -> Result<()> {
         let mut used_desc_heads = [(0, 0); QUEUE_SIZE];
         let mut used_count = 0;
-        if let Some(avail_desc) = self.queue.iter(&mem).next() {
-            used_desc_heads[used_count] = (avail_desc.index, avail_desc.len);
-            used_count += 1;
-            let ctrl_hdr = mem
-                .read_obj::<u16>(avail_desc.addr)
-                .map_err(Error::GuestMemory)?;
-            let ctrl_hdr_v = ctrl_hdr.as_slice();
-            let class = ctrl_hdr_v[0];
-            let cmd = ctrl_hdr_v[1];
-            match u32::from(class) {
+        let queue = &mut self.queue;
+        for avail_desc in queue.iter(&mem) {
+            let ctrl_hdr: ControlHeader =
+                mem.read_obj(avail_desc.addr).map_err(Error::GuestMemory)?;
+            match u32::from(ctrl_hdr.class) {
                 VIRTIO_NET_CTRL_MQ => {
-                    if u32::from(cmd) != VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET {
-                        return Err(Error::InvalidCtlCmd);
-                    }
-                    if let Err(_e) = self.process_mq(&mem, avail_desc) {
-                        return Err(Error::FailedProcessMq);
-                    }
+                    let mq_desc = avail_desc
+                        .next_descriptor()
+                        .ok_or(Error::NoQueuePairsDescriptor)?;
+                    let queue_pairs = mem
+                        .read_obj::<u16>(mq_desc.addr)
+                        .map_err(Error::GuestMemory)?;
+                    let status_desc = mq_desc.next_descriptor().ok_or(Error::NoStatusDescriptor)?;
+
+                    let ok = if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET {
+                        warn!("Unsupported command: {}", ctrl_hdr.cmd);
+                        false
+                    } else if (queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
+                        || (queue_pairs > VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
+                    {
+                        warn!("Number of MQ pairs out of range: {}", queue_pairs);
+                        false
+                    } else {
+                        info!("Number of MQ pairs requested: {}", queue_pairs);
+                        true
+                    };
+
+                    mem.write_obj(
+                        if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
+                        status_desc.addr,
+                    )
+                    .map_err(Error::GuestMemory)?;
                 }
                 _ => return Err(Error::InvalidCtlClass),
             }
-        } else {
-            return Err(Error::InvalidDesc);
+            used_desc_heads[used_count] = (avail_desc.index, avail_desc.len);
+            used_count += 1;
         }
         for &(desc_index, len) in &used_desc_heads[..used_count] {
             self.queue.add_used(&mem, desc_index, len);
@@ -142,7 +132,6 @@ pub struct NetCtrlEpollHandler {
     pub kill_evt: EventFd,
     pub pause_evt: EventFd,
     pub ctrl_q: CtrlVirtio,
-    pub epoll_fd: RawFd,
 }
 
 impl NetCtrlEpollHandler {

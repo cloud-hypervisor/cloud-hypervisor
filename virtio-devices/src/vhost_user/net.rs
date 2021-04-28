@@ -248,7 +248,6 @@ impl VirtioDevice for Net {
                 kill_evt,
                 pause_evt,
                 ctrl_q: CtrlVirtio::new(cvq_queue, cvq_queue_evt),
-                epoll_fd: 0,
             };
 
             let paused = self.common.paused.clone();
