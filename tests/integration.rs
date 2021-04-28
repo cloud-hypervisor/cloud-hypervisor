@@ -5978,6 +5978,19 @@ mod tests {
                 );
 
                 guest.check_nvidia_gpu();
+
+                guest.reboot_linux(0);
+
+                // Run NVIDIA DCGM Diagnostics to validate the device is functional
+                assert_eq!(
+                    guest
+                        .ssh_command("sudo nv-hostengine && echo ok")
+                        .unwrap()
+                        .trim(),
+                    "ok"
+                );
+
+                guest.check_nvidia_gpu();
             });
 
             let _ = child.kill();
