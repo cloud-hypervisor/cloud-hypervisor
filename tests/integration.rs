@@ -736,7 +736,7 @@ mod tests {
             );
         }
 
-        fn reboot_linux(&self, current_reboot_count: u32) {
+        fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
             let reboot_count = self
                 .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
                 .unwrap()
@@ -747,7 +747,7 @@ mod tests {
             assert_eq!(reboot_count, current_reboot_count);
             self.ssh_command("sudo reboot").unwrap();
 
-            self.wait_vm_boot(None).unwrap();
+            self.wait_vm_boot(custom_timeout).unwrap();
             let reboot_count = self
                 .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
                 .unwrap()
@@ -1557,7 +1557,7 @@ mod tests {
             assert_eq!(guest.ssh_command("sudo umount /mnt").unwrap(), "");
             assert_eq!(guest.ssh_command("ls /mnt").unwrap(), "");
 
-            guest.reboot_linux(0);
+            guest.reboot_linux(0, None);
             assert_eq!(guest.ssh_command("sudo mount /dev/pmem0 /mnt").unwrap(), "");
             assert_eq!(
                 guest.ssh_command("sudo cat /mnt/test").unwrap().trim(),
@@ -1630,7 +1630,7 @@ mod tests {
             // skip the reboot test here.
             #[cfg(target_arch = "x86_64")]
             {
-                guest.reboot_linux(0);
+                guest.reboot_linux(0, None);
 
                 // Validate vsock still works after a reboot.
                 guest.check_vsock(socket.as_str());
@@ -2255,7 +2255,7 @@ mod tests {
                 thread::sleep(std::time::Duration::new(5, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
 
-                guest.reboot_linux(0);
+                guest.reboot_linux(0, None);
 
                 // Check the amount of RAM after reboot
                 assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
@@ -3669,7 +3669,7 @@ mod tests {
                     guest.wait_vm_boot(Some(120)).unwrap();
 
                     let fd_count_1 = get_fd_count(child.id());
-                    guest.reboot_linux(0);
+                    guest.reboot_linux(0, Some(120));
                     let fd_count_2 = get_fd_count(child.id());
                     assert_eq!(fd_count_1, fd_count_2);
 
@@ -3716,7 +3716,7 @@ mod tests {
                 guest.wait_vm_boot(None).unwrap();
 
                 let fd_count_1 = get_fd_count(child.id());
-                guest.reboot_linux(0);
+                guest.reboot_linux(0, None);
                 let fd_count_2 = get_fd_count(child.id());
                 assert_eq!(fd_count_1, fd_count_2);
 
@@ -4102,7 +4102,7 @@ mod tests {
                     u32::from(desired_vcpus)
                 );
 
-                guest.reboot_linux(0);
+                guest.reboot_linux(0, None);
 
                 assert_eq!(
                     guest.get_cpu_count().unwrap_or_default(),
@@ -4188,7 +4188,7 @@ mod tests {
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
                 assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
 
-                guest.reboot_linux(0);
+                guest.reboot_linux(0, None);
 
                 assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
 
@@ -4213,7 +4213,7 @@ mod tests {
                 let desired_ram = 1024 << 20;
                 resize_command(&api_socket, None, Some(desired_ram), None);
 
-                guest.reboot_linux(1);
+                guest.reboot_linux(1, None);
 
                 assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
                 assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
@@ -4280,7 +4280,7 @@ mod tests {
                 assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
                 assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
 
-                guest.reboot_linux(0);
+                guest.reboot_linux(0, None);
 
                 // Check the amount of memory after reboot is 1GiB
                 assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
@@ -4510,7 +4510,7 @@ mod tests {
                     .is_ok());
 
                 // Reboot the VM.
-                guest.reboot_linux(0);
+                guest.reboot_linux(0, None);
 
                 // Check still there after reboot
                 assert_eq!(
@@ -4538,7 +4538,7 @@ mod tests {
                     0
                 );
 
-                guest.reboot_linux(1);
+                guest.reboot_linux(1, None);
 
                 // Check device still absent
                 assert_eq!(
@@ -4622,7 +4622,7 @@ mod tests {
                     1
                 );
 
-                guest.reboot_linux(0);
+                guest.reboot_linux(0, None);
 
                 // Check still there after reboot
                 assert_eq!(
@@ -4650,7 +4650,7 @@ mod tests {
                     0
                 );
 
-                guest.reboot_linux(1);
+                guest.reboot_linux(1, None);
 
                 // Check still absent after reboot
                 assert_eq!(
@@ -4748,7 +4748,7 @@ mod tests {
                     2
                 );
 
-                guest.reboot_linux(0);
+                guest.reboot_linux(0, None);
 
                 // Check still there after reboot
                 // 1 network interfaces + default localhost ==> 2 interfaces
@@ -5193,7 +5193,7 @@ mod tests {
                     2
                 );
 
-                guest.reboot_linux(0);
+                guest.reboot_linux(0, None);
 
                 assert_eq!(
                     guest
@@ -5950,7 +5950,7 @@ mod tests {
 
                 guest.check_nvidia_gpu();
 
-                guest.reboot_linux(0);
+                guest.reboot_linux(0, None);
 
                 // Run NVIDIA DCGM Diagnostics to validate the device is functional
                 assert_eq!(
