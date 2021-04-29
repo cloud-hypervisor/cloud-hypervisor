@@ -126,6 +126,8 @@ pub enum ValidationError {
     // CPU Hotplug not permitted with TDX
     #[cfg(feature = "tdx")]
     TdxNoCpuHotplug,
+    // Insuffient vCPUs for queues
+    TooManyQueues,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -165,6 +167,9 @@ impl fmt::Display for ValidationError {
             #[cfg(feature = "tdx")]
             TdxNoCpuHotplug => {
                 write!(f, "CPU hotplug not possible with TDX")
+            }
+            TooManyQueues => {
+                write!(f, "Number of vCPUs is insufficient for number of queues")
             }
         }
     }
@@ -863,6 +868,14 @@ impl DiskConfig {
             disable_io_uring,
         })
     }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if self.num_queues > vm_config.cpus.boot_vcpus as usize {
+            return Err(ValidationError::TooManyQueues);
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -1075,11 +1088,10 @@ impl NetConfig {
             fds,
             rate_limiter_config,
         };
-        config.validate().map_err(Error::Validation)?;
         Ok(config)
     }
 
-    pub fn validate(&self) -> ValidationResult<()> {
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         if self.num_queues < 2 {
             return Err(ValidationError::VnetQueueLowerThan2);
         }
@@ -1094,6 +1106,10 @@ impl NetConfig {
                     return Err(ValidationError::VnetReservedFd);
                 }
             }
+        }
+
+        if (self.num_queues / 2) > vm_config.cpus.boot_vcpus as usize {
+            return Err(ValidationError::TooManyQueues);
         }
 
         Ok(())
@@ -1263,6 +1279,14 @@ impl FsConfig {
             cache_size,
             id,
         })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if self.num_queues > vm_config.cpus.boot_vcpus as usize {
+            return Err(ValidationError::TooManyQueues);
+        }
+
+        Ok(())
     }
 }
 
@@ -1719,6 +1743,7 @@ impl VmConfig {
                 if disk.vhost_user && disk.vhost_socket.is_none() {
                     return Err(ValidationError::VhostUserMissingSocket);
                 }
+                disk.validate(self)?;
             }
         }
 
@@ -1727,13 +1752,16 @@ impl VmConfig {
                 if net.vhost_user && !self.memory.shared {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
                 }
-                net.validate()?;
+                net.validate(self)?;
             }
         }
 
         if let Some(fses) = &self.fs {
             if !fses.is_empty() && !self.memory.shared {
                 return Err(ValidationError::VhostUserRequiresSharedMemory);
+            }
+            for fs in fses {
+                fs.validate(self)?;
             }
         }
 

@@ -984,11 +984,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
+                    "--cpus", "boot=2",
                     "--net",
                     "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
+                    "cpus": {"boot_vcpus": 2, "max_vcpus": 2},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4}
                     ]
@@ -998,11 +1000,13 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
+                    "--cpus", "boot=2",
                     "--net",
                     "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,num_queues=4,queue_size=128",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
+                    "cpus": {"boot_vcpus": 2, "max_vcpus": 2},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4, "queue_size": 128}
                     ]
@@ -1163,13 +1167,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4",
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4}
                     ]
@@ -1179,13 +1184,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
@@ -1195,13 +1201,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,dax=on"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
@@ -1211,13 +1218,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,dax=on"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "dax": true}
                     ]
@@ -1227,13 +1235,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "dax": true}
                     ]
@@ -1243,13 +1252,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,cache_size=8589934592"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
@@ -1259,13 +1269,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true", "--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "cache_size": 8589934592}
                     ]
@@ -1275,13 +1286,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true","--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,cache_size=4294967296"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128, "cache_size": 4294967296}
                     ]
@@ -1291,13 +1303,14 @@ mod unit_tests {
             (
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--memory", "shared=true",
+                    "--memory", "shared=true","--cpus", "boot=4",
                     "--fs",
                     "tag=virtiofs1,socket=/path/to/sock1,num_queues=4,queue_size=128,cache_size=4294967296"
                 ],
                 r#"{
                     "kernel": {"path": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
