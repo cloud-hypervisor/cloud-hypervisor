@@ -96,7 +96,6 @@ popd
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
-BZIMAGE_IMAGE="$WORKLOADS_DIR/bzImage"
 
 LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
 
@@ -112,7 +111,6 @@ if [ ! -f "$VMLINUX_IMAGE" ]; then
     pushd $LINUX_CUSTOM_DIR
     time make bzImage -j `nproc`
     cp vmlinux $VMLINUX_IMAGE || exit 1
-    cp arch/x86/boot/bzImage $BZIMAGE_IMAGE || exit 1
     popd
 fi
 
