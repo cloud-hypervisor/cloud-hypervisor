@@ -1,3 +1,12 @@
+- [v15.0](#v150)
+    - [Version numbering and stability guarantees](#version-numbering-and-stability-guarantees)
+    - [Network device rate limiting](#network-device-rate-limiting)
+    - [Support for runtime control of `virtio-net` guest offload](#support-for-runtime-control-of-virtio-net-guest-offload)
+    - [`--api-socket` supports file descriptor parameter](#--api-socket-supports-file-descriptor-parameter)
+    - [Bug fixes](#bug-fixes)
+    - [Deprecations](#deprecations)
+    - [Contributors](#contributors)
+- [v0.14.1](#v0141)
 - [v0.14.0](#v0140)
     - [Structured event monitoring](#structured-event-monitoring)
     - [MSHV improvements](#mshv-improvements)
@@ -5,8 +14,8 @@
     - [Updated hotplug documentation](#updated-hotplug-documentation)
     - [PTY control for serial and `virtio-console`](#pty-control-for-serial-and-virtio-console)
     - [Block device rate limiting](#block-device-rate-limiting)
-    - [Deprecations](#deprecations)
-    - [Contributors](#contributors)
+    - [Deprecations](#deprecations-1)
+    - [Contributors](#contributors-1)
 - [v0.13.0](#v0130)
     - [Wider VFIO device support](#wider-vfio-device-support)
     - [Improved huge page support](#improved-huge-page-support)
@@ -14,13 +23,13 @@
     - [VHD disk image support](#vhd-disk-image-support)
     - [Improved Virtio device threading](#improved-virtio-device-threading)
     - [Clean shutdown support via synthetic power button](#clean-shutdown-support-via-synthetic-power-button)
-    - [Contributors](#contributors-1)
+    - [Contributors](#contributors-2)
 - [v0.12.0](#v0120)
     - [ARM64 enhancements](#arm64-enhancements)
     - [Removal of `vhost-user-net` and `vhost-user-block` self spawning](#removal-of-vhost-user-net-and-vhost-user-block-self-spawning)
     - [Migration of `vhost-user-fs` backend](#migration-of-vhost-user-fs-backend)
     - [Enhanced "info" API](#enhanced-info-api)
-    - [Contributors](#contributors-2)
+    - [Contributors](#contributors-3)
 - [v0.11.0](#v0110)
     - [`io_uring` support by default for `virtio-block`](#io_uring-support-by-default-for-virtio-block)
     - [Windows Guest Support](#windows-guest-support)
@@ -33,14 +42,14 @@
     - [New `--balloon` Parameter Added](#new---balloon-parameter-added)
     - [Experimental `virtio-watchdog` Support](#experimental-virtio-watchdog-support)
     - [Notable Bug Fixes](#notable-bug-fixes)
-    - [Contributors](#contributors-3)
+    - [Contributors](#contributors-4)
 - [v0.10.0](#v0100)
     - [`virtio-block` Support for Multiple Descriptors](#virtio-block-support-for-multiple-descriptors)
     - [Memory Zones](#memory-zones)
     - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements)
     - [Preliminary KVM HyperV Emulation Control](#preliminary-kvm-hyperv-emulation-control)
     - [Notable Bug Fixes](#notable-bug-fixes-1)
-    - [Contributors](#contributors-4)
+    - [Contributors](#contributors-5)
 - [v0.9.0](#v090)
     - [`io_uring` Based Block Device Support](#io_uring-based-block-device-support)
     - [Block and Network Device Statistics](#block-and-network-device-statistics)
@@ -54,7 +63,7 @@
     - [Intel SGX Support](#intel-sgx-support)
     - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements-1)
     - [Notable Bug Fixes](#notable-bug-fixes-2)
-    - [Contributors](#contributors-5)
+    - [Contributors](#contributors-6)
 - [v0.8.0](#v080)
     - [Experimental Snapshot and Restore Support](#experimental-snapshot-and-restore-support)
     - [Experimental ARM64 Support](#experimental-arm64-support)
@@ -63,7 +72,7 @@
     - [`vhost_user_fs` Improvements](#vhost_user_fs-improvements)
     - [Notable Bug Fixes](#notable-bug-fixes-3)
     - [Command Line and API Changes](#command-line-and-api-changes)
-    - [Contributors](#contributors-6)
+    - [Contributors](#contributors-7)
 - [v0.7.0](#v070)
     - [Block, Network, Persistent Memory (PMEM), VirtioFS and Vsock hotplug](#block-network-persistent-memory-pmem-virtiofs-and-vsock-hotplug)
     - [Alternative `libc` Support](#alternative-libc-support)
@@ -73,14 +82,14 @@
     - [`Seccomp` Sandboxing](#seccomp-sandboxing)
     - [Updated Distribution Support](#updated-distribution-support)
     - [Command Line and API Changes](#command-line-and-api-changes-1)
-    - [Contributors](#contributors-7)
+    - [Contributors](#contributors-8)
 - [v0.6.0](#v060)
     - [Directly Assigned Devices Hotplug](#directly-assigned-devices-hotplug)
     - [Shared Filesystem Improvements](#shared-filesystem-improvements)
     - [Block and Networking IO Self Offloading](#block-and-networking-io-self-offloading)
     - [Command Line Interface](#command-line-interface)
     - [PVH Boot](#pvh-boot)
-    - [Contributors](#contributors-8)
+    - [Contributors](#contributors-9)
 - [v0.5.1](#v051)
 - [v0.5.0](#v050)
     - [Virtual Machine Dynamic Resizing](#virtual-machine-dynamic-resizing)
@@ -88,7 +97,7 @@
     - [New Interrupt Management Framework](#new-interrupt-management-framework)
     - [Development Tools](#development-tools)
     - [Kata Containers Integration](#kata-containers-integration)
-    - [Contributors](#contributors-9)
+    - [Contributors](#contributors-10)
 - [v0.4.0](#v040)
     - [Dynamic virtual CPUs addition](#dynamic-virtual-cpus-addition)
     - [Programmatic firmware tables generation](#programmatic-firmware-tables-generation)
@@ -97,7 +106,7 @@
     - [Userspace IOAPIC by default](#userspace-ioapic-by-default)
     - [PCI BAR reprogramming](#pci-bar-reprogramming)
     - [New `cloud-hypervisor` organization](#new-cloud-hypervisor-organization)
-    - [Contributors](#contributors-10)
+    - [Contributors](#contributors-11)
 - [v0.3.0](#v030)
     - [Block device offloading](#block-device-offloading)
     - [Network device backend](#network-device-backend)
@@ -123,6 +132,97 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v15.0
+
+This release has been tracked through the [v15.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/18).
+
+Highlights for `cloud-hypervisor` version v15.0 include:
+
+### Version numbering and stability guarantees
+
+This release is the first in a new version numbering scheme to represent that
+we believe Cloud Hypervisor is maturing and entering a period of stability.
+With this new release we are beginning our new stability guarantees:
+
+* The API (including command line options) will not be removed or changed in a
+  breaking way without a minimum of 2 releases notice. Where possible warnings
+  will be given about the use of deprecated functionality and the deprecations
+  will be documented in the release notes.
+* Point releases will be made between individual releases where there are
+  substantial bug fixes or security issues that need to be fixed.
+
+Currently the following items are **not** guaranteed across updates:
+
+* Snapshot/restore is not supported across different versions
+* Live migration is not supported across different versions
+* The following features are considered experimental and may change
+  substantially between releases: TDX, SGX.
+
+### Network device rate limiting
+
+Building on our existing support for rate limiting block activity the network
+device also now supports rate limiting. Full details of the controls are in the
+[IO throttling documentation.](docs/io_throttling.md)
+
+### Support for runtime control of `virtio-net` guest offload
+
+The guest is now able to change the offload settings for the `virtio-net`
+device. As well as providing a useful control this mitigates an issue in the
+Linux kernel where the guest will attempt to reprogram the offload settings
+even if they are not advertised as configurable (#2528).
+
+### `--api-socket` supports file descriptor parameter
+
+The `--api-socket` can now take an `fd=` parameter to specify an existing file
+descriptor to use. This is particularly beneficial for frameworks that need to
+programmatically control Cloud Hypervisor.
+
+### Bug fixes
+
+* A workaround has been put in place to mitigate a Linux kernel issues that
+  results in the CPU thread spinning at 100% when using `virtio-pmem` (#2277).
+* PCI BARs are now correctly aligned removing the need for the guest to
+  reprogram them (#1797,#1798)
+* Handle TAP interface not being writable within virtio-net (due to the buffer
+  exhaustion on the host) (#2517)
+* The recommended Linux kernel is now v5.12.0 as it contains a fix that
+  prevents snapshot & restore working (#2535)
+
+### Deprecations
+
+Deprecated features will be removed in a subsequent release and users should plan to use alternatives
+
+* Support for booting with the "LinuxBoot" protocol for ELF and `bzImage`
+  binaries has been deprecated. When using direct boot users should configure
+  their kernel with `CONFIG_PVH=y`. Will be removed in v16.0.
+
+### Contributors
+
+Many thanks to everyone who has contributed to our release including some new faces.
+
+* Alyssa Ross <hi@alyssa.is>
+* Anatol Belski <anbelski@linux.microsoft.com>
+* Bo Chen <chen.bo@intel.com>
+* Gaelan Steele <gbs@canishe.com>
+* Jianyong Wu <jianyong.wu@arm.com>
+* Michael Zhao <michael.zhao@arm.com>
+* Muminul Islam <muislam@microsoft.com>
+* Rob Bradford <robert.bradford@intel.com>
+* Sebastien Boeuf <sebastien.boeuf@intel.com>
+* Wei Liu <liuwe@microsoft.com>
+* William Douglas <william.douglas@intel.com>
+
+# v0.14.1
+
+Bug fix release branched off the v0.14.0 release. The following bugs were fixed
+in this release:
+
+* CPU hotplug on Windows failed due to misreported CPU state information and
+  the lack of HyperV CPUID bit enabled (#2437, #2449, #2436)
+* A seccomp rule was missing that was triggered on CPU unplug (#2455)
+* A bounds check in VIRTIO queue validation was erroneously generating
+  DescriptorChainTooShort errors in certain circumstances (#2450, #2424)
 
 # v0.14.0
 
@@ -165,7 +265,7 @@ PTY subsystem.
 
 The block device performance can now be constrained as part of the VM
 configuration allowing rate limiting. Full details of the controls are in the
-[IO throttling doumentation.](docs/io_throttling.md)
+[IO throttling documentation.](docs/io_throttling.md)
 
 
 ### Deprecations
