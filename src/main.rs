@@ -194,7 +194,7 @@ fn create_app<'a, 'b>(
                 .long("kernel")
                 .help(
                     "Path to loaded kernel. This may be a kernel or firmware that supports a PVH \
-                entry point, a vmlinux ELF file or a Linux bzImage or achitecture equivalent",
+                entry point (e.g. vmlinux) or architecture equivalent",
                 )
                 .takes_value(true)
                 .group("vm-config"),

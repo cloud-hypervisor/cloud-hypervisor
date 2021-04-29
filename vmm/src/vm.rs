@@ -41,14 +41,10 @@ use crate::{
 };
 use anyhow::anyhow;
 use arch::get_host_cpu_phys_bits;
-#[cfg(target_arch = "x86_64")]
-use arch::BootProtocol;
 use arch::EntryPoint;
 use devices::AcpiNotificationFlags;
 use hypervisor::vm::{HypervisorVmError, VmmOps};
 use linux_loader::cmdline::Cmdline;
-#[cfg(target_arch = "x86_64")]
-use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 use linux_loader::loader::KernelLoader;
@@ -88,10 +84,6 @@ use vmm_sys_util::terminal::Terminal;
 use arch::aarch64::gic::gicv3::kvm::{KvmGicV3, GIC_V3_SNAPSHOT_ID};
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::gic::kvm::create_gic;
-
-// 64 bit direct boot entry offset for bzImage
-#[cfg(target_arch = "x86_64")]
-const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
 
 /// Errors associated with VM management
 #[derive(Debug)]
@@ -244,6 +236,9 @@ pub enum Error {
 
     /// Error triggering power button
     PowerButton(device_manager::DeviceManagerError),
+
+    /// Kernel lacks PVH header
+    KernelMissingPvhHeader,
 
     /// Error doing I/O on TDX firmware file
     #[cfg(feature = "tdx")]
@@ -924,15 +919,6 @@ impl Vm {
             Some(arch::layout::HIGH_RAM_START),
         ) {
             Ok(entry_addr) => entry_addr,
-            Err(linux_loader::loader::Error::Elf(InvalidElfMagicNumber)) => {
-                linux_loader::loader::bzimage::BzImage::load(
-                    mem.deref(),
-                    None,
-                    &mut kernel,
-                    Some(arch::layout::HIGH_RAM_START),
-                )
-                .map_err(Error::KernelLoad)?
-            }
             Err(e) => {
                 return Err(Error::KernelLoad(e));
             }
@@ -945,43 +931,20 @@ impl Vm {
         )
         .map_err(Error::LoadCmdLine)?;
 
-        if entry_addr.setup_header.is_some() {
-            let load_addr = entry_addr
-                .kernel_load
-                .raw_value()
-                .checked_add(KERNEL_64BIT_ENTRY_OFFSET)
-                .ok_or(Error::MemOverflow)?;
-
-            Ok(EntryPoint {
-                entry_addr: GuestAddress(load_addr),
-                protocol: BootProtocol::LinuxBoot,
-                setup_header: entry_addr.setup_header,
-            })
-        } else {
+        if let PvhEntryPresent(pvh_entry_addr) = entry_addr.pvh_boot_cap {
+            // Use the PVH kernel entry point to boot the guest
             let entry_point_addr: GuestAddress;
-            let boot_prot: BootProtocol;
-
-            if let PvhEntryPresent(pvh_entry_addr) = entry_addr.pvh_boot_cap {
-                // Use the PVH kernel entry point to boot the guest
-                entry_point_addr = pvh_entry_addr;
-                boot_prot = BootProtocol::PvhBoot;
-            } else {
-                // Use the Linux 64-bit boot protocol
-                entry_point_addr = entry_addr.kernel_load;
-                boot_prot = BootProtocol::LinuxBoot;
-            }
-
+            entry_point_addr = pvh_entry_addr;
             Ok(EntryPoint {
                 entry_addr: entry_point_addr,
-                protocol: boot_prot,
-                setup_header: None,
             })
+        } else {
+            Err(Error::KernelMissingPvhHeader)
         }
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn configure_system(&mut self, entry_addr: EntryPoint) -> Result<()> {
-        let cmdline_cstring = self.get_cmdline()?;
+    fn configure_system(&mut self) -> Result<()> {
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
 
         let initramfs_config = match self.initramfs {
@@ -1013,41 +976,20 @@ impl Vm {
             .as_ref()
             .cloned();
 
-        match entry_addr.setup_header {
-            Some(hdr) => {
-                arch::configure_system(
-                    &mem,
-                    arch::layout::CMDLINE_START,
-                    cmdline_cstring.to_bytes().len() + 1,
-                    &initramfs_config,
-                    boot_vcpus,
-                    Some(hdr),
-                    rsdp_addr,
-                    BootProtocol::LinuxBoot,
-                    sgx_epc_region,
-                )
-                .map_err(Error::ConfigureSystem)?;
-            }
-            None => {
-                arch::configure_system(
-                    &mem,
-                    arch::layout::CMDLINE_START,
-                    cmdline_cstring.to_bytes().len() + 1,
-                    &initramfs_config,
-                    boot_vcpus,
-                    None,
-                    rsdp_addr,
-                    entry_addr.protocol,
-                    sgx_epc_region,
-                )
-                .map_err(Error::ConfigureSystem)?;
-            }
-        }
+        arch::configure_system(
+            &mem,
+            arch::layout::CMDLINE_START,
+            &initramfs_config,
+            boot_vcpus,
+            rsdp_addr,
+            sgx_epc_region,
+        )
+        .map_err(Error::ConfigureSystem)?;
         Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn configure_system(&mut self, _entry_addr: EntryPoint) -> Result<()> {
+    fn configure_system(&mut self) -> Result<()> {
         let cmdline_cstring = self.get_cmdline()?;
         let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
@@ -1715,9 +1657,7 @@ impl Vm {
         };
 
         // Configure shared state based on loaded kernel
-        entry_point
-            .map(|entry_point| self.configure_system(entry_point))
-            .transpose()?;
+        entry_point.map(|_| self.configure_system()).transpose()?;
 
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {

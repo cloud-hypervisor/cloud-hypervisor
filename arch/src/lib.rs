@@ -98,8 +98,8 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     arch_memory_regions, configure_system, configure_vcpu, get_host_cpu_phys_bits,
-    initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START, regs,
-    BootProtocol, CpuidPatch, CpuidReg, EntryPoint,
+    initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START, regs, CpuidPatch,
+    CpuidReg, EntryPoint,
 };
 
 /// Safe wrapper for `sysconf(_SC_PAGESIZE)`.

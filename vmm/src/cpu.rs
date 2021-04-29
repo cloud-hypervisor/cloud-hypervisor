@@ -1558,13 +1558,9 @@ impl Migratable for CpuManager {}
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
 mod tests {
-
-    use super::*;
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
-    use arch::x86_64::BootProtocol;
-    use hypervisor::x86_64::{FpuState, LapicState, SpecialRegisters, StandardRegisters};
-    use vm_memory::GuestAddress;
+    use hypervisor::x86_64::{FpuState, LapicState, StandardRegisters};
 
     #[test]
     fn test_setlint() {
@@ -1652,40 +1648,15 @@ mod tests {
 
         let expected_regs: StandardRegisters = StandardRegisters {
             rflags: 0x0000000000000002u64,
+            rbx: arch::layout::PVH_INFO_START.0,
             rip: 1,
-            rsp: 2,
-            rbp: 2,
-            rsi: 3,
             ..Default::default()
         };
 
-        setup_regs(
-            &vcpu,
-            expected_regs.rip,
-            expected_regs.rsp,
-            expected_regs.rsi,
-            BootProtocol::LinuxBoot,
-        )
-        .unwrap();
+        setup_regs(&vcpu, expected_regs.rip).unwrap();
 
         let actual_regs: StandardRegisters = vcpu.get_regs().unwrap();
         assert_eq!(actual_regs, expected_regs);
-    }
-
-    #[test]
-    fn test_setup_sregs() {
-        let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().expect("new VM fd creation failed");
-        let vcpu = vm.create_vcpu(0, None).unwrap();
-
-        let mut expected_sregs: SpecialRegisters = vcpu.get_sregs().unwrap();
-        let gm = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap();
-        configure_segments_and_sregs(&gm, &mut expected_sregs, BootProtocol::LinuxBoot).unwrap();
-        setup_page_tables(&gm, &mut expected_sregs).unwrap();
-
-        setup_sregs(&gm, &vcpu, BootProtocol::LinuxBoot).unwrap();
-        let actual_sregs: SpecialRegisters = vcpu.get_sregs().unwrap();
-        assert_eq!(expected_sregs, actual_sregs);
     }
 }
 
