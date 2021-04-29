@@ -56,7 +56,7 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     const FOCAL_SGX_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-sgx.raw";
     #[cfg(target_arch = "x86_64")]
-    const FOCAL_NVIDIA_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-nvidia.raw";
+    const HIRSUTE_NVIDIA_IMAGE_NAME: &str = "hirsute-server-cloudimg-amd64-nvidia.raw";
     #[cfg(target_arch = "aarch64")]
     const BIONIC_IMAGE_NAME: &str = "bionic-server-cloudimg-arm64.raw";
     #[cfg(target_arch = "aarch64")]
@@ -689,17 +689,17 @@ mod tests {
             // Run CUDA sample to validate it can find the device
             let device_query_result = self
                 .ssh_command(
-                    "sudo /root/NVIDIA_CUDA-11.2_Samples/bin/x86_64/linux/release/deviceQuery",
+                    "sudo /root/NVIDIA_CUDA-11.3_Samples/bin/x86_64/linux/release/deviceQuery",
                 )
                 .unwrap();
             assert!(device_query_result.contains("Detected 1 CUDA Capable device"));
-            assert!(device_query_result.contains("Device 0: \"Tesla T4\""));
+            assert!(device_query_result.contains("Device 0: \"NVIDIA Tesla T4\""));
             assert!(device_query_result.contains("Result = PASS"));
 
             assert!(self
                 .ssh_command("sudo dcgmi discovery -l")
                 .unwrap()
-                .contains("Name: Tesla T4"));
+                .contains("Name: NVIDIA Tesla T4"));
             assert_eq!(
                 self.ssh_command("sudo dcgmi diag -r 'diagnostic' | grep Pass | wc -l")
                     .unwrap()
@@ -5775,8 +5775,8 @@ mod tests {
 
         #[test]
         fn test_nvidia_card() {
-            let mut focal = UbuntuDiskConfig::new(FOCAL_NVIDIA_IMAGE_NAME.to_string());
-            let guest = Guest::new(&mut focal);
+            let mut hirsute = UbuntuDiskConfig::new(HIRSUTE_NVIDIA_IMAGE_NAME.to_string());
+            let guest = Guest::new(&mut hirsute);
 
             let mut child = GuestCommand::new(&guest)
                 .args(&["--cpus", "boot=4"])
