@@ -14,7 +14,7 @@ pub mod regs;
 use crate::InitramfsConfig;
 use crate::RegionType;
 use hypervisor::{CpuId, CpuIdEntry, CPUID_FLAG_VALID_INDEX};
-use linux_loader::loader::bootparam::{boot_params, setup_header};
+use linux_loader::loader::bootparam::boot_params;
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
@@ -29,31 +29,12 @@ use std::arch::x86_64;
 pub mod tdx;
 
 #[derive(Debug, Copy, Clone)]
-pub enum BootProtocol {
-    LinuxBoot,
-    PvhBoot,
-}
-
-impl ::std::fmt::Display for BootProtocol {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        match self {
-            BootProtocol::LinuxBoot => write!(f, "Linux 64-bit boot protocol"),
-            BootProtocol::PvhBoot => write!(f, "PVH boot protocol"),
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
 /// Specifies the entry point address where the guest must start
 /// executing code, as well as which of the supported boot protocols
 /// is to be used to configure the guest initial state.
 pub struct EntryPoint {
     /// Address in guest memory where the guest must start execution
     pub entry_addr: GuestAddress,
-    /// Specifies which boot protocol to use
-    pub protocol: BootProtocol,
-    /// This field is used for bzImage to fill zero page
-    pub setup_header: Option<setup_header>,
 }
 
 const E820_RAM: u32 = 1;
@@ -351,17 +332,10 @@ pub fn configure_vcpu(
     regs::setup_msrs(fd).map_err(Error::MsrsConfiguration)?;
     if let Some(kernel_entry_point) = kernel_entry_point {
         // Safe to unwrap because this method is called after the VM is configured
-        regs::setup_regs(
-            fd,
-            kernel_entry_point.entry_addr.raw_value(),
-            layout::BOOT_STACK_POINTER.raw_value(),
-            layout::ZERO_PAGE_START.raw_value(),
-            kernel_entry_point.protocol,
-        )
-        .map_err(Error::RegsConfiguration)?;
+        regs::setup_regs(fd, kernel_entry_point.entry_addr.raw_value())
+            .map_err(Error::RegsConfiguration)?;
         regs::setup_fpu(fd).map_err(Error::FpuConfiguration)?;
-        regs::setup_sregs(&vm_memory.memory(), fd, kernel_entry_point.protocol)
-            .map_err(Error::SregsConfiguration)?;
+        regs::setup_sregs(&vm_memory.memory(), fd).map_err(Error::SregsConfiguration)?;
     }
     interrupts::set_lint(fd).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
     Ok(())
@@ -426,12 +400,9 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
 pub fn configure_system(
     guest_mem: &GuestMemoryMmap,
     cmdline_addr: GuestAddress,
-    cmdline_size: usize,
     initramfs: &Option<InitramfsConfig>,
     _num_cpus: u8,
-    setup_hdr: Option<setup_header>,
     rsdp_addr: Option<GuestAddress>,
-    boot_prot: BootProtocol,
     sgx_epc_region: Option<SgxEpcRegion>,
 ) -> super::Result<()> {
     let size = smbios::setup_smbios(guest_mem).map_err(Error::SmbiosSetup)?;
@@ -448,31 +419,13 @@ pub fn configure_system(
         }
     }
 
-    match boot_prot {
-        BootProtocol::PvhBoot => {
-            configure_pvh(
-                guest_mem,
-                cmdline_addr,
-                initramfs,
-                rsdp_addr,
-                sgx_epc_region,
-            )?;
-        }
-        BootProtocol::LinuxBoot => {
-            error!("Using deprecated LinuxBoot protocol: Please configure your kernel with CONFIG_PVH=y and supply the `vmlinux` file to `--kernel`");
-            configure_64bit_boot(
-                guest_mem,
-                cmdline_addr,
-                cmdline_size,
-                initramfs,
-                setup_hdr,
-                rsdp_addr,
-                sgx_epc_region,
-            )?;
-        }
-    }
-
-    Ok(())
+    configure_pvh(
+        guest_mem,
+        cmdline_addr,
+        initramfs,
+        rsdp_addr,
+        sgx_epc_region,
+    )
 }
 
 fn configure_pvh(
@@ -613,121 +566,6 @@ fn add_memmap_entry(memmap: &mut Vec<hvm_memmap_table_entry>, addr: u64, size: u
         type_: mem_type,
         reserved: 0,
     });
-}
-
-fn configure_64bit_boot(
-    guest_mem: &GuestMemoryMmap,
-    cmdline_addr: GuestAddress,
-    cmdline_size: usize,
-    initramfs: &Option<InitramfsConfig>,
-    setup_hdr: Option<setup_header>,
-    rsdp_addr: Option<GuestAddress>,
-    sgx_epc_region: Option<SgxEpcRegion>,
-) -> super::Result<()> {
-    const KERNEL_BOOT_FLAG_MAGIC: u16 = 0xaa55;
-    const KERNEL_HDR_MAGIC: u32 = 0x53726448;
-    const KERNEL_LOADER_OTHER: u8 = 0xff;
-    const KERNEL_MIN_ALIGNMENT_BYTES: u32 = 0x1000000; // Must be non-zero.
-
-    let mut params: BootParamsWrapper = BootParamsWrapper(boot_params::default());
-
-    if let Some(hdr) = setup_hdr {
-        // We should use the header if the loader provides one (e.g. from a bzImage).
-        params.0.hdr = hdr;
-    } else {
-        params.0.hdr.boot_flag = KERNEL_BOOT_FLAG_MAGIC;
-        params.0.hdr.header = KERNEL_HDR_MAGIC;
-        params.0.hdr.kernel_alignment = KERNEL_MIN_ALIGNMENT_BYTES;
-    };
-
-    // Common bootparams settings
-    if params.0.hdr.type_of_loader == 0 {
-        params.0.hdr.type_of_loader = KERNEL_LOADER_OTHER;
-    }
-    params.0.hdr.cmd_line_ptr = cmdline_addr.raw_value() as u32;
-    params.0.hdr.cmdline_size = cmdline_size as u32;
-
-    if let Some(initramfs_config) = initramfs {
-        params.0.hdr.ramdisk_image = initramfs_config.address.raw_value() as u32;
-        params.0.hdr.ramdisk_size = initramfs_config.size as u32;
-    }
-
-    add_e820_entry(&mut params.0, 0, layout::EBDA_START.raw_value(), E820_RAM)?;
-
-    let mem_end = guest_mem.last_addr();
-    if mem_end < layout::MEM_32BIT_RESERVED_START {
-        add_e820_entry(
-            &mut params.0,
-            layout::HIGH_RAM_START.raw_value(),
-            mem_end.unchecked_offset_from(layout::HIGH_RAM_START) + 1,
-            E820_RAM,
-        )?;
-    } else {
-        add_e820_entry(
-            &mut params.0,
-            layout::HIGH_RAM_START.raw_value(),
-            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::HIGH_RAM_START),
-            E820_RAM,
-        )?;
-        if mem_end > layout::RAM_64BIT_START {
-            add_e820_entry(
-                &mut params.0,
-                layout::RAM_64BIT_START.raw_value(),
-                mem_end.unchecked_offset_from(layout::RAM_64BIT_START) + 1,
-                E820_RAM,
-            )?;
-        }
-    }
-
-    add_e820_entry(
-        &mut params.0,
-        layout::PCI_MMCONFIG_START.0,
-        layout::PCI_MMCONFIG_SIZE,
-        E820_RESERVED,
-    )?;
-
-    if let Some(sgx_epc_region) = sgx_epc_region {
-        add_e820_entry(
-            &mut params.0,
-            sgx_epc_region.start().raw_value(),
-            sgx_epc_region.size() as u64,
-            E820_RESERVED,
-        )?;
-    }
-
-    if let Some(rsdp_addr) = rsdp_addr {
-        params.0.acpi_rsdp_addr = rsdp_addr.0;
-    }
-
-    let zero_page_addr = layout::ZERO_PAGE_START;
-    guest_mem
-        .checked_offset(zero_page_addr, mem::size_of::<boot_params>())
-        .ok_or(super::Error::ZeroPagePastRamEnd)?;
-    guest_mem
-        .write_obj(params, zero_page_addr)
-        .map_err(super::Error::ZeroPageSetup)?;
-
-    Ok(())
-}
-
-/// Add an e820 region to the e820 map.
-/// Returns Ok(()) if successful, or an error if there is no space left in the map.
-fn add_e820_entry(
-    params: &mut boot_params,
-    addr: u64,
-    size: u64,
-    mem_type: u32,
-) -> Result<(), Error> {
-    if params.e820_entries >= params.e820_table.len() as u8 {
-        return Err(Error::E820Configuration);
-    }
-
-    params.e820_table[params.e820_entries as usize].addr = addr;
-    params.e820_table[params.e820_entries as usize].size = size;
-    params.e820_table[params.e820_entries as usize].type_ = mem_type;
-    params.e820_entries += 1;
-
-    Ok(())
 }
 
 /// Returns the memory address where the initramfs could be loaded.
@@ -888,7 +726,6 @@ pub fn update_cpuid_sgx(cpuid: &mut CpuId, epc_sections: Vec<SgxEpcSection>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_loader::loader::bootparam::boot_e820_entry;
 
     #[test]
     fn regions_lt_4gb() {
@@ -913,12 +750,9 @@ mod tests {
         let config_err = configure_system(
             &gm,
             GuestAddress(0),
-            0,
             &None,
             1,
-            None,
             Some(layout::RSDP_POINTER),
-            BootProtocol::LinuxBoot,
             None,
         );
         assert!(config_err.is_err());
@@ -932,31 +766,8 @@ mod tests {
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
-        configure_system(
-            &gm,
-            GuestAddress(0),
-            0,
-            &None,
-            no_vcpus,
-            None,
-            None,
-            BootProtocol::LinuxBoot,
-            None,
-        )
-        .unwrap();
 
-        configure_system(
-            &gm,
-            GuestAddress(0),
-            0,
-            &None,
-            no_vcpus,
-            None,
-            None,
-            BootProtocol::PvhBoot,
-            None,
-        )
-        .unwrap();
+        configure_system(&gm, GuestAddress(0), &None, no_vcpus, None, None).unwrap();
 
         // Now assigning some memory that is equal to the start of the 32bit memory hole.
         let mem_size = 3328 << 20;
@@ -967,31 +778,9 @@ mod tests {
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
-        configure_system(
-            &gm,
-            GuestAddress(0),
-            0,
-            &None,
-            no_vcpus,
-            None,
-            None,
-            BootProtocol::LinuxBoot,
-            None,
-        )
-        .unwrap();
+        configure_system(&gm, GuestAddress(0), &None, no_vcpus, None, None).unwrap();
 
-        configure_system(
-            &gm,
-            GuestAddress(0),
-            0,
-            &None,
-            no_vcpus,
-            None,
-            None,
-            BootProtocol::PvhBoot,
-            None,
-        )
-        .unwrap();
+        configure_system(&gm, GuestAddress(0), &None, no_vcpus, None, None).unwrap();
 
         // Now assigning some memory that falls after the 32bit memory hole.
         let mem_size = 3330 << 20;
@@ -1002,71 +791,9 @@ mod tests {
             .map(|r| (r.0, r.1))
             .collect();
         let gm = GuestMemoryMmap::from_ranges(&ram_regions).unwrap();
-        configure_system(
-            &gm,
-            GuestAddress(0),
-            0,
-            &None,
-            no_vcpus,
-            None,
-            None,
-            BootProtocol::LinuxBoot,
-            None,
-        )
-        .unwrap();
+        configure_system(&gm, GuestAddress(0), &None, no_vcpus, None, None).unwrap();
 
-        configure_system(
-            &gm,
-            GuestAddress(0),
-            0,
-            &None,
-            no_vcpus,
-            None,
-            None,
-            BootProtocol::PvhBoot,
-            None,
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn test_add_e820_entry() {
-        let e820_table = [(boot_e820_entry {
-            addr: 0x1,
-            size: 4,
-            type_: 1,
-        }); 128];
-
-        let expected_params = boot_params {
-            e820_table,
-            e820_entries: 1,
-            ..Default::default()
-        };
-
-        let mut params: boot_params = Default::default();
-        add_e820_entry(
-            &mut params,
-            e820_table[0].addr,
-            e820_table[0].size,
-            e820_table[0].type_,
-        )
-        .unwrap();
-        assert_eq!(
-            format!("{:?}", params.e820_table[0]),
-            format!("{:?}", expected_params.e820_table[0])
-        );
-        assert_eq!(params.e820_entries, expected_params.e820_entries);
-
-        // Exercise the scenario where the field storing the length of the e820 entry table is
-        // is bigger than the allocated memory.
-        params.e820_entries = params.e820_table.len() as u8 + 1;
-        assert!(add_e820_entry(
-            &mut params,
-            e820_table[0].addr,
-            e820_table[0].size,
-            e820_table[0].type_
-        )
-        .is_err());
+        configure_system(&gm, GuestAddress(0), &None, no_vcpus, None, None).unwrap();
     }
 
     #[test]
