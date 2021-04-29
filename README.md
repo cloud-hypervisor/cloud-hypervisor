@@ -26,7 +26,8 @@
 
 # 1. What is Cloud Hypervisor?
 
-Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on top of [KVM](https://www.kernel.org/doc/Documentation/virtual/kvm/api.txt).
+Cloud Hypervisor is an open source Virtual Machine Monitor (VMM) that runs on top of [KVM](https://www.kernel.org/doc/Documentation/virtual/kvm/api.txt) and the MSHV hypervisors .
+
 The project focuses on exclusively running modern, cloud workloads, on top of a limited set of hardware architectures and platforms.
 Cloud workloads refers to those that are usually run by customers inside a cloud provider. For our purposes this means modern operating systems with most I/O handled by paravirtualised devices (i.e. virtio), no requirement for legacy devices, and 64-bit CPUs.
 
@@ -36,7 +37,7 @@ Cloud Hypervisor is implemented in [Rust](https://www.rust-lang.org/) and is bas
 
 ### High Level
 
-- KVM based
+- Runs on KVM or MSHV
 - Minimal emulation
 - Low latency
 - Low memory footprint
@@ -53,7 +54,7 @@ Cloud Hypervisor supports the `x86-64` and `AArch64` architectures. There are so
 
 ### Guest OS
 
-Cloud Hypervisor supports `64-bit Linux` with support for _modern_ 64-bit Windows guests currently under development.
+Cloud Hypervisor supports `64-bit Linux` and Windows 10/Windows Server 2019.
 
 # 2. Getting Started
 
@@ -241,12 +242,29 @@ $ ./cloud-hypervisor/target/release/cloud-hypervisor \
 
 # 3. Status
 
-Cloud Hypervisor is under active development. No API or feature stability is guaranteed.
+Cloud Hypervisor is under active development. The following stability guarantees are currently made:
 
-As of 2020-07-02, the following cloud images are supported:
+* The API (including command line options) will not be removed or changed in a
+  breaking way without a minimum of 2 releases notice. Where possible warnings
+  will be given about the use of deprecated functionality and the deprecations
+  will be documented in the release notes.
+* Point releases will be made between individual releases where there are
+  substantial bug fixes or security issues that need to be fixed.
+
+Currently the following items are **not** guaranteed across updates:
+
+* Snapshot/restore is not supported across different versions
+* Live migration is not supported across different versions
+* The following features are considered experimental and may change
+  substantially between releases: TDX, SGX.
+
+
+As of 2021-04-29, the following cloud images are supported:
 
 - [Ubuntu Bionic](https://cloud-images.ubuntu.com/bionic/current/) (cloudimg)
 - [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (cloudimg)
+- [Ubuntu Groovy](https://cloud-images.ubuntu.com/groovy/current/) (cloudimg)
+- [Ubuntu Hirsute](https://cloud-images.ubuntu.com/hirsute/current/) (cloudimg)
 
 Direct kernel boot to userspace should work with a rootfs from most distributions.
 
