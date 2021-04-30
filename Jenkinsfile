@@ -31,24 +31,6 @@ pipeline{
 								checkout scm
 							}
 						}
-						stage ('Run OpenAPI tests') {
-							steps {
-								sh "scripts/run_openapi_tests.sh"
-							}
-						}
-						stage ('Run unit tests') {
-							steps {
-								sh "scripts/dev_cli.sh tests --unit"
-							}
-						}
-						stage ('Run integration tests') {
-							options {
-								timeout(time: 1, unit: 'HOURS')
-							}
-							steps {
-								sh "scripts/dev_cli.sh tests --integration"
-							}
-						}
 					}
 				}
 				stage ('AArch64 worker build') {
@@ -57,19 +39,6 @@ pipeline{
 						stage ('Checkout') {
 							steps {
 								checkout scm
-							}
-						}
-						stage ('Run unit tests') {
-							steps {
-								sh "scripts/dev_cli.sh tests --unit"
-							}
-						}
-						stage ('Run integration tests') {
-							options {
-								timeout(time: 1, unit: 'HOURS')
-							}
-							steps {
-								sh "scripts/dev_cli.sh tests --integration"
 							}
 						}
 					}
@@ -88,24 +57,10 @@ pipeline{
 								checkout scm
 							}
 						}
-						stage ('Run unit tests for musl') {
-							steps {
-								sh "scripts/dev_cli.sh tests --unit --libc musl"
-							}
-						}
-						stage ('Run integration tests for musl') {
-							options {
-								timeout(time: 1, unit: 'HOURS')
-							}
-							steps {
-								sh "scripts/dev_cli.sh tests --integration --libc musl"
-							}
-						}
 					}
 				}
 				stage ('Worker build SGX') {
 					agent { node { label 'bionic-sgx' } }
-					when { branch 'master' }
 					stages {
 						stage ('Checkout') {
 							steps {
@@ -145,22 +100,6 @@ pipeline{
 								checkout scm
 							}
 						}
-						stage ('Run VFIO integration tests') {
-							options {
-								timeout(time: 1, unit: 'HOURS')
-							}
-							steps {
-								sh "scripts/dev_cli.sh tests --integration-vfio"
-							}
-						}
-						stage ('Run VFIO integration tests for musl') {
-							options {
-								timeout(time: 1, unit: 'HOURS')
-							}
-							steps {
-								sh "scripts/dev_cli.sh tests --integration-vfio --libc musl"
-							}
-						}
 					}
 					post {
 						always {
@@ -175,37 +114,6 @@ pipeline{
 						stage ('Checkout') {
 							steps {
 								checkout scm
-							}
-						}
-						stage ('Download assets') {
-							steps {
-								sh "mkdir ${env.HOME}/workloads"
-								azureDownload(storageCredentialId: 'ch-image-store',
-											  containerName: 'private-images',
-											  includeFilesPattern: 'OVMF-4b47d0c6c8.fd',
-											  downloadType: 'container',
-											  downloadDirLoc: "${env.HOME}/workloads")
-								azureDownload(storageCredentialId: 'ch-image-store',
-											  containerName: 'private-images',
-											  includeFilesPattern: 'windows-server-2019.raw',
-											  downloadType: 'container',
-											  downloadDirLoc: "${env.HOME}/workloads")
-							}
-						}
-						stage ('Run Windows guest integration tests') {
-							options {
-								timeout(time: 1, unit: 'HOURS')
-							}
-							steps {
-								sh "scripts/dev_cli.sh tests --integration-windows"
-							}
-						}
-						stage ('Run Windows guest integration tests for musl') {
-							options {
-								timeout(time: 1, unit: 'HOURS')
-							}
-							steps {
-								sh "scripts/dev_cli.sh tests --integration-windows --libc musl"
 							}
 						}
 					}
