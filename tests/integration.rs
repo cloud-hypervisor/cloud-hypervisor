@@ -709,24 +709,25 @@ mod tests {
         }
 
         fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
-            let reboot_count = self
-                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or(current_reboot_count + 1);
-
-            assert_eq!(reboot_count, current_reboot_count);
-            self.ssh_command("sudo reboot").unwrap();
-
-            self.wait_vm_boot(custom_timeout).unwrap();
-            let reboot_count = self
-                .ssh_command("sudo journalctl | grep -c -- \"-- Reboot --\"")
+            let list_boots_cmd = "sudo journalctl --list-boots | wc -l";
+            let boot_count = self
+                .ssh_command(list_boots_cmd)
                 .unwrap()
                 .trim()
                 .parse::<u32>()
                 .unwrap_or_default();
-            assert_eq!(reboot_count, current_reboot_count + 1);
+
+            assert_eq!(boot_count, current_reboot_count + 1);
+            self.ssh_command("sudo reboot").unwrap();
+
+            self.wait_vm_boot(custom_timeout).unwrap();
+            let boot_count = self
+                .ssh_command(list_boots_cmd)
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default();
+            assert_eq!(boot_count, current_reboot_count + 2);
         }
 
         fn enable_memory_hotplug(&self) {
