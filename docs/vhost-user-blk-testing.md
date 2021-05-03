@@ -35,38 +35,52 @@ Here are some good references for detailing them.
 
 ## Test environment
 
-The below test environment is based on ubuntu release(16.04.1 LTS), as for other system, please check related document.
-The test runs with multiple queue (MQ) support enabled, using 4 queues defined for both SPDK and the virtual machine.
-Here are the details on how the test can be run.
+The below test environment is based on Ubuntu release (20.04.1 LTS), as for other system, please check related documents.
+This test runs with multiple queue (MQ) support enabled, using 4 queues defined for both SPDK and the virtual machine.
+Here are the detailed instructions.
 
-### The hugepages settings in host linux
-Add "default_hugepagesz=1G hugepagesz=1G hugepages=2" into host linux cmdline.
-As for how to change Ubuntu linux cmdline in grub file, please ref below link:
-https://www.ostechnix.com/configure-grub-2-boot-loader-settings-ubuntu-16-04/
-reboot Ubuntu
-sudo mount -t hugetlbfs -o pagesize=1G none /dev/hugepages
+### The hugepages settings on the host
+Allocate enough persistent huge pages (e.g. 2GiB) on the host:
+
+```bash
+# Assume the default hugepage size is 2MiB
+echo 1024 | sudo tee /proc/sys/vm/nr_hugepages
+# Confirm the value of "Hugepagesize" and "HugePages_Total"
+cat /proc/meminfo | grep -i huge
+```
 
 ### Download the SPDK code
+```bash
 git clone https://github.com/spdk/spdk
 cd spdk
 git submodule update --init
+```
 
 ### Create the build dep
-./scripts/pkgdep.sh
 
-### Build spdk
+```bash
+./scripts/pkgdep.sh
+```
+
+### Build SPDK
+```bash
 ./configure
 make
+```
 
-### Set the SPDk environment
+### Set the SPDK environment
+```bash
 sudo HUGEMEM=2048 scripts/setup.sh
-sudo ./app/vhost/vhost -S /var/tmp -s 1024 -m 0x3 &
+sudo ./build/bin/vhost -S /var/tmp -s 1024 -m 0x3 &
+```
 
 ### Create 512M block device
+```bash
 sudo scripts/rpc.py bdev_malloc_create 512 512 -b Malloc0
 sudo scripts/rpc.py vhost_create_blk_controller --cpumask 0x1 vhost.1 Malloc0
+```
 
-_Launch the VM_
+### Launch the VM
 
 VMs run in client mode. They connect to the socket created by the `dpdkvhostuser` in the SPDK backend.
 ```bash
@@ -89,9 +103,9 @@ login in guest
 # Use lsblk command to find out vhost-user-blk device
 lsblk
 NAME    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
-vda     252:0    0  2.2G  0 disk 
+vda     252:0    0  2.2G  0 disk
 ├─vda1  252:1    0  2.1G  0 part /
-├─vda14 252:14   0    4M  0 part 
+├─vda14 252:14   0    4M  0 part
 └─vda15 252:15   0  106M  0 part /boot/efi
 vdb    253:16   0  512M  0 disk
 
