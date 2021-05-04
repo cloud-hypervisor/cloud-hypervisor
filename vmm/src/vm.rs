@@ -528,6 +528,8 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
+        info!("Booting VM from config: {:?}", &config);
+
         // Create NUMA nodes based on NumaConfig.
         #[cfg(feature = "acpi")]
         let numa_nodes =
