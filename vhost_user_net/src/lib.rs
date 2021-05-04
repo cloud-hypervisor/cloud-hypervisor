@@ -372,7 +372,7 @@ pub fn start_net_backend(backend_command: &str) {
             .set_vring_worker(Some(vring_workers.remove(0)));
     }
 
-    if let Err(e) = net_daemon.start(listener) {
+    if let Err(e) = net_daemon.start_server(listener) {
         error!(
             "failed to start daemon for vhost-user-net with error: {:?}",
             e

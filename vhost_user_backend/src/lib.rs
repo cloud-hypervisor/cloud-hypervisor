@@ -157,7 +157,7 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
     /// all requests coming through this socket. This runs in an infinite loop
     /// that should be terminating once the other end of the socket (the VMM)
     /// disconnects.
-    pub fn start(&mut self, listener: Listener) -> Result<()> {
+    pub fn start_server(&mut self, listener: Listener) -> Result<()> {
         let mut slave_listener = SlaveListener::new(listener, self.handler.clone())
             .map_err(Error::CreateSlaveListener)?;
         let mut slave_handler = slave_listener
