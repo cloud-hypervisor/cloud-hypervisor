@@ -194,31 +194,28 @@ mod tests {
         ip: &str,
         tap: Option<&str>,
         num_queues: usize,
-    ) -> (std::process::Child, String) {
+        client_mode: bool,
+    ) -> (std::process::Command, String) {
         let vunet_socket_path =
             String::from(tmp_dir.as_path().join("vunet.sock").to_str().unwrap());
 
         // Start the daemon
         let net_params = if let Some(tap_str) = tap {
             format!(
-                "tap={},ip={},mask=255.255.255.0,socket={},num_queues={},queue_size=1024",
-                tap_str, ip, vunet_socket_path, num_queues
+                "tap={},ip={},mask=255.255.255.0,socket={},num_queues={},queue_size=1024,client={}",
+                tap_str, ip, vunet_socket_path, num_queues, client_mode
             )
         } else {
             format!(
-                "ip={},mask=255.255.255.0,socket={},num_queues={},queue_size=1024",
-                ip, vunet_socket_path, num_queues
+                "ip={},mask=255.255.255.0,socket={},num_queues={},queue_size=1024,client={}",
+                ip, vunet_socket_path, num_queues, client_mode
             )
         };
 
-        let child = Command::new(clh_command("vhost_user_net"))
-            .args(&["--net-backend", net_params.as_str()])
-            .spawn()
-            .unwrap();
+        let mut command = Command::new(clh_command("vhost_user_net"));
+        command.args(&["--net-backend", net_params.as_str()]);
 
-        thread::sleep(std::time::Duration::new(10, 0));
-
-        (child, vunet_socket_path)
+        (command, vunet_socket_path)
     }
 
     fn curl_command(api_socket: &str, method: &str, url: &str, http_body: Option<&str>) {
@@ -917,13 +914,14 @@ mod tests {
     }
 
     type PrepareNetDaemon =
-        dyn Fn(&TempDir, &str, Option<&str>, usize) -> (std::process::Child, String);
+        dyn Fn(&TempDir, &str, Option<&str>, usize, bool) -> (std::process::Command, String);
 
     fn test_vhost_user_net(
         tap: Option<&str>,
         num_queues: usize,
-        prepare_vhost_user_net_daemon: Option<&PrepareNetDaemon>,
+        prepare_daemon: &PrepareNetDaemon,
         generate_host_mac: bool,
+        client_mode_daemon: bool,
     ) {
         let mut focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(&mut focal);
@@ -940,29 +938,33 @@ mod tests {
             None
         };
 
-        let (net_params, daemon_child) = {
-            let prepare_daemon = prepare_vhost_user_net_daemon.unwrap();
-            // Start the daemon
-            let (daemon_child, vunet_socket_path) =
-                prepare_daemon(&guest.tmp_dir, &guest.network.host_ip, tap, num_queues);
+        let (mut daemon_command, vunet_socket_path) = prepare_daemon(
+            &guest.tmp_dir,
+            &guest.network.host_ip,
+            tap,
+            num_queues,
+            client_mode_daemon,
+        );
 
-            (
-                format!(
-                    "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024{}",
-                    guest.network.guest_mac,
-                    vunet_socket_path,
-                    num_queues,
-                    if let Some(host_mac) = host_mac {
-                        format!(",host_mac={}", host_mac)
-                    } else {
-                        "".to_owned()
-                    }
-                ),
-                Some(daemon_child),
-            )
-        };
+        let net_params = format!(
+            "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024{},vhost_mode={}",
+            guest.network.guest_mac,
+            vunet_socket_path,
+            num_queues,
+            if let Some(host_mac) = host_mac {
+                format!(",host_mac={}", host_mac)
+            } else {
+                "".to_owned()
+            },
+            if client_mode_daemon {
+                "server"
+            } else {
+                "client"
+            },
+        );
 
-        let mut child = GuestCommand::new(&guest)
+        let mut ch_command = GuestCommand::new(&guest);
+        ch_command
             .args(&["--cpus", format!("boot={}", num_queues / 2).as_str()])
             .args(&["--memory", "size=512M,hotplug_size=2048M,shared=on"])
             .args(&["--kernel", kernel_path.to_str().unwrap()])
@@ -970,9 +972,22 @@ mod tests {
             .default_disks()
             .args(&["--net", net_params.as_str()])
             .args(&["--api-socket", &api_socket])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
+
+        let mut daemon_child: std::process::Child;
+        let mut child: std::process::Child;
+
+        if client_mode_daemon {
+            child = ch_command.spawn().unwrap();
+            // Make sure the VMM is waiting for the backend to connect
+            thread::sleep(std::time::Duration::new(10, 0));
+            daemon_child = daemon_command.spawn().unwrap();
+        } else {
+            daemon_child = daemon_command.spawn().unwrap();
+            // Make sure the backend is waiting for the VMM to connect
+            thread::sleep(std::time::Duration::new(10, 0));
+            child = ch_command.spawn().unwrap();
+        }
 
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
@@ -1055,11 +1070,9 @@ mod tests {
         let _ = child.kill();
         let output = child.wait_with_output().unwrap();
 
-        if let Some(mut daemon_child) = daemon_child {
-            thread::sleep(std::time::Duration::new(5, 0));
-            let _ = daemon_child.kill();
-            let _ = daemon_child.wait();
-        }
+        thread::sleep(std::time::Duration::new(5, 0));
+        let _ = daemon_child.kill();
+        let _ = daemon_child.wait();
 
         handle_child_output(r, &output);
     }
@@ -2590,7 +2603,7 @@ mod tests {
 
         #[test]
         fn test_vhost_user_net_default() {
-            test_vhost_user_net(None, 2, Some(&prepare_vhost_user_net_daemon), false)
+            test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, false, false)
         }
 
         #[test]
@@ -2598,7 +2611,8 @@ mod tests {
             test_vhost_user_net(
                 Some("mytap0"),
                 2,
-                Some(&prepare_vhost_user_net_daemon),
+                &prepare_vhost_user_net_daemon,
+                false,
                 false,
             )
         }
@@ -2608,14 +2622,15 @@ mod tests {
             test_vhost_user_net(
                 Some("vunet-tap0"),
                 2,
-                Some(&prepare_vhost_user_net_daemon),
+                &prepare_vhost_user_net_daemon,
+                false,
                 false,
             )
         }
 
         #[test]
         fn test_vhost_user_net_multiple_queues() {
-            test_vhost_user_net(None, 4, Some(&prepare_vhost_user_net_daemon), false)
+            test_vhost_user_net(None, 4, &prepare_vhost_user_net_daemon, false, false)
         }
 
         #[test]
@@ -2623,7 +2638,8 @@ mod tests {
             test_vhost_user_net(
                 Some("vunet-tap1"),
                 4,
-                Some(&prepare_vhost_user_net_daemon),
+                &prepare_vhost_user_net_daemon,
+                false,
                 false,
             )
         }
@@ -2631,7 +2647,12 @@ mod tests {
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_vhost_user_net_host_mac() {
-            test_vhost_user_net(None, 2, Some(&prepare_vhost_user_net_daemon), true)
+            test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, true, false)
+        }
+
+        #[test]
+        fn test_vhost_user_net_client_mode() {
+            test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, false, true)
         }
 
         #[test]
