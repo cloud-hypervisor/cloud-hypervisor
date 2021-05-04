@@ -93,34 +93,6 @@ mod tests {
         )
     }
 
-    fn prepare_virtiofsd(
-        tmp_dir: &TempDir,
-        shared_dir: &str,
-        cache: &str,
-    ) -> (std::process::Child, String) {
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
-
-        let mut virtiofsd_path = workload_path;
-        virtiofsd_path.push("virtiofsd");
-        let virtiofsd_path = String::from(virtiofsd_path.to_str().unwrap());
-
-        let virtiofsd_socket_path =
-            String::from(tmp_dir.as_path().join("virtiofs.sock").to_str().unwrap());
-
-        // Start the daemon
-        let child = Command::new(virtiofsd_path.as_str())
-            .args(&[format!("--socket-path={}", virtiofsd_socket_path).as_str()])
-            .args(&["-o", format!("source={}", shared_dir).as_str()])
-            .args(&["-o", format!("cache={}", cache).as_str()])
-            .spawn()
-            .unwrap();
-
-        thread::sleep(std::time::Duration::new(10, 0));
-
-        (child, virtiofsd_socket_path)
-    }
-
     fn prepare_virtofsd_rs_daemon(
         tmp_dir: &TempDir,
         shared_dir: &str,
@@ -2730,21 +2702,6 @@ mod tests {
         }
 
         #[test]
-        fn test_virtio_fs_dax_on_default_cache_size() {
-            test_virtio_fs(true, None, "none", &prepare_virtiofsd, false)
-        }
-
-        #[test]
-        fn test_virtio_fs_dax_on_cache_size_1_gib() {
-            test_virtio_fs(true, Some(0x4000_0000), "none", &prepare_virtiofsd, false)
-        }
-
-        #[test]
-        fn test_virtio_fs_dax_off() {
-            test_virtio_fs(false, None, "none", &prepare_virtiofsd, false)
-        }
-
-        #[test]
         fn test_virtio_fs_dax_on_default_cache_size_w_virtiofsd_rs_daemon() {
             test_virtio_fs(true, None, "none", &prepare_virtofsd_rs_daemon, false)
         }
@@ -2763,18 +2720,6 @@ mod tests {
         #[test]
         fn test_virtio_fs_dax_off_w_virtiofsd_rs_daemon() {
             test_virtio_fs(false, None, "none", &prepare_virtofsd_rs_daemon, false)
-        }
-
-        #[test]
-        #[cfg(target_arch = "x86_64")]
-        fn test_virtio_fs_hotplug_dax_on() {
-            test_virtio_fs(true, None, "none", &prepare_virtiofsd, true)
-        }
-
-        #[test]
-        #[cfg(target_arch = "x86_64")]
-        fn test_virtio_fs_hotplug_dax_off() {
-            test_virtio_fs(false, None, "none", &prepare_virtiofsd, true)
         }
 
         #[test]
