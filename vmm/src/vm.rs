@@ -1251,6 +1251,13 @@ impl Vm {
     }
 
     pub fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
+        {
+            // Validate on a clone of the config
+            let mut config = self.config.lock().unwrap().clone();
+            Self::add_to_config(&mut config.devices, _device_cfg.clone());
+            config.validate().map_err(Error::ConfigValidation)?;
+        }
+
         let pci_device_info = self
             .device_manager
             .lock()
@@ -1321,6 +1328,13 @@ impl Vm {
     }
 
     pub fn add_disk(&mut self, mut _disk_cfg: DiskConfig) -> Result<PciDeviceInfo> {
+        {
+            // Validate on a clone of the config
+            let mut config = self.config.lock().unwrap().clone();
+            Self::add_to_config(&mut config.disks, _disk_cfg.clone());
+            config.validate().map_err(Error::ConfigValidation)?;
+        }
+
         let pci_device_info = self
             .device_manager
             .lock()
@@ -1345,6 +1359,13 @@ impl Vm {
     }
 
     pub fn add_fs(&mut self, mut _fs_cfg: FsConfig) -> Result<PciDeviceInfo> {
+        {
+            // Validate on a clone of the config
+            let mut config = self.config.lock().unwrap().clone();
+            Self::add_to_config(&mut config.fs, _fs_cfg.clone());
+            config.validate().map_err(Error::ConfigValidation)?;
+        }
+
         let pci_device_info = self
             .device_manager
             .lock()
@@ -1369,6 +1390,13 @@ impl Vm {
     }
 
     pub fn add_pmem(&mut self, mut _pmem_cfg: PmemConfig) -> Result<PciDeviceInfo> {
+        {
+            // Validate on a clone of the config
+            let mut config = self.config.lock().unwrap().clone();
+            Self::add_to_config(&mut config.pmem, _pmem_cfg.clone());
+            config.validate().map_err(Error::ConfigValidation)?;
+        }
+
         let pci_device_info = self
             .device_manager
             .lock()
@@ -1393,6 +1421,13 @@ impl Vm {
     }
 
     pub fn add_net(&mut self, mut _net_cfg: NetConfig) -> Result<PciDeviceInfo> {
+        {
+            // Validate on a clone of the config
+            let mut config = self.config.lock().unwrap().clone();
+            Self::add_to_config(&mut config.net, _net_cfg.clone());
+            config.validate().map_err(Error::ConfigValidation)?;
+        }
+
         let pci_device_info = self
             .device_manager
             .lock()
@@ -1419,6 +1454,13 @@ impl Vm {
     pub fn add_vsock(&mut self, mut _vsock_cfg: VsockConfig) -> Result<PciDeviceInfo> {
         if self.config.lock().unwrap().vsock.is_some() {
             return Err(Error::TooManyVsockDevices);
+        }
+
+        {
+            // Validate on a clone of the config
+            let mut config = self.config.lock().unwrap().clone();
+            config.vsock = Some(_vsock_cfg.clone());
+            config.validate().map_err(Error::ConfigValidation)?;
         }
 
         let pci_device_info = self
