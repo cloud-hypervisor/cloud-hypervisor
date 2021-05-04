@@ -24,10 +24,14 @@ pub use self::vu_common_ctrl::VhostUserConfig;
 
 #[derive(Debug)]
 pub enum Error {
+    /// Failed accepting connection.
+    AcceptConnection(io::Error),
     /// Invalid available address.
     AvailAddress,
     /// Queue number  is not correct
     BadQueueNum,
+    /// Failed binding vhost-user socket.
+    BindSocket(io::Error),
     /// Creating kill eventfd failed.
     CreateKillEventFd(io::Error),
     /// Cloning kill eventfd failed.

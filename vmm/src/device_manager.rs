@@ -9,9 +9,10 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::ConsoleOutputMode;
-use crate::config::DeviceConfig;
-use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig, VsockConfig};
+use crate::config::{
+    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, VhostMode,
+    VmConfig, VsockConfig,
+};
 use crate::device_tree::{DeviceNode, DeviceTree};
 #[cfg(feature = "kvm")]
 use crate::interrupt::kvm::KvmMsiInterruptManager as MsiInterruptManager;
@@ -2035,12 +2036,17 @@ impl DeviceManager {
                 num_queues: net_cfg.num_queues,
                 queue_size: net_cfg.queue_size,
             };
+            let server = match net_cfg.vhost_mode {
+                VhostMode::Client => false,
+                VhostMode::Server => true,
+            };
             let vhost_user_net_device = Arc::new(Mutex::new(
                 match virtio_devices::vhost_user::Net::new(
                     id.clone(),
                     net_cfg.mac,
                     vu_cfg,
                     self.seccomp_action.clone(),
+                    server,
                 ) {
                     Ok(vun_device) => vun_device,
                     Err(e) => {
