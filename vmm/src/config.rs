@@ -879,6 +879,35 @@ impl DiskConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum VhostMode {
+    Client,
+    Server,
+}
+
+impl Default for VhostMode {
+    fn default() -> Self {
+        VhostMode::Client
+    }
+}
+
+#[derive(Debug)]
+pub enum ParseVhostModeError {
+    InvalidValue(String),
+}
+
+impl FromStr for VhostMode {
+    type Err = ParseVhostModeError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "client" => Ok(VhostMode::Client),
+            "server" => Ok(VhostMode::Server),
+            _ => Err(ParseVhostModeError::InvalidValue(s.to_owned())),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct NetConfig {
     #[serde(default = "default_netconfig_tap")]
     pub tap: Option<String>,
@@ -899,6 +928,8 @@ pub struct NetConfig {
     #[serde(default)]
     pub vhost_user: bool,
     pub vhost_socket: Option<String>,
+    #[serde(default)]
+    pub vhost_mode: VhostMode,
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
@@ -944,6 +975,7 @@ impl Default for NetConfig {
             queue_size: default_netconfig_queue_size(),
             vhost_user: false,
             vhost_socket: None,
+            vhost_mode: VhostMode::Client,
             id: None,
             fds: None,
             rate_limiter_config: None,
@@ -954,8 +986,8 @@ impl Default for NetConfig {
 impl NetConfig {
     pub const SYNTAX: &'static str = "Network parameters \
     \"tap=<if_name>,ip=<ip_addr>,mask=<net_mask>,mac=<mac_addr>,fd=<fd1:fd2...>,iommu=on|off,\
-    num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,\
-    vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,id=<device_id>,\
+    num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,id=<device_id>,\
+    vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,\
     bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
     ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>\"";
 
@@ -973,6 +1005,7 @@ impl NetConfig {
             .add("num_queues")
             .add("vhost_user")
             .add("socket")
+            .add("vhost_mode")
             .add("id")
             .add("fd")
             .add("bw_size")
@@ -1016,6 +1049,10 @@ impl NetConfig {
             .unwrap_or(Toggle(false))
             .0;
         let vhost_socket = parser.get("socket");
+        let vhost_mode = parser
+            .convert("vhost_mode")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or_default();
         let id = parser.get("id");
         let fds = parser
             .convert::<IntegerList>("fd")
@@ -1084,6 +1121,7 @@ impl NetConfig {
             queue_size,
             vhost_user,
             vhost_socket,
+            vhost_mode,
             id,
             fds,
             rate_limiter_config,
