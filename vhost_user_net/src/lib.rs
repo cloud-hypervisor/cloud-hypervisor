@@ -16,6 +16,7 @@ use log::*;
 use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
 };
+use option_parser::Toggle;
 use option_parser::{OptionParser, OptionParserError};
 use std::fmt;
 use std::io::{self};
@@ -75,7 +76,7 @@ pub enum Error {
 }
 
 pub const SYNTAX: &str = "vhost-user-net backend parameters \
-\"ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,\
+\"ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,client=on|off,\
 num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"";
 
 impl fmt::Display for Error {
@@ -278,6 +279,7 @@ pub struct VhostUserNetBackendConfig {
     pub num_queues: usize,
     pub queue_size: u16,
     pub tap: Option<String>,
+    pub client: bool,
 }
 
 impl VhostUserNetBackendConfig {
@@ -291,7 +293,8 @@ impl VhostUserNetBackendConfig {
             .add("mask")
             .add("queue_size")
             .add("num_queues")
-            .add("socket");
+            .add("socket")
+            .add("client");
 
         parser.parse(backend).map_err(Error::FailedConfigParse)?;
 
@@ -317,6 +320,11 @@ impl VhostUserNetBackendConfig {
             .map_err(Error::FailedConfigParse)?
             .unwrap_or(2);
         let socket = parser.get("socket").ok_or(Error::SocketParameterMissing)?;
+        let client = parser
+            .convert::<Toggle>("client")
+            .map_err(Error::FailedConfigParse)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         Ok(VhostUserNetBackendConfig {
             ip,
@@ -326,6 +334,7 @@ impl VhostUserNetBackendConfig {
             num_queues,
             queue_size,
             tap,
+            client,
         })
     }
 }
@@ -353,8 +362,6 @@ pub fn start_net_backend(backend_command: &str) {
         .unwrap(),
     ));
 
-    let listener = Listener::new(&backend_config.socket, true).unwrap();
-
     let mut net_daemon =
         VhostUserDaemon::new("vhost-user-net-backend".to_string(), net_backend.clone()).unwrap();
 
@@ -372,7 +379,11 @@ pub fn start_net_backend(backend_command: &str) {
             .set_vring_worker(Some(vring_workers.remove(0)));
     }
 
-    if let Err(e) = net_daemon.start_server(listener) {
+    if let Err(e) = if backend_config.client {
+        net_daemon.start_client(&backend_config.socket)
+    } else {
+        net_daemon.start_server(Listener::new(&backend_config.socket, true).unwrap())
+    } {
         error!(
             "failed to start daemon for vhost-user-net with error: {:?}",
             e
