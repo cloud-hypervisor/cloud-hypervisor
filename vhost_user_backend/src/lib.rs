@@ -20,6 +20,7 @@ use vhost::vhost_user::message::{
     VhostUserSingleMemoryRegion, VhostUserVirtioFeatures, VhostUserVringAddrFlags,
     VhostUserVringState,
 };
+use vhost::vhost_user::SlaveReqHandler;
 use vhost::vhost_user::{
     Error as VhostUserError, Listener, Result as VhostUserResult, SlaveFsCacheReq, SlaveListener,
     VhostUserSlaveReqHandlerMut,
@@ -153,7 +154,7 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
         })
     }
 
-    /// Connect to the vhost-user socket and run a dedicated thread handling
+    /// Listen to the vhost-user socket and run a dedicated thread handling
     /// all requests coming through this socket. This runs in an infinite loop
     /// that should be terminating once the other end of the socket (the VMM)
     /// disconnects.
@@ -164,6 +165,27 @@ impl<S: VhostUserBackend> VhostUserDaemon<S> {
             .accept()
             .map_err(Error::CreateSlaveReqHandler)?
             .unwrap();
+        let handle = thread::Builder::new()
+            .name(self.name.clone())
+            .spawn(move || loop {
+                slave_handler
+                    .handle_request()
+                    .map_err(Error::HandleRequest)?;
+            })
+            .map_err(Error::StartDaemon)?;
+
+        self.main_thread = Some(handle);
+
+        Ok(())
+    }
+
+    /// Connect to the vhost-user socket and run a dedicated thread handling
+    /// all requests coming through this socket. This runs in an infinite loop
+    /// that should be terminating once the other end of the socket (the VMM)
+    /// hangs up.
+    pub fn start_client(&mut self, socket_path: &str) -> Result<()> {
+        let mut slave_handler = SlaveReqHandler::connect(socket_path, self.handler.clone())
+            .map_err(Error::CreateSlaveReqHandler)?;
         let handle = thread::Builder::new()
             .name(self.name.clone())
             .spawn(move || loop {
