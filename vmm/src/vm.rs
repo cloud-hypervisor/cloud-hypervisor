@@ -1242,6 +1242,14 @@ impl Vm {
         Err(Error::ResizeZone)
     }
 
+    fn add_to_config<T>(devices: &mut Option<Vec<T>>, device: T) {
+        if let Some(devices) = devices {
+            devices.push(device);
+        } else {
+            *devices = Some(vec![device]);
+        }
+    }
+
     pub fn add_device(&mut self, mut _device_cfg: DeviceConfig) -> Result<PciDeviceInfo> {
         let pci_device_info = self
             .device_manager
@@ -1254,11 +1262,7 @@ impl Vm {
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            if let Some(devices) = config.devices.as_mut() {
-                devices.push(_device_cfg);
-            } else {
-                config.devices = Some(vec![_device_cfg]);
-            }
+            Self::add_to_config(&mut config.devices, _device_cfg);
         }
 
         self.device_manager
@@ -1328,11 +1332,7 @@ impl Vm {
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            if let Some(disks) = config.disks.as_mut() {
-                disks.push(_disk_cfg);
-            } else {
-                config.disks = Some(vec![_disk_cfg]);
-            }
+            Self::add_to_config(&mut config.disks, _disk_cfg);
         }
 
         self.device_manager
@@ -1356,11 +1356,7 @@ impl Vm {
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            if let Some(fs_config) = config.fs.as_mut() {
-                fs_config.push(_fs_cfg);
-            } else {
-                config.fs = Some(vec![_fs_cfg]);
-            }
+            Self::add_to_config(&mut config.fs, _fs_cfg);
         }
 
         self.device_manager
@@ -1384,11 +1380,7 @@ impl Vm {
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            if let Some(pmem) = config.pmem.as_mut() {
-                pmem.push(_pmem_cfg);
-            } else {
-                config.pmem = Some(vec![_pmem_cfg]);
-            }
+            Self::add_to_config(&mut config.pmem, _pmem_cfg);
         }
 
         self.device_manager
@@ -1412,11 +1404,7 @@ impl Vm {
         // ensure the device would be created in case of a reboot.
         {
             let mut config = self.config.lock().unwrap();
-            if let Some(net) = config.net.as_mut() {
-                net.push(_net_cfg);
-            } else {
-                config.net = Some(vec![_net_cfg]);
-            }
+            Self::add_to_config(&mut config.net, _net_cfg);
         }
 
         self.device_manager
