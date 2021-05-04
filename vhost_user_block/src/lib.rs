@@ -507,7 +507,7 @@ pub fn start_block_backend(backend_command: &str) {
 
     debug!("blk_daemon is created!\n");
 
-    if let Err(e) = blk_daemon.start(listener) {
+    if let Err(e) = blk_daemon.start_server(listener) {
         error!(
             "Failed to start daemon for vhost-user-block with error: {:?}\n",
             e
