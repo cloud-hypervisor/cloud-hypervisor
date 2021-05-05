@@ -546,7 +546,7 @@ impl VirtioDevice for Net {
 
         let mut epoll_threads = Vec::new();
         let mut taps = self.taps.clone();
-        for i in 0..taps.len() {
+        for i in 0..queues.len() / 2 {
             let rx = RxVirtio::new();
             let tx = TxVirtio::new();
             let rx_tap_listening = false;
